@@ -78,8 +78,13 @@ internal index. `LoadUnifiedAsync` is a private implementation of `LoadUnified`.
 
 The synchronous path keeps `IndexEntryReader` and its HIGH/LOW scheduling. The
 async path uses `AsyncIndexEntryReader` for both directory and entry reads. Both
-readers reuse pure footer validation and directory parsing in `IndexEntryFormat`; each owns its I/O and
-scheduling. Both use the same scalar representation parsers where applicable.
+readers reuse pure footer validation and directory parsing in `IndexEntryFormat`,
+then construct an `IndexEntryCatalog` during `Open`. The catalog owns index
+metadata and entry/slice descriptions, including absolute file offsets, plaintext
+sizes and checksums. Metadata queries go through `reader.Catalog()`; synchronous
+loading does not need `PlanLoad` to obtain it. Streams, scheduling, cancellation,
+decryption and decoded-entry caches remain reader responsibilities. Both use the
+same scalar representation parsers where applicable.
 
 ## Selection and executor ownership
 

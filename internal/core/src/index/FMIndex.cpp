@@ -608,9 +608,10 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   field_id_,
                   schema_.data_type());
     }
-    total_rows_ =
-        ReadRequiredIndexMeta<int64_t>(reader, FMINDEX_META_TOTAL_ROWS);
-    bool nullable = ReadRequiredIndexMeta<bool>(reader, FMINDEX_META_NULLABLE);
+    total_rows_ = ReadRequiredIndexMeta<int64_t>(reader.Catalog(),
+                                                 FMINDEX_META_TOTAL_ROWS);
+    bool nullable =
+        ReadRequiredIndexMeta<bool>(reader.Catalog(), FMINDEX_META_NULLABLE);
     if (total_rows_ < 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: total_rows is negative ({})",
@@ -623,7 +624,7 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   nullable,
                   schema_.nullable());
     }
-    if (!reader.HasEntry(FMINDEX_BLOB_FILE_NAME)) {
+    if (!reader.Catalog().HasEntry(FMINDEX_BLOB_FILE_NAME)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: blob entry '{}' is missing",
                   FMINDEX_BLOB_FILE_NAME);
@@ -744,7 +745,7 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
     // a null row and a genuine empty string are the same empty document.
     null_bitmap_ = TargetBitmap(total_rows_);
     if (nullable) {
-        if (!reader.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        if (!reader.Catalog().HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "corrupt FM index: nullable field is missing null bitmap "
                       "entry");

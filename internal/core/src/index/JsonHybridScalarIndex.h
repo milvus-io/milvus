@@ -170,7 +170,8 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
                 const Config& config) override {
         HybridScalarIndex<T>::LoadEntries(reader, config);
 
-        bool has_non_exist = reader.GetMeta<bool>("has_non_exist", false);
+        bool has_non_exist =
+            reader.Catalog().GetMeta<bool>("has_non_exist", false);
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
             non_exist_offsets_.resize(e.data.size() / sizeof(size_t));

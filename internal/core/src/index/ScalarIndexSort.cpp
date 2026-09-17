@@ -1019,9 +1019,10 @@ template <typename T>
 void
 ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
-    size_t index_size = reader.GetMeta<size_t>("index_length");
-    total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    size_t index_size = reader.Catalog().GetMeta<size_t>("index_length");
+    total_num_rows_ = reader.Catalog().GetMeta<size_t>("num_rows");
+    is_nested_index_ =
+        is_nested_index_ || reader.Catalog().GetMeta<bool>("is_nested");
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -1120,8 +1121,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     // Load persisted idx_to_offsets and valid_bitset if both are available,
     // otherwise recompute (backward compat with older V3 files).
-    if (reader.HasEntry("idx_to_offsets") && reader.HasEntry("valid_bitset") &&
-        is_mmap_) {
+    if (reader.Catalog().HasEntry("idx_to_offsets") &&
+        reader.Catalog().HasEntry("valid_bitset") && is_mmap_) {
         // mmap path: stream idx_to_offsets to disk, then mmap it. valid_bitset
         // stays heap-resident for query masking, matching StringIndexSort.
         mmap_meta_filepath_ =
@@ -1166,8 +1167,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
 
         load_valid_bitset();
-    } else if (reader.HasEntry("idx_to_offsets") &&
-               reader.HasEntry("valid_bitset")) {
+    } else if (reader.Catalog().HasEntry("idx_to_offsets") &&
+               reader.Catalog().HasEntry("valid_bitset")) {
         // memory path: stream into vector
         auto offsets_bytes = get_idx_to_offsets_bytes();
         idx_to_offsets_.resize(total_num_rows_);

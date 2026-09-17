@@ -541,6 +541,20 @@ TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
     EXPECT_THROW(reader->Catalog().At("missing"), milvus::SegcoreError);
 
     EXPECT_EQ(recording->ReadRanges().size(), reads_after_open);
+
+    auto sync_input = CreateInputStream(file_path);
+    auto sync_reader = IndexEntryReader::Open(sync_input, sync_input->Size());
+    EXPECT_EQ(sync_reader->Catalog().GetMeta<int>("catalog_value"), 17);
+    ASSERT_EQ(sync_reader->Catalog().Entries().size(), entries.size());
+    for (const auto& entry : entries) {
+        const auto& sync_entry = sync_reader->Catalog().At(entry.name);
+        EXPECT_EQ(sync_entry.plaintext_size, entry.plaintext_size);
+        EXPECT_EQ(sync_entry.expected_crc, entry.expected_crc);
+        EXPECT_EQ(std::get<PlainEntrySource>(sync_entry.source).remote_offset,
+                  std::get<PlainEntrySource>(entry.source).remote_offset);
+    }
+    EXPECT_EQ(sync_reader->ReadEntry("alpha").data, alpha);
+    EXPECT_EQ(sync_reader->ReadEntry("beta").data, beta);
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
@@ -1391,6 +1405,32 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
             std::get<EncryptedEntrySource>(reader->Catalog().At("data").source)
                 .slices.size(),
             3);
+        auto sync_input = CreateInputStream(path);
+        auto sync_reader =
+            IndexEntryReader::Open(sync_input, sync_input->Size(), 100);
+        for (const auto* name : {"data", "other"}) {
+            const auto& sync_entry = sync_reader->Catalog().At(name);
+            const auto& async_entry = reader->Catalog().At(name);
+            EXPECT_EQ(sync_entry.plaintext_size, async_entry.plaintext_size);
+            EXPECT_EQ(sync_entry.expected_crc, async_entry.expected_crc);
+            const auto& sync_slices =
+                std::get<EncryptedEntrySource>(sync_entry.source).slices;
+            const auto& async_slices =
+                std::get<EncryptedEntrySource>(async_entry.source).slices;
+            ASSERT_EQ(sync_slices.size(), async_slices.size());
+            for (size_t i = 0; i < sync_slices.size(); ++i) {
+                EXPECT_EQ(sync_slices[i].remote_offset,
+                          async_slices[i].remote_offset);
+                EXPECT_EQ(sync_slices[i].remote_bytes,
+                          async_slices[i].remote_bytes);
+                EXPECT_EQ(sync_slices[i].target_offset,
+                          async_slices[i].target_offset);
+                EXPECT_EQ(sync_slices[i].target_bytes,
+                          async_slices[i].target_bytes);
+            }
+        }
+        EXPECT_EQ(sync_reader->ReadEntry("data").data, data);
+        EXPECT_EQ(sync_reader->ReadEntry("other").data, other_data);
         auto artifact = folly::coro::blockingWait(
             reader->ReadEntriesAsync(std::move(entries), priority)
                 .scheduleOn(

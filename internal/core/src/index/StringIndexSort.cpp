@@ -841,7 +841,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                              const Config& config) {
     config_ = config;
 
-    uint32_t version = reader.GetMeta<uint32_t>("version");
+    uint32_t version = reader.Catalog().GetMeta<uint32_t>("version");
     if (version != SERIALIZATION_VERSION) {
         ThrowInfo(milvus::ErrorCode::Unsupported,
                   fmt::format("Unsupported StringIndexSort serialization "
@@ -849,8 +849,9 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               version,
                               SERIALIZATION_VERSION));
     }
-    total_num_rows_ = reader.GetMeta<size_t>("num_rows");
-    is_nested_index_ = is_nested_index_ || reader.GetMeta<bool>("is_nested");
+    total_num_rows_ = reader.Catalog().GetMeta<size_t>("num_rows");
+    is_nested_index_ =
+        is_nested_index_ || reader.Catalog().GetMeta<bool>("is_nested");
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -916,7 +917,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             fw.Finish();
         }
 
-        if (reader.HasEntry("idx_to_offsets")) {
+        if (reader.Catalog().HasEntry("idx_to_offsets")) {
             // Stream idx_to_offsets to meta file, then mmap it
             mmap_meta_filepath_ = mmap_path + "-meta";
             size_t offsets_bytes = get_idx_to_offsets_bytes();

@@ -26,16 +26,17 @@
 
 namespace milvus::index {
 
-template <typename T, typename MetadataSource>
+template <typename T>
 T
-ReadRequiredIndexMeta(const MetadataSource& source, const char* key) {
+ReadRequiredIndexMeta(const storage::IndexEntryCatalog& source,
+                      const char* key) {
     if (!source.HasMeta(key)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt scalar index: required metadata '{}' is missing",
                   key);
     }
     try {
-        return source.template GetMeta<T>(key);
+        return source.GetMeta<T>(key);
     } catch (const SegcoreError&) {
         throw;
     } catch (const std::bad_alloc&) {

@@ -29,6 +29,8 @@
 
 namespace milvus::storage {
 
+struct IndexEntryDirectory;
+
 struct PlainEntrySource {
     // Absolute offset in the packed V3 object.
     uint64_t remote_offset;
@@ -56,6 +58,12 @@ struct IndexEntryCatalogEntry {
 
 class IndexEntryCatalog {
  public:
+    IndexEntryCatalog() = default;
+
+    // Normalize the parsed directory into absolute file offsets and slice ranges.
+    // No I/O; the catalog owns its entry descriptions independently of directory.
+    IndexEntryCatalog(const IndexEntryDirectory& directory, int64_t file_size);
+
     const std::vector<IndexEntryCatalogEntry>&
     Entries() const noexcept {
         return entries_;
@@ -79,7 +87,10 @@ class IndexEntryCatalog {
     template <typename T>
     T
     GetMeta(const std::string& key) const {
-        AssertInfo(metadata_.contains(key), "Meta key not found: {}", key);
+        if (!metadata_.contains(key)) {
+            ThrowInfo(
+                ErrorCode::DataFormatBroken, "Meta key not found: {}", key);
+        }
         return metadata_[key].get<T>();
     }
 
@@ -99,7 +110,10 @@ class IndexEntryCatalog {
 
  private:
     friend class AsyncIndexEntryReader;
+    friend class IndexEntryReader;
 
+    // Preserve persisted enumeration order for the synchronous reader API.
+    std::vector<std::string> entry_names_;
     std::vector<IndexEntryCatalogEntry> entries_;
     nlohmann::json metadata_;
 };

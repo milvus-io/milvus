@@ -1395,10 +1395,11 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     }
 
     // Load persisted CSR or rebuild from str_ids
-    auto has_csr_index = reader.HasEntry(MARISA_CSR_INDEX);
-    auto has_csr_offsets = reader.HasEntry(MARISA_CSR_OFFSETS);
-    auto has_csr_num_keys = reader.HasMeta("csr_num_keys");
-    auto has_csr_version = reader.HasMeta(MARISA_CSR_FORMAT_VERSION_META);
+    auto has_csr_index = reader.Catalog().HasEntry(MARISA_CSR_INDEX);
+    auto has_csr_offsets = reader.Catalog().HasEntry(MARISA_CSR_OFFSETS);
+    auto has_csr_num_keys = reader.Catalog().HasMeta("csr_num_keys");
+    auto has_csr_version =
+        reader.Catalog().HasMeta(MARISA_CSR_FORMAT_VERSION_META);
     auto has_any_csr =
         has_csr_index || has_csr_offsets || has_csr_num_keys || has_csr_version;
 
@@ -1412,7 +1413,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                    has_csr_num_keys,
                    has_csr_version);
         auto csr_format_version =
-            reader.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
+            reader.Catalog().GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
         if (!(csr_format_version == MARISA_CSR_FORMAT_VERSION)) {
             ThrowInfo(
                 ErrorCode::DataFormatBroken,
@@ -1421,7 +1422,7 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 csr_format_version);
         }
 
-        csr_num_keys_ = reader.GetMeta<size_t>("csr_num_keys");
+        csr_num_keys_ = reader.Catalog().GetMeta<size_t>("csr_num_keys");
         if (!(csr_num_keys_ == trie_.num_keys())) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "invalid marisa CSR key count: expected {}, got {}",

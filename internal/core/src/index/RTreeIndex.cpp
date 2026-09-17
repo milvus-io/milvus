@@ -822,8 +822,9 @@ template <typename T>
 void
 RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                            const Config& config) {
-    auto file_names = reader.GetMeta<std::vector<std::string>>("file_names");
-    bool has_null = reader.GetMeta<bool>("has_null");
+    auto file_names =
+        reader.Catalog().GetMeta<std::vector<std::string>>("file_names");
+    bool has_null = reader.Catalog().GetMeta<bool>("has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);

@@ -44,21 +44,6 @@
 #include "storage/PluginLoader.h"
 
 namespace milvus::storage {
-const IndexEntryCatalogEntry&
-IndexEntryCatalog::At(std::string_view name) const {
-    const auto it =
-        std::lower_bound(entries_.begin(),
-                         entries_.end(),
-                         name,
-                         [](const auto& entry, std::string_view key) {
-                             return entry.name < key;
-                         });
-    AssertInfo(it != entries_.end() && it->name == name,
-               "Entry not found in catalog: {}",
-               name);
-    return *it;
-}
-
 folly::coro::Task<std::unique_ptr<AsyncIndexEntryReader>>
 AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                             int64_t collection_id,
@@ -98,8 +83,6 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
             token);
         directory = ParseIndexEntryDirectory(bytes);
     }
-    AssertInfo(directory.entry_names_.size() == directory.entry_index_.size(),
-               "Duplicate entries in V3 directory");
     reader->edek_ = std::move(directory.edek_);
     reader->ez_id_ = directory.ez_id_;
     if (directory.is_encrypted_) {
@@ -107,52 +90,7 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         AssertInfo(reader->cipher_plugin_ != nullptr,
                    "Cipher plugin required for encrypted V3 index");
     }
-    auto& entries = reader->catalog_.entries_;
-    entries.reserve(directory.entry_index_.size());
-    for (const auto& [name, meta] : directory.entry_index_) {
-        if (!meta.encrypted) {
-            AssertInfo(
-                meta.plain.offset <= static_cast<uint64_t>(
-                                         file_size - MILVUS_V3_MAGIC_SIZE) &&
-                    meta.plain.size <=
-                        file_size - MILVUS_V3_MAGIC_SIZE - meta.plain.offset,
-                "Entry '{}' range exceeds packed file",
-                name);
-            entries.push_back(
-                {name,
-                 meta.plain.size,
-                 meta.plain.crc32,
-                 PlainEntrySource{MILVUS_V3_MAGIC_SIZE + meta.plain.offset}});
-            continue;
-        }
-        EncryptedEntrySource source{meta.enc.original_size, {}};
-        source.slices.reserve(meta.enc.slices.size());
-        size_t offset = 0;
-        for (const auto& slice : meta.enc.slices) {
-            const auto bytes =
-                std::min(directory.slice_size_,
-                         static_cast<size_t>(meta.enc.original_size - offset));
-            AssertInfo(
-                slice.size > 0 &&
-                    slice.offset <= static_cast<uint64_t>(
-                                        file_size - MILVUS_V3_MAGIC_SIZE) &&
-                    slice.size <=
-                        file_size - MILVUS_V3_MAGIC_SIZE - slice.offset,
-                "Encrypted entry '{}' has an empty or out-of-bounds range",
-                name);
-            source.slices.push_back({MILVUS_V3_MAGIC_SIZE + slice.offset,
-                                     slice.size,
-                                     offset,
-                                     bytes});
-            offset += bytes;
-        }
-        entries.push_back(
-            {name, meta.enc.original_size, meta.enc.crc32, std::move(source)});
-    }
-    std::sort(
-        entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.name < rhs.name;
-        });
+    reader->catalog_ = IndexEntryCatalog(directory, file_size);
     // Release the temporary parsed representation before entry materialization.
     directory = {};
 

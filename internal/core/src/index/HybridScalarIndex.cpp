@@ -88,13 +88,15 @@ ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
     return std::nullopt;
 }
 
-template <typename Metadata>
+}  // namespace
+
 ScalarIndexType
-ResolvePackedHybridIndexType(const Metadata& reader, const Config& config) {
+ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
+                             const Config& config) {
     ScalarIndexType type = ScalarIndexType::NONE;
-    if (reader.HasMeta(INDEX_TYPE)) {
-        type = static_cast<ScalarIndexType>(
-            reader.template GetMeta<uint8_t>(INDEX_TYPE));
+    if (catalog.HasMeta(INDEX_TYPE)) {
+        type =
+            static_cast<ScalarIndexType>(catalog.GetMeta<uint8_t>(INDEX_TYPE));
     } else {
         // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
         // indexes were built as a standalone STLSORT (or, hypothetically, other
@@ -113,11 +115,11 @@ ResolvePackedHybridIndexType(const Metadata& reader, const Config& config) {
             }
         }
         if (type == ScalarIndexType::NONE) {
-            if (reader.HasMeta("version") || reader.HasMeta("index_length")) {
+            if (catalog.HasMeta("version") || catalog.HasMeta("index_length")) {
                 type = ScalarIndexType::STLSORT;
-            } else if (reader.HasMeta("file_names")) {
+            } else if (catalog.HasMeta("file_names")) {
                 type = ScalarIndexType::INVERTED;
-            } else if (reader.HasMeta(BITMAP_INDEX_LENGTH)) {
+            } else if (catalog.HasMeta(BITMAP_INDEX_LENGTH)) {
                 type = ScalarIndexType::BITMAP;
             } else {
                 ThrowInfo(UnexpectedError,
@@ -132,15 +134,6 @@ ResolvePackedHybridIndexType(const Metadata& reader, const Config& config) {
     }
 
     return type;
-}
-
-}  // namespace
-
-ScalarIndexType
-ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
-                             const Config& config) {
-    return ResolvePackedHybridIndexType<storage::IndexEntryCatalog>(catalog,
-                                                                    config);
 }
 
 template <typename T>
@@ -544,7 +537,8 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    internal_index_type_ = ResolvePackedHybridIndexType(reader, config);
+    internal_index_type_ =
+        ResolvePackedHybridIndexType(reader.Catalog(), config);
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));
