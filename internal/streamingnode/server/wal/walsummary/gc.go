@@ -52,9 +52,6 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 						continue
 					}
 					end := index.GetTransformEndTimetick()
-					if end == 0 {
-						end = index.GetEndTimetick()
-					}
 					if m.manifest.TransformTruncatedThrough == nil {
 						m.manifest.TransformTruncatedThrough = make(map[string]uint64)
 					}
@@ -220,10 +217,6 @@ func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkInd
 			return false
 		}
 		end := index.GetTransformEndTimetick()
-		if end == 0 {
-			// Legacy transform-only chunks use their whole vchannel span.
-			end = index.GetEndTimetick()
-		}
 		if end > floor {
 			// The chunk still holds records past the GC position.
 			return false
