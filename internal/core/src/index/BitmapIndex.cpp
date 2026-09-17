@@ -18,6 +18,7 @@
 #include "common/FastMem.h"
 #include <boost/algorithm/string.hpp>
 #include <bit>
+#include <fcntl.h>
 #include <folly/ScopeGuard.h>
 #include <optional>
 #include <sys/errno.h>
@@ -1651,12 +1652,17 @@ BitmapIndex<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
                              raw_file.Descriptor(),
                              0);
         auto mmap_errno = errno;
-        raw_file.Close();
         AssertInfo(raw_map != MAP_FAILED,
                    "failed to mmap Bitmap raw staging file: {}",
                    strerror(mmap_errno));
-        auto raw_map_guard = folly::makeGuard(
-            [raw_map, raw_size]() { munmap(raw_map, raw_size); });
+        auto raw_map_guard = folly::makeGuard([&raw_file, raw_map, raw_size]() {
+            munmap(raw_map, raw_size);
+            // Best-effort cache eviction after removing the mapping's references.
+            (void)posix_fadvise(
+                raw_file.Descriptor(), 0, 0, POSIX_FADV_DONTNEED);
+        });
+        // Conversion scans the input once in order. Advice is best-effort.
+        (void)madvise(raw_map, raw_size, MADV_SEQUENTIAL);
         context->final_file_cleanup = co_await MMapIndexDataAsync(
             context->final_mmap_path,
             static_cast<const uint8_t*>(raw_map),
@@ -1761,12 +1767,17 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                       "failed to mmap temp file: {}",
                       strerror(errno));
         }
-        tmp_file.Close();
         // Declared after tmp_path_guard so LIFO unwinding runs munmap first,
         // releasing the inode reference before unlink reclaims disk space.
-        auto tmp_map_guard = folly::makeGuard(
-            [tmp_map, tmp_size]() { munmap(tmp_map, tmp_size); });
+        auto tmp_map_guard = folly::makeGuard([&tmp_file, tmp_map, tmp_size]() {
+            munmap(tmp_map, tmp_size);
+            // Best-effort cache eviction after removing the mapping's references.
+            (void)posix_fadvise(
+                tmp_file.Descriptor(), 0, 0, POSIX_FADV_DONTNEED);
+        });
 
+        // Conversion scans the input once in order. Advice is best-effort.
+        (void)madvise(tmp_map, tmp_size, MADV_SEQUENTIAL);
         MMapIndexData(mmap_filepath.value(),
                       static_cast<const uint8_t*>(tmp_map),
                       tmp_size,
