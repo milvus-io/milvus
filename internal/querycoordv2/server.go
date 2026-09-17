@@ -383,6 +383,7 @@ func (s *Server) initMeta() error {
 	s.broker = meta.NewCoordinatorBroker(
 		s.mixCoord,
 	)
+	s.meta.Broker = s.broker
 
 	mlog.Info(s.ctx, "recover meta...")
 	err := s.meta.CollectionManager.Recover(s.ctx, s.broker)
