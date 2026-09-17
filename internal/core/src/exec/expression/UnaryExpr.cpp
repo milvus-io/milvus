@@ -47,6 +47,7 @@
 #include "exec/expression/ExprCache.h"
 #include "exec/expression/ExprCacheHelper.h"
 #include "exec/expression/JsonNumberComparison.h"
+#include "index/Families.h"
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
@@ -1503,6 +1504,29 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImpl(EvalCtx& context) {
         }
     }
 
+    if constexpr (std::is_same_v<T, std::string> ||
+                  std::is_same_v<T, std::string_view>) {
+        // FMINDEX answers general LIKE (PatternOp::Match) with CANDIDATES
+        // ONLY -- the rarest literal fragment's occurrences, a superset of
+        // the exact answer. Never let such a reader reach
+        // UnaryIndexFuncForMatch, which returns the reader's bitmap as the
+        // final result and would pass rows the pattern does not match. Either
+        // recheck the candidates on the sealed VARCHAR column (ExecFMMatch),
+        // or fall back to the raw scan. The gate is the reader contract's own
+        // exactness declaration, so any future candidates-only pattern reader
+        // is covered by the same guard.
+        if (!has_offset_input_ && PatternMatchIsCandidatesOnly()) {
+            if (CanUseFMMatch()) {
+                auto res = ExecFMMatch(context);
+                if (res.has_value()) {
+                    return res.value();
+                }
+                return nullptr;
+            }
+            return ExecRangeVisitorImplForData<T>(context);
+        }
+    }
+
     if (!has_offset_input_ && exec_path_ == ExprExecPath::PkIndex) {
         if (pk_type_ == DataType::VARCHAR) {
             return ExecRangeVisitorImplForPk<std::string_view>(context);
@@ -2468,6 +2492,176 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
     } else {
         apply_string_predicate(matches);
     }
+}
+
+bool
+PhyUnaryRangeFilterExpr::PinnedIndexIsFMIndex() const {
+    // Family is recorded on the inventory entry at load time, so this is a
+    // metadata check: no cast to a concrete index implementation, and no
+    // dependency on the reader having been pinned successfully.
+    return selected_index_entry_.has_value() &&
+           selected_index_entry_->family == index::families::kFmIndex;
+}
+
+bool
+PhyUnaryRangeFilterExpr::PatternMatchIsCandidatesOnly() const {
+    if (exec_path_ != ExprExecPath::ScalarIndex || pattern_reader_ == nullptr) {
+        return false;
+    }
+    if (!IsPatternMatchOpType(expr_->op_type_)) {
+        return false;
+    }
+    return !pattern_reader_->PatternMatchIsExact(
+        ToIndexPatternOp(expr_->op_type_));
+}
+
+bool
+PhyUnaryRangeFilterExpr::CanUseFMMatch() {
+    if (has_offset_input_ || exec_path_ != ExprExecPath::ScalarIndex) {
+        return false;
+    }
+    if (expr_->op_type_ != proto::plan::OpType::Match) {
+        return false;
+    }
+    if (segment_->type() != SegmentType::Sealed) {
+        return false;
+    }
+    // num_data_chunk_ is the construction snapshot. ProcessDataByOffsets on a
+    // ScalarIndex cursor with no data chunks routes to the value-lookup
+    // reverse lookup, which FMINDEX does not expose (it is a pattern-match /
+    // null reader only) -- so the phase-2 recheck needs real field data.
+    if (num_data_chunk_ <= 0) {
+        return false;
+    }
+    // Phase 1 comes from IPatternMatchReader, phase 2 needs the field's
+    // validity in segment row space. The family check keeps this route
+    // FM-specific: a different candidates-only reader would fall back to the
+    // raw scan (still exact, just unaccelerated) until it is wired up here.
+    return PinnedIndexIsFMIndex() && PatternMatchIsCandidatesOnly() &&
+           null_reader_ != nullptr;
+}
+
+std::optional<VectorPtr>
+PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
+    if (!arg_inited_) {
+        value_arg_.SetValue<std::string>(expr_->val_);
+        arg_inited_ = true;
+    }
+
+    auto literal = value_arg_.GetValue<std::string>();
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return std::nullopt;
+    }
+
+    AssertInfo(pattern_reader_ != nullptr && null_reader_ != nullptr,
+               "FMINDEX Match path requires a pattern-match and null reader, "
+               "field_id: {}",
+               field_id_.get());
+    AssertInfo(num_data_chunk_ > 0,
+               "FMINDEX Match recheck needs sealed VARCHAR field data");
+
+    // Phase 1: one segment-level index query, cached for every later batch.
+    if (cached_phase1_res_ == nullptr) {
+        auto candidates =
+            pattern_reader_->PatternMatch(literal, index::PatternOp::Match);
+        // The reader answers in its own row space (Count()). The per-batch
+        // slice and the recheck below address segment rows, so normalize once:
+        // a longer bitmap is truncated, a shorter one is padded with
+        // candidates. Padding with 1s stays correct because these are
+        // CANDIDATES -- phase 2 rechecks every one of them exactly.
+        if (static_cast<int64_t>(candidates.size()) > active_count_) {
+            TargetBitmap sliced;
+            sliced.append(candidates, 0, active_count_);
+            candidates = std::move(sliced);
+        } else if (static_cast<int64_t>(candidates.size()) < active_count_) {
+            candidates.resize(static_cast<size_t>(active_count_),
+                              /*init=*/true);
+        }
+        cached_phase1_res_ =
+            std::make_shared<TargetBitmap>(std::move(candidates));
+        // Validity projected into the segment row space: an index whose entry
+        // count under-reports the segment must not turn a real NULL into a
+        // non-NULL (see INullReader::IsNotNull(int64_t)).
+        cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
+            null_reader_->IsNotNull(active_count_));
+    }
+
+    const int64_t segment_offset = current_index_chunk_pos_;
+    TargetBitmap batch_candidates;
+    batch_candidates.append(
+        *cached_phase1_res_, segment_offset, real_batch_size);
+
+    const auto& bitmap_input = context.get_bitmap_input();
+    if (!bitmap_input.empty()) {
+        AssertInfo(static_cast<int64_t>(bitmap_input.size()) == real_batch_size,
+                   "bitmap_input size {} != real_batch_size {}",
+                   bitmap_input.size(),
+                   real_batch_size);
+        batch_candidates &= bitmap_input;
+    }
+
+    // Phase 2: recheck the surviving candidates against the exact LIKE
+    // pattern on the sealed VARCHAR column. FMINDEX Match candidates are a
+    // superset of the answer, so skipping this would return false positives.
+    if (!batch_candidates.none()) {
+        EnsureLikeMatcherCache();
+        const LikePatternMatcher* matcher = cached_like_matcher_.get();
+        AssertInfo(matcher != nullptr, "LIKE matcher cache missing for Match");
+
+        OffsetVector offsets;
+        offsets.reserve(batch_candidates.count());
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            if (batch_candidates[i]) {
+                offsets.push_back(static_cast<int32_t>(segment_offset + i));
+            }
+        }
+
+        TargetBitmap compact(offsets.size(), false);
+        TargetBitmap compact_valid(offsets.size(), true);
+        TargetBitmapView compact_view(compact);
+        TargetBitmapView compact_valid_view(compact_valid);
+
+        auto execute_sub_batch = [matcher]<FilterType filter_type =
+                                               FilterType::sequential>(
+            const std::string_view* data,
+            ValidityView valid_data,
+            const int32_t* /*offsets*/,
+            const int size,
+            TargetBitmapView res,
+            TargetBitmapView /*valid_res*/) {
+            if (data == nullptr) {
+                return;
+            }
+            for (int i = 0; i < size; ++i) {
+                if (valid_data && !valid_data[i]) {
+                    res[i] = false;
+                    continue;
+                }
+                res[i] = (*matcher)(data[i]);
+            }
+        };
+
+        ProcessDataByOffsets<std::string_view>(execute_sub_batch,
+                                               std::nullptr_t{},
+                                               &offsets,
+                                               compact_view,
+                                               compact_valid_view);
+
+        for (size_t j = 0; j < offsets.size(); ++j) {
+            if (!compact[j]) {
+                batch_candidates[static_cast<int64_t>(offsets[j]) -
+                                 segment_offset] = false;
+            }
+        }
+    }
+
+    TargetBitmap valid_result;
+    valid_result.append(
+        *cached_index_chunk_valid_res_, segment_offset, real_batch_size);
+    MoveCursor();
+    return std::make_shared<ColumnVector>(std::move(batch_candidates),
+                                          std::move(valid_result));
 }
 
 std::optional<VectorPtr>

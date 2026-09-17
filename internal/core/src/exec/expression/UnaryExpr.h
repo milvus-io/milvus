@@ -906,6 +906,13 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
                       plan_options),
           expr_(expr),
           enable_sub_expr_cache_write_(enable_sub_expr_cache_write) {
+        // Pre-warm the LIKE matcher for general Match: the FMINDEX Match
+        // route (ExecFMMatch) rechecks every phase-1 candidate with it, and
+        // building it on the query thread inside the first batch would put a
+        // regex compile on the critical path of every such query.
+        if (expr_->op_type_ == proto::plan::OpType::Match) {
+            EnsureLikeMatcherCache();
+        }
         // DetermineExecPath();
     }
 
@@ -1043,6 +1050,34 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
 
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
+
+    // True when the selected inventory entry is an FM index. Metadata only:
+    // the family name is recorded at load time, so this never casts to a
+    // concrete index implementation.
+    bool
+    PinnedIndexIsFMIndex() const;
+
+    // True when the selected pattern reader answers this expression's
+    // operation with a CANDIDATE SUPERSET instead of the exact result
+    // (index::IPatternMatchReader::PatternMatchIsExact). Such an answer must
+    // never be emitted as-is: the caller either rechecks the candidates
+    // against the raw column or falls back to the scan.
+    bool
+    PatternMatchIsCandidatesOnly() const;
+
+    // Whether general LIKE (Match) may take the FM-index candidate route.
+    // Requires the ScalarIndex exec path without offset input, a sealed
+    // segment, an FM index, and raw VARCHAR field data for the phase-2
+    // recheck.
+    bool
+    CanUseFMMatch();
+
+    // FMINDEX general-LIKE route: phase 1 takes candidates from the rarest
+    // literal fragment via IPatternMatchReader::PatternMatch(Match), phase 2
+    // rechecks those rows against the LIKE matcher on the sealed VARCHAR
+    // column. FMINDEX Match candidates are NEVER served unrechecked.
+    std::optional<VectorPtr>
+    ExecFMMatch(EvalCtx& context);
 
     static std::pair<std::string, std::string>
     SplitAtFirstSlashDigit(std::string input);

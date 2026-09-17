@@ -227,6 +227,11 @@ RunQueryBody(const ReaderBackend& backend,
                 EXPECT_FALSE(should_use);
                 expected_error = ErrorCode::Unsupported;
                 break;
+            case PatternQueryPolicy::CandidatesAndRun:
+                if (query.expected_should_use.has_value()) {
+                    EXPECT_EQ(should_use, *query.expected_should_use);
+                }
+                break;
         }
     }
 
@@ -240,6 +245,17 @@ RunQueryBody(const ReaderBackend& backend,
     const auto expected = QueryGroundTruth<Op>(query, data);
     ASSERT_EQ(expected.size(), data.values.size());
     auto actual = Op::Run(*contract, query.args);
+    if constexpr (requires { Op::QueryPolicy(backend, query.args); }) {
+        if (Op::QueryPolicy(backend, query.args) ==
+            PatternQueryPolicy::CandidatesAndRun) {
+            // Candidates-only answer: every expected row must be present, but
+            // extra rows are allowed (the consumer rechecks them). Asserting
+            // equality here would encode a guarantee the contract does not
+            // make.
+            ExpectBitmapSuperset(actual, expected);
+            return;
+        }
+    }
     ExpectBitmap(actual, expected);
 }
 

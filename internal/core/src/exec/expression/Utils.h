@@ -36,6 +36,17 @@ IsTextIndexOpType(proto::plan::OpType op) {
            op == proto::plan::OpType::TextMatchFuzzy;
 }
 
+// Ops served by IPatternMatchReader / INgramReader. Exactly the operations
+// ToIndexPatternOp() accepts, so it is also the guard before calling it.
+inline bool
+IsPatternMatchOpType(proto::plan::OpType op) {
+    return op == proto::plan::OpType::Match ||
+           op == proto::plan::OpType::PrefixMatch ||
+           op == proto::plan::OpType::PostfixMatch ||
+           op == proto::plan::OpType::InnerMatch ||
+           op == proto::plan::OpType::RegexMatch;
+}
+
 [[maybe_unused]] static ColumnVectorPtr
 GetColumnVector(const VectorPtr& result) {
     ColumnVectorPtr res;

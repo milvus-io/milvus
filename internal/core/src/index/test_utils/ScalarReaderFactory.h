@@ -47,6 +47,13 @@ enum class PatternQueryPolicy {
     DeclineButRun,
     Unsupported,
     SelectiveAndRun,
+    // The reader answers this operation with a CANDIDATE SUPERSET and declares
+    // it through IPatternMatchReader::PatternMatchIsExact(op) == false. Routing
+    // is selective (the family's own cost guard decides), and the result is
+    // asserted to CONTAIN the expected offsets rather than equal them: the
+    // consumer is required to recheck candidates against the raw column.
+    // FM-index's general LIKE (PatternOp::Match) is the only current case.
+    CandidatesAndRun,
 };
 
 struct PatternQueryPolicies {

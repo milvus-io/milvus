@@ -3942,6 +3942,101 @@ class SegmentExpr : public Expr {
     double json_stats_shredding_latency_us_{0.0};
     double json_stats_shared_latency_us_{0.0};
     std::optional<folly::Future<folly::Unit>> prefetch_future_;
+
+    // ==== BEGIN cross-group block owned by P1b (membership filters) ========
+    // Added for #53100. Kept at the end of the class, in one delimited block,
+    // so the file's owner (P1a) can move it without a merge conflict.
+ protected:
+    // Sequential reverse-lookup over the contiguous global row range
+    // [start_offset, start_offset + batch_size). This is the shape of the
+    // no-offset-input index-only scan, and it avoids materializing a
+    // per-batch OffsetVector solely to encode a start plus a count.
+    //
+    // Row semantics are exactly ProcessIndexLookupByOffsetsImpl's, with the
+    // offset vector replaced by the arithmetic range: a candidate cleared by
+    // candidate_mask is left untouched (the evaluator is still invoked with a
+    // null payload so its candidate-position cursor advances), a lookup miss
+    // writes (false, invalid), and a recovered value is handed to the
+    // evaluator as a one-row FilterType::random batch. The mask is indexed by
+    // candidate position, not by segment offset.
+    template <typename T, typename BatchEvaluator, typename... ValTypes>
+    int64_t
+    ProcessIndexLookupSequentialWithMask(BatchEvaluator evaluate_batch,
+                                         int64_t start_offset,
+                                         int64_t batch_size,
+                                         TargetBitmapView res,
+                                         TargetBitmapView valid_res,
+                                         const TargetBitmap& candidate_mask,
+                                         const ValTypes&... values) {
+        AssertInfo(num_index_chunk_ == 1, "scalar index chunk num must be 1");
+        const auto* value_reader = ValueReader<T>();
+        AssertInfo(value_reader != nullptr,
+                   "selected index does not expose typed value lookup");
+        const bool has_candidate_mask = !candidate_mask.empty();
+        AssertInfo(!has_candidate_mask ||
+                       candidate_mask.size() ==
+                           static_cast<size_t>(batch_size),
+                   "candidate mask size {} does not match offset batch size {}",
+                   candidate_mask.size(),
+                   batch_size);
+
+        // A scalar index is one logical index chunk for the whole segment
+        // while SkipIndex statistics stay partitioned by the original data
+        // chunks, so this path applies no chunk-level skip: see the same note
+        // on ProcessIndexLookupByOffsetsImpl.
+        for (int64_t i = 0; i < batch_size; ++i) {
+            if (has_candidate_mask && !candidate_mask[i]) {
+                evaluate_batch.template operator()<FilterType::random>(
+                    nullptr,
+                    nullptr,
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+                continue;
+            }
+            const auto offset = start_offset + i;
+            auto raw = value_reader->Lookup(offset);
+            if (!raw.has_value()) {
+                res[i] = valid_res[i] = false;
+                evaluate_batch.template operator()<FilterType::random>(
+                    nullptr,
+                    ValidityView{},
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+                continue;
+            }
+            bool valid_data = true;
+            if constexpr (std::is_same_v<T, std::string_view>) {
+                std::string_view raw_data = *raw;
+                evaluate_batch.template operator()<FilterType::random>(
+                    &raw_data,
+                    ValidityView::FromExpanded(&valid_data),
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+            } else {
+                T raw_data = *raw;
+                evaluate_batch.template operator()<FilterType::random>(
+                    &raw_data,
+                    ValidityView::FromExpanded(&valid_data),
+                    nullptr,
+                    1,
+                    res + i,
+                    valid_res + i,
+                    values...);
+            }
+        }
+
+        return batch_size;
+    }
+    // ==== END cross-group block owned by P1b ==============================
 };
 
 bool

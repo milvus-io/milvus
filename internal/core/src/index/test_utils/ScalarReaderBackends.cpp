@@ -754,7 +754,9 @@ ScalarReaderBackends() {
         });
 
         PatternQueryPolicies fm_pattern;
-        fm_pattern.match = PatternQueryPolicy::Unsupported;
+        // General LIKE is served as a candidate superset the executor
+        // rechecks on the raw column (FmIndexReader::PatternMatchIsExact).
+        fm_pattern.match = PatternQueryPolicy::CandidatesAndRun;
         fm_pattern.prefix = PatternQueryPolicy::SelectiveAndRun;
         fm_pattern.postfix = PatternQueryPolicy::SelectiveAndRun;
         fm_pattern.inner = PatternQueryPolicy::SelectiveAndRun;

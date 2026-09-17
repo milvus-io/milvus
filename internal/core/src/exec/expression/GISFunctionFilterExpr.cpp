@@ -13,6 +13,7 @@
 
 #include <fmt/core.h>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -29,6 +30,7 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "geos_c.h"
+#include "log/Log.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/MmapManager.h"
@@ -500,16 +502,75 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                 gis_detail::ToSpatialOp(expr_->op_), query_geometry);
         }
         const auto covered = selected_covered_row_end_;
-        AssertInfo(coarse_global_.size() >= static_cast<size_t>(covered),
-                   "spatial candidates cover {} rows, snapshot requires {}",
-                   coarse_global_.size(),
-                   covered);
-        coarse_global_.resize(covered);
-        coarse_valid_global_ = null_reader_->IsNotNull();
-        AssertInfo(coarse_valid_global_.size() >=
-                       static_cast<size_t>(covered),
-                   "spatial validity does not cover snapshot prefix");
-        coarse_valid_global_.resize(covered);
+        // Normalize down first: the reader may answer in a row space wider
+        // than the snapshot prefix the caller combines in (a growing segment
+        // appends to the index before acking rows).
+        if (static_cast<int64_t>(coarse_global_.size()) > covered) {
+            coarse_global_.resize(covered);
+        }
+        // Self-heal an index that reports FEWER rows than the segment holds.
+        //
+        // The R-Tree row count is recomputed from the deserialized tree, so an
+        // index built before empty/unparseable geometries were kept as
+        // placeholder entries under-reports the segment row space. Those old
+        // builders advanced absolute_offset even when they dropped a row, so
+        // the missing entries can be INTERIOR holes rather than a trailing
+        // suffix. Count() reveals how many entries are missing, not where they
+        // were. Once the index is short, therefore, no `false` bit in its
+        // candidate bitmap is trustworthy as a negative: promote the entire
+        // covered row space to candidates and let exact refinement settle it.
+        //
+        // Full refinement beats asserting here: this is an expected upgrade
+        // state, not a Milvus bug, and failing every geometry query on the
+        // segment until someone manually rebuilds the index is a far worse
+        // outcome than a slightly slower correct answer.
+        //
+        // The promotion rule itself lives in PromoteShortGISCoarseBitmap so
+        // the fusion coarse path (PhyGISCoarseConjunctExpr::RunRTreeQuery)
+        // applies the identical rule instead of a tail-only pad.
+        const auto coarse_rows = static_cast<int64_t>(coarse_global_.size());
+        const bool index_is_short =
+            PromoteShortGISCoarseBitmap(coarse_global_, covered);
+        if (index_is_short) {
+            static std::atomic<int64_t> last_short_index_log_us{0};
+            if (ShouldLogGeometryThrottled(last_short_index_log_us)) {
+                LOG_WARN(
+                    "R-Tree index for field {} reports {} rows but the "
+                    "segment holds {}; treating all segment rows as "
+                    "candidates for exact refinement because the {} missing "
+                    "entries may be interior holes. This index predates "
+                    "placeholder-MBR indexing of empty/unparseable "
+                    "geometries. Every geometry query on this segment now "
+                    "refines the whole column (read in {}-row batches) "
+                    "instead of R-Tree candidates -- rebuild the index to "
+                    "restore pruning (further occurrences suppressed "
+                    "briefly).",
+                    field_id_.get(),
+                    coarse_rows,
+                    covered,
+                    covered - coarse_rows,
+                    batch_size_);
+            }
+            // The validity bitmap must NOT simply be padded with true: an
+            // entry count is not a row id, so a genuine NULL beyond the
+            // reported count is absent from the parameterless IsNotNull().
+            // Filling those rows with true would turn NULL into non-NULL and
+            // make `NOT ST_*` return them as matches. Ask the reader to
+            // project its validity into the caller's absolute row space
+            // instead (index::INullReader::IsNotNull(int64_t)).
+            coarse_valid_global_ = null_reader_->IsNotNull(covered);
+            AssertInfo(coarse_valid_global_.size() ==
+                           static_cast<size_t>(covered),
+                       "projected spatial validity has {} rows, expected {}",
+                       coarse_valid_global_.size(),
+                       covered);
+        } else {
+            coarse_valid_global_ = null_reader_->IsNotNull();
+            AssertInfo(coarse_valid_global_.size() >=
+                           static_cast<size_t>(covered),
+                       "spatial validity does not cover snapshot prefix");
+            coarse_valid_global_.resize(covered);
+        }
         if (covered < active_count_) {
             coarse_global_.resize(active_count_, true);
             const auto field_valid = GetFieldRowValidity(active_count_);

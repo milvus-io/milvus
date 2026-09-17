@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -162,10 +163,19 @@ class FmIndexReader final : public IIndexReaderBase,
 
     // ---- IPatternMatchReader -------------------------------------
 
-    // Only PrefixMatch / PostfixMatch / InnerMatch ever arrive; `Match` and
-    // `RegexMatch` are declined by `ShouldUseForOp` below.
+    // PrefixMatch / PostfixMatch / InnerMatch are answered EXACTLY. General
+    // LIKE (`Match`) is answered with CANDIDATES ONLY: the occurrences of the
+    // pattern's rarest literal fragment, a superset of the exact answer that
+    // the consumer MUST recheck against the raw column
+    // (PhyUnaryRangeFilterExpr::ExecFMMatch). `RegexMatch` is declined by
+    // `ShouldUseForOp` below and never arrives.
     TargetBitmap
     PatternMatch(std::string_view pattern, PatternOp op) const override;
+
+    // Exact for the three anchored ops; false for `Match`, which is answered
+    // with a candidate superset the consumer must recheck.
+    bool
+    PatternMatchIsExact(PatternOp op) const override;
 
     bool
     ShouldUseForOp(PatternOp op, std::string_view pattern) const override;
@@ -174,6 +184,11 @@ class FmIndexReader final : public IIndexReaderBase,
 
     TargetBitmap
     IsNull() const override;
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using INullReader::IsNotNull;
 
     TargetBitmap
     IsNotNull() const override;
@@ -185,6 +200,29 @@ class FmIndexReader final : public IIndexReaderBase,
 
     TargetBitmap
     DocsToBitmap(const std::vector<uint64_t>& docs) const;
+
+    // Count-first guard for general LIKE (Match). Declines an empty pattern
+    // and every pattern with no literal fragment (`%`, `%_%`), because phase 1
+    // has no seed to search for. Otherwise the rarest fragment is scored as
+    // occ * sa_sample_rate < cost_ratio * tokens, the same locate-only bound
+    // as the anchored ops. The consumer's phase-2 recheck reads those
+    // candidates back from the raw column; its byte cost is deliberately NOT
+    // priced here (known approximation for long rows * unselective
+    // fragments).
+    bool
+    MatchGuardAccepts(std::string_view pattern) const;
+
+    // Rarest literal fragment of `pattern`, or nullopt when the pattern has
+    // none. Shared by MatchGuardAccepts and the Match branch of PatternMatch
+    // so the guard and the query can never disagree on which fragment seeds
+    // phase 1.
+    struct RarestFragment {
+        std::string literal;
+        int64_t occurrences{0};
+    };
+
+    std::optional<RarestFragment>
+    RarestMatchFragment(std::string_view pattern) const;
 
     std::shared_ptr<const FmIndexStorage> storage_;
 

@@ -34,8 +34,10 @@ TEST(FmIndexReaderTest, AdvertisesSelectiveVarcharPatternPolicy) {
         const auto caps = backend.DeriveCaps();
         EXPECT_FALSE(caps.predicate) << name;
         EXPECT_TRUE(caps.pattern_match) << name;
+        // General LIKE is served, but as a candidate superset the executor
+        // must recheck (FmIndexReader::PatternMatchIsExact(Match) == false).
         EXPECT_EQ(backend.PatternPolicy(PatternOp::Match),
-                  PatternQueryPolicy::Unsupported);
+                  PatternQueryPolicy::CandidatesAndRun);
         EXPECT_EQ(backend.PatternPolicy(PatternOp::PrefixMatch),
                   PatternQueryPolicy::SelectiveAndRun);
         EXPECT_EQ(backend.PatternPolicy(PatternOp::PostfixMatch),

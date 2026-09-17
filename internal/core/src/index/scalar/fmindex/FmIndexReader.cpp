@@ -24,6 +24,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/RegexQuery.h"
 #include "index/fmindex/FMIndex.h"
 
 namespace milvus::index {
@@ -323,15 +324,50 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
                 });
             return result;
         }
-        case PatternOp::Match:
+        case PatternOp::Match: {
+            // Phase 1 ONLY: candidate rows taken from the pattern's rarest
+            // literal fragment. This is a SUPERSET of the exact answer -- the
+            // consumer must recheck each candidate against the raw column
+            // (PhyUnaryRangeFilterExpr::ExecFMMatch). Null rows are excluded
+            // up front: a NULL never matches a LIKE under either polarity.
+            auto not_null = IsNotNull();
+            const auto rarest = RarestMatchFragment(pattern);
+            if (!rarest.has_value()) {
+                // No literal fragment ("%", "%_%", or an empty pattern):
+                // every non-null row is a candidate. ShouldUseForOp declines
+                // this case, so a planner-driven query never lands here; a
+                // direct API caller still gets a safe candidate superset.
+                return not_null;
+            }
+            TargetBitmap candidates(static_cast<size_t>(storage_->Count()),
+                                    false);
+            const auto rows = static_cast<uint64_t>(storage_->Count());
+            storage_->Engine().VisitMatchingDocs(
+                Bytes(rarest->literal),
+                rarest->literal.size(),
+                [&](uint64_t document) {
+                    if (document < rows) {
+                        candidates.set(static_cast<size_t>(document));
+                    }
+                });
+            candidates &= not_null;
+            return candidates;
+        }
         case PatternOp::RegexMatch:
-            ThrowInfo(Unsupported,
-                      "FM-index does not support general LIKE or regex");
+            ThrowInfo(Unsupported, "FM-index does not support regex");
         default:
             ThrowInfo(UnexpectedError,
                       "invalid FM-index pattern operation {}",
                       static_cast<int>(op));
     }
+}
+
+bool
+FmIndexReader::PatternMatchIsExact(PatternOp op) const {
+    // General LIKE is answered by locating the rarest literal fragment, which
+    // is a superset of the pattern's true matches. Every other supported
+    // operation is answered exactly by backward search.
+    return op != PatternOp::Match;
 }
 
 bool
@@ -341,7 +377,13 @@ FmIndexReader::ShouldUseForOp(PatternOp op, std::string_view pattern) const {
         case PatternOp::PostfixMatch:
         case PatternOp::InnerMatch:
             break;
+        // General LIKE uses the same locate-only bound, but does NOT inherit
+        // the anchored ops' empty-pattern acceptance below: with no literal
+        // fragment there is nothing to seed phase 1 with, so the raw scan is
+        // strictly cheaper. RegexMatch stays declined (required-literal
+        // extraction is a follow-up).
         case PatternOp::Match:
+            return MatchGuardAccepts(pattern);
         case PatternOp::RegexMatch:
             return false;
         default:
@@ -372,6 +414,57 @@ FmIndexReader::IsNotNull() const {
     auto result = storage_->NullBitmap().clone();
     result.flip();
     return result;
+}
+
+std::optional<FmIndexReader::RarestFragment>
+FmIndexReader::RarestMatchFragment(std::string_view pattern) const {
+    // Maximal literal runs between unescaped LIKE wildcards. Shared with the
+    // NGRAM candidate generator (common/RegexQuery.h), so the two families
+    // split a pattern the same way.
+    const auto parts = milvus::split_by_wildcard(std::string(pattern));
+    if (parts.empty()) {
+        return std::nullopt;
+    }
+    RarestFragment rarest;
+    rarest.literal = parts[0];
+    rarest.occurrences =
+        SaturatingSize(storage_->Engine().Count(Bytes(parts[0]),
+                                                parts[0].size()));
+    for (size_t i = 1; i < parts.size(); ++i) {
+        const auto occurrences = SaturatingSize(
+            storage_->Engine().Count(Bytes(parts[i]), parts[i].size()));
+        if (occurrences < rarest.occurrences) {
+            rarest.occurrences = occurrences;
+            rarest.literal = parts[i];
+        }
+    }
+    return rarest;
+}
+
+bool
+FmIndexReader::MatchGuardAccepts(std::string_view pattern) const {
+    const auto rarest = RarestMatchFragment(pattern);
+    if (!rarest.has_value()) {
+        // Covers the wildcard-only patterns ("%", "%_%") and, because
+        // split_by_wildcard("") is also empty, the empty pattern: answering
+        // would mean handing every non-null row to the phase-2 recheck, which
+        // is the raw scan wearing an index costume. Decline so the executor
+        // runs the scan directly.
+        return false;
+    }
+    if (rarest->occurrences == 0) {
+        return true;
+    }
+    // Locate is occ * sa_sample_rate LF steps. Phase 2 reads those candidates
+    // back from the raw column (ascending offsets, views fetched per
+    // same-chunk run). Its candidate-byte cost is NOT priced by this
+    // locate-only bound -- a known approximation whose worst case is long
+    // average rows * unselective fragments, where phase 2 approaches a full
+    // column read on top of the locate. Revisit with end-to-end measurements
+    // across row length and selectivity before recalibrating.
+    return static_cast<double>(rarest->occurrences) *
+               static_cast<double>(storage_->Engine().sa_sample_rate()) <
+           cost_ratio_ * static_cast<double>(storage_->TotalTokens());
 }
 
 int64_t

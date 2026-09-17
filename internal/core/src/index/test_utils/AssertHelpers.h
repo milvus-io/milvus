@@ -58,6 +58,21 @@ ExpectBitmap(TargetBitmap&& actual, const TargetBitmap& expected) {
     ExpectBitmap(actual, expected);
 }
 
+// For readers that answer an operation with a candidate SUPERSET (see
+// IPatternMatchReader::PatternMatchIsExact): every expected row must be
+// present; extra rows are allowed because the consumer rechecks them.
+inline void
+ExpectBitmapSuperset(const TargetBitmap& actual,
+                     const TargetBitmap& expected) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        if (expected[i]) {
+            EXPECT_TRUE(actual[i])
+                << "candidate superset is missing expected row " << i;
+        }
+    }
+}
+
 inline void
 ExpectHits(TargetBitmap& actual,
            size_t count,
