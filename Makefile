@@ -78,7 +78,7 @@ MOCKERY_VERSION := 2.53.3
 MOCKERY_OUTPUT := $(shell $(INSTALL_PATH)/mockery --version 2>/dev/null)
 INSTALL_MOCKERY := $(findstring $(MOCKERY_VERSION),$(MOCKERY_OUTPUT))
 # gci
-GCI_VERSION := 0.11.2
+GCI_VERSION := 0.13.4
 GCI_OUTPUT := $(shell $(INSTALL_PATH)/gci --version 2>/dev/null)
 INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 # gofumpt
@@ -212,8 +212,7 @@ lint-fix: getdeps
 	@$(INSTALL_PATH)/gofumpt -l -w tests/go_client/
 	@$(INSTALL_PATH)/gofumpt -l -w tests/integration/
 	@echo "Running gci fix"
-# Skip boring_enabled.go: gci misclassifies crypto/boring (a std lib package) as third-party, conflicting with gofumpt
-	@find cmd/ -name '*.go' ! -name 'boring_enabled.go' | xargs $(INSTALL_PATH)/gci write --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
+	@$(INSTALL_PATH)/gci write cmd/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write internal/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write pkg/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
 	@$(INSTALL_PATH)/gci write client/ --skip-generated -s standard -s default -s "prefix(github.com/milvus-io)" --custom-order
