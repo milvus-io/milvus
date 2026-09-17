@@ -222,7 +222,13 @@ func TestImportMetaUpdateJobCannotRegressCommittingToFailed(t *testing.T) {
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Once()
+	var saved []*datapb.ImportJob
+	// One save for AddJob, one for the reason-only update below: Committing is
+	// the 2PC point of no return, so UpdateJobState refuses the regression
+	// (UnfailableJobStates) and the persisted job must stay Committing.
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Run(func(_ context.Context, job *datapb.ImportJob) {
+		saved = append(saved, job)
+	}).Return(nil).Times(2)
 
 	im, err := NewImportMeta(context.TODO(), catalog, nil, nil)
 	assert.NoError(t, err)
@@ -233,6 +239,9 @@ func TestImportMetaUpdateJobCannotRegressCommittingToFailed(t *testing.T) {
 		UpdateJobState(internalpb.ImportJobState_Failed),
 		UpdateJobReason("late worker failure")))
 	assert.Equal(t, internalpb.ImportJobState_Committing, im.GetJob(context.TODO(), 1).GetState())
+	assert.Len(t, saved, 2)
+	assert.Equal(t, internalpb.ImportJobState_Committing, saved[1].GetState())
+	assert.Equal(t, "late worker failure", saved[1].GetReason())
 }
 
 func TestImportMetaAddJob(t *testing.T) {

@@ -255,12 +255,6 @@ func (m *importMeta) UpdateJob(ctx context.Context, jobID int64, actions ...Upda
 		for _, action := range actions {
 			action(updatedJob)
 		}
-		if job.GetState() == internalpb.ImportJobState_Committing &&
-			updatedJob.GetState() == internalpb.ImportJobState_Failed {
-			// Committing is the 2PC point of no return. Late timeout/worker/GC
-			// callbacks must not regress an in-flight vchannel commit to Failed.
-			return nil
-		}
 		err := m.catalog.SaveImportJob(ctx, updatedJob.(*importJob).ImportJob)
 		if err != nil {
 			return err
