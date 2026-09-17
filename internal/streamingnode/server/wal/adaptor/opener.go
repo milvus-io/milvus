@@ -138,12 +138,14 @@ func (o *openerAdaptorImpl) determineWALName(ctx context.Context, opt *wal.OpenO
 	}
 	if cpProto != nil {
 		checkpoint := utility.NewWALCheckpointFromProto(cpProto)
-		mlog.Info(ctx, "get checkpoint from catalog",
+		fields := []mlog.Field{
 			mlog.String("channel", opt.Channel.Name),
 			mlog.Stringer("checkpoint", checkpoint.MessageID),
 			mlog.Uint64("checkpointTimeTick", checkpoint.TimeTick),
 			mlog.Stringer("currentWAL", checkpoint.MessageID.WALName()),
-			mlog.Any("AlterWalState", checkpoint.AlterWalState))
+		}
+		fields = append(fields, utility.AlterWALStateLogFields(checkpoint.AlterWalState)...)
+		mlog.Info(ctx, "get checkpoint from catalog", fields...)
 		walName = checkpoint.MessageID.WALName()
 	}
 
@@ -293,7 +295,8 @@ func (o *openerAdaptorImpl) handleAlterWAL(ctx context.Context, opt *wal.OpenOpt
 		mlog.Stringer("targetWAL", snapshot.AlterWALInfo.TargetWALName),
 		mlog.String("checkpointMessageID", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
-		mlog.Any("alterWALConfig", snapshot.AlterWALInfo.AlterWALConfig))
+		// The persisted map is request payload, including its keys.
+		mlog.Int("alterWALConfigCount", len(snapshot.AlterWALInfo.AlterWALConfig)))
 
 	if snapshot.Checkpoint.AlterWalState != nil && snapshot.Checkpoint.AlterWalState.Stage == streamingpb.AlterWALStage_FLUSHING {
 		flushingErr := o.handleAlterWALFlushingStage(ctx, opt, roWAL, rs, resources, snapshot)
