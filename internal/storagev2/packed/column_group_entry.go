@@ -131,7 +131,9 @@ func columnGroupFileProperties(file *C.LoonColumnGroupFile) (map[string]string, 
 	properties := make(map[string]string, len(keys))
 	for i := range keys {
 		if keys[i] == nil || values[i] == nil {
-			continue
+			// Dropping a property can make an otherwise valid-looking
+			// descriptor unreadable after it is committed to a manifest.
+			return nil, merr.WrapErrServiceInternalMsg("file property %d is incomplete", i)
 		}
 		properties[C.GoString(keys[i])] = C.GoString(values[i])
 	}
