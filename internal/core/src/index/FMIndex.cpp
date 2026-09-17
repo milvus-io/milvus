@@ -927,12 +927,25 @@ FMIndex::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
                       "failed to mmap FM index: {}",
                       strerror(errno));
         }
-        new_fm = fmindex::FMIndex::LoadView(
-            reinterpret_cast<const uint8_t*>(new_mmap_data),
-            context->blob_size);
+        detail::GuardFMIndexLibrary(
+            [&] {
+                new_fm = fmindex::FMIndex::LoadView(
+                    reinterpret_cast<const uint8_t*>(new_mmap_data),
+                    context->blob_size);
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
     } else {
         AssertInfo(context->blob != nullptr, "FMIndex memory target is null");
-        new_fm = fmindex::FMIndex::Deserialize(std::move(*context->blob));
+        detail::GuardFMIndexLibrary(
+            [&] {
+                new_fm =
+                    fmindex::FMIndex::Deserialize(std::move(*context->blob));
+            },
+            ErrorCode::DataFormatBroken,
+            "load",
+            field_id_);
     }
     if (!new_fm.valid()) {
         ThrowInfo(ErrorCode::DataFormatBroken,

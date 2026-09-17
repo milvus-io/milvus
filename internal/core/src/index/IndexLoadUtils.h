@@ -85,7 +85,8 @@ PlanIndexDirectory(const storage::IndexEntryDirectory& directory,
     names.reserve(file_names.size());
     for (const auto& name : file_names) {
         const auto path = std::filesystem::path(name);
-        if (name.empty() || path.is_absolute() || path.has_parent_path() ||
+        if (name.empty() || name.find('\0') != std::string::npos ||
+            path.is_absolute() || path.has_parent_path() ||
             path.filename() != path || name == "." || name == ".." ||
             !names.insert(name).second || !directory.HasEntry(name)) {
             ThrowInfo(

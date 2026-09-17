@@ -40,11 +40,13 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
         co_await folly::coro::co_current_cancellation_token);
     storage::ThrowIfCancelled(cancellation_token,
                               "ScalarIndex::OpenInputStream");
-    auto input = co_await folly::coro::co_withCancellation(
-        folly::CancellationToken{},
-        file_manager_->OpenInputStreamAsync(packed_file, is_index_file_));
+    auto opened =
+        co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
+            folly::CancellationToken{},
+            file_manager_->OpenInputStreamAsync(packed_file, is_index_file_)));
     storage::ThrowIfCancelled(cancellation_token,
                               "ScalarIndex::OpenInputStream");
+    auto input = std::move(opened).value();
     AssertInfo(
         input != nullptr, "Failed to open packed index file: {}", packed_file);
     const auto collection_id =
@@ -67,6 +69,8 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
                                   "ScalarIndex::FinishLoadAsync");
         co_await folly::coro::co_withCancellation(
             cancellation_token, FinishLoadAsync(plan, config));
+        storage::ThrowIfCancelled(cancellation_token,
+                                  "ScalarIndex::FinishLoadComplete");
     } catch (...) {
         failure = std::current_exception();
     }

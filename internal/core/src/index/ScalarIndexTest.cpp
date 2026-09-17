@@ -49,6 +49,7 @@
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
+#include "index/IndexLoadUtils.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/JsonFlatIndex.h"
 #include "index/ScalarIndex.h"
@@ -242,7 +243,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
                 payload, payload->data(), payload->size()};
         } else {
             auto staging = std::make_shared<milvus::storage::IndexFileTarget>(
-                mmap_target_path_, bytes, false);
+                mmap_target_path_, bytes, retain_file_);
             target = milvus::storage::FileEntryTarget{staging, 0, bytes};
         }
         plan.entries.push_back(milvus::storage::EntryLoadPlan{
@@ -274,9 +275,14 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
                       sizeof(loaded_payload_));
             EXPECT_TRUE(file.good());
         }
+        if (cancel_on_finish_) {
+            cancel_on_finish_->requestCancellation();
+        }
         co_return;
     }
 
+    folly::CancellationSource* cancel_on_finish_{nullptr};
+    bool retain_file_{false};
     std::string planned_thread_;
     std::string finish_load_thread_;
     std::string cleanup_thread_;
@@ -304,10 +310,17 @@ class RecordingOpenFileSystem : public arrow::fs::LocalFileSystem {
     arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
     OpenInputFileAsync(const std::string& path) override {
         ++async_opens;
+        if (cancel_on_open) {
+            cancel_on_open->requestCancellation();
+            return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
+                MakeFinished(arrow::Status::IOError(
+                    "injected open failure after cancellation"));
+        }
         return arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>::
             MakeFinished(fs_->OpenInputFile(path));
     }
 
+    folly::CancellationSource* cancel_on_open{nullptr};
     int sync_opens{0};
     int async_opens{0};
 
@@ -342,6 +355,67 @@ TEST(ScalarIndexV3AsyncLoadConfigTest,
             ctx);
         EXPECT_EQ(fs->sync_opens, async ? 0 : 1);
         EXPECT_EQ(fs->async_opens, async ? 1 : 0);
+    }
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest, CancellationWinsOverOpenFailure) {
+    using namespace milvus;
+    using namespace milvus::index;
+    auto ctx = GetTempFileManagerCtx(Int32);
+    TestScalarIndexV3LoadRoute built(ctx);
+    auto stats = built.UploadUnified({});
+    auto fs = std::make_shared<RecordingOpenFileSystem>(ctx.fs);
+    folly::CancellationSource cancelled;
+    fs->cancel_on_open = &cancelled;
+    ctx.fs = fs;
+    ctx.use_async_load = true;
+    TestScalarIndexV3LoadRoute loaded(ctx);
+    Config config;
+    config[INDEX_FILES] = stats->GetIndexFiles();
+    OpContext op_ctx;
+    op_ctx.cancellation_token = cancelled.getToken();
+    try {
+        loaded.LoadUnified(config, &op_ctx);
+        FAIL() << "Expected cancellation";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_GT(fs->async_opens, 0);
+    EXPECT_EQ(loaded.finish_load_calls_, 0);
+}
+
+TEST(ScalarIndexV3AsyncLoadConfigTest,
+     CancellationDuringFinalizationPreventsCommit) {
+    using namespace milvus;
+    using namespace milvus::index;
+    auto ctx = GetTempFileManagerCtx(Int32);
+    ctx.use_async_load = true;
+    TestScalarIndexV3LoadRoute built(ctx);
+    auto stats = built.UploadUnified({});
+    Config config;
+    config[INDEX_FILES] = stats->GetIndexFiles();
+    for (bool file : {false, true}) {
+        folly::CancellationSource cancelled;
+        TestScalarIndexV3LoadRoute loaded(ctx);
+        loaded.cancel_on_finish_ = &cancelled;
+        loaded.retain_file_ = true;
+        if (file) {
+            loaded.mmap_target_path_ = TestLocalPath + "/cancel_finish/payload";
+        }
+        OpContext op_ctx;
+        op_ctx.cancellation_token = cancelled.getToken();
+        try {
+            loaded.LoadUnified(config, &op_ctx);
+            FAIL() << "Expected cancellation";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(loaded.finish_load_calls_, 1);
+        if (file) {
+            EXPECT_FALSE(std::filesystem::exists(loaded.mmap_target_path_));
+            EXPECT_TRUE(loaded.cleanup_thread_.starts_with("MILVUS_LF_IO_") ||
+                        loaded.cleanup_thread_.starts_with("MILVUS_ASYNC"));
+        }
     }
 }
 
@@ -1114,3 +1188,31 @@ static_assert(HasRowCountIsNotNull<milvus::index::StringIndexMarisa>::value);
 static_assert(HasRowCountIsNotNull<milvus::index::StringIndexSort>::value);
 static_assert(HasRowCountIsNotNull<milvus::index::JsonKeyStats>::value);
 static_assert(HasRowCountIsNotNull<milvus::index::FMIndex>::value);
+
+TEST(ScalarIndexV3LoadRouteTest, RejectsEmbeddedNulBeforePreparingDirectory) {
+    using namespace milvus;
+    const auto ctx = GetTempFileManagerCtx(CDataType::Int32);
+    auto manager = std::make_shared<storage::DiskFileManagerImpl>(ctx);
+    const std::string name("data\0suffix", 11);
+    const nlohmann::json json = {{"entries",
+                                  {{{"name", name},
+                                    {"offset", 0},
+                                    {"size", 1},
+                                    {"crc32", "00000000"}}}}};
+    const auto bytes = json.dump();
+    auto parsed = storage::ParseIndexEntryDirectory(
+        std::span(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()),
+        4096);
+    index::IndexLoadPlan plan;
+    try {
+        index::PlanIndexDirectory(parsed.first,
+                                  nlohmann::json{{"file_names", {name}}},
+                                  manager,
+                                  true,
+                                  plan);
+        FAIL() << "expected invalid filename";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
+    }
+    EXPECT_TRUE(plan.entries.empty());
+}
