@@ -233,9 +233,8 @@ RunTantivyDirectLoad(bool enable_mmap, bool nullable) {
         ASSERT_TRUE(resources.overhead.has_value());
         EXPECT_EQ(
             sync_resources.overhead->memory->group,
-            storage::LoadMemoryOverheadController::GetInstance()
-                .GetOrCreateForSync(ThreadPools::GetLoadExecutorWorkers()));
-        EXPECT_NE(sync_resources.overhead->memory->group,
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate());
+        EXPECT_EQ(sync_resources.overhead->memory->group,
                   resources.overhead->memory->group);
     }
     const auto old_workers = storage::GetAsyncLoadThreadPoolSize();

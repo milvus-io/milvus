@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include <boost/container/vector.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
@@ -1015,6 +1016,11 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds) {
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous_enabled = StorageV2AsyncLoadEnabled();
+    auto restore_mode = folly::makeGuard(
+        [&] { SetStorageV2AsyncLoadEnabled(previous_enabled); });
+    SetStorageV2AsyncLoadEnabled(true);
     auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(

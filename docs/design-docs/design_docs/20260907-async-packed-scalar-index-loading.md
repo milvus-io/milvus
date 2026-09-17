@@ -258,13 +258,18 @@ capacity rather than HIGH/LOW or async worker counts.
 Admission expands accounting bounds before permitting more work; a rejected
 accounting update leaves the admission limit unchanged. Shrinking first restricts
 new admissions and keeps accounting for already active work until it drains.
-Async executor resizing does not change these accounting bounds. Synchronous
-field-data and direct-to-file scalar loads use a separate overhead group bounded
-by HIGH + LOW thread-pool workers, updated when those pools resize. Each
-translator retains its group's identity across rollout changes, so synchronous
-and asynchronous loads can coexist without changing each other's bounds.
-Synchronous ordered scalar prefetch retains completed buffers after its workers
-return; it keeps request-local reservations rather than sharing a worker-bound
+Each resource dimension uses one overhead group. Synchronous mode uses HIGH +
+LOW thread-pool workers as its concurrency limit; asynchronous mode uses
+admission slots and, for memory, the configured byte budget. Only the active
+mode's configuration updates the group. Async executor resizing does not affect
+these limits. Mode changes require quiescent loading and configuration updates,
+and rebuilding readers that captured the old mode before loading resumes. The
+policy changes without changing the group's identity; mixed-mode live rollout
+is unsupported.
+
+The legacy Storage V2 field loader always uses synchronous workers and keeps
+request-local overhead in async mode. Synchronous ordered scalar prefetch retains
+completed buffers after its workers return; it keeps request-local reservations rather than sharing a worker-bound
 group. The legacy scalar download algorithm and its batch allowance are unchanged.
 
 These estimates cover loader-managed allocations, not every allocation inside

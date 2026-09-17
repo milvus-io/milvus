@@ -20,7 +20,6 @@
 #include "folly/coro/BlockingWait.h"
 #include "storage/AsyncIndexEntryReader.h"
 #include "storage/LoadOverheadController.h"
-#include "storage/ThreadPools.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/FileWriter.h"
@@ -999,10 +998,7 @@ IndexFactory::ScalarIndexFileLoadResource(
     // Both routes must lease the entire overhead before sharing its reservation.
     if (can_share) {
         auto& controller = storage::LoadMemoryOverheadController::GetInstance();
-        auto memory_group = use_async_load
-                                ? controller.GetOrCreate()
-                                : controller.GetOrCreateForSync(
-                                      ThreadPools::GetLoadExecutorWorkers());
+        auto memory_group = controller.GetOrCreate();
         AssertInfo(max_task <= static_cast<uint64_t>(
                                    std::numeric_limits<int64_t>::max()),
                    "Async scalar task estimate exceeds resource policy range");

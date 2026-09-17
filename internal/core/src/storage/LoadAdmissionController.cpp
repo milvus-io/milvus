@@ -23,6 +23,7 @@
 #include "folly/OperationCancelled.h"
 #include "monitor/Monitor.h"
 #include "storage/LoadOverheadController.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 
 namespace milvus::storage {
 
@@ -30,6 +31,9 @@ namespace {
 
 bool
 UpdateLoadOverheadControllers(const size_t slots) {
+    if (!segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
+        return true;
+    }
     // All current Group bindings provide max_runtime_unit, so both policy
     // updates should succeed. If that invariant is violated and only one
     // update succeeds, SetCapacitySlots's ordering keeps admission
@@ -37,10 +41,9 @@ UpdateLoadOverheadControllers(const size_t slots) {
     // shrinking restricts admission before updating the policies.
     const auto memory_updated =
         storage::LoadMemoryOverheadController::GetInstance()
-            .UpdateAdmissionSlots(slots);
-    const auto file_updated =
-        storage::LoadFileOverheadController::GetInstance().UpdateAdmissionSlots(
-            slots);
+            .UpdateConcurrencyLimit(slots);
+    const auto file_updated = storage::LoadFileOverheadController::GetInstance()
+                                  .UpdateConcurrencyLimit(slots);
     if (memory_updated != file_updated) {
         LOG_ERROR(
             "Load overhead controllers were updated partially, "
@@ -274,7 +277,10 @@ LoadAdmissionController::SetCapacityBytes(const size_t bytes) {
         const bool expanding =
             old_capacity != 0 && (bytes == 0 || bytes > old_capacity);
         auto& overhead_controller = LoadMemoryOverheadController::GetInstance();
-        if (expanding && !overhead_controller.UpdateBudgetBytes(bytes)) {
+        const bool async =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        if (async && expanding &&
+            !overhead_controller.UpdateBudgetBytes(bytes)) {
             return;
         }
         {
@@ -282,7 +288,7 @@ LoadAdmissionController::SetCapacityBytes(const size_t bytes) {
             capacity_bytes_ = bytes;
             resolution = TakeAdmittedLocked();
         }
-        if (!expanding) {
+        if (async && !expanding) {
             overhead_controller.UpdateBudgetBytes(bytes);
         }
     }

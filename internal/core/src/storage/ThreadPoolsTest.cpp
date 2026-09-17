@@ -96,7 +96,9 @@ TEST(ThreadPool, LoadExecutorWorkerCountUsesCacheAfterInitialization) {
     EXPECT_EQ(query.get(), expected);
 }
 
-TEST(ThreadPool, AsyncOverheadGroupsDoNotAcquirePoolMapLock) {
+TEST(ThreadPool, InitializedOverheadGroupsDoNotAcquirePoolMapLock) {
+    milvus::storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
+    milvus::storage::LoadFileOverheadController::GetInstance().GetOrCreate();
     auto pool_map_lock = milvus::ThreadPoolsTestAccess::LockPoolMap();
     std::promise<void> query_started;
     auto started = query_started.get_future();

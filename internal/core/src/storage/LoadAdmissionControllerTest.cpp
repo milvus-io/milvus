@@ -98,6 +98,9 @@ class LoadAdmissionControllerAsyncTest : public testing::Test {
  protected:
     void
     SetUp() override {
+        previous_enabled_ =
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled();
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(true);
         budget_.SetCapacityBytes(0);
         budget_.SetCapacitySlots(0);
     }
@@ -106,8 +109,11 @@ class LoadAdmissionControllerAsyncTest : public testing::Test {
     TearDown() override {
         budget_.SetCapacityBytes(0);
         budget_.SetCapacitySlots(0);
+        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            previous_enabled_);
     }
 
+    bool previous_enabled_;
     LoadAdmissionController& budget_ = LoadAdmissionController::GetInstance();
 };
 
@@ -152,19 +158,10 @@ TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsAdmissionLimits) {
     check({200, 100});  // Disabling bytes uses the latest slot capacity.
 
     const auto previous_workers = GetAsyncLoadThreadPoolSize();
-    const auto previous_enabled =
-        segcore::storagev2translator::StorageV2AsyncLoadEnabled();
-    auto restore = folly::makeGuard([&] {
-        SetAsyncLoadThreadPoolSize(previous_workers);
-        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
-            previous_enabled);
-    });
+    auto restore =
+        folly::makeGuard([&] { SetAsyncLoadThreadPoolSize(previous_workers); });
     SetAsyncLoadThreadPoolSize(1);
-    for (const bool enabled : {false, true}) {
-        segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
-        check({200,
-               100});  // Two slots can outlive one CPU worker in either mode.
-    }
+    check({200, 100});  // Admitted tasks can outlive CPU workers.
     SetAsyncLoadThreadPoolSize(4);
     check({200, 100});
     budget_.SetCapacitySlots(5);
@@ -183,9 +180,10 @@ TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsAdmissionLimits) {
     check({1000, 500});  // The policy conversion must not overflow.
 }
 
-TEST_F(LoadAdmissionControllerAsyncTest,
-       SyncOverheadFollowsPoolsIndependently) {
+TEST_F(LoadAdmissionControllerAsyncTest, SharedOverheadFollowsActiveMode) {
     using namespace cachinglayer;
+    using segcore::storagev2translator::SetStorageV2AsyncLoadEnabled;
+    SetStorageV2AsyncLoadEnabled(false);
     const auto high = ThreadPools::GetThreadPool(HIGH).GetMaxThreadNum();
     const auto low = ThreadPools::GetThreadPool(LOW).GetMaxThreadNum();
     auto restore = folly::makeGuard([&] {
@@ -199,20 +197,12 @@ TEST_F(LoadAdmissionControllerAsyncTest,
     auto& memory = LoadMemoryOverheadController::GetInstance();
     auto& file = LoadFileOverheadController::GetInstance();
     const LoadingOverheadConfig sync{
-        LoadingOverheadGroupBinding{memory.GetOrCreateForSync(workers), 100},
-        LoadingOverheadGroupBinding{file.GetOrCreateForSync(workers), 50}};
-    const LoadingOverheadConfig async{
         LoadingOverheadGroupBinding{memory.GetOrCreate(), 100},
         LoadingOverheadGroupBinding{file.GetOrCreate(), 50}};
-    EXPECT_NE(sync.memory->group, async.memory->group);
-    EXPECT_NE(sync.file->group, async.file->group);
     internal::DList list(false, {100000, 100000}, {}, {}, {});
     list.BindLoadingOverheadGroups(sync);
-    list.BindLoadingOverheadGroups(async);
-    auto unbind = folly::makeGuard([&] {
-        list.UnbindLoadingOverheadGroups(sync);
-        list.UnbindLoadingOverheadGroups(async);
-    });
+    auto unbind =
+        folly::makeGuard([&] { list.UnbindLoadingOverheadGroups(sync); });
     const ResourceUsage overhead{10000, 5000};
     const auto check = [&](const LoadingOverheadConfig& config,
                            ResourceUsage expected) {
@@ -225,25 +215,26 @@ TEST_F(LoadAdmissionControllerAsyncTest,
         EXPECT_EQ(list.ReleaseLoadingResource({}, overhead, &config), expected);
     };
     budget_.SetCapacitySlots(8);
-    check(sync, {200, 100});
-    check(async, {800, 400});
     budget_.SetCapacityBytes(600);
-    check(sync, {200, 100});
-    check(async, {600, 400});
+    check(sync, {200, 100});  // Inactive admission settings do not affect sync.
     ThreadPools::ResizeThreadPool(HIGH, 3.0f / CPU_NUM);
     check(sync, {400, 200});
-    check(async, {600, 400});
+    SetStorageV2AsyncLoadEnabled(true);
+    EXPECT_EQ(memory.GetOrCreate(), sync.memory->group);
+    EXPECT_EQ(file.GetOrCreate(), sync.file->group);
+    check(sync, {600, 400});
     ThreadPools::ResizeThreadPool(LOW, 2.0f / CPU_NUM);
-    check(sync, {500, 250});
+    check(sync, {600, 400});  // Inactive workers do not overwrite admission.
+    budget_.SetCapacityBytes(0);
+    check(sync, {800, 400});
+    SetStorageV2AsyncLoadEnabled(false);
+    check(sync, {500, 250});  // Picks up the latest worker count.
     ThreadPools::ResizeThreadPool(HIGH, 1.0f / CPU_NUM);
     check(sync, {300, 150});
-    budget_.SetCapacityBytes(0);
     budget_.SetCapacitySlots(0);
     check(sync, {300, 150});
-    check(async, overhead);
-    // A stale bootstrap count must not overwrite a published resize.
-    EXPECT_EQ(memory.GetOrCreateForSync(workers), sync.memory->group);
-    check(sync, {300, 150});
+    SetStorageV2AsyncLoadEnabled(true);
+    check(sync, overhead);  // Unlimited async must not inherit worker bounds.
 }
 
 TEST_F(LoadAdmissionControllerAsyncTest,

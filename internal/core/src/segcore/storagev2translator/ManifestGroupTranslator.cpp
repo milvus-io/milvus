@@ -58,7 +58,6 @@
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -485,14 +484,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
             std::max(FieldDataLoadBatchTargetBytes(), max_overhead_size);
         auto max_file_runtime_unit =
             std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
-        const auto workers = enable_async_load_
-                                 ? int64_t{0}
-                                 : ThreadPools::GetLoadExecutorWorkers();
-        auto& memory_controller =
-            milvus::storage::LoadMemoryOverheadController::GetInstance();
-        auto memory_group = enable_async_load_
-                                ? memory_controller.GetOrCreate()
-                                : memory_controller.GetOrCreateForSync(workers);
+        auto memory_group =
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
         meta_.loading_overhead_config =
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
@@ -500,15 +493,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 use_mmap_
                     ? std::make_optional(
                           milvus::cachinglayer::LoadingOverheadGroupBinding{
-                              enable_async_load_
-                                  ? milvus::storage::
-                                        LoadFileOverheadController::
-                                            GetInstance()
-                                                .GetOrCreate()
-                                  : milvus::storage::
-                                        LoadFileOverheadController::
-                                            GetInstance()
-                                                .GetOrCreateForSync(workers),
+                              storage::LoadFileOverheadController::GetInstance()
+                                  .GetOrCreate(),
                               max_file_runtime_unit})
                     : std::nullopt};
     }

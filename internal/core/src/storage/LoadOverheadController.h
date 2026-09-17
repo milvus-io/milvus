@@ -30,29 +30,18 @@ class LoadOverheadController {
     static LoadOverheadController&
     GetInstance();
 
-    // Returns the async Group, bounded by admission bytes/slots.
-    // Its identity survives configuration changes and starts no workers.
+    // One group per resource dimension; the active load mode selects its policy.
     cachinglayer::LoadingOverheadGroupHandle
     GetOrCreate();
-
-    // Returns a separate sync Group bounded by HIGH + LOW workers. The initial
-    // count only bootstraps the policy; later calls cannot overwrite a resize.
-    cachinglayer::LoadingOverheadGroupHandle
-    GetOrCreateForSync(int64_t initial_executor_workers);
-
-    // Called by ThreadPools before expansion and after shrink; never updates
-    // the async Group, including while sync and async translators coexist.
-    bool
-    UpdateExecutorWorkers(int64_t executor_workers);
 
     bool
     UpdateBudgetBytes(size_t bytes)
         requires(Dimension == cachinglayer::LoadingOverheadDimension::kMemory);
 
     // Updates the fallback concurrency bound. Zero means no slot bound.
-    // Called by LoadAdmissionController with serialized capacity updates.
+    // Callers publish only the active mode's concurrency limit.
     bool
-    UpdateAdmissionSlots(size_t slots);
+    UpdateConcurrencyLimit(size_t slots);
 
  private:
     LoadOverheadController() = default;
@@ -65,10 +54,9 @@ class LoadOverheadController {
 
     std::mutex mutex_;
     cachinglayer::LoadingOverheadGroupHandle group_handle_;
-    cachinglayer::LoadingOverheadGroupHandle sync_group_handle_;
-    int64_t executor_workers_{-1};
+    bool initialized_{false};
     size_t budget_bytes_{0};
-    size_t admission_slots_{0};
+    size_t concurrency_limit_{0};
 };
 
 extern template class LoadOverheadController<

@@ -21,6 +21,8 @@
 #include "cachinglayer/Manager.h"
 #include "common/EasyAssert.h"
 #include "log/Log.h"
+#include "storage/ThreadPools.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 
 namespace milvus::storage {
 
@@ -72,11 +74,10 @@ LoadOverheadController<Dimension>::CurrentPolicy() const {
                 static_cast<int64_t>(budget_bytes_));
         }
     }
-    return SlotPolicy(admission_slots_);
+    return SlotPolicy(concurrency_limit_);
 }
 
-// The existing multiplicative policy counts admitted runtime units here, not
-// CPU workers: suspended async reads keep their slot but release the worker.
+// Count runtime units: synchronous workers or admitted asynchronous tasks.
 template <cachinglayer::LoadingOverheadDimension Dimension>
 cachinglayer::LoadingOverheadPolicy
 LoadOverheadController<Dimension>::SlotPolicy(const size_t slots) {
@@ -91,7 +92,15 @@ LoadOverheadController<Dimension>::SlotPolicy(const size_t slots) {
 template <cachinglayer::LoadingOverheadDimension Dimension>
 cachinglayer::LoadingOverheadGroupHandle
 LoadOverheadController<Dimension>::GetOrCreate() {
+    const auto initial_limit =
+        segcore::storagev2translator::StorageV2AsyncLoadEnabled()
+            ? size_t{0}
+            : static_cast<size_t>(ThreadPools::GetLoadExecutorWorkers());
     std::lock_guard<std::mutex> lock(mutex_);
+    if (!initialized_) {
+        concurrency_limit_ = initial_limit;
+        initialized_ = true;
+    }
     if (group_handle_ == nullptr) {
         group_handle_ = cachinglayer::Manager::CreateLoadingOverheadGroup(
             Dimension, CurrentPolicy());
@@ -100,49 +109,6 @@ LoadOverheadController<Dimension>::GetOrCreate() {
                    ResourceName<Dimension>());
     }
     return group_handle_;
-}
-
-template <cachinglayer::LoadingOverheadDimension Dimension>
-cachinglayer::LoadingOverheadGroupHandle
-LoadOverheadController<Dimension>::GetOrCreateForSync(
-    int64_t initial_executor_workers) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    AssertInfo(initial_executor_workers >= 0,
-               "Load {} executor workers must be non-negative",
-               ResourceName<Dimension>());
-    if (executor_workers_ < 0) {
-        executor_workers_ = initial_executor_workers;
-    }
-    if (sync_group_handle_ == nullptr) {
-        sync_group_handle_ = cachinglayer::Manager::CreateLoadingOverheadGroup(
-            Dimension,
-            cachinglayer::LoadingOverheadPolicy::Executor(executor_workers_));
-        AssertInfo(sync_group_handle_ != nullptr,
-                   "Failed to create sync load {} overhead group",
-                   ResourceName<Dimension>());
-    }
-    return sync_group_handle_;
-}
-
-template <cachinglayer::LoadingOverheadDimension Dimension>
-bool
-LoadOverheadController<Dimension>::UpdateExecutorWorkers(
-    int64_t executor_workers) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    AssertInfo(executor_workers >= 0,
-               "Load {} executor workers must be non-negative",
-               ResourceName<Dimension>());
-    if (executor_workers == executor_workers_) {
-        return true;
-    }
-    if (!UpdateGroupPolicy(
-            sync_group_handle_,
-            cachinglayer::LoadingOverheadPolicy::Executor(executor_workers),
-            ResourceName<Dimension>())) {
-        return false;
-    }
-    executor_workers_ = executor_workers;
-    return true;
 }
 
 template <cachinglayer::LoadingOverheadDimension Dimension>
@@ -158,7 +124,7 @@ LoadOverheadController<Dimension>::UpdateBudgetBytes(size_t bytes)
         return true;
     }
     const auto policy = bytes == 0
-                            ? SlotPolicy(admission_slots_)
+                            ? SlotPolicy(concurrency_limit_)
                             : cachinglayer::LoadingOverheadPolicy::Budget(
                                   static_cast<int64_t>(bytes));
     if (!UpdateGroupPolicy(group_handle_, policy, ResourceName<Dimension>())) {
@@ -170,9 +136,9 @@ LoadOverheadController<Dimension>::UpdateBudgetBytes(size_t bytes)
 
 template <cachinglayer::LoadingOverheadDimension Dimension>
 bool
-LoadOverheadController<Dimension>::UpdateAdmissionSlots(const size_t slots) {
+LoadOverheadController<Dimension>::UpdateConcurrencyLimit(const size_t slots) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (slots == admission_slots_) {
+    if (initialized_ && slots == concurrency_limit_) {
         return true;
     }
     if (budget_bytes_ == 0 &&
@@ -180,7 +146,8 @@ LoadOverheadController<Dimension>::UpdateAdmissionSlots(const size_t slots) {
             group_handle_, SlotPolicy(slots), ResourceName<Dimension>())) {
         return false;
     }
-    admission_slots_ = slots;
+    concurrency_limit_ = slots;
+    initialized_ = true;
     return true;
 }
 

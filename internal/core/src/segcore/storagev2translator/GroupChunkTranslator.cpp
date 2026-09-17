@@ -53,7 +53,7 @@
 #include "storage/EntryStreamUtils.h"
 #include "storage/KeyRetriever.h"
 #include "storage/LoadOverheadController.h"
-#include "storage/ThreadPools.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -221,8 +221,9 @@ GroupChunkTranslator::GroupChunkTranslator(
         num_cells,
         cell_target_size_bytes);
 
-    // Bind loading overhead to the runtime limiter used by this translator.
-    if (!meta_.chunk_memory_size_.empty()) {
+    // This legacy loader always uses synchronous workers. In async mode its
+    // scratch remains request-local rather than borrowing admission limits.
+    if (!StorageV2AsyncLoadEnabled() && !meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
         auto max_overhead_size = loading_overhead_bytes(max_cell_sz);
@@ -230,10 +231,9 @@ GroupChunkTranslator::GroupChunkTranslator(
             std::max(FieldDataLoadBatchTargetBytes(), max_overhead_size);
         auto max_file_runtime_unit =
             std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
-        const auto workers = ThreadPools::GetLoadExecutorWorkers();
         auto memory_group =
             milvus::storage::LoadMemoryOverheadController::GetInstance()
-                .GetOrCreateForSync(workers);
+                .GetOrCreate();
         meta_.loading_overhead_config =
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
@@ -243,7 +243,7 @@ GroupChunkTranslator::GroupChunkTranslator(
                           milvus::cachinglayer::LoadingOverheadGroupBinding{
                               milvus::storage::LoadFileOverheadController::
                                   GetInstance()
-                                      .GetOrCreateForSync(workers),
+                                      .GetOrCreate(),
                               max_file_runtime_unit})
                     : std::nullopt};
     }
