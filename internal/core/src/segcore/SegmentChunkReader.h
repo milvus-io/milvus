@@ -17,6 +17,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,6 +27,7 @@
 #include "common/OpContext.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {
@@ -42,6 +44,25 @@ using data_access_type = std::optional<boost::variant<bool,
 
 using ChunkDataAccessor = std::function<const data_access_type(int)>;
 using MultipleChunkDataAccessor = std::function<const data_access_type()>;
+
+// One sealed raw string consumer owns this handle across complete execution
+// windows of one field and request snapshot. Two consumers of the same field
+// must use separate handles. A default handle does not allocate Scan state.
+class StringScanState {
+ public:
+    StringScanState() = default;
+    StringScanState(const StringScanState&) = delete;
+    StringScanState&
+    operator=(const StringScanState&) = delete;
+    StringScanState(StringScanState&&) noexcept = default;
+    StringScanState&
+    operator=(StringScanState&&) noexcept = default;
+
+ private:
+    friend class SegmentChunkReader;
+    struct State;
+    std::shared_ptr<State> state_;
+};
 
 // Helper to extract a value of type T from data_access_type.
 // For std::string, handles both std::string and std::string_view in the variant.
@@ -104,11 +125,22 @@ class SegmentChunkReader {
           op_ctx_(op_ctx) {
     }
 
+    // A sequential string accessor materializes at most scan_batch_size rows
+    // per window. It may serve multiple windows; consume borrowed values before
+    // advancing it into the next window or Cell.
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(DataType data_type,
                                  FieldId field_id,
                                  int64_t& current_chunk_id,
-                                 int64_t& current_chunk_pos) const;
+                                 int64_t& current_chunk_pos,
+                                 int64_t scan_batch_size = 1024,
+                                 StringScanState* scan_state = nullptr) const;
+
+    // Sealed string access over one expression's finite offset input. The
+    // offsets must outlive the accessor. Borrowed strings must be consumed
+    // before the next access that switches the underlying Cell.
+    ChunkDataAccessor
+    GetStringDataAccessorByOffsets(FieldId field_id, OffsetView offsets) const;
 
     ChunkDataAccessor
     GetChunkDataAccessor(DataType data_type,
@@ -210,11 +242,26 @@ class SegmentChunkReader {
     mutable const segcore::SegmentReadSnapshot* snapshot_{nullptr};
 
  private:
+    // Sealed string reads prefer the bound request snapshot's published
+    // column; growing / non-pinned paths fall back to the live segment.
+    std::shared_ptr<ChunkedColumnInterface>
+    GetStringColumn(FieldId field_id) const {
+        return snapshot_ ? snapshot_->GetDataScanResources(field_id).first
+                         : segment_->GetChunkedColumn(field_id);
+    }
+
     template <typename T>
     MultipleChunkDataAccessor
     GetMultipleChunkDataAccessor(FieldId field_id,
                                  int64_t& current_chunk_id,
                                  int64_t& current_chunk_pos) const;
+
+    MultipleChunkDataAccessor
+    GetMultipleChunkStringDataAccessor(FieldId field_id,
+                                       int64_t& current_chunk_id,
+                                       int64_t& current_chunk_pos,
+                                       int64_t scan_batch_size,
+                                       StringScanState* scan_state) const;
 
     template <typename T>
     ChunkDataAccessor

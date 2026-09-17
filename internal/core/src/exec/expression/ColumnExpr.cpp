@@ -156,9 +156,30 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
         valid_res.set();
 
+        if constexpr (std::is_same_v<T, std::string>) {
+            if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
+                auto accessor =
+                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
+                        expr_->GetColumn().field_id_,
+                        OffsetView::From(input->data(), real_batch_size));
+                for (int64_t i = 0; i < real_batch_size; ++i) {
+                    auto value = accessor(i);
+                    if (value.has_value()) {
+                        res_value[i] = segcore::get_from_variant<T>(value);
+                    } else {
+                        valid_res[i] = false;
+                    }
+                }
+                return res_vec;
+            }
+        }
+
         int64_t processed_rows = 0;
         // Keep the chunk's data accessor (which pins the chunk) across
-        // iterations and rebuild only when the chunk id changes.
+        // iterations and rebuild only when the chunk id changes, avoiding a
+        // per-row chunk pin + accessor construction. Safe on both sealed
+        // (CellAccessor keeps the chunk resident) and growing (data and the
+        // chunked validity storage have stable per-chunk buffers).
         int64_t cached_chunk_id = -1;
         segcore::ChunkDataAccessor cda;
         for (auto i = 0; i < real_batch_size; ++i) {
@@ -171,9 +192,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                         segment_chunk_reader_.SizePerChunk();
                     return {offset / size_per_chunk, offset % size_per_chunk};
                 } else if (segment_chunk_reader_.segment_->is_chunked() &&
-                           segment_chunk_reader_.segment_->num_chunk_data(
+                           segment_chunk_reader_.NumChunkData(
                                expr_->GetColumn().field_id_) > 0) {
-                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                    return segment_chunk_reader_.GetChunkByOffset(
                         expr_->GetColumn().field_id_, offset);
                 } else {
                     return {0, offset};
@@ -214,7 +235,9 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             expr_->GetColumn().data_type_,
             expr_->GetColumn().field_id_,
             current_chunk_id_,
-            current_chunk_pos_);
+            current_chunk_pos_,
+            real_batch_size,
+            &string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto data = cda();
             if (!data.has_value()) {
@@ -302,8 +325,7 @@ PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
     if (!GatherFromValueReader(
             offsets.data(), real_batch_size, values, valid)) {
         const auto raw_chunk_count =
-            segment_chunk_reader_.segment_->num_chunk_data(
-                expr_->GetColumn().field_id_);
+            segment_chunk_reader_.NumChunkData(expr_->GetColumn().field_id_);
         int64_t cached_chunk_id = -1;
         segcore::ChunkDataAccessor accessor;
         for (int64_t i = 0; i < real_batch_size; ++i) {
@@ -317,7 +339,7 @@ PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
                 }
                 if (segment_chunk_reader_.segment_->is_chunked() &&
                     raw_chunk_count > 0) {
-                    return segment_chunk_reader_.segment_->get_chunk_by_offset(
+                    return segment_chunk_reader_.GetChunkByOffset(
                         expr_->GetColumn().field_id_, offset);
                 }
                 return std::pair<int64_t, int64_t>{0, offset};

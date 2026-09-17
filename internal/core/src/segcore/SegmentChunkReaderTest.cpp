@@ -523,7 +523,7 @@ TEST_P(SegmentChunkReaderStringTest, SmallWindowsDoNotRebuildWholeChunkViews) {
     for (int64_t start = 0; start < expected_.size(); start += batch) {
         const auto count = std::min<int64_t>(batch, expected_.size() - start);
         auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, count, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, count, &scan_state);
         for (int64_t i = 0; i < count; ++i) {
             Check(accessor(), start + i);
         }
@@ -549,16 +549,16 @@ TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
     int64_t chunk = 1, pos = 0;
     for (int64_t row = 8192; row < 8196; row += 2) {
         auto scan = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
         Check(scan(), row);
         Check(scan(), row + 1);
     }
     auto chunk_accessor =
-        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1, {});
+        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
     Check(chunk_accessor(0), 8192);
     const std::vector<int32_t> offsets{8198, 0, 8198};
     auto take = reader.GetStringDataAccessorByOffsets(
-        field_, OffsetView::From(offsets.data(), offsets.size()), {});
+        field_, OffsetView::From(offsets.data(), offsets.size()));
     for (int64_t i = 0; i < offsets.size(); ++i) {
         Check(take(i), offsets[i]);
     }
@@ -670,7 +670,7 @@ TEST_P(SegmentChunkReaderStringTest, OneAccessorCanScanAcrossManyWindows) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     int64_t chunk = 0, pos = 0;
     auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, {}, 17);
+        DataType::VARCHAR, field_, chunk, pos, 17);
     for (int64_t i = 0; i < expected_.size(); ++i) {
         Check(accessor(), i);
     }
@@ -683,7 +683,7 @@ TEST_P(SegmentChunkReaderStringTest,
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     const std::vector<int32_t> offsets{8192, 8198, 8192, 16, 0, 16, 8218};
     auto accessor = reader.GetStringDataAccessorByOffsets(
-        field_, OffsetView::From(offsets.data(), offsets.size()), {});
+        field_, OffsetView::From(offsets.data(), offsets.size()));
     for (int i = 0; i < offsets.size(); ++i) {
         Check(accessor(i), offsets[i]);
     }
@@ -697,7 +697,7 @@ TEST_P(SegmentChunkReaderStringTest,
        RandomChunkAccessorKeepsBorrowedDataPinned) {
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     auto accessor =
-        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1, {});
+        reader.GetChunkDataAccessor(DataType::VARCHAR, field_, 1);
     auto value = accessor(0);
     column_->ManualEvictCache();
     EXPECT_FALSE(lifetimes_[1].expired());
@@ -714,7 +714,7 @@ TEST_P(SegmentChunkReaderStringTest,
     SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
     int64_t chunk = 1, pos = 0;
     auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, {}, 2);
+        DataType::VARCHAR, field_, chunk, pos, 2);
     auto value = accessor();
     column_->ManualEvictCache();
     EXPECT_FALSE(lifetimes_[1].expired());
@@ -734,7 +734,7 @@ TEST_P(SegmentChunkReaderStringTest,
     int64_t chunk = 1, pos = 0;
     {
         auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
         Check(accessor(), 8192);
         Check(accessor(), 8193);
     }
@@ -743,7 +743,7 @@ TEST_P(SegmentChunkReaderStringTest,
     SegcoreConfig::default_config().set_scan_cursor_owns_pin(!CursorOwnsPin());
     {
         auto accessor = reader.GetMultipleChunkDataAccessor(
-            DataType::VARCHAR, field_, chunk, pos, {}, 2, &scan_state);
+            DataType::VARCHAR, field_, chunk, pos, 2, &scan_state);
         Check(accessor(), 8194);
         Check(accessor(), 8195);
         column_->ManualEvictCache();
@@ -767,7 +767,7 @@ TEST_P(SegmentChunkReaderStringTest, TakeOwnsItsPinAfterColumnRelease) {
     {
         SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
         accessor = reader.GetStringDataAccessorByOffsets(
-            field_, OffsetView::From(offsets.data(), offsets.size()), {});
+            field_, OffsetView::From(offsets.data(), offsets.size()));
     }
     auto value = accessor(0);
     column_->ManualEvictCache();
@@ -785,7 +785,7 @@ TEST_P(SegmentChunkReaderStringTest, ReadFailureKeepsItsCode) {
     stats_->fail_pin = true;
     int64_t chunk = 0, pos = 0;
     auto accessor = reader.GetMultipleChunkDataAccessor(
-        DataType::VARCHAR, field_, chunk, pos, {}, 17);
+        DataType::VARCHAR, field_, chunk, pos, 17);
     try {
         accessor();
         FAIL() << "expected injected scan failure";
@@ -795,7 +795,7 @@ TEST_P(SegmentChunkReaderStringTest, ReadFailureKeepsItsCode) {
     EXPECT_EQ(pos, 0);
     const int32_t offset = 1;
     auto take = reader.GetStringDataAccessorByOffsets(
-        field_, OffsetView::From(&offset, 1), {});
+        field_, OffsetView::From(&offset, 1));
     try {
         take(0);
         FAIL() << "expected injected Take failure";
