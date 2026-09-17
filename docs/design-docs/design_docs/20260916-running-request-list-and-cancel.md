@@ -184,6 +184,29 @@ message CancelRequestsResponse {
   `POST /v2/vectordb/requests/cancel`, wired through `wrapperPost` in
   `internal/distributed/proxy/httpserver/handler_v2.go`.
 
+### Checking the group isolation rule
+
+Section 2.7 asks that cancelling one request in a merged QueryNode group not
+affect the others. A cancellation can land at four moments: before the request
+is enqueued, while the group waits in the queue, between the group leaving the
+queue and reaching the executor, and while the group is executing. Tests reach
+those moments one at a time and cannot show that no other ordering breaks the
+rule.
+
+`specs/MergedGroupCancel.tla` is a TLA+ model of the group's journey, checked
+with TLC. It enumerates every interleaving of arrival, merging, cancellation,
+the two pruning points and the search itself, and checks that every caller is
+answered exactly once, that a cancelled request is told it was cancelled, that
+a request nobody cancelled is never told it was, that the scheduler's waiting
+counters are conserved across pruning, and that every request is eventually
+answered. Four requests is 144,771 distinct states and five is 3,909,257, both
+with no violation.
+
+Two of the model's constants turn it back into the behaviour this design
+replaces, so each property is shown to fail there rather than only to hold
+here. `specs/README.md` records what the model leaves out and what has to be
+revisited when the code changes.
+
 ### When a proxy does not answer
 
 Both calls are broadcast from the coordinator to every proxy, so one proxy can
