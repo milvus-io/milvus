@@ -242,7 +242,7 @@ func TestManagerRestoreProbesOrphanChunk(t *testing.T) {
 	// Simulate a crash between chunk write and manifest publish: write a chunk
 	// directly without recording it.
 	orphan := buildIdempotencySections(idempotencyWrite{timeTick: 300, key: "orphan", pk: 300})
-	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan}, TimeTickRange{Start: 100, End: 300})
+	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan}, TimeTickRange{StartAfter: 100, End: 300})
 	require.NoError(t, err)
 
 	recovered := newTestManager(t, manager.cfg.Store, 1<<30)
@@ -479,7 +479,7 @@ func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 	ctx := context.Background()
 	manager, store := newTestManagerWithStore(t)
 	for gen := uint64(0); gen < 3; gen++ {
-		_, _, err := store.WriteChunk(ctx, gen, nil, testRecordRange(nil))
+		_, _, err := store.WriteChunk(ctx, gen, nil, testRecordCoverage(nil))
 		require.NoError(t, err)
 	}
 	require.NoError(t, store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
@@ -697,7 +697,7 @@ func writeIdempotencyChunk(
 	t.Helper()
 	footer, objectSize, err := store.WriteChunk(context.Background(), generation, map[string]*ChunkSections{
 		vchannel: sections,
-	}, testRecordRange(map[string]*ChunkSections{
+	}, testRecordCoverage(map[string]*ChunkSections{
 		vchannel: sections,
 	}))
 	require.NoError(t, err)
@@ -1095,7 +1095,7 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	// Term 1, unaware it is fenced, writes one more chunk AFTER that probe. It
 	// lands at the same generation term 2 will claim, under its own term, so
 	// the two objects coexist and no manifest names term 1's.
-	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}), testRecordRange(writeSections(map[string][]uint64{"v1": {200}})))
+	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}), testRecordCoverage(writeSections(map[string][]uint64{"v1": {200}})))
 	require.NoError(t, err)
 	orphanKey := store1.ChunkKey(1)
 	exists, err := cm.Exist(ctx, orphanKey)

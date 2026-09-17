@@ -318,7 +318,7 @@ func TestSummaryStoreRemovalIsScopedToPChannel(t *testing.T) {
 }
 
 func TestSummaryRejectsCorruptMetadataBeforeConsumerRecovery(t *testing.T) {
-	payload, _, err := marshalChunk("p1", 1, 1, writeSections(map[string][]uint64{"v1": {100}}), testRecordRange(writeSections(map[string][]uint64{"v1": {100}})))
+	payload, _, err := marshalChunk("p1", 1, 1, writeSections(map[string][]uint64{"v1": {100}}), testRecordCoverage(writeSections(map[string][]uint64{"v1": {100}})))
 	require.NoError(t, err)
 	_, footerStart, err := unmarshalChunkTail(payload)
 	require.NoError(t, err)

@@ -39,7 +39,7 @@ func TestS3SummaryPaginationAndRecovery(t *testing.T) {
 		require.NoError(t, cm.Write(ctx, buildChunkKey(cm, "p1", 98, term), []byte("other term")))
 	}
 	for _, gen := range []uint64{98, 99, 100} {
-		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {gen + 1}}), TimeTickRange{Start: gen, End: gen + 1})
+		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {gen + 1}}), TimeTickRange{StartAfter: gen, End: gen + 1})
 		require.NoError(t, err)
 	}
 	entries, err := store.ProbeChunkForward(ctx, 98)
