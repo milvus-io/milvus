@@ -543,6 +543,14 @@ TEST(GeometryCacheConcurrency, ReadersNeverObserveAPartiallyPublishedSlot) {
         });
     }
 
+    // First every row lands unparseable (what a swallowed parse-time OOM
+    // looks like), then the "retry" writes the real WKB over the same offsets.
+    // Readers race both passes, including the heal of each unpublished slot.
+    std::string corrupt = wkb;
+    corrupt.resize(corrupt.size() / 2);
+    for (size_t off = 0; off < kRows; ++off) {
+        cache->AppendDataAt(off, corrupt.data(), corrupt.size());
+    }
     for (size_t off = 0; off < kRows; ++off) {
         cache->AppendDataAt(off, wkb.data(), wkb.size());
     }
@@ -580,9 +588,9 @@ TEST(GeometryCacheLifetime, PublishedSlotsAreFrozenAndStable) {
     Geometry expected(ctx, "POINT (1 1)");
     ASSERT_TRUE(pinned->equals(expected, ctx));
 
-    // FIRST WRITER WINS: an absolute offset denotes one immutable row, so a
-    // second write to it is by contract the same bytes and is skipped rather
-    // than mutating a slot a reader may be holding.
+    // FIRST VALID WRITER WINS: an absolute offset denotes one immutable row
+    // and a successful parse is a pure function of its bytes, so a second
+    // write is skipped rather than mutating a slot a reader may be holding.
     cache->AppendDataAt(0, second.data(), second.size());
     EXPECT_EQ(cache->GetByOffset(0), pinned);
     EXPECT_TRUE(pinned->equals(expected, ctx));
@@ -599,6 +607,53 @@ TEST(GeometryCacheLifetime, PublishedSlotsAreFrozenAndStable) {
     }
     EXPECT_EQ(cache->GetByOffset(0), pinned);
     EXPECT_TRUE(pinned->equals(expected, ctx));
+
+    mgr.RemoveSegmentCaches(kInstanceA, seg_id);
+}
+
+// An unparseable outcome is NOT frozen. GEOS swallows an OOM inside
+// GEOSWKBReader_read_r and returns nullptr, so a transient failure looks
+// exactly like corrupt WKB (the KNOWN LIMIT note on TryParseFromWkb). When a
+// later row of the same batch throws a retriable MemAllocateFailed, the batch
+// is retried over the same absolute offsets; that retry must re-parse the
+// earlier row and heal it. Freezing the invalid outcome would silently drop
+// the row from every ST_* result for the segment's lifetime (and flip it to a
+// false positive under a negated predicate) -- a regression against the
+// unconditional overwrite the cache used before it went lock-free.
+TEST(GeometryCacheLifetime, InvalidRowsAreRewrittenByARetry) {
+    auto& mgr = SimpleGeometryCacheManager::Instance();
+    const int64_t seg_id = 900000015;
+    const FieldId field_id(35);
+    const std::string good = MakePointWkb(3.0, 4.0);
+    std::string transient = good;
+    transient.resize(transient.size() / 2);  // parses to nullptr, like an OOM
+
+    auto cache = mgr.GetOrCreateCache(kInstanceA, seg_id, field_id);
+
+    // First attempt: row 0 hits the "transient" failure, row 1 is null.
+    cache->AppendDataAt(0, transient.data(), transient.size());
+    cache->AppendDataAt(1, nullptr, 0);
+    EXPECT_EQ(cache->GetByOffset(0), nullptr);
+    EXPECT_EQ(cache->GetByOffset(1), nullptr);
+    EXPECT_EQ(cache->Size(), 2u);
+
+    // The retried batch re-derives the real bytes for both offsets.
+    cache->AppendDataAt(0, good.data(), good.size());
+    cache->AppendDataAt(1, good.data(), good.size());
+
+    GEOSContextHandle_t ctx = milvus::GetThreadLocalGEOSContext();
+    Geometry expected(ctx, "POINT (3 4)");
+    for (size_t off : {size_t{0}, size_t{1}}) {
+        const Geometry* g = cache->GetByOffset(off);
+        ASSERT_NE(g, nullptr) << "offset " << off << " was not healed";
+        EXPECT_TRUE(g->equals(expected, ctx)) << "offset " << off;
+    }
+    EXPECT_EQ(cache->Size(), 2u);
+
+    // Once healed, the slot is frozen like any other valid slot.
+    const Geometry* healed = cache->GetByOffset(0);
+    cache->AppendDataAt(0, transient.data(), transient.size());
+    EXPECT_EQ(cache->GetByOffset(0), healed);
 
     mgr.RemoveSegmentCaches(kInstanceA, seg_id);
 }

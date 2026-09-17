@@ -88,7 +88,10 @@ MakeSegmentCachePrefix(uint64_t segment_instance_uid, int64_t segment_id) {
 // mutex, which readers never touch) and any number of lock-free readers.
 class GeometryChunkStore {
  public:
-    // Slot publication states. A slot goes kEmpty -> kReady exactly once.
+    // Slot publication states. A slot goes kEmpty -> kReady at most once, and
+    // only ever for a VALID geometry: kReady means "frozen, readable forever".
+    // A null or unparseable row never leaves kEmpty (see Publish), so it stays
+    // rewritable and a later write of the same offset can still heal it.
     static constexpr uint8_t kEmpty = 0;
     static constexpr uint8_t kReady = 1;
 
@@ -164,21 +167,31 @@ class GeometryChunkStore {
         return SlotRef{chunk, offset % kChunkSize};
     }
 
-    // Writer only. True once the slot carries a final geometry.
+    // Writer only. True once the slot carries a final, valid geometry.
     static bool
     IsPublished(const SlotRef& ref) {
         return ref.chunk->states[ref.index].load(std::memory_order_relaxed) ==
                kReady;
     }
 
-    // Writer only. Moves `geometry` into the slot and publishes it. The move
-    // is noexcept and completes before the release store, so a reader either
-    // does not see the slot yet or sees a fully constructed geometry -- never
-    // anything in between. A published slot is never written again.
+    // Writer only; the slot must not be published yet. Moves a VALID
+    // `geometry` into the slot and publishes it. The move is noexcept and
+    // completes before the release store, so a reader either does not see the
+    // slot yet or sees a fully constructed geometry -- never anything in
+    // between. A published slot is never written again.
+    //
+    // An invalid `geometry` is not stored and the slot stays kEmpty: readers
+    // already answer "no geometry here" for kEmpty without touching the slot,
+    // and leaving it unpublished is what keeps it safely rewritable. Storing
+    // it as a published-but-invalid slot instead would freeze it (a later
+    // valid write would have to mutate a slot readers may be inspecting).
     static void
     Publish(const SlotRef& ref, Geometry&& geometry) {
         static_assert(std::is_nothrow_move_assignable_v<Geometry>,
                       "slot publication requires a noexcept move");
+        if (!geometry.IsValid()) {
+            return;
+        }
         ref.chunk->geometries[ref.index] = std::move(geometry);
         ref.chunk->states[ref.index].store(kReady, std::memory_order_release);
     }
@@ -206,8 +219,8 @@ class GeometryChunkStore {
         if (chunk->states[index].load(std::memory_order_acquire) != kReady) {
             return nullptr;
         }
-        const Geometry& geometry = chunk->geometries[index];
-        return geometry.IsValid() ? &geometry : nullptr;
+        // kReady is only ever set for a valid geometry (see Publish).
+        return &chunk->geometries[index];
     }
 
     // Destroys every chunk (and with it every cached Geometry). Called by the
@@ -314,15 +327,24 @@ class SimpleGeometryCache {
     // failed batch stay unpublished and readers skip them; such rows are never
     // acked/readable until their write lands.
     //
-    // FIRST WRITER WINS: a slot that is already published is left untouched
-    // and this call returns. An absolute segment offset denotes one immutable
-    // row, so every write to it carries the same WKB -- the retry above
-    // re-derives exactly the bytes that are already cached. Skipping keeps
-    // that idempotence while guaranteeing a published Geometry is never
-    // mutated, which is what lets readers hold a bare pointer into it with no
-    // lock.
+    // FIRST VALID WRITER WINS: once a slot holds a valid geometry it is frozen,
+    // and a later write to that offset is skipped. What makes skipping safe is
+    // not only that an absolute offset denotes one immutable row (so every
+    // write carries the same WKB) but that a SUCCESSFUL parse is a pure
+    // function of those bytes: the frozen geometry is exactly what the rewrite
+    // would have produced. Freezing is what lets readers hold a bare pointer
+    // into the slot with no lock.
     //
-    // A row with corrupt (unparseable) WKB is stored as an INVALID entry --
+    // An INVALID outcome is deliberately not frozen, because it is not a pure
+    // function of the bytes: an OOM inside GEOS parsing is indistinguishable
+    // from corrupt WKB (the KNOWN LIMIT note on TryParseFromWkb). Such a slot
+    // stays unpublished, so when the batch is retried -- e.g. after a later row
+    // threw a retriable MemAllocateFailed -- the row is parsed again and a
+    // transient failure heals, exactly as the unconditional overwrite did
+    // before the cache went lock-free. Genuinely corrupt or null rows simply
+    // stay "no geometry here" on every attempt.
+    //
+    // A row with corrupt (unparseable) WKB is left without a geometry --
     // GetByOffset() returns nullptr for it and every reader skips it --
     // instead of throwing. Throwing here would make a single corrupt row fail
     // the whole segment load whenever the geometry cache is enabled (the write
@@ -346,7 +368,7 @@ class SimpleGeometryCache {
         }
 
         if (size == 0 || wkb_data == nullptr) {
-            // Null/empty geometry - publish an invalid entry
+            // Null/empty geometry: nothing to publish, readers skip the row
             PublishAt(slot, absolute_offset, Geometry());
             return;
         }
@@ -355,8 +377,8 @@ class SimpleGeometryCache {
             static std::atomic<int64_t> last_cache_parse_log_us{0};
             if (ShouldLogGeometryThrottled(last_cache_parse_log_us)) {
                 LOG_WARN(
-                    "unparseable WKB at cache offset {}; caching an invalid "
-                    "placeholder entry, readers will skip it (further "
+                    "unparseable WKB at cache offset {}; leaving the row "
+                    "without a cached geometry, readers will skip it (further "
                     "occurrences suppressed briefly)",
                     absolute_offset);
             } else {
@@ -371,7 +393,8 @@ class SimpleGeometryCache {
 
     // Get Geometry by absolute segment offset. Lock-free, and the returned
     // pointer stays valid for as long as the caller holds its shared_ptr to
-    // this cache (chunks never move and a published slot is never rewritten).
+    // this cache (chunks never move and a slot holding a valid geometry is
+    // never rewritten).
     //
     // An offset with no geometry returns nullptr -- the same "no geometry
     // here, skip the row" answer as an invalid entry -- it must NOT throw. On
@@ -387,11 +410,11 @@ class SimpleGeometryCache {
         return geometries_.Get(offset);
     }
 
-    // Highest absolute offset published so far, plus one. Lock-free, and
-    // advisory only: the cache is written at absolute offsets that may arrive
-    // out of order, so this is a high-water mark, not a count of populated
-    // rows, and it is never used to bound a read (GetByOffset resolves each
-    // offset on its own).
+    // Highest absolute offset written so far (including null/unparseable rows,
+    // which publish no geometry), plus one. Lock-free, and advisory only: the
+    // cache is written at absolute offsets that may arrive out of order, so
+    // this is a high-water mark, not a count of populated rows, and it is never
+    // used to bound a read (GetByOffset resolves each offset on its own).
     size_t
     Size() const {
         return size_.load(std::memory_order_acquire);

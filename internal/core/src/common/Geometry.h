@@ -282,9 +282,12 @@ class Geometry {
     // indistinguishable from unparseable WKB at this boundary (telling them
     // apart would require installing a GEOS error handler and parsing message
     // strings). Such a row is therefore classified as bad data with no retry:
-    // the cache stores an invalid entry, the filter paths evaluate it to
-    // false, and the index stamps a placeholder MBR. Accepted tradeoff:
-    // parse-time OOM is rare and the blast radius is a single row.
+    // the geometry cache leaves it without a geometry, the filter paths
+    // evaluate it to false, and the index stamps a placeholder MBR. Accepted
+    // tradeoff: parse-time OOM is rare and the blast radius is a single row.
+    // (The cache does not freeze that outcome: if the same offset is written
+    // again -- e.g. its batch is retried -- the row is re-parsed, see
+    // SimpleGeometryCache::AppendDataAt.)
     bool
     TryParseFromWkb(GEOSContextHandle_t ctx, const void* wkb, size_t size) {
         if (ctx == nullptr) {
