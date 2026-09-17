@@ -12,7 +12,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterResourceGroup | Broadcast: CChannel | No | ExclusiveCluster |
 | DropResourceGroup | Broadcast: CChannel | No | ExclusiveCluster |
 
-- **FlushAll**: Flushes ALL growing segments across ALL collections on ALL PChannels.
+- **FlushAll**: Flushes ALL growing segments and required L0 Delete output across ALL collections on ALL PChannels. Uses AckSyncUp; the RPC waits for consuming-side completion on every PChannel. Follow-up GetFlushAllState returns true without polling channel checkpoints.
 - **AlterReplicateConfig**: Changes replication topology — enabling, disabling, or switching PRIMARY/SECONDARY roles.
 - **AlterWAL**: Switches WAL backend implementation across the entire cluster.
 - **AlterResourceGroup**: Creates, updates, or transfers nodes between query resource groups.

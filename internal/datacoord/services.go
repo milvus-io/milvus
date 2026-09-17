@@ -198,7 +198,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
-		WithClusterLevelBroadcast(cc).
+		WithClusterLevelBroadcast(cc, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
@@ -1494,6 +1494,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 }
 
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// Unlike FlushAll, ManualFlush uses RawAppend and returns before consuming-side
+// completion, so its follow-up state check must still wait for durable progress.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	log := mlog.With(mlog.Int64("collection", req.GetCollectionID()),
 		mlog.Uint64("flushTs", req.GetFlushTs()),
@@ -1584,110 +1586,15 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 	return channels, nil
 }
 
-// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+// GetFlushAllState serves follow-up checks for a successfully returned FlushAll.
+// FlushAll waits for consuming-side Ack from every PChannel, so its L1 and L0
+// work is already complete. Channel checkpoint reporting may lag and must not
+// turn that completed operation back into an unfinished one.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &milvuspb.GetFlushAllStateResponse{
-			Status: merr.Status(err),
-		}, nil
+		return &milvuspb.GetFlushAllStateResponse{Status: merr.Status(err)}, nil
 	}
-
-	resp := &milvuspb.GetFlushAllStateResponse{
-		Status: merr.Success(),
-	}
-
-	// TODO: Introduce pchannel level flush checkpoint to
-	// check if the flush is complete.
-	// Rather than validate every vchannel checkpoint.
-
-	dbsRsp, err := s.broker.ListDatabases(ctx)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to ListDatabases", mlog.Err(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	targetDbs := lo.Uniq(dbsRsp.DbNames)
-	allFlushed := true
-OUTER:
-	for _, dbName := range targetDbs {
-		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to ShowCollections", mlog.String("db", dbName), mlog.Err(err))
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-
-		for _, collectionID := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
-				mlog.Warn(context.TODO(), "failed to DescribeCollectionInternal", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-			for _, channel := range describeColRsp.GetVirtualChannelNames() {
-				if len(req.GetFlushAllTss()) > 0 {
-					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(ctx, channel, req.GetFlushAllTss())
-					if err != nil {
-						resp.Status = merr.Status(err)
-						return resp, nil
-					}
-					if !ok {
-						allFlushed = false
-						break OUTER
-					}
-				} else if req.GetFlushAllTs() != 0 {
-					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
-					if !s.verifyFlushAllStateByLegacyFlushAllTs(ctx, channel, req.GetFlushAllTs()) {
-						allFlushed = false
-						break OUTER
-					}
-				} else {
-					resp.Status = merr.Status(merr.WrapErrParameterMissingMsg("FlushAllTss or FlushAllTs is required"))
-					return resp, nil
-				}
-			}
-		}
-	}
-
-	if allFlushed {
-		mlog.Info(context.TODO(), "GetFlushAllState all flushed", mlog.Any("flushAllTss", req.GetFlushAllTss()), mlog.Uint64("FlushAllTs", req.GetFlushAllTs()))
-	}
-
-	resp.Flushed = allFlushed
-	return resp, nil
-}
-
-func (s *Server) verifyFlushAllStateByChannelFlushAllTs(ctx context.Context, channel string, flushAllTss map[string]uint64) (bool, error) {
-	channelCP := s.meta.GetChannelCheckpoint(channel)
-	pchannel := funcutil.ToPhysicalChannel(channel)
-	flushAllTs, ok := flushAllTss[pchannel]
-	if !ok || flushAllTs == 0 {
-		mlog.Warn(ctx, "FlushAllTs not found for pchannel", mlog.String("pchannel", pchannel), mlog.Uint64("flushAllTs", flushAllTs))
-		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
-	}
-	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
-			mlog.String("vchannel", channel),
-			mlog.Uint64("flushAllTs", flushAllTs),
-			mlog.Uint64("channelCP", channelCP.GetTimestamp()),
-		)
-		return false, nil
-	}
-	return true, nil
-}
-
-func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(ctx context.Context, channel string, flushAllTs uint64) bool {
-	channelCP := s.meta.GetChannelCheckpoint(channel)
-	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
-			mlog.String("vchannel", channel),
-			mlog.Uint64("flushAllTs", flushAllTs),
-			mlog.Uint64("channelCP", channelCP.GetTimestamp()),
-		)
-		return false
-	}
-	return true
+	return &milvuspb.GetFlushAllStateResponse{Status: merr.Success(), Flushed: true}, nil
 }
 
 // Deprecated

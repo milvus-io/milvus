@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
@@ -537,5 +538,63 @@ func TestBroadcastFlushWaitsForL0AndCloseDoesNotCompleteIt(t *testing.T) {
 			require.True(t, acked)
 			require.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
 		})
+	}
+}
+
+func TestBroadcastFlushAllWaitsForEveryVChannel(t *testing.T) {
+	ctx := context.Background()
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
+	tasks := make(chan nodescheduler.Task, 4)
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle {
+		tasks <- task
+		return nil
+	}).Build()
+	defer submit.UnPatch()
+	defer storage.closeRecoveryResources()
+	summary := walsummary.NewManager(walsummary.ManagerConfig{})
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel: storage.channel.Name,
+		VChannelMetas: map[string]*streamingpb.VChannelMeta{
+			"v1": {Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, TransformMaterializedTimeTick: 10},
+			"v2": {Vchannel: "v2", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, TransformMaterializedTimeTick: 10},
+		},
+		SummaryManager: summary, Runtime: moduleapi.Runtime{Scheduler: storage.taskScheduler, Notifier: storage},
+	})
+	require.NoError(t, err)
+	storage.vchannelManager = manager
+	storage.summaryManager = summary
+	acked := false
+	storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error {
+		acked = true
+		return nil
+	}
+	raw := newBroadcastAckMessageWith(t, message.NewFlushAllMessageBuilderV2().
+		WithClusterLevelBroadcast(message.ClusterChannels{
+			Channels: []string{storage.channel.Name}, ControlChannel: funcutil.GetControlChannel(storage.channel.Name),
+		}, message.OptBuildBroadcastAckSyncUp()).
+		WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}), 1, 20)
+	storage.observeMessage(ctx, raw)
+	require.Len(t, tasks, 2, "the control-channel copy must flush every VChannel on its PChannel")
+	first, second := <-tasks, <-tasks
+	require.NoError(t, first.Execute(ctx))
+	require.False(t, storage.broadcastAck.ackTasks[0].exclusive.Load(), "one unfinished VChannel must block Ack")
+	require.Empty(t, tasks)
+	require.False(t, acked)
+	require.NoError(t, second.Execute(ctx))
+	select {
+	case ackTask := <-tasks:
+		require.NoError(t, ackTask.Execute(ctx))
+	case <-time.After(time.Second):
+		t.Fatal("all VChannel completions did not wake BroadcastAck")
+	}
+	require.True(t, acked)
+	require.Equal(t, uint64(10), storage.GetCheckpoint(ctx).TimeTick, "Ack must not wait for global checkpoint publication")
+	batch := storage.consumeDirtySnapshot()
+	require.NotNil(t, batch)
+	snapshot, err := storage.buildRecoverySnapshot(batch)
+	require.NoError(t, err)
+	require.Len(t, snapshot.VChannelBaseMetas, 2)
+	for _, meta := range snapshot.VChannelBaseMetas {
+		require.Equal(t, uint64(20), meta.GetTransformMaterializedTimeTick(), "Ack must follow dirty metadata installation")
 	}
 }
