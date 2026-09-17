@@ -43,6 +43,34 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// Supply the Import ownership declaration normally registered by DataCoord.
+func init() {
+	for _, typ := range []message.MessageTypeWithVersion{
+		message.MessageTypeImportV1,
+		message.MessageTypeCommitImportV2,
+		message.MessageTypeRollbackImportV2,
+	} {
+		registry.RegisterResourceKeyPair(typ, testImportResourceKeyPair)
+	}
+}
+
+func testImportResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
+	var jobID int64
+	var owner bool
+	switch msg.MessageTypeWithVersion() {
+	case message.MessageTypeImportV1:
+		jobID, owner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+	case message.MessageTypeCommitImportV2:
+		jobID = message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId()
+	case message.MessageTypeRollbackImportV2:
+		jobID = message.MustAsBroadcastRollbackImportMessageV2(msg).Header().GetJobId()
+	}
+	if jobID == 0 {
+		return "", false // Legacy messages have no recoverable pairing identity.
+	}
+	return fmt.Sprintf("import/%d", jobID), owner
+}
+
 func TestBroadcaster(t *testing.T) {
 	registry.ResetRegistration()
 	paramtable.Init()

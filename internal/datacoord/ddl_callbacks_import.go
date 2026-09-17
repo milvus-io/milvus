@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"slices"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -42,6 +43,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Register the stateless ownership parser before broadcaster recovery starts;
+// ACK callbacks are registered later, when the DataCoord server is initialized.
+func init() {
+	for _, typ := range []message.MessageTypeWithVersion{
+		message.MessageTypeImportV1,
+		message.MessageTypeCommitImportV2,
+		message.MessageTypeRollbackImportV2,
+	} {
+		registry.RegisterResourceKeyPair(typ, importResourceKeyPair)
+	}
+}
+
+func importResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
+	var jobID int64
+	var owner bool
+	switch msg.MessageTypeWithVersion() {
+	case message.MessageTypeImportV1:
+		jobID, owner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+	case message.MessageTypeCommitImportV2:
+		jobID = message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId()
+	case message.MessageTypeRollbackImportV2:
+		jobID = message.MustAsBroadcastRollbackImportMessageV2(msg).Header().GetJobId()
+	}
+	if jobID == 0 {
+		return "", false // Legacy messages have no recoverable pairing identity.
+	}
+	return "import/" + strconv.FormatInt(jobID, 10), owner
+}
 
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {

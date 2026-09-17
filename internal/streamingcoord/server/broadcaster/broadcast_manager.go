@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -391,7 +392,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
-	if jobID, begin := broadcastPair(msg); begin && jobID != 0 {
+	if key, owner := registry.ResourceKeyPair(msg); owner && key != "" {
 		newIncomingTask.task.ResourceKeyOwnerId = broadcastID
 	}
 	bm.tasks[broadcastID] = newIncomingTask
@@ -519,7 +520,7 @@ func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, 
 }
 
 // WithResourceKeysForMessage reserves an idempotency scope before waiting for
-// keys. A retry of an accepted Begin waits for its ACK, not for the import job.
+// keys. A retry of an accepted owner waits for its ACK, not for ownership release.
 // Reservations disappear on pre-broadcast failure; they are never acceptance.
 func (bm *broadcastTaskManager) WithResourceKeysForMessage(ctx context.Context, msgType message.MessageType, key message.IdempotencyKey, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
 	scope := idempotencyScope(msgType, key)
@@ -571,11 +572,11 @@ func (bm *broadcastTaskManager) WithResourceKeysForMessage(ctx context.Context, 
 
 // BroadcastWithResourceKeyOwner registers one End under the manager mutex and
 // borrows the Begin's keys. It must never reacquire them: an exclusive DDL may
-// already be waiting for the import to finish. Legacy jobs fall back to their
-// ordinary broadcast path at the caller.
+// already be waiting for ownership release. If no owner is retained, the
+// caller decides whether to use the ordinary broadcast path.
 func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
-	jobID, begin := broadcastPair(msg)
-	if begin || jobID == 0 {
+	key, acquiring := registry.ResourceKeyPair(msg)
+	if acquiring || key == "" {
 		return false, merr.WrapErrServiceInternalMsg("message is not a paired broadcast End")
 	}
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -586,7 +587,7 @@ func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Contex
 	bm.mu.Lock()
 	var owner *broadcastTask
 	for _, task := range bm.tasks {
-		if id, isBegin := broadcastPair(task.BroadcastMessage()); isBegin && id == jobID {
+		if ownerKey, acquiring := registry.ResourceKeyPair(task.BroadcastMessage()); acquiring && ownerKey == key {
 			ownerID, _ := task.resourceKeyOwnership()
 			if ownerID != 0 {
 				owner = task
@@ -601,8 +602,8 @@ func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Contex
 	if err := bm.checkClusterRole(ctx); err != nil {
 		return true, err
 	}
-	// Begin's callback must finish before an End can execute, including when
-	// the checker sees a newly created Failed job before Begin has returned.
+	// The owner's callback must finish before its terminal message can execute,
+	// even if that callback makes the business operation visible before returning.
 	if _, err := owner.BlockUntilDone(ctx); err != nil {
 		return true, err
 	}
@@ -615,8 +616,8 @@ func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Contex
 	ownerID, released := owner.resourceKeyOwnership()
 	if released {
 		bm.mu.Unlock()
-		// The owner is retained only for deduplication; the import job's state
-		// already protects public Commit/Abort retries after End GC.
+		// The owner is retained only for deduplication. Once it is GC'd,
+		// callers must handle terminal retries using their business state.
 		return true, nil
 	}
 	var end *broadcastTask
@@ -629,7 +630,7 @@ func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Contex
 	if end != nil {
 		bm.mu.Unlock()
 		if end.BroadcastMessage().MessageTypeWithVersion() != msg.MessageTypeWithVersion() {
-			return true, merr.WrapErrImportSysFailedMsg("import %d already has a different terminal broadcast", jobID)
+			return true, merr.WrapErrServiceInternalMsg("resource key owner %s already has a different terminal broadcast", key)
 		}
 		_, err := end.BlockUntilDone(ctx)
 		return true, err
