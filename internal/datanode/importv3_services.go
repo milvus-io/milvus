@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -222,12 +223,15 @@ type reshardRunCounters struct {
 	sortWriteCost time.Duration
 	// readWait is the time the routing side blocked waiting for the next
 	// prepared source batch (read + normalize + function execution); flushWall
-	// is the wall time spent inside bucket flushes (sort + write + upload).
-	// Whichever dominates tells the operator whether the run is
-	// read/prepare-bound or flush-bound; the gap to their sum is the
-	// hash/routing CPU cost.
+	// is the summed wall time of the detached fragment writes (sort + write +
+	// upload), which exceeds the run's own wall time as soon as writes overlap
+	// each other or the routing side. flushBlock is the time the routing side
+	// spent waiting for a free write slot: zero means every write hid behind
+	// reading and hashing, anything above zero means the run is write-bound and
+	// dataCoord.import.reshardFlushConcurrency is the limiter.
 	readWait     time.Duration
 	flushWall    time.Duration
+	flushBlock   time.Duration
 	peakResident int64
 }
 
@@ -357,13 +361,16 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 
 	manifest := &datapb.ReshardManifest{}
 	buckets := make(map[reshardBucketKey]*reshardBucket)
-	var residentBytes int64
 	var fragmentSeq int64
 	// Backup sources already carry every function output column; ordinary
 	// sources get theirs computed here so fragments are uniform either way.
 	runFunctions := !plan.GetBackup()
 
-	memModel := reshardmem.Model{ReadBuffer: bufferSize, FragmentTarget: fragmentTarget}
+	memModel := reshardmem.Model{
+		ReadBuffer:       bufferSize,
+		FragmentTarget:   fragmentTarget,
+		FlushConcurrency: paramtable.Get().DataCoordCfg.ReshardFlushConcurrency.GetAsInt64(),
+	}
 	effectiveFragmentInput := memModel.SortInput(memoryBudget)
 	// The per-bucket resident ceiling: unbounded while the whole in-flight
 	// set fits reshardResidentBucketCap (low-bucket jobs reshard fully in
@@ -381,39 +388,105 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 	// fragments; the same term is charged by DataCoord's WorkingSet.
 	fragmentOverhead := reshardmem.FragmentOverhead(int64(len(typeutil.GetAllFieldSchemas(temporarySchema))))
 	var counters reshardRunCounters
-	// flushBucket sorts and writes one bucket's fragments synchronously while
-	// the prepare stage keeps reading ahead, so the source side no longer stalls
-	// for the whole flush. Sequence numbers are assigned in flush order and
-	// spill chunks are removed before the bucket resets, so the manifest and
-	// the spill files' lifetime are exactly what the pre-pipeline serial run
-	// produced.
+	// Accounted live bytes: every routed batch still sitting in a bucket plus
+	// every fragment input a detached write has not released yet. The routing
+	// goroutine adds and spills, the write goroutines release, hence atomic.
+	var resident atomic.Int64
+
+	// Each sort group is written by its own goroutine so the sort, encode and
+	// upload of one fragment overlap reading and hashing the next batches
+	// instead of stalling them. The semaphore bounds the in-flight writes at
+	// the same N DataCoord charged the slot for (reshardmem.WorkingSet), so the
+	// live set stays inside the model; a full pool blocks the routing side
+	// exactly like the old synchronous flush did.
+	flushCtx, cancelFlush := context.WithCancel(ctx)
+	flushSem := make(chan struct{}, memModel.Flushes())
+	var flushWG sync.WaitGroup
+	var flushMu sync.Mutex
+	var flushErr error
+	// Fragment outcomes indexed by sequence number, so the published manifest
+	// keeps the exact fragment order the synchronous pipeline produced no
+	// matter which write finishes first.
+	var flushed []*reshardFragmentOutcome
+	// Registered after the spillLog.Close defer, so the run cancels, joins
+	// every write, and only then closes the log and wipes the spill root.
+	defer flushWG.Wait()
+	defer cancelFlush()
+
+	flushError := func() error {
+		flushMu.Lock()
+		defer flushMu.Unlock()
+		return flushErr
+	}
+
+	// dispatchFlush hands one sort group to a write goroutine. The group takes
+	// over the accounted bytes of the fragment input it carries and releases
+	// them when the write is done, so resident covers that memory for exactly
+	// as long as it is live. Sequence numbers are assigned by the caller in
+	// routing order.
+	dispatchFlush := func(vchannelOrdinal, partitionOrdinal int, group reshardFragmentGroup, seq int64) error {
+		if err := flushError(); err != nil {
+			return err
+		}
+		blockStart := time.Now()
+		select {
+		case flushSem <- struct{}{}:
+		case <-flushCtx.Done():
+			if err := flushError(); err != nil {
+				return err
+			}
+			return flushCtx.Err()
+		}
+		counters.flushBlock += time.Since(blockStart)
+		flushWG.Add(1)
+		go func() {
+			defer flushWG.Done()
+			defer func() { <-flushSem }()
+			writeStart := time.Now()
+			outcome, err := writeReshardFragment(flushCtx, req, plan, temporarySchema, vchannelOrdinal, partitionOrdinal, group, seq, bufferSize, sortFields, pluginContext, spillLog)
+			wall := time.Since(writeStart)
+			// This write was the last reader of the group's spill ranges, so it
+			// owns releasing them, which is what retires a drained shard file.
+			spillLog.Release(group.ranges)
+			resident.Add(-group.accounted)
+			flushMu.Lock()
+			defer flushMu.Unlock()
+			counters.flushWall += wall
+			if err != nil {
+				if flushErr == nil {
+					flushErr = err
+					// Stop routing and the read side: the task is failed, so the
+					// rest of the source is wasted work. A write already in
+					// flight still runs to completion -- the writer takes no
+					// ctx -- and the run joins it before returning.
+					cancelFlush()
+				}
+				return
+			}
+			for int64(len(flushed)) <= seq {
+				flushed = append(flushed, nil)
+			}
+			flushed[seq] = outcome
+		}()
+		return nil
+	}
+
+	// flushBucket cuts one full bucket into sort groups, detaches a write per
+	// group and resets the bucket: its data now belongs to the writes, which
+	// release the accounted bytes as they finish. The spill ranges travel with
+	// their group, so a shard file is retired by the write that drained it.
 	flushBucket := func(b *reshardBucket) error {
-		flushStart := time.Now()
-		defer func() { counters.flushWall += time.Since(flushStart) }()
 		groups := splitReshardBucketForSort(b, effectiveFragmentInput)
 		for _, group := range groups {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			outcome, err := writeReshardFragment(ctx, req, plan, temporarySchema, b.vchannelOrdinal, b.partitionOrdinal, group, fragmentSeq, bufferSize, sortFields, pluginContext, spillLog)
-			if err != nil {
+			if err := dispatchFlush(b.vchannelOrdinal, b.partitionOrdinal, group, fragmentSeq); err != nil {
 				return err
 			}
 			fragmentSeq++
-			manifest.Fragments = append(manifest.Fragments, outcome.descriptor)
-			counters.fragments++
-			counters.rows += outcome.descriptor.GetRows()
-			counters.logicalBytes += outcome.descriptor.GetLogicalBytes()
-			counters.writtenBytes += int64(outcome.writtenUncompressed)
-			if outcome.timings != nil {
-				counters.sortReadCost += outcome.timings.ReadCost
-				counters.sortCost += outcome.timings.SortCost
-				counters.sortWriteCost += outcome.timings.WriteCost
-			}
 		}
-		spillLog.Release(b.ranges)
 		*b = reshardBucket{vchannelOrdinal: b.vchannelOrdinal, partitionOrdinal: b.partitionOrdinal}
-		debug.FreeOSMemory()
 		return nil
 	}
 
@@ -461,7 +534,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 	}
 
 	// readReshardSource prepares one source through the prepare stage, routing
-	// every prepared batch and flushing full buckets synchronously. Reader
+	// every prepared batch and detaching a write per full bucket. Reader
 	// cleanup and the stage join ride on defers, so every failure return below
 	// leaves nothing behind.
 	readReshardSource := func(source *datapb.SourceFileSpec) error {
@@ -471,8 +544,11 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		// The source context bounds this reader's lifetime: canceling it
 		// interrupts an in-flight Read (the reader's IO is bound to its
 		// construction ctx), so any failure return below stops the prepare
-		// stage without waiting out a slow or hung read.
-		sourceCtx, cancelSource := context.WithCancel(ctx)
+		// stage without waiting out a slow or hung read. It derives from
+		// flushCtx, not the run ctx, so a failed fragment write also cuts the
+		// read side short instead of letting it read the rest of the source for
+		// a run that is already failed.
+		sourceCtx, cancelSource := context.WithCancel(flushCtx)
 		defer cancelSource()
 		reader, err := newReshardSourceReader(sourceCtx, cm, plan.GetSchema(), source, bufferSize, req.GetStorageConfig(), pluginContext)
 		if err != nil {
@@ -520,9 +596,21 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			// A detached write that failed has already canceled flushCtx; stop
+			// routing instead of reading the rest of the source for nothing.
+			if err := flushError(); err != nil {
+				return err
+			}
 			receiveStart := time.Now()
 			result, ok := <-prepared
 			counters.readWait += time.Since(receiveStart)
+			// A failed write cancels flushCtx, and that cancel is what unblocked
+			// this receive: report the write's error rather than the source-side
+			// cancel it caused. flushErr is stored before the cancel, so once the
+			// cancel is observable the write error is too.
+			if err := flushError(); err != nil {
+				return err
+			}
 			if !ok {
 				// Clean EOF: the prepare stage closes the channel after io.EOF.
 				// A canceled run can land here too, but the ctx checks before
@@ -555,14 +643,15 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 					logical := int64(bucketData.GetMemorySize())
 					mem := logical + fragmentOverhead
 					appendReshardBatch(b, bucketData, mem, logical)
-					residentBytes += mem
-					counters.peakResident = max(counters.peakResident, residentBytes)
+					resident.Add(mem)
+					counters.peakResident = max(counters.peakResident, resident.Load())
 					if b.logicalBytes >= fragmentTarget {
-						freed := b.bytes
+						// The bucket's accounted bytes travel with the detached
+						// writes and are released there, not here: the memory
+						// stays live until the fragment is on object storage.
 						if err := flushBucket(b); err != nil {
 							return err
 						}
-						residentBytes -= freed
 					} else if b.bytes >= tailCap {
 						// The bucket tail crossed its resident ceiling: stream it
 						// to the spill log. With buckets inside reshardResidentBucketCap
@@ -573,28 +662,28 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 						if err != nil {
 							return err
 						}
-						residentBytes -= spilled
+						resident.Add(-spilled)
 					}
 				}
 			}
 			// Natural checkpoint: exactly one memory read per source batch --
 			// the batch cadence itself rate-limits the check, so no sampling
 			// timer is needed. Converges on REMAINING memory: while free is
-			// below the model's checkpoint floor (one flush spike + the
-			// system-memory reserve), drain the largest bucket's tail into
-			// the spill log once per batch. Free memory sees what the
+			// below the model's checkpoint floor (the in-flight writes' flush
+			// spike + the system-memory reserve), drain the largest bucket's
+			// tail into the spill log once per batch. Free memory sees what the
 			// per-bucket tail caps miss (concurrent tasks, V2 import,
 			// compaction, GC churn, cgo buffers); it can only push usage
 			// below what the tail model accounts, never above it. See
 			// importutilv2/reshardmem.
-			if residentBytes > 0 {
+			if resident.Load() > 0 {
 				total := int64(hardware.GetMemoryCount())
 				if total-int64(hardware.GetUsedMemoryCount()) < memModel.CheckpointFloor(memoryBudget, total) {
 					spilled, err := drainLargest()
 					if err != nil {
 						return err
 					}
-					residentBytes -= spilled
+					resident.Add(-spilled)
 				}
 			}
 		}
@@ -602,6 +691,9 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 
 	for _, source := range plan.GetSources() {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := flushError(); err != nil {
 			return err
 		}
 		if err := readReshardSource(source); err != nil {
@@ -633,6 +725,28 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		}
 	}
 
+	// Every fragment write is detached, so the run joins them before it
+	// publishes: the manifest is complete only once the last fragment is on
+	// object storage, and the spill log has to outlive its last reader.
+	flushWG.Wait()
+	if err := flushError(); err != nil {
+		return err
+	}
+	// Collected in sequence order, which is the routing order the synchronous
+	// pipeline appended to the manifest in.
+	for _, outcome := range flushed {
+		manifest.Fragments = append(manifest.Fragments, outcome.descriptor)
+		counters.fragments++
+		counters.rows += outcome.descriptor.GetRows()
+		counters.logicalBytes += outcome.descriptor.GetLogicalBytes()
+		counters.writtenBytes += int64(outcome.writtenUncompressed)
+		if outcome.timings != nil {
+			counters.sortReadCost += outcome.timings.ReadCost
+			counters.sortCost += outcome.timings.SortCost
+			counters.sortWriteCost += outcome.timings.WriteCost
+		}
+	}
+
 	mlog.Info(ctx, "import v3 reshard run finished",
 		mlog.FieldJobID(req.GetJobId()),
 		mlog.Int64("taskID", req.GetTaskId()),
@@ -642,6 +756,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		mlog.Int64("fragmentTarget", fragmentTarget),
 		mlog.Int64("effectiveFragmentInput", effectiveFragmentInput),
 		mlog.Int64("bucketTailCap", tailCap),
+		mlog.Int64("flushConcurrency", memModel.Flushes()),
 		mlog.Int("buckets", len(buckets)),
 		mlog.Int("sources", len(plan.GetSources())),
 		mlog.Int("fragments", counters.fragments),
@@ -655,6 +770,7 @@ func executeReshardPlan(ctx context.Context, cm storage.ChunkManager, req *datap
 		mlog.Int64("peakResidentBytes", counters.peakResident),
 		mlog.Duration("readWait", counters.readWait),
 		mlog.Duration("flushWall", counters.flushWall),
+		mlog.Duration("flushBlock", counters.flushBlock),
 		mlog.Duration("sortReadCost", counters.sortReadCost),
 		mlog.Duration("sortCost", counters.sortCost),
 		mlog.Duration("sortWriteCost", counters.sortWriteCost),
@@ -748,6 +864,11 @@ type reshardFragmentGroup struct {
 	batches      []*storage.InsertData
 	rows         int64
 	logicalBytes int64
+	// accounted is the memory-accounted size of the group's in-memory batches
+	// (decoded bytes plus the per-fragment structural overhead). Spilled ranges
+	// contribute nothing: their bytes were released when they went to disk. A
+	// detached write releases exactly this much once its fragment is written.
+	accounted int64
 }
 
 // splitReshardBucketForSort packs spill ranges and the in-memory tail into
@@ -756,22 +877,23 @@ type reshardFragmentGroup struct {
 // single-record pathological case.
 func splitReshardBucketForSort(b *reshardBucket, limit int64) []reshardFragmentGroup {
 	type item struct {
-		rangeRef *importv3.SpillRange
-		batch    *storage.InsertData
-		bytes    int64
-		rows     int64
+		rangeRef  *importv3.SpillRange
+		batch     *storage.InsertData
+		bytes     int64
+		accounted int64
+		rows      int64
 	}
 	items := make([]item, 0, len(b.ranges)+len(b.batches))
 	for i := range b.ranges {
 		items = append(items, item{rangeRef: &b.ranges[i], bytes: b.ranges[i].Logical, rows: b.ranges[i].Rows})
 	}
 	for _, batch := range b.batches {
-		items = append(items, item{batch: batch.data, bytes: batch.logical, rows: int64(batch.data.GetRowNum())})
+		items = append(items, item{batch: batch.data, bytes: batch.logical, accounted: batch.bytes, rows: int64(batch.data.GetRowNum())})
 	}
 	groups := make([]reshardFragmentGroup, 0, 1)
 	if limit <= 0 {
 		for _, it := range items {
-			groups = append(groups, reshardFragmentGroup{rows: it.rows, logicalBytes: it.bytes})
+			groups = append(groups, reshardFragmentGroup{rows: it.rows, logicalBytes: it.bytes, accounted: it.accounted})
 			g := &groups[len(groups)-1]
 			if it.rangeRef != nil {
 				g.ranges = append(g.ranges, *it.rangeRef)
@@ -789,6 +911,7 @@ func splitReshardBucketForSort(b *reshardBucket, limit int64) []reshardFragmentG
 		}
 		g.rows += it.rows
 		g.logicalBytes += it.bytes
+		g.accounted += it.accounted
 	}
 	for _, it := range items {
 		if len(groups) == 0 || (groups[len(groups)-1].logicalBytes > 0 && groups[len(groups)-1].logicalBytes+it.bytes > limit) {

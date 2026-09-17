@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -80,16 +81,21 @@ type spillStream struct {
 // buckets map by a fixed hash onto at most streamCount shard files
 // (min(buckets, dataNode.import.reshardSpillMaxStreams), chosen by the
 // caller), each holding ONE long-lived Arrow IPC stream -- the schema
-// message is written once per file creation, not per spill event. A single
-// writer goroutine (the routing loop) appends whole bucket tails as indexed
-// ranges, so offset tracking is a counter with no locking. Readers cache one
-// fd per shard and address ranges through SectionReader with the run's
-// captured schema message prepended: fd count, file count and per-bucket
-// read fan-out are all bounded by streamCount no matter how many buckets
-// exist. The log is not durable state: a run restart re-executes from the
-// sources and the node-local spill root is wiped on startup, so writes are
-// never fsynced.
+// message is written once per file creation, not per spill event. The routing
+// goroutine appends whole bucket tails as indexed ranges while the detached
+// fragment writes replay their ranges and release them, so every entry point
+// takes the log's mutex; the write offset stays a plain counter because that
+// mutex serializes appends. Readers cache one fd per shard and address ranges
+// through SectionReader with the run's captured schema message prepended: fd
+// count, file count and per-bucket read fan-out are all bounded by streamCount
+// no matter how many buckets exist, and two writes reading one shard do not
+// interfere because a SectionReader only preads its own span. A range is
+// released by the write that consumed it and a shard is removed only once none
+// of its ranges are live, so no reader ever sees a removed file. The log is not
+// durable state: a run restart re-executes from the sources and the node-local
+// spill root is wiped on startup, so writes are never fsynced.
 type SpillLog struct {
+	mu        sync.Mutex
 	dir       string
 	schema    *schemapb.CollectionSchema
 	arrow     *arrow.Schema
@@ -141,6 +147,8 @@ func (l *SpillLog) Streams() int {
 // Files reports how many stream files have been materialized so far, for the
 // run summary.
 func (l *SpillLog) Files() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	return l.created
 }
 
@@ -226,6 +234,8 @@ func (l *SpillLog) removeStream(seq int32) {
 // stream stays open across appends -- a range is a bare offset span, not a
 // stream of its own.
 func (l *SpillLog) Append(bucket int64, batches []SpillBatch) (SpillRange, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	seq := int32(bucket % int64(len(l.streams)))
 	s := l.streams[seq]
 	if err := l.ensureStream(s); err != nil {
@@ -284,6 +294,8 @@ func (l *SpillLog) Append(bucket int64, batches []SpillBatch) (SpillRange, error
 // until the next Next, exactly like the stream reader it replaces, and its
 // Close never touches the shared fd.
 func (l *SpillLog) RangeReader(r SpillRange) (storage.RecordReader, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	fd, ok := l.readFds[r.Stream]
 	if !ok {
 		file, err := storage.Open(l.streams[r.Stream].path)
@@ -303,11 +315,14 @@ func (l *SpillLog) RangeReader(r SpillRange) (storage.RecordReader, error) {
 	return &spillRangeReader{reader: reader, field2Col: l.field2Col}, nil
 }
 
-// Release marks a bucket's ranges consumed. Because a shard only ever holds
+// Release marks a bucket's ranges consumed; the detached write that replayed
+// them calls it once its readers are closed. Because a shard only ever holds
 // the tails of its fixed bucket group, a shard whose ranges are all released
 // is removed immediately: a flushed bucket group reclaims its disk without
 // waiting for unrelated buckets or for the run to end.
 func (l *SpillLog) Release(ranges []SpillRange) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	for _, r := range ranges {
 		s := l.streams[r.Stream]
 		s.live--
@@ -320,9 +335,12 @@ func (l *SpillLog) Release(ranges []SpillRange) {
 
 // Close terminates every open stream with its EOS marker -- leaving each
 // materialized file a valid standalone IPC stream for inspection -- and
-// releases the append and cached read fds. Files stay on disk: the run-level
-// spill-root removal is the single cleanup owner.
+// releases the append and cached read fds. The run joins its detached writes
+// before calling this, so no reader is left with a borrowed fd. Files stay on
+// disk: the run-level spill-root removal is the single cleanup owner.
 func (l *SpillLog) Close() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	var firstErr error
 	for _, s := range l.streams {
 		if s.iw != nil {

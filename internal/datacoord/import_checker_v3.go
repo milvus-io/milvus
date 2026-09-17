@@ -739,8 +739,9 @@ func (c *importCheckerV3) createReshardTask(job ImportJob, taskID int64, sources
 		return err
 	}
 	slot := calculateReshardTaskSlot(reshardmem.Model{
-		ReadBuffer:     Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64(),
-		FragmentTarget: fragmentSize,
+		ReadBuffer:       Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64(),
+		FragmentTarget:   fragmentSize,
+		FlushConcurrency: Params.DataCoordCfg.ReshardFlushConcurrency.GetAsInt64(),
 	}, Params.DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt64(),
 		int64(len(job.GetVchannels())*len(job.GetPartitionIDs())),
 		Params.DataCoordCfg.ReshardResidentBucketCap.GetAsInt64(),

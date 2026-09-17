@@ -33,17 +33,35 @@ func TestModel(t *testing.T) {
 	require.Equal(t, int64(0), m.StructOverhead(0, 2048, 15))
 	require.Equal(t, int64(0), Model{FragmentTarget: 128 * mib}.StructOverhead(128*mib, 2048, 15), "degenerate read buffer charges nothing")
 
-	// WorkingSet = fixed + pipeline + GCFactor x (resident + struct) + one
-	// sort copy. Resident demand flattens beyond the cap; the structural term
-	// keeps growing with buckets because the live set keeps shredding.
-	single := 96*mib + 96*mib + int64(GCFactor*float64(128*mib+8*15*FragmentFieldOverhead)) + 128*mib
+	// WorkingSet = fixed + pipeline + GCFactor x (resident + detached inputs +
+	// struct) + one sort copy per detached write. Resident demand flattens
+	// beyond the cap; the structural term keeps growing with buckets because
+	// the live set keeps shredding. A zero-valued model detaches one write.
+	// gcScaled mirrors the production conversion, which the constant factor
+	// cannot be folded into at compile time.
+	gcScaled := func(live int64) int64 { return int64(GCFactor * float64(live)) }
+	require.Equal(t, int64(1), m.Flushes())
+	single := 96*mib + 96*mib + gcScaled(128*mib+128*mib+8*15*FragmentFieldOverhead) + 128*mib
 	require.Equal(t, single, m.WorkingSet(1, 16, 15))
 	require.Equal(t, single, m.WorkingSet(0, 16, 15), "degenerate buckets clamp to one resident bucket")
-	capped := 96*mib + 96*mib + int64(GCFactor*float64(16*128*mib+128*16*15*FragmentFieldOverhead)) + 128*mib
+	capped := 96*mib + 96*mib + gcScaled(16*128*mib+128*mib+128*16*15*FragmentFieldOverhead) + 128*mib
 	require.Equal(t, capped, m.WorkingSet(16, 16, 15))
-	beyond := 96*mib + 96*mib + int64(GCFactor*float64(16*128*mib+128*128*15*FragmentFieldOverhead)) + 128*mib
+	beyond := 96*mib + 96*mib + gcScaled(16*128*mib+128*mib+128*128*15*FragmentFieldOverhead) + 128*mib
 	require.Equal(t, beyond, m.WorkingSet(128, 16, 15))
 	require.Greater(t, beyond, capped, "structural overhead grows with buckets beyond the cap")
+
+	// Two detached writes cost one more writer buffer, one more in-flight
+	// fragment input inside the GC-scaled live set, one more sort copy, and
+	// split the sort input budget across both writes.
+	m2 := Model{ReadBuffer: 16 * mib, FragmentTarget: 128 * mib, FlushConcurrency: 2}
+	require.Equal(t, int64(2), m2.Flushes())
+	require.Equal(t, importparquet.TotalReadBufferSize+2*32*mib, m2.FixedOverhead())
+	require.Equal(t, importparquet.TotalReadBufferSize+2*32*mib+96*mib+
+		gcScaled(128*mib+2*128*mib+8*15*FragmentFieldOverhead)+2*128*mib,
+		m2.WorkingSet(1, 16, 15))
+	require.Equal(t, 64*mib, m2.SortInput(480*mib)) // (480-96-128)/(2*2)=64
+	require.Equal(t, 2*64*mib+96*mib+128*mib, m2.FlushSpike(480*mib))
+	require.Greater(t, m2.WorkingSet(1, 16, 15), single, "detaching a second write charges its fragment input and sort copy")
 
 	// BucketTailCap: unbounded while the whole in-flight set fits the cap
 	// (low-bucket jobs never spill statically); beyond the cap the same total

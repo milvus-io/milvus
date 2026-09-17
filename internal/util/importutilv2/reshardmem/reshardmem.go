@@ -16,16 +16,18 @@
 //
 //	R  Model.ReadBuffer      one batch: dataNode.import.readBufferSizeInMB
 //	F  Model.FragmentTarget  per-bucket flush trigger: dataCoord.import.fragmentSizeInMB
+//	N  Model.FlushConcurrency detached fragment writes in flight: dataCoord.import.reshardFlushConcurrency
 //	P  parquet read stream   fixed buffered stream of one source reader (TotalReadBufferSize)
 //	W  packed writer buffer  packed.DefaultWriteBufferSize
 //
 // A reshard run's peak is the sum of: the resident routed batches (bounded
 // per bucket by BucketTailCap so the total resident accounting never exceeds
-// min(buckets, bucketCap) x F), the structural overhead those fragments carry
-// on top of their decoded bytes (StructOverhead), one flushBucket spike (the
-// Sort materialization of one fragment group plus its output batch, the
-// prepare pipeline and the fixed reader/writer overhead), and the GC headroom
-// the Go runtime keeps on top of the live set (GCFactor).
+// min(buckets, bucketCap) x F), the N detached fragment inputs a run keeps
+// live while their writes overlap the routing side (N x F), the structural
+// overhead those fragments carry on top of their decoded bytes
+// (StructOverhead), the flush spike (one Sort materialization per in-flight
+// write plus the prepare pipeline and the fixed reader/writer overhead), and
+// the GC headroom the Go runtime keeps on top of the live set (GCFactor).
 package reshardmem
 
 import (
@@ -65,20 +67,33 @@ const FragmentFieldOverhead = 200
 const PipelineCopies = 6
 
 // GCFactor is the Go-runtime headroom charged on top of the live resident
-// set: with the default GOGC=100 the heap grows toward roughly twice the live
-// size between collections, and reshard only returns memory at source and
-// flush boundaries. 1.5 is the measured-median compromise between charging
-// the full 2x (which would halve scheduling density) and ignoring GC
-// entirely (the pre-calibration model, which undercharged real usage 4-10x).
-const GCFactor = 1.5
+// set. GOGC=100 lets the heap grow toward twice the live size between
+// collections, but reshard returns memory at every source and flush boundary
+// and the dynamic free-memory checkpoint spills once real free memory drops
+// below one flush spike plus the reserve, so the static charge only has to
+// cover the growth between two boundaries. 1.2 keeps that margin without
+// paying the full 2x, which would halve scheduling density; ignoring GC
+// entirely is the pre-calibration model that undercharged real usage 4-10x.
+const GCFactor = 1.2
 
-// Model binds the two deployment-dependent buffer sizes every formula shares.
+// Model binds the deployment-dependent sizes every formula shares.
 // FragmentTarget may be the live config (DataCoord planning) or the value
-// frozen in the task plan (DataNode execution); both sides must pass the
-// same pair they charge/enforce with.
+// frozen in the task plan (DataNode execution), and FlushConcurrency is
+// dataCoord.import.reshardFlushConcurrency on both sides; charge and
+// enforcement must pass the same values.
 type Model struct {
 	ReadBuffer     int64
 	FragmentTarget int64
+	// FlushConcurrency is the number of fragment writes one reshard run keeps
+	// detached and in flight while the routing side keeps reading.
+	FlushConcurrency int64
+}
+
+// Flushes is the in-flight fragment write count the formulas charge and the
+// DataNode's semaphore enforces, clamped so a zero-valued Model still
+// describes one detached write.
+func (m Model) Flushes() int64 {
+	return max(m.FlushConcurrency, 1)
 }
 
 // FragmentOverhead is the structural live-heap overhead of one routed
@@ -91,10 +106,10 @@ func FragmentOverhead(nFields int64) int64 {
 }
 
 // FixedOverhead is the per-task fixed IO footprint: the parquet read
-// buffered stream (charged once, sources are read sequentially) plus the
-// packed fragment writer buffer.
+// buffered stream (charged once, sources are read sequentially) plus one
+// packed fragment writer buffer per in-flight write.
 func (m Model) FixedOverhead() int64 {
-	return importparquet.TotalReadBufferSize + int64(packed.DefaultWriteBufferSize)
+	return importparquet.TotalReadBufferSize + m.Flushes()*int64(packed.DefaultWriteBufferSize)
 }
 
 // Pipeline covers the in-flight batch copies: the source/normalized/routed
@@ -136,37 +151,44 @@ func (m Model) StructOverhead(residentBytes, buckets, nFields int64) int64 {
 }
 
 // WorkingSet is the memory DataCoord charges for a reshard task: fixed
-// overhead + pipeline + GCFactor x (resident buckets + their structural
-// overhead) + one sort copy. One-pass hash routing keeps up to buckets x F
-// of unflushed logical data across all (vchannel, partition) buckets, so
-// charging min(buckets, bucketCap) whole buckets lets the DataNode hold the
-// full in-flight set resident when it fits inside the cap; beyond the cap
-// BucketTailCap spreads the same total across every bucket and the excess
-// spills. The sort copy is not GC-scaled: it is a short-lived flush spike,
-// not part of the persistent live set.
+// overhead + pipeline + GCFactor x (resident buckets + detached fragment
+// inputs + their structural overhead) + one sort copy per detached write.
+// One-pass hash routing keeps up to buckets x F of unflushed logical data
+// across all (vchannel, partition) buckets, so charging min(buckets,
+// bucketCap) whole buckets lets the DataNode hold the full in-flight set
+// resident when it fits inside the cap; beyond the cap BucketTailCap spreads
+// the same total across every bucket and the excess spills. A detached write
+// keeps its fragment input live while the bucket it was cut from refills, so
+// N in-flight writes add N x F on top of the resident buckets. The sort
+// copies are not GC-scaled: they are short-lived flush spikes, not part of
+// the persistent live set.
 func (m Model) WorkingSet(buckets, bucketCap, nFields int64) int64 {
 	resident := max(min(buckets, bucketCap), 1) * m.FragmentTarget
+	inFlight := m.Flushes() * m.FragmentTarget
 	structural := m.StructOverhead(resident, max(buckets, 1), nFields)
-	return m.FixedOverhead() + m.Pipeline() + int64(GCFactor*float64(resident+structural)) + m.FragmentTarget
+	return m.FixedOverhead() + m.Pipeline() + int64(GCFactor*float64(resident+inFlight+structural)) + inFlight
 }
 
 // SortInput is the largest logical input one storage.Sort may materialize
 // inside the given slot budget. Sort holds the group's records and its
-// materialized copy at the same time, hence the halving after reserving the
-// pipeline and fixed overhead. Degenerate budgets clamp to 1: every spill
-// item then becomes its own sort group -- slow, but bounded.
+// materialized copy at the same time, and every detached write sorts
+// concurrently, hence the division by 2N after reserving the pipeline and
+// fixed overhead. Degenerate budgets clamp to 1: every spill item then
+// becomes its own sort group -- slow, but bounded.
 func (m Model) SortInput(memoryBudget int64) int64 {
-	return min(m.FragmentTarget, max((memoryBudget-m.Pipeline()-m.FixedOverhead())/2, 1))
+	return min(m.FragmentTarget, max((memoryBudget-m.Pipeline()-m.FixedOverhead())/(2*m.Flushes()), 1))
 }
 
-// FlushSpike is the transient one flushBucket adds on top of resident data:
-// the Sort materialization of one group plus the pipeline and fixed overhead.
+// FlushSpike is the transient the in-flight writes add on top of resident
+// data: one Sort materialization per detached write plus the pipeline and
+// fixed overhead.
 func (m Model) FlushSpike(memoryBudget int64) int64 {
-	return m.SortInput(memoryBudget) + m.Pipeline() + m.FixedOverhead()
+	return m.Flushes()*m.SortInput(memoryBudget) + m.Pipeline() + m.FixedOverhead()
 }
 
 // CheckpointFloor is the free-memory floor of the dynamic spill checkpoint:
-// one flush spike plus the system-memory reserve. While real free memory is
+// the flush spike of every in-flight write plus the system-memory reserve.
+// While real free memory is
 // below the floor, the routing loop spills the largest bucket once per
 // source batch, converging back above it. This is cooperative backpressure
 // across every memory consumer in the process (concurrent V3 tasks, V2

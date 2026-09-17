@@ -6246,6 +6246,7 @@ type dataCoordConfig struct {
 	ImportFragmentSize              ParamItem `refreshable:"true"`
 	FragmentMergeFanIn              ParamItem `refreshable:"true"`
 	ReshardResidentBucketCap        ParamItem `refreshable:"true"`
+	ReshardFlushConcurrency         ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
 	CopySegmentCheckInterval        ParamItem `refreshable:"true"`
 	CopySegmentTaskRetention        ParamItem `refreshable:"true"`
@@ -7758,6 +7759,23 @@ raise this for files written with small row groups, many columns, or untruncated
 	p.ReshardResidentBucketCap.Init(base.mgr)
 	if cap := p.ReshardResidentBucketCap.GetAsInt64(); cap < 1 {
 		panic("dataCoord.import.reshardResidentBucketCap must be at least 1")
+	}
+
+	p.ReshardFlushConcurrency = ParamItem{
+		Key:     "dataCoord.import.reshardFlushConcurrency",
+		Version: "3.0.0",
+		Doc: "Number of fragment writes one ImportTaskV3 reshard task keeps detached and in flight. " +
+			"A full bucket's sort/encode/upload runs on its own goroutine so it overlaps reading and hashing " +
+			"the next batches instead of stalling them. Every detached write holds its fragment input plus one " +
+			"sort copy, so the reshard slot estimate charges this many of them: raising it trades node task " +
+			"concurrency for per-task latency.",
+		DefaultValue: "2",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReshardFlushConcurrency.Init(base.mgr)
+	if concurrency := p.ReshardFlushConcurrency.GetAsInt64(); concurrency < 1 {
+		panic("dataCoord.import.reshardFlushConcurrency must be at least 1")
 	}
 
 	p.MaxSegmentsPerCopyTask = ParamItem{

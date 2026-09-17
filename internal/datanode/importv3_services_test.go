@@ -498,13 +498,19 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	}
 	totalBytes := int64(100) + size1 + size2
 	totalRows := int64(5 + 3 + 1)
-	sumGroups := func(groups []reshardFragmentGroup) (int64, int64) {
-		var sumBytes, sumRows int64
+	// The accounted bytes a detached write releases once its fragment is
+	// written: the in-memory batches' accounted sizes (decoded plus the +600
+	// structural overhead). The spilled range contributes nothing -- its bytes
+	// were released when the tail went to disk.
+	totalAccounted := size1 + 600 + size2 + 600
+	sumGroups := func(groups []reshardFragmentGroup) (int64, int64, int64) {
+		var sumBytes, sumRows, sumAccounted int64
 		for _, g := range groups {
 			sumBytes += g.logicalBytes
 			sumRows += g.rows
+			sumAccounted += g.accounted
 		}
-		return sumBytes, sumRows
+		return sumBytes, sumRows, sumAccounted
 	}
 
 	// A limit covering the whole bucket keeps a single group.
@@ -512,6 +518,7 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	require.Len(t, groups, 1)
 	require.Equal(t, totalBytes, groups[0].logicalBytes)
 	require.Equal(t, totalRows, groups[0].rows)
+	require.Equal(t, totalAccounted, groups[0].accounted)
 
 	// A limit fitting the spill range plus the first batch packs those two
 	// and leaves the second batch alone; the accounted overhead (+600) must
@@ -520,17 +527,21 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	require.Len(t, groups, 2)
 	require.Equal(t, int64(100)+size1, groups[0].logicalBytes)
 	require.Equal(t, size2, groups[1].logicalBytes)
-	sumBytes, sumRows := sumGroups(groups)
+	require.Equal(t, size1+600, groups[0].accounted)
+	require.Equal(t, size2+600, groups[1].accounted)
+	sumBytes, sumRows, sumAccounted := sumGroups(groups)
 	require.Equal(t, totalBytes, sumBytes)
 	require.Equal(t, totalRows, sumRows)
+	require.Equal(t, totalAccounted, sumAccounted)
 
 	// A limit below every item still isolates each item instead of dropping
 	// or merging bytes across items.
 	groups = splitReshardBucketForSort(bucket, 1)
 	require.Len(t, groups, 3)
-	sumBytes, sumRows = sumGroups(groups)
+	sumBytes, sumRows, sumAccounted = sumGroups(groups)
 	require.Equal(t, totalBytes, sumBytes)
 	require.Equal(t, totalRows, sumRows)
+	require.Equal(t, totalAccounted, sumAccounted)
 
 	// A non-positive limit degrades to one group per item.
 	groups = splitReshardBucketForSort(bucket, 0)
@@ -538,9 +549,10 @@ func TestSplitReshardBucketForSortAccountsDecodedBytes(t *testing.T) {
 	for _, g := range groups {
 		require.Equal(t, 1, len(g.ranges)+len(g.batches))
 	}
-	sumBytes, sumRows = sumGroups(groups)
+	sumBytes, sumRows, sumAccounted = sumGroups(groups)
 	require.Equal(t, totalBytes, sumBytes)
 	require.Equal(t, totalRows, sumRows)
+	require.Equal(t, totalAccounted, sumAccounted)
 }
 
 // scriptReader is a fake importutilv2.Reader that replays canned batches. It
@@ -728,9 +740,16 @@ func initReshardPipelineParams(t *testing.T) {
 	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key) })
 	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.Key) })
 	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataNodeCfg.ImportBaseBufferSize.Key) })
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ReshardFlushConcurrency.Key) })
 	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, t.TempDir())
 	// The memory-budget tests below compute thresholds from this buffer size.
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ImportBaseBufferSize.Key, "16")
+	// One detached write keeps the pipeline tests deterministic: the semaphore
+	// then serializes the writes, so call order equals sequence order and the
+	// sort input budget matches the serial model the thresholds are computed
+	// from. TestExecuteReshardPlanDetachesConcurrentFragmentWrites pins the
+	// concurrent path.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ReshardFlushConcurrency.Key, "1")
 }
 
 // TestExecuteReshardPlanKeepsManifestDeterministic pins the run's ordering
@@ -786,15 +805,73 @@ func TestExecuteReshardPlanKeepsManifestDeterministic(t *testing.T) {
 	}
 }
 
+// TestExecuteReshardPlanDetachesConcurrentFragmentWrites pins what
+// dataCoord.import.reshardFlushConcurrency buys and what it must never break:
+// with two detached writes the second fragment is written while the first one
+// is still in flight (both meet at a barrier), and the published manifest still
+// carries contiguous sequence numbers in routing order even though the writes
+// complete in the opposite order.
+func TestExecuteReshardPlanDetachesConcurrentFragmentWrites(t *testing.T) {
+	initReshardPipelineParams(t)
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ReshardFlushConcurrency.Key, "2")
+	fix := newReshardPipelineFixture()
+	readers := map[int64]reshardReaderBuilder{
+		1: staticReshardReader(&scriptReader{batches: []*storage.InsertData{fix.batch(1, 2), fix.batch(3, 4, 5)}, size: 100}),
+	}
+	plan := fix.plan([]*datapb.SourceFileSpec{fix.source(1)}, 1)
+	recorder := &reshardCallRecorder{}
+
+	// The first write blocks until the second one is inside the mock too, so
+	// the run only completes if the writes are genuinely detached; the timeout
+	// turns a regression into an error instead of a hung test. The first write
+	// then finishes last, so completion order is the reverse of routing order.
+	both := make(chan struct{})
+	var arrived atomic.Int64
+	var completedMu sync.Mutex
+	var completed []int64
+	recorder.onWrite = func(_ int, group reshardFragmentGroup) error {
+		if arrived.Add(1) == 1 {
+			select {
+			case <-both:
+			case <-time.After(10 * time.Second):
+				return merr.WrapErrImportSysFailedMsg("the second fragment write never overlapped the first")
+			}
+			time.Sleep(50 * time.Millisecond)
+		} else {
+			close(both)
+		}
+		completedMu.Lock()
+		completed = append(completed, group.rows)
+		completedMu.Unlock()
+		return nil
+	}
+	mockReshardBoundaries(t, readers, recorder)
+
+	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil))
+	require.Equal(t, int64(1), recorder.publishCalled.Load())
+	require.Len(t, recorder.published, 1)
+	fragments := recorder.published[0].GetFragments()
+	require.Len(t, fragments, 2)
+	for i, fragment := range fragments {
+		require.Equal(t, int64(i), fragment.GetSeq(), "the manifest keeps routing order no matter which write finished first")
+	}
+	require.Equal(t, []int64{2, 3}, []int64{fragments[0].GetRows(), fragments[1].GetRows()})
+	completedMu.Lock()
+	defer completedMu.Unlock()
+	require.Equal(t, []int64{3, 2}, completed, "the second fragment completed while the first was still in flight")
+}
+
 // TestExecuteReshardPlanPrefetchesReadDuringFlush proves with a counter, not
 // a clock, that the source prepare stage advances reads while a flush is in
 // flight:
 // the first flush sleeps with the remaining reads gated open behind it, so a
 // strictly larger read count at flush end means the reads overlapped the
-// flush instead of stalling behind it. It also pins the run-ahead bound: the
-// reads may advance by at most one buffered batch plus one in-flight batch
-// (reshardPrepareDepth+1), so the stage can never turn into unbounded
-// read-ahead memory.
+// flush instead of stalling behind it. It also pins the run-ahead bound: with
+// a single detached write the reads may advance by at most one buffered batch
+// plus one in-flight batch (reshardPrepareDepth+1) plus the one batch the
+// routing side consumes -- and the stage then refills -- before it blocks on
+// the flush semaphore, so the stage can never turn into unbounded read-ahead
+// memory.
 func TestExecuteReshardPlanPrefetchesReadDuringFlush(t *testing.T) {
 	initReshardPipelineParams(t)
 	fix := newReshardPipelineFixture()
@@ -829,8 +906,8 @@ func TestExecuteReshardPlanPrefetchesReadDuringFlush(t *testing.T) {
 	require.NoError(t, executeReshardPlan(context.Background(), nil, fix.request(plan, 3), plan, nil))
 	require.Greater(t, exitReads.Load(), entryReads.Load(),
 		"reads must advance while the first flush is in flight (entry=%d exit=%d)", entryReads.Load(), exitReads.Load())
-	require.LessOrEqual(t, exitReads.Load()-entryReads.Load(), int64(reshardPrepareDepth+1),
-		"prepare run-ahead is bounded by one buffered batch plus one in-flight batch (entry=%d exit=%d)", entryReads.Load(), exitReads.Load())
+	require.LessOrEqual(t, exitReads.Load()-entryReads.Load(), int64(reshardPrepareDepth+2),
+		"prepare run-ahead is bounded by the stage's buffered and in-flight batches plus the one batch the routing side consumes before it blocks on the flush semaphore (entry=%d exit=%d)", entryReads.Load(), exitReads.Load())
 	require.Equal(t, int64(len(inner.batches)+1), inner.reads.Load(), "every batch plus the terminal EOF must be read")
 }
 

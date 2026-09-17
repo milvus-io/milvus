@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -214,4 +215,103 @@ func TestSpillLogCloseIsIdempotent(t *testing.T) {
 	require.NoError(t, log.Close())
 	require.NoError(t, log.Close())
 	require.Equal(t, 0, log.Files())
+}
+
+// TestSpillLogServesConcurrentAppendsAndReleases pins the locking contract the
+// detached fragment writes rely on: the routing goroutine keeps appending
+// bucket tails while several write goroutines replay and release their ranges
+// on the same shards, including the retire-and-recreate path of a shard whose
+// ranges are all released. Every spilled row must come back exactly once. Run
+// under -race, which is how CI executes it.
+func TestSpillLogServesConcurrentAppendsAndReleases(t *testing.T) {
+	dir := t.TempDir()
+	log, err := NewSpillLog(dir, spillTestSchema(), 4)
+	require.NoError(t, err)
+	defer func() { _ = log.Close() }()
+
+	const (
+		buckets = 8
+		rounds  = 16
+		writers = 4
+		rows    = 4
+	)
+	type replay struct {
+		rows int
+		pks  []int64
+		err  error
+	}
+	// An unbuffered handoff, so every append really interleaves with the
+	// replays and releases of the ranges appended before it.
+	ranges := make(chan SpillRange)
+	replays := make(chan replay, buckets*rounds)
+	var wg sync.WaitGroup
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for r := range ranges {
+				got := replay{}
+				reader, err := log.RangeReader(r)
+				if err != nil {
+					got.err = err
+					replays <- got
+					continue
+				}
+				for {
+					record, err := reader.Next()
+					if err == io.EOF {
+						break
+					}
+					if err != nil {
+						got.err = err
+						break
+					}
+					got.rows += record.Len()
+					col := record.Column(100).(*array.Int64)
+					for i := 0; i < col.Len(); i++ {
+						got.pks = append(got.pks, col.Value(i))
+					}
+				}
+				_ = reader.Close()
+				log.Release([]SpillRange{r})
+				replays <- got
+			}
+		}()
+	}
+
+	var pk int64
+	for round := 0; round < rounds; round++ {
+		for bucket := 0; bucket < buckets; bucket++ {
+			data, size := spillTestBatch(pk, rows)
+			spillRange, err := log.Append(int64(bucket), []SpillBatch{{Data: data, Bytes: size}})
+			require.NoError(t, err)
+			require.Equal(t, int64(rows), spillRange.Rows)
+			ranges <- spillRange
+			pk += rows
+		}
+	}
+	close(ranges)
+	wg.Wait()
+	close(replays)
+
+	total := 0
+	seen := make(map[int64]struct{}, int(pk))
+	for got := range replays {
+		require.NoError(t, got.err)
+		total += got.rows
+		for _, p := range got.pks {
+			_, dup := seen[p]
+			require.False(t, dup, "a spilled row must come back exactly once")
+			seen[p] = struct{}{}
+		}
+	}
+	require.Equal(t, buckets*rounds*rows, total)
+	require.Len(t, seen, int(pk))
+	// Every range came back and was released, so every shard retired: the spill
+	// directory is empty again even though the concurrent releases drove the
+	// retire-and-recreate path over and over.
+	require.Positive(t, log.Files(), "the run must have materialized shard files")
+	entries, err := os.ReadDir(dir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
 }
