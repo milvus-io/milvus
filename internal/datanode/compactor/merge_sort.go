@@ -72,7 +72,11 @@ func mergeSortMultipleSegments(ctx context.Context,
 
 	segmentFilters := make([]compaction.EntityFilter, len(binlogs))
 	for i, s := range binlogs {
-		reader, existingFields, err := newCompactionSegmentRecordReader(ctx, s, plan.GetSchema(), compactionParams.StorageConfig,
+		textDecodeConfigs, err := lobContext.GetSourceTextColumnConfigs(s.GetManifest())
+		if err != nil {
+			return nil, err
+		}
+		reader, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, s, plan.GetSchema(), compactionParams.StorageConfig, textDecodeConfigs,
 			storage.WithCollectionID(collectionID),
 			storage.WithDownloader(binlogIO.Download),
 			storage.WithVersion(s.StorageVersion),

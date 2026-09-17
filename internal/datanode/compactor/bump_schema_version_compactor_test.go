@@ -924,6 +924,9 @@ func (s *BumpSchemaVersionCompactionTaskSuite) buildTextLOBTask(withTextField bo
 			OutputFieldNames: []string{"sparse"}, OutputFieldIds: []int64{102},
 		}}
 	}
+	params := compaction.GenParams()
+	manifest := packed.MarshalManifestPath(
+		storage.SegmentManifestBasePath(params.StorageConfig.GetRootPath(), 1, 1, 100), 1)
 	plan := &datapb.CompactionPlan{
 		PlanID:    999,
 		Type:      datapb.CompactionType_BumpSchemaVersionCompaction,
@@ -931,16 +934,32 @@ func (s *BumpSchemaVersionCompactionTaskSuite) buildTextLOBTask(withTextField bo
 		TotalRows: 3,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID: 1, PartitionID: 1, SegmentID: 100,
-			StorageVersion: storage.StorageV3, Manifest: "manifest",
+			StorageVersion: storage.StorageV3, Manifest: manifest,
 		}},
 	}
-	params := compaction.GenParams()
 	params.StorageVersion = storage.StorageV3
 	return &bumpSchemaVersionCompactionTask{
 		ctx:              context.Background(),
 		plan:             plan,
 		compactionParams: params,
 	}
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestInitLOBCompactionContextRewritesAcrossPartitionBases() {
+	task := s.buildTextLOBTask(true)
+	task.plan.SegmentBinlogs[0].Manifest = packed.MarshalManifestPath(
+		task.compactionParams.StorageConfig.GetRootPath()+"/files/insert_log/1/1/100", 1)
+	collectPatch := mockey.Mock(compaction.CollectLobFilesFromManifests).Return(
+		map[int64][]packed.LobFileInfo{100: {{FieldID: 101, TotalRows: 3, ValidRows: 3}}}, nil,
+	).Build()
+	defer collectPatch.UnPatch()
+
+	err := task.initLOBCompactionContext(context.Background())
+	s.NoError(err)
+	s.Require().NotNil(task.lobContext)
+	s.False(task.lobContext.HasReuseAllFields())
+	s.True(task.lobContext.ShouldRewriteAnyField())
+	s.Equal(compaction.LOBStrategyRewriteAll, task.lobContext.GetStrategy(101))
 }
 
 // TestInitLOBCompactionContextTextFieldReuseAll: a schema-bump on a segment with a

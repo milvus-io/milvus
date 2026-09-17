@@ -22,6 +22,8 @@
 #include <arrow/record_batch.h>
 #include <arrow/type_fwd.h>
 #include <gtest/gtest.h>
+
+#include "test_utils/Constants.h"
 #include <parquet/properties.h>
 #include <stdlib.h>
 #include <time.h>
@@ -241,7 +243,8 @@ TEST(ChunkedSegmentSealedStorageV2,
     auto schema = Schema::ParseFrom(schema_proto);
 
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    const std::string dir = "test_data/storage_v2_direct_warmup";
+    const std::string dir =
+        TestLocalPath + "test_data/storage_v2_direct_warmup";
     StorageV2TempDirGuard dir_guard(fs, dir);
     const std::string path = dir + "/vec.parquet";
     ASSERT_TRUE(fs->CreateDir(dir).ok());
@@ -360,9 +363,10 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
 
         // Prepare paths and column groups
-        std::vector<std::string> paths = {"test_data/0/10000.parquet",
-                                          "test_data/102/10001.parquet",
-                                          "test_data/103/10002.parquet"};
+        std::vector<std::string> paths = {
+            TestLocalPath + "test_data/0/10000.parquet",
+            TestLocalPath + "test_data/102/10001.parquet",
+            TestLocalPath + "test_data/103/10002.parquet"};
 
         // Create directories for the parquet files
         for (const auto& path : paths) {
@@ -491,7 +495,7 @@ class TestChunkSegmentStorageV2 : public testing::TestWithParam<bool> {
         }
         // Clean up test data directory
         auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-        auto status = fs->DeleteDir("test_data");
+        auto status = fs->DeleteDir(TestLocalPath + "test_data");
         ASSERT_TRUE(status.ok());
     }
 
@@ -893,7 +897,8 @@ TEST(TestChunkSegmentStorageV2Regression,
     schema->set_primary_field_id(right_fid);
 
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
-    const std::string root = "test_compare_expr_misaligned_storage_v2";
+    const std::string root =
+        TestLocalPath + "test_compare_expr_misaligned_storage_v2";
     auto cleanup_status = fs->DeleteDir(root);
     (void)cleanup_status;
     ASSERT_TRUE(fs->CreateDir(root + "/0").ok());

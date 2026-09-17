@@ -235,6 +235,32 @@ func newCompactionSegmentRecordReader(ctx context.Context, segment *datapb.Compa
 	return newCompactionSegmentRecordReaderWithFields(ctx, segment, schema, storageConfig, existingFields, opts...)
 }
 
+func newTextDecodedCompactionSegmentRecordReader(
+	ctx context.Context,
+	segment *datapb.CompactionSegmentBinlogs,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	textColumnConfigs []packed.TextColumnConfig,
+	opts ...storage.RwOption,
+) (storage.RecordReader, map[int64]struct{}, error) {
+	if segment.GetManifest() == "" || len(textColumnConfigs) == 0 {
+		return newCompactionSegmentRecordReader(ctx, segment, schema, storageConfig, opts...)
+	}
+	existingFields, err := compactionSegmentStorageFields(segment, storageConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+	readSchema := compactionReadSchema(schema, existingFields)
+	reader, err := storage.NewTextDecodedManifestRecordReader(
+		ctx,
+		segment.GetManifest(),
+		readSchema,
+		textColumnConfigs,
+		append(opts, storage.WithPresentFields(existingFields))...,
+	)
+	return reader, existingFields, err
+}
+
 func compactionSegmentStorageFields(segment *datapb.CompactionSegmentBinlogs, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
 	if segment.GetManifest() != "" {
 		return packed.GetManifestFieldIDs(segment.GetManifest(), storageConfig)
