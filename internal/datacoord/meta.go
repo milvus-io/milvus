@@ -1752,15 +1752,21 @@ func UpdateBumpSchemaVersionMaterializationOperator(segmentID int64, newSchemaVe
 func UpdateStartPosition(startPositions []*datapb.SegmentStartPosition) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		for _, pos := range startPositions {
-			if len(pos.GetStartPosition().GetMsgID()) == 0 {
-				continue
-			}
 			s := modPack.Get(pos.GetSegmentID())
 			if s == nil {
 				continue
 			}
+			// L0 segments materialized from WALSummary have no physical WAL
+			// position. Their timestamp-only StartPosition is a valid delete
+			// retention boundary used by QueryCoord/delegators, not a WAL seek
+			// position. Dropping it would allow live L0 deletes to be evicted.
+			startPosition := pos.GetStartPosition()
+			if len(startPosition.GetMsgID()) == 0 &&
+				(s.GetLevel() != datapb.SegmentLevel_L0 || startPosition.GetTimestamp() == 0) {
+				continue
+			}
 
-			s.StartPosition = pos.GetStartPosition()
+			s.StartPosition = startPosition
 		}
 		return true
 	}

@@ -17,11 +17,15 @@
 package datacoord
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -47,6 +51,53 @@ func (s *TestSegmentOperatorSuite) TestSetMaxRowCount() {
 
 func TestSegmentOperators(t *testing.T) {
 	suite.Run(t, new(TestSegmentOperatorSuite))
+}
+
+func TestUpdateStartPosition(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		level    datapb.SegmentLevel
+		position *msgpb.MsgPosition
+		accepted bool
+	}{
+		{"L0 timestamp only", datapb.SegmentLevel_L0, &msgpb.MsgPosition{Timestamp: 100}, true},
+		{"L0 WAL position", datapb.SegmentLevel_L0, &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 100}, true},
+		{"L0 missing position", datapb.SegmentLevel_L0, nil, false},
+		{"L0 empty position", datapb.SegmentLevel_L0, &msgpb.MsgPosition{}, false},
+		{"L1 timestamp only", datapb.SegmentLevel_L1, &msgpb.MsgPosition{Timestamp: 100}, false},
+		{"L1 WAL position", datapb.SegmentLevel_L1, &msgpb.MsgPosition{MsgID: []byte{1}, Timestamp: 100}, true},
+		{"L1 message ID only", datapb.SegmentLevel_L1, &msgpb.MsgPosition{MsgID: []byte{1}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := &msgpb.MsgPosition{ChannelName: "ch", MsgID: []byte{2}, Timestamp: 50}
+			segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 1, Level: tc.level, StartPosition: original,
+			}}
+			pack := &updateSegmentPack{segments: map[int64]*SegmentInfo{1: segment}}
+			if tc.position != nil {
+				tc.position.ChannelName = "ch"
+			}
+			require.True(t, UpdateStartPosition([]*datapb.SegmentStartPosition{{
+				SegmentID: 1, StartPosition: tc.position,
+			}})(pack))
+			want := original
+			if tc.accepted {
+				want = tc.position
+			}
+			require.True(t, proto.Equal(want, segment.GetStartPosition()))
+		})
+	}
+
+	t.Run("missing segment", func(t *testing.T) {
+		pack := &updateSegmentPack{
+			meta:     &meta{ctx: context.Background(), segments: NewSegmentsInfo()},
+			segments: make(map[int64]*SegmentInfo),
+		}
+		require.True(t, UpdateStartPosition([]*datapb.SegmentStartPosition{{
+			SegmentID: 1, StartPosition: &msgpb.MsgPosition{Timestamp: 100},
+		}})(pack))
+		require.Empty(t, pack.segments)
+	})
 }
 
 func TestUpdateImportSegmentPosition(t *testing.T) {
