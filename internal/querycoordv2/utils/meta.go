@@ -139,7 +139,10 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 		return nil, err
 	}
 
-	if streamingutil.IsStreamingServiceEnabled() && checkNodeNum {
+	// A replica needs a streaming query node of its own only when that is
+	// where its delegator goes; under an installed form it goes onto the
+	// replica's regular query nodes, and the regular bound below is the bound.
+	if streamingutil.UseStreamingQueryNodeAsDelegator() && checkNodeNum {
 		streamingNodeCount := snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDs().Len()
 		if replicaNumber > int32(streamingNodeCount) {
 			return nil, merr.WrapErrStreamingNodeNotEnough(streamingNodeCount, int(replicaNumber), fmt.Sprintf("when load %d replica count", replicaNumber))
