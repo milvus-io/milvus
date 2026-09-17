@@ -20,8 +20,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/indexpb"
 )
@@ -59,4 +61,34 @@ func TestCompleteVectorIndexMetadataRequiresEveryField(t *testing.T) {
 	response.SegmentInfo[31].IndexInfos = append(response.SegmentInfo[31].IndexInfos,
 		&indexpb.IndexFilePathInfo{SegmentID: 31, FieldID: 102})
 	require.False(t, completeVectorIndexMetadata(response, segments, vectorFieldIDs))
+}
+
+func TestFillMissingStructArrayVectorDims(t *testing.T) {
+	expected := newStructArrayCampaign().fields[2]
+	for _, tc := range []struct {
+		name   string
+		mutate func(*schemapb.VectorField)
+		equal  bool
+	}{
+		{name: "omitted array dimension", equal: true},
+		{name: "explicit array dimension", mutate: func(v *schemapb.VectorField) { v.GetVectorArray().Dim = rawDataDim }, equal: true},
+		{name: "incorrect array dimension", mutate: func(v *schemapb.VectorField) { v.GetVectorArray().Dim = rawDataDim + 1 }},
+		{name: "incorrect outer dimension", mutate: func(v *schemapb.VectorField) { v.Dim++ }},
+		{name: "incorrect row dimension", mutate: func(v *schemapb.VectorField) { v.GetVectorArray().Data[0].Dim++ }},
+		{name: "corrupted payload", mutate: func(v *schemapb.VectorField) { v.GetVectorArray().Data[0].GetFloatVector().Data[0]++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := proto.Clone(expected).(*schemapb.FieldData)
+			for _, child := range actual.GetStructArrays().GetFields() {
+				if array := child.GetVectors().GetVectorArray(); array != nil {
+					array.Dim = 0
+				}
+			}
+			if tc.mutate != nil {
+				tc.mutate(actual.GetStructArrays().GetFields()[2].GetVectors())
+			}
+			fillMissingStructArrayVectorDims(actual)
+			require.Equal(t, tc.equal, proto.Equal(expected, actual))
+		})
+	}
 }

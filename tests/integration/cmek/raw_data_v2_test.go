@@ -421,13 +421,14 @@ func (s *RawDataV2Suite) assertRawDataOracle(ctx context.Context, collection str
 					"field %s row %d differs after cold load", actual.GetFieldName(), i)
 			}
 		case schemapb.DataType_ArrayOfStruct:
+			fillMissingStructArrayVectorDims(actualCopy)
 			actualFields := actualCopy.GetStructArrays().GetFields()
 			wantFields := wantCopy.GetStructArrays().GetFields()
 			sort.Slice(actualFields, func(i, j int) bool { return actualFields[i].GetFieldId() < actualFields[j].GetFieldId() })
 			sort.Slice(wantFields, func(i, j int) bool { return wantFields[i].GetFieldId() < wantFields[j].GetFieldId() })
-			s.Require().True(proto.Equal(wantCopy, actualCopy), "field %s differs after cold load", actual.GetFieldName())
+			s.Require().True(proto.Equal(wantCopy, actualCopy), "field %s differs after cold load: expected %s, actual %s", actual.GetFieldName(), wantCopy, actualCopy)
 		default:
-			s.Require().True(proto.Equal(wantCopy, actualCopy), "field %s differs after cold load", actual.GetFieldName())
+			s.Require().True(proto.Equal(wantCopy, actualCopy), "field %s differs after cold load: expected %s, actual %s", actual.GetFieldName(), wantCopy, actualCopy)
 		}
 		delete(expectedByName, actual.GetFieldName())
 	}
@@ -839,4 +840,16 @@ func fieldDataByName(fields []*schemapb.FieldData) map[string]*schemapb.FieldDat
 		result[field.GetFieldName()] = field
 	}
 	return result
+}
+
+// The 2.6 query path can omit VectorArray.dim while retaining the dimension
+// on the enclosing VectorField and each row. Fill only that redundant default
+// on the comparison copy; explicit dimensions and all payloads stay checked.
+func fillMissingStructArrayVectorDims(field *schemapb.FieldData) {
+	for _, child := range field.GetStructArrays().GetFields() {
+		vectors := child.GetVectors()
+		if array := vectors.GetVectorArray(); array != nil && array.GetDim() == 0 {
+			array.Dim = vectors.GetDim()
+		}
+	}
 }
