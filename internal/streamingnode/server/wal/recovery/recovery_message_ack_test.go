@@ -447,3 +447,95 @@ func TestSummaryCoveragePrecedesVChannelObservation(t *testing.T) {
 	storage.observeMessage(context.Background(), newAckTestTimeTickMessage(t, 20, 2))
 	require.True(t, observed)
 }
+
+func TestFlushAllCheckpointWaitsForEveryL0AndCapturesMaterializedMeta(t *testing.T) {
+	ctx := context.Background()
+	initial := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+	storage := newTestRecoveryStorage(t, initial)
+	t.Cleanup(storage.metrics.Close)
+	var tasks []nodescheduler.Task
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	defer submit.UnPatch()
+	summary := walsummary.NewManager(walsummary.ManagerConfig{})
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel: storage.channel.Name,
+		VChannelMetas: map[string]*streamingpb.VChannelMeta{
+			"v1": {Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, TransformMaterializedTimeTick: 10},
+			"v2": {Vchannel: "v2", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, TransformMaterializedTimeTick: 10},
+		},
+		SummaryManager: summary, Runtime: moduleapi.Runtime{Scheduler: storage.taskScheduler, Notifier: storage},
+	})
+	require.NoError(t, err)
+	defer manager.Close()
+	storage.vchannelManager = manager
+	storage.summaryManager = summary
+	raw := message.NewFlushAllMessageBuilderV2().WithVChannel("").
+		WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).MustBuildMutable().
+		WithTimeTick(20).WithLastConfirmed(walimplstest.NewTestMessageID(2)).IntoImmutableMessage(walimplstest.NewTestMessageID(3))
+	storage.observeMessage(ctx, raw)
+	storage.observeMessage(ctx, newAckTestTimeTickMessage(t, 30, 4))
+	require.Len(t, tasks, 2)
+	require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
+	require.NoError(t, tasks[0].Execute(ctx))
+	require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick, "one VChannel cannot release the shared request")
+	require.NoError(t, tasks[1].Execute(ctx))
+	require.Equal(t, uint64(30), storage.ackTracker.CompletedPoint().TimeTick)
+	batch := storage.consumeDirtySnapshot()
+	require.NotNil(t, batch)
+	require.Equal(t, uint64(30), batch.Checkpoint.TimeTick)
+	snapshot, err := storage.buildRecoverySnapshot(batch)
+	require.NoError(t, err)
+	require.Len(t, snapshot.VChannelBaseMetas, 2)
+	for _, meta := range snapshot.VChannelBaseMetas {
+		require.Equal(t, uint64(20), meta.GetTransformMaterializedTimeTick(), "dirty M must accompany a checkpoint past Flush")
+	}
+}
+
+func TestBroadcastFlushWaitsForL0AndCloseDoesNotCompleteIt(t *testing.T) {
+	for _, closeBeforeOutput := range []bool{false, true} {
+		t.Run(map[bool]string{false: "complete", true: "close"}[closeBeforeOutput], func(t *testing.T) {
+			ctx := context.Background()
+			storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10})
+			tasks := make(chan nodescheduler.Task, 4)
+			submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks <- task; return nil }).Build()
+			defer submit.UnPatch()
+			defer storage.closeRecoveryResources()
+			summary := walsummary.NewManager(walsummary.ManagerConfig{})
+			manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+				PChannel:       storage.channel.Name,
+				VChannelMetas:  map[string]*streamingpb.VChannelMeta{"v1": {Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL, TransformMaterializedTimeTick: 10}},
+				SummaryManager: summary, Runtime: moduleapi.Runtime{Scheduler: storage.taskScheduler, Notifier: storage},
+			})
+			require.NoError(t, err)
+			storage.vchannelManager = manager
+			storage.summaryManager = summary
+			acked := false
+			storage.broadcastAck.ack = func(context.Context, message.ImmutableMessage) error { acked = true; return nil }
+			raw := newBroadcastAckMessageWith(t, message.NewManualFlushMessageBuilderV2().WithBroadcast([]string{"v1"}).
+				WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}), 1, 20)
+			storage.observeMessage(ctx, raw)
+			require.Len(t, tasks, 1, "only L0 work is ready before its retained handle releases")
+			l0Task := <-tasks
+			require.False(t, storage.broadcastAck.ackTasks[0].exclusive.Load())
+			require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
+			if closeBeforeOutput {
+				storage.closeRecoveryResources()
+				require.False(t, acked)
+				require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
+				require.False(t, storage.broadcastAck.ackTasks[0].exclusive.Load(), "close cannot release the pending L0 handle as success")
+				return
+			}
+			require.NoError(t, l0Task.Execute(ctx))
+			require.False(t, acked)
+			require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick, "Coordinator Ack is still required")
+			select {
+			case ackTask := <-tasks:
+				require.NoError(t, ackTask.Execute(ctx))
+			case <-time.After(time.Second):
+				t.Fatal("L0 completion did not wake BroadcastAck")
+			}
+			require.True(t, acked)
+			require.Equal(t, uint64(20), storage.ackTracker.CompletedPoint().TimeTick)
+		})
+	}
+}

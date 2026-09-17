@@ -15,8 +15,9 @@ finished. The resulting continuous successful prefix, capped by
 One WAL message may create asynchronous work in multiple SegmentViews and
 copied records in WALSummary. Segment work participates in reference-counted
 completion; Summary has its own confirmation frontier. The target
-[L0Materializer](l0_materializer.md) observes only window boundaries and reads
-Summary without holding WAL handles.
+[L0Materializer](l0_materializer.md) reads Delete data from Summary without
+holding Delete handles. Explicit Flush/lifecycle requests retain handles until
+L0 completion and installation of dirty materialization metadata.
 Broadcast messages additionally wait for consuming-side Ack to StreamingCoord.
 
 Ack observes completion. It does not define Segment or L0Materializer scheduling,
@@ -110,7 +111,8 @@ BroadcastAck.Accept(O)
 
 PChannel-wide routing clones once for every affected VChannel. SegmentView
 clones when it exposes asynchronous work. Summary copies records without
-retaining source handles; L0Materializer records only boundary positions.
+retaining source handles; L0Materializer records boundary positions and clones
+explicit completion requests before dispatch returns.
 
 There is no special untracked metadata flow. Every recovered or live WAL
 message enters the same Tracker path.
@@ -129,12 +131,18 @@ the incomplete positions and cannot advance through them.
 
 ### L0Materializer
 
-L0Materializer retains no WAL handle and keeps no copied record window.
-WALSummary independently persists Delete records and exposes `LastAcked`.
-L0Materializer reads Summary in bounded batches. L0 materialization does not
-participate in source-message Ack or wait for a TransformLog subscriber.
-The ownership split is an implementation target; see the component status in
-[L0 Materializer](l0_materializer.md).
+L0Materializer keeps no copied Delete window. WALSummary independently
+persists Delete records and exposes `LastAcked`; capacity/backlog work does not
+hold their source handles. Explicit completion requests are different: each
+VChannel clones the Flush/lifecycle message and retains it while waiting for
+L1 final commit and bounded L0 output. After output succeeds, the owner installs
+dirty materialization metadata before covered handles release. Retries and
+cancellation cannot release unfinished requests as successful.
+
+These handles pin Tracker's completed prefix and delay broadcast readiness.
+Thus restart rebuilds unfinished requests from WAL without a separate persisted
+request boundary. A replayed request already covered by restored M needs no
+new output. TransformLog subscribers do not participate in completion.
 
 ### Metadata Components
 
@@ -207,8 +215,9 @@ reconstructed by replay from the global checkpoint.
 ## 10. Invariants
 
 1. Every WAL message has one Tracker entry and one Owner.
-2. Each async Segment consumer owns an independent Retained clone; Summary
-   records and L0Materializer window boundaries do not.
+2. Each async Segment consumer and each VChannel requiring explicit L0
+   completion owns an independent Retained clone. Summary records and ordinary
+   L0 window observations do not.
 3. Finalization occurs only at reference count zero.
 4. Completed payloads are released independently of ordered-prefix progress.
 5. Tracker checkpoint progress is continuous and monotonic.

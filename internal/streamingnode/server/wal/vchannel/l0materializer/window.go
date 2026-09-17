@@ -15,7 +15,7 @@
 // limitations under the License.
 
 // Package l0materializer converts the shared WALSummary's Delete records into
-// L0 segments. Observation retains only boundaries; Summary owns all payloads.
+// L0 segments. Summary owns Delete payloads; explicit requests retain WAL handles.
 package l0materializer
 
 import (
@@ -35,7 +35,6 @@ import (
 type Config struct {
 	VChannel             string
 	MaterializedTimeTick uint64
-	FlushThrough         uint64
 	Reader               walsummary.TransformReader
 	MaterializeMaxRows   uint64
 	MaterializeMaxBytes  uint64
@@ -47,7 +46,8 @@ type Config struct {
 }
 
 // L0Materializer keeps a constant-sized window (M,W] subject to L1 bound L.
-// Only one bounded batch executes at a time. No source message is retained.
+// Only one bounded batch executes at a time. Only explicit Flush requests
+// retain source handles; Delete payloads remain owned by Summary.
 type L0Materializer struct {
 	mu                    sync.Mutex
 	materializeMu         sync.Mutex
@@ -55,6 +55,7 @@ type L0Materializer struct {
 	materializedTimeTick  uint64
 	requestedThrough      uint64
 	flushThrough          uint64
+	pendingFlushes        []message.RetainedImmutableMessage
 	backlogThrough        uint64
 	activeGoal            uint64
 	materializeUpperBound uint64
@@ -80,7 +81,6 @@ func New(config Config) *L0Materializer {
 		reader: config.Reader, materializer: config.Materializer,
 		materializeMaxRows: config.MaterializeMaxRows, materializeMaxBytes: config.MaterializeMaxBytes,
 		runtime: config.Runtime, onMaterialized: config.OnMaterialized,
-		flushThrough: config.FlushThrough,
 	}
 }
 
@@ -126,11 +126,19 @@ func (m *L0Materializer) HasPendingMaterializeTask() bool {
 	return m.task != nil
 }
 
-// RequestFlushThrough records an explicit API boundary, after the owner has
-// saved the intent in its recovery metadata. L >= F proves all earlier L1
-// segments have completed final commit; partial L1 progress cannot force a batch.
-func (m *L0Materializer) RequestFlushThrough(through uint64) {
+// RequestFlush retains an explicit completion request until L0 output succeeds
+// and the owner installs dirty recovery metadata. Until then its handle pins
+// the checkpoint, so restart reconstructs the request from WAL replay.
+// L >= F proves all earlier L1 segments have completed final commit.
+func (m *L0Materializer) RequestFlush(owned message.RetainedImmutableMessage) {
 	m.mu.Lock()
+	through := owned.Message().TimeTick()
+	if through <= m.materializedTimeTick {
+		m.mu.Unlock()
+		return
+	}
+	// Requests arrive in WAL order. Keep each handle even when targets coalesce.
+	m.pendingFlushes = append(m.pendingFlushes, owned.Clone())
 	m.flushThrough = max(m.flushThrough, through)
 	task := m.scheduleLocked()
 	m.mu.Unlock()
@@ -213,14 +221,30 @@ func (m *L0Materializer) materialize(ctx context.Context, target uint64) error {
 			return err
 		}
 	}
+	// Install dirty metadata before exposing completion to either retained
+	// handles or a concurrent RequestFlush that may already be covered by M.
+	if m.onMaterialized != nil {
+		m.onMaterialized(batch.CoveredThrough)
+	}
 	m.mu.Lock()
 	m.materializedTimeTick = batch.CoveredThrough
 	if m.materializedTimeTick >= m.activeGoal {
 		m.activeGoal = 0
 	}
-	m.mu.Unlock()
-	if m.onMaterialized != nil {
-		m.onMaterialized(batch.CoveredThrough)
+	n := 0
+	for n < len(m.pendingFlushes) && m.pendingFlushes[n].Message().TimeTick() <= m.materializedTimeTick {
+		n++
 	}
+	completed := m.pendingFlushes[:n:n]
+	m.pendingFlushes = m.pendingFlushes[n:]
+	if len(m.pendingFlushes) == 0 {
+		m.pendingFlushes = nil
+	}
+	m.mu.Unlock()
+	// Finalizers can re-enter checkpoint/owner code. Never release under mu.
+	for _, handle := range completed {
+		handle.Release()
+	}
+	clear(completed)
 	return nil
 }

@@ -53,9 +53,11 @@ The persisted copy of M can lag the running value and is tracked by normal
 VChannel snapshot bookkeeping. W and L are runtime state, not additional
 persistent checkpoints or WAL replay positions.
 
-There is no pending-entry list, retained source handle, recovery-loaded payload
-window, or `loadedThrough`. Window bookkeeping is constant-sized; only the
-current bounded read/materialization batch holds Delete payloads.
+There is no pending Delete-entry list, recovery-loaded payload window, or
+`loadedThrough`. Window positions are constant-sized; only the current bounded
+read/materialization batch holds Delete payloads. Explicit completion requests
+add an ordered list of retained WAL handles until their boundaries are covered.
+Coalescing targets does not discard the individual handles.
 
 ## 3. ObserveMessage
 
@@ -68,8 +70,10 @@ Observation classifies each valid, ordered, routed WAL message:
 | BarrierEntry | Every other message, including empty or mixed non-Delete Txn | Advance W to the message TimeTick. |
 
 Delete takes precedence inside a Txn. ObserveMessage performs no I/O, copies no
-payload, and retains no message handle. It monotonically merges the requested
-boundary and asks the batching policy to re-evaluate when relevant state changes.
+payload, and retains no Delete or ordinary Barrier handle. It monotonically
+merges the requested boundary and asks the batching policy to re-evaluate when
+relevant state changes. The owner separately calls `RequestFlush` with a
+retained message for explicit completion operations before dispatch returns.
 BarrierEntry is a classification, not an allocated queue entry or stored record.
 
 PChannel-level messages, including persisted TimeTicks and RecoveryBarrier,
@@ -173,7 +177,7 @@ Range statistics and backlog inspection must include cold and hot records,
 using Summary indexes and bounded reads without scanning all payloads on each
 observation. A storage transition or restart cannot reset outstanding work.
 Runtime requests from this policy can be reconstructed from Summary state;
-explicit API requests have the separate recovery requirement in §6.
+explicit API requests are rebuilt by WAL replay as described in §6.
 
 ### 5.3 Execute A Captured Request
 
@@ -187,8 +191,10 @@ Each VChannel executes materialization batches serially:
 4. Use returned `CoveredThrough`, not the requested target, as the possible
    commit position; group Deletes by partition/PK representation, write L0
    deltalogs and register all resulting output with DataCoord.
-5. After the entire batch succeeds, advance M through its covered range,
-   update VChannelMeta through the owner callback, and mark the snapshot dirty.
+5. After the entire batch succeeds, update VChannelMeta through the owner
+   callback and mark the snapshot dirty, then expose the new M and release
+   retained explicit-request handles whose boundaries are covered. Keep later
+   requests and failed/canceled work retained. Invoke finalizers outside locks.
 6. For capacity work, continue only while capacity is still satisfied. For an
    explicit or backlog request, continue to its captured goal, then re-evaluate.
    New small arrivals do not indefinitely extend the running request's goal.
@@ -242,20 +248,23 @@ Summary owns actual chunk retention and deletion. Future subscription consumers
 add their own history requirements; this consumer's release position is not
 permission to override those requirements.
 
-Explicit completion intent must survive a crash if WAL replay will no longer
-contain its initiating message. Persist the pending boundary and recoverable
-L1 dependency information in VChannel recovery state, or derive them fully
-from retained lifecycle metadata, before checkpoint publication can skip that
-message. `VChannelMeta.l0_flush_time_tick` stores the monotonic explicit
-boundary F. It remains pending while F > M; Segment metadata reconstructs L1
-dependencies after restart. This field participates in both full and base-only
-snapshots. Requests arriving after a snapshot is frozen remain dirty for the
-next snapshot. This is durable intent, not an additional WAL replay checkpoint;
-the component still owns no separate catalog.
+An explicit completion request retains its WAL message handle until L0 output
+and registration through its boundary succeed and the owner installs dirty
+materialization metadata. Each affected VChannel owns an independent clone.
+Releasing the last consumer handle allows BroadcastAck/Tracker completion.
+The checkpoint publisher then saves the captured component metadata before it
+can publish a checkpoint past that request.
 
-L0 materialization retains no source WAL handles, does not delay BroadcastAck,
-and does not independently gate the global recovery checkpoint. Summary's
-recoverable confirmation protects Delete durability while materialization lags.
+There is no persisted explicit-request field. A crash before completion leaves
+the global checkpoint before the Flush, so WAL replay reconstructs the request.
+If M was persisted before the crash but the checkpoint was not, replay can
+recognize an already covered request without producing another L0. If neither
+was persisted, physical output may repeat safely.
+
+Ordinary Delete/capacity/backlog work retains no source WAL handles; Summary's
+recoverable confirmation protects those records while materialization lags.
+Explicit Flush/lifecycle requests do gate the checkpoint and, for broadcasts,
+Coordinator Ack until L0 completion. This is intentional.
 
 ## 7. Recovery And Close
 
@@ -268,8 +277,9 @@ After restoring Summary and VChannel/Segment metadata:
 4. Route the startup RecoveryBarrier to each VChannel still requiring
    materialization. This ensures old Summary backlog is discovered even when
    no new Delete arrives.
-5. Restore explicit completion intent and re-evaluate capacity and Summary
-   backlog requests; read outstanding data lazily only when admitted.
+5. Rebuild explicit completion requests from WAL replay and re-evaluate
+   capacity and Summary backlog requests; read outstanding data lazily only
+   when admitted.
 
 For example, M=50 and global checkpoint=200 may coexist with an unmaterialized
 Delete@100 already stored in Summary. WAL replay need not deliver that Delete
@@ -281,9 +291,9 @@ Do not initialize W from Summary's largest position, which may be ahead of
 VChannel replay. Restored M may itself be ahead of the global checkpoint;
 older observations never move it backward or request already completed work.
 
-Closing cancels reads/tasks without inventing progress or requiring a final
-materialization. Restart reconstructs the pending window from durable M and
-ordered replay. If L0 registration succeeds but the updated VChannel metadata
+Closing cancels reads/tasks without releasing unfinished Flush handles as
+successful or requiring a final materialization. Restart reconstructs the
+pending window from durable M and ordered replay. If L0 registration succeeds but the updated VChannel metadata
 is lost in a crash, the batch may be repeated. This design does not promise
 physical exactly-once output; output idempotency/reconciliation is separate.
 
@@ -291,6 +301,8 @@ physical exactly-once output; output idempotency/reconciliation is separate.
 
 - Summary is the only owner of Delete record storage.
 - ObserveMessage records boundaries only, after Summary and Segment observation.
+- Explicit requests retain independent handles; dirty M precedes their release.
+- Pending Flush requests remain in the WAL replay range, with no persisted F.
 - A task never commits beyond W, L, or its complete read coverage.
 - Per-VChannel batches advance through a continuous prefix of complete entries.
 - Payload memory is bounded by active batches, not unmaterialized history.

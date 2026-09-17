@@ -156,17 +156,6 @@ func (info *VChannelView) SetTransformMaterializedTimeTick(timetick uint64) {
 	}
 }
 
-// RequestL0Flush saves monotonic API completion intent in the same snapshot as
-// other VChannel state, before the global checkpoint may skip the WAL request.
-func (info *VChannelView) RequestL0Flush(through uint64) {
-	info.mu.Lock()
-	defer info.mu.Unlock()
-	if through > info.meta.GetL0FlushTimeTick() {
-		info.meta.L0FlushTimeTick = through
-		info.dirty = true
-	}
-}
-
 // PersistedMaterializedTimeTick returns the transform materialization frontier
 // already stored in the recovery catalog.
 func (info *VChannelView) PersistedMaterializedTimeTick() uint64 {

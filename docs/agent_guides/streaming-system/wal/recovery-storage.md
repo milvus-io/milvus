@@ -23,9 +23,11 @@ L0 materialization is admitted by Delete row/byte capacity, an explicit completi
 request after L1 final commit, or a Summary-owned backlog request. Capacity
 batches leave small tails to accumulate; there is no L0 age/idle timer.
 Summary indexes provide payload-free range statistics over hot and durable data.
-`VChannelMeta.l0_flush_time_tick` preserves unfinished explicit requests across
-checkpoint publication and restart. Only persisted materialization progress
-releases Delete history, including when restored metadata is DROPPED/TOMBSTONED.
+Explicit Flush/lifecycle requests retain WAL handles until L0 completes and
+dirty materialization metadata is installed. They pin checkpoint/BroadcastAck;
+restart rebuilds unfinished requests from WAL, with no persisted request field.
+Only persisted materialization progress releases Delete history, including when
+restored metadata is DROPPED/TOMBSTONED.
 
 ## Key Packages
 

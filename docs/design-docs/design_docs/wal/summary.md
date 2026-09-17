@@ -675,8 +675,9 @@ frontiers. The manifest persists per-VChannel transform truncation bounds,
 including after removal of the last chunk.
 
 L0 admission uses capacity, explicit completion, or Summary backlog requests.
-Explicit intent is saved in `VChannelMeta.l0_flush_time_tick` and waits for L1
-final commit. Capacity completion rechecks thresholds without draining a small
+Explicit requests retain their WAL handles while waiting for L1 final commit
+and L0 completion. Dirty VChannel M is installed before handles release;
+unfinished requests are replayed from WAL without a persisted request field. Capacity completion rechecks thresholds without draining a small
 tail. Forced requests use captured finite goals. The policy has no L0 age timer
 and does not use `FlushL0MaxLifetime` as a trigger.
 
