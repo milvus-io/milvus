@@ -33,9 +33,9 @@ and the shared scheduler. It has no dependency on TransformLog, its streams, or
 RPCs, and owns no separate catalog or record storage.
 
 The VChannel module derives the L1 safety bound and aggregates materialization
-progress into `VChannelMeta`. The existing field
-`transform_materialized_time_tick` remains the durable L0 frontier; changing the
-component name does not change the field number or require a new metadata key.
+progress into `VChannelMeta`. Its `transform_materialized_time_tick` stores the
+durable L0 frontier. Unfinished explicit requests are reconstructed from WAL
+replay and have no persisted field or reserved field number.
 
 ## 2. Window State
 

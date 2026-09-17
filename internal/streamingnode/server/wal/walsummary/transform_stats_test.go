@@ -150,6 +150,7 @@ func TestValidateTransformStatistics(t *testing.T) {
 		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats[1].TimeTick = 100 },
 		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats[1].Rows = 0 },
 		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformStats[1].Bytes = 0 },
+		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformEndTimetick = 0 },
 		func(i *streamingpb.VChannelSummaryChunkIndex) { i.TransformEndTimetick = 199 },
 	} {
 		index := proto.Clone(valid).(*streamingpb.VChannelSummaryChunkIndex)

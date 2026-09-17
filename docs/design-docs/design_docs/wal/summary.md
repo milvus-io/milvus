@@ -17,6 +17,11 @@ materialization-backlog requests described in
 [L0Materializer §5](l0_materializer.md#5-read-and-materialize). TransformLog
 subscriptions (§5.5) are a separate future integration.
 
+The protocol added by this feature is still under development. Intermediate
+branch versions are not compatibility targets: removed draft messages and
+fields are deleted without reservations, and Transform indexes must provide
+the current section boundaries and statistics.
+
 ## 1. Core Purpose
 
 WALSummary is the WAL consumer-side summary of a physical WAL channel: it
