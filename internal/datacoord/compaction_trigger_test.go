@@ -62,7 +62,7 @@ func (h *spyCompactionInspector) getCompactionTasksNum(filters ...compactionTask
 	return 0
 }
 
-func (h *spyCompactionInspector) getCompactionTasksNumBySignalID(signalID int64) int {
+func (h *spyCompactionInspector) getCompactionTasksNumByTriggerID(signalID int64) int {
 	return 0
 }
 
@@ -76,7 +76,7 @@ func (h *spyCompactionInspector) removeTasksByChannel(channel string) {}
 
 // enqueueCompaction start to execute plan and return immediately
 func (h *spyCompactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
-	t := newMixCompactionTask(task, nil, h.meta, newMockVersionManager())
+	t := newMixCompactionTask(context.TODO(), task, nil, h.meta, newMockVersionManager())
 	alloc := newMock0Allocator(h.t)
 	t.allocator = alloc
 	plan, err := t.BuildCompactionRequest()
@@ -179,13 +179,12 @@ func Test_compactionTrigger_force_without_index(t *testing.T) {
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			indexes:        map[UniqueID]map[UniqueID]*model.Index{},
 		},
-		collections: collections,
 	}
 
 	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: m}
 	tr := &compactionTrigger{
 		meta:          m,
-		handler:       newMockHandlerWithMeta(m),
+		handler:       newMockRootCoordCollectionHandler(collections),
 		allocator:     newMock0Allocator(t),
 		signals:       make(chan *compactionSignal, 100),
 		manualSignals: make(chan *compactionSignal, 100),
@@ -559,8 +558,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 							},
 						},
 					},
-					indexMeta:   im,
-					collections: collections,
+					indexMeta: im,
 				},
 				mock0Allocator,
 				nil,
@@ -580,7 +578,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       make(chan *compactionSignal, 100),
 				manualSignals: make(chan *compactionSignal, 100),
@@ -620,7 +618,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			}
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       make(chan *compactionSignal, 100),
 				manualSignals: make(chan *compactionSignal, 100),
@@ -656,7 +654,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 			}
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       make(chan *compactionSignal, 100),
 				manualSignals: make(chan *compactionSignal, 100),
@@ -831,10 +829,9 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			"test many segments",
 			fields{
 				&meta{
-					segments:    segmentInfos,
-					channelCPs:  newChannelCps(),
-					collections: collections,
-					indexMeta:   indexMeta,
+					segments:   segmentInfos,
+					channelCPs: newChannelCps(),
+					indexMeta:  indexMeta,
 				},
 				mock0Allocator,
 				nil,
@@ -904,7 +901,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       make(chan *compactionSignal, 100),
 				manualSignals: make(chan *compactionSignal, 100),
@@ -1037,7 +1034,6 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 							},
 						},
 					},
-					collections: collections,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1056,7 +1052,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       make(chan *compactionSignal, 100),
 				inspector:     tt.fields.inspector,
@@ -1230,9 +1226,8 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 					// 8 small segments
 					channelCPs: newChannelCps(),
 
-					segments:    mockSegmentsInfo(20, 20, 20, 20, 20, 20),
-					indexMeta:   im,
-					collections: collections,
+					segments:  mockSegmentsInfo(20, 20, 20, 20, 20, 20),
+					indexMeta: im,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1252,7 +1247,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			}
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       make(chan *compactionSignal, 100),
 				inspector:     tt.fields.inspector,
@@ -1376,9 +1371,8 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					// full-tier fill-rate gate and are packed into one
 					// bucket; the remaining 2 stay below
 					// MaxFragmentsPerGroup and are left uncompacted.
-					segments:    mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
-					indexMeta:   im,
-					collections: collections,
+					segments:  mockSegmentsInfo(200, 200, 200, 200, 200, 200, 200),
+					indexMeta: im,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1402,7 +1396,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			}
 			tr := &compactionTrigger{
 				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
+				handler:                   newMockRootCoordCollectionHandler(collections),
 				allocator:                 tt.fields.allocator,
 				signals:                   make(chan *compactionSignal, 100),
 				inspector:                 tt.fields.inspector,
@@ -1564,9 +1558,8 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				&meta{
 					channelCPs: newChannelCps(),
 
-					segments:    segmentInfos,
-					collections: collections,
-					indexMeta:   indexMeta,
+					segments:  segmentInfos,
+					indexMeta: indexMeta,
 				},
 				mock0Allocator,
 				make(chan *compactionSignal, 1),
@@ -1590,7 +1583,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			}
 			tr := &compactionTrigger{
 				meta:                      tt.fields.meta,
-				handler:                   newMockHandlerWithMeta(tt.fields.meta),
+				handler:                   newMockRootCoordCollectionHandler(collections),
 				allocator:                 tt.fields.allocator,
 				signals:                   make(chan *compactionSignal, 100),
 				inspector:                 tt.fields.inspector,
@@ -2053,12 +2046,9 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 	schema := newTestSchema()
 	schema.Version = 5
 	mt := &meta{
-		segments:    NewSegmentsInfo(),
-		indexMeta:   newSegmentIndexMeta(nil),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(),
+		indexMeta: newSegmentIndexMeta(nil),
 	}
-	mt.collections.Insert(collectionID, &collectionInfo{ID: collectionID, Schema: schema})
-
 	for _, item := range []struct {
 		id            int64
 		schemaVersion int32
@@ -2083,7 +2073,10 @@ func TestCompactionTriggerKeepsMixedSchemaVersionSegments(t *testing.T) {
 	}
 
 	inspector := &spyCompactionInspector{t: t, spyChan: make(chan *datapb.CompactionPlan, 1), meta: mt}
-	trigger := newCompactionTrigger(mt, inspector, newMock0Allocator(t), newMockHandlerWithMeta(mt), newMockVersionManager())
+	handler := &mockHandler{collectionGetter: func(context.Context, UniqueID) (*collectionInfo, error) {
+		return &collectionInfo{ID: collectionID, Schema: schema}, nil
+	}}
+	trigger := newCompactionTrigger(mt, inspector, newMock0Allocator(t), handler, newMockVersionManager())
 	err := trigger.handleSignal(&compactionSignal{
 		id:           1,
 		collectionID: collectionID,
@@ -2128,7 +2121,7 @@ func Test_TirggerCompaction_WaitResult(t *testing.T) {
 	}()
 	m := &meta{
 		channelCPs: newChannelCps(),
-		segments:   NewSegmentsInfo(), collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:   NewSegmentsInfo(),
 	}
 	got := newCompactionTrigger(m, &compactionInspector{}, newMockAllocator(t),
 		&ServerHandler{
@@ -2391,8 +2384,7 @@ func (s *CompactionTriggerSuite) SetupTest() {
 				},
 			},
 		},
-		indexMeta:   im,
-		collections: collections,
+		indexMeta: im,
 	}
 	s.meta.UpdateChannelCheckpoint(context.TODO(), s.channel, &msgpb.MsgPosition{
 		ChannelName: s.channel,
@@ -2901,7 +2893,6 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 					}},
 				},
 			},
-			collections: collections,
 		}
 	}
 
@@ -2965,7 +2956,6 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 							},
 						},
 					},
-					collections: collections,
 				},
 				allocator:     mock0Allocator,
 				signals:       nil,
@@ -3149,7 +3139,7 @@ func Test_compactionTrigger_generatePlans(t *testing.T) {
 
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       tt.fields.signals,
 				inspector:     tt.fields.inspector,
@@ -3433,7 +3423,6 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 							},
 						},
 					},
-					collections: collections,
 				},
 				allocator:     mock0Allocator,
 				signals:       nil,
@@ -3460,7 +3449,7 @@ func Test_compactionTrigger_generatePlansByTime(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := &compactionTrigger{
 				meta:          tt.fields.meta,
-				handler:       newMockHandlerWithMeta(tt.fields.meta),
+				handler:       newMockRootCoordCollectionHandler(collections),
 				allocator:     tt.fields.allocator,
 				signals:       tt.fields.signals,
 				inspector:     tt.fields.inspector,

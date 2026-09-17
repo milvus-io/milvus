@@ -1391,7 +1391,14 @@ enum CopySegmentTaskState {
   CopySegmentTaskPending = 1;      // Task created, waiting to be scheduled
   CopySegmentTaskInProgress = 2;   // Task is being executed on DataNode
   CopySegmentTaskCompleted = 3;    // Task successfully completed, segment copied
-  CopySegmentTaskFailed = 4;       // Task failed, requires manual handling
+  CopySegmentTaskFailed = 4;       // Task failed permanently, the job cannot succeed
+  // The attempt hit a transient fault (object storage throttling, a timeout)
+  // and the coordinator must replan it under a fresh identity instead of
+  // failing the job. The worker reports it; the coordinator also persists it
+  // itself when it abandons an attempt whose worker answer was lost, and
+  // restart recovery reads it back to drive the replacement. It mirrors the
+  // Failed/Retry split in ImportTaskStateV2. An old DataNode never sends it.
+  CopySegmentTaskRetry = 5;
 }
 
 // SnapshotState defines the state for snapshot 2PC commit
@@ -1515,6 +1522,7 @@ message PreImportTask {
   repeated ImportFileStats file_stats = 10;
   string created_time = 11;
   string complete_time = 12;
+  int64 task_version = 13; // Zero-based attempt count carried across fresh-task-ID replacements; not an identity fence.
 }
 
 message ImportTaskV2 {
@@ -1530,6 +1538,7 @@ message ImportTaskV2 {
   repeated int64 sorted_segmentIDs = 10;
   string created_time = 11;
   ImportTaskSourceV2 source = 12;
+  int64 task_version = 13; // Zero-based attempt count carried across fresh-task-ID replacements; not an identity fence.
 }
 
 enum GcCommand {
@@ -1559,6 +1568,9 @@ message QuerySlotResponse {
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
   bool copy_segment_shared_indexes = 4;
+  // Explicit writer capability. Older DataNodes omit it and cannot receive
+  // StorageV3 stats tasks that require isolated attempt directories.
+  bool supports_v3_stats_attempt_path = 5;
 }
 
 enum CompactionTaskState {
@@ -1573,6 +1585,11 @@ enum CompactionTaskState {
   cleaned = 8;
   meta_saved = 9;
   statistic = 10;
+  // This attempt ended without succeeding and the work is owed a rebuild under
+  // a fresh plan ID. Terminal for the attempt, not for the trigger: cleanup
+  // releases the inputs and then replans. `failed` is the outcome instead once
+  // dataCoord.compaction.maxAttempts is spent.
+  retrying = 11;
 }
 
 enum TargetState {
@@ -1715,11 +1732,10 @@ message ExternalCollectionRefreshJob {
   // segment write under the job lock, not atomic with it. Only written when
   // dataCoord.externalCollection.refreshWaitForIndex is on.
   //
-  // It is both the sub-state marker ("applied, now waiting for indexes") and
-  // the apply-once guard: a job carrying it has already committed its segments
-  // and must not apply again. The converse does not hold - a crash between the
-  // two writes leaves committed segments with no marker, and the apply is
-  // replay-safe for exactly that reason. 0 when unset.
+  // It is the sub-state marker ("applied, now waiting for indexes"). Task
+  // result consumption is the independent apply-once guard: a crash between
+  // the segment transaction and this marker write leaves consumed results, so
+  // recovery skips segment adoption and retries only this marker. 0 when unset.
   //
   // Callers of DescribeRefresh / ListRefreshJobs can read it directly, and it
   // is the field that resolves the one ambiguity this feature introduces: a
@@ -1742,7 +1758,7 @@ message ExternalCollectionRefreshTask {
   int64 task_id = 1;             // Unique task identifier
   int64 job_id = 2;              // Parent job ID
   int64 collection_id = 3;
-  int64 version = 4;             // Task version for CAS
+  int64 version = 4;             // Compatibility-only field; fresh task_id identifies current attempts
   int64 node_id = 5;             // Assigned worker node
   index.JobState state = 6;      // Task execution state
   string fail_reason = 7;
@@ -1768,6 +1784,15 @@ message ExternalCollectionRefreshTask {
   string result_path = 22;
   // SHA-256 checksum of the serialized task result payload.
   bytes result_checksum = 23;
+  // Former path-valued baseline map. Never reuse its number or decode it as
+  // a version-valued map: protobuf map values have different wire types.
+  reserved 24;
+  reserved "base_manifests";
+  // Manifest revision of each owned segment in the exact snapshot sent to the
+  // worker. Segment directories stay fixed; finalization also checks that the
+  // returned manifest has the current segment's base directory. Persist before
+  // dispatch so restart recovery uses the original baseline, not current meta.
+  map<int64, int64> base_manifest_versions = 25;
 }
 
 message GetRefreshExternalCollectionProgressResponse {

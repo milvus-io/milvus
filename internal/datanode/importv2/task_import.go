@@ -173,16 +173,20 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		mlog.Any("files", t.req.GetFiles()),
 		mlog.FieldSchema(t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req
 
+	// TODO: Once storage/import readers preserve reliable error categories and
+	// causes, wait for all file futures and publish one task-level verdict: any
+	// InputError is Failed; otherwise any error is Retry. Per-file state writes
+	// are order-dependent and cannot classify this safely today.
 	fn := func(file *internalpb.ImportFile) error {
 		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		defer reader.Close()
@@ -206,7 +210,7 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 		if err != nil {
 			mlog.Warn(t.ctx, "do import failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+			t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			return err
 		}
 		mlog.Info(t.ctx, "import file done", WrapLogFields(t, mlog.Strings("files", file.GetPaths()),
@@ -218,8 +222,9 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	for _, file := range req.GetFiles() {
 		file := file
 		f := GetExecPool().Submit(func() (any, error) {
-			// Use blocking allocation - this will wait until memory is available
-			GetMemoryAllocator().BlockingAllocate(t.GetTaskID(), bufferSize)
+			if err := GetMemoryAllocator().BlockingAllocate(t.ctx, t.GetTaskID(), bufferSize); err != nil {
+				return nil, err
+			}
 			defer func() {
 				GetMemoryAllocator().Release(t.GetTaskID(), bufferSize)
 				debug.FreeOSMemory()
@@ -293,7 +298,7 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *pkCursor) error
 		if err != nil {
 			return err
 		}
-		t.manager.Update(t.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+		t.manager.Update(t, UpdateSegmentInfo(segmentInfo))
 		mlog.Info(t.ctx, "sync import data done", WrapLogFields(t, mlog.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil

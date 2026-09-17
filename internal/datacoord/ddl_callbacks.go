@@ -124,9 +124,9 @@ func (s *Server) startBroadcastForRestoreSnapshot(ctx context.Context, collectio
 //     and serializes against DropSnapshot of the same source snapshot
 //
 // The returned broadcaster holds the locks only; Close() releases them
-// without broadcasting any message. Callers are expected to increment
-// the restore reference count while the lock is held, then Close() — the
-// refcount becomes the persistent guard after the lock is released.
+// without broadcasting any message. Callers are expected to claim the
+// restore pin while the lock is held, then Close() — the
+// pin becomes the persistent guard after the lock is released.
 func (s *Server) startRestoreSnapshotLock(
 	ctx context.Context,
 	sourceCollectionID int64,

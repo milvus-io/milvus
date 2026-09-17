@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -207,6 +208,11 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 
 	commit := mockey.Mock(packed.CommitManifestUpdates).Return(newManifest, nil).Build()
 	defer commit.UnPatch()
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) { fatalCalled = true }).
+		Build()
+	defer mockFatal.UnPatch()
 
 	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
 		SegmentID:     201,
@@ -217,6 +223,7 @@ func TestCommitSegmentManifestLeavesMemoryUntouchedOnCatalogFailure(t *testing.T
 		},
 	})
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.True(t, fatalCalled)
 	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), 201).GetManifestPath())
 }
 
@@ -646,7 +653,7 @@ func manifestIndexEntryForCommitTest(t *testing.T, m *meta, segmentID, buildID i
 	require.True(t, ok)
 	finished, _, err := m.indexMeta.buildFinishedSegmentIndex(segIdx, taskInfo)
 	require.NoError(t, err)
-	entry, err := buildManifestIndexInfo(m, m.GetSegment(context.Background(), segmentID), finished)
+	entry, err := buildManifestIndexInfo(m, nil, m.GetSegment(context.Background(), segmentID), finished)
 	require.NoError(t, err)
 	// These focused commit tests do not load collection/index definitions; the
 	// task-owned fields above are the contract under test.
@@ -738,89 +745,6 @@ func TestCommitSegmentManifestPublishesIndexTaskAtomically(t *testing.T) {
 	require.Equal(t, commonpb.IndexState_Finished, published.IndexState)
 	require.Equal(t, []string{"0", "1"}, published.IndexFileKeys)
 	require.EqualValues(t, 2000, published.IndexSerializedSize)
-}
-
-// The manifest entry is assembled before CommitSegmentManifest takes the
-// build lock. If the task is reset in that window, publishing the old entry
-// would pair the manifest with a newer SegmentIndex projection. Reject the
-// stale entry before creating any manifest revision.
-func TestCommitSegmentManifestRejectsStaleIndexTaskProjection(t *testing.T) {
-	const (
-		collectionID = int64(1)
-		partitionID  = int64(10)
-		segmentID    = int64(218)
-		indexID      = int64(103)
-		buildID      = int64(104)
-	)
-	basePath := "/tmp/milvus/insert_log/1/10/218"
-	oldManifest := packed.MarshalManifestPath(basePath, 3)
-
-	meta, err := newMemoryMeta(t)
-	require.NoError(t, err)
-	require.NoError(t, meta.AddSegment(context.Background(), NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		CollectionID:   collectionID,
-		PartitionID:    partitionID,
-		State:          commonpb.SegmentState_Flushed,
-		StorageVersion: storage.StorageV3,
-		ManifestPath:   oldManifest,
-	})))
-	require.NoError(t, meta.indexMeta.AddSegmentIndex(context.Background(), &model.SegmentIndex{
-		CollectionID:          collectionID,
-		PartitionID:           partitionID,
-		SegmentID:             segmentID,
-		IndexID:               indexID,
-		BuildID:               buildID,
-		IndexVersion:          4,
-		IndexState:            commonpb.IndexState_InProgress,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-	}))
-
-	taskInfo := &workerpb.IndexTaskInfo{
-		BuildID:               buildID,
-		State:                 commonpb.IndexState_Finished,
-		IndexFileKeys:         []string{"0"},
-		SerializedSize:        100,
-		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
-	}
-	entry := manifestIndexEntryForCommitTest(t, meta, segmentID, buildID, taskInfo)
-
-	// Simulate a reset after the caller built entry. The same build ID now has
-	// a newer task version, which must not be represented by the old artifact.
-	require.NoError(t, meta.indexMeta.UpdateVersion(buildID, 1000))
-
-	manifestCalls := 0
-	commit := mockey.Mock(packed.CommitManifestUpdates).To(
-		func(string, int64, *indexpb.StorageConfig, *packed.ManifestUpdates) (string, error) {
-			manifestCalls++
-			return packed.MarshalManifestPath(basePath, 4), nil
-		},
-	).Build()
-	defer commit.UnPatch()
-
-	err = meta.CommitSegmentManifest(context.Background(), SegmentManifestCommit{
-		SegmentID:     segmentID,
-		StorageConfig: &indexpb.StorageConfig{},
-		Mutation: ManifestMutation{
-			Type:    ManifestMutationCommitUpdates,
-			Updates: &packed.ManifestUpdates{Indexes: []packed.ManifestIndexInfo{entry}},
-		},
-		CatalogMutation: SegmentCatalogMutation{
-			SegmentIndexes: []SegmentIndexMutation{{
-				Type:         SegmentIndexUpsert,
-				BuildID:      buildID,
-				FinishedTask: taskInfo,
-			}},
-		},
-	})
-	require.Error(t, err)
-	require.ErrorIs(t, err, merr.ErrServiceInternal)
-	require.Zero(t, manifestCalls)
-	require.Equal(t, oldManifest, meta.GetSegment(context.Background(), segmentID).GetManifestPath())
-	current, ok := meta.indexMeta.GetIndexJob(buildID)
-	require.True(t, ok)
-	require.EqualValues(t, 5, current.IndexVersion)
-	require.Equal(t, commonpb.IndexState_InProgress, current.IndexState)
 }
 
 // A worker result for a task that was deleted mid-flight must not advance the
@@ -1265,7 +1189,7 @@ func TestCommitSegmentManifestDefersFieldIndexLockOutsideSegMu(t *testing.T) {
 		IndexFileKeys: []string{"0", "1"},
 	})
 	require.NoError(t, err)
-	entry, err := buildManifestIndexInfo(m, m.GetSegment(ctx, restartSegID), finished)
+	entry, err := buildManifestIndexInfo(m, nil, m.GetSegment(ctx, restartSegID), finished)
 	require.NoError(t, err)
 	baseManifest := m.GetSegment(ctx, restartSegID).GetManifestPath()
 

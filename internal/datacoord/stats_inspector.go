@@ -26,6 +26,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -34,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -59,6 +59,7 @@ type statsInspector struct {
 	mt *meta
 
 	scheduler           task.GlobalScheduler
+	cluster             session.Cluster
 	allocator           allocator.Allocator
 	handler             Handler
 	compactionInspector CompactionInspector
@@ -68,6 +69,7 @@ type statsInspector struct {
 func newStatsInspector(ctx context.Context,
 	mt *meta,
 	scheduler task.GlobalScheduler,
+	cluster session.Cluster,
 	allocator allocator.Allocator,
 	handler Handler,
 	compactionInspector CompactionInspector,
@@ -80,6 +82,7 @@ func newStatsInspector(ctx context.Context,
 		loopWg:              sync.WaitGroup{},
 		mt:                  mt,
 		scheduler:           scheduler,
+		cluster:             cluster,
 		allocator:           allocator,
 		handler:             handler,
 		compactionInspector: compactionInspector,
@@ -132,11 +135,47 @@ func (si *statsInspector) Stop() {
 }
 
 func (si *statsInspector) reloadFromMeta() {
+	// Startup resumes dispatchable/assigned work. Retry waits for the first
+	// TaskCheckInterval tick so the business owner, not scheduler startup, owns
+	// the retry cadence.
+	si.enqueueActiveTasks(false)
+}
+
+// enqueueActiveTasks is the stats owner's scheduling and retry loop. A Retry
+// record is replaced under a fresh task ID only here; offering Init/InProgress
+// every round also recovers wrappers released after a local persistence/RPC
+// failure. Scheduler Enqueue is idempotent while it still owns the current
+// wrapper.
+func (si *statsInspector) enqueueActiveTasks(retry bool) {
 	tasks := si.mt.statsTaskMeta.GetAllTasks()
 	for _, st := range tasks {
-		if st.GetState() != indexpb.JobState_JobStateInit &&
-			st.GetState() != indexpb.JobState_JobStateRetry &&
-			st.GetState() != indexpb.JobState_JobStateInProgress {
+		if st.GetState() == indexpb.JobState_JobStateRetry {
+			if !retry {
+				continue
+			}
+			newTaskID, err := si.allocator.AllocID(si.ctx)
+			if err != nil {
+				mlog.Warn(si.ctx, "failed to allocate replacement stats task ID",
+					mlog.FieldTaskID(st.GetTaskID()), mlog.Err(err))
+				continue
+			}
+			replacement, replaced, err := si.mt.statsTaskMeta.ReplaceRetryTask(si.ctx, st.GetTaskID(), newTaskID)
+			if err != nil {
+				// A failed transaction response is ambiguous: it may already have
+				// replaced the catalog record. Restart and reload catalog before
+				// attempting another replacement.
+				if si.ctx.Err() == nil {
+					mlog.Fatal(si.ctx, "stats retry task replacement failed; terminating process", mlog.Err(err))
+				}
+				continue
+			}
+			if !replaced {
+				continue
+			}
+			st = replacement
+		}
+		if st == nil || (st.GetState() != indexpb.JobState_JobStateInit &&
+			st.GetState() != indexpb.JobState_JobStateInProgress) {
 			continue
 		}
 		taskSlot := int64(0)
@@ -169,6 +208,7 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 			mlog.Warn(si.ctx, "DataCoord context done, exit checkStatsTaskLoop...")
 			return
 		case <-ticker.C:
+			si.enqueueActiveTasks(true)
 			si.triggerStatsTasks(round)
 			round++
 		}
@@ -181,14 +221,32 @@ func (si *statsInspector) triggerStatsTaskLoop() {
 // otherwise a long text-index backlog starves JSON shredding for as long as it
 // takes to drain - days on a large collection.
 func (si *statsInspector) triggerStatsTasks(round int) {
+	collections := si.collectionsWithSegments()
 	if round%2 == 0 {
-		si.triggerTextStatsTask()
-		si.triggerJSONKeyIndexStatsTask()
+		si.triggerTextStatsTaskForCollections(collections)
+		si.triggerJSONKeyIndexStatsTaskForCollections(collections)
 	} else {
-		si.triggerJSONKeyIndexStatsTask()
-		si.triggerTextStatsTask()
+		si.triggerJSONKeyIndexStatsTaskForCollections(collections)
+		si.triggerTextStatsTaskForCollections(collections)
 	}
-	si.triggerBM25StatsTask()
+	si.triggerBM25StatsTaskForCollections(collections)
+}
+
+// collectionsWithSegments resolves collection metadata only for collection IDs
+// present in DataCoord's authoritative segment metadata. The returned slice is
+// a per-discovery-round snapshot; it is not retained as a cache.
+func (si *statsInspector) collectionsWithSegments() []*collectionInfo {
+	collections := make([]*collectionInfo, 0)
+	for collectionID := range si.mt.GetAllCollectionNumRows() {
+		collection, err := si.handler.GetCollection(si.ctx, collectionID)
+		if err != nil || collection == nil {
+			mlog.Warn(si.ctx, "failed to get collection while discovering stats tasks",
+				mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			continue
+		}
+		collections = append(collections, collection)
+	}
+	return collections
 }
 
 func (si *statsInspector) enableBM25() bool {
@@ -247,18 +305,16 @@ func needDoBM25(segment *SegmentInfo, fieldIDs []UniqueID) bool {
 	return false
 }
 
-// canSubmitStatsTask reports whether the global scheduler still has room for a
-// new stats task. The pending queue is shared by every task type, so the count is
-// scoped to stats work: an index or compaction backlog must not starve text-index
-// and JSON-shredding submission. Stats tasks waiting on a retry backoff are
-// counted, because they still occupy queue depth. Discovery re-runs on every
+// canSubmitStatsTask reports whether the persisted stats-task backlog still has
+// room for a new task. Init and Retry records are durable work debt even when the
+// scheduler no longer owns a wrapper for them. Discovery re-runs on every
 // TaskCheckInterval tick, so a segment skipped here is picked up again once the
-// stats queue drains.
+// stats backlog drains.
 func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) bool {
-	pendingTaskCount := si.scheduler.GetPendingTaskCount(taskcommon.Stats)
+	pendingTaskCount := si.mt.statsTaskMeta.GetPendingTaskCount()
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
-	if pendingTaskCount > pendingTaskLimit {
-		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because global scheduler has too many pending tasks",
+	if pendingTaskCount >= pendingTaskLimit {
+		mlog.RatedInfo(si.ctx, rate.Limit(10), "skip submitting stats task because stats meta reached the pending task limit",
 			mlog.Int("pendingTaskCount", pendingTaskCount),
 			mlog.Int("pendingTaskLimit", pendingTaskLimit),
 			mlog.String("subJobType", subJobType.String()))
@@ -268,9 +324,12 @@ func (si *statsInspector) canSubmitStatsTask(subJobType indexpb.StatsSubJob) boo
 }
 
 func (si *statsInspector) triggerTextStatsTask() {
-	collections := si.mt.GetCollections()
+	si.triggerTextStatsTaskForCollections(si.collectionsWithSegments())
+}
+
+func (si *statsInspector) triggerTextStatsTaskForCollections(collections []*collectionInfo) {
 	for _, collection := range collections {
-		if collection == nil {
+		if collection == nil || collection.Schema == nil {
 			continue
 		}
 		if !si.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob) {
@@ -327,14 +386,17 @@ func (si *statsInspector) triggerTextStatsTask() {
 }
 
 func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
+	si.triggerJSONKeyIndexStatsTaskForCollections(si.collectionsWithSegments())
+}
+
+func (si *statsInspector) triggerJSONKeyIndexStatsTaskForCollections(collections []*collectionInfo) {
 	if jsonShreddingDisabledByDeprecatedConfig() {
 		mlog.RatedWarn(si.ctx, rate.Limit(0.1), "skip JSON key index stats task, dataCoord.jsonShreddingTriggerCount is set to 0",
 			mlog.String("suggestion", "set common.enabledJSONShredding to false instead"))
 		return
 	}
-	collections := si.mt.GetCollections()
 	for _, collection := range collections {
-		if collection == nil {
+		if collection == nil || collection.Schema == nil {
 			continue
 		}
 		if !si.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob) {
@@ -376,14 +438,17 @@ func (si *statsInspector) triggerJSONKeyIndexStatsTask() {
 }
 
 func (si *statsInspector) triggerBM25StatsTask() {
+	si.triggerBM25StatsTaskForCollections(si.collectionsWithSegments())
+}
+
+func (si *statsInspector) triggerBM25StatsTaskForCollections(collections []*collectionInfo) {
 	// BM25 stats tasks are not docked yet, so every collection would be scanned
 	// for nothing. Drop out before touching the segment meta at all.
 	if !si.enableBM25() {
 		return
 	}
-	collections := si.mt.GetCollections()
 	for _, collection := range collections {
-		if collection == nil || collection.IsExternal() {
+		if collection == nil || collection.Schema == nil || collection.IsExternal() {
 			continue
 		}
 		if !si.canSubmitStatsTask(indexpb.StatsSubJob_BM25Job) {
@@ -438,7 +503,7 @@ func (si *statsInspector) cleanupStatsTasksLoop() {
 
 			taskIDs := si.mt.statsTaskMeta.CanCleanedTasks()
 			for _, taskID := range taskIDs {
-				if err := si.mt.statsTaskMeta.DropStatsTask(si.ctx, taskID); err != nil {
+				if err := si.cleanupStatsTask(taskID); err != nil {
 					// ignore err, if remove failed, wait next GC
 					mlog.Warn(si.ctx, "clean up stats task failed", mlog.FieldTaskID(taskID), mlog.Err(err))
 				}
@@ -446,6 +511,41 @@ func (si *statsInspector) cleanupStatsTasksLoop() {
 			mlog.Info(si.ctx, "cleanupUnusedStatsTasks done", mlog.Duration("timeCost", time.Since(start)))
 		}
 	}
+}
+
+func (si *statsInspector) cleanupStatsTask(taskID int64) error {
+	var retErr error
+	cleanup := func() {
+		// Resolve worker ownership only after the scheduler callback drains.
+		// Without this fence, an in-flight QueryTaskOnWorker for the same task
+		// can commit or resurrect state after the meta row below is gone
+		// (e.g. pushing a Finished task back to Retry on a query error).
+		latest := si.mt.statsTaskMeta.GetStatsTask(taskID)
+		if latest == nil {
+			return
+		}
+		if latest.GetNodeID() > 0 {
+			if si.cluster == nil {
+				retErr = merr.WrapErrServiceNotReadyMsg("stats worker cluster is unavailable")
+				return
+			}
+			if err := si.cluster.DropStats(latest.GetNodeID(), taskID); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+				retErr = err
+				return
+			}
+		}
+		retErr = si.mt.statsTaskMeta.DropStatsTask(si.ctx, taskID)
+	}
+	if si.scheduler == nil {
+		// Tests that do not exercise scheduler concurrency use the direct path.
+		cleanup()
+	} else {
+		// Release scheduler ownership before terminal cleanup so a late worker
+		// callback finds the task gone and gives up instead of racing this
+		// drop and meta removal. This mirrors copy/import/external GC.
+		si.scheduler.Finalize(taskID, cleanup)
+	}
+	return retErr
 }
 
 func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64,
@@ -456,7 +556,11 @@ func (si *statsInspector) SubmitStatsTask(originSegmentID, targetSegmentID int64
 	if originSegment == nil {
 		return merr.WrapErrSegmentNotFound(originSegmentID)
 	}
-	if si.isExternalCollection(originSegment.GetCollectionID()) {
+	isExternal, err := si.isExternalCollection(si.ctx, originSegment.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	if isExternal {
 		if subJobType == indexpb.StatsSubJob_JsonKeyIndexJob && !canBuildExternalJSONKeyIndex(originSegment) {
 			mlog.Info(si.ctx,
 				"skip submit external json stats task without v3 manifest",
@@ -553,10 +657,10 @@ func (si *statsInspector) DropStatsTask(originSegmentID int64, subJobType indexp
 	return nil
 }
 
-func (si *statsInspector) isExternalCollection(collectionID int64) bool {
-	if si.mt == nil {
-		return false
+func (si *statsInspector) isExternalCollection(ctx context.Context, collectionID int64) (bool, error) {
+	coll, err := si.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return false, err
 	}
-	coll := si.mt.GetCollection(collectionID)
-	return coll != nil && coll.IsExternal()
+	return coll != nil && coll.IsExternal(), nil
 }

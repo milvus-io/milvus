@@ -22,16 +22,18 @@ type l0CompactionPolicy struct {
 
 	activeCollections *activeCollections
 	allocator         allocator.Allocator
+	handler           Handler
 }
 
 // Ensure l0CompactionPolicy implements CompactionPolicy interface
 var _ CompactionPolicy = (*l0CompactionPolicy)(nil)
 
-func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator) *l0CompactionPolicy {
+func newL0CompactionPolicy(meta *meta, allocator allocator.Allocator, handler Handler) *l0CompactionPolicy {
 	return &l0CompactionPolicy{
 		meta:              meta,
 		activeCollections: newActiveCollections(),
 		allocator:         allocator,
+		handler:           handler,
 	}
 }
 
@@ -67,8 +69,10 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 	}
 	events = make(map[CompactionTriggerType][]CompactionView)
 	for collID, segments := range latestCollSegs {
-		collection := policy.meta.GetCollection(collID)
-		if collection == nil {
+		collection, err := policy.handler.GetCollection(ctx, collID)
+		if err != nil || collection == nil {
+			mlog.Warn(ctx, "failed to get collection for l0 compaction",
+				mlog.FieldCollectionID(collID), mlog.Err(err))
 			continue
 		}
 		if collection.IsExternal() {
@@ -104,9 +108,13 @@ func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (events map[Compa
 func (policy *l0CompactionPolicy) triggerOneCollection(ctx context.Context, collectionID int64) ([]CompactionView, int64, error) {
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 	log.Info(ctx, "start trigger collection l0 compaction")
-	collection := policy.meta.GetCollection(collectionID)
+	collection, err := policy.handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		log.Warn(ctx, "failed to get collection for l0 compaction", mlog.Err(err))
+		return nil, 0, err
+	}
 	if collection == nil {
-		log.Warn(ctx, "collection not found in meta")
+		log.Warn(ctx, "collection not found")
 		return nil, 0, merr.WrapErrCollectionNotLoaded(collectionID, "collection not found")
 	}
 	if collection.IsExternal() {

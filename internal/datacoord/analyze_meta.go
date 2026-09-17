@@ -104,7 +104,10 @@ func (m *analyzeMeta) dropTaskFromMemoryLocked(taskID int64) {
 	delete(m.tasks, taskID)
 }
 
-func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {
+// AssignTask persists worker ownership and the running state before Create.
+// Version=1 remains only as the legacy analyze-result path/completion marker;
+// retries use a fresh AnalyzeTaskID and never compare or increment it.
+func (m *analyzeMeta) AssignTask(taskID int64, nodeID int64) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -114,10 +117,11 @@ func (m *analyzeMeta) UpdateVersion(taskID int64, nodeID int64) error {
 	}
 
 	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
-	cloneT.Version++
+	cloneT.Version = 1
 	cloneT.NodeID = nodeID
-	mlog.Info(m.ctx, "update task version", mlog.FieldTaskID(taskID), mlog.Int64("newVersion", cloneT.Version),
-		mlog.FieldNodeID(nodeID))
+	cloneT.State = indexpb.JobState_JobStateInProgress
+	cloneT.FailReason = ""
+	mlog.Info(m.ctx, "assigned analyze task", mlog.FieldTaskID(taskID), mlog.FieldNodeID(nodeID))
 	return m.saveTask(cloneT)
 }
 
@@ -178,7 +182,11 @@ func (m *analyzeMeta) GetAllTasks() map[int64]*indexpb.AnalyzeTask {
 	m.RLock()
 	defer m.RUnlock()
 
-	return m.tasks
+	tasks := make(map[int64]*indexpb.AnalyzeTask, len(m.tasks))
+	for taskID, task := range m.tasks {
+		tasks[taskID] = proto.Clone(task).(*indexpb.AnalyzeTask)
+	}
+	return tasks
 }
 
 func (m *analyzeMeta) CheckCleanAnalyzeTask(taskID UniqueID) (bool, *indexpb.AnalyzeTask) {

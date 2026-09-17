@@ -73,7 +73,7 @@ func TestRejectedCopyCleanupIncludesLegacySibling(t *testing.T) {
 			require.NoError(t, m.chunkManager.Write(ctx, artifact, []byte("completed V2 copy artifact")))
 			patch := mockey.Mock(packed.GetManifestIndexInfos).Return(nil, merr.ErrServiceUnavailable).Build()
 			defer patch.UnPatch()
-			err = SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+			err = SyncCopySegmentTask(context.Background(), task, &datapb.QueryCopySegmentResponse{
 				State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 				SegmentResults: []*datapb.CopySegmentResult{
 					{SegmentId: 2002, ImportedRows: 100, Binlogs: makeTestCopySegmentBinlogs(), IndexInfos: map[int64]*datapb.VectorScalarIndexInfo{6: {BuildId: 6, Version: 1, IndexName: "vec_idx", FieldId: 101, IndexFilePaths: []string{"index.bin"}, IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED}}},
