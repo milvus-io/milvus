@@ -102,6 +102,10 @@ func (s *scopedTaskScheduler) WaitIdle(ctx context.Context) error {
 // otherwise hang Close forever.
 const closeWaitTimeout = 30 * time.Second
 
+// Delayed tasks release their per-WAL slot. Re-submitting them must still
+// preserve a pause between attempts, just like NodeScheduler's ErrDelay path.
+const scopedTaskRetryDelay = 100 * time.Millisecond
+
 func (s *scopedTaskScheduler) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), closeWaitTimeout)
 	defer cancel()
@@ -160,11 +164,21 @@ func (s *scopedTaskScheduler) delay(id uint64) {
 		if s.closed || entry.ctx.Err() != nil {
 			s.finishEntryLocked(entry)
 		} else {
-			s.pending = append(s.pending, entry)
+			entry.retryTimer = time.AfterFunc(scopedTaskRetryDelay, func() { s.requeue(id) })
 		}
 		s.dispatchLocked()
 	}
 	s.mu.Unlock()
+}
+
+func (s *scopedTaskScheduler) requeue(id uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry, ok := s.tasks[id]; ok {
+		entry.retryTimer = nil
+		s.pending = append(s.pending, entry)
+		s.dispatchLocked()
+	}
 }
 
 func (s *scopedTaskScheduler) cancel(id uint64) nodescheduler.TaskHandle {
@@ -191,6 +205,10 @@ func (s *scopedTaskScheduler) finishEntryLocked(entry *scopedTaskEntry) {
 		return
 	}
 	delete(s.tasks, entry.id)
+	if entry.retryTimer != nil {
+		entry.retryTimer.Stop()
+		entry.retryTimer = nil
+	}
 	if entry.running {
 		s.running--
 		entry.running = false
@@ -235,8 +253,9 @@ type scopedTaskEntry struct {
 	done     chan struct{}
 	doneOnce sync.Once
 
-	running bool
-	inner   nodescheduler.TaskHandle
+	running    bool
+	inner      nodescheduler.TaskHandle
+	retryTimer *time.Timer
 }
 
 func (e *scopedTaskEntry) finish() {
