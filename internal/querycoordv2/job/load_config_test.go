@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
@@ -58,7 +59,7 @@ func TestGenerateReplicasTransfersWhenAResourceGroupIsLeftAtZero(t *testing.T) {
 // rg_1 gets a newly allocated one, so the record describes a placement that
 // grew rather than one that moved.
 func TestGenerateReplicasAddsWhenEveryResourceGroupIsNamed(t *testing.T) {
-	m := meta.NewMeta(func() (int64, error) { return 99, nil }, nil, session.NewNodeManager())
+	m := meta.NewMeta(func() (int64, error) { return 99, nil }, nil, session.NewNodeManager(), metacache.NewMetaStore(nil))
 	req := &AlterLoadConfigRequest{
 		Meta: m,
 		Current: CurrentLoadConfig{

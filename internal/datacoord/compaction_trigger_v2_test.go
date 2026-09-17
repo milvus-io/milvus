@@ -18,13 +18,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestCompactionTriggerManagerSuite(t *testing.T) {
@@ -218,14 +218,12 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 	segments := genSegmentsForMeta(s.testLabel)
-	s.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	store := metacache.NewMetaStore(nil)
+	s.meta = &meta{segments: NewSegmentsInfo(store), metaStore: store}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
-	s.meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	s.meta.AddCollection(&collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})

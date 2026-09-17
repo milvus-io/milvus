@@ -13,12 +13,24 @@ type ChunkManagerFactory struct {
 	config            *objectstorage.Config
 }
 
+// PersistentStorageRootPath returns the root path the persistent chunk manager
+// is built with. Callers that need the same prefix without holding a chunk
+// manager (e.g. the DataCoord catalog, which rebuilds text log paths) must use
+// this rather than reading MinioCfg.RootPath directly: local storage roots at
+// LocalStorageCfg.Path instead.
+func PersistentStorageRootPath(params *paramtable.ComponentParam) string {
+	if params.CommonCfg.StorageType.GetValue() == "local" {
+		return params.LocalStorageCfg.Path.GetValue()
+	}
+	return params.MinioCfg.RootPath.GetValue()
+}
+
 func NewChunkManagerFactoryWithParam(params *paramtable.ComponentParam) *ChunkManagerFactory {
 	if params.CommonCfg.StorageType.GetValue() == "local" {
-		return NewChunkManagerFactory("local", objectstorage.RootPath(params.LocalStorageCfg.Path.GetValue()))
+		return NewChunkManagerFactory("local", objectstorage.RootPath(PersistentStorageRootPath(params)))
 	}
 	return NewChunkManagerFactory(params.CommonCfg.StorageType.GetValue(),
-		objectstorage.RootPath(params.MinioCfg.RootPath.GetValue()),
+		objectstorage.RootPath(PersistentStorageRootPath(params)),
 		objectstorage.Address(params.MinioCfg.Address.GetValue()),
 		objectstorage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
 		objectstorage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),

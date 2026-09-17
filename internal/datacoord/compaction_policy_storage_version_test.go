@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -58,9 +59,10 @@ func (s *StorageVersionUpgradePolicySuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 
+	store := metacache.NewMetaStore(nil)
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 	}
 
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
@@ -70,21 +72,17 @@ func (s *StorageVersionUpgradePolicySuite) SetupTest() {
 }
 
 func (s *StorageVersionUpgradePolicySuite) setPolicyMeta(collID int64, coll *collectionInfo, segments map[UniqueID]*SegmentInfo) {
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: store,
 	}
 }
 
@@ -222,21 +220,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithSegments() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: store,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -511,21 +505,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithCompactingSegment() {
 		isCompacting: true, // Already compacting
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: store,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -564,21 +554,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerWithImportingSegment() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: store,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -626,21 +612,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerRateLimiting() {
 		}
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
+
+	segmentsInfo := NewSegmentsInfo(store)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
-
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: store,
 	}
 
 	// Should only trigger 2 segments due to rate limiting
@@ -685,12 +667,12 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerCollectionNotFound() {
 	// Handler returns nil collection
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, nil)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -710,12 +692,12 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerGetCollectionError() {
 	// Handler returns error
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(nil, context.DeadlineExceeded)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -734,12 +716,12 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerAllocIDError() {
 	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(coll, nil)
 	s.mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(0), context.DeadlineExceeded)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	store := metacache.NewMetaStore(nil)
+	store.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: collections,
+		segments:  NewSegmentsInfo(store),
+		metaStore: store,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -805,23 +787,18 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerMultipleCollections() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				100: {101: segments[101]},
-				200: {201: segments[201]},
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(100, coll1)
-	collections.Insert(200, coll2)
+	ms.PutCollection(coll1)
+	ms.PutCollection(coll2)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	events, err := s.policy.Trigger(ctx)
@@ -861,21 +838,17 @@ func (s *StorageVersionUpgradePolicySuite) TestViewContent() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	ms.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -923,21 +896,17 @@ func (s *StorageVersionUpgradePolicySuite) TestDroppedSegmentFiltered() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	ms.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -975,21 +944,17 @@ func (s *StorageVersionUpgradePolicySuite) TestGrowingSegmentFiltered() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	ms.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	views, err := s.policy.triggerOneCollection(ctx, collID, 10)
@@ -1038,21 +1003,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerSkippedDueToVersionRequire
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	ms.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	// Should return empty views because version requirement is not met
@@ -1106,21 +1067,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionRequirementSatisfie
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	ms.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	// Should trigger because version requirement is met
@@ -1186,21 +1143,17 @@ func (s *StorageVersionUpgradePolicySuite) TestTriggerVersionExactlyEqual() {
 		},
 	}
 
-	segmentsInfo := &SegmentsInfo{
-		segments: segments,
-		secondaryIndexes: segmentInfoIndexes{
-			coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
-				collID: segments,
-			},
-		},
+	ms := metacache.NewMetaStore(nil)
+	segmentsInfo := NewSegmentsInfo(ms)
+	for id, seg := range segments {
+		segmentsInfo.SetSegment(id, seg)
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, coll)
+	ms.PutCollection(coll)
 
 	s.policy.meta = &meta{
-		segments:    segmentsInfo,
-		collections: collections,
+		segments:  segmentsInfo,
+		metaStore: ms,
 	}
 
 	// Should trigger because minVersion equals requirement (not less than)

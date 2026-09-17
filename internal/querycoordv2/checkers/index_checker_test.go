@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -74,7 +75,7 @@ func (suite *IndexCheckerSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := params.RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, metacache.NewMetaStore(nil))
 	distManager := meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
 
@@ -366,7 +367,7 @@ func TestRemoveRedundantIndex(t *testing.T) {
 	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	nodeMgr := session.NewNodeManager()
-	metaMgr := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr)
+	metaMgr := meta.NewMeta(params.RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 	distManager := meta.NewDistributionManager(nodeMgr)
 	broker := meta.NewMockBroker(t)
 	targetMgr := meta.NewMockTargetManager(t)

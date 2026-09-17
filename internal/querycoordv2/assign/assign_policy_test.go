@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -43,7 +44,7 @@ func TestAssignPolicyTestSuite(t *testing.T) {
 func (suite *AssignPolicyTestSuite) SetupSuite() {
 	suite.nodeManager = session.NewNodeManager()
 	suite.dist = meta.NewDistributionManager(suite.nodeManager)
-	suite.meta = meta.NewMeta(nil, nil, suite.nodeManager)
+	suite.meta = meta.NewMeta(nil, nil, suite.nodeManager, metacache.NewMetaStore(nil))
 
 	// Initialize global factory for tests
 	InitGlobalAssignPolicyFactory(nil, suite.nodeManager, suite.dist, suite.meta, nil)

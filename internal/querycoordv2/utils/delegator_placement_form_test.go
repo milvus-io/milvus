@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -103,7 +104,7 @@ func metaWithQueryClusters(t *testing.T, rgNames ...string) (context.Context, *m
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(),
 		querycoord.NewCatalog(etcdKV.NewEtcdKV(cli, config.MetaRootPath.GetValue())),
-		nodeMgr)
+		nodeMgr, metacache.NewMetaStore(nil))
 	for i, rgName := range rgNames {
 		_, err = m.AddResourceGroup(ctx, rgName, &rgpb.ResourceGroupConfig{
 			Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},

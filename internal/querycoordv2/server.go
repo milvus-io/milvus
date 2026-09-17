@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -92,6 +93,9 @@ type Server struct {
 	dist      *meta.DistributionManager
 	targetMgr meta.TargetManagerInterface
 	broker    meta.Broker
+
+	// metaView is the shared metacache.MetaView injected by MixCoord.
+	metaView metacache.MetaView
 
 	// Session
 	cluster          session.Cluster
@@ -377,7 +381,7 @@ func (s *Server) initMeta() error {
 
 	mlog.Info(s.ctx, "init meta")
 	s.store = querycoord.NewCatalog(s.kv)
-	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr)
+	s.meta = meta.NewMeta(s.idAllocator, s.store, s.nodeMgr, s.metaView)
 
 	s.broker = meta.NewCoordinatorBroker(
 		s.mixCoord,
@@ -410,7 +414,8 @@ func (s *Server) initMeta() error {
 	}
 
 	s.dist = meta.NewDistributionManager(s.nodeMgr)
-	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	targetMgr := meta.NewTargetManager(s.broker, s.meta, s.metaView)
+	s.targetMgr = targetMgr
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover collection targets", mlog.Err(err))
@@ -628,6 +633,12 @@ func (s *Server) SetTiKVClient(client *txnkv.Client) {
 
 func (s *Server) SetMixCoord(mixCoord types.MixCoord) {
 	s.mixCoord = mixCoord
+}
+
+// SetMetaView sets the shared metacache.MetaView for QueryCoord to resolve
+// segment details from. Must be called before initMeta.
+func (s *Server) SetMetaView(view metacache.MetaView) {
+	s.metaView = view
 }
 
 func (s *Server) SetQueryNodeCreator(f func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)) {

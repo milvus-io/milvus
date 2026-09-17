@@ -220,8 +220,10 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		segment := c.target.GetSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
-		existInTarget := segment != nil
+		// Membership only: a segment the shared store can no longer resolve is
+		// still part of the target, and must not be removed from the delegator
+		// on that basis alone.
+		existInTarget := c.target.HasSealedSegment(ctx, leaderView.CollectionID, sid, meta.CurrentTargetFirst)
 		if ok || existInTarget {
 			continue
 		}

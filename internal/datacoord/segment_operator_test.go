@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -52,8 +53,9 @@ func TestSegmentOperators(t *testing.T) {
 func TestUpdateImportSegmentPosition(t *testing.T) {
 	t.Run("segment not found", func(t *testing.T) {
 		// Create a meta with empty segments to properly test the "not found" case
-		segments := NewSegmentsInfo()
-		m := &meta{segments: segments}
+		store := metacache.NewMetaStore(nil)
+		segments := NewSegmentsInfo(store)
+		m := &meta{segments: segments, metaStore: store}
 		modPack := &updateSegmentPack{
 			meta:     m,
 			segments: make(map[int64]*SegmentInfo),

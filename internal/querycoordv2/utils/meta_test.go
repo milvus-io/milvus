@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -56,7 +57,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	ctx := context.Background()
 	store := querycoord.NewCatalog(kv)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 	m.AddResourceGroup(ctx, "rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
@@ -146,7 +147,7 @@ func TestReassignReplicaToRG_ScaleUpTransfersToSmallestRG(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 
 	// Setup: 1 replica in __default_resource_group
 	m.PutCollection(ctx, CreateTestCollection(100, 1))
@@ -195,7 +196,7 @@ func TestReassignReplicaToRG_ScaleDownPreservesSmallestRG(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 
 	// Setup: 3 replicas in rg1/rg2/rg3
 	m.PutCollection(ctx, CreateTestCollection(100, 3))
@@ -244,7 +245,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 	m.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
@@ -311,7 +312,7 @@ func TestRecoverReplicaOfCollection_WaitRGReady(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 
 	collectionID := int64(1000)
 	m.PutCollection(ctx, CreateTestCollection(collectionID, 2))
@@ -413,7 +414,7 @@ func TestRecoverReplicaOfCollection_ExistingReplicaNotAffectedByMissingNodes(t *
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 
 	collectionID := int64(2000)
 	m.PutCollection(ctx, CreateTestCollection(collectionID, 1))
@@ -464,7 +465,7 @@ func TestSpawnWithoutWaitRGReadyOption(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 
 	collectionID := int64(3000)
 	m.PutCollection(ctx, CreateTestCollection(collectionID, 1))
@@ -498,7 +499,7 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
-	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
+	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr, metacache.NewMetaStore(nil))
 	m.AddResourceGroup(ctx, "rg", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},

@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -9,13 +10,82 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
+func TestSegmentsInfo_MetaStore_GetSegment(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	info := NewSegmentsInfo(store)
+
+	seg := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+			State: commonpb.SegmentState_Flushed, NumOfRows: 1000,
+		},
+		isCompacting:  true,
+		lastFlushTime: time.Now(),
+	}
+	info.SetSegment(1, seg)
+
+	got := info.GetSegment(1)
+	assert.NotNil(t, got)
+	assert.Equal(t, int64(1), got.GetID())
+	assert.Equal(t, int64(1000), got.GetNumOfRows())
+	assert.True(t, got.isCompacting)
+
+	// Verify proto lives in MetaStore, not in a local map
+	storeSeg, ok := store.GetSegment(1)
+	assert.True(t, ok)
+	assert.Equal(t, int64(1), storeSeg.GetID())
+
+	// Verify DC-only field mutations don't touch the store
+	info.SetIsCompacting(1, false)
+	got2 := info.GetSegment(1)
+	assert.False(t, got2.isCompacting)
+
+	// Verify proto field mutations go through the store
+	info.SetRowCount(1, 2000)
+	got3 := info.GetSegment(1)
+	assert.Equal(t, int64(2000), got3.GetNumOfRows())
+	storeSeg3, _ := store.GetSegment(1)
+	assert.Equal(t, int64(2000), storeSeg3.GetNumOfRows())
+}
+
+func TestSegmentsInfo_MetaStore_GetCandidates(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	info := NewSegmentsInfo(store)
+
+	info.SetSegment(1, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 1, CollectionID: 100, InsertChannel: "ch-0",
+		State: commonpb.SegmentState_Flushed,
+	}})
+	info.SetSegment(2, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 2, CollectionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Growing,
+	}})
+	info.SetSegment(3, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 3, CollectionID: 200, InsertChannel: "ch-0",
+		State: commonpb.SegmentState_Flushed,
+	}})
+
+	// By collection
+	result := info.GetSegmentsBySelector(CollectionFilter(100))
+	assert.Len(t, result, 2)
+
+	// By channel
+	result = info.GetSegmentsBySelector(ChannelFilter("ch-0"))
+	assert.Len(t, result, 2)
+
+	// By collection + channel
+	result = info.GetSegmentsBySelector(CollectionFilter(100), ChannelFilter("ch-0"))
+	assert.Len(t, result, 1)
+}
+
 func TestCompactionTo(t *testing.T) {
 	t.Run("mix_2_to_1", func(t *testing.T) {
-		segments := NewSegmentsInfo()
+		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1,
 		})
@@ -71,7 +141,7 @@ func TestCompactionTo(t *testing.T) {
 	})
 
 	t.Run("split_1_to_2", func(t *testing.T) {
-		segments := NewSegmentsInfo()
+		segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 		segment := NewSegmentInfo(&datapb.SegmentInfo{
 			ID: 1,
 		})
@@ -439,4 +509,142 @@ func TestNewSegmentInfo_PreservesExplicitStats(t *testing.T) {
 		Stats:        explicit,
 	})
 	assert.Same(t, explicit, seg.GetStats(), "supplied Stats must not be replaced")
+}
+
+// newSegmentsInfoWithSegments builds a store-backed SegmentsInfo pre-populated
+// with the given segments, for use in test fixtures that used to build a
+// SegmentsInfo struct literal directly (e.g. `&SegmentsInfo{segments: ...}`)
+// back when the standalone in-memory map existed.
+// newEmptyTestMeta returns a meta whose segments and metaStore share one
+// empty MetaStore.
+func newEmptyTestMeta() *meta {
+	ms := metacache.NewMetaStore(nil)
+	return &meta{metaStore: ms, segments: NewSegmentsInfo(ms)}
+}
+
+func newSegmentsInfoWithSegments(segs map[int64]*SegmentInfo) *SegmentsInfo {
+	si := NewSegmentsInfo(metacache.NewMetaStore(nil))
+	for id, seg := range segs {
+		si.SetSegment(id, seg)
+	}
+	return si
+}
+
+// TestRebuildFromStore covers the recovery path: segments loaded straight into
+// the shared store bypass SetSegment, so the compaction relations and the
+// per-segment transient state have to be seeded explicitly. Without it
+// SetIsCompacting silently does nothing and GetCompactionTo reports no
+// children, both of which only show up after a restart.
+func TestRebuildFromStore(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	store.LoadSegments([]*datapb.SegmentInfo{
+		{ID: 1, CollectionID: 100, InsertChannel: "ch-0", State: commonpb.SegmentState_Dropped},
+		{ID: 2, CollectionID: 100, InsertChannel: "ch-0", State: commonpb.SegmentState_Flushed, CompactionFrom: []int64{1}},
+		{ID: 3, CollectionID: 100, InsertChannel: "ch-0", State: commonpb.SegmentState_Growing},
+	})
+	segments := NewSegmentsInfo(store)
+
+	// Before the rebuild the DC-side state is empty.
+	compactTos, ok := segments.GetCompactionTo(1)
+	assert.True(t, ok)
+	assert.Empty(t, compactTos)
+
+	segments.RebuildFromStore()
+
+	compactTos, ok = segments.GetCompactionTo(1)
+	assert.True(t, ok)
+	require.Len(t, compactTos, 1)
+	assert.EqualValues(t, 2, compactTos[0].GetID())
+
+	segments.SetIsCompacting(2, true)
+	assert.True(t, segments.GetSegment(2).isCompacting)
+
+	// A recovered growing segment starts out flushable and idle, matching
+	// NewSegmentInfo.
+	growing := segments.GetSegment(3)
+	assert.False(t, growing.lastFlushTime.IsZero())
+	assert.True(t, growing.lastWrittenTime.IsZero())
+}
+
+// TestSetIsCompactingWithoutRebuild asserts the setters themselves recover
+// from a missing entry, so a segment that reaches memory by some other path
+// than SetSegment still tracks its compaction state.
+func TestSetIsCompactingWithoutRebuild(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	store.LoadSegments([]*datapb.SegmentInfo{{ID: 1, CollectionID: 100, State: commonpb.SegmentState_Flushed}})
+	segments := NewSegmentsInfo(store)
+
+	segments.SetIsCompacting(1, true)
+	assert.True(t, segments.GetSegment(1).isCompacting)
+
+	// An unknown segment is still a no-op rather than a panic.
+	segments.SetIsCompacting(42, true)
+	assert.Nil(t, segments.GetSegment(42))
+}
+
+// TestSetSegmentNormalizesRowCount pins the invariant that makes the shared
+// store trustworthy for row counts: the catalog reconciles a V1/V2 segment's
+// NumOfRows against its insert binlogs only on the copy it persists, so the
+// in-memory segment has to be corrected on its way in. QueryCoord reads that
+// in-memory copy through the MetaView.
+func TestSetSegmentNormalizesRowCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		segment *datapb.SegmentInfo
+		want    int64
+	}{
+		{
+			name: "v2 stale row count is corrected from binlogs",
+			segment: &datapb.SegmentInfo{
+				ID: 1, NumOfRows: 0, StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{
+					{EntriesNum: 20}, {EntriesNum: 10},
+				}}},
+			},
+			want: 30,
+		},
+		{
+			name: "v2 consistent row count is left alone",
+			segment: &datapb.SegmentInfo{
+				ID: 2, NumOfRows: 30, StorageVersion: storage.StorageV2,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 30}}}},
+			},
+			want: 30,
+		},
+		{
+			name: "no insert binlogs cannot answer, so the count stands",
+			segment: &datapb.SegmentInfo{
+				ID: 3, NumOfRows: 42, StorageVersion: storage.StorageV2,
+			},
+			want: 42,
+		},
+		{
+			name: "v3 keeps the writer-reported count",
+			segment: &datapb.SegmentInfo{
+				ID: 4, NumOfRows: 70, StorageVersion: storage.StorageV3,
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 5}}}},
+			},
+			want: 70,
+		},
+		{
+			name: "manifest-backed segment keeps its count",
+			segment: &datapb.SegmentInfo{
+				ID: 5, NumOfRows: 70, ManifestPath: "files/insert_log/1/2/5",
+				Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 5}}}},
+			},
+			want: 70,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := metacache.NewMetaStore(nil)
+			segments := NewSegmentsInfo(store)
+			segments.SetSegment(test.segment.GetID(), &SegmentInfo{SegmentInfo: test.segment})
+
+			stored, ok := store.GetSegment(test.segment.GetID())
+			require.True(t, ok)
+			assert.Equal(t, test.want, stored.GetNumOfRows())
+		})
+	}
 }

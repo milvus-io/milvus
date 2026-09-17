@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -64,7 +65,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ServerSuite struct {
@@ -1275,7 +1275,7 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 	})
 
 	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
+		s := &Server{meta: newEmptyTestMeta()}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1286,13 +1286,13 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
+		assert.Equal(t, 1, len(s.meta.ListCollections()))
 	})
 
 	t.Run("test update meta", func(t *testing.T) {
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(1, &collectionInfo{ID: 1})
-		s := &Server{meta: &meta{collections: collections}}
+		ms := metacache.NewMetaStore(nil)
+		ms.PutCollection(&collectionInfo{ID: 1})
+		s := &Server{meta: &meta{metaStore: ms}}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1301,14 +1301,14 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 		}
 
-		coll, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
+		coll := s.meta.GetCollection(1)
+		assert.NotNil(t, coll)
 		assert.Nil(t, coll.Properties)
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-		coll, ok = s.meta.collections.Get(1)
-		assert.True(t, ok)
+		coll = s.meta.GetCollection(1)
+		assert.NotNil(t, coll)
 		assert.NotNil(t, coll.Properties)
 	})
 }
@@ -1329,6 +1329,7 @@ func TestServer_GcConfirm(t *testing.T) {
 		m := &meta{}
 		catalog := mocks.NewDataCoordCatalog(t)
 		m.catalog = catalog
+		m.metaStore = metacache.NewMetaStore(catalog)
 
 		catalog.On("GcConfirm",
 			mock.Anything,
@@ -2104,16 +2105,18 @@ func TestGetChannelRecoveryInfo(t *testing.T) {
 	handler := NewNMockHandler(t)
 	handler.EXPECT().GetDataVChanPositions(mock.Anything, mock.Anything).Return(channelInfo)
 	s.handler = handler
+	store := metacache.NewMetaStore(nil)
 	s.meta = &meta{
-		segments: NewSegmentsInfo(),
+		metaStore: store,
+		segments:  NewSegmentsInfo(store),
 	}
-	s.meta.segments.segments[1] = NewSegmentInfo(&datapb.SegmentInfo{
+	s.meta.segments.SetSegment(1, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:                   1,
 		CollectionID:         0,
 		PartitionID:          0,
 		State:                commonpb.SegmentState_Growing,
 		IsCreatedByStreaming: false,
-	})
+	}))
 
 	assert.NoError(t, err)
 	resp, err = s.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{
@@ -2265,6 +2268,7 @@ func TestGcControlService(t *testing.T) {
 
 // createTestFlushAllServer creates a test server for FlushAll tests
 func createTestFlushAllServer() *Server {
+	ms := metacache.NewMetaStore(nil)
 	// Create a mock allocator that will be replaced by mockey
 	mockAlloc := &allocator.MockAllocator{}
 	mockBroker := &broker.MockBroker{}
@@ -2273,9 +2277,8 @@ func createTestFlushAllServer() *Server {
 		allocator: mockAlloc,
 		broker:    mockBroker,
 		meta: &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-			channelCPs:  newChannelCps(),
-			segments:    NewSegmentsInfo(),
+			metaStore: ms,
+			segments:  NewSegmentsInfo(ms),
 		},
 		// handler will be set to a mock in individual tests when needed
 	}
@@ -2373,7 +2376,7 @@ func createTestGetFlushAllStateServer() *Server {
 	server := &Server{
 		broker: mockBroker,
 		meta: &meta{
-			channelCPs: newChannelCps(),
+			metaStore: metacache.NewMetaStore(nil),
 		},
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
@@ -2457,8 +2460,10 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		defer mockDescribeCollection.UnPatch()
 
 		// Setup channel checkpoints - both flushed
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
-		server.meta.channelCPs.checkpoints["channel2"] = &msgpb.MsgPosition{Timestamp: 15000}
+		server.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"channel1": {Timestamp: 15000},
+			"channel2": {Timestamp: 15000},
+		})
 
 		req := &milvuspb.GetFlushAllStateRequest{
 			FlushAllTss: map[string]uint64{
@@ -2499,7 +2504,9 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		defer mockDescribeCollection.UnPatch()
 
 		// Setup channel checkpoint with timestamp lower than FlushAllTs
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 10000}
+		server.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"channel1": {Timestamp: 10000},
+		})
 
 		req := &milvuspb.GetFlushAllStateRequest{
 			FlushAllTss: map[string]uint64{
@@ -2539,7 +2546,9 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		defer mockDescribeCollection.UnPatch()
 
 		// Setup channel checkpoint with timestamp >= deprecated FlushAllTs
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 15000}
+		server.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"channel1": {Timestamp: 15000},
+		})
 
 		req := &milvuspb.GetFlushAllStateRequest{
 			FlushAllTs: 15000, // deprecated field
@@ -2577,7 +2586,9 @@ func TestServer_GetFlushAllState(t *testing.T) {
 		defer mockDescribeCollection.UnPatch()
 
 		// Setup channel checkpoint with timestamp < deprecated FlushAllTs
-		server.meta.channelCPs.checkpoints["channel1"] = &msgpb.MsgPosition{Timestamp: 10000}
+		server.meta.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"channel1": {Timestamp: 10000},
+		})
 
 		req := &milvuspb.GetFlushAllStateRequest{
 			FlushAllTs: 15000, // deprecated field
@@ -5383,6 +5394,7 @@ func TestServer_BatchUpdateManifest(t *testing.T) {
 }
 
 func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -5399,7 +5411,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 		recomputeManager := &recordingDataViewManager{}
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo(), dataViewManager: recomputeManager},
+			meta: &meta{segments: NewSegmentsInfo(ms), dataViewManager: recomputeManager},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5438,7 +5450,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5474,7 +5486,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5516,7 +5528,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -5570,7 +5582,7 @@ func TestServer_BatchUpdateManifest_Callback(t *testing.T) {
 
 		server := &Server{
 			ctx:  ctx,
-			meta: &meta{segments: NewSegmentsInfo()},
+			meta: &meta{segments: NewSegmentsInfo(ms)},
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 		RegisterDDLCallbacks(server)
@@ -6543,7 +6555,7 @@ func TestHandleCommitVchannelRPC(t *testing.T) {
 
 func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	ctx := context.Background()
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 	addSegment := func(id int64, channel string, state commonpb.SegmentState, invisible bool) {
 		segments.SetSegment(id, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            id,
@@ -6598,7 +6610,7 @@ func TestHandleCommitVchannelRPCRecomputesAfterImportMetaUnlock(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            10,
 		CollectionID:  100,
@@ -6652,7 +6664,7 @@ func TestHandleCommitVchannelRPCRepublishesDataViewForCommittedVchannel(t *testi
 	ctx := context.Background()
 	catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            10,
 		CollectionID:  100,
@@ -6725,7 +6737,7 @@ func TestHandleCommitVchannelRPCResolvesFinalSegmentsAfterCommit(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(metacache.NewMetaStore(nil))
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            10,
 		CollectionID:  100,
@@ -6794,6 +6806,7 @@ func TestHandleCommitVchannelRPCResolvesFinalSegmentsAfterCommit(t *testing.T) {
 }
 
 func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
@@ -6807,7 +6820,7 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 		Return(int64(100), segIDs).Build()
 	defer getSegIDsMock.UnPatch()
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(ms)
 	for _, segID := range segIDs {
 		segments.SetSegment(segID, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID:            segID,
@@ -6851,6 +6864,7 @@ func TestHandleCommitVchannelRPC_StoresCommitTimestamp(t *testing.T) {
 }
 
 func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
@@ -6864,7 +6878,7 @@ func TestHandleCommitVchannelRPC_RejectsCommitTimestampBelowBinlogTimestamp(t *t
 		Return(int64(100), segIDs).Build()
 	defer getSegIDsMock.UnPatch()
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(ms)
 	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 		ID:            10,
 		CollectionID:  100,
@@ -7015,6 +7029,7 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 // should flip these assertions; until then the current behavior is recorded
 // rather than left to be discovered.
 func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
+	ms := metacache.NewMetaStore(nil)
 	ctx := context.Background()
 
 	importMetaMock := NewMockImportMeta(t)
@@ -7028,7 +7043,7 @@ func TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet(t *testing.T) {
 		Return(int64(100), segIDs).Build()
 	defer getSegIDsMock.UnPatch()
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(ms)
 	// Exactly the shape a reloaded V3 import segment has: a manifest, no binlog
 	// arrays, and Stats carrying the row timestamps that did survive the restart.
 	segments.SetSegment(11, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{

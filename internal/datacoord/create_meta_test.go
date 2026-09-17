@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -470,174 +471,171 @@ func withStatsTaskMeta(stm *statsTaskMeta) testMetaOption {
 
 func createMeta(catalog metastore.DataCoordCatalog, opts ...testMetaOption) *meta {
 	mt := &meta{
-		catalog:     catalog,
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				1000: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           1000,
-						CollectionID: 10000,
-						PartitionID:  10001,
-						NumOfRows:    3000,
-						State:        commonpb.SegmentState_Flushed,
-						Binlogs:      []*datapb.FieldBinlog{{FieldID: 10002, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}, {LogID: 3}}}},
-					},
-				},
-				1001: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           1001,
-						CollectionID: 10000,
-						PartitionID:  10001,
-						NumOfRows:    3000,
-						State:        commonpb.SegmentState_Flushed,
-						Binlogs:      []*datapb.FieldBinlog{{FieldID: 10002, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}, {LogID: 3}}}},
-					},
-				},
-				1002: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:           1002,
-						CollectionID: 10000,
-						PartitionID:  10001,
-						NumOfRows:    3000,
-						State:        commonpb.SegmentState_Flushed,
-						Binlogs:      []*datapb.FieldBinlog{{FieldID: 10002, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}, {LogID: 3}}}},
-					},
-				},
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1025,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 1,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 2,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 3: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 3,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      500,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 4: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 4,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 5: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 5,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 6: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 6,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 7: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 7,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 8: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 8,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      1026,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 9: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 9,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      500,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
-				},
-				segID + 10: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 10,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "",
-						NumOfRows:      500,
-						State:          commonpb.SegmentState_Flushed,
-						MaxRowNum:      65536,
-						LastExpireTime: 10,
-					},
+		metaStore: metacache.NewMetaStore(catalog),
+		segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+			1000: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           1000,
+					CollectionID: 10000,
+					PartitionID:  10001,
+					NumOfRows:    3000,
+					State:        commonpb.SegmentState_Flushed,
+					Binlogs:      []*datapb.FieldBinlog{{FieldID: 10002, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}, {LogID: 3}}}},
 				},
 			},
-		},
+			1001: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           1001,
+					CollectionID: 10000,
+					PartitionID:  10001,
+					NumOfRows:    3000,
+					State:        commonpb.SegmentState_Flushed,
+					Binlogs:      []*datapb.FieldBinlog{{FieldID: 10002, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}, {LogID: 3}}}},
+				},
+			},
+			1002: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:           1002,
+					CollectionID: 10000,
+					PartitionID:  10001,
+					NumOfRows:    3000,
+					State:        commonpb.SegmentState_Flushed,
+					Binlogs:      []*datapb.FieldBinlog{{FieldID: 10002, Binlogs: []*datapb.Binlog{{LogID: 1}, {LogID: 2}, {LogID: 3}}}},
+				},
+			},
+			segID: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1025,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 1: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 1,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 2: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 2,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 3: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 3,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      500,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 4: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 4,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 5: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 5,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 6: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 6,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 7: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 7,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 8: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 8,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      1026,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 9: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 9,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      500,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+			segID + 10: {
+				SegmentInfo: &datapb.SegmentInfo{
+					ID:             segID + 10,
+					CollectionID:   collID,
+					PartitionID:    partID,
+					InsertChannel:  "",
+					NumOfRows:      500,
+					State:          commonpb.SegmentState_Flushed,
+					MaxRowNum:      65536,
+					LastExpireTime: 10,
+				},
+			},
+		}),
 	}
 
 	for _, opt := range opts {
