@@ -61,10 +61,10 @@ func TestSummaryManagerPersistsThroughPChannelLevel(t *testing.T) {
 	require.Len(t, scheduler.tasks, 1)
 	require.NoError(t, scheduler.tasks[0].Execute(ctx))
 	require.Len(t, manager.Manifest().GetChunks(), 1)
-	require.Equal(t, uint64(9), manager.LastAcked().TimeTick, "first publication gates confirmation")
+	require.Equal(t, uint64(0), manager.LastAcked(), "first publication gates confirmation")
 	require.Len(t, scheduler.tasks, 2)
 	require.NoError(t, scheduler.tasks[1].Execute(ctx))
-	require.Equal(t, uint64(10), manager.LastAcked().TimeTick)
+	require.Equal(t, uint64(10), manager.LastAcked())
 	manager.RequestFlushThrough(10)
 	require.Len(t, scheduler.tasks, 2)
 }

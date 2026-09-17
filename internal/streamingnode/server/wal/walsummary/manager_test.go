@@ -242,7 +242,7 @@ func TestManagerRestoreProbesOrphanChunk(t *testing.T) {
 	// Simulate a crash between chunk write and manifest publish: write a chunk
 	// directly without recording it.
 	orphan := buildIdempotencySections(idempotencyWrite{timeTick: 300, key: "orphan", pk: 300})
-	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan})
+	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan}, TimeTickRange{Start: 100, End: 300})
 	require.NoError(t, err)
 
 	recovered := newTestManager(t, manager.cfg.Store, 1<<30)
@@ -289,7 +289,7 @@ func TestManagerGCReleasesOldestFirstUnderBudget(t *testing.T) {
 	// The released object is gone; the coverage boundary is retained.
 	_, _, err := manager.cfg.Store.ReadChunk(ctx, 0, 1)
 	assert.Error(t, err, "chunk object must be deleted after release")
-	assert.NotNil(t, manager.Manifest().GetLastChunk())
+	assert.NotNil(t, manager.Manifest().GetCoverage())
 
 	// A budget below one object releases everything: the bound is soft, and
 	// release frees whole objects.
@@ -479,12 +479,11 @@ func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 	ctx := context.Background()
 	manager, store := newTestManagerWithStore(t)
 	for gen := uint64(0); gen < 3; gen++ {
-		_, _, err := store.WriteChunk(ctx, gen, nil)
+		_, _, err := store.WriteChunk(ctx, gen, nil, testRecordRange(nil))
 		require.NoError(t, err)
 	}
 	require.NoError(t, store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
-		LastChunk:       &streamingpb.PChannelSummaryChunkRef{Generation: 2, Term: 1},
-		CoveredPosition: &streamingpb.PChannelSummaryPosition{TimeTick: 300},
+		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, EndTimeTick: 300},
 	}))
 	require.NoError(t, manager.Restore(ctx))
 	require.NoError(t, gcSummary(ctx, manager))
@@ -493,7 +492,7 @@ func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, exists)
 	}
-	require.Equal(t, uint64(2), manager.Manifest().GetLastChunk().GetGeneration())
+	require.Equal(t, uint64(2), manager.Manifest().GetCoverage().GetGeneration())
 }
 
 // TestConcurrentFlushAndGCRelease exercises the manifest publish paths
@@ -698,7 +697,9 @@ func writeIdempotencyChunk(
 	t.Helper()
 	footer, objectSize, err := store.WriteChunk(context.Background(), generation, map[string]*ChunkSections{
 		vchannel: sections,
-	})
+	}, testRecordRange(map[string]*ChunkSections{
+		vchannel: sections,
+	}))
 	require.NoError(t, err)
 	manager.mu.Lock()
 	recordChunk(manager.manifest, chunkIndexEntryFromFooter(footer, objectSize))
@@ -1094,7 +1095,7 @@ func TestGCSweepsRetiredTermObjects(t *testing.T) {
 	// Term 1, unaware it is fenced, writes one more chunk AFTER that probe. It
 	// lands at the same generation term 2 will claim, under its own term, so
 	// the two objects coexist and no manifest names term 1's.
-	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}))
+	_, _, err := store1.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}), testRecordRange(writeSections(map[string][]uint64{"v1": {200}})))
 	require.NoError(t, err)
 	orphanKey := store1.ChunkKey(1)
 	exists, err := cm.Exist(ctx, orphanKey)

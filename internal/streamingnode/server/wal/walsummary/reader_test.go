@@ -91,7 +91,7 @@ func TestReadKeepsWholeOversizedTransaction(t *testing.T) {
 	}
 }
 
-func TestReadDetectsDurableTruncationAfterRestart(t *testing.T) {
+func TestReadReportsDurableFastForwardAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	m, store := newTransformTestManagerWithStore(t)
 	var released bool
@@ -102,8 +102,15 @@ func TestReadDetectsDurableTruncationAfterRestart(t *testing.T) {
 	require.Empty(t, m.Manifest().GetChunks())
 	restored := newTestManager(t, store, 1)
 	require.NoError(t, restored.Restore(ctx))
-	_, err := restored.ReadTransform(ctx, "v1", 99, 200, ReadLimits{})
-	require.ErrorIs(t, err, ErrTransformTruncated)
+	forwarded, err := restored.ReadTransform(ctx, "v1", 99, 200, ReadLimits{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), forwarded.FastForwardTimeTick)
+	require.Empty(t, forwarded.Entries)
+	short, err := restored.ReadTransform(ctx, "v1", 0, 50, ReadLimits{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), short.FastForwardTimeTick)
+	require.Equal(t, uint64(50), short.CoveredThrough, "requested end still caps the read")
+	require.Empty(t, short.Entries)
 	b, err := restored.ReadTransform(ctx, "v1", 100, 200, ReadLimits{})
 	require.NoError(t, err)
 	require.Equal(t, uint64(100), b.CoveredThrough)
@@ -138,8 +145,10 @@ func TestReadSnapshotPinsObjectsAcrossGC(t *testing.T) {
 	require.Len(t, b.Entries, 2, "snapshot must not omit or duplicate a section moving to disk")
 	require.Equal(t, uint64(200), b.CoveredThrough)
 	require.NoError(t, gcSummary(ctx, m))
-	_, err = m.ReadTransform(ctx, "v1", 0, 200, ReadLimits{})
-	require.ErrorIs(t, err, ErrTransformTruncated)
+	b, err = m.ReadTransform(ctx, "v1", 0, 200, ReadLimits{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), b.FastForwardTimeTick)
+	require.Len(t, b.Entries, 1)
 }
 
 func TestConcurrentReadObserveAndSeal(t *testing.T) {
@@ -172,4 +181,36 @@ func TestConcurrentReadObserveAndSeal(t *testing.T) {
 		}
 	}
 	wg.Wait()
+}
+
+func TestFastForwardAndReferenceRemovalPublishTogether(t *testing.T) {
+	ctx := context.Background()
+	m, store := newTransformTestManagerWithStore(t)
+	var released bool
+	flushTransform(t, m, "v1", 100, &released)
+	m.AdvanceGCTimeTick("v1", 100)
+	m.cfg.RetentionMaxBytes = 1
+	require.NoError(t, m.GCOnce(ctx))
+	patch := mockey.Mock((*Store).WriteManifest).Return(context.DeadlineExceeded).Build()
+	defer patch.UnPatch()
+	require.Error(t, m.manifestTask.Execute(ctx))
+	patch.UnPatch()
+	// A failed publication leaves both the old reference and old reader floor.
+	before := newTestManager(t, nextTermStore(store), 1<<30)
+	require.NoError(t, before.Restore(ctx))
+	batch, err := before.ReadTransform(ctx, "v1", 0, 100, ReadLimits{})
+	require.NoError(t, err)
+	require.Zero(t, batch.FastForwardTimeTick)
+	require.Len(t, batch.Entries, 1)
+	require.NoError(t, m.manifestTask.Execute(ctx))
+	after := newTestManager(t, nextTermStore(store), 1<<30)
+	require.NoError(t, after.Restore(ctx))
+	batch, err = after.ReadTransform(ctx, "v1", 0, 100, ReadLimits{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), batch.FastForwardTimeTick)
+	require.Empty(t, batch.Entries)
+	require.Empty(t, after.Manifest().Chunks)
+	exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(0))
+	require.NoError(t, err)
+	require.True(t, exists, "physical deletion follows publication independently")
 }

@@ -162,14 +162,18 @@ Tracker exposes:
 ```go
 CompletedPoint() WALCheckpoint
 Completed() (WALCheckpoint, uint64)
+CheckpointThrough(summaryTimeTick uint64) (WALCheckpoint, uint64)
 ```
 
-The publisher freezes the minimum by TimeTick of this point and Summary's
-`LastAcked`; neither frontier alone permits publication. The
+Tracker also exposes `CheckpointThrough(summaryTimeTick)`, which selects the
+last completed entry no later than Summary's logical `LastAcked`. Completed
+entries keep only their position and byte-offset metadata until this selection;
+payloads are released immediately. TimeTick, MessageID and offset are selected
+from one entry, never assembled from independent frontiers. The
 published checkpoint remains a separate state until catalog commit succeeds.
 
 An asynchronous consumer always marks its component dirty before releasing its
-last handle. Therefore a snapshot collection after freezing `CompletedPoint`
+last handle. Therefore a snapshot collection after selecting `CheckpointThrough`
 contains the recoverable component state required by every message in the
 candidate prefix.
 

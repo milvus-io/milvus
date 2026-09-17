@@ -47,7 +47,7 @@ func TestRecoveryRestoresIdempotencyHistoryAtBarrier(t *testing.T) {
 			durable := newRecoveryIdempotentInsert("historical-vchannel", "durable-key", 10, result)
 			previous.ObserveMessage(ctx, durable)
 			previous.RequestFlushThrough(10)
-			require.Equal(t, uint64(10), previous.LastAcked().TimeTick)
+			require.Equal(t, uint64(10), previous.LastAcked())
 
 			// The checkpoint is newer than this retained history, and the write
 			// path has no collection for either vchannel. Neither may filter IKs.

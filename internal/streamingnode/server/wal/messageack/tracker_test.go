@@ -310,3 +310,30 @@ func testVChannelMessage(t *testing.T, vchannel string, messageID int64, timetic
 		WithLastConfirmed(walimplstest.NewTestMessageID(messageID)).
 		IntoImmutableMessage(walimplstest.NewTestMessageID(messageID + 100))
 }
+
+func TestCheckpointThroughSelectsCoherentCompletedPosition(t *testing.T) {
+	tracker := NewTracker(utility.WALCheckpoint{TimeTick: 10}, nil, nil)
+	firstRaw, secondRaw := testMessage(t, 2, 20), testMessage(t, 2, 40)
+	first, second := tracker.Track(firstRaw), tracker.Track(secondRaw)
+	second.Release()
+	point, offset := tracker.CheckpointThrough(100)
+	require.Equal(t, uint64(10), point.TimeTick, "an incomplete prefix still blocks publication")
+	require.Zero(t, offset)
+	first.Release()
+	require.Len(t, tracker.checkpointPending, 2)
+	for _, entry := range tracker.checkpointPending {
+		require.Nil(t, entry.message, "waiting for Summary retains no message payload")
+	}
+	point, offset = tracker.CheckpointThrough(30)
+	require.Equal(t, uint64(20), point.TimeTick, "a tick gap must select an actual tracked position")
+	require.True(t, firstRaw.LastConfirmedMessageID().EQ(point.MessageID))
+	require.Equal(t, logicalMessageSize(firstRaw), offset)
+	point, offset = tracker.CheckpointThrough(40)
+	require.Equal(t, uint64(40), point.TimeTick, "equal MessageIDs can have different logical positions")
+	require.True(t, secondRaw.LastConfirmedMessageID().EQ(point.MessageID))
+	require.Equal(t, logicalMessageSize(firstRaw)+logicalMessageSize(secondRaw), offset)
+	require.Empty(t, tracker.checkpointPending)
+	older, olderOffset := tracker.CheckpointThrough(20)
+	require.Equal(t, point, older)
+	require.Equal(t, offset, olderOffset)
+}

@@ -23,6 +23,8 @@ import (
 	"math"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -58,6 +60,7 @@ type L0Materializer struct {
 	pendingFlushes        []message.RetainedImmutableMessage
 	backlogThrough        uint64
 	activeGoal            uint64
+	capacityProbeThrough  uint64
 	materializeUpperBound uint64
 	reader                walsummary.TransformReader
 	materializeMaxRows    uint64
@@ -161,6 +164,7 @@ func (m *L0Materializer) scheduleLocked() *materializeTask {
 		return nil
 	}
 	target := safe
+	capacity := false
 	switch {
 	case m.activeGoal > m.materializedTimeTick:
 		if m.activeGoal > safe {
@@ -178,11 +182,12 @@ func (m *L0Materializer) scheduleLocked() *materializeTask {
 			return nil
 		}
 		stats := m.reader.TransformStats(m.vchannel, m.materializedTimeTick, safe)
-		if stats.Rows < m.materializeMaxRows && stats.Bytes < m.materializeMaxBytes {
+		if stats.UpperBytes < m.materializeMaxBytes || stats.LastTimeTick <= m.capacityProbeThrough {
 			return nil
 		}
+		capacity = true
 	}
-	m.task = &materializeTask{materializer: m, target: target}
+	m.task = &materializeTask{materializer: m, target: target, capacity: capacity}
 	return m.task
 }
 
@@ -192,7 +197,7 @@ func (m *L0Materializer) submit(task *materializeTask) {
 	}
 }
 
-func (m *L0Materializer) materialize(ctx context.Context, target uint64) error {
+func (m *L0Materializer) materialize(ctx context.Context, target uint64, capacity bool) error {
 	m.mu.Lock()
 	after := m.materializedTimeTick
 	target = min(target, m.requestedThrough, m.materializeUpperBound)
@@ -203,9 +208,24 @@ func (m *L0Materializer) materialize(ctx context.Context, target uint64) error {
 	if m.reader == nil {
 		return merr.WrapErrServiceInternalMsg("L0 materializer summary reader is nil")
 	}
+	if capacity {
+		ready, err := m.checkCapacity(ctx, after, target)
+		if err != nil {
+			return err
+		}
+		if !ready {
+			m.mu.Lock()
+			m.capacityProbeThrough = max(m.capacityProbeThrough, target)
+			m.mu.Unlock()
+			return nil
+		}
+	}
 	batch, err := m.reader.ReadTransform(ctx, m.vchannel, after, target, walsummary.ReadLimits{MaxRows: m.materializeMaxRows, MaxBytes: m.materializeMaxBytes})
 	if err != nil {
 		return err
+	}
+	if batch.FastForwardTimeTick > after {
+		return merr.WrapErrDataIntegrityMsg("L0 materialized position %d precedes summary fast-forward %d", after, batch.FastForwardTimeTick)
 	}
 	if batch.CoveredThrough <= after {
 		return nodescheduler.ErrDelay
@@ -228,6 +248,7 @@ func (m *L0Materializer) materialize(ctx context.Context, target uint64) error {
 	}
 	m.mu.Lock()
 	m.materializedTimeTick = batch.CoveredThrough
+	m.capacityProbeThrough = 0
 	if m.materializedTimeTick >= m.activeGoal {
 		m.activeGoal = 0
 	}
@@ -247,4 +268,28 @@ func (m *L0Materializer) materialize(ctx context.Context, target uint64) error {
 	}
 	clear(completed)
 	return nil
+}
+
+// checkCapacity resolves only uncertain boundary sections. Row limits govern
+// output batches, not admission; the probe is bounded by the byte target.
+func (m *L0Materializer) checkCapacity(ctx context.Context, after, target uint64) (bool, error) {
+	stats := m.reader.TransformStats(m.vchannel, after, target)
+	if stats.Bytes >= m.materializeMaxBytes {
+		return true, nil
+	}
+	if stats.UpperBytes < m.materializeMaxBytes {
+		return false, nil
+	}
+	batch, err := m.reader.ReadTransform(ctx, m.vchannel, after, target, walsummary.ReadLimits{MaxBytes: m.materializeMaxBytes})
+	if err != nil {
+		return false, err
+	}
+	if batch.FastForwardTimeTick > after {
+		return false, merr.WrapErrDataIntegrityMsg("L0 materialized position %d precedes summary fast-forward %d", after, batch.FastForwardTimeTick)
+	}
+	var size uint64
+	for _, entry := range batch.Entries {
+		size += uint64(proto.Size(entry))
+	}
+	return size >= m.materializeMaxBytes || batch.CoveredThrough < min(target, batch.ReadableThrough), nil
 }

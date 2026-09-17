@@ -2,6 +2,7 @@ package recovery
 
 import (
 	"context"
+	"math"
 	"sync"
 
 	"google.golang.org/protobuf/proto"
@@ -270,7 +271,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	// the frontier never starts behind a checkpoint that was already
 	// persisted; the WAL replay re-observes messages right after.
 	if summaryManager != nil {
-		summaryManager.InitLastAcked(r.checkpoint)
+		summaryManager.InitLastAcked(r.checkpoint.TimeTick)
 	}
 	return nil
 }
@@ -412,25 +413,12 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	if r.checkpoint != nil {
 		checkpoint = r.checkpoint.Clone()
 	}
-	completedPoint, completedLogicalOffset := r.ackTracker.Completed()
-	// The summary consumes the WAL without retaining message references, so
-	// the tracker's completed point does not include it. Merge the summary's
-	// own confirmation frontier: the persisted checkpoint must never advance
-	// past a staged-but-not-yet-durable delete record (the WAL truncation
-	// would delete it and recovery would never replay it). Compare logical
-	// timeticks: distinct frontiers can share the same safe message ID.
+	summaryThrough := uint64(math.MaxUint64)
 	if r.summaryManager != nil {
-		if summaryAcked := r.summaryManager.LastAcked(); summaryAcked != nil {
-			if completedPoint.MessageID == nil || summaryAcked.TimeTick < completedPoint.TimeTick {
-				completedPoint = *summaryAcked
-				// The tracker offset covers a later frontier; retain the last
-				// published offset until summary catches up.
-				if r.tailController != nil {
-					completedLogicalOffset = r.tailController.Snapshot().PublishedOffset
-				}
-			}
-		}
+		summaryThrough = r.summaryManager.LastAcked()
 	}
+	completedPoint, completedLogicalOffset := r.ackTracker.CheckpointThrough(summaryThrough)
+
 	if checkpoint != nil && !shouldAdvanceConsumePoint(*checkpoint, completedPoint) {
 		completedPoint = *checkpoint.Clone()
 		if r.tailController != nil {

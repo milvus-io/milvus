@@ -219,19 +219,19 @@ func TestTransformSectionsRoundTripAndRetry(t *testing.T) {
 	sections := writeSections(map[string][]uint64{"v1": {200}})
 	sections["v1"].Transform = []*streamingpb.VChannelSummaryTransformRecord{record(110, 2), record(100, 1)}
 	sections["delete-only"] = &ChunkSections{Transform: []*streamingpb.VChannelSummaryTransformRecord{record(90, 3)}}
-	footer, _, err := store.WriteChunk(ctx, 0, sections)
+	footer, _, err := store.WriteChunk(ctx, 0, sections, testRecordRange(sections))
 	require.NoError(t, err)
-	require.Equal(t, uint64(90), footer.GetStartTimetick())
+	require.Equal(t, uint64(89), footer.GetStartTimetick())
 	require.Equal(t, uint64(200), footer.GetEndTimetick())
 	decoded, _, err := store.ReadChunk(ctx, 0, store.Term())
 	require.NoError(t, err)
 	require.True(t, chunkSectionsByVChannelEqual(sections, decoded))
 	require.Equal(t, uint64(100), decoded["v1"].Transform[0].GetTimeTick())
 	require.Empty(t, decoded["delete-only"].Inserts)
-	_, _, err = store.WriteChunk(ctx, 0, decoded)
+	_, _, err = store.WriteChunk(ctx, 0, decoded, testRecordRange(decoded))
 	require.NoError(t, err, "sorted rewrite has the same content")
 	decoded["v1"].Transform[0] = record(100, 999)
-	_, _, err = store.WriteChunk(ctx, 0, decoded)
+	_, _, err = store.WriteChunk(ctx, 0, decoded, testRecordRange(decoded))
 	require.ErrorIs(t, err, ErrStoreCorrupted, "a transform-only difference is not an idempotent retry")
 }
 
@@ -249,7 +249,7 @@ func TestTransformSectionRejectsCorruptRefs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			bad := proto.Clone(ref).(*streamingpb.VChannelSummarySectionRef)
 			alter(bad)
-			_, err := unmarshalTransformSection(buf.Bytes(), uint64(buf.Len()), &streamingpb.VChannelSummaryChunkIndex{Vchannel: "v1", Transform: bad})
+			_, err := unmarshalTransformSection(buf.Bytes(), uint64(buf.Len()), &streamingpb.VChannelSummaryChunkIndex{Vchannel: "v1", Transform: &streamingpb.VChannelSummaryTransformIndex{Ref: bad}})
 			require.ErrorIs(t, err, ErrStoreCorrupted)
 		})
 	}
@@ -278,7 +278,7 @@ func TestTransformSectionRejectsMalformedPayload(t *testing.T) {
 	_, err := unmarshalTransformSection(newChunkHeader(), chunkHeaderSize, index)
 	require.ErrorIs(t, err, ErrStoreCorrupted)
 	payload := append(newChunkHeader(), byte(0xff))
-	index.Transform = &streamingpb.VChannelSummarySectionRef{Offset: chunkHeaderSize, Length: 1, RecordCount: 1}
+	index.Transform = &streamingpb.VChannelSummaryTransformIndex{Ref: &streamingpb.VChannelSummarySectionRef{Offset: chunkHeaderSize, Length: 1, RecordCount: 1}}
 	_, err = unmarshalTransformSection(payload, uint64(len(payload)), index)
 	require.ErrorIs(t, err, ErrStoreCorrupted)
 	require.NoError(t, store.chunkManager.Write(ctx, store.ChunkKey(0), payload))
@@ -348,7 +348,7 @@ func TestSummaryDoesNotPersistBarrierEntries(t *testing.T) {
 			}
 			require.NoError(t, persistSummary(ctx, manager))
 			require.Len(t, manager.Manifest().GetChunks(), expectedRecords, "barriers must not create chunks")
-			require.Equal(t, uint64(203), manager.LastAcked().TimeTick)
+			require.Equal(t, uint64(203), manager.LastAcked())
 			recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 2), 1<<30)
 			require.NoError(t, recovered.Restore(ctx))
 			entries, err := recovered.ReadTransformEntries(ctx, "v1", 0, math.MaxUint64)

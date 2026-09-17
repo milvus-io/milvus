@@ -116,27 +116,37 @@ The manifest describes the retained data organization and accelerates access:
 - chunk identities, sizes and TimeTick ranges;
 - per-vchannel section locations and record counts;
 - the monotonically advancing published sequence boundary and corresponding
-  covered WAL position, retained even when the chunk set becomes empty.
+  covered WAL TimeTick interval, retained even when the chunk set becomes empty.
 
-The coverage boundary distinguishes unpublished tail objects from objects
-already removed by retention but not yet physically deleted. It describes
-which WAL prefix has been summarized; it is not a GC task or retry state.
-The proto fields are `last_chunk` and `covered_position`; the latter contains
-a logical `time_tick` and a safe physical `message_id` (LastConfirmedMessageID).
-The `transform_truncated_through` map records each VChannel’s last removed
-Delete entry; GC publishes this together with reference removal. It survives
-an empty retained chunk set. The manifest contains no `pending_gc` queue or
-DDL invalidation markers.
+The manifest's `coverage: SummaryCoverage` stores the last continuously covered
+`generation` and `term` together with `(start_time_tick, end_time_tick]` of the
+complete summarized WAL interval. It is progress metadata, not an object
+reference. Removing even every retained chunk leaves coverage intact. An empty
+manifest is authoritative; it must never resurrect an older retained set.
 
-Each `VChannelSummaryChunkIndex` has independent `idempotency`, `inserts`, and
-`transform` section references. The first two sections are paired by position;
-transform records are independently ordered by WAL TimeTick. DDL does not
-invalidate the history of executed requests.
+Chunk footer and chunk index `start_timetick/end_timetick` describe complete WAL
+coverage `(start,end]`, including keyless inserts and payload-free barriers.
+Consecutive chunks share their boundary. Per-VChannel indexes instead describe
+actual stored record ranges. There is no additional covered position or physical
+message ID in Summary. `LastAcked()` returns only a TimeTick; RecoveryStorage's
+Tracker selects a completed WAL checkpoint at or below it. Only WALCheckpoint
+persists the physical replay position.
 
-`transform_end_timetick` bounds transform retention without waiting for later
-inserts in the same chunk. Physical deletion remains subject to L0Materializer's
-durable materialization or cleanup frontier and any additional history retention
-requirements when subscription consumers are integrated.
+`transform_fast_forward_time_tick[vchannel]` records the last retired Delete
+boundary. GC advances it with each removed Transform index's end TimeTick and
+publishes it atomically with reference removal, before physical deletion.
+Materialization alone does not advance it. Readers explicitly report a
+fast-forward when a cursor precedes the boundary; skipped history is never
+reported as a proven empty interval. L0 must reject a fast-forward beyond its
+durable materialized position as inconsistent recovery state.
+
+Each VChannel index has paired idempotency/inserts sections and a separate
+`VChannelSummaryTransformIndex { ref, start_time_tick, end_time_tick, total_size }`.
+The Transform range contains actual Delete records; total_size counts logical
+entry bytes. No per-entry statistics are persisted or retained in a separate
+runtime index. Full sections provide exact size; boundary sections provide
+bounds and are read asynchronously when exact capacity admission is needed.
+DDL does not invalidate executed-request history.
 
 ### 2.5 Chunk Format And Read Validation
 
@@ -149,8 +159,8 @@ per-vchannel payload sections:
   idempotency: {key, row_offsets}[]                    (optional)
   inserts:    {message_id, timetick, last_confirmed, ids}[]
   transform:  {timetick, delete blocks}[]              (optional)
-protobuf footer: pchannel, generation, term, TimeTick span,
-  coverage position, per-vchannel section indexes
+protobuf footer: pchannel, generation, term, complete WAL TimeTick span,
+  per-vchannel section indexes
 SHA-256 of the exact footer bytes
 4-byte footer length | "PSCFT001"
 ```
@@ -253,7 +263,7 @@ pins the continuous frontier; later completed uploads cannot bypass it.
 
 ### 3.2 Confirmation And The First Publication Of A Term
 
-`LastAcked` exposes a continuous position that the specified recovery algorithm
+`LastAcked` exposes a continuous TimeTick that the specified recovery algorithm
 can reconstruct. A copied/released source message or an isolated completed
 upload does not establish this property. Non-record messages can extend the
 confirmed span once preceding record-bearing messages are safely covered.
@@ -384,7 +394,7 @@ subscription delivery cursors are not retention acknowledgements. Unknown
 requirements during recovery keep history pinned until they are reconstructed.
 Summary accepts storage retention constraints, not QueryView-specific types.
 
-The read contract also requires a recoverable truncation boundary (§5.4).
+The read contract also requires a durable fast-forward boundary (§5.4).
 Reference removal and that boundary must be published consistently, so restart
 cannot report removed history as a successfully read empty interval. Local read
 pins protect in-progress I/O; view-level requirements protect future reads.
@@ -466,7 +476,7 @@ choice; the semantic result is:
 
 ```text
 ReadTransform(vchannel, after, through, row/byte limit)
-    -> Entries, CoveredThrough, retained/readable bounds
+    -> Entries, CoveredThrough, ReadableThrough, FastForwardTimeTick, Changed
 ReadableProgress() -> coverage and change token
 WaitForChange(token)
 ```
@@ -478,7 +488,7 @@ waiting for Summary uploads. `LastAcked` retains its separate durability meaning
 
 The contract is:
 
-1. Return Delete entries strictly in `(after, CoveredThrough]`, ordered by
+1. Return Delete entries strictly in `(max(after, FastForwardTimeTick), CoveredThrough]`, ordered by
    source WAL TimeTick, with `CoveredThrough <= through`.
 2. CoveredThrough proves every Delete in that interval has been included.
    Page limits stop at a complete Entry boundary; a Txn uses its outer TimeTick
@@ -489,12 +499,14 @@ The contract is:
 4. Capture disk indexes and in-memory records consistently with readable
    progress. A concurrent pending/sealed/durable transition cannot leave a
    record in neither half or return it twice.
-5. Reject a cursor before the retained transform window. Persist enough
-   truncation information to retain this distinction after restart and after
-   the last chunk is removed. `transform_truncated_through` records the largest
-   removed Delete TimeTick per VChannel; cursors before it fail with
-   `ErrTransformTruncated`. Existing `covered_position` proves summarization,
-   not retained history.
+5. A cursor before retained history is explicitly fast-forwarded. Return
+   `FastForwardTimeTick` with the last retired Delete boundary, and read only
+   after that boundary. `CoveredThrough` remains capped by the requested and
+   readable ends; it describes coverage after accounting for this explicit
+   skip, not proof that retired history was empty. Persist the per-VChannel
+   `transform_fast_forward_time_tick` with reference removal, even when the
+   last chunk is removed. L0 rejects any fast-forward beyond its materialized
+   cursor. Future subscription adaptors must expose the skip to their caller.
 6. Missing or corrupt referenced objects fail the read; an absent VChannel
    section means an empty interval only within known complete retained coverage.
 7. Pin a read's required objects against local deletion. Pins have bounded read
@@ -676,7 +688,7 @@ RecoveryStorage observes Summary before VChannel modules. L0Materializer
 restores only its durable cursor, and replay/RecoveryBarrier requests the
 window to read; startup no longer preloads Delete payloads. Both full and
 base-only VChannel snapshot commits report their captured materialization
-frontiers. The manifest persists per-VChannel transform truncation bounds,
+frontiers. The manifest persists per-VChannel transform fast-forward TimeTicks,
 including after removal of the last chunk.
 
 L0 admission uses capacity, explicit completion, or Summary backlog requests.
@@ -686,13 +698,15 @@ unfinished requests are replayed from WAL without a persisted request field. Cap
 tail. Forced requests use captured finite goals. The policy has no L0 age timer
 and does not use `FlushL0MaxLifetime` as a trigger.
 
-`TransformStats(vchannel, after, through)` uses per-VChannel prefix indexes
-covering hot and durable Delete entries, clamped to readable coverage. The
-manifest's `transform_stats` records one TimeTick and cumulative PK row/logical
-byte counts per complete Entry within each VChannel chunk section. Recovery
-validates these indexes and rebuilds the in-memory prefixes without loading
-payloads. Storage transitions do not double count; GC drops released prefixes.
-These are record metadata, not a second Delete payload buffer.
+`TransformStats(vchannel, after, through)` returns lower/upper logical-byte
+bounds from section totals spanning hot, sealed and durable records. The
+manifest stores one Transform index per VChannel section, with its actual
+Delete range and total size. Pending records use one aggregate per VChannel;
+sealing transfers that aggregate without maintaining per-entry metadata.
+Fully included sections contribute exact totals; partial sections contribute
+only to the upper bound. L0 resolves uncertain admission by bounded async reads.
+Summary backlog similarly resolves a partial section's oldest remaining Delete
+with a bounded read in its existing worker. Object I/O never enters Observe.
 
 Count-budget wiring remains absent (§3.4). Future subscription retention and
 cross-owner GC fencing remain separate follow-up work.

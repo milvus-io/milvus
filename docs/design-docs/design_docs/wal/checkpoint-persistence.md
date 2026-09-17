@@ -24,7 +24,7 @@ The checkpoint is the largest published continuous prefix. Internally, the
 Tracker also has a completed point that may be newer than the published point:
 
 ```text
-candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
+candidate = Tracker.CheckpointThrough(WALSummary.LastAcked())
 published checkpoint <= candidate <= observed WAL tail
 ```
 
@@ -62,8 +62,8 @@ replay position, just like a Segment snapshot (see [§7](#7-pchannel-control-sta
 Transform records themselves are not a component snapshot: their durability is
 owned by the pchannel-scoped WALSummary (chunk + manifest on object storage,
 term-scoped object keys). The summary copies records without retaining message handles. RecoveryStorage
-clamps the tracker frontier to `WALSummary.LastAcked()` by TimeTick before
-publishing, so the global checkpoint cannot pass the recoverable summary prefix. See
+selects a complete tracked WAL position at or below the logical
+`WALSummary.LastAcked()` TimeTick before publishing, so the global checkpoint cannot pass the recoverable summary prefix. See
 [WALSummary Design](summary.md).
 
 The persisted component fields use one uniform name:
@@ -117,7 +117,7 @@ mechanism; it does not create another recovery cursor.
 The publisher executes:
 
 ```text
-candidate = min_by_TimeTick(Tracker.CompletedPoint(), WALSummary.LastAcked())
+candidate = Tracker.CheckpointThrough(WALSummary.LastAcked())
 freeze candidate
   -> consume stable dirty component snapshots
   -> save all component deltas
