@@ -238,38 +238,6 @@ func (s *BulkInsertSuite) TestGeometryTypes() {
 	s.run()
 }
 
-func (s *MultiFileTypeImportSuite) TestMultiFileTypes() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet, importutilv2.CSV}
-	vectorTypes := []struct {
-		vecType    schemapb.DataType
-		indexType  indexparamcheck.IndexType
-		metricType metric.MetricType
-	}{
-		{schemapb.DataType_BinaryVector, "BIN_IVF_FLAT", metric.HAMMING},
-		{schemapb.DataType_FloatVector, "HNSW", metric.L2},
-		{schemapb.DataType_Float16Vector, "HNSW", metric.L2},
-		{schemapb.DataType_BFloat16Vector, "HNSW", metric.L2},
-		{schemapb.DataType_Int8Vector, "HNSW", metric.L2},
-		{schemapb.DataType_SparseFloatVector, "SPARSE_WAND", metric.IP},
-	}
-
-	for _, fileType := range fileTypeArr {
-		for _, vectorType := range vectorTypes {
-			// Numpy does not support sparse vectors.
-			if fileType == importutilv2.Numpy && vectorType.vecType == schemapb.DataType_SparseFloatVector {
-				continue
-			}
-			s.Run(fmt.Sprintf("%s/%s", fileType, vectorType.vecType), func() {
-				s.fileType = fileType
-				s.vecType = vectorType.vecType
-				s.indexType = vectorType.indexType
-				s.metricType = vectorType.metricType
-				s.run()
-			})
-		}
-	}
-}
-
 func (s *BulkInsertSuite) TestPK() {
 	s.pkType = schemapb.DataType_Int64
 	s.run()

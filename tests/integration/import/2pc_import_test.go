@@ -86,7 +86,7 @@ func WaitForImportState(ctx context.Context, c *cluster.MiniClusterV3, jobID str
 			mlog.String("current", currentState.String()),
 			mlog.String("target", targetState.String()),
 			mlog.Int64("progress", resp.GetProgress()))
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 

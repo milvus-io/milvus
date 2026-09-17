@@ -30,5 +30,6 @@ func (s *importSuite) SetupSuite() {
 	// production scheduling intervals. Set these before the tickers are created.
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportCheckIntervalHigh.Key, "0.1")
 	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportScheduleInterval.Key, "0.1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.CompactionScheduleInterval.Key, "100")
 	s.MiniClusterSuite.SetupSuite()
 }
