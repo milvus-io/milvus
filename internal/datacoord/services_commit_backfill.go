@@ -151,12 +151,27 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 		}
 	}
 
-	for start := 0; start < len(v3Units); start += maxBackfillCommitBatch {
-		end := start + maxBackfillCommitBatch
-		if end > len(v3Units) {
-			end = len(v3Units)
+	// Segments whose delta was already applied (replay of a committed result)
+	// are reported committed without issuing another manifest commit.
+	v3ToCommit := make([]backfillCommitUnit, 0, len(v3Units))
+	v3Applied := make([]backfillCommitUnit, 0)
+	for _, unit := range v3Units {
+		if unit.alreadyApplied {
+			v3Applied = append(v3Applied, unit)
+		} else {
+			v3ToCommit = append(v3ToCommit, unit)
 		}
-		batch := v3Units[start:end]
+	}
+	if len(v3Applied) > 0 {
+		appendUnitStatuses(&statuses, v3Applied, true, "")
+	}
+
+	for start := 0; start < len(v3ToCommit); start += maxBackfillCommitBatch {
+		end := start + maxBackfillCommitBatch
+		if end > len(v3ToCommit) {
+			end = len(v3ToCommit)
+		}
+		batch := v3ToCommit[start:end]
 		// Re-check the schema fence immediately before the catalog writes so a
 		// drop/alter-function committing between the fast-fail above and this
 		// commit is still caught. On mismatch, abort the remaining batches:
@@ -165,8 +180,8 @@ func (s *Server) CommitBackfillResult(ctx context.Context, req *datapb.CommitBac
 			log.Warn(ctx, "CommitBackfillResult rejected by schema version fence before batch commit",
 				mlog.Err(err), mlog.Int("batchStart", start), mlog.Int("batchEnd", end))
 			lastErr = err
-			for i := start; i < len(v3Units); i++ {
-				appendUnitStatuses(&statuses, v3Units[i:i+1], false, err.Error())
+			for i := start; i < len(v3ToCommit); i++ {
+				appendUnitStatuses(&statuses, v3ToCommit[i:i+1], false, err.Error())
 			}
 			break
 		}
@@ -224,6 +239,13 @@ type backfillCommitUnit struct {
 	operator UpdateOperator
 	// set for v3: the manifest commit (delta CommitUpdates or legacy Noop)
 	commit SegmentManifestCommit
+	// alreadyApplied is set for a V3 delta replay that the pre-validation
+	// recognized as already committed (the target column exists in the
+	// manifest with exactly the ops' descriptors). Such a segment is reported
+	// committed without issuing another manifest commit, so a retry after a
+	// lost response recovers a success instead of failing on the
+	// existing-column rejection milvus-storage enforces.
+	alreadyApplied bool
 }
 
 func appendUnitStatuses(out *[]*datapb.CommitBackfillResultSegmentStatus, batch []backfillCommitUnit, ok bool, reason string) {
@@ -403,10 +425,35 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 		// lock (rebase semantics), so concurrent stats/index commits are
 		// preserved rather than rejected.
 		if entry.IsV3Delta() {
-			updates, err := opsToManifestUpdates(&entry)
+			// A replace of a column that carries a SegmentIndex record would
+			// drop the column's manifest index entries while indexMeta keeps
+			// the stale Finished record: readers would use an index built from
+			// the old column data alongside the new manifest. Reject until the
+			// index-record lifecycle is wired into the commit.
+			if fid, indexed := s.replaceTargetsIndexedField(result.CollectionID, segID, &entry); indexed {
+				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
+					SegmentId: segID, Ok: false, Kind: "v3",
+					Reason: "replace of indexed field " + strconv.FormatInt(fid, 10) +
+						" is not supported yet; drop the index on the field first",
+				})
+				continue
+			}
+			// Already-applied replay detection: an add whose target column
+			// already exists in the manifest with exactly the op's descriptors
+			// is a re-submission of a committed result and must return success
+			// instead of hitting milvus-storage's existing-column rejection.
+			updates, alreadyApplied, err := s.deltaOpsToManifestUpdates(ctx, segInfo, &entry)
 			if err != nil {
 				statuses = append(statuses, &datapb.CommitBackfillResultSegmentStatus{
 					SegmentId: segID, Ok: false, Kind: "v3", Reason: err.Error(),
+				})
+				continue
+			}
+			if alreadyApplied {
+				units = append(units, backfillCommitUnit{
+					segmentID:      segID,
+					kind:           "v3",
+					alreadyApplied: true,
 				})
 				continue
 			}
@@ -481,6 +528,157 @@ func (s *Server) classifyBackfillSegments(ctx context.Context, result *BackfillR
 		})
 	}
 	return units, statuses
+}
+
+// replaceTargetsIndexedField reports whether a delta backfill replace op
+// targets a column that has a live SegmentIndex record. Replacing such a
+// column would drop the column's manifest index entries while indexMeta keeps
+// the stale Finished record (indexInspector skips rebuilding when a record
+// exists), so readers could serve an index built from the old column data.
+func (s *Server) replaceTargetsIndexedField(collectionID, segID int64, entry *BackfillSegment) (int64, bool) {
+	segIndexes := s.meta.indexMeta.GetSegmentIndexes(collectionID, segID)
+	if len(segIndexes) == 0 {
+		return 0, false
+	}
+	for _, op := range entry.Ops {
+		if op.Type != "replace" {
+			continue
+		}
+		replaced := make(map[string]struct{}, len(op.Columns))
+		for _, col := range op.Columns {
+			replaced[col] = struct{}{}
+		}
+		for indexID := range segIndexes {
+			fid := s.meta.indexMeta.GetFieldIDByIndexID(collectionID, indexID)
+			if _, ok := replaced[strconv.FormatInt(fid, 10)]; ok {
+				return fid, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// deltaOpsToManifestUpdates converts a delta backfill's ops into the manifest
+// updates to commit, applying already-applied replay detection first: an "add"
+// whose target column already exists in the segment's manifest with exactly
+// the op's file descriptors is treated as already committed and excluded, so a
+// re-submission after a lost response returns success instead of failing on
+// milvus-storage's existing-column rejection. A column that exists with
+// different descriptors is a conflict and fails. "replace" ops are always
+// committed (drop + re-add is idempotent: the C++ layer applies the drop
+// before add validation). When every op is already applied, alreadyApplied is
+// true and the caller skips the segment.
+func (s *Server) deltaOpsToManifestUpdates(ctx context.Context, segInfo *SegmentInfo, entry *BackfillSegment) (updates *packed.ManifestUpdates, alreadyApplied bool, err error) {
+	existing, err := packed.ReadManifestColumnGroups(segInfo.GetManifestPath(), createStorageConfig())
+	if err != nil {
+		return nil, false, merr.Wrap(err, "read segment manifest for backfill delta replay check")
+	}
+	remaining := &BackfillSegment{}
+	allApplied := true
+	for i := range entry.Ops {
+		op := &entry.Ops[i]
+		if op.Type == "add" {
+			switch matchAddAgainstManifest(op, existing) {
+			case addOpNotPresent:
+				remaining.Ops = append(remaining.Ops, *op)
+				allApplied = false
+			case addOpAlreadyApplied:
+				// already committed; exclude from this replay
+			case addOpConflict:
+				return nil, false, merr.WrapErrParameterInvalidMsg(
+					"backfill manifest column %v already exists with different files; re-run the backfill", op.Columns)
+			}
+			continue
+		}
+		remaining.Ops = append(remaining.Ops, *op)
+		allApplied = false
+	}
+	if allApplied {
+		return nil, true, nil
+	}
+	updates, err = opsToManifestUpdates(remaining)
+	if err != nil {
+		return nil, false, err
+	}
+	return updates, false, nil
+}
+
+// addOpState classifies an "add" op against the column groups already present
+// in the segment's manifest.
+type addOpState int
+
+const (
+	// addOpNotPresent: the column does not exist yet; the add must be committed.
+	addOpNotPresent addOpState = iota
+	// addOpAlreadyApplied: the column exists in exactly the op's shape; a
+	// replay of a committed result, safe to skip.
+	addOpAlreadyApplied
+	// addOpConflict: the column exists in a different shape; committing would
+	// hit milvus-storage's existing-column rejection.
+	addOpConflict
+)
+
+// matchAddAgainstManifest classifies one "add" op against the manifest's
+// current column groups. Descriptor identity follows the same path + row-range
+// notion milvus-storage itself uses for fragment identity.
+func matchAddAgainstManifest(op *BackfillManifestOp, existing []packed.ColumnGroupEntry) addOpState {
+	opCols := make(map[string]struct{}, len(op.Columns))
+	for _, col := range op.Columns {
+		opCols[col] = struct{}{}
+	}
+	for _, g := range existing {
+		if !columnSetsIntersect(g.Columns, opCols) {
+			continue
+		}
+		if sameColumnSet(g.Columns, opCols) && sameFileDescriptors(g.Files, op.Files) {
+			return addOpAlreadyApplied
+		}
+		return addOpConflict
+	}
+	return addOpNotPresent
+}
+
+func columnSetsIntersect(columns []string, target map[string]struct{}) bool {
+	for _, col := range columns {
+		if _, ok := target[col]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func sameColumnSet(columns []string, target map[string]struct{}) bool {
+	if len(columns) != len(target) {
+		return false
+	}
+	for _, col := range columns {
+		if _, ok := target[col]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// sameFileDescriptors compares the op's file list against the manifest group's
+// as a multiset keyed by path + inclusive-start/exclusive-end row range — the
+// same fragment identity milvus-storage uses. Order and file properties are
+// not part of the identity.
+func sameFileDescriptors(manifestFiles []packed.ColumnGroupFileEntry, opFiles []BackfillManifestFile) bool {
+	if len(manifestFiles) != len(opFiles) {
+		return false
+	}
+	seen := make(map[string]int, len(manifestFiles))
+	for _, f := range manifestFiles {
+		seen[f.Path+":"+strconv.FormatInt(f.StartIndex, 10)+":"+strconv.FormatInt(f.EndIndex, 10)]++
+	}
+	for _, f := range opFiles {
+		key := f.Path + ":" + strconv.FormatInt(f.StartIndex, 10) + ":" + strconv.FormatInt(f.EndIndex, 10)
+		if seen[key] == 0 {
+			return false
+		}
+		seen[key]--
+	}
+	return true
 }
 
 func inferKind(entry *BackfillSegment) string {

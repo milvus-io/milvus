@@ -541,3 +541,32 @@ func TestCommitManifestUpdates_DropColumns_AbsentColumnAndIndexAutoDrop(t *testi
 	require.NoError(t, err)
 	require.NotContains(t, fields, int64(100))
 }
+
+// TestReadManifestColumnGroups round-trips column-group descriptors through the
+// real manifest FFI: a group written with absolute <base>/_data/<file> paths
+// must read back with those absolute paths, so pre-commit descriptor
+// comparison (backfill delta replay detection) can match op files exactly.
+func TestReadManifestColumnGroups(t *testing.T) {
+	cfg := manifestTestStorageConfig(t)
+	basePath := "files/read_column_groups/seg1"
+	dataPath := path.Join(basePath, "_data", "100_a.parquet")
+
+	committed, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
+		ColumnGroups: []ColumnGroupEntry{{
+			Columns: []string{"100"},
+			Format:  "parquet",
+			Files:   []ColumnGroupFileEntry{{Path: dataPath, StartIndex: 0, EndIndex: 5}},
+		}},
+	})
+	require.NoError(t, err)
+
+	groups, err := ReadManifestColumnGroups(committed, cfg)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Equal(t, []string{"100"}, groups[0].Columns)
+	require.Equal(t, "parquet", groups[0].Format)
+	require.Len(t, groups[0].Files, 1)
+	require.Equal(t, dataPath, groups[0].Files[0].Path)
+	require.Equal(t, int64(0), groups[0].Files[0].StartIndex)
+	require.Equal(t, int64(5), groups[0].Files[0].EndIndex)
+}

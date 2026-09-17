@@ -69,9 +69,11 @@ type BackfillSegment struct {
 }
 
 // BackfillManifestOp is one StorageV3 manifest operation produced by a delta
-// backfill. Files are base-relative object keys (the form milvus-storage
-// stores in the manifest), matching the SegmentManifestDelta contract that
-// compaction's in-place schema-bump materialization uses.
+// backfill. Files are absolute object keys under the segment's manifest base
+// (e.g. "<base>/_data/<file>.parquet"), the form the loon writer emits and
+// milvus-storage's ToRelative strips to base-relative on write; matching the
+// SegmentManifestDelta contract that compaction's in-place schema-bump
+// materialization uses.
 type BackfillManifestOp struct {
 	Type     string                 `json:"type"`    // "add" | "replace"
 	Columns  []string               `json:"columns"` // Milvus field IDs as column names
