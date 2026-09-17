@@ -1724,10 +1724,7 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
     bool rebuild_validity_from_postings =
         schema_.nullable() && !is_nested_index_;
 
-    auto entry_names = reader.GetEntryNames();
-    if (std::find(entry_names.begin(),
-                  entry_names.end(),
-                  BITMAP_INDEX_VALID_BITSET) != entry_names.end()) {
+    if (reader.Directory().HasEntry(BITMAP_INDEX_VALID_BITSET)) {
         auto valid_bitset_entry = reader.ReadEntry(BITMAP_INDEX_VALID_BITSET);
         DeserializeValidBitsetData(valid_bitset_entry.data.data(),
                                    valid_bitset_entry.data.size());

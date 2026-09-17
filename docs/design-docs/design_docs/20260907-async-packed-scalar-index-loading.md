@@ -41,9 +41,12 @@ Loading proceeds in five stages:
    its size. `AsyncIndexEntryReader::Open` then reads the directory and index
    metadata through `InputStream::ReadAtAsync`. The resulting **directory** describes
    what is stored, without loading every entry. Magic/footer and directory reads
-   bypass admission because they are normally small; this choice should be
-   revisited if directories become large. The `_meta` entry still uses the same
-   slice admission as other entry payloads.
+   bypass admission. A 64 KiB tail read usually covers both footer and directory;
+   larger directories require one additional prefix read. Directory/metadata
+   buffers and parsed JSON are allocated outside admission, so unusually large
+   control data can add memory usage not covered by its budget. The `__meta__`
+   entry still uses slice admission for reads, but that does not cover its
+   destination buffer. No additional directory or metadata size limit is imposed.
 2. Let the scalar index choose the entries it needs and their destinations:
    allocated memory or local files. `PlanLoad` returns an `IndexLoadPlan` that
    owns those destinations and the index-specific initialization context.

@@ -344,23 +344,6 @@ DefaultEntryStreamSliceSize() {
     return DefaultStreamSliceSize();
 }
 
-EntryStreamLoadInfo
-IndexEntryReader::InspectStreamLoadInfo(
-    std::shared_ptr<milvus::InputStream> input,
-    int64_t file_size,
-    folly::CancellationToken cancellation_token) {
-    auto reader = std::unique_ptr<IndexEntryReader>(new IndexEntryReader());
-    reader->input_ = std::move(input);
-    reader->file_size_ = file_size;
-    reader->cancellation_token_ = cancellation_token;
-    reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
-    // The caller has already selected the V3 path. Actual loading validates
-    // the magic; inspection avoids a separate range read at offset zero.
-    reader->ReadFooterAndDirectory();
-    reader->CheckCancelled("IndexEntryReader::InspectStreamLoadInfo");
-    return reader->stream_load_info_;
-}
-
 std::unique_ptr<IndexEntryReader>
 IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
                        int64_t file_size,
@@ -425,31 +408,6 @@ void
 IndexEntryReader::ReadFooterAndDirectory() {
     std::tie(directory_, encryption_) =
         ReadIndexEntryDirectory(input_, file_size_, cancellation_token_);
-    stream_load_info_.encrypted = encryption_.has_value();
-    for (const auto& entry : directory_.Entries()) {
-        if (const auto* encrypted =
-                std::get_if<EncryptedEntrySource>(&entry.source)) {
-            for (const auto& slice : encrypted->slices) {
-                AssertInfo(slice.plaintext_bytes <=
-                                   std::numeric_limits<size_t>::max() / 2 &&
-                               slice.remote_bytes <=
-                                   std::numeric_limits<size_t>::max() -
-                                       2 * slice.plaintext_bytes,
-                           "Encrypted stream budget size overflow");
-                const auto bytes =
-                    slice.remote_bytes + 2 * slice.plaintext_bytes;
-                stream_load_info_.total_transient_bytes = SaturatingAdd(
-                    stream_load_info_.total_transient_bytes, bytes);
-                stream_load_info_.max_task_transient_bytes =
-                    std::max(stream_load_info_.max_task_transient_bytes, bytes);
-            }
-        }
-    }
-}
-
-std::vector<std::string>
-IndexEntryReader::GetEntryNames() const {
-    return directory_.EntryNames();
 }
 
 void

@@ -44,21 +44,8 @@ struct Entry {
     std::vector<uint8_t> data;
 };
 
-// Bounds for the synchronous encrypted entry-stream implementation.
-struct EntryStreamLoadInfo {
-    bool encrypted{false};
-    size_t total_transient_bytes{0};
-    size_t max_task_transient_bytes{0};
-};
-
 class IndexEntryReader {
  public:
-    static EntryStreamLoadInfo
-    InspectStreamLoadInfo(std::shared_ptr<milvus::InputStream> input,
-                          int64_t file_size,
-                          folly::CancellationToken cancellation_token =
-                              folly::CancellationToken());
-
     static std::unique_ptr<IndexEntryReader>
     Open(std::shared_ptr<milvus::InputStream> input,
          int64_t file_size,
@@ -66,14 +53,6 @@ class IndexEntryReader {
          ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
-
-    const EntryStreamLoadInfo&
-    GetStreamLoadInfo() const {
-        return stream_load_info_;
-    }
-
-    std::vector<std::string>
-    GetEntryNames() const;
 
     Entry
     ReadEntry(const std::string& name);
@@ -236,7 +215,6 @@ class IndexEntryReader {
 
     IndexEntryDirectory directory_;
     nlohmann::json metadata_;
-    EntryStreamLoadInfo stream_load_info_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;
     std::unordered_map<std::string, Entry> small_entry_cache_;

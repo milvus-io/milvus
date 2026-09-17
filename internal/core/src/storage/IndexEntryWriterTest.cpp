@@ -720,7 +720,7 @@ TEST_F(IndexEntryWriterV3Test, ReadEntriesToFiles) {
     ::unlink(file_b.c_str());
 }
 
-TEST_F(IndexEntryWriterV3Test, GetEntryNames) {
+TEST_F(IndexEntryWriterV3Test, DirectoryEntries) {
     const std::string file_path = kV3FilePath + "_names";
     auto data = GeneratePattern(64);
 
@@ -737,12 +737,12 @@ TEST_F(IndexEntryWriterV3Test, GetEntryNames) {
     int64_t file_size = GetFileSize(file_path);
     auto reader = IndexEntryReader::Open(input, file_size);
 
-    auto names = reader->GetEntryNames();
-    ASSERT_EQ(names.size(), 4);
-    EXPECT_EQ(names[0], "alpha");
-    EXPECT_EQ(names[1], "beta");
-    EXPECT_EQ(names[2], "gamma");
-    EXPECT_EQ(names[3], "__meta__");
+    const auto& entries = reader->Directory().Entries();
+    ASSERT_EQ(entries.size(), 4);
+    EXPECT_EQ(entries[0].name, "__meta__");
+    EXPECT_EQ(entries[1].name, "alpha");
+    EXPECT_EQ(entries[2].name, "beta");
+    EXPECT_EQ(entries[3].name, "gamma");
 }
 
 TEST_F(IndexEntryWriterV3Test, EntryNotFound) {
@@ -839,11 +839,11 @@ TEST_F(IndexEntryWriterV3Test, MixedSizeEntries) {
     int64_t file_size = GetFileSize(file_path);
     auto reader = IndexEntryReader::Open(input, file_size);
 
-    auto names = reader->GetEntryNames();
-    ASSERT_EQ(names.size(), 3);
-    EXPECT_EQ(names[0], "tiny_meta");
-    EXPECT_EQ(names[1], "large_data");
-    EXPECT_EQ(names[2], "__meta__");
+    const auto& entries = reader->Directory().Entries();
+    ASSERT_EQ(entries.size(), 3);
+    EXPECT_EQ(entries[0].name, "__meta__");
+    EXPECT_EQ(entries[1].name, "large_data");
+    EXPECT_EQ(entries[2].name, "tiny_meta");
 
     auto tiny_entry = reader->ReadEntry("tiny_meta");
     VerifyPattern(tiny_entry.data, tiny_size);
@@ -870,8 +870,7 @@ TEST_F(IndexEntryWriterV3Test, SetMetaRoundtrip) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     // Verify __meta__ entry is present
-    auto names = reader->GetEntryNames();
-    EXPECT_EQ(names.back(), "__meta__");
+    EXPECT_TRUE(reader->Directory().HasEntry("__meta__"));
 
     // Read and verify the meta content via GetMeta
     EXPECT_EQ(reader->IndexMeta().at("index_type").get<std::string>(),
@@ -998,9 +997,9 @@ TEST_F(IndexEntryWriterV3Test, LargeDirectoryTableNeedsSecondIO) {
     int64_t file_size = GetFileSize(file_path);
     auto reader = IndexEntryReader::Open(input, file_size);
 
-    auto names = reader->GetEntryNames();
+    const auto& entries = reader->Directory().Entries();
     // +1 for __meta__
-    ASSERT_EQ(names.size(), num_entries + 1);
+    ASSERT_EQ(entries.size(), num_entries + 1);
 
     // Verify a few entries
     auto entry0 = reader->ReadEntry(name_prefix + "0");
@@ -1010,7 +1009,7 @@ TEST_F(IndexEntryWriterV3Test, LargeDirectoryTableNeedsSecondIO) {
     VerifyPattern(entry_last.data, 64);
 }
 
-TEST_F(IndexEntryWriterV3Test, InspectStreamLoadInfoReadsOnlyFileTail) {
+TEST_F(IndexEntryWriterV3Test, ReadDirectoryReadsOnlyFileTail) {
     const std::string file_path = kV3FilePath + "_inspect_tail_only";
     auto data = GeneratePattern(1024);
 
@@ -1024,16 +1023,17 @@ TEST_F(IndexEntryWriterV3Test, InspectStreamLoadInfoReadsOnlyFileTail) {
     auto input =
         std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
     auto file_size = input->Size();
-    auto info = IndexEntryReader::InspectStreamLoadInfo(input, file_size);
+    auto [directory, encryption] =
+        ReadIndexEntryDirectory(input, file_size, {});
 
-    EXPECT_FALSE(info.encrypted);
+    EXPECT_FALSE(encryption.has_value());
     ASSERT_EQ(input->ReadRanges().size(), 1);
     auto tail_size = std::min<size_t>(file_size, 64 * 1024);
     EXPECT_EQ(input->ReadRanges()[0].offset, file_size - tail_size);
     EXPECT_EQ(input->ReadRanges()[0].size, tail_size);
 }
 
-TEST_F(IndexEntryWriterV3Test, InspectStreamLoadInfoDoesNotPrefetchLargeMeta) {
+TEST_F(IndexEntryWriterV3Test, ReadDirectoryDoesNotPrefetchLargeMeta) {
     const std::string file_path = kV3FilePath + "_inspect_large_meta";
     auto data = GeneratePattern(1024);
 
@@ -1048,9 +1048,10 @@ TEST_F(IndexEntryWriterV3Test, InspectStreamLoadInfoDoesNotPrefetchLargeMeta) {
     auto input =
         std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
     auto file_size = input->Size();
-    auto info = IndexEntryReader::InspectStreamLoadInfo(input, file_size);
+    auto [directory, encryption] =
+        ReadIndexEntryDirectory(input, file_size, {});
 
-    EXPECT_FALSE(info.encrypted);
+    EXPECT_FALSE(encryption.has_value());
     auto non_magic_reads = std::count_if(
         input->ReadRanges().begin(),
         input->ReadRanges().end(),
@@ -1259,8 +1260,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedMultiSliceEntry) {
     VerifyEncryptedEntry(file_path, "large_enc", entry_size);
 }
 
-TEST_F(IndexEntryEncryptedV3Test,
-       InspectStreamLoadInfoUsesPersistedCiphertextSizes) {
+TEST_F(IndexEntryEncryptedV3Test, DirectoryPreservesCiphertextSizes) {
     IndexEntryStreamConfigGuard guard;
     const std::string file_path = kV3FilePath + "_enc_stream_load_info";
     const size_t slice_size = kStreamSliceAlignment;
@@ -1281,24 +1281,16 @@ TEST_F(IndexEntryEncryptedV3Test,
     }
 
     auto input = CreateInputStream(file_path);
-    auto info = IndexEntryReader::InspectStreamLoadInfo(input, input->Size());
-
-    // The encryptor expands ciphertext beyond 3x plaintext. The directory also
-    // contains the encrypted two-byte "{}" metadata entry.
-    EXPECT_TRUE(info.encrypted);
-    EXPECT_EQ(info.max_task_transient_bytes, 6 * slice_size + 17);
-    EXPECT_EQ(info.total_transient_bytes,
-              2 * (6 * slice_size + 17) + (6 * 100 + 17) + 29);
-
-    milvus::SetLoadTransientBudgetBytes(0);
-    EXPECT_EQ(EntryStreamMaxTransientBytes(info.total_transient_bytes,
-                                           info.max_task_transient_bytes),
-              info.total_transient_bytes);
-
-    milvus::SetLoadTransientBudgetBytes(1);
-    EXPECT_EQ(EntryStreamMaxTransientBytes(info.total_transient_bytes,
-                                           info.max_task_transient_bytes),
-              info.max_task_transient_bytes);
+    auto [directory, encryption] =
+        ReadIndexEntryDirectory(input, input->Size(), {});
+    ASSERT_TRUE(encryption.has_value());
+    const auto& slices =
+        std::get<EncryptedEntrySource>(directory.At("data").source).slices;
+    ASSERT_EQ(slices.size(), 3);
+    EXPECT_EQ(slices[0].remote_bytes, 4 * slice_size + 17);
+    EXPECT_EQ(slices[1].remote_bytes, 4 * slice_size + 17);
+    EXPECT_EQ(slices[2].remote_bytes, 4 * 100 + 17);
+    EXPECT_EQ(directory.At("data").plaintext_size, entry_size);
 }
 
 TEST_F(IndexEntryEncryptedV3Test, EncryptedMultipleEntriesMultiSlice) {

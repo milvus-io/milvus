@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "storage/IndexEntryFormat.h"
+#include <charconv>
 #include <algorithm>
 #include <limits>
 #include "common/Utils.h"
@@ -50,9 +51,8 @@ ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
                   "V3 index file is too small: {}",
                   file_size);
     }
-    constexpr size_t kTailBufferSize = 64 * 1024UL;
     size_t tail_size =
-        std::min(static_cast<size_t>(file_size), kTailBufferSize);
+        std::min(static_cast<size_t>(file_size), kIndexEntryTailReadBytes);
     size_t tail_offset = file_size - tail_size;
 
     std::vector<uint8_t> tail_data(tail_size);
@@ -139,97 +139,133 @@ IndexEntryDirectorySize(std::span<const uint8_t> footer, int64_t file_size) {
 
 std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
 ParseIndexEntryDirectory(std::span<const uint8_t> bytes, int64_t file_size) {
-    AssertInfo(file_size >= MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE,
-               "V3 index file is too small: {}",
-               file_size);
-    IndexEntryDirectory directory;
-    std::optional<IndexFileEncryption> encryption;
-    nlohmann::json json;
+    if (!(file_size >= MILVUS_V3_MAGIC_SIZE + MILVUS_V3_FOOTER_SIZE)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "V3 index file is too small: {}",
+                  file_size);
+    }
+    if (bytes.size() > static_cast<size_t>(file_size - MILVUS_V3_MAGIC_SIZE -
+                                           MILVUS_V3_FOOTER_SIZE)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid packed directory size {}",
+                  bytes.size());
+    }
     try {
-        json = nlohmann::json::parse(bytes.begin(), bytes.end());
-    } catch (const nlohmann::json::parse_error& e) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "Failed to parse V3 index directory table JSON: {}",
-                  e.what());
-    }
-    if (!json.contains("entries")) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
-                  "Directory table missing entries");
-    }
-    size_t slice_size = 0;
-    if (json.contains("__edek__")) {
-        encryption = IndexFileEncryption{
-            json["__edek__"].get<std::string>(),
-            std::stoll(json["__ez_id__"].get<std::string>())};
-        slice_size = json["slice_size"].get<size_t>();
-        AssertInfo(IsStreamSliceSizeAligned(slice_size),
-                   "Encrypted entry slice_size must be {}-byte aligned, got {}",
-                   kStreamSliceAlignment,
-                   slice_size);
-    }
-    const auto max_offset =
-        static_cast<uint64_t>(file_size - MILVUS_V3_MAGIC_SIZE);
-    const auto& entries = json["entries"];
-    directory.entries_.reserve(entries.size());
-    directory.entry_names_.reserve(entries.size());
-    for (const auto& value : entries) {
-        EntryMeta entry;
-        entry.name = value["name"].get<std::string>();
-        entry.expected_crc = Crc32cFromHex(value["crc32"].get<std::string>());
-        if (encryption) {
-            entry.plaintext_size = value["original_size"].get<uint64_t>();
-            EncryptedEntrySource source;
-            source.slices.reserve(value["slices"].size());
-            size_t plaintext_offset = 0;
-            for (const auto& slice : value["slices"]) {
-                const auto offset = slice["offset"].get<uint64_t>();
-                const auto size = slice["size"].get<uint64_t>();
-                if (plaintext_offset >= entry.plaintext_size) {
+        IndexEntryDirectory directory;
+        std::optional<IndexFileEncryption> encryption;
+        auto json = nlohmann::json::parse(bytes.begin(), bytes.end());
+        if (!json.contains("entries")) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Directory table missing entries");
+        }
+        size_t slice_size = 0;
+        if (json.contains("__edek__")) {
+            const auto ez_id_text = json.at("__ez_id__").get<std::string>();
+            int64_t ez_id;
+            const auto result =
+                std::from_chars(ez_id_text.data(),
+                                ez_id_text.data() + ez_id_text.size(),
+                                ez_id);
+            if (result.ec != std::errc{} ||
+                result.ptr != ez_id_text.data() + ez_id_text.size()) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Invalid packed encryption zone id");
+            }
+            encryption = IndexFileEncryption{
+                json.at("__edek__").get<std::string>(), ez_id};
+            slice_size = json["slice_size"].get<size_t>();
+            if (!(IsStreamSliceSizeAligned(slice_size))) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "Encrypted entry slice_size must be {}-byte aligned, "
+                          "got {}",
+                          kStreamSliceAlignment,
+                          slice_size);
+            }
+        }
+        const auto max_offset =
+            static_cast<uint64_t>(file_size - MILVUS_V3_MAGIC_SIZE -
+                                  MILVUS_V3_FOOTER_SIZE - bytes.size());
+        const auto& entries = json.at("entries");
+        if (!entries.is_array()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Packed directory entries must be an array");
+        }
+        directory.entries_.reserve(entries.size());
+        for (const auto& value : entries) {
+            EntryMeta entry;
+            entry.name = value.at("name").get<std::string>();
+            entry.expected_crc =
+                Crc32cFromHex(value.at("crc32").get<std::string>());
+            if (encryption) {
+                entry.plaintext_size =
+                    value.at("original_size").get<uint64_t>();
+                EncryptedEntrySource source;
+                if (!value.at("slices").is_array()) {
                     ThrowInfo(ErrorCode::DataFormatBroken,
-                              "Encrypted slice exceeds original entry size {}",
+                              "Encrypted slices must be an array");
+                }
+                source.slices.reserve(value.at("slices").size());
+                size_t plaintext_offset = 0;
+                for (const auto& slice : value.at("slices")) {
+                    const auto offset = slice.at("offset").get<uint64_t>();
+                    const auto size = slice.at("size").get<uint64_t>();
+                    if (plaintext_offset >= entry.plaintext_size) {
+                        ThrowInfo(
+                            ErrorCode::DataFormatBroken,
+                            "Encrypted slice exceeds original entry size {}",
+                            entry.plaintext_size);
+                    }
+                    if (!(size > 0 && offset <= max_offset &&
+                          size <= max_offset - offset)) {
+                        ThrowInfo(ErrorCode::DataFormatBroken,
+                                  "Encrypted entry '{}' has an empty or "
+                                  "out-of-bounds range",
+                                  entry.name);
+                    }
+                    const auto plaintext_bytes = std::min(
+                        slice_size, entry.plaintext_size - plaintext_offset);
+                    source.slices.push_back({MILVUS_V3_MAGIC_SIZE + offset,
+                                             size,
+                                             plaintext_offset,
+                                             plaintext_bytes});
+                    plaintext_offset += plaintext_bytes;
+                }
+                if (plaintext_offset != entry.plaintext_size) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "Encrypted slices cover {} bytes, expected {}",
+                              plaintext_offset,
                               entry.plaintext_size);
                 }
-                AssertInfo(
-                    size > 0 && offset <= max_offset &&
-                        size <= max_offset - offset,
-                    "Encrypted entry '{}' has an empty or out-of-bounds range",
-                    entry.name);
-                const auto plaintext_bytes = std::min(
-                    slice_size, entry.plaintext_size - plaintext_offset);
-                source.slices.push_back({MILVUS_V3_MAGIC_SIZE + offset,
-                                         size,
-                                         plaintext_offset,
-                                         plaintext_bytes});
-                plaintext_offset += plaintext_bytes;
+                entry.source = std::move(source);
+            } else {
+                const auto offset = value.at("offset").get<uint64_t>();
+                entry.plaintext_size = value.at("size").get<uint64_t>();
+                if (!(offset <= max_offset &&
+                      entry.plaintext_size <= max_offset - offset)) {
+                    ThrowInfo(ErrorCode::DataFormatBroken,
+                              "Entry '{}' range exceeds packed file",
+                              entry.name);
+                }
+                entry.source = PlainEntrySource{MILVUS_V3_MAGIC_SIZE + offset};
             }
-            if (plaintext_offset != entry.plaintext_size) {
-                ThrowInfo(ErrorCode::DataFormatBroken,
-                          "Encrypted slices cover {} bytes, expected {}",
-                          plaintext_offset,
-                          entry.plaintext_size);
-            }
-            entry.source = std::move(source);
-        } else {
-            const auto offset = value["offset"].get<uint64_t>();
-            entry.plaintext_size = value["size"].get<uint64_t>();
-            AssertInfo(offset <= max_offset &&
-                           entry.plaintext_size <= max_offset - offset,
-                       "Entry '{}' range exceeds packed file",
-                       entry.name);
-            entry.source = PlainEntrySource{MILVUS_V3_MAGIC_SIZE + offset};
+            directory.entries_.push_back(std::move(entry));
         }
-        directory.entry_names_.push_back(entry.name);
-        directory.entries_.push_back(std::move(entry));
+        std::sort(directory.entries_.begin(),
+                  directory.entries_.end(),
+                  [](const auto& a, const auto& b) { return a.name < b.name; });
+        if (!(std::adjacent_find(directory.entries_.begin(),
+                                 directory.entries_.end(),
+                                 [](const auto& a, const auto& b) {
+                                     return a.name == b.name;
+                                 }) == directory.entries_.end())) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "Duplicate entries in V3 directory");
+        }
+        return {std::move(directory), std::move(encryption)};
+    } catch (const nlohmann::json::exception& error) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid packed directory: {}",
+                  error.what());
     }
-    std::sort(directory.entries_.begin(),
-              directory.entries_.end(),
-              [](const auto& a, const auto& b) { return a.name < b.name; });
-    AssertInfo(std::adjacent_find(directory.entries_.begin(),
-                                  directory.entries_.end(),
-                                  [](const auto& a, const auto& b) {
-                                      return a.name == b.name;
-                                  }) == directory.entries_.end(),
-               "Duplicate entries in V3 directory");
-    return {std::move(directory), std::move(encryption)};
 }
 }  // namespace milvus::storage

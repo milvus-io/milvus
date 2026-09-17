@@ -34,6 +34,8 @@
 
 namespace milvus::storage {
 
+inline constexpr size_t kIndexEntryTailReadBytes = 64 * 1024;
+
 // File encryption header. Readers own it alongside their decryption resources.
 struct IndexFileEncryption {
     std::string edek;
@@ -70,11 +72,6 @@ class IndexEntryDirectory {
         return entries_;
     }
 
-    const std::vector<std::string>&
-    EntryNames() const noexcept {
-        return entry_names_;
-    }
-
     const EntryMeta&
     At(std::string_view name) const;
 
@@ -94,8 +91,6 @@ class IndexEntryDirectory {
     friend std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
         ParseIndexEntryDirectory(std::span<const uint8_t>, int64_t);
 
-    // Preserve persisted order independently of the sorted lookup table.
-    std::vector<std::string> entry_names_;
     std::vector<EntryMeta> entries_;
 };
 

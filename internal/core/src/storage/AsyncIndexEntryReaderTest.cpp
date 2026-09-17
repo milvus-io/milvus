@@ -20,6 +20,7 @@
 #include <arrow/util/future.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -464,10 +465,11 @@ TEST_F(AsyncIndexEntryReaderTest,
             return error.get_error_code();
         }
     });
-    // Magic, footer and directory bypass the held budget; _meta waits for it.
-    EXPECT_TRUE(direct_file->WaitForCallCount(3));
+    // Magic and the combined footer/directory read bypass the held budget;
+    // __meta__ is the third read and must wait for admission.
+    EXPECT_TRUE(direct_file->WaitForCallCount(2));
     EXPECT_FALSE(
-        direct_file->WaitForCallCount(4, std::chrono::milliseconds(50)));
+        direct_file->WaitForCallCount(3, std::chrono::milliseconds(50)));
     EXPECT_EQ(load.wait_for(std::chrono::milliseconds(50)),
               std::future_status::timeout);
     cancel.requestCancellation();
@@ -553,6 +555,8 @@ TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
         std::make_shared<RecordingInputStream>(CreateInputStream(file_path));
     auto reader = OpenAsyncReader(recording);
     auto reads_after_open = recording->ReadRanges().size();
+    // One magic read, one combined directory/footer tail read, one meta read.
+    EXPECT_EQ(reads_after_open, 3);
 
     static_assert(std::is_same_v<decltype(reader->Directory()),
                                  const IndexEntryDirectory&>);
@@ -1657,4 +1661,57 @@ TEST_F(AsyncIndexEntryReaderTest,
     EXPECT_EQ(source.slices[0].plaintext_bytes, 33);
     json["entries"][0]["original_size"] = 8192;
     EXPECT_THROW(parse(4096), milvus::SegcoreError);
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       ValidatesDirectoryWithoutAnArbitrarySizeLimit) {
+    auto expect_corrupt = [](auto&& operation) {
+        try {
+            operation();
+            FAIL() << "expected corrupt packed input";
+        } catch (const milvus::SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(),
+                      milvus::ErrorCode::DataFormatBroken);
+        }
+    };
+    nlohmann::json json = {{"entries",
+                            {{{"name", "data"},
+                              {"offset", 0},
+                              {"size", 32},
+                              {"crc32", "00000000"}}}}};
+    auto parse = [&](size_t payload_bytes) {
+        auto bytes = json.dump();
+        return ParseIndexEntryDirectory(
+            std::span(reinterpret_cast<const uint8_t*>(bytes.data()),
+                      bytes.size()),
+            MILVUS_V3_MAGIC_SIZE + payload_bytes + bytes.size() +
+                MILVUS_V3_FOOTER_SIZE);
+    };
+    EXPECT_NO_THROW(parse(32));
+    // The range is inside the file, but extends into its directory.
+    expect_corrupt([&] { parse(31); });
+    json["entries"][0]["crc32"] = "invalid";
+    expect_corrupt([&] { parse(32); });
+    json["entries"][0]["crc32"] = "00000000";
+    json["entries"][0].erase("offset");
+    expect_corrupt([&] { parse(32); });
+    json["entries"][0]["offset"] = 0;
+    json["entries"][0]["size"] = "invalid";
+    expect_corrupt([&] { parse(32); });
+    json["entries"][0]["name"] = MILVUS_V3_META_ENTRY_NAME;
+    // Valid metadata need not fit an arbitrary 64 MiB limit. Only its directory
+    // description is parsed here, without allocating the payload.
+    constexpr uint32_t large_size = 64 * 1024 * 1024 + 1;
+    json["entries"][0]["size"] = large_size;
+    EXPECT_NO_THROW(parse(large_size));
+
+    std::array<uint8_t, MILVUS_V3_FOOTER_SIZE> footer{};
+    const uint16_t version = MILVUS_V3_FORMAT_VERSION;
+    const uint32_t directory_bytes = large_size;
+    std::memcpy(footer.data(), &version, sizeof(version));
+    std::memcpy(footer.data() + 28, &directory_bytes, sizeof(directory_bytes));
+    EXPECT_EQ(IndexEntryDirectorySize(footer,
+                                      MILVUS_V3_MAGIC_SIZE + directory_bytes +
+                                          MILVUS_V3_FOOTER_SIZE),
+              directory_bytes);
 }
