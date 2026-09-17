@@ -312,8 +312,12 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 							return nil, nil
 						}
 					}
-					return nil, merr.Wrapf(err, "recover segment %d indexes from manifest %s",
-						segment.GetID(), segment.GetManifestPath())
+					// Do not let initMeta replay the entire metastore load after the
+					// per-segment retries are exhausted. A second newMeta attempt would
+					// repeat every catalog read and can expose a partially initialized
+					// state; the caller can retry the startup as a whole instead.
+					return nil, retry.Unrecoverable(merr.Wrapf(err,
+						"recover segment %d indexes from manifest %s", segment.GetID(), segment.GetManifestPath()))
 				}
 				for _, entry := range entries {
 					if _, ok := manifestIndexFilePathInfoForSegment(rootPath, segment.SegmentInfo, entry); !ok {

@@ -23,6 +23,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 )
 
@@ -116,7 +118,7 @@ func (p *ServiceParam) init(bt *BaseTable) {
 	p.KafkaCfg.Init(bt)
 	p.RocksmqCfg.Init(bt)
 	p.MinioCfg.Init(bt)
-	p.ProfileCfg.Init(bt)
+	p.ProfileCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 }
 
 func (p *ServiceParam) RocksmqEnable() bool {
@@ -611,11 +613,27 @@ func (p *LocalStorageConfig) Init(base *BaseTable) {
 		Version:      "2.0.0",
 		DefaultValue: defaultLocalStoragePath,
 		Doc: `Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+Migration of data written using a relative path in older versions is not supported.
 Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
 It is recommended to change this parameter before starting Milvus for the first time.`,
-		Export: true,
+		// Every local storage key is a complete filesystem path that starts
+		// with this value, and the loon local filesystem is rooted at "/", so
+		// a relative path here would silently depend on the process working
+		// directory. Reject it during configuration initialization.
+		Formatter: formatLocalStoragePath,
+		Forbidden: true,
+		Export:    true,
 	}
 	p.Path.Init(base.mgr)
+}
+
+func formatLocalStoragePath(value string) string {
+	value = strings.TrimSpace(value)
+	if !filepath.IsAbs(value) {
+		panic(merr.WrapErrParameterInvalidMsg("localStorage.path must be an absolute filesystem path, got %q", value))
+	}
+	return filepath.Clean(value)
 }
 
 type MetaStoreConfig struct {
@@ -1270,6 +1288,10 @@ type PulsarConfig struct {
 	EnableClientMetrics ParamItem `refreshable:"false"`
 
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
+
+	ProducerAccessMode ParamItem `refreshable:"false"`
+
+	ProducerCreateTimeout ParamItem `refreshable:"true"`
 }
 
 // GetMessageSizeLimitsFor generalizes the plaintext-body budget to an
@@ -1519,6 +1541,29 @@ If this option is zero or negative, it will be ignored and the default value (10
 		Export: true,
 	}
 	p.BacklogAutoClearBytes.Init(base.mgr)
+
+	p.ProducerAccessMode = ParamItem{
+		Key:          "pulsar.producerAccessMode",
+		Version:      "3.0.2",
+		DefaultValue: "exclusive",
+		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+shared: multiple producers can write to the topic at the same time.
+exclusive access is enforced by pulsar broker 2.8.0 or later.`,
+		Export: true,
+	}
+	p.ProducerAccessMode.Init(base.mgr)
+
+	p.ProducerCreateTimeout = ParamItem{
+		Key:          "pulsar.producerCreateTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "1m",
+		Doc: `The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.`,
+		Export: true,
+	}
+	p.ProducerCreateTimeout.Init(base.mgr)
 }
 
 // --- kafka ---
@@ -2088,6 +2133,10 @@ type ProfileConfig struct {
 }
 
 func (p *ProfileConfig) Init(base *BaseTable) {
+	p.init(base, formatLocalStoragePath(base.GetWithDefault("localStorage.path", defaultLocalStoragePath)))
+}
+
+func (p *ProfileConfig) init(base *BaseTable, localStoragePath string) {
 	p.PprofPath = ParamItem{
 		Key:          "profile.pprof.path",
 		Version:      "2.5.5",
@@ -2095,7 +2144,6 @@ func (p *ProfileConfig) Init(base *BaseTable) {
 		Doc:          "The folder that storing pprof files, by default will use localStoragePath/pprof",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "pprof")
 			}
 			return v

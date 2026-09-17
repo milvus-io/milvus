@@ -85,6 +85,22 @@ func TestParamGroupDeleteDoesNotSurfaceTombstone(t *testing.T) {
 	assert.Empty(t, group.GetValue())
 }
 
+func TestForbiddenParamItemAllowsRuntimeOverride(t *testing.T) {
+	manager := config.NewManager()
+	manager.SetConfig("test.static.path", "initial")
+
+	param := &ParamItem{
+		Key:       "test.static.path",
+		Forbidden: true,
+		Formatter: strings.ToUpper,
+	}
+	param.Init(manager)
+	require.Equal(t, "INITIAL", param.GetValue())
+
+	manager.SetConfig("test.static.path", "runtime")
+	require.Equal(t, "RUNTIME", param.GetValue())
+}
+
 func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 	// When primary key equals DefaultValue and a fallback key has a different value,
 	// getWithRaw should return the fallback value as result but the primary key's

@@ -166,7 +166,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
-	p.QueryNodeCfg.init(bt)
+	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
@@ -4488,7 +4488,7 @@ func formatDurationWithMillisecondFallback(v string) string {
 	return v
 }
 
-func (p *queryNodeConfig) init(base *BaseTable) {
+func (p *queryNodeConfig) init(base *BaseTable, localStoragePath string) {
 	p.StrictGroupAcceptanceThreshold = ParamItem{
 		Key:     "queryNode.groupBy.strictGroupAcceptanceThreshold",
 		Version: "2.6.23", DefaultValue: "0.1", Export: true,
@@ -5178,7 +5178,6 @@ This defaults to true, indicating that Milvus creates temporary index for growin
 		Doc:          "Deprecated: The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				localStoragePath := getLocalStoragePath(base)
 				return path.Join(localStoragePath, "mmap")
 			}
 			return v
@@ -5451,7 +5450,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Formatter: func(v string) string {
 			if len(v) == 0 {
 				// use local storage path to check correct device
-				localStoragePath := getLocalStoragePath(base)
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
 					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
 						mlog.Fatal(context.TODO(), "failed to mkdir", mlog.String("localStoragePath", localStoragePath), mlog.Err(err))
@@ -8754,6 +8752,7 @@ type streamingConfig struct {
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 	WALBalancerBackoffMaxInterval     ParamItem `refreshable:"true"`
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
+	WALBalancerNodeLostGracePeriod    ParamItem `refreshable:"true"`
 
 	// balancer Policy
 	WALBalancerPolicyName                               ParamItem `refreshable:"true"`
@@ -8953,6 +8952,18 @@ If the operation exceeds this timeout, it will be canceled.`,
 		Export:       true,
 	}
 	p.WALBalancerOperationTimeout.Init(base.mgr)
+
+	p.WALBalancerNodeLostGracePeriod = ParamItem{
+		Key:     "streaming.walBalancer.nodeLostGracePeriod",
+		Version: "3.0.2",
+		Doc: `The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+It gives the old streaming node time to exit before another streaming node writes to the same wal.
+It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.`,
+		DefaultValue: "5s",
+		Export:       true,
+	}
+	p.WALBalancerNodeLostGracePeriod.Init(base.mgr)
 
 	p.WALBalancerPolicyName = ParamItem{
 		Key:          "streaming.walBalancer.balancePolicy.name",
@@ -9686,13 +9697,4 @@ func (params *ComponentParam) Reset(key string) error {
 
 func (params *ComponentParam) GetWithDefault(key string, dft string) string {
 	return params.baseTable.GetWithDefault(key, dft)
-}
-
-func getLocalStoragePath(base *BaseTable) string {
-	localStoragePath := base.Get("localStorage.path")
-	if len(localStoragePath) == 0 {
-		localStoragePath = defaultLocalStoragePath
-		mlog.Warn(context.TODO(), "localStorage.path is not set, using default value", mlog.String("localStorage.path", localStoragePath))
-	}
-	return localStoragePath
 }

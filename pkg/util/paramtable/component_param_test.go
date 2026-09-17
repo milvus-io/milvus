@@ -47,6 +47,40 @@ func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
 }
 
+func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testing.T) {
+	workingDir := t.TempDir()
+	t.Chdir(workingDir)
+	configDir := t.TempDir()
+	t.Setenv("MILVUSCONF", configDir)
+	configFile := filepath.Join(configDir, "local-storage.yaml")
+	root := filepath.Join(t.TempDir(), "canonical")
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: \"  "+root+"/./  \"\n"), 0o600))
+
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(configFile)}), Interval(10*time.Millisecond))
+	t.Cleanup(bt.mgr.Close)
+	params := &ComponentParam{}
+	params.Init(bt)
+
+	wantRoot := filepath.Clean(root)
+	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
+	initialDiskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetValue()
+
+	// File/config-center updates replace the raw source value before the
+	// Forbidden handler rejects them. Derived paths must keep using the same
+	// canonical startup root as LocalStorageCfg.Path, not that rejected raw value.
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: relative/data\n"), 0o600))
+	require.Eventually(t, func() bool {
+		return bt.Get("localStorage.path") == "relative/data"
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
+	require.Equal(t, initialDiskCapacity, params.QueryNodeCfg.DiskCapacityLimit.GetValue())
+	require.NoDirExists(t, filepath.Join(workingDir, "relative"))
+}
+
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()
@@ -1244,6 +1278,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
 		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
 		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
+		assert.Equal(t, 5*time.Second, params.StreamingCfg.WALBalancerNodeLostGracePeriod.GetAsDurationByParse())
 		assert.Equal(t, 4.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALBroadcasterTombstoneCheckInternal.GetAsDurationByParse())
 		assert.Equal(t, 8192, params.StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt())

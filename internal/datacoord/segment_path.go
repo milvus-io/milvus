@@ -14,8 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "index/Meta.h"
+package datacoord
 
-namespace milvus::index {
-std::string kOverrideRootPathForUT;
-}  // namespace milvus::index
+import (
+	"fmt"
+	"strings"
+
+	"github.com/milvus-io/milvus/pkg/v3/common"
+)
+
+// segmentBaseMatches checks only the segment identity, allowing legacy prefixes.
+// Callers own backend-specific normalization and root containment.
+func segmentBaseMatches(base string, collectionID, partitionID, segmentID int64) bool {
+	suffix := fmt.Sprintf("%s/%d/%d/%d", common.SegmentInsertLogPath, collectionID, partitionID, segmentID)
+	return base == suffix || strings.HasSuffix(base, "/"+suffix)
+}

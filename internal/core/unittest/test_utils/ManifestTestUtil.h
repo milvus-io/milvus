@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "storage/loon_ffi/util.h"
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -88,9 +89,12 @@ class V3SegmentTestData {
                       int64_t dim,
                       const std::string& root_path,
                       const std::string& base_path)
-        : schema_(schema), base_path_(base_path), root_path_(root_path) {
-        std::filesystem::create_directories(std::filesystem::path(root_path) /
-                                            std::filesystem::path(base_path));
+        : schema_(schema),
+          // Keys are complete paths: the loon local filesystem is rooted at
+          // "/" and base_path lives under root_path (see LoonFSRootPath).
+          base_path_((std::filesystem::path(root_path) / base_path).string()),
+          root_path_(root_path) {
+        std::filesystem::create_directories(base_path_);
 
         // Convert schema to Arrow schemas
         auto arrow_schema = schema_->ConvertToArrowSchema();
@@ -118,7 +122,7 @@ class V3SegmentTestData {
         milvus_storage::api::SetValue(
             props, PROPERTY_FS_STORAGE_TYPE, LOON_FS_TYPE_LOCAL);
         milvus_storage::api::SetValue(
-            props, PROPERTY_FS_ROOT_PATH, root_path.c_str());
+            props, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
         milvus_storage::api::SetValue(props,
                                       PROPERTY_WRITER_POLICY,
                                       LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
@@ -201,7 +205,7 @@ class V3SegmentTestData {
         milvus_storage::api::SetValue(
             reader_props, PROPERTY_FS_STORAGE_TYPE, LOON_FS_TYPE_LOCAL);
         milvus_storage::api::SetValue(
-            reader_props, PROPERTY_FS_ROOT_PATH, root_path_.c_str());
+            reader_props, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
         auto reader = milvus_storage::api::Reader::create(
             column_groups_, loon_schema_, needed_columns, reader_props);
         auto result = reader->get_chunk_reader(cg_index);

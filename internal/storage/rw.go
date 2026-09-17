@@ -443,6 +443,48 @@ func NewManifestRecordReader(ctx context.Context, manifestPath string, neededSch
 	return NewAbsentFieldFillRecordReader(inner, neededSchema, present), nil
 }
 
+// NewTextDecodedManifestRecordReader resolves persisted TEXT references through
+// source-specific LOB paths and returns logical UTF8 columns. It is intended for
+// compaction that must rewrite LOB payloads into a different partition namespace.
+func NewTextDecodedManifestRecordReader(
+	_ context.Context,
+	manifestPath string,
+	neededSchema *schemapb.CollectionSchema,
+	textColumnConfigs []packed.TextColumnConfig,
+	option ...RwOption,
+) (RecordReader, error) {
+	rwOptions := DefaultReaderOptions()
+	for _, opt := range option {
+		opt(rwOptions)
+	}
+	if err := rwOptions.validate(); err != nil {
+		return nil, err
+	}
+	present := rwOptions.presentFields
+	if present == nil {
+		var err error
+		present, err = packed.GetManifestFieldIDs(manifestPath, rwOptions.storageConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	presentSchema, err := filterSchemaToPresentFields(neededSchema, present)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := NewTextDecodedManifestReader(
+		manifestPath,
+		presentSchema,
+		rwOptions.bufferSize,
+		rwOptions.storageConfig,
+		textColumnConfigs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return NewAbsentFieldFillRecordReader(inner, neededSchema, present), nil
+}
+
 // filterSchemaToPresentFields returns a copy of schema keeping only the fields
 // (and struct sub-fields) whose FieldID is physically present, so the packed
 // reader is asked to read only stored columns; absent fields are then filled by

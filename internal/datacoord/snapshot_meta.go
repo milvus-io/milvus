@@ -939,6 +939,23 @@ func (sm *snapshotMeta) ReadSnapshotData(ctx context.Context, collectionID int64
 		mlog.Error(context.TODO(), "failed to read snapshot data from S3", mlog.Err(err))
 		return nil, err
 	}
+	// Named, referenced snapshots point at this instance's storage. Older
+	// snapshots retain relative V3 manifest bases whose files remain under the
+	// legacy local prefix. Resolve only the returned view to their absolute paths;
+	// the stored snapshot is immutable, and foreign/self-contained layouts use other roots.
+	if local, ok := sm.chunkManager.(*storage.LocalChunkManager); ok && snapshotData.Layout == datapb.SnapshotLayout_SnapshotLayoutReferenced {
+		for _, segment := range snapshotData.Segments {
+			if segment.GetStorageVersion() != storage.StorageV3 || segment.GetManifestPath() == "" {
+				continue
+			}
+			manifestPath, err := normalizeLocalManifestPath(segment.GetManifestPath(), local.RootPath(),
+				Params.MinioCfg.RootPath.GetValue(), collectionID, segment.GetPartitionId(), segment.GetSegmentId())
+			if err != nil {
+				return nil, merr.Wrapf(err, "normalize local snapshot %d segment %d manifest", snapshotInfo.GetId(), segment.GetSegmentId())
+			}
+			segment.ManifestPath = manifestPath
+		}
+	}
 
 	// Step 3: Merge S3 location from memory into returned data
 	snapshotData.SnapshotInfo.S3Location = snapshotInfo.S3Location
