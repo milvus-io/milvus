@@ -242,7 +242,7 @@ func TestManagerRestoreProbesOrphanChunk(t *testing.T) {
 	// Simulate a crash between chunk write and manifest publish: write a chunk
 	// directly without recording it.
 	orphan := buildIdempotencySections(idempotencyWrite{timeTick: 300, key: "orphan", pk: 300})
-	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan}, TimeTickRange{StartAfter: 100, End: 300})
+	_, _, err := manager.cfg.Store.WriteChunk(ctx, 1, map[string]*ChunkSections{"v1": orphan}, TimeTickRange{Start: 101, End: 300})
 	require.NoError(t, err)
 
 	recovered := newTestManager(t, manager.cfg.Store, 1<<30)
@@ -483,7 +483,7 @@ func TestGCOnceRediscoversReleasedObjects(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, store.WriteManifest(ctx, &streamingpb.PChannelSummaryManifest{
-		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, EndTimeTick: 300},
+		Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, StartTimeTick: 1, EndTimeTick: 300},
 	}))
 	require.NoError(t, manager.Restore(ctx))
 	require.NoError(t, gcSummary(ctx, manager))

@@ -221,7 +221,7 @@ func TestTransformSectionsRoundTripAndRetry(t *testing.T) {
 	sections["delete-only"] = &ChunkSections{Transform: []*streamingpb.VChannelSummaryTransformRecord{record(90, 3)}}
 	footer, _, err := store.WriteChunk(ctx, 0, sections, testRecordCoverage(sections))
 	require.NoError(t, err)
-	require.Equal(t, uint64(89), footer.GetStartAfterTimeTick())
+	require.Equal(t, uint64(90), footer.GetStartTimeTick())
 	require.Equal(t, uint64(200), footer.GetEndTimetick())
 	decoded, _, err := store.ReadChunk(ctx, 0, store.Term())
 	require.NoError(t, err)

@@ -362,7 +362,7 @@ func (m *Manager) seal() *SealedChunk {
 	// Keep removal and queue insertion atomic: observers must never see a gap
 	// where an unwritten chunk appears to have no pending records.
 	sc := buildSealedChunk(m.nextGeneration, m.pending)
-	sc.Coverage = TimeTickRange{StartAfter: m.sealedThrough, End: m.lastObserved}
+	sc.Coverage = TimeTickRange{Start: m.sealedThrough + 1, End: m.lastObserved}
 	sc.Transforms = m.pendingTransforms
 	m.pendingTransforms = make(map[string]*streamingpb.VChannelSummaryTransformIndex)
 	m.sealedThrough = m.lastObserved
@@ -573,7 +573,7 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	}
 
 	for _, chunk := range chunks {
-		if chunk.GetEndTimetick() <= from || chunk.GetStartAfterTimeTick() > to {
+		if chunk.GetEndTimetick() <= from || chunk.GetStartTimeTick() > to {
 			continue
 		}
 		indexes := make(map[string]*streamingpb.VChannelSummaryChunkIndex)
