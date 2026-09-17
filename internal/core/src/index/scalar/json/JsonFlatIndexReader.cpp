@@ -154,13 +154,12 @@ JsonFlatIndexReaderState::JsonFlatIndexReaderState(
     size_t engine_path_bytes)
     : directory_(std::move(directory)),
       engine_(std::move(engine)),
-      null_offsets_(std::move(null_offsets)),
       field_path_prefix_(std::move(field_path_prefix)),
       mmap_(mmap),
       engine_bytes_(engine_bytes),
       engine_path_bytes_(engine_path_bytes) {
     AssertInfo(engine_ != nullptr, "JSON flat reader requires an engine");
-    AssertInfo(null_offsets_ != nullptr,
+    AssertInfo(null_offsets != nullptr,
                "JSON flat reader requires null-offset state");
     AssertInfo(!mmap_ || directory_ != nullptr,
                "mmap JSON flat reader requires a directory owner");
@@ -169,7 +168,7 @@ JsonFlatIndexReaderState::JsonFlatIndexReaderState(
 
     size_t previous = 0;
     bool first = true;
-    for (const auto offset : *null_offsets_) {
+    for (const auto offset : *null_offsets) {
         if ((!first && offset <= previous) || offset >= count_) {
             ThrowInfo(DataFormatBroken,
                       "invalid JSON flat null offset {} for count {}",
@@ -180,19 +179,24 @@ JsonFlatIndexReaderState::JsonFlatIndexReaderState(
         first = false;
     }
 
+    // See the valid_bitmap_ declaration: materialize field validity once here
+    // so no query replays the offsets, and keep the all-valid case
+    // allocation-free.
+    if (null_offsets->empty()) {
+        all_valid_ = true;
+    } else {
+        valid_bitmap_ = TargetBitmap(count_, true);
+        for (const auto offset : *null_offsets) {
+            valid_bitmap_.reset(offset);
+        }
+    }
+
     size_t heap = sizeof(JsonFlatIndexReaderState);
     AddBytes(
         heap, sizeof(milvus::tantivy::TantivyIndexWrapper), "JSON flat reader");
     AddBytes(heap, engine_path_bytes_, "JSON flat reader");
     AddBytes(heap, StringHeapBytes(field_path_prefix_), "JSON flat reader");
-    AddBytes(heap, sizeof(std::vector<size_t>), "JSON flat null offsets");
-    if (null_offsets_->capacity() >
-        std::numeric_limits<size_t>::max() / sizeof(size_t)) {
-        ThrowInfo(DataFormatBroken,
-                  "JSON flat null-offset memory size overflows");
-    }
-    AddBytes(
-        heap, null_offsets_->capacity() * sizeof(size_t), "JSON flat reader");
+    AddBytes(heap, valid_bitmap_.size_in_bytes(), "JSON flat validity");
     if (directory_ != nullptr) {
         AddBytes(heap, directory_->HeapBytes(), "JSON flat reader");
     }
@@ -249,20 +253,20 @@ JsonFlatIndexReaderState::FileBytes() const {
 
 TargetBitmap
 JsonFlatIndexReaderState::FieldIsNull() const {
-    TargetBitmap result(count_);
-    for (const auto offset : *null_offsets_) {
-        result.set(offset);
+    if (all_valid_) {
+        return TargetBitmap(count_);
     }
+    auto result = valid_bitmap_.clone();
+    result.flip();
     return result;
 }
 
 TargetBitmap
 JsonFlatIndexReaderState::FieldIsNotNull() const {
-    TargetBitmap result(count_, true);
-    for (const auto offset : *null_offsets_) {
-        result.reset(offset);
+    if (all_valid_) {
+        return TargetBitmap(count_, true);
     }
-    return result;
+    return valid_bitmap_.clone();
 }
 
 namespace {
@@ -309,6 +313,11 @@ class JsonPathReaderBase : public IIndexReaderBase, public INullReader {
         result.flip();
         return result;
     }
+
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using INullReader::IsNotNull;
 
     TargetBitmap
     IsNotNull() const override {

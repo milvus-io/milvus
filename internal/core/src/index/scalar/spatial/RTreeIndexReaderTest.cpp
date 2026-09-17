@@ -54,10 +54,23 @@ ConcreteRTreeCases() {
     static const auto cases = [] {
         IndexTestCases cases;
         const std::vector<ConcreteSpatialCase> table = {
+            // Offsets 8 (GEOMETRYCOLLECTION EMPTY) and 9 (corrupt WKB) are
+            // non-null rows with no computable envelope, so they carry the
+            // deterministic placeholder MBR at the origin and this
+            // origin-covering query pulls them into the candidate set. Exact
+            // refinement discards them; dropping them from the index instead
+            // would desynchronize the index row count from the segment row
+            // count. Regression guard for the placeholder contract (#50951).
             {.name = "PointMbrIntersection",
              .op = SpatialOp::Equals,
              .query_wkt = "POINT(0 0)",
-             .expected_offsets = {0, 2, 3, 6}},
+             .expected_offsets = {0, 2, 3, 6, 8, 9}},
+            // The same two rows stay out of every candidate set whose box does
+            // not cover the origin, which is what keeps the placeholder cheap.
+            {.name = "PlaceholderRowsStayOutOfDistantMbr",
+             .op = SpatialOp::Intersects,
+             .query_wkt = "POLYGON((4 4,4 6,6 6,6 4,4 4))",
+             .expected_offsets = {5, 7}},
             {.name = "OperatorIndependentMbrIntersection",
              .op = SpatialOp::Contains,
              .query_wkt = "POINT(1 1)",

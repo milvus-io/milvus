@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <cstdint>
+
+#include "common/EasyAssert.h"
 #include "common/Types.h"
 
 // Null predicates, independent of point/range support. Scalar predicate and
@@ -35,6 +38,33 @@ class INullReader {
 
     virtual TargetBitmap
     IsNotNull() const = 0;
+
+    // Validity projected into the CALLER's absolute row space, which may be
+    // wider than Count().
+    //
+    // An index can legitimately cover fewer rows than the segment the caller
+    // is filtering: a growing index publishes snapshots behind the insert
+    // cursor, and legacy R-Tree files can carry null offsets past the indexed
+    // row count because older builders dropped non-null empty/corrupt
+    // geometries. A consumer that sized a row-addressed bitmap by its own
+    // active row count cannot use the Count()-sized bitmap from IsNotNull()
+    // directly.
+    //
+    // The default projects this reader's own bitmap: rows below Count() keep
+    // their recorded validity, and rows at or beyond it are set to 1 --
+    // "not indexed, so not decided here; the consumer must refine". Setting
+    // them to 0 would silently drop live rows. Rows above row_count are
+    // dropped. An implementation that persists absolute null offsets
+    // independently of Count() may override this to project them directly.
+    virtual TargetBitmap
+    IsNotNull(int64_t row_count) const {
+        AssertInfo(row_count >= 0,
+                   "validity row count must be non-negative, got {}",
+                   row_count);
+        auto bitmap = IsNotNull();
+        bitmap.resize(static_cast<size_t>(row_count), /*init=*/true);
+        return bitmap;
+    }
 };
 
 }  // namespace milvus::index

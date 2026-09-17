@@ -17,6 +17,7 @@
 #include "index/scalar/spatial/RTreeEngine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -31,6 +32,7 @@
 #include <boost/geometry/index/detail/rtree/utilities/view.hpp>
 
 #include "common/EasyAssert.h"
+#include "common/Geometry.h"
 #include "index/scalar/spatial/RTreeSerialization.h"
 #include "nlohmann/json.hpp"
 
@@ -87,6 +89,35 @@ BoundingBox(const GEOSGeometry* geometry, GEOSContextHandle_t context) {
                              rtree_detail::Point(max_x, max_y));
 }
 
+// Deterministic MBR for a row whose WKB payload carries no usable envelope
+// (empty payload, unparseable bytes, or a geometry GEOS cannot bound).
+//
+// The row is indexed with this placeholder instead of being dropped. The
+// R-tree is only a coarse filter and exact refinement tolerates the
+// placeholder (Geometry::TryParseFromWkb -> skip) in every configuration, so a
+// placeholder never yields a wrong result -- but dropping the row would
+// permanently desynchronize the index row count from the segment row count,
+// which then trips the coarse-bitmap bounds guard in EvalForIndexSegment on
+// EVERY subsequent geometry query against this segment.
+//
+// Nullness is decided by the caller's validity bitmap alone, never by the
+// payload: the builder and the growing appender both classify a row as NULL
+// before reaching here, so a valid row with an empty/corrupt payload lands on
+// this path and stays indexed. Growing and sealed therefore agree -- neither
+// write path drops a row.
+//
+// Tradeoff: Point(0, 0) is a legal coordinate (Null Island), so any query
+// whose bounding box covers the origin pulls every placeholder row in this
+// segment into the candidate set and pays exact refinement for it (which then
+// discards the row). World-scale bbox queries almost always cover the origin,
+// so segments with many empty/corrupt geometries make such queries
+// proportionally more expensive. Correctness is unaffected.
+rtree_detail::Box
+PlaceholderBox() {
+    return rtree_detail::Box(rtree_detail::Point(0, 0),
+                             rtree_detail::Point(0, 0));
+}
+
 }  // namespace
 
 RTreeBuildEngine::RTreeBuildEngine(std::string index_path)
@@ -123,7 +154,10 @@ RTreeBuildEngine::AddGeometry(const uint8_t* wkb,
                row_offset);
     AssertInfo(len == 0 || wkb != nullptr,
                "R-Tree received null WKB with non-zero length");
+    // See PlaceholderBox(): a non-null row with no usable envelope is indexed
+    // with a placeholder MBR, never dropped.
     if (len == 0) {
+        values_.emplace_back(PlaceholderBox(), row_offset);
         return;
     }
 
@@ -131,10 +165,38 @@ RTreeBuildEngine::AddGeometry(const uint8_t* wkb,
         geos_context_,
         GEOSWKBReader_read_r(geos_context_, wkb_reader_, wkb, len));
     if (geometry.Get() == nullptr) {
+        // nullptr here is *usually* unparseable WKB, but GEOS's execute()
+        // wrapper also swallows a transient OOM during parsing into the same
+        // nullptr -- the two are indistinguishable at this boundary, and both
+        // are deliberately classified as bad data (see the KNOWN LIMIT note on
+        // Geometry::TryParseFromWkb).
+        static std::atomic<int64_t> last_parse_log_us{0};
+        if (ShouldLogGeometryThrottled(last_parse_log_us)) {
+            LOG_ERROR(
+                "failed to parse WKB data for row {}; indexing a placeholder "
+                "MBR to keep the index row count consistent (further "
+                "occurrences suppressed briefly)",
+                row_offset);
+        } else {
+            LOG_DEBUG("failed to parse WKB data for row {}", row_offset);
+        }
+        values_.emplace_back(PlaceholderBox(), row_offset);
         return;
     }
     auto box = BoundingBox(geometry.Get(), geos_context_);
     if (!box.has_value()) {
+        static std::atomic<int64_t> last_envelope_log_us{0};
+        if (ShouldLogGeometryThrottled(last_envelope_log_us)) {
+            LOG_WARN(
+                "geometry at row {} has no computable envelope (empty?); "
+                "indexing with a placeholder MBR, exact refinement will "
+                "filter it (further occurrences suppressed briefly)",
+                row_offset);
+        } else {
+            LOG_DEBUG("geometry at row {} has no computable envelope",
+                      row_offset);
+        }
+        values_.emplace_back(PlaceholderBox(), row_offset);
         return;
     }
     values_.emplace_back(std::move(*box), row_offset);

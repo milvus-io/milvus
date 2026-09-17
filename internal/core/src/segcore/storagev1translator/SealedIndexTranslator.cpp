@@ -176,7 +176,7 @@ SealedIndexTranslator::SealedIndexTranslator(
                                    index_load_info_.index_files,
                                    metadata_options);
     auto resolved_family =
-        milvus::index::ResolveLoadFamily(adapted.family, *source);
+        milvus::index::ResolveLoadFamily(adapted.family, *source, config_);
     const auto loader =
         milvus::index::LoaderRegistry::Instance().Lookup(resolved_family);
     AssertInfo(static_cast<bool>(loader),

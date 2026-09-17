@@ -269,6 +269,9 @@ FmIndexBuilder::AddBatch(const ScalarBuildBatch<std::string_view>& batch) {
         ThrowInfo(IndexBuildError,
                   "failed to buffer FM-index input: {}",
                   error.what());
+    } catch (...) {
+        ThrowInfo(IndexBuildError,
+                  "failed to buffer FM-index input: unknown exception");
     }
 }
 
@@ -317,6 +320,11 @@ FmIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
                                                  params_.value_type,
                                                  params_.nullable,
                                                  std::move(params_.local_dir));
+    // Same classification the shared GuardFmIndexLibrary applies on the load
+    // path (FmIndexArtifact.h), with IndexBuildError as this phase's fallback:
+    // the vendored library throws untyped std:: exceptions, and an unclassified
+    // one reaches cgo as UnexpectedError(2001). bad_alloc stays separate because
+    // it is transient and retriable while a build failure is permanent.
     } catch (const SegcoreError&) {
         throw;
     } catch (const std::bad_alloc& error) {
@@ -325,6 +333,9 @@ FmIndexBuilder::Build(const ScalarBuildInput<std::string_view>& input) && {
     } catch (const std::exception& error) {
         ThrowInfo(
             IndexBuildError, "failed to build FM-index: {}", error.what());
+    } catch (...) {
+        ThrowInfo(IndexBuildError,
+                  "failed to build FM-index: unknown exception");
     }
 }
 

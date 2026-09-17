@@ -29,6 +29,36 @@
 namespace milvus::index::test {
 namespace {
 
+// IsNotNull(row_count) answers in the CALLER's row space, which may be wider
+// than the reader's Count(): a consumer filtering more rows than this index
+// covers must still get a bitmap it can use. Rows the reader knows keep their
+// recorded validity; rows past its Count() read as 1 -- "not indexed, so not
+// decided here" -- because setting them to 0 would silently drop live rows.
+template <typename T>
+void
+ExpectRowCountValidity(const ScalarTestData<T>& data,
+                       const INullReader& reader) {
+    const auto count = data.values.size();
+    const auto exact = reader.IsNotNull(static_cast<int64_t>(count));
+    ASSERT_EQ(exact.size(), count);
+    ExpectBitmap(exact, reader.IsNotNull());
+
+    const auto wider = reader.IsNotNull(static_cast<int64_t>(count) + 3);
+    ASSERT_EQ(wider.size(), count + 3);
+    for (size_t i = 0; i < count; ++i) {
+        EXPECT_EQ(wider[i], data.validity[i]) << "offset=" << i;
+    }
+    for (size_t i = count; i < count + 3; ++i) {
+        EXPECT_TRUE(wider[i]) << "uncovered tail offset=" << i;
+    }
+
+    const auto narrower = reader.IsNotNull(0);
+    EXPECT_EQ(narrower.size(), 0);
+
+    ExpectSegcoreError(ErrorCode::UnexpectedError,
+                       [&] { static_cast<void>(reader.IsNotNull(-1)); });
+}
+
 template <typename T>
 void
 ExpectNullMasks(const ScalarTestData<T>& data, const INullReader& reader) {
@@ -53,6 +83,8 @@ ExpectNullMasks(const ScalarTestData<T>& data, const INullReader& reader) {
     auto repeated_nulls = reader.IsNull();
     ASSERT_EQ(repeated_nulls.size(), nulls.size());
     ExpectBitmap(repeated_nulls, expected_nulls);
+
+    ExpectRowCountValidity(data, reader);
 }
 
 template <typename T>

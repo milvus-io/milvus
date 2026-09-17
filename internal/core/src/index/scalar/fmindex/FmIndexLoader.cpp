@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "index/ParamUtils.h"
+#include "index/scalar/fmindex/FmIndexArtifact.h"
 #include "index/scalar/fmindex/FmIndexBuilder.h"
 #include "common/EasyAssert.h"
 #include "storage/artifact/FileSourceUtils.h"
@@ -346,7 +347,15 @@ OpenMmap(storage::FileSource& source,
     mapping_guard.Release();
     staging.Release();
 
-    auto engine = fmindex::FMIndex::LoadView(mapped_file->Data(), blob_bytes);
+    // The vendored library throws untyped std:: exceptions on a truncated or
+    // oversized blob; without this boundary they reach cgo as
+    // UnexpectedError(2001) instead of DataFormatBroken.
+    auto engine = GuardFmIndexLibrary(
+        [&] {
+            return fmindex::FMIndex::LoadView(mapped_file->Data(), blob_bytes);
+        },
+        DataFormatBroken,
+        "load");
     ValidateLoadedEngine(engine, total_rows);
     auto null_bitmap = ReadNullBitmap(source, nullable, total_rows);
 
@@ -438,7 +447,11 @@ LoadStorage(storage::FileSource& source, const storage::LoadOptions& opts) {
     }
 
     auto blob = source.ReadEntry(kBlobEntry);
-    auto engine = fmindex::FMIndex::Deserialize(std::move(blob));
+    // Same boundary as the mmap path above.
+    auto engine = GuardFmIndexLibrary(
+        [&] { return fmindex::FMIndex::Deserialize(std::move(blob)); },
+        DataFormatBroken,
+        "load");
     ValidateLoadedEngine(engine, total_rows);
     auto null_bitmap = ReadNullBitmap(source, nullable, total_rows);
     auto shared_engine =

@@ -103,6 +103,11 @@ class TextIndexReader final : public IIndexReaderBase,
     TargetBitmap
     IsNull() const override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using INullReader::IsNotNull;
+
     TargetBitmap
     IsNotNull() const override;
 
@@ -118,7 +123,14 @@ class TextIndexReader final : public IIndexReaderBase,
     // state belong to the growing owner, not this query reader.
     std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> engine_;
 
-    std::shared_ptr<const std::vector<size_t>> null_offsets_;
+    // Validity materialized once at construction instead of replaying the
+    // frozen null-offset vector on every IsNull/IsNotNull call, which sit on
+    // the query hot path. The offset vector is not retained: it would duplicate
+    // the same information at 8 bytes per null row. `all_valid_` leaves the
+    // bitmap empty rather than allocating rows/8 bytes of all-ones for a
+    // non-nullable field or a field with no nulls.
+    bool all_valid_{false};
+    TargetBitmap valid_bitmap_;
 
     int64_t count_{0};
     DataType value_type_{DataType::NONE};

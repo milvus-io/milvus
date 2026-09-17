@@ -20,18 +20,23 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "common/Consts.h"
 #include "index/Families.h"
 #include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
+#include "index/contracts/Registry.h"
 #include "index/contracts/build/IReaderConvertible.h"
+#include "index/contracts/build/ScalarBuildInput.h"
 #include "index/contracts/query/IPatternMatchReader.h"
 #include "index/contracts/query/IScalarPredicateReader.h"
 #include "index/scalar/hybrid/HybridIndexArtifact.h"
+#include "index/scalar/sort/SortedIndexFormat.h"
 #include "index/test_utils/ArtifactTestUtils.h"
 #include "index/test_utils/CaseTestDriver.h"
 #include "index/test_utils/ScalarReaderFactory.h"
@@ -205,6 +210,46 @@ BuildInspectArrayAndQuery(const ReaderBackend& backend,
     const auto result = predicate->In(1, &key);
     ASSERT_EQ(result.size(), count);
     EXPECT_TRUE(result[0]);
+}
+
+// Reads back the persisted HYBRID selector without going through a loader, so a
+// family-selection assertion does not depend on the delegate being openable in
+// the current profile.
+ScalarIndexType
+PersistedSelector(const storage::Artifact& artifact) {
+    TestArtifactData v3;
+    TestArtifactSink sink(v3);
+    artifact.Serialize(sink);
+    static_cast<void>(sink.Finish());
+    if (!v3.metadata.contains(INDEX_TYPE)) {
+        throw std::logic_error("hybrid artifact has no persisted selector");
+    }
+    return static_cast<ScalarIndexType>(
+        v3.metadata.at(INDEX_TYPE).get<uint8_t>());
+}
+
+// Builds through a named backend's configured parameters with only the scalar
+// index engine version overridden, which is the one input the nested
+// high-cardinality choice is gated on.
+template <typename T>
+ScalarIndexType
+SelectorAtEngineVersion(std::string_view backend_name,
+                        int32_t engine_version,
+                        ScalarTestData<T> data) {
+    const auto& backend = ScalarReaderBackends().Get<T>(backend_name);
+    auto params = backend.BuildParams();
+    params[SCALAR_INDEX_ENGINE_VERSION] = engine_version;
+    auto builder = BuilderRegistry<ScalarBuildInput<T>>::Instance().Create(
+        families::kHybrid, params);
+    if (!builder) {
+        throw std::logic_error("no hybrid builder for the requested input");
+    }
+    const ScalarTestInput<T> input(data);
+    auto artifact = std::move(*builder).Build(input.View());
+    if (artifact == nullptr) {
+        throw std::logic_error("hybrid builder returned no artifact");
+    }
+    return PersistedSelector(*artifact);
 }
 
 template <typename T>
@@ -404,12 +449,138 @@ INSTANTIATE_TEST_SUITE_P(HybridCases,
                          ::testing::ValuesIn(HybridLifecycleCases()),
                          FilterParamName);
 
+// A nested (struct sub-field) HYBRID index feeds its delegate the FLATTENED
+// scalar elements, which the sort family can serve, so high-cardinality nested
+// data selects the sort family instead of inverted -- but only from
+// kNestedHybridStlSortMinVersion on. Below that an older reader's sorted index
+// predates nested-index support and cannot load a nested STL_SORT physical
+// index, so a rebuild past the cardinality limit would make the index
+// unreadable after a rollback (issue #52893).
+TEST(HybridIndexBuilderTest, NestedHighCardinalitySelectsSortFromGateVersion) {
+    for (const int32_t version : {kNestedHybridStlSortMinVersion,
+                                  kNestedHybridStlSortMinVersion + 1}) {
+        EXPECT_EQ(SelectorAtEngineVersion<int64_t>(
+                      "HybridInt64Nested",
+                      version,
+                      IntegerCardinalityData(16, false)),
+                  ScalarIndexType::STLSORT)
+            << "scalar index engine version " << version;
+    }
+}
+
+TEST(HybridIndexBuilderTest, NestedHighCardinalityKeepsInvertedBelowGate) {
+    for (const int32_t version : {0,
+                                  kHybridIndexConfigVersion,
+                                  kNestedHybridStlSortMinVersion - 1}) {
+        EXPECT_EQ(SelectorAtEngineVersion<int64_t>(
+                      "HybridInt64Nested",
+                      version,
+                      IntegerCardinalityData(16, false)),
+                  ScalarIndexType::INVERTED)
+            << "scalar index engine version " << version;
+    }
+}
+
+// Low cardinality keeps BITMAP for nested data at any version: the gate only
+// governs the high-cardinality choice.
+TEST(HybridIndexBuilderTest, NestedLowCardinalityKeepsBitmapAtAnyVersion) {
+    for (const int32_t version : {kHybridIndexConfigVersion,
+                                  kNestedHybridStlSortMinVersion}) {
+        EXPECT_EQ(SelectorAtEngineVersion<int64_t>(
+                      "HybridInt64Nested",
+                      version,
+                      IntegerCardinalityData(15, false)),
+                  ScalarIndexType::BITMAP)
+            << "scalar index engine version " << version;
+    }
+}
+
+// A regular (non-nested) ARRAY field keeps INVERTED at high cardinality even at
+// and above the gate version: the sort family cannot handle array values, only
+// flattened elements.
+TEST(HybridIndexBuilderTest, ArrayRowsHighCardinalityKeepsInvertedAtAnyVersion) {
+    for (const int32_t version : {kHybridIndexConfigVersion,
+                                  kNestedHybridStlSortMinVersion,
+                                  kNestedHybridStlSortMinVersion + 1}) {
+        EXPECT_EQ(SelectorAtEngineVersion<ArrayView>(
+                      "HybridInt64ArrayNonNull",
+                      version,
+                      ArrayCardinalityData(16, false)),
+                  ScalarIndexType::INVERTED)
+            << "scalar index engine version " << version;
+    }
+}
+
 TEST(HybridIndexBuilderTest, InvalidPersistedSelectorIsRejected) {
     TestArtifactData persisted;
     persisted.metadata[INDEX_TYPE] = 255;
     TestArtifactSource source(persisted);
     ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
         static_cast<void>(ResolveLoadFamily(families::kHybrid, source));
+    });
+}
+
+// 3.0.0 routed a struct-array sub-field HYBRID index through the plain sort
+// factory, so the physical file is a standalone
+// `milvus_packed_stlsort_index.v3` carrying no HYBRID selector at all while
+// collection metadata still says HYBRID (issue #52620). Such a file is
+// perfectly readable; refusing to resolve it fails segment load for no reason,
+// and no reindex or object-store rewrite can be required to recover.
+TEST(HybridIndexBuilderTest, LegacySelectorlessArtifactResolvesFromFileName) {
+    TestArtifactData persisted;
+    TestArtifactSource source(persisted);
+    Config params;
+    params[INDEX_FILES] = std::vector<std::string>{
+        "root/index/1/2/" + PackedScalarIndexFileName(ScalarIndexType::STLSORT)};
+    EXPECT_EQ(ResolveLoadFamily(families::kHybrid, source, params),
+              families::kSort);
+
+    params[INDEX_FILES] = std::vector<std::string>{
+        PackedScalarIndexFileName(ScalarIndexType::MARISA)};
+    EXPECT_EQ(ResolveLoadFamily(families::kHybrid, source, params),
+              families::kMarisa);
+}
+
+// Without a usable file name the physical families' own meta keys are the
+// fallback discriminator.
+TEST(HybridIndexBuilderTest, LegacySelectorlessArtifactResolvesFromMetaKeys) {
+    {
+        TestArtifactData sorted;
+        sorted.metadata[std::string(sort_format::kIndexLength)] = 128;
+        TestArtifactSource source(sorted);
+        EXPECT_EQ(ResolveLoadFamily(families::kHybrid, source),
+                  families::kSort);
+    }
+    {
+        TestArtifactData inverted;
+        inverted.metadata[FILE_NAMES] =
+            std::vector<std::string>{"meta.json"};
+        TestArtifactSource source(inverted);
+        EXPECT_EQ(ResolveLoadFamily(families::kHybrid, source),
+                  families::kInverted);
+    }
+    {
+        TestArtifactData bitmap;
+        bitmap.metadata[BITMAP_INDEX_LENGTH] = 4;
+        TestArtifactSource source(bitmap);
+        EXPECT_EQ(ResolveLoadFamily(families::kHybrid, source),
+                  families::kBitmap);
+    }
+}
+
+// An artifact with neither a selector, a recognizable name, nor recognizable
+// physical meta is genuinely undecidable and must stay an error rather than
+// silently picking a family.
+TEST(HybridIndexBuilderTest, UnrecognizableSelectorlessArtifactIsRejected) {
+    TestArtifactData persisted;
+    persisted.metadata["something_else"] = 1;
+    TestArtifactSource source(persisted);
+    Config params;
+    params[INDEX_FILES] =
+        std::vector<std::string>{"milvus_packed_hybrid_index.v3"};
+    ExpectSegcoreError(ErrorCode::DataFormatBroken, [&] {
+        static_cast<void>(
+            ResolveLoadFamily(families::kHybrid, source, params));
     });
 }
 

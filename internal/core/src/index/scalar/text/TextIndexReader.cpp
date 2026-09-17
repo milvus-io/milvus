@@ -55,13 +55,12 @@ TextIndexReader::TextIndexReader(
     size_t payload_bytes)
     : directory_(std::move(directory)),
       engine_(std::move(engine)),
-      null_offsets_(std::move(null_offsets)),
       count_(count),
       value_type_(value_type),
       file_backed_(file_backed),
       payload_bytes_(payload_bytes) {
     AssertInfo(engine_ != nullptr, "text reader requires an engine");
-    AssertInfo(null_offsets_ != nullptr,
+    AssertInfo(null_offsets != nullptr,
                "text reader requires frozen null offsets");
     AssertInfo(count_ >= 0, "text reader count must be non-negative");
     AssertInfo(IsStringDataType(value_type_),
@@ -74,15 +73,26 @@ TextIndexReader::TextIndexReader(
                "text reader count {} disagrees with Tantivy count {}",
                count_,
                engine_count);
-    AssertInfo(std::is_sorted(null_offsets_->begin(), null_offsets_->end()),
+    AssertInfo(std::is_sorted(null_offsets->begin(), null_offsets->end()),
                "text reader null offsets must be sorted");
-    AssertInfo(std::adjacent_find(null_offsets_->begin(), null_offsets_->end()) ==
-                   null_offsets_->end(),
+    AssertInfo(std::adjacent_find(null_offsets->begin(), null_offsets->end()) ==
+                   null_offsets->end(),
                "text reader null offsets must be unique");
-    AssertInfo(null_offsets_->empty() ||
-                   null_offsets_->back() < static_cast<size_t>(count_),
+    AssertInfo(null_offsets->empty() ||
+                   null_offsets->back() < static_cast<size_t>(count_),
                "text reader null offset exceeds row count {}",
                count_);
+
+    // See the valid_bitmap_ declaration: materialize validity once here so no
+    // query replays the offsets, and keep the all-valid case allocation-free.
+    if (null_offsets->empty()) {
+        all_valid_ = true;
+    } else {
+        valid_bitmap_ = TargetBitmap(static_cast<size_t>(count_), true);
+        for (const auto offset : *null_offsets) {
+            valid_bitmap_.reset(offset);
+        }
+    }
 }
 
 TextIndexReader::~TextIndexReader() = default;
@@ -114,14 +124,13 @@ TextIndexReader::MemoryUsage() const {
     // reader/analyzer heap census. Count the known C++ ownership explicitly;
     // for RAM indexes, also count the RAM-backed managed payload.
     constexpr size_t kKnownMetadataBytes =
-        sizeof(TextIndexReader) + sizeof(milvus::tantivy::TantivyIndexWrapper) +
-        sizeof(std::vector<size_t>);
+        sizeof(TextIndexReader) + sizeof(milvus::tantivy::TantivyIndexWrapper);
     size_t total = kKnownMetadataBytes;
-    if (null_offsets_->capacity() >
-        (std::numeric_limits<size_t>::max() - total) / sizeof(size_t)) {
+    const auto validity_bytes = valid_bitmap_.size_in_bytes();
+    if (validity_bytes > std::numeric_limits<size_t>::max() - total) {
         ThrowInfo(DataFormatBroken, "text reader memory size overflows");
     }
-    total += null_offsets_->capacity() * sizeof(size_t);
+    total += validity_bytes;
     if (directory_ != nullptr) {
         const auto directory_bytes = directory_->HeapBytes();
         if (directory_bytes > std::numeric_limits<size_t>::max() - total) {
@@ -173,20 +182,20 @@ TextIndexReader::FuzzyMatchQuery(std::string_view query,
 
 TargetBitmap
 TextIndexReader::IsNull() const {
-    TargetBitmap result(static_cast<size_t>(count_));
-    for (const auto offset : *null_offsets_) {
-        result.set(offset);
+    if (all_valid_) {
+        return TargetBitmap(static_cast<size_t>(count_));
     }
+    auto result = valid_bitmap_.clone();
+    result.flip();
     return result;
 }
 
 TargetBitmap
 TextIndexReader::IsNotNull() const {
-    TargetBitmap result(static_cast<size_t>(count_), true);
-    for (const auto offset : *null_offsets_) {
-        result.reset(offset);
+    if (all_valid_) {
+        return TargetBitmap(static_cast<size_t>(count_), true);
     }
-    return result;
+    return valid_bitmap_.clone();
 }
 
 }  // namespace milvus::index

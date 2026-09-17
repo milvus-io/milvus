@@ -245,8 +245,13 @@ TextIndexBuilder::TextIndexBuilder(TextIndexBuildParams params)
         params_.analyzer_params.c_str(),
         params_.analyzer_extra_info.c_str(),
         milvus::tantivy::DEFAULT_NUM_THREADS,
+        // Build-mode writer: the large budget is deliberate. Every
+        // memory-budget flush is another Tantivy segment, background merge is
+        // off, and finish() no longer merges them all, so a small budget would
+        // ship the index as many small segments. The growing writer, which
+        // commits on a timer anyway, uses the small growing budget instead.
         milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
-        false);
+        /*enable_background_merge=*/false);
 }
 
 TextIndexBuilder::~TextIndexBuilder() = default;

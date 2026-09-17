@@ -17,6 +17,7 @@
 #include "index/growing/TantivyGrowingTextIndex.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <exception>
 #include <limits>
 #include <utility>
@@ -52,6 +53,20 @@ CheckedBatchEnd(int64_t row_begin, size_t row_count) {
     return row_begin + static_cast<int64_t>(row_count);
 }
 
+// A growing text writer commits on a periodic cadence, so its arena is flushed
+// again every interval and a large budget buys nothing: it only holds more dirty
+// memory per growing segment. Keep the small growing budget for a real cadence
+// and the large build budget for the INT64_MAX sentinel ("never commit on a
+// timer"), which is how a sealed/interim build is expressed — that build wants
+// as few memory-budget flushes as possible because each one is a segment it
+// would otherwise have to rewrite.
+uintptr_t
+WriterMemoryBudget(int64_t commit_interval_in_ms) {
+    return commit_interval_in_ms == std::numeric_limits<int64_t>::max()
+               ? milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES
+               : milvus::tantivy::GROWING_TEXT_MEMORY_BUDGET_IN_BYTES;
+}
+
 }  // namespace
 
 TantivyGrowingTextIndex::TantivyGrowingTextIndex(const char* unique_id,
@@ -68,7 +83,7 @@ TantivyGrowingTextIndex::TantivyGrowingTextIndex(const char* unique_id,
           RequireCString(analyzer_params, "analyzer parameters"),
           /*analyzer_extra_info=*/"",
           milvus::tantivy::DEFAULT_NUM_THREADS,
-          milvus::tantivy::DEFAULT_OVERALL_MEMORY_BUDGET_IN_BYTES,
+          WriterMemoryBudget(commit_interval_in_ms),
           /*enable_background_merge=*/true)),
       commit_policy_(commit_interval_in_ms), value_type_(value_type) {
     AssertInfo(IsStringDataType(value_type_),

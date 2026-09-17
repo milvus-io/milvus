@@ -27,7 +27,9 @@
 #include "fmt/format.h"
 #include "index/Meta.h"
 #include "index/ParamUtils.h"
+#include "index/scalar/sort/SortedIndexFormat.h"
 #include "index/vector/VectorLoadResource.h"
+#include "log/Log.h"
 #include "storage/artifact/FileSource.h"
 
 namespace milvus::index {
@@ -179,6 +181,50 @@ ReadHybridSelector(const nlohmann::json& value,
     return static_cast<uint8_t>(selector);
 }
 
+// V3 packed file names encode the physical index type as a lowercased
+// ScalarIndexType (see PackedScalarIndexFileName), e.g.
+// "milvus_packed_stlsort_index.v3". The writer chose the name from the
+// physical type, so it is an authoritative discriminator and stays correct as
+// new physical types are added -- their meta keys may reuse generic names like
+// "version" or "file_names", which would break meta-key-only inference.
+// Returns an empty family for the genuine HYBRID name
+// ("milvus_packed_hybrid_index.v3") and for anything unrecognized, so callers
+// fall back to the file meta.
+IndexFamily
+FamilyFromPackedFileName(const std::string& path) {
+    const auto slash = path.find_last_of('/');
+    const auto filename =
+        slash == std::string::npos ? path : path.substr(slash + 1);
+    for (const auto type : {ScalarIndexType::STLSORT,
+                            ScalarIndexType::INVERTED,
+                            ScalarIndexType::BITMAP,
+                            ScalarIndexType::MARISA}) {
+        if (filename == PackedScalarIndexFileName(type)) {
+            return FamilyFromScalarIndexType(type);
+        }
+    }
+    return {};
+}
+
+// Physical families persist distinct meta keys; use them when neither the
+// HYBRID selector nor a recognizable packed file name is available. Weaker than
+// the file name (generic key names can collide across future families), so it
+// stays a last resort.
+IndexFamily
+FamilyFromPhysicalMetaKeys(storage::FileSource& source) {
+    if (source.GetMeta(sort_format::kVersion).has_value() ||
+        source.GetMeta(sort_format::kIndexLength).has_value()) {
+        return families::kSort;
+    }
+    if (source.GetMeta(FILE_NAMES).has_value()) {
+        return families::kInverted;
+    }
+    if (source.GetMeta(BITMAP_INDEX_LENGTH).has_value()) {
+        return families::kBitmap;
+    }
+    return {};
+}
+
 }  // namespace
 
 AdaptedIndexType
@@ -318,7 +364,8 @@ FamilyFromScalarIndexType(ScalarIndexType type) {
 
 IndexFamily
 ResolveLoadFamily(const IndexFamily& requested_family,
-                  storage::FileSource& source) {
+                  storage::FileSource& source,
+                  const Config& load_params) {
     if (requested_family != families::kHybrid) {
         return requested_family;
     }
@@ -327,8 +374,32 @@ ResolveLoadFamily(const IndexFamily& requested_family,
     if (source.Gen() == storage::Generation::V3) {
         auto value = source.GetMeta(INDEX_TYPE);
         if (!value.has_value()) {
-            ThrowInfo(DataFormatBroken,
-                      "HYBRID V3 artifact has no index_type selector");
+            // Legacy 3.0.0 files (issue #52620): a struct-array sub-field
+            // HYBRID index was written by the plain sort factory, so the
+            // physical file carries no HYBRID selector at all while collection
+            // metadata still says HYBRID. Failing here fails segment load for
+            // an index that is perfectly readable, and no reindex or
+            // object-store rewrite is needed to recover the physical family.
+            auto recovered = IndexFamily{};
+            if (auto files = GetValueFromConfig<std::vector<std::string>>(
+                    load_params, INDEX_FILES);
+                files.has_value() && !files->empty()) {
+                recovered = FamilyFromPackedFileName(files->front());
+            }
+            if (recovered.empty()) {
+                recovered = FamilyFromPhysicalMetaKeys(source);
+            }
+            if (recovered.empty()) {
+                ThrowInfo(DataFormatBroken,
+                          "HYBRID V3 artifact has no index_type selector, a "
+                          "recognizable packed file name, or a recognizable "
+                          "physical index meta");
+            }
+            LOG_WARN(
+                "HYBRID V3 artifact has no index_type selector; inferred "
+                "physical family: {}",
+                recovered);
+            return recovered;
         }
         encoded_type = ReadHybridSelector(*value, "V3");
     } else {

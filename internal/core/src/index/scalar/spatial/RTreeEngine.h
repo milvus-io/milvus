@@ -56,10 +56,14 @@ class RTreeBuildEngine {
 
     ~RTreeBuildEngine();
 
-    // WKB in, MBR + row offset out. Rows whose WKB fails to parse are SKIPPED
-    // while the offset still advances (RTreeIndexWrapper.cpp:134-151) — that
-    // silent skip is load-bearing for offset alignment; keep it, and keep it
-    // documented.
+    // WKB in, MBR + row offset out. A row reaching here is NON-NULL by the
+    // caller's validity bitmap, so it is always indexed: when its payload is
+    // empty, unparseable, or has no computable envelope it gets a
+    // deterministic placeholder MBR rather than being skipped. Dropping such a
+    // row would desynchronize the index row count from the segment row count
+    // and trip the coarse-bitmap bounds guard in EvalForIndexSegment on every
+    // later geometry query; exact refinement filters the placeholder out. See
+    // PlaceholderBox() in RTreeEngine.cpp.
     void
     AddGeometry(const uint8_t* wkb, size_t len, int64_t row_offset);
 

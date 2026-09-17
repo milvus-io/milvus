@@ -97,14 +97,13 @@ InvertedIndexReader<T>::InvertedIndexReader(
     size_t engine_path_bytes)
     : directory_(std::move(directory)),
       engine_(std::move(engine)),
-      null_offsets_(std::move(null_offsets)),
       value_type_(value_type),
       nested_(nested),
       mmap_(mmap),
       engine_bytes_(engine_bytes),
       engine_path_bytes_(engine_path_bytes) {
     AssertInfo(engine_ != nullptr, "inverted reader requires an engine");
-    AssertInfo(null_offsets_ != nullptr,
+    AssertInfo(null_offsets != nullptr,
                "inverted reader requires immutable null offsets");
     AssertInfo(CompatibleReaderType<T>(value_type_),
                "inverted reader type {} does not match its interface",
@@ -114,7 +113,7 @@ InvertedIndexReader<T>::InvertedIndexReader(
     count_ = engine_->count();
     size_t previous = 0;
     bool first = true;
-    for (const auto offset : *null_offsets_) {
+    for (const auto offset : *null_offsets) {
         if ((!first && offset <= previous) || (!nested_ && offset >= count_)) {
             ThrowInfo(DataFormatBroken,
                       "invalid inverted null offset {} for count {}",
@@ -123,6 +122,17 @@ InvertedIndexReader<T>::InvertedIndexReader(
         }
         previous = offset;
         first = false;
+    }
+
+    // See the valid_bitmap_ declaration: materialize validity once here so no
+    // query replays the offsets, and keep the all-valid case allocation-free.
+    if (nested_ || null_offsets->empty()) {
+        all_valid_ = true;
+    } else {
+        valid_bitmap_ = TargetBitmap(count_, true);
+        for (const auto offset : *null_offsets) {
+            valid_bitmap_.reset(offset);
+        }
     }
 }
 
@@ -164,13 +174,7 @@ InvertedIndexReader<T>::MemoryUsage() const {
     size_t total = sizeof(InvertedIndexReader<T>);
     AddUsageBytes(total, sizeof(milvus::tantivy::TantivyIndexWrapper));
     AddUsageBytes(total, engine_path_bytes_);
-    AddUsageBytes(total, sizeof(std::vector<size_t>));
-    if (null_offsets_->capacity() >
-        std::numeric_limits<size_t>::max() / sizeof(size_t)) {
-        ThrowInfo(DataFormatBroken, "inverted reader memory size overflows");
-    }
-    const auto offsets_bytes = null_offsets_->capacity() * sizeof(size_t);
-    AddUsageBytes(total, offsets_bytes);
+    AddUsageBytes(total, valid_bitmap_.size_in_bytes());
     if (directory_ != nullptr) {
         AddUsageBytes(total, directory_->HeapBytes());
     }
@@ -209,15 +213,25 @@ InvertedIndexReader<T>::In(size_t n, const T* values) const {
 }
 
 template <typename T>
+void
+InvertedIndexReader<T>::ApplyValidityMask(TargetBitmap& bitset) const {
+    if (all_valid_) {
+        return;
+    }
+    AssertInfo(valid_bitmap_.size() == bitset.size(),
+               "inverted validity bitmap size {} does not match result size "
+               "{}",
+               valid_bitmap_.size(),
+               bitset.size());
+    bitset &= valid_bitmap_;
+}
+
+template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::NotIn(size_t n, const T* values) const {
     auto result = In(n, values);
     result.flip();
-    if (!nested_) {
-        for (const auto offset : *null_offsets_) {
-            result.reset(offset);
-        }
-    }
+    ApplyValidityMask(result);
     return result;
 }
 
@@ -350,25 +364,21 @@ InvertedIndexReader<T>::PatternQuery(std::string_view pattern) const {
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::IsNull() const {
-    TargetBitmap result(count_);
-    if (!nested_) {
-        for (const auto offset : *null_offsets_) {
-            result.set(offset);
-        }
+    if (all_valid_) {
+        return TargetBitmap(count_);
     }
+    auto result = valid_bitmap_.clone();
+    result.flip();
     return result;
 }
 
 template <typename T>
 TargetBitmap
 InvertedIndexReader<T>::IsNotNull() const {
-    TargetBitmap result(count_, true);
-    if (!nested_) {
-        for (const auto offset : *null_offsets_) {
-            result.reset(offset);
-        }
+    if (all_valid_) {
+        return TargetBitmap(count_, true);
     }
-    return result;
+    return valid_bitmap_.clone();
 }
 
 #define INSTANTIATE_INVERTED_READER(T) template class InvertedIndexReader<T>;

@@ -436,15 +436,31 @@ ParseHybridBuildParams(const BuildParams& params) {
         }
     }
 
-    if (field_type == DataType::ARRAY) {
-        result.low_cardinality_family = families::kBitmap;
-        result.high_cardinality_family = families::kInverted;
-        return result;
-    }
-
     const auto version = OptionalInteger(params,
                                          SCALAR_INDEX_ENGINE_VERSION,
                                          kLastVersionWithoutHybridIndexConfig);
+
+    if (field_type == DataType::ARRAY) {
+        // ARRAY always uses BITMAP for low cardinality. For high cardinality,
+        // a nested (struct sub-field) index feeds the delegate the FLATTENED
+        // scalar elements, so the sort family can serve it and replaces
+        // INVERTED -- but only once the whole cluster is guaranteed to run
+        // scalar index version >= kNestedHybridStlSortMinVersion. Below that,
+        // an older reader's sorted index predates nested-index support and
+        // cannot load a nested STL_SORT physical index, so a rebuild/compaction
+        // past the cardinality limit would make the index unreadable after a
+        // rollback (issue #52893). Regular ARRAY fields keep INVERTED at any
+        // version because the sort family cannot handle array values. These are
+        // hardcoded; the configurable low/high index types do not apply to
+        // ARRAY.
+        result.low_cardinality_family = families::kBitmap;
+        result.high_cardinality_family =
+            (nested && version >= kNestedHybridStlSortMinVersion)
+                ? families::kSort
+                : families::kInverted;
+        return result;
+    }
+
     if (version >= kHybridIndexConfigVersion) {
         result.low_cardinality_family =
             GetLowCardinalityFamilyFromConfig(params);

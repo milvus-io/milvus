@@ -634,7 +634,6 @@ NgramIndexReader::NgramIndexReader(
     size_t engine_bytes)
     : directory_(std::move(directory)),
       engine_(std::move(engine)),
-      null_offsets_(std::move(null_offsets)),
       value_type_(value_type),
       min_gram_(min_gram),
       max_gram_(max_gram),
@@ -642,7 +641,7 @@ NgramIndexReader::NgramIndexReader(
       mmap_(mmap),
       engine_bytes_(engine_bytes) {
     AssertInfo(engine_ != nullptr, "NGRAM reader requires an engine");
-    AssertInfo(null_offsets_ != nullptr,
+    AssertInfo(null_offsets != nullptr,
                "NGRAM reader requires immutable null offsets");
     AssertInfo(IsStringDataType(value_type_),
                "NGRAM reader requires a string value type, got {}",
@@ -657,7 +656,7 @@ NgramIndexReader::NgramIndexReader(
 
     size_t previous = 0;
     bool first = true;
-    for (const auto offset : *null_offsets_) {
+    for (const auto offset : *null_offsets) {
         if ((!first && offset <= previous) || offset >= count_) {
             ThrowInfo(DataFormatBroken,
                       "invalid NGRAM null offset {} for count {}",
@@ -666,6 +665,17 @@ NgramIndexReader::NgramIndexReader(
         }
         previous = offset;
         first = false;
+    }
+
+    // See the valid_bitmap_ declaration: materialize validity once here so no
+    // query replays the offsets, and keep the all-valid case allocation-free.
+    if (null_offsets->empty()) {
+        all_valid_ = true;
+    } else {
+        valid_bitmap_ = TargetBitmap(count_, true);
+        for (const auto offset : *null_offsets) {
+            valid_bitmap_.reset(offset);
+        }
     }
 }
 
@@ -695,14 +705,13 @@ int64_t
 NgramIndexReader::MemoryUsage() const {
     constexpr size_t kKnownMetadataBytes =
         sizeof(NgramIndexReader) +
-        sizeof(milvus::tantivy::TantivyIndexWrapper) +
-        sizeof(std::vector<size_t>);
-    const auto offsets_bytes = null_offsets_->capacity() * sizeof(size_t);
-    if (offsets_bytes >
+        sizeof(milvus::tantivy::TantivyIndexWrapper);
+    const auto validity_bytes = valid_bitmap_.size_in_bytes();
+    if (validity_bytes >
         std::numeric_limits<size_t>::max() - kKnownMetadataBytes) {
         ThrowInfo(DataFormatBroken, "NGRAM reader memory size overflows");
     }
-    auto total = kKnownMetadataBytes + offsets_bytes;
+    auto total = kKnownMetadataBytes + validity_bytes;
     if (directory_ != nullptr) {
         const auto directory_bytes = directory_->HeapBytes();
         if (directory_bytes > std::numeric_limits<size_t>::max() - total) {
@@ -818,20 +827,20 @@ NgramIndexReader::Candidates(std::string_view literal,
 
 TargetBitmap
 NgramIndexReader::IsNull() const {
-    TargetBitmap result(count_);
-    for (const auto offset : *null_offsets_) {
-        result.set(offset);
+    if (all_valid_) {
+        return TargetBitmap(count_);
     }
+    auto result = valid_bitmap_.clone();
+    result.flip();
     return result;
 }
 
 TargetBitmap
 NgramIndexReader::IsNotNull() const {
-    TargetBitmap result(count_, true);
-    for (const auto offset : *null_offsets_) {
-        result.reset(offset);
+    if (all_valid_) {
+        return TargetBitmap(count_, true);
     }
-    return result;
+    return valid_bitmap_.clone();
 }
 
 bool

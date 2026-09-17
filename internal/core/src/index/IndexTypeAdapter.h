@@ -59,9 +59,20 @@ AdaptIndexType(const IndexTypeAdapterRequest& request);
 // Resolve the legacy HYBRID selector without opening an index. For V1/V2 this
 // reads only the existing one-byte `index_type` entry; for V3 it reads the
 // existing typed `index_type` meta value already parsed by FileSource.
+//
+// A HYBRID artifact can legitimately carry NO selector at all: 3.0.0 routed a
+// struct-array sub-field HYBRID index through the plain sort factory, so the
+// physical file is a standalone `milvus_packed_stlsort_index.v3` whose meta
+// lacks `index_type`, while collection metadata still says HYBRID (issue
+// #52620). `load_params` optionally supplies the load config so the physical
+// family can be recovered from the packed file name -- the authoritative
+// discriminator, since the writer picked that name from the physical type. With
+// no usable file name the resolution falls back to the physical families' own
+// meta keys.
 IndexFamily
 ResolveLoadFamily(const IndexFamily& requested_family,
-                  storage::FileSource& source);
+                  storage::FileSource& source,
+                  const Config& load_params = Config::object());
 
 IndexFamily
 FamilyFromScalarIndexType(ScalarIndexType type);

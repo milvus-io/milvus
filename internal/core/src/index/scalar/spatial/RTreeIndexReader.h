@@ -123,6 +123,11 @@ class RTreeIndexReader final : public IIndexReaderBase,
     TargetBitmap
     IsNull() const override;
 
+    // Declaring IsNotNull() here hides the base's row-count-aware
+    // IsNotNull(int64_t) overload; keep it visible so a call through this
+    // static type still finds it.
+    using INullReader::IsNotNull;
+
     TargetBitmap
     IsNotNull() const override;
 
