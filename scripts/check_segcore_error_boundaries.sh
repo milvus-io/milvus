@@ -38,8 +38,16 @@ SRC="${ROOT}/internal/core/src"
 
 # Test sources are exempt: they throw std:: exceptions on purpose to drive the
 # handlers under test.
+#
+# internal/core/src/index/test_utils/ is the index_tests support library. Its
+# files carry ordinary names (ScalarReaderFactory.cpp, CaseTestDriver.h, ...)
+# but internal/core/src/index/CMakeLists.txt excludes the whole directory from
+# the milvus_index object library, so none of it is linked into milvus_core and
+# none of its throws can reach the cgo boundary. It is test code by build
+# configuration, exempt for the same reason *Test.cpp is.
 is_test_file() {
-    [[ "$1" =~ Test\.cpp$ || "$1" =~ _test\.(cpp|h)$ || "$1" =~ /test_[^/]*\.(cpp|h)$ || "$1" =~ test_case ]]
+    [[ "$1" =~ Test\.cpp$ || "$1" =~ _test\.(cpp|h)$ || "$1" =~ /test_[^/]*\.(cpp|h)$ || "$1" =~ test_case \
+       || "$1" =~ ^internal/core/src/index/test_utils/ ]]
 }
 
 fail=0
@@ -133,9 +141,11 @@ fi
 # shrinking it is free.
 CONFINED=(
     # fm-index-lite throws std::runtime_error / std::length_error / std::bad_alloc
-    # on a truncated or oversized corpus; FMIndex.cpp classifies them in
-    # BuildFMIndexLibrary (build) and LoadFMIndexLibrary (load).
-    'fmindex::|^internal/core/src/index/FMIndex\.(cpp|h)$'
+    # on a truncated or oversized corpus. The single FMIndex.{cpp,h} pair that
+    # used to own the classifying guard was split into the family's four
+    # Artifact/Builder/Loader/Reader units, which are listed by name so a new
+    # file in the directory still trips the check.
+    'fmindex::|^internal/core/src/index/scalar/fmindex/(FmIndexArtifact|FmIndexBuilder|FmIndexLoader|FmIndexReader)\.(cpp|h)$'
 )
 
 for entry in "${CONFINED[@]}"; do
