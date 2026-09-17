@@ -8,12 +8,15 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 const (
@@ -47,7 +50,8 @@ var DefaultGrpcOpts = []grpc.DialOption{
 	),
 }
 
-// ClientConfig for milvus client.
+// ClientConfig for milvus client. Configure it before New and do not copy or
+// mutate it afterward. Use GetServerVersion for concurrent version reads.
 type ClientConfig struct {
 	Address  string // Remote address, "localhost:19530".
 	Username string // Username for auth.
@@ -65,10 +69,28 @@ type ClientConfig struct {
 
 	DisableConn bool
 
+	// ConnectionPoolSize is the number of independent gRPC connections.
+	// Values less than 1 use a single connection.
+	ConnectionPoolSize int
+	// ConnectionMaxAge controls proactive replacement of pooled unary connections.
+	// Values <= 0 disable replacement. When enabled, one additional non-rotating
+	// connection carries streaming RPCs, GetService calls, and telemetry.
+	ConnectionMaxAge time.Duration
+	// ConnectionDrainTimeout limits how long a replaced connection waits for
+	// in-flight unary RPCs. Zero waits indefinitely. A slot's next rotation timer
+	// starts after draining; a positive timeout can interrupt unfinished RPCs.
+	ConnectionDrainTimeout time.Duration
+	// ConnectionRotationTimeout limits dialing and handshaking a replacement.
+	// Values <= 0 use 10 seconds.
+	ConnectionRotationTimeout time.Duration
+
 	// TelemetryConfig for client telemetry settings
 	TelemetryConfig *TelemetryConfig
 
-	ServerVersion string // ServerVersion
+	// ServerVersion is updated by Connect handshakes. Use GetServerVersion
+	// for concurrent reads; do not write this field while the client is in use.
+	ServerVersion string
+	stateMut      sync.RWMutex // protects ServerVersion and flags
 	parsedAddress *url.URL
 	flags         uint64 // internal flags
 }
@@ -104,6 +126,9 @@ func (cfg *ClientConfig) parse() error {
 	if remoteURL.Port() == "" && cfg.EnableTLSAuth {
 		remoteURL.Host += ":443"
 	}
+	if cfg.ConnectionDrainTimeout < 0 {
+		return merr.WrapErrParameterInvalidMsg("connection drain timeout must not be negative")
+	}
 	cfg.parsedAddress = remoteURL
 	return nil
 }
@@ -113,13 +138,37 @@ func (c *ClientConfig) getParsedAddress() string {
 	return c.parsedAddress.Host
 }
 
+func (cfg *ClientConfig) getConnectionPoolSize() int {
+	if cfg.ConnectionPoolSize < 1 {
+		return 1
+	}
+	return cfg.ConnectionPoolSize
+}
+
+func (cfg *ClientConfig) getConnectionRotationTimeout() time.Duration {
+	if cfg.ConnectionRotationTimeout <= 0 {
+		return 10 * time.Second
+	}
+	return cfg.ConnectionRotationTimeout
+}
+
 // useDatabase change the inner db name.
 func (c *ClientConfig) useDatabase(dbName string) {
 	c.DBName = dbName
 }
 
 func (c *ClientConfig) setServerInfo(serverInfo string) {
+	c.stateMut.Lock()
+	defer c.stateMut.Unlock()
 	c.ServerVersion = serverInfo
+}
+
+// GetServerVersion returns the version reported by the latest successful
+// Connect handshake. It is safe to call while connections are rotating.
+func (c *ClientConfig) GetServerVersion() string {
+	c.stateMut.RLock()
+	defer c.stateMut.RUnlock()
+	return c.ServerVersion
 }
 
 func (c *ClientConfig) getRetryOnRateLimitInterceptor() grpc.UnaryClientInterceptor {
@@ -141,15 +190,21 @@ func (c *ClientConfig) defaultRetryRateLimitOption() *RetryRateLimitOption {
 
 // addFlags set internal flags
 func (c *ClientConfig) addFlags(flags uint64) {
+	c.stateMut.Lock()
+	defer c.stateMut.Unlock()
 	c.flags |= flags
 }
 
 // hasFlags check flags is set
 func (c *ClientConfig) hasFlags(flags uint64) bool {
+	c.stateMut.RLock()
+	defer c.stateMut.RUnlock()
 	return (c.flags & flags) > 0
 }
 
 func (c *ClientConfig) resetFlags(flags uint64) {
+	c.stateMut.Lock()
+	defer c.stateMut.Unlock()
 	c.flags &= ^flags
 }
 

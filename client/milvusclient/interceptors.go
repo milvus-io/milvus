@@ -130,27 +130,44 @@ func newClientRequestID() string {
 // withClientMetadata applies the client's metadata enrichment (static headers,
 // connection state, and per-request extras) to an outgoing context. It is shared
 // by the unary and stream interceptors so new headers stay in sync across both.
-func (c *Client) withClientMetadata(ctx context.Context) context.Context {
+func (c *Client) withClientMetadata(ctx context.Context, identifier string) context.Context {
 	ctx = c.metadata(ctx)
-	ctx = c.state(ctx)
+	ctx = c.state(ctx, identifier)
 	ctx = c.extraInfo(ctx)
 	return ctx
 }
 
 func (c *Client) MetadataUnaryInterceptor() grpc.UnaryClientInterceptor {
+	return c.metadataUnaryInterceptor(c.defaultIdentifier)
+}
+
+func (c *Client) metadataUnaryInterceptor(identifier func() string) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = c.withClientMetadata(ctx)
+		ctx = c.withClientMetadata(ctx, identifier())
 
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
 
 func (c *Client) MetadataStreamInterceptor() grpc.StreamClientInterceptor {
+	return c.metadataStreamInterceptor(c.defaultIdentifier)
+}
+
+func (c *Client) metadataStreamInterceptor(identifier func() string) grpc.StreamClientInterceptor {
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		ctx = c.withClientMetadata(ctx)
+		ctx = c.withClientMetadata(ctx, identifier())
 
 		return streamer(ctx, desc, cc, method, opts...)
 	}
+}
+
+func (c *Client) defaultIdentifier() string {
+	c.connectionsMut.RLock()
+	defer c.connectionsMut.RUnlock()
+	if len(c.connections) == 0 {
+		return ""
+	}
+	return c.connections[0].getIdentifier()
 }
 
 func (c *Client) metadata(ctx context.Context) context.Context {
@@ -160,15 +177,15 @@ func (c *Client) metadata(ctx context.Context) context.Context {
 	return ctx
 }
 
-func (c *Client) state(ctx context.Context) context.Context {
+func (c *Client) state(ctx context.Context, identifier string) context.Context {
 	c.stateMut.RLock()
 	defer c.stateMut.RUnlock()
 
 	if c.currentDB != "" {
 		ctx = metadata.AppendToOutgoingContext(ctx, databaseHeader, c.currentDB)
 	}
-	if c.identifier != "" {
-		ctx = metadata.AppendToOutgoingContext(ctx, identifierHeader, c.identifier)
+	if identifier != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, identifierHeader, identifier)
 	}
 
 	return ctx
