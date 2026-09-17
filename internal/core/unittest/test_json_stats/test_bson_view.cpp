@@ -16,7 +16,7 @@
 #include "common/bson_view.h"
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
-#include "index/json_stats/bson_builder.h"
+#include "segcore/json_stats/bson_builder.h"
 
 namespace milvus::index {
 

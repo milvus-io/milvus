@@ -32,11 +32,8 @@
 #include "exec/expression/EvalCtx.h"
 #include "folly/FBVector.h"
 #include "monitor/Monitor.h"
-#include "index/Index.h"
-#include "index/JsonFlatIndex.h"
-#include "index/JsonScalarIndexWrapper.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "opentelemetry/trace/span.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentSealed.h"
@@ -50,7 +47,19 @@ PhyExistsFilterExpr::DetermineExecPath() {
         exec_path_ = ExprExecPath::JsonStats;
         return;
     }
-    SegmentExpr::DetermineExecPath();
+    auto req = MakeIndexRequirement(RequiredReader::JsonPath);
+    // EXISTS has no cast requirement. Multi-path JSON and projected exact-path
+    // readers both answer Exists(Any); path matching still prevents a projected
+    // reader from serving a sibling path.
+    req.value_type = DataType::NONE;
+    if (!SelectAndPinIndex(req)) {
+        return;
+    }
+    const auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
+    if (json_reader_->CastTypesOf(pointer).empty()) {
+        ClearSelectedIndex();
+        exec_path_ = ExprExecPath::RawData;
+    }
 }
 
 void
@@ -99,24 +108,9 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
             [&]() -> ExprCacheHelper::ComputeResult {
                 auto pointer =
                     milvus::Json::pointer(expr_->column_.nested_path_);
-                auto* index = pinned_index_[cached_index_chunk_id_].get();
-                AssertInfo(index != nullptr,
+                AssertInfo(json_reader_ != nullptr,
                            "Cannot find json index with path: " + pointer);
-                TargetBitmap res;
-                if (index->GetCastType().data_type() ==
-                    JsonCastType::DataType::JSON) {
-                    // JsonFlatIndex needs special handling via executor.
-                    auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
-                        dynamic_cast<const index::JsonFlatIndex*>(index));
-                    auto executor =
-                        json_flat_index->create_executor<double>(pointer);
-                    res = executor->Exists();
-                } else {
-                    // All other JSON path indexes (Inverted, Sort, Bitmap,
-                    // Hybrid) return a fresh clone from Exists().
-                    auto* mutable_index = const_cast<index::IndexBase*>(index);
-                    res = mutable_index->Exists();
-                }
+                TargetBitmap res = json_reader_->Exists(pointer);
                 TargetBitmap valid(res.size(), true);
                 return {std::move(res), std::move(valid)};
             });

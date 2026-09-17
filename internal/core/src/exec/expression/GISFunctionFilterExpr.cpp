@@ -29,11 +29,6 @@
 #include "common/Types.h"
 #include "common/Utils.h"
 #include "geos_c.h"
-#include "index/Index.h"
-#include "index/Meta.h"
-#include "index/ScalarIndex.h"
-#include "log/Log.h"
-#include "knowhere/dataset.h"
 #include "pb/plan.pb.h"
 #include "pb/schema.pb.h"
 #include "storage/MmapManager.h"
@@ -238,14 +233,13 @@ namespace exec {
 
 void
 PhyGISFunctionFilterExpr::DetermineExecPath() {
-    SegmentExpr::DetermineExecPath();
-    if (exec_path_ != ExprExecPath::ScalarIndex) {
-        return;
-    }
-    // STIsValid operation cannot use index
     if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_STIsValid) {
         exec_path_ = ExprExecPath::RawData;
+        return;
     }
+    auto req = MakeIndexRequirement(RequiredReader::Spatial);
+    req.value_type = DataType::GEOMETRY;
+    SelectAndPinIndex(req);
 }
 
 void
@@ -492,91 +486,37 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
     int processed_rows = 0;
 
     if (!coarse_cached_) {
-        using Index = index::ScalarIndex<std::string>;
-
-        // Prepare shared dataset for index query (coarse candidate set by R-Tree)
-        auto ds = std::make_shared<milvus::Dataset>();
-        ds->Set(milvus::index::OPERATOR_TYPE, expr_->op_);
+        AssertInfo(spatial_reader_ != nullptr && null_reader_ != nullptr,
+                   "selected geometry index has no spatial/null reader");
 
         // For range_within operations, use bounding box for coarse filtering
         if (expr_->op_ == proto::plan::GISFunctionFilterExpr_GISOp_DWithin) {
-            // Create bounding box geometry for index coarse filtering
-            Geometry bbox_geometry = create_bounding_box_for_dwithin(
+            auto candidate_geometry = create_bounding_box_for_dwithin(
                 ctx, query_geometry, expr_->distance_);
-
-            ds->Set(milvus::index::MATCH_VALUE, bbox_geometry);
-
-            // Note: Distance is not used for bounding box intersection query
+            coarse_global_ = spatial_reader_->Candidates(
+                gis_detail::ToSpatialOp(expr_->op_), candidate_geometry);
         } else {
-            // For other operations, use original geometry
-            ds->Set(milvus::index::MATCH_VALUE, query_geometry);
+            coarse_global_ = spatial_reader_->Candidates(
+                gis_detail::ToSpatialOp(expr_->op_), query_geometry);
         }
-
-        // Query segment-level R-Tree index **once** since each chunk shares the same index
-        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
-        auto* idx_ptr = const_cast<Index*>(scalar_index);
-
-        {
-            auto tmp = idx_ptr->Query(ds);
-            coarse_global_ = std::move(tmp);
-        }
-        // Self-heal an index that reports fewer rows than the segment holds.
-        //
-        // RTreeIndex::Load recomputes the row count from the deserialized
-        // tree, so an index built before empty/unparseable geometries were
-        // kept as placeholder entries under-reports the segment row space.
-        // Those old builders advanced absolute_offset even when they dropped
-        // a row, so the missing entries can be interior holes rather than a
-        // trailing suffix. Count() reveals how many entries are missing, not
-        // where they were. Once the index is short, therefore, no bit in its
-        // candidate bitmap is trustworthy as a negative: promote the entire
-        // active row space to candidates and let exact refinement settle it.
-        //
-        // The INDEX validity bitmap cannot be filled with true, though:
-        // Count() is an entry count while null offsets are absolute row ids, so
-        // a genuine NULL beyond Count() is absent from parameterless
-        // IsNotNull(). Filling it with true would turn NULL into non-NULL and
-        // make NOT ST_* return it as a match. Ask the index to project its
-        // absolute null offsets into the segment row space instead.
-        //
-        // Full refinement beats asserting here: this is an expected upgrade state,
-        // not a Milvus bug, and failing every geometry query on the segment
-        // until someone manually rebuilds the index is a far worse outcome
-        // than a slightly slower correct answer.
-        //
-        // The promotion rule itself lives in PromoteShortGISCoarseBitmap so
-        // the fusion coarse path (PhyGISCoarseConjunctExpr::RunRTreeQuery)
-        // applies the identical rule instead of a tail-only pad.
-        auto coarse_rows = static_cast<int64_t>(coarse_global_.size());
-        if (PromoteShortGISCoarseBitmap(coarse_global_, active_count_)) {
-            static std::atomic<int64_t> last_short_index_log_us{0};
-            if (ShouldLogGeometryThrottled(last_short_index_log_us)) {
-                LOG_WARN(
-                    "R-Tree index for field {} reports {} rows but the "
-                    "segment holds {}; treating all segment rows as "
-                    "candidates for exact refinement because the {} missing "
-                    "entries may be interior holes. This index predates "
-                    "placeholder-MBR indexing of empty/unparseable "
-                    "geometries. Every geometry query on this segment now "
-                    "refines the whole column (read in {}-row batches) "
-                    "instead of R-Tree candidates -- rebuild the index to "
-                    "restore pruning (further occurrences suppressed "
-                    "briefly).",
-                    field_id_.get(),
-                    coarse_rows,
-                    active_count_,
-                    active_count_ - coarse_rows,
-                    batch_size_);
+        const auto covered = selected_covered_row_end_;
+        AssertInfo(coarse_global_.size() >= static_cast<size_t>(covered),
+                   "spatial candidates cover {} rows, snapshot requires {}",
+                   coarse_global_.size(),
+                   covered);
+        coarse_global_.resize(covered);
+        coarse_valid_global_ = null_reader_->IsNotNull();
+        AssertInfo(coarse_valid_global_.size() >=
+                       static_cast<size_t>(covered),
+                   "spatial validity does not cover snapshot prefix");
+        coarse_valid_global_.resize(covered);
+        if (covered < active_count_) {
+            coarse_global_.resize(active_count_, true);
+            const auto field_valid = GetFieldRowValidity(active_count_);
+            coarse_valid_global_.resize(active_count_, false);
+            for (int64_t i = covered; i < active_count_; ++i) {
+                coarse_valid_global_[i] = field_valid[i];
             }
-
-            // null_offset_ uses absolute segment row ids, while Count() on a
-            // legacy index can under-report after older builders dropped
-            // non-null empty/corrupt rows. Ask the R-Tree to lay validity out
-            // directly in the segment row space so every absolute NULL offset
-            // survives independently of the short entry count.
-            coarse_valid_global_ = idx_ptr->IsNotNull(active_count_);
-        } else {
-            coarse_valid_global_ = idx_ptr->IsNotNull();
         }
 
         coarse_cached_ = true;

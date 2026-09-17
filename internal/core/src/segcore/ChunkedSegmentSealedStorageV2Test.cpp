@@ -58,7 +58,6 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/ScalarIndex.h"
 #include "milvus-storage/common/config.h"

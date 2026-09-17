@@ -36,8 +36,8 @@
 #include "glog/logging.h"
 #include "index/SkipIndex.h"
 #include "monitor/Monitor.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "log/Log.h"
 #include "opentelemetry/trace/span.h"
 #include "query/Utils.h"
@@ -405,7 +405,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType = index_value_t<T>;
     typedef std::conditional_t<std::is_integral_v<IndexInnerType> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -436,11 +436,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
     }
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
-                                 Index* index_ptr,
+                                 const index::IScalarPredicateReader<ReaderType>*
+                                     reader,
                                  HighPrecisionType val1,
                                  HighPrecisionType val2) {
         BinaryRangeIndexFunc<T> func;
-        return func(index_ptr, val1, val2, lower_inclusive, upper_inclusive);
+        return func(reader, val1, val2, lower_inclusive, upper_inclusive);
     };
     if (input != nullptr) {
         if (PinnedJsonIndexIsFlat()) {
@@ -448,14 +449,12 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForIndex(OffsetVector* input) {
                 execute_sub_batch, *input, val1, val2);
         }
         if (cached_result_ == nullptr) {
-            auto scalar_index =
-                dynamic_cast<const Index*>(pinned_index_[0].get());
-            AssertInfo(scalar_index != nullptr, "invalid scalar index type");
-            auto* index_ptr = const_cast<Index*>(scalar_index);
+            const auto* reader = PredicateReader<ReaderType>();
+            AssertInfo(reader != nullptr, "invalid scalar predicate type");
             cached_result_ = std::make_shared<TargetBitmap>(
-                execute_sub_batch(index_ptr, val1, val2));
+                execute_sub_batch(reader, val1, val2));
             cached_valid_result_ = std::make_shared<TargetBitmap>(
-                GetCachedIndexValidBitmap(index_ptr).clone());
+                GetCachedIndexValidBitmap().clone());
             AssertInfo(
                 cached_result_->size() == static_cast<size_t>(active_count_),
                 "index range result size {} does not match row count {}",
@@ -1230,44 +1229,13 @@ PhyBinaryRangeFilterExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
+    auto req = MakeIndexRequirement(RequiredReader::Predicate);
+    req.value_type = field_type_ == DataType::JSON ? value_type_ : data_type;
+    SelectAndPinIndex(req);
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }
 
-    if (data_type == DataType::JSON &&
-        expr_->lower_val_.val_case() ==
-            proto::plan::GenericValue::ValCase::kStringVal) {
-        auto* index_ptr = dynamic_cast<const index::ScalarIndex<std::string>*>(
-            pinned_index_[0].get());
-        const auto supports_range =
-            index_ptr != nullptr &&
-            index_ptr->GetIndexType() != index::ScalarIndexType::NGRAM &&
-            SegmentExpr::CanUseIndexForOp<std::string>(
-                proto::plan::OpType::GreaterEqual) &&
-            SegmentExpr::CanUseIndexForOp<std::string>(
-                proto::plan::OpType::LessEqual);
-        if (!supports_range) {
-            exec_path_ = ExprExecPath::RawData;
-        }
-    }
-
-    // A binary range needs both one-sided range operations. String indexes can
-    // decline individual operations through ShouldUseOp; FMINDEX declines all
-    // lexicographic ranges and must fall back before its Range() overload is
-    // reached.
-    if (data_type == DataType::VARCHAR) {
-        const auto lower_op = expr_->lower_inclusive_
-                                  ? proto::plan::OpType::GreaterEqual
-                                  : proto::plan::OpType::GreaterThan;
-        const auto upper_op = expr_->upper_inclusive_
-                                  ? proto::plan::OpType::LessEqual
-                                  : proto::plan::OpType::LessThan;
-        if (!SegmentExpr::CanUseIndexForOp<std::string>(lower_op) ||
-            !SegmentExpr::CanUseIndexForOp<std::string>(upper_op)) {
-            exec_path_ = ExprExecPath::RawData;
-        }
-    }
 }
 
 void

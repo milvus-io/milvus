@@ -29,7 +29,7 @@
 #include "segcore/SegmentInterface.h"
 #include "common/bson_view.h"
 #include "exec/expression/Utils.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "cachinglayer/CacheSlot.h"
 
 namespace milvus {
@@ -518,21 +518,23 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
-        SegmentExpr::DetermineExecPath();
-        if (exec_path_ != ExprExecPath::ScalarIndex ||
-            expr_->column_.data_type_ != DataType::JSON ||
-            value_type_ != DataType::INT64 || PinnedJsonIndexIsFlat()) {
+        if (expr_->column_.data_type_ == DataType::JSON &&
+            value_type_ == DataType::INT64 &&
+            std::any_of(expr_->vals_.begin(),
+                        expr_->vals_.end(),
+                        [this](const auto& value) {
+                            return !IsInt64SafeForJsonDoubleIndex(
+                                value.int64_val());
+                        })) {
+            exec_path_ = ExprExecPath::RawData;
             return;
         }
-        const auto has_unsafe_int_literal = std::any_of(
-            expr_->vals_.begin(),
-            expr_->vals_.end(),
-            [this](const auto& value) {
-                return !IsInt64SafeForJsonDoubleIndex(value.int64_val());
-            });
-        if (has_unsafe_int_literal) {
-            exec_path_ = ExprExecPath::RawData;
-        }
+        auto req = MakeIndexRequirement(RequiredReader::Predicate);
+        req.value_type = expr_->column_.data_type_ == DataType::JSON
+                             ? value_type_
+                             : expr_->column_.element_type_;
+        req.json_array_cast = expr_->column_.data_type_ == DataType::JSON;
+        SelectAndPinIndex(req);
     }
 
  private:

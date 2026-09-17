@@ -18,21 +18,53 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>
-#include <optional>
-#include <string_view>
-#include <type_traits>
+#include <filesystem>
 #include <utility>
 
+#include "common/EasyAssert.h"
 #include "common/ScopedTimer.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
-#include "index/TextMatchIndex.h"
+#include "index/Families.h"
+#include "index/Meta.h"
+#include "index/Utils.h"
+#include "index/contracts/Registry.h"
 #include "log/Log.h"
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
+#include "storage/artifact/FileSource.h"
+#include "storage/artifact/LoadOptions.h"
 
 namespace milvus::segcore::storagev1translator {
+namespace {
+
+bool
+IsPackedV3(const std::vector<std::string>& paths) {
+    return paths.size() == 1 &&
+           std::filesystem::path(paths.front()).filename().string().ends_with(
+               ".v3");
+}
+
+std::unique_ptr<storage::FileSource>
+MakeTextSource(const storage::FileManagerContext& context,
+               const std::vector<std::string>& paths,
+               const storage::LoadOptions& options) {
+    if (IsPackedV3(paths)) {
+        return std::make_unique<storage::V3PackedSource>(
+            context,
+            paths,
+            options,
+            storage::ArtifactStoragePath::TextLog);
+    }
+    return std::make_unique<storage::V1RemoteSource>(
+        context,
+        paths,
+        options,
+        storage::ArtifactStoragePath::TextLog,
+        storage::V1SourceLayout::DiskFiles);
+}
+
+}  // namespace
 
 namespace {
 
@@ -68,6 +100,25 @@ TextMatchIndexTranslator::TextMatchIndexTranslator(
             /* support_eviction */ true,
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
+    milvus::index::IndexFamily family = milvus::index::families::kText;
+    const auto value_type = static_cast<DataType>(
+        file_manager_context_.fieldDataMeta.field_schema.data_type());
+    AssertInfo(IsStringDataType(value_type),
+               "text index requires a string field type");
+    config_["field_type"] = static_cast<int32_t>(value_type);
+    config_["value_type"] = static_cast<int32_t>(value_type);
+    config_["nested"] = false;
+    config_["is_nested"] = false;
+    config_["analyzer_name"] = "milvus_tokenizer";
+    config_["analyzer_params"] = load_info_.analyzer_params;
+    config_[milvus::index::ENABLE_MMAP] = load_info_.enable_mmap;
+    const auto loader =
+        milvus::index::LoaderRegistry::Instance().Lookup(family);
+    AssertInfo(static_cast<bool>(loader),
+               "no index loader is registered for family {}",
+               family);
+    SetReaderContract(
+        std::move(family), value_type, loader.derive_caps(config_));
 }
 
 size_t
@@ -112,7 +163,7 @@ TextMatchIndexTranslator::key() const {
 }
 
 std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<milvus::index::TextMatchIndex>>>
+                      std::unique_ptr<milvus::index::IIndexReaderBase>>>
 TextMatchIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
@@ -120,9 +171,29 @@ TextMatchIndexTranslator::get_cells(
     CheckCancellation(
         ctx, load_info_.segment_id, "TextMatchIndexTranslator::get_cells()");
 
-    auto index =
-        std::make_unique<milvus::index::TextMatchIndex>(file_manager_context_);
+    const auto files = milvus::index::GetValueFromConfig<
+        std::vector<std::string>>(config_, milvus::index::INDEX_FILES);
+    AssertInfo(files.has_value() && !files->empty(),
+               "text index file paths are empty");
 
+    storage::LoadOptions options;
+    options.enable_mmap = load_info_.enable_mmap;
+    options.estimated_bytes = load_info_.index_size;
+    options.params = config_;
+    options.op_ctx = ctx;
+    options.warmup = ToStorageWarmup(milvus::segcore::getCacheWarmupPolicy(
+        load_info_.warmup_policy,
+        /* is_vector */ false,
+        /* is_index */ true));
+    auto source =
+        MakeTextSource(file_manager_context_, *files, options);
+    const auto loader =
+        milvus::index::LoaderRegistry::Instance().Lookup(Family());
+    AssertInfo(static_cast<bool>(loader),
+               "no index loader is registered for family {}",
+               Family());
+
+    std::unique_ptr<milvus::index::IIndexReaderBase> reader;
     {
         milvus::ScopedTimer timer(
             "text_match_index_load",
@@ -130,26 +201,19 @@ TextMatchIndexTranslator::get_cells(
                 // no specific metric defined for text match index load yet
             },
             milvus::ScopedTimer::LogLevel::Info);
-        index->Load(config_);
-        index->RegisterAnalyzer("milvus_tokenizer",
-                                load_info_.analyzer_params.c_str());
+        reader = loader.open(*source, options);
     }
+    AssertInfo(reader != nullptr,
+               "text loader returned a null reader");
 
     LOG_INFO("load text match index success for field:{} of segment:{}",
              load_info_.field_id,
              load_info_.segment_id);
 
-    if (load_info_.enable_mmap) {
-        auto bitmap_bytes = index->ValidityBitmapByteSize();
-        index->SetCellSize({bitmap_bytes, index->ByteSize() - bitmap_bytes});
-    } else {
-        index->SetCellSize({index->ByteSize(), 0});
-    }
-
     std::vector<std::pair<milvus::cachinglayer::cid_t,
-                          std::unique_ptr<milvus::index::TextMatchIndex>>>
+                          std::unique_ptr<milvus::index::IIndexReaderBase>>>
         result;
-    result.emplace_back(std::make_pair(0, std::move(index)));
+    result.emplace_back(std::make_pair(0, std::move(reader)));
     return result;
 }
 

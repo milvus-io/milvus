@@ -1,3 +1,5 @@
+#pragma once
+
 #include <assert.h>
 #include <cmath>
 #include <sstream>
@@ -6,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <vector>
 #include <type_traits>
 
@@ -229,6 +232,30 @@ struct TantivyIndexWrapper {
                 res, "failed to load index: {}", res.result_->error);
             reader_ = res.result_->value.ptr._0;
         }
+    }
+
+    // Capture the writer's currently committed generation in an independent
+    // manual-reload reader. This does not commit the writer, and published
+    // snapshots must never call reload().
+    std::shared_ptr<TantivyIndexWrapper>
+    create_snapshot_reader(SetBitsetFn set_bitset) const {
+        AssertInfo(writer_ != nullptr,
+                   "snapshot reader requires a live Tantivy writer");
+        AssertInfo(reader_ == nullptr,
+                   "snapshot reader requires a writer-only wrapper");
+
+        // Allocate before exporting the Rust reader so a C++ allocation
+        // failure cannot leak the returned binding.
+        auto snapshot = std::make_shared<TantivyIndexWrapper>();
+        auto res = RustResultWrapper(
+            tantivy_create_snapshot_reader_from_writer(writer_, set_bitset));
+        AssertInfo(res.result_->success,
+                   "failed to create snapshot reader from writer: {}",
+                   res.result_->error);
+        snapshot->reader_ = res.result_->value.ptr._0;
+        AssertInfo(snapshot->reader_ != nullptr,
+                   "snapshot reader creation returned a null reader");
+        return snapshot;
     }
 
     ~TantivyIndexWrapper() {
@@ -675,6 +702,16 @@ struct TantivyIndexWrapper {
             AssertTantivyOk(
                 res, "failed to commit index: {}", res.result_->error);
         }
+    }
+
+    inline void
+    rollback() {
+        AssertInfo(writer_ != nullptr,
+                   "cannot rollback an index without a writer");
+        auto res = RustResultWrapper(tantivy_rollback_index(writer_));
+        AssertInfo(res.result_->success,
+                   "failed to rollback index: {}",
+                   res.result_->error);
     }
 
     inline void

@@ -50,10 +50,8 @@
 #include "fmt/core.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
-#include "index/NgramInvertedIndex.h"
-#include "index/TextMatchIndex.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/utils.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "opentelemetry/trace/span.h"
@@ -69,29 +67,15 @@ namespace exec {
 template <typename T>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray() {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
-
-    for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
-        auto index_ptr = dynamic_cast<const Index*>(pinned_index_[i].get());
-
-        if (index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::HYBRID ||
-            index_ptr->GetIndexType() ==
-                milvus::index::ScalarIndexType::BITMAP) {
-            return false;
-        }
-    }
-    return true;
+    return selected_index_entry_.has_value() &&
+           selected_index_entry_->family != "hybrid" &&
+           selected_index_entry_->family != "bitmap";
 }
 
 template <>
 bool
 PhyUnaryRangeFilterExpr::CanUseIndexForArray<milvus::Array>() {
-    // HasCompatibleScalarIndex() is already confirmed by SegmentExpr::DetermineExecPath()
-    // before this is called. Only check index type compatibility here.
+    // Selection already fixed one exact entry; only check family compatibility.
     switch (expr_->column_.element_type_) {
         case DataType::BOOL:
             return CanUseIndexForArray<bool>();
@@ -701,10 +685,8 @@ template <typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                                                 bool reverse) {
-    typedef std::
-        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-            IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return nullptr;
@@ -718,19 +700,23 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // cache the result to suit the framework.
-    auto batch_res = ProcessIndexChunksWithRowLevel<IndexInnerType>(
-        [this, &val, reverse](Index* index_ptr) {
-            boost::container::vector<IndexInnerType> elems;
+    auto batch_res = ProcessIndexChunksWithRowLevel<ReaderType>(
+        [this, &val, reverse](
+            const index::IScalarPredicateReader<ReaderType>* index_ptr) {
+            boost::container::vector<ReaderType> elems;
             elems.reserve(val.array_size());
             for (auto const& element : val.array()) {
-                auto e = GetValueFromProto<IndexInnerType>(element);
+                auto e = GetValueFromProto<ReaderType>(element);
                 if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
                     elems.push_back(e);
                 }
             }
 
+            // Convert element hits to candidate rows, then keep is_same_array as exact
+            // verification. TODO: migrate the callback/set path to bitmap query interfaces
+            // and the plan-selected projection constrained by index/contracts/README.md.
             std::shared_ptr<const IArrayOffsets> array_offsets;
-            if (index_ptr->IsNestedIndex()) {
+            if (selected_element_level_result_) {
                 array_offsets = segment_->GetArrayOffsets(field_id_);
                 AssertInfo(array_offsets != nullptr,
                            "array offsets are required for nested ARRAY index");
@@ -776,44 +762,29 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
                 };
             }
 
-            // collect all candidates.
-            std::unordered_set<size_t> candidates;
-            std::unordered_set<size_t> tmp_candidates;
-            auto first_callback =
-                [this, &candidates, &to_row_offset](size_t offset) -> void {
-                auto row_offset = to_row_offset(offset);
-                if (row_offset < static_cast<size_t>(active_count_)) {
-                    candidates.insert(row_offset);
-                }
-            };
-            auto callback = [this,
-                             &candidates,
-                             &tmp_candidates,
-                             &to_row_offset](size_t offset) -> void {
-                auto row_offset = to_row_offset(offset);
-                if (row_offset < static_cast<size_t>(active_count_) &&
-                    candidates.find(row_offset) != candidates.end()) {
-                    tmp_candidates.insert(row_offset);
-                }
-            };
-            // run in-filter.
+            TargetBitmap candidate_rows(active_count_, true);
             for (size_t idx = 0; idx < elems.size(); idx++) {
-                if (idx == 0) {
-                    index_ptr->InApplyCallback(1, &elems[idx], first_callback);
-                } else {
-                    tmp_candidates.clear();
-                    index_ptr->InApplyCallback(1, &elems[idx], callback);
-                    candidates = std::move(tmp_candidates);
+                auto element_hits = index_ptr->In(1, &elems[idx]);
+                TargetBitmap rows(active_count_, false);
+                for (auto hit = element_hits.find_first(); hit.has_value();
+                     hit = element_hits.find_next(*hit)) {
+                    const auto row_offset = to_row_offset(*hit);
+                    if (row_offset < static_cast<size_t>(active_count_)) {
+                        rows[row_offset] = true;
+                    }
                 }
-                // the size of candidates is small enough.
-                if (candidates.size() * 100 < active_count_) {
+                candidate_rows &= rows;
+                if (candidate_rows.count() * 100 <
+                    static_cast<size_t>(active_count_)) {
                     break;
                 }
             }
             TargetBitmap res(active_count_, reverse);
             // run post-filter. The filter will only be executed once in the framework.
-            for (const auto& candidate : candidates) {
-                res[candidate] = is_same(val, candidate);
+            for (auto candidate = candidate_rows.find_first();
+                 candidate.has_value();
+                 candidate = candidate_rows.find_next(*candidate)) {
+                res[*candidate] = is_same(val, *candidate);
             }
             return res;
         },
@@ -1610,7 +1581,9 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     typedef std::
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
-    using Index = index::ScalarIndex<IndexInnerType>;
+    using ReaderType = std::conditional_t<std::is_same_v<T, std::string>,
+                                          std::string_view,
+                                          T>;
     if (!arg_inited_) {
         value_arg_.SetValue<IndexInnerType>(expr_->val_);
         arg_inited_ = true;
@@ -1629,62 +1602,55 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
     auto op_type = expr_->op_type_;
-    auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
+    auto execute_sub_batch = [this, op_type](
+                                 const index::IScalarPredicateReader<ReaderType>*
+                                     index_ptr,
+                                 const IndexInnerType& stored_val) {
+        const ReaderType val = stored_val;
         TargetBitmap res;
         switch (op_type) {
             case proto::plan::GreaterThan: {
-                UnaryIndexFunc<T, proto::plan::GreaterThan> func;
+                UnaryIndexFunc<ReaderType, proto::plan::GreaterThan> func;
                 res = func(index_ptr, val);
                 break;
             }
             case proto::plan::GreaterEqual: {
-                UnaryIndexFunc<T, proto::plan::GreaterEqual> func;
+                UnaryIndexFunc<ReaderType, proto::plan::GreaterEqual> func;
                 res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessThan: {
-                UnaryIndexFunc<T, proto::plan::LessThan> func;
+                UnaryIndexFunc<ReaderType, proto::plan::LessThan> func;
                 res = func(index_ptr, val);
                 break;
             }
             case proto::plan::LessEqual: {
-                UnaryIndexFunc<T, proto::plan::LessEqual> func;
+                UnaryIndexFunc<ReaderType, proto::plan::LessEqual> func;
                 res = func(index_ptr, val);
                 break;
             }
             case proto::plan::Equal: {
-                UnaryIndexFunc<T, proto::plan::Equal> func;
+                UnaryIndexFunc<ReaderType, proto::plan::Equal> func;
                 res = func(index_ptr, val);
                 break;
             }
             case proto::plan::NotEqual: {
-                UnaryIndexFunc<T, proto::plan::NotEqual> func;
+                UnaryIndexFunc<ReaderType, proto::plan::NotEqual> func;
                 res = func(index_ptr, val);
                 break;
             }
-            case proto::plan::PrefixMatch: {
-                UnaryIndexFunc<T, proto::plan::PrefixMatch> func;
-                res = func(index_ptr, val);
-                break;
-            }
-            case proto::plan::PostfixMatch: {
-                UnaryIndexFunc<T, proto::plan::PostfixMatch> func;
-                res = func(index_ptr, val);
-                break;
-            }
-            case proto::plan::InnerMatch: {
-                UnaryIndexFunc<T, proto::plan::InnerMatch> func;
-                res = func(index_ptr, val);
-                break;
-            }
-            case proto::plan::Match: {
-                UnaryIndexFunc<T, proto::plan::Match> func;
-                res = func(index_ptr, val);
-                break;
-            }
+            case proto::plan::PrefixMatch:
+            case proto::plan::PostfixMatch:
+            case proto::plan::InnerMatch:
+            case proto::plan::Match:
             case proto::plan::RegexMatch: {
-                UnaryIndexFunc<T, proto::plan::RegexMatch> func;
-                res = std::move(func(index_ptr, val));
+                if constexpr (std::is_same_v<ReaderType, std::string_view>) {
+                    UnaryIndexFuncForMatch<ReaderType> func;
+                    res = func(pattern_reader_, val, op_type);
+                } else {
+                    ThrowInfo(OpTypeInvalid,
+                              "pattern matching only supports string type");
+                }
                 break;
             }
             default:
@@ -2068,10 +2034,10 @@ PhyUnaryRangeFilterExpr::StringLiteralForCostGuard() const {
 
 void
 PhyUnaryRangeFilterExpr::DetermineExecPath() {
-    // TextMatch/PhraseMatch/TextMatchFuzzy use a separate text index path
-    // (segment_->GetTextIndex()), not the pinned_index_ scalar index path.
     if (IsTextIndexOpType(expr_->op_type_)) {
-        exec_path_ = ExprExecPath::TextIndex;
+        auto req = MakeIndexRequirement(RequiredReader::TextMatch);
+        req.value_type = field_type_;
+        SelectAndPinIndex(req);
         return;
     }
 
@@ -2105,9 +2071,7 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
     if (data_type == DataType::JSON &&
         expr_->val_.val_case() ==
             proto::plan::GenericValue::ValCase::kInt64Val &&
-        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val()) &&
-        expr_->op_type_ != proto::plan::OpType::Equal &&
-        expr_->op_type_ != proto::plan::OpType::NotEqual) {
+        !IsInt64SafeForJsonDoubleIndex(expr_->val_.int64_val())) {
         exec_path_ = ExprExecPath::RawData;
         return;
     }
@@ -2163,7 +2127,28 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
         }
     }
 
-    SegmentExpr::DetermineExecPath();
+    const bool is_pattern =
+        expr_->op_type_ == proto::plan::OpType::Match ||
+        expr_->op_type_ == proto::plan::OpType::PrefixMatch ||
+        expr_->op_type_ == proto::plan::OpType::PostfixMatch ||
+        expr_->op_type_ == proto::plan::OpType::InnerMatch ||
+        expr_->op_type_ == proto::plan::OpType::RegexMatch;
+    auto req = MakeIndexRequirement(is_pattern ? RequiredReader::Ngram
+                                               : RequiredReader::Predicate);
+    req.value_type =
+        data_type == DataType::ARRAY
+            ? expr_->column_.element_type_
+            : (field_type_ == DataType::JSON ? value_type_ : data_type);
+    if (is_pattern && SelectAndPinIndex(req) &&
+        ngram_reader_->CanHandle(GetValueFromProto<std::string>(expr_->val_),
+                                 ToIndexPatternOp(expr_->op_type_))) {
+        return;
+    }
+    if (is_pattern) {
+        ClearSelectedIndex();
+        req.reader = RequiredReader::PatternMatch;
+    }
+    SelectAndPinIndex(req);
     if (exec_path_ != ExprExecPath::ScalarIndex) {
         return;
     }
@@ -2246,13 +2231,13 @@ PhyUnaryRangeFilterExpr::DetermineExecPath() {
             can_use = false;
     }
     if (!can_use) {
+        ClearSelectedIndex();
         exec_path_ = ExprExecPath::RawData;
     }
 }
 
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecTextMatch() {
-    using Index = index::TextMatchIndex;
     if (!arg_inited_) {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
@@ -2318,33 +2303,39 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
             this->ToString(),
             active_count_,
             [&]() -> exec::ExprCacheHelper::ComputeResult {
-                auto pw = segment_->GetTextIndex(op_ctx_, field_id_);
-                auto index = pw.get();
+                AssertInfo(text_reader_ != nullptr,
+                           "selected text index has no text-match reader");
+                AssertInfo(null_reader_ != nullptr,
+                           "selected text index has no null reader");
                 TargetBitmap res;
                 if (op_type == proto::plan::OpType::TextMatch) {
-                    res = index->MatchQuery(query, min_should_match);
+                    res = text_reader_->MatchQuery(query, min_should_match);
                 } else if (op_type == proto::plan::OpType::PhraseMatch) {
-                    res = index->PhraseMatchQuery(query, slop);
+                    res = text_reader_->PhraseMatchQuery(query, slop);
                 } else if (op_type == proto::plan::OpType::TextMatchFuzzy) {
-                    res = index->FuzzyMatchQuery(query, max_edit_distance);
+                    res = text_reader_->FuzzyMatchQuery(query,
+                                                        max_edit_distance);
                 } else {
                     ThrowInfo(UnexpectedError,
                               "unsupported operator type for match query: {}",
                               op_type);
                 }
-                auto valid_res = index->IsNotNull();
-                if (res.size() < static_cast<size_t>(active_count_)) {
-                    // some entities are not visible in inverted index.
-                    // only happens on growing segment.
-                    TargetBitmap tail(active_count_ - res.size());
+                const auto covered = selected_covered_row_end_;
+                AssertInfo(res.size() >= static_cast<size_t>(covered),
+                           "text index covers {} rows, snapshot requires {}",
+                           res.size(),
+                           covered);
+                res.resize(covered);
+                auto valid_res = null_reader_->IsNotNull();
+                AssertInfo(valid_res.size() >= static_cast<size_t>(covered),
+                           "text null index covers {} rows, snapshot requires {}",
+                           valid_res.size(),
+                           covered);
+                valid_res.resize(covered);
+                if (covered < active_count_) {
+                    TargetBitmap tail(active_count_ - covered);
                     res.append(tail);
                     valid_res.append(tail);
-                } else if (res.size() > static_cast<size_t>(active_count_)) {
-                    // on growing segments, the text index may have indexed
-                    // rows beyond the query timestamp. Truncate to
-                    // active_count_.
-                    res.resize(active_count_);
-                    valid_res.resize(active_count_);
                 }
                 return {std::move(res), std::move(valid_res)};
             },
@@ -2375,12 +2366,12 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
 
 bool
 PhyUnaryRangeFilterExpr::CanUseNgramIndex() const {
-    if (pinned_ngram_index_.get() == nullptr || has_offset_input_) {
+    if (ngram_reader_ == nullptr || has_offset_input_) {
         return false;
     }
     auto literal = GetValueFromProto<std::string>(expr_->val_);
-    return pinned_ngram_index_.get()->CanHandleLiteral(literal,
-                                                       expr_->op_type_);
+    return ngram_reader_->CanHandle(literal,
+                                    ToIndexPatternOp(expr_->op_type_));
 }
 
 void
@@ -2391,12 +2382,11 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase1(TargetBitmap& candidates) {
     }
 
     auto literal = value_arg_.GetValue<std::string>();
-    auto index = pinned_ngram_index_.get();
-    AssertInfo(index != nullptr,
+    AssertInfo(ngram_reader_ != nullptr,
                "ngram index should not be null, field_id: {}",
                field_id_.get());
-
-    index->ExecutePhase1(literal, expr_->op_type_, candidates);
+    ngram_reader_->Candidates(
+        literal, ToIndexPatternOp(expr_->op_type_), candidates);
 }
 
 void
@@ -2409,13 +2399,92 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
     }
 
     auto literal = value_arg_.GetValue<std::string>();
-    auto index = pinned_ngram_index_.get();
-    AssertInfo(index != nullptr,
+    AssertInfo(ngram_reader_ != nullptr,
                "ngram index should not be null, field_id: {}",
                field_id_.get());
 
-    index->ExecutePhase2(
-        literal, expr_->op_type_, this, candidates, segment_offset, batch_size);
+    TargetBitmapView res(candidates);
+    auto apply_string_predicate = [&](auto&& predicate) {
+        auto execute_batch = [&predicate](const std::string_view* data,
+                                          int64_t size,
+                                          TargetBitmapView output) {
+            for (auto pos = output.find_first(); pos.has_value() &&
+                 *pos < static_cast<size_t>(size);
+                 pos = output.find_next(*pos)) {
+                if (!predicate(data[*pos])) {
+                    output[*pos] = false;
+                }
+            }
+        };
+        ProcessDataChunkForRange<std::string_view>(
+            execute_batch, res, segment_offset, batch_size);
+    };
+    auto apply_json_predicate = [&](auto&& predicate) {
+        auto execute_batch = [&predicate](const milvus::Json* data,
+                                          int64_t size,
+                                          TargetBitmapView output) {
+            for (auto pos = output.find_first(); pos.has_value() &&
+                 *pos < static_cast<size_t>(size);
+                 pos = output.find_next(*pos)) {
+                if (!predicate(data[*pos])) {
+                    output[*pos] = false;
+                }
+            }
+        };
+        ProcessDataChunkForRange<milvus::Json>(
+            execute_batch, res, segment_offset, batch_size);
+    };
+    std::function<bool(std::string_view)> matches;
+    switch (expr_->op_type_) {
+        case proto::plan::OpType::InnerMatch:
+            matches = [&literal](std::string_view value) {
+                return value.find(literal) != std::string_view::npos;
+            };
+            break;
+        case proto::plan::OpType::PrefixMatch:
+            matches = [&literal](std::string_view value) {
+                return value.size() >= literal.size() &&
+                       value.compare(0, literal.size(), literal) == 0;
+            };
+            break;
+        case proto::plan::OpType::PostfixMatch:
+            matches = [&literal](std::string_view value) {
+                return value.size() >= literal.size() &&
+                       value.compare(value.size() - literal.size(),
+                                     literal.size(),
+                                     literal) == 0;
+            };
+            break;
+        case proto::plan::OpType::Match: {
+            auto matcher = std::make_shared<LikePatternMatcher>(literal);
+            matches = [matcher](std::string_view value) {
+                return (*matcher)(value);
+            };
+            break;
+        }
+        case proto::plan::OpType::RegexMatch: {
+            auto matcher = std::make_shared<PartialRegexMatcher>(literal);
+            matches = [matcher](std::string_view value) {
+                return (*matcher)(value);
+            };
+            break;
+        }
+        default:
+            ThrowInfo(UnexpectedError,
+                      "unsupported ngram operator {}",
+                      expr_->op_type_);
+    }
+
+    if (field_type_ == DataType::JSON) {
+        auto pointer = milvus::Json::pointer(nested_path_);
+        apply_json_predicate([pointer = std::move(pointer), &matches](
+                                 const milvus::Json& data) {
+            auto value = data.template at<std::string_view>(pointer);
+            return !value.error() && matches(value.value());
+        });
+    } else {
+        apply_string_predicate(matches);
+    }
 }
 
 bool
@@ -2563,24 +2632,25 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         return std::nullopt;
     }
 
-    auto index = pinned_ngram_index_.get();
-    AssertInfo(index != nullptr,
+    AssertInfo(ngram_reader_ != nullptr && selected_reader_ != nullptr,
                "ngram index should not be null, field_id: {}",
                field_id_.get());
 
     // Phase 1: Execute once for entire segment (no bitmap_input needed)
     if (cached_phase1_res_ == nullptr) {
-        if (!index->CanHandleLiteral(literal, expr_->op_type_)) {
+        if (!ngram_reader_->CanHandle(literal,
+                                      ToIndexPatternOp(expr_->op_type_))) {
             return std::nullopt;
         }
 
-        auto total_count = static_cast<size_t>(index->Count());
+        auto total_count = static_cast<size_t>(selected_reader_->Count());
         TargetBitmap candidates(total_count, true);
-        index->ExecutePhase1(literal, expr_->op_type_, candidates);
+        ngram_reader_->Candidates(
+            literal, ToIndexPatternOp(expr_->op_type_), candidates);
         cached_phase1_res_ =
             std::make_shared<TargetBitmap>(std::move(candidates));
-        cached_index_chunk_valid_res_ =
-            std::make_shared<TargetBitmap>(index->IsNotNull());
+        cached_index_chunk_valid_res_ = std::make_shared<TargetBitmap>(
+            null_reader_->IsNotNull());
     }
 
     // Phase 2: Execute per batch with batch-level bitmap_input
@@ -2600,12 +2670,9 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
 
     // Execute Phase2 (post-filter) on this batch
     if (!batch_candidates.none()) {
-        index->ExecutePhase2(literal,
-                             expr_->op_type_,
-                             this,
-                             batch_candidates,
-                             current_data_global_pos_,
-                             real_batch_size);
+        ExecuteNgramPhase2(batch_candidates,
+                           current_data_global_pos_,
+                           real_batch_size);
     }
 
     TargetBitmap valid_result;

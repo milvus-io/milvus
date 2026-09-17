@@ -16,11 +16,9 @@
 
 #pragma once
 
-#include <algorithm>
-#include <atomic>
 #include <cstdint>
-#include <limits>
-#include <mutex>
+#include <memory>
+#include <optional>
 #include <vector>
 
 #include "common/EasyAssert.h"
@@ -67,6 +65,16 @@ namespace milvus {
 // gone either way.
 class GrowingOffsetMapping final : public OffsetMapping {
  public:
+    GrowingOffsetMapping();
+    ~GrowingOffsetMapping() override;
+
+    GrowingOffsetMapping(const GrowingOffsetMapping&) = delete;
+    GrowingOffsetMapping&
+    operator=(const GrowingOffsetMapping&) = delete;
+    GrowingOffsetMapping(GrowingOffsetMapping&&) = delete;
+    GrowingOffsetMapping&
+    operator=(GrowingOffsetMapping&&) = delete;
+
     // Append `count` rows. start_logical / start_physical default to the
     // current counts; passing them explicitly lets callers assert the offsets
     // they reserved. Appends MUST arrive in ascending logical order (enforced
@@ -77,6 +85,13 @@ class GrowingOffsetMapping final : public OffsetMapping {
            int64_t count,
            int64_t start_logical = -1,
            int64_t start_physical = -1);
+
+    // Freeze the currently published (valid_count, total_count) pair in one
+    // acquire load. The returned read-only view shares the append-only p2l
+    // spine, but later appends cannot widen any of its lookup or transform
+    // bounds. The view may outlive this writer object.
+    std::shared_ptr<const OffsetMapping>
+    Snapshot() const;
 
     // Binary search over the physical -> logical array (strictly increasing):
     // O(log valid_count). Returns -1 for null rows and out-of-range offsets.
@@ -119,120 +134,14 @@ class GrowingOffsetMapping final : public OffsetMapping {
         std::vector<int64_t>& physical_offsets) const override;
 
  private:
-    // Append-only array of int32_t for one writer and many lock-free readers.
-    //
-    // The spine is a FIXED array of chunk pointers -- it is never reallocated,
-    // so a reader can index it without synchronising against the writer -- and
-    // chunk c holds (kFirstChunk << c) entries, so total allocation stays
-    // within 2x of the rows actually stored while a small mapping still starts
-    // at one 4KB chunk.
-    //
-    // Reserve()/Set() are writer-only. Get() is safe for any index the owner
-    // has published via its release-store to counts_; the matching acquire is
-    // what orders the chunk pointer and element stores before it, which is why
-    // the loads here can be relaxed.
-    class ChunkedArray {
-     public:
-        static constexpr int64_t kFirstChunkLog2 = 10;
-        static constexpr int64_t kFirstChunk = int64_t{1} << kFirstChunkLog2;
-        // 22 chunks already cover the whole int32 offset range Append allows
-        // (kFirstChunk * (2^22 - 1) > 2^31); 24 leaves margin at 8 bytes per
-        // spine slot, so Reserve's bound check can never be the thing that
-        // fires first.
-        static constexpr int kMaxChunks = 24;
-        // Fill value for freshly allocated slots. Never observable: Append
-        // writes every slot below the published bound and readers never look
-        // above it. It exists so a future partial-write bug shows up as an
-        // absurd offset rather than as a plausible 0 or as -1 ("null row").
-        static constexpr int32_t kUnset = std::numeric_limits<int32_t>::min();
-
-        ChunkedArray() {
-            for (auto& chunk : chunks_) {
-                chunk.store(nullptr, std::memory_order_relaxed);
-            }
-        }
-
-        ~ChunkedArray() {
-            for (auto& chunk : chunks_) {
-                delete[] chunk.load(std::memory_order_relaxed);
-            }
-        }
-
-        ChunkedArray(const ChunkedArray&) = delete;
-        ChunkedArray&
-        operator=(const ChunkedArray&) = delete;
-
-        // Writer only. Allocates every chunk needed to address `capacity`
-        // entries. Idempotent, and safe to call while readers run: a chunk is
-        // published before any element in it is, and neither is reachable
-        // until counts_ moves.
-        void
-        Reserve(int64_t capacity);
-
-        // Writer only; `index` must lie inside the reserved capacity. Neither
-        // Set nor Get bounds-checks the chunk index: Reserve() is the single
-        // enforcement point (it asserts against kMaxChunks), Append always
-        // reserves the full batch before writing any of it, and readers never
-        // look above the published counts. Re-checking per element would put a
-        // branch on the per-row read path to restate an invariant that is
-        // already established.
-        void
-        Set(int64_t index, int32_t value) {
-            const int chunk = ChunkOf(index);
-            chunks_[chunk].load(
-                std::memory_order_relaxed)[PosOf(index, chunk)] = value;
-        }
-
-        int32_t
-        Get(int64_t index) const {
-            const int chunk = ChunkOf(index);
-            return chunks_[chunk].load(
-                std::memory_order_relaxed)[PosOf(index, chunk)];
-        }
-
-        OffsetMappingIdView
-        View(int64_t index, int64_t count) const {
-            if (count <= 0) {
-                return {};
-            }
-            AssertInfo(
-                index >= 0, "offset mapping index {} is negative", index);
-            const int chunk = ChunkOf(index);
-            auto* data = chunks_[chunk].load(std::memory_order_relaxed);
-            AssertInfo(data != nullptr,
-                       "growing offset mapping chunk {} is not allocated",
-                       chunk);
-            const auto pos = PosOf(index, chunk);
-            const auto chunk_size = kFirstChunk << chunk;
-            return {data + pos, std::min<int64_t>(count, chunk_size - pos)};
-        }
-
-     private:
-        // Entry i lives in chunk floor(log2(i / kFirstChunk + 1)) because the
-        // chunks form a geometric series: chunks 0..c-1 together hold
-        // kFirstChunk * (2^c - 1) entries.
-        static int
-        ChunkOf(int64_t index) {
-            const auto scaled =
-                static_cast<uint64_t>(index) / kFirstChunk + 1;  // >= 1
-            return 63 - __builtin_clzll(scaled);
-        }
-
-        static int64_t
-        PosOf(int64_t index, int chunk) {
-            return index - kFirstChunk * ((int64_t{1} << chunk) - 1);
-        }
-
-        std::atomic<int32_t*> chunks_[kMaxChunks];
-    };
-
-    // A (valid_count, total_count) pair read from one atomic load, so the two
-    // can never come from different generations. Both fit in 32 bits: the
-    // mapping stores offsets as int32_t and Append rejects anything larger.
     struct Counts {
         int64_t valid;
         int64_t total;
     };
+
+    class State;
+
+    GrowingOffsetMapping(std::shared_ptr<State> state, Counts counts);
 
     static uint64_t
     PackCounts(int64_t valid, int64_t total) {
@@ -241,14 +150,8 @@ class GrowingOffsetMapping final : public OffsetMapping {
     }
 
     Counts
-    LoadCounts() const {
-        const uint64_t packed = counts_.load(std::memory_order_acquire);
-        return Counts{static_cast<int64_t>(packed >> 32),
-                      static_cast<int64_t>(packed & 0xffffffffULL)};
-    }
+    LoadCounts() const;
 
-    // Both take the counts snapshot as a parameter so callers can read it
-    // once per batch instead of per element.
     int64_t
     GetPhysicalOffsetInternal(int64_t logical_offset,
                               const Counts& counts) const;
@@ -257,35 +160,17 @@ class GrowingOffsetMapping final : public OffsetMapping {
     GetLogicalOffsetInternal(int64_t physical_offset,
                              int64_t valid_count) const;
 
-    // First physical index whose logical offset is >= logical_target, over
-    // p2l_[0, valid_count). Shared by ValidCountBelow (the answer IS the
-    // count) and GetPhysicalOffset (an exact hit is the row's physical slot,
-    // a miss means the row is null).
     int64_t
     LowerBound(int64_t logical_target, int64_t valid_count) const;
 
-    // LowerBound restricted to [from, bound), found by exponential search
-    // from `from`. Precondition: the answer is >= from -- i.e. `from` is a
-    // lower bound for some target <= logical_target. Lets an ascending batch
-    // pay O(log gap) per element instead of O(log valid_count).
     int64_t
     GallopLowerBound(int64_t logical_target, int64_t from, int64_t bound) const;
 
-    // Writer-vs-writer only; readers never take it. Present so that a caller
-    // that breaks the single-writer contract hits Append's ordering assertions
-    // instead of racing on chunk allocation.
-    std::mutex append_mutex_;
-
-    // physical -> logical, strictly increasing. The only stored direction;
-    // logical -> physical is answered by binary search over it (LowerBound).
-    ChunkedArray p2l_;
-
-    // Packed (valid_count, total_count). The ONLY publication point: every
-    // store is a release, every read is one acquire load. total_count == 0
-    // means "no mapping yet", which is what IsEnabled() reports -- Append
-    // returns early on an empty batch, so a mapping can never be enabled with
-    // zero logical rows.
-    std::atomic<uint64_t> counts_{0};
+    // State owns the fixed p2l spine and publication counter. Snapshot views
+    // retain it after this writer is destroyed; writer objects themselves stay
+    // non-copyable so there is still exactly one append entry point.
+    std::shared_ptr<State> state_;
+    std::optional<Counts> frozen_counts_;
 };
 
 }  // namespace milvus

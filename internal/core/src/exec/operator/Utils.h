@@ -22,6 +22,7 @@
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/index/index_node.h"
 #include "log/Log.h"
 #include "segcore/SegmentInterface.h"
@@ -106,22 +107,31 @@ UseVectorIterator(const SearchInfo& search_info) {
     return search_info.has_group_by() || search_info.iterative_filter_execution;
 }
 
+inline index::VectorSearchParams
+ProjectVectorSearchParams(const SearchInfo& search_info) {
+    return index::VectorSearchParams{search_info.search_params_,
+                                     search_info.metric_type_,
+                                     search_info.topk_,
+                                     search_info.trace_ctx_};
+}
+
 [[maybe_unused]] static bool
 PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                                 int nq,
                                 const DatasetPtr dataset,
                                 SearchResult& search_result,
                                 const BitsetView& bitset,
-                                const index::VectorIndex& index,
+                                const index::IVectorReader& reader,
                                 milvus::OpContext* op_context = nullptr) {
     // when we use group by, we will use vector iterator to continously get results and group on them
     // when we use iterative filtered search, we will use vector iterator to continously get results and check scalar attr on them
     // until we get valid topk results
     if (UseVectorIterator(search_info)) {
         try {
-            auto search_conf = index.PrepareSearchParams(search_info);
+            auto search_conf = reader.PrepareSearchParams(
+                ProjectVectorSearchParams(search_info));
             knowhere::expected<std::vector<knowhere::IndexNode::IteratorPtr>>
-                iterators_val = index.VectorIterators(
+                iterators_val = reader.Iterators(
                     dataset, search_conf, bitset, op_context);
             if (iterators_val.has_value()) {
                 bool larger_is_closer =
@@ -177,7 +187,7 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
             ThrowInfo(ErrorCode::Unsupported,
                       "Failed to {}, current index:{} doesn't support",
                       operator_type,
-                      index.GetIndexType());
+                      reader.KnowhereIndexType());
         }
         return true;
     }

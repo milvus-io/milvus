@@ -28,13 +28,11 @@
 #include <string>
 #include <boost/algorithm/string.hpp>
 
+#include "nlohmann/json.hpp"
+
 #include "common/Common.h"
 #include "common/Types.h"
 #include "common/FieldData.h"
-#include "common/QueryInfo.h"
-#include "common/RangeSearchHelper.h"
-#include "index/IndexInfo.h"
-#include "index/ScalarIndex.h"
 #include "storage/Types.h"
 #include "storage/DataCodec.h"
 #include "log/Log.h"
@@ -43,12 +41,6 @@ namespace milvus::index {
 
 size_t
 get_file_size(int fd);
-
-std::vector<std::tuple<IndexType, MetricType>>
-unsupported_index_combinations();
-
-bool
-is_unsupported(const IndexType& index_type, const MetricType& metric_type);
 
 bool
 CheckKeyInConfig(const Config& cfg, const std::string& key);
@@ -108,6 +100,14 @@ GetValueFromConfig(const Config& cfg, const std::string& key) {
 }
 
 template <typename T>
+inline T
+GetValueFromConfigOrFallback(const Config& cfg,
+                             const std::string& key,
+                             T fallback) {
+    return GetValueFromConfig<T>(cfg, key).value_or(fallback);
+}
+
+template <typename T>
 inline void
 CheckMetricTypeSupport(const MetricType& metric_type) {
     if constexpr (std::is_same_v<T, bin1>) {
@@ -146,11 +146,14 @@ GetIndexEngineVersionFromConfig(const Config& config);
 int32_t
 GetBitmapCardinalityLimitFromConfig(const Config& config);
 
-ScalarIndexType
-GetHybridLowCardinalityIndexTypeFromConfig(const Config& config);
+// Return a registry family while accepting the legacy HYBRID internal-type
+// spellings. The HYBRID artifact still persists its established one-byte
+// ScalarIndexType selector; these helpers only normalize runtime config.
+std::string
+GetLowCardinalityFamilyFromConfig(const Config& config);
 
-ScalarIndexType
-GetHybridHighCardinalityIndexTypeFromConfig(const Config& config);
+std::string
+GetHighCardinalityFamilyFromConfig(const Config& config);
 
 Config
 ParseConfigFromIndexParams(
@@ -193,12 +196,6 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
 // On Linux, read() (and similar system calls) will transfer at most 0x7ffff000 (2,147,479,552) bytes once
 void
 ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size = 0x7ffff000);
-
-bool
-CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
-                                       const int64_t topk,
-                                       const MetricType& metric_type,
-                                       knowhere::Json& search_config);
 
 // for unused
 void inline SetBitsetUnused(void* bitset, const uint32_t* doc_id, uintptr_t n) {

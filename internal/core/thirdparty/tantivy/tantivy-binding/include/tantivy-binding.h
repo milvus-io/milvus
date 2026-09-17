@@ -446,7 +446,11 @@ RustResult tantivy_finish_index(void *ptr);
 
 RustResult tantivy_commit_index(void *ptr);
 
+RustResult tantivy_rollback_index(void *ptr);
+
 RustResult tantivy_create_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
+
+RustResult tantivy_create_snapshot_reader_from_writer(void *ptr, SetBitsetFn set_bitset);
 
 RustResult tantivy_index_add_int8s(void *ptr,
                                    const int8_t *array,
