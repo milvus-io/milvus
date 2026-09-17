@@ -14,7 +14,7 @@
 # Update milvus-storage_VERSION for the first occurrence
 milvus_add_pkg_config("milvus-storage")
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY INCLUDE_DIRECTORIES "")
-set( milvus-storage_VERSION b502efe400a6749320da413bd2a35c01b8fdf786)
+set( milvus-storage_VERSION 23011d46c4ae9b348074d9366f214e2e3e2074f1)
 set( GIT_REPOSITORY  "https://github.com/milvus-io/milvus-storage.git")
 message(STATUS "milvus-storage repo: ${GIT_REPOSITORY}")
 message(STATUS "milvus-storage version: ${milvus-storage_VERSION}")
