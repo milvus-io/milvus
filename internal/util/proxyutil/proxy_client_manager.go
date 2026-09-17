@@ -433,11 +433,17 @@ func (p *ProxyClientManager) ClearReadTaskQueue(ctx context.Context, request *in
 // ListRunningRequests collects the requests registered on every proxy and
 // returns them together with one result row per proxy.
 //
-// Partial results are the point: a proxy that is unreachable, unhealthy or
-// running an older build shows up in nodeResults, and the requests the other
-// proxies reported are still returned. An empty client map is an error rather
-// than an empty success, because "no proxy answered" and "no request is
-// running" must not look the same to an operator.
+// Partial results are the point. A proxy that is unreachable, unhealthy or
+// running an older build shows up in nodeResults and the requests the other
+// proxies reported are still returned, with the call itself succeeding: the
+// reason to be listing running requests is usually that something is wrong,
+// which is exactly when one proxy is most likely to be unreachable, and an
+// operator who cannot see the other proxies' requests cannot act at all.
+// nodeResults is what keeps such an answer honest about being incomplete.
+//
+// The call fails only when no proxy answered, including an empty client map,
+// because "no proxy answered" and "no request is running" must not look the
+// same to an operator.
 func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *milvuspb.ListRunningRequestsRequest) ([]*milvuspb.RunningRequestInfo, []*milvuspb.RunningRequestNodeResult, error) {
 	if p.proxyClient.Len() == 0 {
 		return nil, nil, merr.WrapErrServiceUnavailable("no proxy is registered, cannot list running requests")
@@ -449,33 +455,40 @@ func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *m
 	var mu sync.Mutex
 	requests := make([]*milvuspb.RunningRequestInfo, 0, p.proxyClient.Len())
 	nodeResults := make([]*milvuspb.RunningRequestNodeResult, 0, p.proxyClient.Len())
-	group := &errgroup.Group{}
+	var answered int
+	var wg sync.WaitGroup
 	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID, client := key, value
-		group.Go(func() error {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			resp, err := client.ListLocalRunningRequests(ctx, request)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				nodeResults = append(nodeResults, newRunningRequestNodeResult(nodeID, err))
 				if errors.Is(err, merr.ErrServiceUnimplemented) {
-					return nil
+					answered++
 				}
-				return errors.Wrapf(err, "ListRunningRequests failed, proxyID = %d", nodeID)
+				return
 			}
 			nodeResults = append(nodeResults, &milvuspb.RunningRequestNodeResult{
 				NodeId: nodeID,
 				Status: resp.GetStatus(),
 			})
 			if !merr.Ok(resp.GetStatus()) {
-				return errors.Wrapf(merr.Error(resp.GetStatus()), "ListRunningRequests failed, proxyID = %d", nodeID)
+				return
 			}
+			answered++
 			requests = append(requests, resp.GetRequests()...)
-			return nil
-		})
+		}()
 		return true
 	})
-	return requests, nodeResults, group.Wait()
+	wg.Wait()
+	if answered == 0 {
+		return requests, nodeResults, noProxyAnswered("cannot list running requests", nodeResults)
+	}
+	return requests, nodeResults, nil
 }
 
 // CancelRequests asks every proxy to cancel the given request ids and returns
@@ -485,6 +498,11 @@ func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *m
 // The call is broadcast because a request id does not say which proxy serves
 // it. An id is reported as not found only when no proxy claimed it, so a
 // single proxy's "not found" is not mistaken for the cluster's answer.
+//
+// Like the list, this succeeds as long as one proxy answered, so that a proxy
+// that is down cannot stop the others from cancelling what they hold. When
+// nodeResults contains a failure, notFound is not authoritative: an id in it
+// may still be running on the proxy that did not answer.
 func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error) {
 	if p.proxyClient.Len() == 0 {
 		return nil, nil, nil, merr.WrapErrServiceUnavailable("no proxy is registered, cannot cancel requests")
@@ -496,40 +514,57 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 	var mu sync.Mutex
 	cancelled := make([]*milvuspb.RunningRequestInfo, 0, len(request.GetRequestIds()))
 	// Start from every requested id and strike out the ones a proxy cancelled.
-	// Whatever remains was held by nobody.
+	// Whatever remains was held by nobody that answered.
 	pending := typeutil.NewSet(request.GetRequestIds()...)
 	nodeResults := make([]*milvuspb.RunningRequestNodeResult, 0, p.proxyClient.Len())
-	group := &errgroup.Group{}
+	var answered int
+	var wg sync.WaitGroup
 	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
 		nodeID, client := key, value
-		group.Go(func() error {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			resp, err := client.CancelLocalRequests(ctx, request)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
 				nodeResults = append(nodeResults, newRunningRequestNodeResult(nodeID, err))
 				if errors.Is(err, merr.ErrServiceUnimplemented) {
-					return nil
+					answered++
 				}
-				return errors.Wrapf(err, "CancelRequests failed, proxyID = %d", nodeID)
+				return
 			}
 			nodeResults = append(nodeResults, &milvuspb.RunningRequestNodeResult{
 				NodeId: nodeID,
 				Status: resp.GetStatus(),
 			})
 			if !merr.Ok(resp.GetStatus()) {
-				return errors.Wrapf(merr.Error(resp.GetStatus()), "CancelRequests failed, proxyID = %d", nodeID)
+				return
 			}
+			answered++
 			for _, info := range resp.GetCancelled() {
 				cancelled = append(cancelled, info)
 				pending.Remove(info.GetRequestId())
 			}
-			return nil
-		})
+		}()
 		return true
 	})
-	err := group.Wait()
-	return cancelled, pending.Collect(), nodeResults, err
+	wg.Wait()
+	if answered == 0 {
+		return cancelled, pending.Collect(), nodeResults, noProxyAnswered("cannot cancel requests", nodeResults)
+	}
+	return cancelled, pending.Collect(), nodeResults, nil
+}
+
+// noProxyAnswered builds the error for a fan-out that reached nobody, naming
+// one of the proxies that failed so the cause is not lost.
+func noProxyAnswered(what string, nodeResults []*milvuspb.RunningRequestNodeResult) error {
+	for _, r := range nodeResults {
+		if !merr.Ok(r.GetStatus()) {
+			return errors.Wrapf(merr.Error(r.GetStatus()), "no proxy answered, %s (proxyID = %d)", what, r.GetNodeId())
+		}
+	}
+	return merr.WrapErrServiceUnavailable("no proxy answered, " + what)
 }
 
 // newRunningRequestNodeResult records why one proxy could not answer. A node
