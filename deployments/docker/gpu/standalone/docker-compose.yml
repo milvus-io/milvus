@@ -1,10 +1,12 @@
 version: '3.5'
 
+x-milvus-image: &milvus-image milvusdb/milvus:v3.0.1-gpu
+
 services:
   # Remove the .milvus-volume-owner-* marker after restoring files owned by a
   # different user so this one-shot migration runs again.
   milvus-volume-init:
-    image: milvusdb/milvus:v3.0.0-gpu
+    image: *milvus-image
     user: "0:0"
     network_mode: none
     read_only: true
@@ -62,7 +64,7 @@ services:
 
   standalone:
     container_name: milvus-standalone
-    image: milvusdb/milvus:v3.0.1-gpu
+    image: *milvus-image
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
