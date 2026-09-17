@@ -684,6 +684,10 @@ func (m *ReplicaManager) GetByResourceGroup(ctx context.Context, rgName string) 
 // 2. Add new incoming nodes into the replica if they are not in-used by other replicas of same collection.
 // 3. replicas in same resource group will shared the nodes in resource group fairly.
 func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
+	return m.recoverNodesInCollection(ctx, collectionID, rgs, nil)
+}
+
+func (m *ReplicaManager) recoverNodesInCollection(ctx context.Context, collectionID int64, rgs map[string]*ResourceGroup, skipRG func(string) bool) error {
 	// Build node sets from resource groups.
 	rgNodeSets := make(map[string]typeutil.UniqueSet, len(rgs))
 	for rgName, rg := range rgs {
@@ -714,6 +718,9 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	modifiedReplicas := make([]*Replica, 0)
 	// recover node by resource group.
 	helper.RangeOverResourceGroup(func(replicaHelper *replicasInSameRGAssignmentHelper) {
+		if skipRG != nil && skipRG(replicaHelper.rgName) {
+			return
+		}
 		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
 			replica := assignment.GetReplica()
 			// For replicas with needWaitRGReady flag, skip assignment if the RG still has missing nodes.
