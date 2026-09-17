@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -40,17 +40,18 @@ func newIndexReadinessTestServer(segments []*datapb.SegmentInfo, states map[int6
 		CollectionID: 1, FieldID: 10, IndexID: 10, CreateTime: 100,
 		IndexParams: []*commonpb.KeyValuePair{{Key: "index_type", Value: "IVF_FLAT"}},
 	}
+	store := metacache.NewMetaStore(nil)
 	s := &Server{ctx: context.Background(), meta: &meta{
-		collections:        typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		partitionStatsMeta: &partitionStatsMeta{partitionStatsInfos: make(map[string]map[int64]*partitionStatsInfo)},
-		channelCPs:         &channelCPs{checkpoints: make(map[string]*msgpb.MsgPosition)},
-		segments:           NewSegmentsInfo(),
+		metaStore:          store,
+		channelSync:        newChannelSync(),
+		segments:           NewSegmentsInfo(store),
 		indexMeta: &indexMeta{
 			indexes:        map[UniqueID]map[UniqueID]*model.Index{1: {10: index}},
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
 	}}
-	s.meta.collections.Insert(1, &collectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
+	s.meta.AddCollection(&collectionInfo{ID: 1, Schema: &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
 			{FieldID: 10, Name: "vector", DataType: schemapb.DataType_FloatVector},
 			{FieldID: 20, Name: "scalar", DataType: schemapb.DataType_Int64},

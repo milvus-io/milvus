@@ -45,10 +45,10 @@ func createMockPriorityQueue() *assign.PriorityQueue {
 // Helper function to create a test BalanceChecker
 func createTestBalanceChecker() *BalanceChecker {
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, nil),
 		ReplicaManager:    meta.NewReplicaManager(nil, nil),
 	}
-	targetMgr := meta.NewTargetManager(nil, nil)
+	targetMgr := meta.NewTargetManager(nil, nil, nil)
 	nodeMgr := &session.NodeManager{}
 	dist := meta.NewDistributionManager(nodeMgr)
 	scheduler := task.NewScheduler(context.Background(), nil, nil, nil, nil, nil, nil)

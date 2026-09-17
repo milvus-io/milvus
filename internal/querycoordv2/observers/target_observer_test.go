@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -46,10 +47,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type TargetObserverSuite struct {
 	suite.Suite
+	// metaStore is shared by Meta and TargetManager.
+	metaStore metacache.MetaStore
 
 	kv kv.MetaKv
 	// dependency
@@ -98,10 +102,11 @@ func (suite *TargetObserverSuite) SetupTest() {
 	}))
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr, suite.metaStore)
 
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 	suite.distMgr = meta.NewDistributionManager(nodeMgr)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.observer = NewTargetObserver(suite.meta, suite.targetMgr, suite.distMgr, suite.broker, suite.cluster, nodeMgr)
@@ -150,7 +155,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, mock.Anything, suite.nextTargetChannels, suite.nextTargetSegments, nil)
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -261,9 +266,7 @@ func (suite *TargetObserverSuite) TestIncrementalUpdate_WithNewSegment() {
 
 	// Setup mocks for the new segment discovery phase
 	// These mocks will be used by the background goroutine when it polls for updates
-	suite.broker.EXPECT().
-		GetRecoveryInfoV2(mock.Anything, mock.Anything).
-		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	expectRecoveryInfo(suite.broker, suite.metaStore, mock.Anything, suite.nextTargetChannels, suite.nextTargetSegments, nil)
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -386,6 +389,8 @@ func (suite *TargetObserverSuite) TearDownTest() {
 
 type TargetObserverCheckSuite struct {
 	suite.Suite
+	// metaStore is shared by Meta and TargetManager.
+	metaStore metacache.MetaStore
 
 	kv kv.MetaKv
 	// dependency
@@ -425,10 +430,11 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	nodeMgr := session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr)
+	suite.metaStore = metacache.NewMetaStore(nil)
+	suite.meta = meta.NewMeta(idAllocator, store, nodeMgr, suite.metaStore)
 
 	suite.broker = meta.NewMockBroker(suite.T())
-	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
+	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 	suite.distMgr = meta.NewDistributionManager(nodeMgr)
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.observer = NewTargetObserver(
@@ -474,7 +480,7 @@ func TestShouldUpdateCurrentTarget_EmptyNextTarget(t *testing.T) {
 
 	// Use a minimal meta without CollectionManager since we only test targetMgr behavior
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 	}
 
 	observer := NewTargetObserver(metaInstance, targetMgr, distMgr, broker, cluster, nodeMgr)
@@ -521,7 +527,7 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	replicaMgr := meta.NewReplicaManager(nil, nil)
 
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -644,7 +650,7 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	assert.NoError(t, err)
 
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -667,6 +673,7 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	// Return a segment in target - this will be checked by CheckDelegatorDataReady
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(typeutil.NewUniqueSet(lo.Keys(targetSegments)...)).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(nil).Maybe()
@@ -786,7 +793,7 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	assert.NoError(t, err)
 
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -821,7 +828,9 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(typeutil.NewUniqueSet(lo.Keys(targetSegments1)...)).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(targetSegments2).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(typeutil.NewUniqueSet(lo.Keys(targetSegments2)...)).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -926,7 +935,7 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	assert.NoError(t, err)
 
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -961,7 +970,9 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(typeutil.NewUniqueSet(lo.Keys(targetSegments1)...)).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(targetSegments2).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(typeutil.NewUniqueSet(lo.Keys(targetSegments2)...)).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1049,7 +1060,7 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	assert.NoError(t, err)
 
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 		ReplicaManager:    replicaMgr,
 	}
 
@@ -1071,6 +1082,7 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
+	targetMgr.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(typeutil.NewUniqueSet(lo.Keys(targetSegments)...)).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDroppedSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
 	targetMgr.EXPECT().GetDmChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1146,7 +1158,7 @@ func TestUpdateAllReplicasCheckpointMetric(t *testing.T) {
 	assert.NoError(t, err)
 
 	metaInstance := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(nil),
+		CollectionManager: meta.NewCollectionManager(nil, metacache.NewMetaStore(nil)),
 		ReplicaManager:    replicaMgr,
 	}
 

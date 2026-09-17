@@ -27,10 +27,12 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -701,4 +703,40 @@ func TestMixCoord_ExternalCollectionRefreshMethods(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, 0, len(resp.GetJobs()))
 	})
+}
+
+// TestMixCoord_SharedMetaStoreIsInjected pins the wiring the shared store
+// depends on: MixCoord builds ONE MetaStore and hands that same instance to
+// DataCoord (read-write) and to QueryCoord as a read-only MetaView. If the two
+// ever diverge, QueryCoord resolves against a store nobody writes and every
+// target silently reports its segments missing.
+//
+// The collection seeding that used to live here is gone: DataCoord's Init
+// already walks RootCoord for the same collections into the same store
+// (meta.reloadCollectionsFromRootcoord), and MixCoord runs DC Init before QC
+// Init, so a second walk was pure duplicate load.
+func TestMixCoord_SharedMetaStoreIsInjected(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+	s := &mixCoordImpl{metaStore: store}
+
+	seg := &datapb.SegmentInfo{
+		ID:            42,
+		CollectionID:  1,
+		InsertChannel: "ch-0",
+		State:         commonpb.SegmentState_Flushed,
+	}
+	s.metaStore.PutSegment(seg)
+
+	// The read-only view is the same object, so a DataCoord write is
+	// immediately visible to QueryCoord.
+	var view metacache.MetaView = s.metaStore
+	got, ok := view.GetSegment(42)
+	require.True(t, ok, "QueryCoord must resolve a segment DataCoord installed")
+	assert.Equal(t, int64(1), got.GetCollectionID())
+	assert.Equal(t, "ch-0", got.GetInsertChannel())
+
+	// And so is a removal -- the property the GC gate depends on.
+	s.metaStore.RemoveSegment(42)
+	_, ok = view.GetSegment(42)
+	assert.False(t, ok, "a removal on the write side must be visible on the read side")
 }
