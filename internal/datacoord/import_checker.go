@@ -480,10 +480,9 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info(c.ctx, "import job build index done", mlog.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
-	// 2PC: hand off to Uncommitted regardless of auto_commit. Segment visibility
-	// (is_importing=false) is cleared only by HandleCommitVchannel after the WAL
-	// commit fence is processed per vchannel; auto_commit=true jobs are then
-	// driven through the commit broadcast by checkUncommittedJob.
+	// Both auto-commit and explicit commit use the CommitImport broadcast
+	// callback to publish segment visibility and complete the job. Until then
+	// imported segments remain invisible in Uncommitted.
 	err := c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Uncommitted))
 	if err != nil {
 		log.Warn(c.ctx, "failed to update job state to Uncommitted", mlog.Err(err))
@@ -507,7 +506,7 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 	// Repeated invocations across ticks are safe: the broadcaster's exclusive
 	// collection-level resource-key lock serializes overlapping broadcasts, the
 	// ack callback only transitions when the job is still Uncommitted, and
-	// HandleCommitVchannel is idempotent on committed_vchannels.
+	// the completed callback is a no-op on replay.
 	if c.hooks.commitImport == nil {
 		log.Error(c.ctx, "commit hook is nil but auto_commit=true; this is a programming error")
 		return

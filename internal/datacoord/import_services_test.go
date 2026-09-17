@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
@@ -56,6 +57,12 @@ import (
 
 type ImportServicesSuite struct {
 	suite.Suite
+}
+
+func (s *ImportServicesSuite) SetupTest() {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
 }
 
 func TestImportServicesSuite(t *testing.T) {

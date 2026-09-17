@@ -40,6 +40,16 @@ The index lives and dies with the task entry, so **the idempotency window a clie
 
 Replicated tasks are indexed too: the query path is unreachable on a secondary (`WithResourceKeys` rejects non-primary clusters), and indexing there lets a promoted secondary honor pre-failover keys.
 
+## Import Completion
+
+Import, CommitImport, and RollbackImport include CChannel alongside the business
+VChannels so replicated callbacks share an ordered copy. CommitImport uses
+FastAck and completes in the DataCoord callback: persist Committing to protect
+against timeout, update segment visibility with each business VChannel's own
+commit TimeTick, then persist Completed. Failures keep the broadcast task
+retryable. No StreamingNode per-channel RPC or L0 materialization is required.
+See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
+
 ## Resource Key Locking
 
 Each ResourceKey has: **Domain** (resource type), **Key** (entity identifier), **Shared** (read vs exclusive). Every broadcast automatically acquires SharedCluster.
