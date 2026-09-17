@@ -1237,6 +1237,34 @@ func TestImportUtil_ListBinlogImportRequestFiles(t *testing.T) {
 		assert.Nil(t, files)
 	})
 
+	t.Run("backup files - storage errors remain retryable", func(t *testing.T) {
+		for _, test := range []struct {
+			name string
+			err  error
+		}{
+			{"untyped", errors.New("object storage unavailable")},
+			{"throttled", merr.WrapErrIoTooManyRequests("insert", errors.New("SlowDown"))},
+			{"missing object", merr.WrapErrIoKeyNotFound("insert")},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				mockCM := mocks2.NewChunkManager(t)
+				mockCM.EXPECT().WalkWithPrefix(mock.Anything, "insert", false, mock.Anything).
+					Return(test.err).Once()
+				files, err := ListBinlogImportRequestFiles(ctx, mockCM,
+					[]*internalpb.ImportFile{{Paths: []string{"insert"}}},
+					[]*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}})
+				require.Error(t, err)
+				assert.Nil(t, files)
+				assert.ErrorIs(t, err, test.err)
+				status := merr.Status(err)
+				assert.Equal(t, merr.Code(merr.ErrServiceUnavailable), status.GetCode())
+				assert.True(t, status.GetRetriable())
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(status)))
+				assert.True(t, merr.IsRetryableErr(merr.Error(status)))
+			})
+		}
+	})
+
 	t.Run("backup files - success", func(t *testing.T) {
 		reqFiles := []*internalpb.ImportFile{
 			{

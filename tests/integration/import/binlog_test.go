@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/samber/lo"
@@ -448,7 +447,8 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 	s.NoError(err)
 	s.ErrorContains(merr.CheckRPCCall(l0Resp, err), "l0 import is disabled")
 
-	// binlog import
+	// Backup paths are an insert-log prefix and an optional delta-log prefix.
+	// A third path is invalid input and must not trigger service retries.
 	files := []*internalpb.ImportFile{
 		{
 			Paths: []string{"invalid-path", "invalid-path", "invalid-path"},
@@ -462,9 +462,12 @@ func (s *BulkInsertSuite) TestInvalidInput() {
 			{Key: "backup", Value: "true"},
 		},
 	})
+	s.Require().NoError(err)
 	err = merr.CheckRPCCall(importResp, err)
-	s.True(strings.Contains(err.Error(), "too many input paths for binlog import"))
-	s.Error(err)
+	s.ErrorContains(err, "too many input paths for binlog import")
+	s.ErrorIs(err, merr.ErrImportFailed)
+	s.Equal(merr.InputError, merr.GetErrorType(err))
+	s.False(importResp.GetStatus().GetRetriable())
 	mlog.Info(context.TODO(), "Import result", mlog.Any("importResp", importResp))
 }
 

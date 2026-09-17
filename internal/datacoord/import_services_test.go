@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -94,6 +95,30 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	s.NoError(err)
 	s.NotNil(resp)
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+}
+
+func (s *ImportServicesSuite) TestImportV2_InvalidBinlogPathsAreNotRetryable() {
+	paramtable.Init()
+	for _, paths := range [][]string{nil, {"insert", "delta", "extra"}} {
+		s.Run(fmt.Sprintf("paths_%d", len(paths)), func() {
+			server := &Server{meta: &meta{}}
+			server.stateCode.Store(commonpb.StateCode_Healthy)
+			// A supplied job ID skips allocation; a nil chunk manager proves
+			// invalid path counts are rejected before accessing object storage.
+			resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
+				JobID:   1,
+				Files:   []*internalpb.ImportFile{{Paths: paths}},
+				Options: []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}},
+			})
+			s.Require().NoError(err)
+			s.Require().NotNil(resp)
+			status := resp.GetStatus()
+			s.Equal(merr.Code(merr.ErrImportFailed), status.GetCode())
+			s.False(status.GetRetriable())
+			s.ErrorIs(merr.Error(status), merr.ErrImportFailed)
+			s.Equal(merr.InputError, merr.GetErrorType(merr.Error(status)))
+		})
+	}
 }
 
 func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
