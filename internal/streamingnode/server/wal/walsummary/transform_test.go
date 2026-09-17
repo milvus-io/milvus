@@ -219,19 +219,19 @@ func TestTransformSectionsRoundTripAndRetry(t *testing.T) {
 	sections := writeSections(map[string][]uint64{"v1": {200}})
 	sections["v1"].Transform = []*streamingpb.VChannelSummaryTransformRecord{record(110, 2), record(100, 1)}
 	sections["delete-only"] = &ChunkSections{Transform: []*streamingpb.VChannelSummaryTransformRecord{record(90, 3)}}
-	footer, _, err := store.WriteChunk(ctx, 0, sections, testRecordRange(sections))
+	footer, _, err := store.WriteChunk(ctx, 0, sections, testRecordCoverage(sections))
 	require.NoError(t, err)
-	require.Equal(t, uint64(89), footer.GetStartTimetick())
+	require.Equal(t, uint64(89), footer.GetStartAfterTimeTick())
 	require.Equal(t, uint64(200), footer.GetEndTimetick())
 	decoded, _, err := store.ReadChunk(ctx, 0, store.Term())
 	require.NoError(t, err)
 	require.True(t, chunkSectionsByVChannelEqual(sections, decoded))
 	require.Equal(t, uint64(100), decoded["v1"].Transform[0].GetTimeTick())
 	require.Empty(t, decoded["delete-only"].Inserts)
-	_, _, err = store.WriteChunk(ctx, 0, decoded, testRecordRange(decoded))
+	_, _, err = store.WriteChunk(ctx, 0, decoded, testRecordCoverage(decoded))
 	require.NoError(t, err, "sorted rewrite has the same content")
 	decoded["v1"].Transform[0] = record(100, 999)
-	_, _, err = store.WriteChunk(ctx, 0, decoded, testRecordRange(decoded))
+	_, _, err = store.WriteChunk(ctx, 0, decoded, testRecordCoverage(decoded))
 	require.ErrorIs(t, err, ErrStoreCorrupted, "a transform-only difference is not an idempotent retry")
 }
 

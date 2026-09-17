@@ -20,7 +20,7 @@ import (
 
 func nextTermStore(s *Store) *Store { return NewStore(s.chunkManager, s.PChannel(), s.Term()+1) }
 
-func testRecordRange(sections map[string]*ChunkSections) TimeTickRange {
+func testRecordCoverage(sections map[string]*ChunkSections) TimeTickRange {
 	start, end := uint64(math.MaxUint64), uint64(0)
 	for _, section := range sections {
 		for _, record := range section.Inserts {
@@ -38,7 +38,7 @@ func testRecordRange(sections map[string]*ChunkSections) TimeTickRange {
 	if start > 0 {
 		start--
 	}
-	return TimeTickRange{Start: start, End: end}
+	return TimeTickRange{StartAfter: start, End: end}
 }
 
 func stageChunk(t *testing.T, m *Manager, tt uint64) *chunkWriteTask {
@@ -182,11 +182,11 @@ func TestRecoveryPrefixBoundaryAndTermFilter(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
 	for _, gen := range []uint64{98, 99, 100, 102} {
-		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {gen + 1}}), TimeTickRange{Start: gen, End: gen + 1})
+		_, _, err := store.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {gen + 1}}), TimeTickRange{StartAfter: gen, End: gen + 1})
 		require.NoError(t, err)
 	}
 	foreign := nextTermStore(store)
-	_, _, err := foreign.WriteChunk(ctx, 101, writeSections(map[string][]uint64{"v1": {102}}), TimeTickRange{Start: 101, End: 102})
+	_, _, err := foreign.WriteChunk(ctx, 101, writeSections(map[string][]uint64{"v1": {102}}), TimeTickRange{StartAfter: 101, End: 102})
 	require.NoError(t, err)
 	var prefixes []string
 	cm := store.chunkManager.(*storage.LocalChunkManager)
@@ -209,7 +209,7 @@ func TestRecoveryEmptyManifestAndGenerationGap(t *testing.T) {
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
 	// Generation 1 is missing. Generation 2 must not advance recovery.
-	_, _, err := store.WriteChunk(ctx, 2, writeSections(map[string][]uint64{"v1": {300}}), TimeTickRange{Start: 200, End: 300})
+	_, _, err := store.WriteChunk(ctx, 2, writeSections(map[string][]uint64{"v1": {300}}), TimeTickRange{StartAfter: 200, End: 300})
 	require.NoError(t, err)
 	successor := newTestManager(t, nextTermStore(store), 1<<30)
 	require.NoError(t, successor.Restore(ctx))
@@ -253,7 +253,7 @@ func TestRecoveryRejectsNewerOwnerAndSameTermKeyReuse(t *testing.T) {
 func TestRecoveryDoesNotAdoptUndiscoverableTerm(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	_, _, err := store.WriteChunk(ctx, 0, writeSections(map[string][]uint64{"v1": {100}}), TimeTickRange{Start: 0, End: 100})
+	_, _, err := store.WriteChunk(ctx, 0, writeSections(map[string][]uint64{"v1": {100}}), TimeTickRange{StartAfter: 0, End: 100})
 	require.NoError(t, err)
 	m := newTestManager(t, nextTermStore(store), 1<<30)
 	require.NoError(t, m.Restore(ctx))
@@ -333,7 +333,7 @@ func TestManifestValidationAndGenerationExhaustion(t *testing.T) {
 	for _, bad := range []*streamingpb.PChannelSummaryManifest{
 		{Coverage: &streamingpb.SummaryCoverage{}},
 		{Chunks: []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 1}}},
-		{Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, EndTimeTick: 100}, Chunks: []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 1, StartTimetick: 100, EndTimetick: 99}}},
+		{Coverage: &streamingpb.SummaryCoverage{Generation: 2, Term: 1, EndTimeTick: 100}, Chunks: []*streamingpb.PChannelSummaryChunkIndexEntry{{Generation: 1, StartAfterTimeTick: 100, EndTimetick: 99}}},
 		{Coverage: &streamingpb.SummaryCoverage{Term: 1, EndTimeTick: 100}, TransformFastForwardTimeTick: map[string]uint64{"v1": 101}},
 	} {
 		requireSummaryError(t, validateManifest(bad), ErrStoreCorrupted)
@@ -351,7 +351,7 @@ func TestManifestValidationAndGenerationExhaustion(t *testing.T) {
 func TestTailTransientFailureAndWrongIdentity(t *testing.T) {
 	ctx := context.Background()
 	store := newTestStore(t)
-	_, _, err := store.WriteChunk(ctx, 0, writeSections(map[string][]uint64{"v1": {100}}), TimeTickRange{Start: 0, End: 100})
+	_, _, err := store.WriteChunk(ctx, 0, writeSections(map[string][]uint64{"v1": {100}}), TimeTickRange{StartAfter: 0, End: 100})
 	require.NoError(t, err)
 	failure := errors.New("read timeout")
 	patch := mockey.Mock((*storage.LocalChunkManager).Read).Return(nil, failure).Build()
@@ -359,7 +359,7 @@ func TestTailTransientFailureAndWrongIdentity(t *testing.T) {
 	_, err = store.ProbeChunkForward(ctx, 0)
 	requireSummaryError(t, err, failure)
 	patch.UnPatch()
-	payload, _, err := marshalChunk("wrong-channel", 0, store.Term(), writeSections(map[string][]uint64{"v1": {100}}), TimeTickRange{Start: 0, End: 100})
+	payload, _, err := marshalChunk("wrong-channel", 0, store.Term(), writeSections(map[string][]uint64{"v1": {100}}), TimeTickRange{StartAfter: 0, End: 100})
 	require.NoError(t, err)
 	require.NoError(t, store.chunkManager.Write(ctx, store.ChunkKey(0), payload))
 	_, err = store.ProbeChunkForward(ctx, 0)
@@ -371,7 +371,7 @@ func TestSweepProtectsFutureTermAndCurrentTail(t *testing.T) {
 	store := newTestStore(t)
 	for _, s := range []*Store{store, nextTermStore(store)} {
 		for _, gen := range []uint64{0, 1} {
-			_, _, err := s.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {gen + 1}}), testRecordRange(writeSections(map[string][]uint64{"v1": {gen + 1}})))
+			_, _, err := s.WriteChunk(ctx, gen, writeSections(map[string][]uint64{"v1": {gen + 1}}), testRecordCoverage(writeSections(map[string][]uint64{"v1": {gen + 1}})))
 			require.NoError(t, err)
 		}
 	}
@@ -453,11 +453,11 @@ func TestChunkCoverageIncludesMessagesWithoutSummaryRecords(t *testing.T) {
 	observeReadBarrier(m, 250)
 	require.NoError(t, persistSummary(ctx, m))
 	manifest := m.Manifest()
-	require.Equal(t, uint64(50), manifest.Coverage.StartTimeTick)
+	require.Equal(t, uint64(50), manifest.Coverage.StartAfterTimeTick)
 	require.Equal(t, uint64(250), manifest.Coverage.EndTimeTick)
 	require.Len(t, manifest.Chunks, 2)
 	require.Equal(t, uint64(150), manifest.Chunks[0].EndTimetick)
-	require.Equal(t, manifest.Chunks[0].EndTimetick, manifest.Chunks[1].StartTimetick)
+	require.Equal(t, manifest.Chunks[0].EndTimetick, manifest.Chunks[1].StartAfterTimeTick)
 	require.Equal(t, uint64(100), manifest.Chunks[0].Vchannels[0].EndTimetick)
 	m.cfg.RetentionMaxBytes = 1
 	require.NoError(t, gcSummary(ctx, m))
@@ -474,7 +474,7 @@ func TestRecoveryRejectsUnpublishedTailCoverageGap(t *testing.T) {
 	m, store := newTestManagerWithStore(t)
 	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
 	require.NoError(t, drainSummary(ctx, m))
-	_, _, err := store.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}), TimeTickRange{Start: 150, End: 200})
+	_, _, err := store.WriteChunk(ctx, 1, writeSections(map[string][]uint64{"v1": {200}}), TimeTickRange{StartAfter: 150, End: 200})
 	require.NoError(t, err)
 	restored := newTestManager(t, nextTermStore(store), 1<<30)
 	require.ErrorContains(t, restored.Restore(ctx), "not contiguous")

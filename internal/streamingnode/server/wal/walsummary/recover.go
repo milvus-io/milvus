@@ -68,7 +68,7 @@ func (m *Manager) Restore(ctx context.Context) error {
 			return err
 		}
 		for _, entry := range tail {
-			if manifest.Coverage != nil && entry.GetStartTimetick() != manifest.Coverage.GetEndTimeTick() {
+			if manifest.Coverage != nil && entry.GetStartAfterTimeTick() != manifest.Coverage.GetEndTimeTick() {
 				return storeCorruptedf("summary tail is not contiguous with covered WAL prefix at generation %d", entry.GetGeneration())
 			}
 			recordChunk(manifest, entry)
@@ -110,7 +110,7 @@ func (m *Manager) Restore(ctx context.Context) error {
 // validateManifest checks structure without reading retained chunk bodies.
 func validateManifest(manifest *streamingpb.PChannelSummaryManifest) error {
 	coverage := manifest.GetCoverage()
-	if coverage != nil && (coverage.GetStartTimeTick() >= coverage.GetEndTimeTick() || coverage.GetTerm() <= 0) {
+	if coverage != nil && (coverage.GetStartAfterTimeTick() >= coverage.GetEndTimeTick() || coverage.GetTerm() <= 0) {
 		return storeCorruptedf("invalid summary coverage")
 	}
 	for _, frontier := range manifest.GetTransformFastForwardTimeTick() {
@@ -129,8 +129,8 @@ func validateManifest(manifest *streamingpb.PChannelSummaryManifest) error {
 		if err := validateChunkIndex(chunk); err != nil {
 			return err
 		}
-		if chunk.GetStartTimetick() < coverage.GetStartTimeTick() || chunk.GetEndTimetick() > coverage.GetEndTimeTick() ||
-			(previous != nil && (previous.GetGeneration() == math.MaxUint64 || chunk.GetGeneration() != previous.GetGeneration()+1 || chunk.GetStartTimetick() != previous.GetEndTimetick())) {
+		if chunk.GetStartAfterTimeTick() < coverage.GetStartAfterTimeTick() || chunk.GetEndTimetick() > coverage.GetEndTimeTick() ||
+			(previous != nil && (previous.GetGeneration() == math.MaxUint64 || chunk.GetGeneration() != previous.GetGeneration()+1 || chunk.GetStartAfterTimeTick() != previous.GetEndTimetick())) {
 			return storeCorruptedf("invalid or discontinuous summary manifest")
 		}
 		previous = chunk
@@ -142,11 +142,11 @@ func validateManifest(manifest *streamingpb.PChannelSummaryManifest) error {
 }
 
 func validateChunkIndex(chunk *streamingpb.PChannelSummaryChunkIndexEntry) error {
-	if chunk == nil || chunk.GetStartTimetick() >= chunk.GetEndTimetick() {
+	if chunk == nil || chunk.GetStartAfterTimeTick() >= chunk.GetEndTimetick() {
 		return storeCorruptedf("invalid summary chunk coverage")
 	}
 	for _, index := range chunk.GetVchannels() {
-		if index.GetStartTimetick() <= chunk.GetStartTimetick() || index.GetEndTimetick() > chunk.GetEndTimetick() || index.GetStartTimetick() > index.GetEndTimetick() {
+		if index.GetStartTimetick() <= chunk.GetStartAfterTimeTick() || index.GetEndTimetick() > chunk.GetEndTimetick() || index.GetStartTimetick() > index.GetEndTimetick() {
 			return storeCorruptedf("summary section exceeds chunk coverage")
 		}
 		if err := validateTransformIndex(index); err != nil {

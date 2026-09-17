@@ -119,16 +119,20 @@ The manifest describes the retained data organization and accelerates access:
   covered WAL TimeTick interval, retained even when the chunk set becomes empty.
 
 The manifest's `coverage: SummaryCoverage` stores the last continuously covered
-`generation` and `term` together with `(start_time_tick, end_time_tick]` of the
+`generation` and `term` together with `(start_after_time_tick, end_time_tick]` of the
 complete summarized WAL interval. It is progress metadata, not an object
 reference. Removing even every retained chunk leaves coverage intact. An empty
 manifest is authoritative; it must never resurrect an older retained set.
 
-Chunk footer and chunk index `start_timetick/end_timetick` describe complete WAL
-coverage `(start,end]`, including keyless inserts and payload-free barriers.
-Consecutive chunks share their boundary. Per-VChannel indexes instead describe
-actual stored record ranges. There is no additional covered position or physical
-message ID in Summary. `LastAcked()` returns only a TimeTick; RecoveryStorage's
+Chunk footer and chunk index `start_after_time_tick/end_timetick` describe
+complete WAL coverage `(start_after,end]`, including keyless inserts and
+payload-free barriers.
+Consecutive chunks share their boundary: the next chunk starts exclusively
+after the previous end. The `start_after_time_tick` name always denotes this
+exclusive lower bound. Per-VChannel and Transform indexes instead describe
+closed ranges of actual stored records, keeping `start_timetick` and
+`start_time_tick` respectively for the inclusive first record. There is no
+additional covered position or physical message ID in Summary. `LastAcked()` returns only a TimeTick; RecoveryStorage's
 Tracker selects a completed WAL checkpoint at or below it. Only WALCheckpoint
 persists the physical replay position.
 
