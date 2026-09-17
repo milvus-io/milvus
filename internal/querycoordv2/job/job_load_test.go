@@ -685,17 +685,17 @@ func (suite *IncrementalExpansionSuite) TestAReplayedExpansionKeepsTheCollection
 	suite.seedLoadedCollection(1, rgA, 1)
 	message := suite.buildExpansionRequest(replicaConfig(1, rgA), replicaConfig(2, rgB))
 
-	// The first attempt dies at UpdateReplicaNumber, after the spawn.
+	// The first attempt dies at the replica number write, after the spawn.
 	crashed := errors.New("querycoord went away")
-	var origin func(*meta.CollectionManager, context.Context, int64, int32, bool) error
+	var origin func(*meta.CollectionManager, context.Context, int64, func() int32, *bool) (int32, error)
 	attempts := 0
-	crash := mockey.Mock((*meta.CollectionManager).UpdateReplicaNumber).
-		To(func(cm *meta.CollectionManager, ctx context.Context, collectionID int64, replicaNumber int32, userSpecified bool) error {
+	crash := mockey.Mock((*meta.CollectionManager).SyncReplicaNumber).
+		To(func(cm *meta.CollectionManager, ctx context.Context, collectionID int64, count func() int32, userSpecified *bool) (int32, error) {
 			attempts++
 			if attempts == 1 {
-				return crashed
+				return 0, crashed
 			}
-			return origin(cm, ctx, collectionID, replicaNumber, userSpecified)
+			return origin(cm, ctx, collectionID, count, userSpecified)
 		}).Origin(&origin).Build()
 	defer crash.UnPatch()
 

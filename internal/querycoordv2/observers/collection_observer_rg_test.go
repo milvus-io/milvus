@@ -1248,6 +1248,34 @@ func TestTaskIsQuiet(t *testing.T) {
 		"a figure unknown for longer than the load timeout is quiet")
 }
 
+// TestATeardownsWriteBackKeepsTheStoredReplicaMode pins what the write-back
+// owns. It follows the replicas that exist, counted inside the collection
+// manager's critical section so that a concurrent expansion's own write cannot
+// be overtaken by a stale count; how the replicas were asked for
+// (UserSpecifiedReplicaMode) is not the teardown's to say, and writing back
+// the value it read earlier would revert a change made beside it.
+func (s *CollectionObserverRGSuite) TestATeardownsWriteBackKeepsTheStoredReplicaMode() {
+	s.registerLoadingCollection(2000, 2001, "2000-dmc0", 2, 20001, 20002)
+	s.putReplica(2000, 200001, 121, rgA)
+	s.putServiceableDelegator(2000, 121, "2000-dmc0", 20001, 20002)
+	s.markCollectionLoaded(2000, 2001)
+	s.putReplica(2000, 200002, 122, rgB)
+	s.putDelegator(2000, 122, "2000-dmc0") // the channel and nothing else
+	s.Require().NoError(s.meta.UpdateReplicaNumber(s.ctx, 2000, 2, true))
+
+	s.ob.LoadCollection(s.ctx, 2000, rgB)
+	key := s.taskKey(2000, rgB)
+	s.ob.Observe(s.ctx)
+	s.ageTaskWatermark(key, time.Hour)
+	s.ob.Observe(s.ctx)
+
+	s.Empty(s.replicaIDsInRG(2000, rgB), "the stalled group is released")
+	collection := s.meta.GetCollection(s.ctx, 2000)
+	s.Require().NotNil(collection)
+	s.EqualValues(1, collection.GetReplicaNumber(), "the number follows the replicas that exist")
+	s.True(collection.GetUserSpecifiedReplicaMode(), "and the stored mode is left as it was")
+}
+
 func TestCollectionObserverRG(t *testing.T) {
 	suite.Run(t, new(CollectionObserverRGSuite))
 }
