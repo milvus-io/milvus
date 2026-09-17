@@ -758,6 +758,46 @@ func TestMeta_PublishRequiresSupersededRetired(t *testing.T) {
 	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(ctx, 10, 1).State)
 }
 
+// TestMeta_PublishSupersededParentGcResidue verifies tedxu's finding: a
+// superseded parent removed from meta entirely by the drop/truncate + GC cycle
+// while the group was staged is already retired — the publish must succeed, not
+// fail with a spurious "must be retired" error.
+func TestMeta_PublishSupersededParentGcResidue(t *testing.T) {
+	m, err := newMemoryMeta(t)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, IsInvisible: true,
+	})))
+	require.NoError(t, m.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 2001, CollectionID: 10, PartitionID: 100, InsertChannel: "ch-1",
+		State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1,
+	})))
+
+	group := newTestGroup()
+	require.NoError(t, m.AddSegmentChangeGroup(ctx, group))
+	ready := group.Clone()
+	ready.State = model.SegmentChangeStateReady
+	require.NoError(t, m.UpdateSegmentChangeGroup(ctx, ready))
+
+	// Simulate the drop/truncate + GC cycle removing the superseded parent
+	// from meta while the group sits READY.
+	m.segMu.Lock()
+	delete(m.segments.segments, 2001)
+	m.segMu.Unlock()
+
+	committed := ready.Clone()
+	committed.State = model.SegmentChangeStateCommitted
+	err = m.UpdateSegmentsInfoAndChangeGroups(ctx,
+		[]metastore.UpdateAction{metastore.SaveSegmentChangeGroup(committed)},
+		SetSegmentIsInvisible(1001, false),
+	)
+	require.NoError(t, err, "a GC'd superseded parent is already retired and must not fail the publish")
+	require.Equal(t, model.SegmentChangeStateCommitted, m.GetSegmentChangeGroup(ctx, 10, 1).State)
+}
+
 // TestMeta_UpdateSegmentsInfoAndChangeGroups_DuplicateGroupID verifies C18: two
 // ActionUpdate actions with the same groupID (differing collectionID and
 // members) in ONE composite write are rejected — otherwise both persist under

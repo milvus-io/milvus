@@ -709,8 +709,13 @@ func (m *meta) UpdateSegmentsInfoAndChangeGroups(ctx context.Context, groupActio
 		// never repair it. Each parent must either already be Dropped in meta
 		// (the idempotent skip) or be dropped by this write's operators.
 		for _, id := range entry.Group.SupersededSegmentIDs {
-			if inMeta := m.segments.GetSegment(id); inMeta != nil && inMeta.GetState() == commonpb.SegmentState_Dropped {
-				continue // already retired
+			// tedxu: a superseded parent that is gone from meta entirely — the
+			// drop/truncate + GC cycle ran while the group was STAGED/READY —
+			// is already retired; nil (GC'd) and Dropped are both idempotent
+			// skips. Treating a GC'd parent as "not retired" would spuriously
+			// fail the publish.
+			if inMeta := m.segments.GetSegment(id); inMeta == nil || inMeta.GetState() == commonpb.SegmentState_Dropped {
+				continue // already retired or GC'd
 			}
 			segment, ok := updatePack.segments[id]
 			if !ok || segment.GetState() != commonpb.SegmentState_Dropped {

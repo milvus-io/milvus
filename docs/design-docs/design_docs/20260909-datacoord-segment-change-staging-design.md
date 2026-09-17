@@ -895,6 +895,38 @@ Replay safety:
 > group whose members are missing as FAILED (reclaimable) instead of aborting
 > startup — is part of the reconciler follow-up (M5).
 
+> **Partial-publish atomicity (tedxu): resolved WITH DataView integration, out
+> of this design's scope.** A COMMITTED publish whose composite op count exceeds
+> the store's `MaxTxnOps` (etcd default 128) uses the chunked fallback: a crash
+> mid-flush can leave some members `IsInvisible=false` (serving queries) and
+> others still invisible, with no COMMITTED marker. On restart the group loads
+> as STAGED/READY and the partially flipped segments keep serving queries —
+> recovery today only detects persisted *conflicts* (two groups claiming the
+> same segment), not a single group with partially-applied member visibility.
+>
+> This is the exact atomicity violation staging exists to prevent, and it will
+> be **resolved together with the DataView integration (PR #52537)**, not in
+> this design's scope: the composite write then composes a DataView snapshot
+> action as the single visibility marker, and `UpdateSegmentsInfoAndDataView`'s
+> atomic publish plus the DataView's committed-snapshot recovery make the
+> chunked-fallback partial state unreachable. Until then the operator runbook
+> for a DataCoord crash during a >128-op publish is:
+>
+> 1. Identify the ALIVE group whose members have mixed `IsInvisible` values
+>    (query `coord/segchange/{collection}/{group}`; cross-check member
+>    `IsInvisible` in SegmentMeta).
+> 2. Do NOT re-run or retry the batch blindly — members already visible would
+>    be duplicated.
+> 3. Either drop the already-visible members' superseded parents by hand to
+>    complete the publication, or mark the group FAILED and reclaim its
+>    members; then delete the group record key.
+> 4. Report the incident so the DataView integration can be prioritized.
+>
+> Base-PR mitigation: terminal-group GC is wired into collection drop
+> (`DropSegmentChangeGroupsOfCollection`); a periodic sweep of old terminal
+> groups and the recovery-time member-visibility consistency check remain
+> reconciler follow-ups (M5).
+
 ## GC and Staged-Member Reclamation
 
 - **Staged (unpublished) members**: state is Flushed + `IsInvisible`.
