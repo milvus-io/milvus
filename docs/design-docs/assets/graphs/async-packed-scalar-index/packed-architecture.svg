@@ -26,7 +26,7 @@
 <text x="476" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Read directory + metadata</text>
 <text x="860" y="244" font-size="16" fill="#566A80" text-anchor="start" font-weight="600">ReadEntriesAsync(entries)</text>
 <text x="860" y="268" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Read / decrypt / verify slices</text>
-<text x="860" y="292" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Fill heap or writable mappings</text>
+<text x="860" y="292" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Memory or limited file writes</text>
 </g>
 <g data-node="Global admission"><rect x="40" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="60" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">Global admission</text>
@@ -35,7 +35,7 @@
 </g>
 <g data-node="LocalFileIOPool"><rect x="456" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>
 <text x="476" y="456" font-size="20" fill="#25364A" text-anchor="start" font-weight="600">LocalFileIOPool</text>
-<text x="476" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Preallocate / map writable files</text>
+<text x="476" y="488" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Create / write / close files</text>
 <text x="476" y="512" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Unmap / close / retain files</text>
 </g>
 <g data-node="Scalar index"><rect x="872" y="420" width="320" height="144" rx="8" fill="#FFFFFF" stroke="#CDD9E2" stroke-width="1.2"/>

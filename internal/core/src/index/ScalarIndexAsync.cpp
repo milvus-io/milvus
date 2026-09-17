@@ -54,7 +54,7 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
     auto plan = PlanLoad(reader->Catalog(), config);
     const bool has_file_targets = std::any_of(
         plan.entries.begin(), plan.entries.end(), [](const auto& entry) {
-            return std::holds_alternative<storage::MmapEntryTarget>(
+            return std::holds_alternative<storage::FileEntryTarget>(
                 entry.target);
         });
     storage::IndexLoadArtifact artifact;

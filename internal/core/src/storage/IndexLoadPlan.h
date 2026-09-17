@@ -33,7 +33,7 @@
 #include "common/EasyAssert.h"
 #include "pb/common.pb.h"
 #include "storage/IndexEntryCatalog.h"
-#include "storage/WritableMmapFile.h"
+#include "storage/StagingIndexFile.h"
 
 namespace milvus::storage {
 
@@ -43,62 +43,25 @@ struct MemoryEntryTarget {
     size_t bytes;
 };
 
-struct MmapFileTarget {
+struct IndexFileTarget {
     std::string path;
     size_t file_size;
     bool retain_on_success;
-    std::shared_ptr<WritableMmapFile> file;
+    std::shared_ptr<StagingIndexFile> file;
 };
 
-struct MmapEntryTarget {
-    std::shared_ptr<MmapFileTarget> staging;
+struct FileEntryTarget {
+    std::shared_ptr<IndexFileTarget> staging;
     size_t offset;
+    // Reserved file region, including any entry-tail alignment padding.
     size_t bytes;
 };
 
-using EntryTarget = std::variant<MemoryEntryTarget, MmapEntryTarget>;
+using EntryTarget = std::variant<MemoryEntryTarget, FileEntryTarget>;
 
 inline size_t
 EntryTargetSize(const EntryTarget& target) {
     return std::visit([](const auto& value) { return value.bytes; }, target);
-}
-
-inline std::span<uint8_t>
-EntryTargetRegion(EntryTarget& target, size_t offset, size_t bytes) {
-    AssertInfo(offset <= EntryTargetSize(target) &&
-                   bytes <= EntryTargetSize(target) - offset,
-               "Entry target region exceeds target size {}",
-               EntryTargetSize(target));
-    return std::visit(
-        [offset, bytes](auto& value) -> std::span<uint8_t> {
-            using Target = std::decay_t<decltype(value)>;
-            if constexpr (std::is_same_v<Target, MemoryEntryTarget>) {
-                AssertInfo(value.data != nullptr || bytes == 0,
-                           "Memory Entry target is null");
-                if (bytes == 0) {
-                    return {};
-                }
-                return {value.data + offset, bytes};
-            } else {
-                AssertInfo(value.staging != nullptr,
-                           "Mmap Entry staging descriptor is null");
-                AssertInfo(value.staging->file != nullptr,
-                           "Mmap Entry target file '{}' is not prepared",
-                           value.staging->path);
-                AssertInfo(
-                    value.offset <= value.staging->file_size &&
-                        offset <= value.staging->file_size - value.offset &&
-                        bytes <=
-                            value.staging->file_size - value.offset - offset,
-                    "Mmap Entry target region exceeds staging file '{}' "
-                    "size {}",
-                    value.staging->path,
-                    value.staging->file_size);
-                return value.staging->file->Region(value.offset + offset,
-                                                   bytes);
-            }
-        },
-        target);
 }
 
 // Index code chooses destinations; AsyncIndexEntryReader derives slices and CRCs
@@ -113,14 +76,14 @@ struct MaterializedEntry {
     EntryTarget target;
 };
 
-inline std::vector<std::shared_ptr<MmapFileTarget>>
-CollectMmapFileTargets(const std::vector<EntryLoadPlan>& entries) {
-    std::vector<std::shared_ptr<MmapFileTarget>> targets;
+inline std::vector<std::shared_ptr<IndexFileTarget>>
+CollectIndexFileTargets(const std::vector<EntryLoadPlan>& entries) {
+    std::vector<std::shared_ptr<IndexFileTarget>> targets;
     targets.reserve(entries.size());
-    std::unordered_set<const MmapFileTarget*> seen;
+    std::unordered_set<const IndexFileTarget*> seen;
     seen.reserve(entries.size());
     for (const auto& entry : entries) {
-        const auto* mmap_target = std::get_if<MmapEntryTarget>(&entry.target);
+        const auto* mmap_target = std::get_if<FileEntryTarget>(&entry.target);
         if (mmap_target == nullptr || mmap_target->staging == nullptr) {
             continue;
         }
@@ -132,8 +95,8 @@ CollectMmapFileTargets(const std::vector<EntryLoadPlan>& entries) {
 }
 
 inline void
-CleanupUncommittedMmapTargets(
-    const std::vector<std::shared_ptr<MmapFileTarget>>& targets) noexcept {
+CleanupUncommittedFileTargets(
+    const std::vector<std::shared_ptr<IndexFileTarget>>& targets) noexcept {
     for (const auto& target : targets) {
         if (target != nullptr && target->file != nullptr &&
             !target->file->Committed()) {
@@ -159,7 +122,7 @@ class IndexLoadArtifact {
     IndexLoadArtifact&
     operator=(IndexLoadArtifact&& other) noexcept {
         if (this != &other) {
-            CleanupUncommittedMmapTargets(cleanup_targets_);
+            CleanupUncommittedFileTargets(cleanup_targets_);
             entries_ = std::move(other.entries_);
             cleanup_targets_ = std::move(other.cleanup_targets_);
             other.cleanup_targets_.clear();
@@ -168,7 +131,7 @@ class IndexLoadArtifact {
     }
 
     ~IndexLoadArtifact() {
-        CleanupUncommittedMmapTargets(cleanup_targets_);
+        CleanupUncommittedFileTargets(cleanup_targets_);
     }
 
     const std::vector<MaterializedEntry>&
@@ -196,7 +159,7 @@ class IndexLoadArtifact {
     CommitTargets() {
         for (auto& entry : entries_) {
             if (auto* mmap_target =
-                    std::get_if<MmapEntryTarget>(&entry.target)) {
+                    std::get_if<FileEntryTarget>(&entry.target)) {
                 AssertInfo(mmap_target->staging != nullptr &&
                                mmap_target->staging->file != nullptr,
                            "Cannot commit unprepared mmap target '{}'",
@@ -214,7 +177,7 @@ class IndexLoadArtifact {
     friend class AsyncIndexEntryReader;
 
     std::vector<MaterializedEntry> entries_;
-    std::vector<std::shared_ptr<MmapFileTarget>> cleanup_targets_;
+    std::vector<std::shared_ptr<IndexFileTarget>> cleanup_targets_;
 };
 
 }  // namespace milvus::storage

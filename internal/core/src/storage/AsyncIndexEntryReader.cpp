@@ -213,7 +213,7 @@ struct Slice {
 
 // Slice layout is derived once from the catalog, never supplied by index code.
 std::vector<Slice>
-BuildSlices(const IndexEntryCatalogEntry& entry) {
+BuildSlices(const IndexEntryCatalogEntry& entry, bool file_target) {
     std::vector<Slice> slices;
     if (const auto* encrypted =
             std::get_if<EncryptedEntrySource>(&entry.source)) {
@@ -241,6 +241,15 @@ BuildSlices(const IndexEntryCatalogEntry& entry) {
             offset += bytes;
         }
     }
+    if (file_target) {
+        for (auto& slice : slices) {
+            // File reads retain a destination buffer through the local write.
+            // Include possible direct-I/O tail padding in the temporary bound.
+            slice.admission_bytes = SaturatingAdd(
+                slice.admission_bytes,
+                SaturatingAdd(slice.bytes, 2 * FileWriter::ALIGNMENT_MASK));
+        }
+    }
     return slices;
 }
 
@@ -248,7 +257,8 @@ struct EntryState {
     EntryState(EntryLoadPlan entry_plan, const IndexEntryCatalogEntry& source)
         : plan(std::move(entry_plan)),
           source(source),
-          slices(BuildSlices(source)),
+          slices(BuildSlices(
+              source, std::holds_alternative<FileEntryTarget>(plan.target))),
           slice_crcs(slices.size()),
           remaining_slices(slices.size()) {
     }
@@ -275,7 +285,7 @@ ValidatePlan(const IndexEntryCatalog& catalog,
     struct TargetWriteRange {
         std::string_view entry_name;
         const MemoryEntryTarget* memory{nullptr};
-        const MmapEntryTarget* mmap{nullptr};
+        const FileEntryTarget* mmap{nullptr};
         uintptr_t memory_begin{0};
         uintptr_t memory_end{0};
         size_t mmap_begin{0};
@@ -319,31 +329,30 @@ ValidatePlan(const IndexEntryCatalog& catalog,
                                  0,
                                  0});
         } else {
-            const auto& mmap = std::get<MmapEntryTarget>(entry.target);
+            const auto& mmap = std::get<FileEntryTarget>(entry.target);
             AssertInfo(mmap.staging != nullptr,
-                       "Mmap Entry '{}' staging descriptor is null",
+                       "File Entry '{}' staging descriptor is null",
                        entry.name);
             AssertInfo(!mmap.staging->path.empty(),
-                       "Mmap Entry '{}' staging path is empty",
+                       "File Entry '{}' staging path is empty",
                        entry.name);
             AssertInfo(
                 mmap.offset <= mmap.staging->file_size &&
                     mmap.bytes <= mmap.staging->file_size - mmap.offset,
-                "Mmap Entry '{}' target [{}, {}) exceeds staging file '{}' "
+                "File Entry '{}' target [{}, {}) exceeds staging file '{}' "
                 "size {}",
                 entry.name,
                 mmap.offset,
                 mmap.offset + mmap.bytes,
                 mmap.staging->path,
                 mmap.staging->file_size);
-            target_ranges.push_back(
-                TargetWriteRange{entry.name,
-                                 nullptr,
-                                 &mmap,
-                                 0,
-                                 0,
-                                 mmap.offset,
-                                 mmap.offset + catalog_entry.plaintext_size});
+            target_ranges.push_back(TargetWriteRange{entry.name,
+                                                     nullptr,
+                                                     &mmap,
+                                                     0,
+                                                     0,
+                                                     mmap.offset,
+                                                     mmap.offset + mmap.bytes});
         }
     }
 
@@ -397,17 +406,18 @@ FinalizeEntry(EntryState& state) {
 }
 
 folly::coro::Task<void>
-PrepareMmapTargetAsync(MmapEntryTarget* target,
+PrepareFileTargetAsync(FileEntryTarget* target,
+                       proto::common::LoadPriority priority,
                        folly::CancellationToken cancellation_token) {
     ThrowIfCancelled(cancellation_token,
                      "AsyncIndexEntryReader::PrepareTarget");
     AssertInfo(target != nullptr && target->staging != nullptr,
-               "Mmap Entry staging descriptor is null");
+               "File Entry staging descriptor is null");
     auto& staging = *target->staging;
-    AssertInfo(!staging.path.empty(), "Mmap Entry staging path is empty");
+    AssertInfo(!staging.path.empty(), "File Entry staging path is empty");
     AssertInfo(target->offset <= staging.file_size &&
                    target->bytes <= staging.file_size - target->offset,
-               "Mmap Entry target [{}, {}) exceeds staging file '{}' size {}",
+               "File Entry target [{}, {}) exceeds staging file '{}' size {}",
                target->offset,
                target->offset + target->bytes,
                staging.path,
@@ -419,7 +429,10 @@ PrepareMmapTargetAsync(MmapEntryTarget* target,
     if (!parent.empty()) {
         std::filesystem::create_directories(parent);
     }
-    staging.file = WritableMmapFile::Create(staging.path, staging.file_size);
+    staging.file =
+        StagingIndexFile::Create(staging.path,
+                                 staging.file_size,
+                                 io::GetPriorityFromLoadPriority(priority));
     co_return;
 }
 
@@ -428,7 +441,7 @@ PrepareTargetsAsync(std::vector<EntryLoadPlan>& entries,
                     proto::common::LoadPriority priority,
                     folly::CancellationToken cancellation_token) {
     for (auto& entry : entries) {
-        auto* target = std::get_if<MmapEntryTarget>(&entry.target);
+        auto* target = std::get_if<FileEntryTarget>(&entry.target);
         if (target == nullptr ||
             (target->staging != nullptr && target->staging->file != nullptr)) {
             continue;
@@ -438,7 +451,7 @@ PrepareTargetsAsync(std::vector<EntryLoadPlan>& entries,
         co_await folly::coro::co_withExecutor(
             ResolveAsyncLoadExecutor(
                 LocalFileIOPool::GetInstance().GetExecutor(), priority),
-            PrepareMmapTargetAsync(target, cancellation_token));
+            PrepareFileTargetAsync(target, priority, cancellation_token));
         ThrowIfCancelled(cancellation_token,
                          "AsyncIndexEntryReader::PrepareTarget");
     }
@@ -446,14 +459,14 @@ PrepareTargetsAsync(std::vector<EntryLoadPlan>& entries,
 
 // Runs after all slice writers have joined, on the local-file executor.
 folly::coro::Task<void>
-FinishMmapTargetsAsync(
-    const std::vector<std::shared_ptr<MmapFileTarget>>& targets,
+FinishFileTargetsAsync(
+    const std::vector<std::shared_ptr<IndexFileTarget>>& targets,
     folly::CancellationToken cancellation_token) {
     ThrowIfCancelled(cancellation_token,
                      "AsyncIndexEntryReader::FinishTargets");
     for (const auto& target : targets) {
         AssertInfo(target != nullptr && target->file != nullptr,
-                   "Materialized mmap target is not prepared");
+                   "Materialized file target is not prepared");
         target->file->Finish();
     }
     co_return;
@@ -485,7 +498,7 @@ folly::coro::Task<IndexLoadArtifact>
 AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     std::vector<EntryLoadPlan>& entries,
     proto::common::LoadPriority priority,
-    const std::vector<std::shared_ptr<MmapFileTarget>>& cleanup_targets,
+    const std::vector<std::shared_ptr<IndexFileTarget>>& cleanup_targets,
     folly::CancellationToken cancellation_token) {
     auto caller_cancellation_token =
         co_await folly::coro::co_current_cancellation_token;
@@ -517,17 +530,44 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     auto& budget = LoadAdmissionController::GetInstance();
     auto budget_priority = BudgetPriority(priority);
     // This closure stays alive until every slice has joined below.
-    auto read_slice = [this](std::shared_ptr<EntryState> state,
-                             size_t slice_index,
-                             LoadAdmissionLease lease,
-                             folly::CancellationToken cancellation_token,
-                             std::shared_ptr<FailureState> failure_state)
+    auto read_slice = [this, priority](
+                          std::shared_ptr<EntryState> state,
+                          size_t slice_index,
+                          LoadAdmissionLease lease,
+                          folly::CancellationToken cancellation_token,
+                          std::shared_ptr<FailureState> failure_state)
         -> folly::coro::Task<void> {
         bool decremented = false;
         try {
             const auto& slice = state->slices[slice_index];
-            auto target = EntryTargetRegion(
-                state->plan.target, slice.offset, slice.bytes);
+            std::vector<uint8_t> buffer;
+            std::span<uint8_t> target;
+            auto* file = std::get_if<FileEntryTarget>(&state->plan.target);
+            if (file != nullptr) {
+                // Padding belongs to this entry's reserved target region. Never
+                // extend a write into the next entry, even on buffered I/O.
+                auto write_bytes = slice.bytes;
+                const auto padding =
+                    std::min((-slice.bytes) & FileWriter::ALIGNMENT_MASK,
+                             file->staging->file_size - file->offset -
+                                 slice.offset - slice.bytes);
+                if (file->offset + slice.offset + slice.bytes !=
+                    file->staging->file_size) {
+                    AssertInfo(
+                        slice.offset <= file->bytes &&
+                            slice.bytes <= file->bytes - slice.offset &&
+                            padding <= file->bytes - slice.offset - slice.bytes,
+                        "File entry '{}' lacks alignment padding",
+                        state->plan.name);
+                    write_bytes += padding;
+                }
+                buffer.resize(write_bytes, 0);
+                target = {buffer.data(), slice.bytes};
+            } else {
+                const auto& memory =
+                    std::get<MemoryEntryTarget>(state->plan.target);
+                target = {memory.data + slice.offset, slice.bytes};
+            }
             co_await ReadSliceIntoAsync(state->source,
                                         slice_index,
                                         slice.offset,
@@ -537,6 +577,18 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
                              "AsyncIndexEntryReader::SliceFinalize");
             state->slice_crcs[slice_index] = RangeCrc{
                 Crc32cValue(target.data(), target.size()), target.size()};
+            if (file != nullptr) {
+                co_await RunLocalFileIOAsync(
+                    [&] {
+                        ThrowIfCancelled(cancellation_token,
+                                         "AsyncIndexEntryReader::WriteSlice");
+                        file->staging->file->WriteAt(
+                            file->offset + slice.offset,
+                            buffer.data(),
+                            buffer.size());
+                    },
+                    priority);
+            }
 
             auto remaining =
                 state->remaining_slices.fetch_sub(1, std::memory_order_acq_rel);
@@ -619,7 +671,7 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
         co_await folly::coro::co_withExecutor(
             ResolveAsyncLoadExecutor(
                 LocalFileIOPool::GetInstance().GetExecutor(), priority),
-            FinishMmapTargetsAsync(cleanup_targets,
+            FinishFileTargetsAsync(cleanup_targets,
                                    operation_cancellation_token));
     }
     auto artifact_cleanup_targets = cleanup_targets;
@@ -638,7 +690,7 @@ AsyncIndexEntryReader::ReadEntriesAsync(
     std::vector<EntryLoadPlan> entries,
     proto::common::LoadPriority priority,
     folly::CancellationToken cancellation_token) {
-    const auto cleanup_targets = CollectMmapFileTargets(entries);
+    const auto cleanup_targets = CollectIndexFileTargets(entries);
     std::exception_ptr failure;
     try {
         co_return co_await ReadEntriesAsyncImpl(
@@ -648,7 +700,7 @@ AsyncIndexEntryReader::ReadEntriesAsync(
     }
     if (!cleanup_targets.empty()) {
         co_await RunLocalFileIOAsync(
-            [&] { CleanupUncommittedMmapTargets(cleanup_targets); }, priority);
+            [&] { CleanupUncommittedFileTargets(cleanup_targets); }, priority);
     }
     std::rethrow_exception(failure);
 }

@@ -376,7 +376,7 @@ class AsyncIndexEntryReaderTest : public testing::Test {
     milvus_storage::ArrowFileSystemPtr fs_;
 };
 
-TEST_F(AsyncIndexEntryReaderTest, InvalidMappingSizeDoesNotRemoveExistingFile) {
+TEST_F(AsyncIndexEntryReaderTest, InvalidFileSizeDoesNotRemoveExistingFile) {
     const auto path = GetRootPath() + "/existing_file";
     std::filesystem::create_directories(GetRootPath());
     {
@@ -384,7 +384,7 @@ TEST_F(AsyncIndexEntryReaderTest, InvalidMappingSizeDoesNotRemoveExistingFile) {
         output << "keep";
     }
     EXPECT_THROW(
-        WritableMmapFile::Create(path, std::numeric_limits<size_t>::max()),
+        StagingIndexFile::Create(path, std::numeric_limits<size_t>::max()),
         milvus::SegcoreError);
     ASSERT_TRUE(std::filesystem::exists(path));
     EXPECT_EQ(ReadLocalFileBytes(path),
@@ -1017,7 +1017,7 @@ TEST_F(AsyncIndexEntryReaderTest,
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
-       ReadEntriesRejectsOverlappingMmapEntryTargetsBeforePrepare) {
+       ReadEntriesRejectsOverlappingFileEntryTargetsBeforePrepare) {
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
     const std::string file_path = kV3FilePath + "_materialize_mmap_overlap";
     const std::string staging_path =
@@ -1039,13 +1039,13 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
                                                            &direct_file);
 
-    auto staging = std::make_shared<MmapFileTarget>(
-        MmapFileTarget{staging_path, 2 * entry_size, false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(
+        IndexFileTarget{staging_path, 2 * entry_size, false, nullptr});
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
-        EntryLoadPlan{"a", MmapEntryTarget{staging, 0, entry_size}});
+        EntryLoadPlan{"a", FileEntryTarget{staging, 0, entry_size}});
     entries.push_back(EntryLoadPlan{
-        "b", MmapEntryTarget{staging, entry_size / 2, entry_size}});
+        "b", FileEntryTarget{staging, entry_size / 2, entry_size}});
 
     EXPECT_THROW(
         folly::coro::blockingWait(reader->ReadEntriesAsync(
@@ -1056,7 +1056,108 @@ TEST_F(AsyncIndexEntryReaderTest,
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
-       ReadEntriesFinishesWritableMmapBeforeIndexMaterialization) {
+       FileSliceHoldsAdmissionUntilLimitedWriteCompletes) {
+    const auto data = GeneratePattern(kStreamSliceAlignment);
+    milvus::test::ScopedLoadTransientBudget budget_guard(
+        2 * data.size() + 2 * FileWriter::ALIGNMENT_MASK);
+    auto& budget = LoadAdmissionController::GetInstance();
+    const auto old_slots = budget.CapacitySlots();
+    budget.SetCapacitySlots(1);
+    auto& pool = LocalFileIOPool::GetInstance();
+    pool.Configure(1);
+    const auto old_mode = FileWriter::GetMode();
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    auto restore = folly::makeGuard([&] {
+        FileWriter::SetMode(old_mode);
+        pool.Configure(0);
+        budget.SetCapacitySlots(old_slots);
+    });
+    const auto path = kV3FilePath + "_limited_file_slice";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    milvus::test::ControlledDirectReadFile* direct = nullptr;
+    auto reader = milvus::test::OpenDirectIndexEntryReader(
+        ReadLocalFileBytes(GetRootPath() + "/" + path), &direct);
+    direct->SetAutoComplete(false);
+    const auto local = GetRootPath() + "/limited_file_slice";
+    auto staging = std::make_shared<IndexFileTarget>(
+        IndexFileTarget{local, data.size(), false, nullptr});
+    auto permit = pool.AcquireWritePermit();
+    auto load = std::async(std::launch::async, [&] {
+        return folly::coro::blockingWait(reader->ReadEntriesAsync(
+            {{"data", FileEntryTarget{staging, 0, data.size()}}},
+            milvus::proto::common::LoadPriority::LOW));
+    });
+    auto drain = folly::makeGuard([&] {
+        permit = {};
+        direct->SetAutoComplete(true);
+        for (size_t i = 0; i < direct->DirectReadCalls().size(); ++i)
+            direct->Complete(i);
+    });
+    ASSERT_TRUE(direct->WaitForCallCount(1));
+    direct->Complete(0);
+    EXPECT_EQ(load.wait_for(std::chrono::milliseconds(100)),
+              std::future_status::timeout);
+    EXPECT_EQ(std::filesystem::file_size(local), 0);
+    const bool admitted =
+        budget.TryAcquire({1, 1}, LoadAdmissionPriority::High);
+    EXPECT_FALSE(admitted);
+    if (admitted)
+        budget.Release({1, 1});
+    permit = {};
+    ASSERT_EQ(load.wait_for(std::chrono::seconds(2)),
+              std::future_status::ready);
+    auto artifact = load.get();
+    EXPECT_EQ(ReadLocalFileBytes(local), data);
+    EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0), milvus::SegcoreError);
+    const bool released =
+        budget.TryAcquire({1, 1}, LoadAdmissionPriority::High);
+    EXPECT_TRUE(released);
+    if (released)
+        budget.Release({1, 1});
+}
+
+TEST_F(AsyncIndexEntryReaderTest, SharedFilePadsEntryBoundaries) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(0);
+    const auto old_mode = FileWriter::GetMode();
+    FileWriter::SetMode(FileWriter::WriteMode::DIRECT);
+    auto restore = folly::makeGuard([&] { FileWriter::SetMode(old_mode); });
+    const auto a = GeneratePattern(33);
+    const auto b = GeneratePattern(45);
+    const auto path = kV3FilePath + "_shared_unaligned_file";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        writer.WriteEntry("a", a.data(), a.size());
+        writer.WriteEntry("b", b.data(), b.size());
+        writer.Finish();
+    }
+    auto reader = OpenAsyncReader(CreateInputStream(path));
+    const auto local = GetRootPath() + "/shared_unaligned_file";
+    auto staging = std::make_shared<IndexFileTarget>(IndexFileTarget{
+        local, FileWriter::ALIGNMENT_BYTES + b.size(), false, nullptr});
+    // The reserved padding must not overlap another entry's data.
+    EXPECT_THROW(
+        folly::coro::blockingWait(reader->ReadEntriesAsync(
+            {{"a", FileEntryTarget{staging, 0, FileWriter::ALIGNMENT_BYTES}},
+             {"b", FileEntryTarget{staging, a.size(), b.size()}}},
+            milvus::proto::common::LoadPriority::LOW)),
+        milvus::SegcoreError);
+    auto artifact = folly::coro::blockingWait(reader->ReadEntriesAsync(
+        {{"a", FileEntryTarget{staging, 0, FileWriter::ALIGNMENT_BYTES}},
+         {"b",
+          FileEntryTarget{staging, FileWriter::ALIGNMENT_BYTES, b.size()}}},
+        milvus::proto::common::LoadPriority::LOW));
+    auto expected = a;
+    expected.resize(FileWriter::ALIGNMENT_BYTES, 0);
+    expected.insert(expected.end(), b.begin(), b.end());
+    EXPECT_EQ(ReadLocalFileBytes(local), expected);
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       ReadEntriesClosesWriterBeforeIndexMaterialization) {
     milvus::test::ScopedLoadTransientBudget budget(/*capacity_bytes=*/0);
     const std::string file_path = kV3FilePath + "_materialize_mmap_finish";
     const std::string staging_path =
@@ -1073,18 +1174,19 @@ TEST_F(AsyncIndexEntryReaderTest,
     milvus::test::ControlledDirectReadFile* direct_file = nullptr;
     auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
                                                            &direct_file);
-    auto staging = std::make_shared<MmapFileTarget>(
-        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(
+        IndexFileTarget{staging_path, data.size(), false, nullptr});
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
-        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
+        EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
 
     {
         auto artifact = folly::coro::blockingWait(reader->ReadEntriesAsync(
             std::move(entries), milvus::proto::common::LoadPriority::HIGH));
 
         ASSERT_NE(staging->file, nullptr);
-        EXPECT_THROW((void)staging->file->Region(0, 1), milvus::SegcoreError);
+        EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0),
+                     milvus::SegcoreError);
         EXPECT_TRUE(std::filesystem::exists(staging_path));
     }
     EXPECT_FALSE(std::filesystem::exists(staging_path));
@@ -1114,10 +1216,10 @@ TEST_F(AsyncIndexEntryReaderTest,
 
     std::vector<EntryLoadPlan> entries;
 
-    auto staging = std::make_shared<MmapFileTarget>(
-        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(
+        IndexFileTarget{staging_path, data.size(), false, nullptr});
     entries.push_back(
-        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
+        EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
 
     EXPECT_THROW(
         folly::coro::blockingWait(reader->ReadEntriesAsync(
@@ -1142,11 +1244,11 @@ TEST_F(AsyncIndexEntryReaderTest, ReadEntriesCancelsQueuedMmapPreparation) {
     milvus::test::ControlledDirectReadFile* direct_file = nullptr;
     auto reader = milvus::test::OpenDirectIndexEntryReader(
         ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
-    auto staging = std::make_shared<MmapFileTarget>(
-        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(
+        IndexFileTarget{staging_path, data.size(), false, nullptr});
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
-        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
+        EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
     LocalFileIOBlocker blocker;
     folly::CancellationSource cancellation;
     auto load = std::async(std::launch::async, [&] {
@@ -1199,11 +1301,11 @@ TEST_F(AsyncIndexEntryReaderTest,
             direct_file->CorruptRemoteByte(source.remote_offset + 7);
         }
         direct_file->SetAutoComplete(false);
-        auto staging = std::make_shared<MmapFileTarget>(
-            MmapFileTarget{staging_path, data.size(), false, nullptr});
+        auto staging = std::make_shared<IndexFileTarget>(
+            IndexFileTarget{staging_path, data.size(), false, nullptr});
         std::vector<EntryLoadPlan> entries;
         entries.push_back(
-            EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
+            EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
         folly::CancellationSource cancellation;
         auto load = std::async(std::launch::async, [&] {
             return folly::coro::blockingWait(reader->ReadEntriesAsync(
@@ -1230,7 +1332,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
                   std::future_status::timeout);
         ASSERT_NE(staging->file, nullptr);
-        EXPECT_NO_THROW((void)staging->file->Region(0, 1));
+        EXPECT_NO_THROW(staging->file->WriteAt(0, nullptr, 0));
         EXPECT_TRUE(std::filesystem::exists(staging_path));
         blocker.Release();
         if (outcome != Outcome::Success) {
@@ -1246,7 +1348,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         } else {
             auto artifact = load.get();
 
-            EXPECT_THROW((void)staging->file->Region(0, 1),
+            EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0),
                          milvus::SegcoreError);
         }
         EXPECT_FALSE(std::filesystem::exists(staging_path));
@@ -1271,11 +1373,11 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto reader = milvus::test::OpenDirectIndexEntryReader(
         ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
     direct_file->SetAutoComplete(false);
-    auto staging = std::make_shared<MmapFileTarget>(
-        MmapFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(
+        IndexFileTarget{staging_path, data.size(), false, nullptr});
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
-        EntryLoadPlan{"data", MmapEntryTarget{staging, 0, data.size()}});
+        EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
     auto load = std::async(std::launch::async, [&] {
         return folly::coro::blockingWait(reader->ReadEntriesAsync(
             std::move(entries), milvus::proto::common::LoadPriority::HIGH));
@@ -1298,7 +1400,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     direct_file->Complete(0);
     auto artifact = load.get();
 
-    EXPECT_THROW((void)staging->file->Region(0, 1), milvus::SegcoreError);
+    EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0), milvus::SegcoreError);
 }
 
 TEST_F(AsyncIndexEntryReaderTest,

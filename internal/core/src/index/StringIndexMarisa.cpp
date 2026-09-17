@@ -107,14 +107,15 @@ struct MarisaLoadContext {
     size_t str_ids_bytes{0};
     size_t csr_index_bytes{0};
     size_t csr_offsets_bytes{0};
+    size_t csr_offsets_file_offset{0};
     size_t csr_num_keys{0};
 
     std::shared_ptr<std::vector<int64_t>> str_ids;
     std::shared_ptr<std::vector<uint32_t>> csr_index;
     std::shared_ptr<std::vector<uint32_t>> csr_offsets;
-    std::shared_ptr<storage::MmapFileTarget> trie_file;
-    std::shared_ptr<storage::MmapFileTarget> str_ids_file;
-    std::shared_ptr<storage::MmapFileTarget> csr_file;
+    std::shared_ptr<storage::IndexFileTarget> trie_file;
+    std::shared_ptr<storage::IndexFileTarget> str_ids_file;
+    std::shared_ptr<storage::IndexFileTarget> csr_file;
 };
 
 }  // namespace
@@ -989,7 +990,7 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     auto trie_bytes = catalog.At(MARISA_TRIE_INDEX).plaintext_size;
     context->trie_file =
-        std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+        std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
             context->file_name, trie_bytes, context->is_mmap, nullptr});
 
     context->str_ids_bytes = catalog.At(MARISA_STR_IDS).plaintext_size;
@@ -1047,17 +1048,17 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
     plan.load_context = context;
     plan.entries.push_back(storage::EntryLoadPlan{
         MARISA_TRIE_INDEX,
-        storage::MmapEntryTarget{context->trie_file, 0, trie_bytes}});
+        storage::FileEntryTarget{context->trie_file, 0, trie_bytes}});
 
     if (context->is_mmap) {
-        context->str_ids_file = std::make_shared<storage::MmapFileTarget>(
-            storage::MmapFileTarget{context->file_name + ".str_ids",
-                                    context->str_ids_bytes,
-                                    true,
-                                    nullptr});
+        context->str_ids_file = std::make_shared<storage::IndexFileTarget>(
+            storage::IndexFileTarget{context->file_name + ".str_ids",
+                                     context->str_ids_bytes,
+                                     true,
+                                     nullptr});
         plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_STR_IDS,
-            storage::MmapEntryTarget{
+            storage::FileEntryTarget{
                 context->str_ids_file, 0, context->str_ids_bytes}});
     } else {
         context->str_ids = std::make_shared<std::vector<int64_t>>(
@@ -1074,19 +1075,31 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
         return plan;
     }
     if (context->is_mmap) {
+        AssertInfo(
+            context->csr_index_bytes <= std::numeric_limits<size_t>::max() -
+                                            storage::FileWriter::ALIGNMENT_MASK,
+            "marisa CSR alignment overflow");
+        // The local CSR file reserves padding between the two packed entries.
+        context->csr_offsets_file_offset =
+            (context->csr_index_bytes + storage::FileWriter::ALIGNMENT_MASK) &
+            ~storage::FileWriter::ALIGNMENT_MASK;
+        AssertInfo(
+            context->csr_offsets_bytes <= std::numeric_limits<size_t>::max() -
+                                              context->csr_offsets_file_offset,
+            "marisa padded CSR file size overflow");
         auto csr_file_size =
-            context->csr_index_bytes + context->csr_offsets_bytes;
+            context->csr_offsets_file_offset + context->csr_offsets_bytes;
         context->csr_file =
-            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
                 context->file_name + ".csr", csr_file_size, true, nullptr});
         plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_INDEX,
-            storage::MmapEntryTarget{
-                context->csr_file, 0, context->csr_index_bytes}});
+            storage::FileEntryTarget{
+                context->csr_file, 0, context->csr_offsets_file_offset}});
         plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_OFFSETS,
-            storage::MmapEntryTarget{context->csr_file,
-                                     context->csr_index_bytes,
+            storage::FileEntryTarget{context->csr_file,
+                                     context->csr_offsets_file_offset,
                                      context->csr_offsets_bytes}});
     } else {
         context->csr_index = std::make_shared<std::vector<uint32_t>>(
@@ -1148,8 +1161,7 @@ StringIndexMarisa::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
     });
     auto csr_mmap_guard = folly::makeGuard([&]() {
         if (new_csr_mmap_data != nullptr && new_csr_mmap_data != MAP_FAILED) {
-            munmap(new_csr_mmap_data,
-                   context->csr_index_bytes + context->csr_offsets_bytes);
+            munmap(new_csr_mmap_data, context->csr_file->file_size);
         }
     });
     std::vector<int64_t> new_str_ids;
@@ -1187,8 +1199,7 @@ StringIndexMarisa::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
             context->csr_cleanup =
                 std::make_unique<MmapFileRAII>(context->csr_file->path);
             auto file = File::Open(context->csr_file->path, O_RDONLY);
-            auto csr_size =
-                context->csr_index_bytes + context->csr_offsets_bytes;
+            auto csr_size = context->csr_file->file_size;
             new_csr_mmap_data = static_cast<char*>(mmap(nullptr,
                                                         csr_size,
                                                         PROT_READ,
@@ -1226,8 +1237,7 @@ StringIndexMarisa::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
     if (context->has_csr) {
         csr_num_keys_ = context->csr_num_keys;
         if (context->is_mmap) {
-            auto csr_size =
-                context->csr_index_bytes + context->csr_offsets_bytes;
+            auto csr_size = context->csr_file->file_size;
             AssertInfo(csr_size <= static_cast<size_t>(
                                        std::numeric_limits<int64_t>::max()),
                        "marisa CSR mmap size exceeds int64 range");
@@ -1237,7 +1247,7 @@ StringIndexMarisa::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
 
             csr_index_ptr_ = reinterpret_cast<const uint32_t*>(csr_mmap_data_);
             csr_offsets_ptr_ = reinterpret_cast<const uint32_t*>(
-                csr_mmap_data_ + context->csr_index_bytes);
+                csr_mmap_data_ + context->csr_offsets_file_offset);
         } else {
             csr_index_ = std::move(new_csr_index);
             csr_offsets_ = std::move(new_csr_offsets);

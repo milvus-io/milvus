@@ -108,7 +108,7 @@ struct FMIndexLoadContext {
     size_t mmap_size{0};
     std::shared_ptr<std::vector<uint8_t>> blob;
     std::shared_ptr<TargetBitmap> null_bitmap;
-    std::shared_ptr<storage::MmapFileTarget> blob_file;
+    std::shared_ptr<storage::IndexFileTarget> blob_file;
     std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease>
         local_dir_lease;
 };
@@ -845,12 +845,12 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
         auto mmap_path =
             local_prefix + std::string("/") + FMINDEX_BLOB_FILE_NAME;
         context->blob_file =
-            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
                 mmap_path, context->mmap_size, true, nullptr});
         plan.entries.push_back(storage::EntryLoadPlan{
             FMINDEX_BLOB_FILE_NAME,
-            storage::MmapEntryTarget{
-                context->blob_file, 0, context->blob_size}});
+            storage::FileEntryTarget{
+                context->blob_file, 0, context->blob_file->file_size}});
     } else {
         context->blob =
             std::make_shared<std::vector<uint8_t>>(context->blob_size);

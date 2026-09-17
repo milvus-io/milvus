@@ -1179,6 +1179,52 @@ TEST_F(FileWriterTest, FileWriterWaitsForConfiguredWritePermit) {
     EXPECT_EQ(ReadFile(filename), data);
 }
 
+TEST_F(FileWriterTest, PositionedWriterSharesConfiguredWritePermit) {
+    auto& pool = LocalFileIOPool::GetInstance();
+    for (const auto mode :
+         {FileWriter::WriteMode::BUFFERED, FileWriter::WriteMode::DIRECT}) {
+        FileWriter::SetMode(mode);
+        pool.Configure(1);
+        const auto filename = (test_dir_ / "positioned_permit.txt").string();
+        const std::string data(kBufferSize * 2, 'x');
+        PositionedFileWriter writer(filename, data.size());
+        auto permit = pool.AcquireWritePermit();
+        // Empty writes must not wait for a permit.
+        writer.WriteAt(0, nullptr, 0);
+
+        std::promise<void> started;
+        auto ready = started.get_future();
+        auto write = std::async(std::launch::async, [&] {
+            started.set_value();
+            writer.WriteAt(0, data.data(), data.size());
+        });
+        // Unblock the worker even when an assertion below fails.
+        auto unblock = folly::makeGuard([&] { pool.Configure(0); });
+        ASSERT_EQ(ready.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_EQ(write.wait_for(std::chrono::milliseconds(100)),
+                  std::future_status::timeout);
+        permit = {};
+        ASSERT_EQ(write.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        EXPECT_NO_THROW(write.get());
+
+        if (mode == FileWriter::WriteMode::DIRECT) {
+            // This fails inside the write path, after acquiring the permit.
+            EXPECT_THROW(writer.WriteAt(kBufferSize, data.data(), 17),
+                         std::runtime_error);
+        }
+        auto next = std::async(std::launch::async,
+                               [&] { return pool.AcquireWritePermit(); });
+        auto unblock_next = folly::makeGuard([&] { pool.Configure(0); });
+        ASSERT_EQ(next.wait_for(std::chrono::seconds(2)),
+                  std::future_status::ready);
+        auto next_permit = next.get();
+        writer.Finish();
+        EXPECT_EQ(ReadFile(filename), data);
+    }
+}
+
 TEST_F(FileWriterTest, DisablingWriteLimitUnblocksWaitingWriters) {
     auto& pool = LocalFileIOPool::GetInstance();
     pool.Configure(1);

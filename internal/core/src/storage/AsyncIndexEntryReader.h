@@ -61,7 +61,7 @@ class AsyncIndexEntryReader {
     AsyncIndexEntryReader() = default;
 
     // Entry and slice come from the validated catalog and BuildSlices(). The
-    // caller owns the destination and admission lease through CRC completion.
+    // caller owns the destination and admission lease through CRC and file-write completion.
     folly::coro::Task<void>
     ReadSliceIntoAsync(const IndexEntryCatalogEntry& entry,
                        size_t slice_index,
@@ -73,7 +73,7 @@ class AsyncIndexEntryReader {
     ReadEntriesAsyncImpl(
         std::vector<EntryLoadPlan>& entries,
         proto::common::LoadPriority priority,
-        const std::vector<std::shared_ptr<MmapFileTarget>>& cleanup_targets,
+        const std::vector<std::shared_ptr<IndexFileTarget>>& cleanup_targets,
         folly::CancellationToken token);
 
     // Caller supplies a validated range and destination. Require a full read

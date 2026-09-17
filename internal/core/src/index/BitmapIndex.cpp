@@ -69,7 +69,7 @@ struct BitmapLoadContext {
     std::string final_mmap_path;
     std::shared_ptr<std::vector<uint8_t>> index_data;
     std::shared_ptr<TargetBitmap> valid_bitset;
-    std::shared_ptr<storage::MmapFileTarget> index_data_file;
+    std::shared_ptr<storage::IndexFileTarget> index_data_file;
 };
 
 }  // namespace
@@ -1571,14 +1571,14 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
     if (context->use_mmap) {
         context->final_mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
-        context->index_data_file = std::make_shared<storage::MmapFileTarget>(
-            storage::MmapFileTarget{context->final_mmap_path + ".raw.tmp_load",
-                                    raw_data_size,
-                                    false,
-                                    nullptr});
+        context->index_data_file = std::make_shared<storage::IndexFileTarget>(
+            storage::IndexFileTarget{context->final_mmap_path + ".raw.tmp_load",
+                                     raw_data_size,
+                                     false,
+                                     nullptr});
         plan.entries.push_back(storage::EntryLoadPlan{
             BITMAP_INDEX_DATA,
-            storage::MmapEntryTarget{
+            storage::FileEntryTarget{
                 context->index_data_file, 0, raw_data_size}});
     } else {
         context->index_data =

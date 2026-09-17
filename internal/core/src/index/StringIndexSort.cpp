@@ -174,8 +174,8 @@ struct StringSortLoadContext {
 
     std::shared_ptr<std::vector<uint8_t>> index_data;
     std::shared_ptr<TargetBitmap> valid_bitset;
-    std::shared_ptr<storage::MmapFileTarget> index_data_file;
-    std::shared_ptr<storage::MmapFileTarget> offsets_file;
+    std::shared_ptr<storage::IndexFileTarget> index_data_file;
+    std::shared_ptr<storage::IndexFileTarget> offsets_file;
 };
 
 }  // namespace
@@ -695,15 +695,16 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
         AssertInfo(!mmap_path.empty(),
                    "StringIndexSort mmap filepath is empty");
         context->index_data_file =
-            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
                 mmap_path,
                 StringSortMmapFileSize(context->index_data_bytes),
                 true,
                 nullptr});
         plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
-            storage::MmapEntryTarget{
-                context->index_data_file, 0, context->index_data_bytes}});
+            storage::FileEntryTarget{context->index_data_file,
+                                     0,
+                                     context->index_data_file->file_size}});
     } else {
         context->index_data =
             std::make_shared<std::vector<uint8_t>>(context->index_data_bytes);
@@ -722,14 +723,14 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
             expected_valid_bitset_bytes}});
 
     if (context->is_mmap && context->has_persisted_offsets) {
-        context->offsets_file = std::make_shared<storage::MmapFileTarget>(
-            storage::MmapFileTarget{context->index_data_file->path + "-meta",
-                                    context->offsets_bytes,
-                                    true,
-                                    nullptr});
+        context->offsets_file = std::make_shared<storage::IndexFileTarget>(
+            storage::IndexFileTarget{context->index_data_file->path + "-meta",
+                                     context->offsets_bytes,
+                                     true,
+                                     nullptr});
         plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
-            storage::MmapEntryTarget{
+            storage::FileEntryTarget{
                 context->offsets_file, 0, context->offsets_bytes}});
     }
     return plan;

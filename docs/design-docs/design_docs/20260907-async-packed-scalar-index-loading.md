@@ -52,7 +52,7 @@ Loading proceeds in five stages:
    `IndexLoadArtifact`.
 4. Call the index's `FinishLoadAsync` to adopt the completed targets, initialize
    query state, and update index state using existing representation code.
-   Writable mappings close before this stage; read-only mappings and engine
+   File writers close before this stage; read-only mappings and engine
    objects are opened here. Bitmap mmap loading also converts postings to frozen
    format and awaits local-file writes, so this stage remains asynchronous.
 5. Retain the files needed by the successful index and release temporary inputs.
@@ -109,8 +109,8 @@ executor.
 | `InputStream::ReadAtAsync` on a native remote file | Storage backend asynchronous I/O fills the destination; completion resumes the coroutine |
 | `InputStream::ReadAtAsync` on a generic Arrow file | Arrow `ReadAsync`; copy the returned buffer into the destination |
 | Memory stream read | Immediate memory copy; no I/O |
-| Create directories, preallocate and map writable files | `LocalFileIOPool` |
-| Unmap and close writable targets after reads drain | `LocalFileIOPool` |
+| Create directories and positioned file writers | `LocalFileIOPool` |
+| Write file slices with disk permits and bandwidth limiting; close writers after all writes drain | `LocalFileIOPool` |
 | Deserialize, open engines/read-only mappings, restore query state | Shared `AsyncLoadExecutor` |
 | Convert Bitmap postings to frozen representation | Shared `AsyncLoadExecutor` |
 | Write Bitmap's derived frozen file and release file-backed staging resources | `LocalFileIOPool` |
@@ -155,8 +155,9 @@ A **40 MiB plain entry** becomes:
 
 If the entry begins at object offset `P`, the source reads begin at `P`,
 `P + 16 MiB`, and `P + 32 MiB`. They fill disjoint ranges of the same destination.
-If slice 1 finishes before slice 0, it can fill its destination, verify its
-checksum, and return its admission lease immediately. That capacity can admit
+If slice 1 finishes before slice 0, it can fill its destination and verify its
+checksum independently. For a file destination, it awaits its positioned write
+before returning the admission lease. That capacity can admit
 slice 2 while slice 0 remains in flight. There is no ordered consumer waiting
 for the earliest slice before placing later results.
 
@@ -178,12 +179,19 @@ Engine restoration waits until all selected inputs are complete and verified.
 ## Example: Sort with mmap enabled
 
 `ScalarIndexSort` plans memory for validity metadata and file destinations for
-sorted values and row-offset lookup data. Local file workers reserve disk blocks
-and create writable mappings. Native reads can fill the mappings directly;
-generic Arrow reads copy their returned buffers into the same ranges.
+sorted values and row-offset lookup data. Local file workers create
+`PositionedFileWriter` instances. Each file slice reads into a temporary buffer,
+then awaits a positioned write on `LocalFileIOPool`. The write uses the shared
+disk-write permit and bandwidth limiter. Memory destinations still receive reads
+directly; file downloads do not use writable mmap.
 
-After all reads and CRC checks finish, local file workers close the writable
-mappings. The async worker opens the read-only mappings and restores the Sort
+Marisa's local CSR file pads the first entry to a 4 KiB boundary. Slice writes
+include zero padding only within their reserved entry region. All files follow
+the writer's existing configured mode and priority rules.
+Aligned layouts retain the configured direct-I/O behavior.
+
+After all reads, CRC checks, and writes finish, local file workers close the
+writers. The async worker opens the read-only mappings and restores the Sort
 index's lookup state. A successful load retains those files. A failed or
 canceled load removes its temporary targets after outstanding work has drained.
 
@@ -219,10 +227,14 @@ An indivisible unit larger than a nonzero byte limit may run exclusively so it
 can make progress; it still needs a slot. Waiters hold neither resource.
 
 A slice's lease remains alive until the issued read, decryption, checksum, and
-placement finish and temporary buffers are released. Plain slices charge their
-length; encrypted slices charge twice the ciphertext length plus plaintext length.
-Final destinations are reserved separately. Directory reads are admitted too,
-including estimated JSON parsing scratch.
+placement finish and temporary buffers are released. Memory-target plain slices
+charge their length; encrypted slices charge twice the ciphertext length plus
+plaintext length. File targets add one plaintext-slice buffer and up to 8190 bytes
+of padding across the slice buffer and direct-I/O scratch buffer to this bound. The lease covers waiting for a local worker,
+waiting for a disk-write permit, and the complete positioned write. Remote-read
+scratch and direct-write scratch are used in separate phases.
+Final destinations are reserved separately. Magic/footer and directory reads
+bypass admission; the metadata entry is admitted like other payloads.
 
 The cache estimate distinguishes final resident resources, request-local inputs,
 and temporary work covered by slice leases. Full-entry buffers or sidecars that

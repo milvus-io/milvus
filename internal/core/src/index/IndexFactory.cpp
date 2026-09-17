@@ -836,6 +836,13 @@ IndexFactory::ScalarIndexFileLoadResource(
                    static_cast<int>(type));
         resolved_params["index_type"] = resolved;
     }
+    const auto& type = resolved_params.at(INDEX_TYPE);
+    const bool file_stream = type == INVERTED_INDEX_TYPE ||
+                             type == NGRAM_INDEX_TYPE ||
+                             type == RTREE_INDEX_TYPE;
+    const bool may_write_files =
+        use_async_load && (mmap_enable || file_stream || type == MARISA_TRIE ||
+                           type == MARISA_TRIE_UPPER);
     storage::EntryStreamLoadInfo legacy_stream;
     uint64_t total_transient = 0;
     uint64_t max_task = 0;
@@ -844,9 +851,16 @@ IndexFactory::ScalarIndexFileLoadResource(
                 std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
             legacy_stream.encrypted = true;
             for (const auto& slice : encrypted->slices) {
-                const auto bytes = SaturatingAdd(
+                auto bytes = SaturatingAdd(
                     milvus::SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
                     slice.target_bytes);
+                if (may_write_files) {
+                    bytes = SaturatingAdd(
+                        bytes,
+                        SaturatingAdd(
+                            slice.target_bytes,
+                            uint64_t{2 * storage::FileWriter::ALIGNMENT_MASK}));
+                }
                 const auto legacy_bytes = SaturatingAdd(
                     slice.remote_bytes,
                     SaturatingMultiply(slice.target_bytes, uint64_t{2}));
@@ -858,21 +872,27 @@ IndexFactory::ScalarIndexFileLoadResource(
                 max_task = std::max(max_task, bytes);
             }
         } else {
-            total_transient =
-                SaturatingAdd(total_transient, entry.plaintext_size);
-            max_task =
-                std::max(max_task,
-                         std::min<uint64_t>(entry.plaintext_size,
-                                            storage::DefaultStreamSliceSize()));
+            const auto slice_size = storage::DefaultStreamSliceSize();
+            auto bytes = entry.plaintext_size;
+            auto task_bytes = std::min<uint64_t>(bytes, slice_size);
+            if (may_write_files && bytes != 0) {
+                const auto slices = 1 + (bytes - 1) / slice_size;
+                bytes = SaturatingAdd(
+                    SaturatingMultiply(bytes, uint64_t{2}),
+                    SaturatingMultiply(
+                        slices,
+                        uint64_t{2 * storage::FileWriter::ALIGNMENT_MASK}));
+                task_bytes = SaturatingAdd(
+                    SaturatingMultiply(task_bytes, uint64_t{2}),
+                    uint64_t{2 * storage::FileWriter::ALIGNMENT_MASK});
+            }
+            total_transient = SaturatingAdd(total_transient, bytes);
+            max_task = std::max(max_task, task_bytes);
         }
     }
     // Estimates survive admission refreshes, including removal of all limits.
     // The shared overhead group applies the live global bound where eligible.
     const auto read_peak = total_transient;
-    const auto& type = resolved_params.at(INDEX_TYPE);
-    const bool file_stream = type == INVERTED_INDEX_TYPE ||
-                             type == NGRAM_INDEX_TYPE ||
-                             type == RTREE_INDEX_TYPE;
     const auto legacy_peak =
         ScalarIndexStreamMemoryOverhead(index_size,
                                         std::max(version, 3),

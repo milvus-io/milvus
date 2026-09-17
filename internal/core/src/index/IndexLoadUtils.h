@@ -64,7 +64,7 @@ struct IndexDirectoryLoadContext {
 
     std::shared_ptr<storage::DiskFileManagerImpl> manager;
     std::string path;
-    std::vector<std::shared_ptr<storage::MmapFileTarget>> files;
+    std::vector<std::shared_ptr<storage::IndexFileTarget>> files;
     std::optional<storage::DiskFileManagerImpl::LocalDirWriteLease> lease;
 };
 
@@ -102,10 +102,10 @@ PlanIndexDirectory(const storage::IndexEntryCatalog& catalog,
     for (const auto& name : file_names) {
         const auto size = catalog.At(name).plaintext_size;
         auto file =
-            std::make_shared<storage::MmapFileTarget>(storage::MmapFileTarget{
+            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
                 context->path + "/" + name, size, retain_on_success, nullptr});
         context->files.push_back(file);
-        plan.entries.push_back({name, storage::MmapEntryTarget{file, 0, size}});
+        plan.entries.push_back({name, storage::FileEntryTarget{file, 0, size}});
     }
     return context;
 }
