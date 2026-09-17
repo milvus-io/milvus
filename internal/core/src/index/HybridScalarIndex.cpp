@@ -90,7 +90,7 @@ ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
 
 template <typename Metadata>
 ScalarIndexType
-ResolvePackedHybridType(const Metadata& reader, const Config& config) {
+ResolvePackedHybridIndexType(const Metadata& reader, const Config& config) {
     ScalarIndexType type = ScalarIndexType::NONE;
     if (reader.HasMeta(INDEX_TYPE)) {
         type = static_cast<ScalarIndexType>(
@@ -139,7 +139,8 @@ ResolvePackedHybridType(const Metadata& reader, const Config& config) {
 ScalarIndexType
 ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
                              const Config& config) {
-    return ResolvePackedHybridType(catalog, config);
+    return ResolvePackedHybridIndexType<storage::IndexEntryCatalog>(catalog,
+                                                                    config);
 }
 
 template <typename T>
@@ -543,7 +544,7 @@ template <typename T>
 void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
-    internal_index_type_ = ResolvePackedHybridType(reader, config);
+    internal_index_type_ = ResolvePackedHybridIndexType(reader, config);
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));
