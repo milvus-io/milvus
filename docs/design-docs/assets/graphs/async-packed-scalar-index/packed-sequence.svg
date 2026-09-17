@@ -64,11 +64,11 @@
 <rect x="884.0" y="660.0" width="128" height="20" fill="#FCFDFE"/>
 <text x="948.0" y="676.0" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">TARGETS CLOSED</text>
 <rect x="304" y="700.0" width="304" height="32" rx="4" fill="#EFF7F5"/>
-<text x="456" y="720.0" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">FinishLoadAsync; retain files</text>
+<text x="456" y="720.0" font-size="12" fill="#566A80" text-anchor="middle" font-weight="400">FinishLoadAsync(plan)</text>
 <path d="M 456 760 L 128 760" fill="none" stroke="#397985" stroke-width="1.2" marker-end="url(#packed-sequence-accent)"/>
 <rect x="264.0" y="732.0" width="56" height="20" fill="#FCFDFE"/>
 <text x="292.0" y="748.0" font-size="16" fill="#566A80" text-anchor="middle" font-weight="400">READY</text>
 <line x1="40" y1="804.0" x2="1240" y2="804.0" stroke="#CDD9E2"/>
 <text x="40" y="832.0" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Each file slice holds admission until its local write completes.</text>
-<text x="40" y="856.0" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Engine restoration runs on the async worker. CommitTargets and file-artifact release use the file pool.</text>
+<text x="40" y="856.0" font-size="16" fill="#566A80" text-anchor="start" font-weight="400">Engine restoration runs on the async worker. Plan commit and file cleanup use the file pool.</text>
 </g></svg>

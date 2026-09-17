@@ -57,27 +57,24 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
             return std::holds_alternative<storage::FileEntryTarget>(
                 entry.target);
         });
-    storage::IndexLoadArtifact artifact;
     // Keep engine context alive through reading and FinishLoadAsync. File
     // contexts can remove directories and must be released on the local executor.
     std::exception_ptr failure;
     try {
-        artifact = co_await reader->ReadEntriesAsync(
-            std::move(plan.entries), load_priority, cancellation_token);
+        co_await reader->ReadEntriesAsync(
+            plan.entries, load_priority, cancellation_token);
         storage::ThrowIfCancelled(cancellation_token,
                                   "ScalarIndex::FinishLoadAsync");
         co_await folly::coro::co_withCancellation(
-            cancellation_token,
-            FinishLoadAsync(artifact, plan.load_context, config));
+            cancellation_token, FinishLoadAsync(plan, config));
     } catch (...) {
         failure = std::current_exception();
     }
     auto release = [&] {
-        // Destroy targets before engine context, so directory leases cover cleanup.
-        auto context = std::move(plan.load_context);
-        auto owned_artifact = std::move(artifact);
+        // Destruction releases file targets before the index's directory lease.
+        auto owned_plan = std::move(plan);
         if (!failure) {
-            owned_artifact.CommitTargets();
+            owned_plan.Commit();
         }
     };
     if (has_file_targets) {

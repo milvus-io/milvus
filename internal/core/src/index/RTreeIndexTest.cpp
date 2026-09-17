@@ -2241,11 +2241,10 @@ class ExposedRTreeIndex : public milvus::index::RTreeIndex<std::string> {
                       const milvus::Config& config,
                       milvus::proto::common::LoadPriority priority) {
         auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
-        auto artifact = folly::coro::blockingWait(
-            reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
-            FinishLoadAsync(artifact, plan.load_context, config));
-        artifact.CommitTargets();
+            reader.ReadEntriesAsync(plan.entries, priority));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
     }
 };
 }  // namespace

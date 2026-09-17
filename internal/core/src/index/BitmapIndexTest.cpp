@@ -81,11 +81,10 @@ class ExposedBitmapIndex : public BitmapIndex<int32_t> {
     LoadPlannedForTest(milvus::storage::AsyncIndexEntryReader& reader,
                        const milvus::Config& config) {
         auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
-        auto artifact = folly::coro::blockingWait(reader.ReadEntriesAsync(
-            std::move(plan.entries), proto::common::LoadPriority::HIGH));
-        folly::coro::blockingWait(
-            FinishLoadAsync(artifact, plan.load_context, config));
-        artifact.CommitTargets();
+        folly::coro::blockingWait(reader.ReadEntriesAsync(
+            plan.entries, proto::common::LoadPriority::HIGH));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
     }
 };
 
@@ -273,20 +272,18 @@ TEST(BitmapIndexV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
                 const auto target =
                     std::get<storage::MemoryEntryTarget>(entry->target);
                 ASSERT_EQ(target.bytes, (rows + 7) / 8);
-                auto artifact =
-                    folly::coro::blockingWait(reader->ReadEntriesAsync(
-                        std::move(plan.entries),
-                        proto::common::LoadPriority::HIGH));
+                folly::coro::blockingWait(reader->ReadEntriesAsync(
+                    plan.entries, proto::common::LoadPriority::HIGH));
                 // The synchronous unpacker ignores unused persisted bits.
                 if (rows % 8 != 0) {
                     target.data[target.bytes - 1] |= 0x80;
                 }
-                folly::coro::blockingWait(load_index.FinishLoadAsync(
-                    artifact, plan.load_context, config));
+                folly::coro::blockingWait(
+                    load_index.FinishLoadAsync(plan, config));
                 EXPECT_EQ(
                     reinterpret_cast<uint8_t*>(load_index.valid_bitset_.data()),
                     target.data);
-                artifact.CommitTargets();
+                plan.Commit();
             }
             const auto* bytes = reinterpret_cast<const uint8_t*>(
                 load_index.valid_bitset_.data());

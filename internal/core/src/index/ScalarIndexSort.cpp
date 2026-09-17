@@ -882,13 +882,11 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
 
 template <typename T>
 folly::coro::Task<void>
-ScalarIndexSort<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                                    const std::any& load_context,
-                                    const Config& config) {
+ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     (void)config;
     auto context =
         std::any_cast<const std::shared_ptr<ScalarSortLoadContext<T>>&>(
-            load_context);
+            plan.load_context);
     AssertInfo(context != nullptr,
                "ScalarIndexSort FinishLoadAsync context is null");
 

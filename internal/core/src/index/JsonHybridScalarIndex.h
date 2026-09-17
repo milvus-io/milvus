@@ -195,13 +195,10 @@ class JsonHybridScalarIndex : public HybridScalarIndex<T> {
     }
 
     folly::coro::Task<void>
-    FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                    const std::any& load_context,
-                    const Config& config) override {
-        auto new_non_exist_offsets = TakeJsonNonExistOffsets(artifact);
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override {
+        auto new_non_exist_offsets = TakeJsonNonExistOffsets(plan);
 
-        co_await HybridScalarIndex<T>::FinishLoadAsync(
-            artifact, load_context, config);
+        co_await HybridScalarIndex<T>::FinishLoadAsync(plan, config);
         non_exist_offsets_ = std::move(new_non_exist_offsets);
         BuildExistsBitset(this->Count());
         LOG_INFO(

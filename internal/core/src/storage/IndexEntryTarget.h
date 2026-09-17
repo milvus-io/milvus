@@ -31,8 +31,6 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "pb/common.pb.h"
-#include "storage/IndexEntryDirectory.h"
 #include "storage/StagingIndexFile.h"
 
 namespace milvus::storage {
@@ -71,11 +69,6 @@ struct EntryLoadPlan {
     EntryTarget target;
 };
 
-struct MaterializedEntry {
-    std::string name;
-    EntryTarget target;
-};
-
 inline std::vector<std::shared_ptr<IndexFileTarget>>
 CollectIndexFileTargets(const std::vector<EntryLoadPlan>& entries) {
     std::vector<std::shared_ptr<IndexFileTarget>> targets;
@@ -104,80 +97,5 @@ CleanupUncommittedFileTargets(
         }
     }
 }
-
-class IndexLoadArtifact {
- public:
-    IndexLoadArtifact() = default;
-
-    IndexLoadArtifact(const IndexLoadArtifact&) = delete;
-    IndexLoadArtifact&
-    operator=(const IndexLoadArtifact&) = delete;
-
-    IndexLoadArtifact(IndexLoadArtifact&& other) noexcept
-        : entries_(std::move(other.entries_)),
-          cleanup_targets_(std::move(other.cleanup_targets_)) {
-        other.cleanup_targets_.clear();
-    }
-
-    IndexLoadArtifact&
-    operator=(IndexLoadArtifact&& other) noexcept {
-        if (this != &other) {
-            CleanupUncommittedFileTargets(cleanup_targets_);
-            entries_ = std::move(other.entries_);
-            cleanup_targets_ = std::move(other.cleanup_targets_);
-            other.cleanup_targets_.clear();
-        }
-        return *this;
-    }
-
-    ~IndexLoadArtifact() {
-        CleanupUncommittedFileTargets(cleanup_targets_);
-    }
-
-    const std::vector<MaterializedEntry>&
-    Entries() const noexcept {
-        return entries_;
-    }
-
-    const MaterializedEntry&
-    At(std::string_view name) const {
-        auto it = std::find_if(
-            entries_.begin(), entries_.end(), [name](const auto& entry) {
-                return entry.name == name;
-            });
-        AssertInfo(
-            it != entries_.end(), "Materialized Entry not found: {}", name);
-        return *it;
-    }
-
-    MaterializedEntry&
-    At(std::string_view name) {
-        return const_cast<MaterializedEntry&>(std::as_const(*this).At(name));
-    }
-
-    void
-    CommitTargets() {
-        for (auto& entry : entries_) {
-            if (auto* mmap_target =
-                    std::get_if<FileEntryTarget>(&entry.target)) {
-                AssertInfo(mmap_target->staging != nullptr &&
-                               mmap_target->staging->file != nullptr,
-                           "Cannot commit unprepared mmap target '{}'",
-                           mmap_target->staging == nullptr
-                               ? std::string("<null>")
-                               : mmap_target->staging->path);
-                if (mmap_target->staging->retain_on_success) {
-                    mmap_target->staging->file->Commit();
-                }
-            }
-        }
-    }
-
- private:
-    friend class AsyncIndexEntryReader;
-
-    std::vector<MaterializedEntry> entries_;
-    std::vector<std::shared_ptr<IndexFileTarget>> cleanup_targets_;
-};
 
 }  // namespace milvus::storage

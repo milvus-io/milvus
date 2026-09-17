@@ -896,12 +896,10 @@ FMIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
 }
 
 folly::coro::Task<void>
-FMIndex::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                         const std::any& load_context,
-                         const Config& config) {
+FMIndex::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     (void)config;
-    auto context =
-        std::any_cast<const std::shared_ptr<FMIndexLoadContext>&>(load_context);
+    auto context = std::any_cast<const std::shared_ptr<FMIndexLoadContext>&>(
+        plan.load_context);
     AssertInfo(context != nullptr, "FMIndex FinishLoadAsync context is null");
 
     fmindex::FMIndex new_fm;

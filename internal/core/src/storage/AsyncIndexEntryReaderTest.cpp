@@ -52,10 +52,11 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/AsyncIndexEntryReader.h"
+#include "index/IndexLoadPlan.h"
 #include "storage/IndexEntryFormat.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
-#include "storage/IndexLoadPlan.h"
+#include "storage/IndexEntryTarget.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/Crc32cUtil.h"
 #include "storage/PluginLoader.h"
@@ -377,6 +378,18 @@ class AsyncIndexEntryReaderTest : public testing::Test {
     milvus_storage::ArrowFileSystemPtr fs_;
 };
 
+// Mirror production ownership while testing the reader in isolation.
+static folly::coro::Task<milvus::index::IndexLoadPlan>
+ReadEntriesForTest(AsyncIndexEntryReader& reader,
+                   std::vector<EntryLoadPlan> entries,
+                   milvus::proto::common::LoadPriority priority,
+                   folly::CancellationToken token = {}) {
+    milvus::index::IndexLoadPlan plan;
+    plan.entries = std::move(entries);
+    co_await reader.ReadEntriesAsync(plan.entries, priority, token);
+    co_return std::move(plan);
+}
+
 TEST_F(AsyncIndexEntryReaderTest, InvalidFileSizeDoesNotRemoveExistingFile) {
     const auto path = GetRootPath() + "/existing_file";
     std::filesystem::create_directories(GetRootPath());
@@ -578,7 +591,8 @@ TEST_F(AsyncIndexEntryReaderTest,
     direct_file->ResetCounters();
 
     std::vector<uint8_t> target(data.size());
-    folly::coro::blockingWait(reader->ReadEntriesAsync(
+    folly::coro::blockingWait(ReadEntriesForTest(
+        *reader,
         {{"data", MemoryEntryTarget{nullptr, target.data(), target.size()}}},
         milvus::proto::common::LoadPriority::HIGH));
 
@@ -613,7 +627,8 @@ TEST_F(AsyncIndexEntryReaderTest, PlainEntryFallsBackToArrowBufferRead) {
     fallback_file->ResetCounters();
 
     std::vector<uint8_t> target(data.size());
-    folly::coro::blockingWait(reader->ReadEntriesAsync(
+    folly::coro::blockingWait(ReadEntriesForTest(
+        *reader,
         {{"data", MemoryEntryTarget{nullptr, target.data(), target.size()}}},
         milvus::proto::common::LoadPriority::HIGH));
 
@@ -640,7 +655,8 @@ TEST_F(AsyncIndexEntryReaderTest, PlainEntryRejectsShortRead) {
 
     std::vector<uint8_t> target(data.size());
     EXPECT_THROW(
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
+        folly::coro::blockingWait(ReadEntriesForTest(
+            *reader,
             {{"data",
               MemoryEntryTarget{nullptr, target.data(), target.size()}}},
             milvus::proto::common::LoadPriority::HIGH)),
@@ -666,7 +682,8 @@ TEST_F(AsyncIndexEntryReaderTest, PlainEntryRetriesTransientStorageError) {
         "throttled"));
 
     std::vector<uint8_t> target(data.size());
-    folly::coro::blockingWait(reader->ReadEntriesAsync(
+    folly::coro::blockingWait(ReadEntriesForTest(
+        *reader,
         {{"data", MemoryEntryTarget{nullptr, target.data(), target.size()}}},
         milvus::proto::common::LoadPriority::HIGH));
 
@@ -693,7 +710,8 @@ TEST_F(AsyncIndexEntryReaderTest, PlainEntryCancellationDrainsStreamRetry) {
     folly::CancellationSource cancellation_source;
     std::vector<uint8_t> target(data.size());
     auto read_future = std::async(std::launch::async, [&]() {
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
+        folly::coro::blockingWait(ReadEntriesForTest(
+            *reader,
             {{"data",
               MemoryEntryTarget{nullptr, target.data(), target.size()}}},
             milvus::proto::common::LoadPriority::HIGH,
@@ -762,8 +780,10 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto materialize_future = std::async(
         std::launch::async,
         [reader = reader.get(), entries = std::move(entries)]() mutable {
-            return folly::coro::blockingWait(reader->ReadEntriesAsync(
-                std::move(entries), milvus::proto::common::LoadPriority::HIGH));
+            return folly::coro::blockingWait(
+                ReadEntriesForTest(*reader,
+                                   std::move(entries),
+                                   milvus::proto::common::LoadPriority::HIGH));
         });
     auto drain_on_failure = folly::makeGuard([&] {
         direct_file->SetAutoComplete(true);
@@ -795,7 +815,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         direct_file->Complete(positions[i].second);
     }
 
-    auto artifact = materialize_future.get();
+    auto plan = materialize_future.get();
     EXPECT_EQ(*target_a, data_a);
     EXPECT_EQ(*target_b, data_b);
 
@@ -829,8 +849,10 @@ TEST_F(AsyncIndexEntryReaderTest,
     entries.push_back(EntryLoadPlan{
         "data", MemoryEntryTarget{target, target->data(), target->size()}});
 
-    auto artifact = folly::coro::blockingWait(reader->ReadEntriesAsync(
-        std::move(entries), milvus::proto::common::LoadPriority::HIGH));
+    auto plan = folly::coro::blockingWait(
+        ReadEntriesForTest(*reader,
+                           std::move(entries),
+                           milvus::proto::common::LoadPriority::HIGH));
 
     EXPECT_EQ(*target, data);
     EXPECT_EQ(fallback_file->AsyncReadCalls(), 2);
@@ -875,8 +897,10 @@ TEST_F(AsyncIndexEntryReaderTest, ReadEntriesUsesOnlyGlobalAdmissionLimits) {
     auto materialize_future = std::async(
         std::launch::async,
         [reader = reader.get(), entries = std::move(entries)]() mutable {
-            return folly::coro::blockingWait(reader->ReadEntriesAsync(
-                std::move(entries), milvus::proto::common::LoadPriority::LOW));
+            return folly::coro::blockingWait(
+                ReadEntriesForTest(*reader,
+                                   std::move(entries),
+                                   milvus::proto::common::LoadPriority::LOW));
         });
     auto drain_on_failure = folly::makeGuard([&] {
         direct_file->SetAutoComplete(true);
@@ -899,7 +923,7 @@ TEST_F(AsyncIndexEntryReaderTest, ReadEntriesUsesOnlyGlobalAdmissionLimits) {
         direct_file->Complete(i);
     }
 
-    auto artifact = materialize_future.get();
+    auto plan = materialize_future.get();
 
     EXPECT_EQ(*target, data);
 }
@@ -940,8 +964,10 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto materialize_future = std::async(
         std::launch::async,
         [reader = reader.get(), entries = std::move(entries)]() mutable {
-            return folly::coro::blockingWait(reader->ReadEntriesAsync(
-                std::move(entries), milvus::proto::common::LoadPriority::LOW));
+            return folly::coro::blockingWait(
+                ReadEntriesForTest(*reader,
+                                   std::move(entries),
+                                   milvus::proto::common::LoadPriority::LOW));
         });
     auto drain_on_failure = folly::makeGuard([&] {
         admission.SetCapacitySlots(0);
@@ -970,7 +996,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     direct_file->Complete(3);
     direct_file->Complete(2);
 
-    auto artifact = materialize_future.get();
+    auto plan = materialize_future.get();
 
     EXPECT_EQ(*target, data);
     EXPECT_LE(direct_file->PeakInflight(), 2);
@@ -1010,10 +1036,11 @@ TEST_F(AsyncIndexEntryReaderTest,
         MemoryEntryTarget{
             target, target->data() + entry_size / 2, entry_size}});
 
-    EXPECT_THROW(
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
-            std::move(entries), milvus::proto::common::LoadPriority::HIGH)),
-        milvus::SegcoreError);
+    EXPECT_THROW(folly::coro::blockingWait(ReadEntriesForTest(
+                     *reader,
+                     std::move(entries),
+                     milvus::proto::common::LoadPriority::HIGH)),
+                 milvus::SegcoreError);
     EXPECT_TRUE(direct_file->DirectReadCalls().empty());
 }
 
@@ -1048,10 +1075,11 @@ TEST_F(AsyncIndexEntryReaderTest,
     entries.push_back(EntryLoadPlan{
         "b", FileEntryTarget{staging, entry_size / 2, entry_size}});
 
-    EXPECT_THROW(
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
-            std::move(entries), milvus::proto::common::LoadPriority::HIGH)),
-        milvus::SegcoreError);
+    EXPECT_THROW(folly::coro::blockingWait(ReadEntriesForTest(
+                     *reader,
+                     std::move(entries),
+                     milvus::proto::common::LoadPriority::HIGH)),
+                 milvus::SegcoreError);
     EXPECT_TRUE(direct_file->DirectReadCalls().empty());
     EXPECT_FALSE(std::filesystem::exists(staging_path));
 }
@@ -1088,7 +1116,8 @@ TEST_F(AsyncIndexEntryReaderTest,
         IndexFileTarget{local, data.size(), false, nullptr});
     auto permit = pool.AcquireWritePermit();
     auto load = std::async(std::launch::async, [&] {
-        return folly::coro::blockingWait(reader->ReadEntriesAsync(
+        return folly::coro::blockingWait(ReadEntriesForTest(
+            *reader,
             {{"data", FileEntryTarget{staging, 0, data.size()}}},
             milvus::proto::common::LoadPriority::LOW));
     });
@@ -1111,7 +1140,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     permit = {};
     ASSERT_EQ(load.wait_for(std::chrono::seconds(2)),
               std::future_status::ready);
-    auto artifact = load.get();
+    auto plan = load.get();
     EXPECT_EQ(ReadLocalFileBytes(local), data);
     EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0), milvus::SegcoreError);
     const bool released =
@@ -1141,12 +1170,14 @@ TEST_F(AsyncIndexEntryReaderTest, SharedFilePadsEntryBoundaries) {
         local, FileWriter::ALIGNMENT_BYTES + b.size(), false, nullptr});
     // The reserved padding must not overlap another entry's data.
     EXPECT_THROW(
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
+        folly::coro::blockingWait(ReadEntriesForTest(
+            *reader,
             {{"a", FileEntryTarget{staging, 0, FileWriter::ALIGNMENT_BYTES}},
              {"b", FileEntryTarget{staging, a.size(), b.size()}}},
             milvus::proto::common::LoadPriority::LOW)),
         milvus::SegcoreError);
-    auto artifact = folly::coro::blockingWait(reader->ReadEntriesAsync(
+    auto plan = folly::coro::blockingWait(ReadEntriesForTest(
+        *reader,
         {{"a", FileEntryTarget{staging, 0, FileWriter::ALIGNMENT_BYTES}},
          {"b",
           FileEntryTarget{staging, FileWriter::ALIGNMENT_BYTES, b.size()}}},
@@ -1182,8 +1213,10 @@ TEST_F(AsyncIndexEntryReaderTest,
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
 
     {
-        auto artifact = folly::coro::blockingWait(reader->ReadEntriesAsync(
-            std::move(entries), milvus::proto::common::LoadPriority::HIGH));
+        auto plan = folly::coro::blockingWait(
+            ReadEntriesForTest(*reader,
+                               std::move(entries),
+                               milvus::proto::common::LoadPriority::HIGH));
 
         ASSERT_NE(staging->file, nullptr);
         EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0),
@@ -1222,10 +1255,11 @@ TEST_F(AsyncIndexEntryReaderTest,
     entries.push_back(
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
 
-    EXPECT_THROW(
-        folly::coro::blockingWait(reader->ReadEntriesAsync(
-            std::move(entries), milvus::proto::common::LoadPriority::HIGH)),
-        milvus::SegcoreError);
+    EXPECT_THROW(folly::coro::blockingWait(ReadEntriesForTest(
+                     *reader,
+                     std::move(entries),
+                     milvus::proto::common::LoadPriority::HIGH)),
+                 milvus::SegcoreError);
     EXPECT_FALSE(std::filesystem::exists(staging_path));
 }
 
@@ -1254,9 +1288,10 @@ TEST_F(AsyncIndexEntryReaderTest, ReadEntriesCancelsQueuedMmapPreparation) {
     folly::CancellationSource cancellation;
     auto load = std::async(std::launch::async, [&] {
         return folly::coro::blockingWait(
-            reader->ReadEntriesAsync(std::move(entries),
-                                     milvus::proto::common::LoadPriority::HIGH,
-                                     cancellation.getToken()));
+            ReadEntriesForTest(*reader,
+                               std::move(entries),
+                               milvus::proto::common::LoadPriority::HIGH,
+                               cancellation.getToken()));
     });
     auto unblock = folly::makeGuard([&] { blocker.Release(); });
     ASSERT_TRUE(blocker.WaitForQueuedTask());
@@ -1309,10 +1344,11 @@ TEST_F(AsyncIndexEntryReaderTest,
             EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
         folly::CancellationSource cancellation;
         auto load = std::async(std::launch::async, [&] {
-            return folly::coro::blockingWait(reader->ReadEntriesAsync(
-                std::move(entries),
-                milvus::proto::common::LoadPriority::HIGH,
-                cancellation.getToken()));
+            return folly::coro::blockingWait(
+                ReadEntriesForTest(*reader,
+                                   std::move(entries),
+                                   milvus::proto::common::LoadPriority::HIGH,
+                                   cancellation.getToken()));
         });
         auto drain = folly::makeGuard([&] {
             direct_file->SetAutoComplete(true);
@@ -1347,7 +1383,7 @@ TEST_F(AsyncIndexEntryReaderTest,
                 }
             }
         } else {
-            auto artifact = load.get();
+            auto plan = load.get();
 
             EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0),
                          milvus::SegcoreError);
@@ -1380,8 +1416,10 @@ TEST_F(AsyncIndexEntryReaderTest,
     entries.push_back(
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
     auto load = std::async(std::launch::async, [&] {
-        return folly::coro::blockingWait(reader->ReadEntriesAsync(
-            std::move(entries), milvus::proto::common::LoadPriority::HIGH));
+        return folly::coro::blockingWait(
+            ReadEntriesForTest(*reader,
+                               std::move(entries),
+                               milvus::proto::common::LoadPriority::HIGH));
     });
     auto drain = folly::makeGuard([&] {
         direct_file->SetAutoComplete(true);
@@ -1399,7 +1437,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
               std::future_status::timeout);
     direct_file->Complete(0);
-    auto artifact = load.get();
+    auto plan = load.get();
 
     EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0), milvus::SegcoreError);
 }
@@ -1432,8 +1470,10 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto materialize_future = std::async(
         std::launch::async,
         [reader = reader.get(), entries = std::move(entries)]() mutable {
-            return folly::coro::blockingWait(reader->ReadEntriesAsync(
-                std::move(entries), milvus::proto::common::LoadPriority::HIGH));
+            return folly::coro::blockingWait(
+                ReadEntriesForTest(*reader,
+                                   std::move(entries),
+                                   milvus::proto::common::LoadPriority::HIGH));
         });
     auto drain_on_failure = folly::makeGuard([&] {
         direct_file->SetAutoComplete(true);
@@ -1534,8 +1574,8 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
         }
         EXPECT_EQ(sync_reader->ReadEntry("data").data, data);
         EXPECT_EQ(sync_reader->ReadEntry("other").data, other_data);
-        auto artifact = folly::coro::blockingWait(
-            reader->ReadEntriesAsync(std::move(entries), priority)
+        auto plan = folly::coro::blockingWait(
+            ReadEntriesForTest(*reader, std::move(entries), priority)
                 .scheduleOn(
                     milvus::storage::ResolveAsyncLoadExecutor({}, priority)));
         EXPECT_EQ(*target, data);

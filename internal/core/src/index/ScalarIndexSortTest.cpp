@@ -45,11 +45,10 @@ class ExposedScalarIndexSort : public ScalarIndexSort<int64_t> {
                       const Config& config,
                       proto::common::LoadPriority priority) {
         auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
-        auto artifact = folly::coro::blockingWait(
-            reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
-            FinishLoadAsync(artifact, plan.load_context, config));
-        artifact.CommitTargets();
+            reader.ReadEntriesAsync(plan.entries, priority));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
     }
 };
 

@@ -1914,11 +1914,10 @@ class ExposedFMIndex : public index::FMIndex {
                       const Config& config,
                       proto::common::LoadPriority priority) {
         auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
-        auto artifact = folly::coro::blockingWait(
-            reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
-            FinishLoadAsync(artifact, plan.load_context, config));
-        artifact.CommitTargets();
+            reader.ReadEntriesAsync(plan.entries, priority));
+        folly::coro::blockingWait(FinishLoadAsync(plan, config));
+        plan.Commit();
     }
 };
 
@@ -2063,25 +2062,23 @@ TEST(FMIndexV3AsyncLoadTest, PackedNullBitmapPreservesRowsAndRejectsTailBits) {
                 const auto target =
                     std::get<storage::MemoryEntryTarget>(entry->target);
                 ASSERT_EQ(target.bytes, (rows + 7) / 8);
-                auto artifact =
-                    folly::coro::blockingWait(reader->ReadEntriesAsync(
-                        std::move(plan.entries),
-                        proto::common::LoadPriority::HIGH));
+                folly::coro::blockingWait(reader->ReadEntriesAsync(
+                    plan.entries, proto::common::LoadPriority::HIGH));
                 if (corrupt_tail) {
                     // Inject after CRC to exercise the FM format check itself.
                     target.data[target.bytes - 1] |= 0x80;
                     try {
-                        folly::coro::blockingWait(load_index.FinishLoadAsync(
-                            artifact, plan.load_context, config));
+                        folly::coro::blockingWait(
+                            load_index.FinishLoadAsync(plan, config));
                         FAIL() << "Expected corrupt null bitmap to be rejected";
                     } catch (const SegcoreError& error) {
                         EXPECT_EQ(error.get_error_code(),
                                   ErrorCode::DataFormatBroken);
                     }
                 } else {
-                    folly::coro::blockingWait(load_index.FinishLoadAsync(
-                        artifact, plan.load_context, config));
-                    artifact.CommitTargets();
+                    folly::coro::blockingWait(
+                        load_index.FinishLoadAsync(plan, config));
+                    plan.Commit();
                     auto nulls = load_index.IsNull();
                     const auto* bytes =
                         reinterpret_cast<const uint8_t*>(nulls.data());

@@ -44,14 +44,12 @@ AppendJsonNonExistOffsetsPlan(IndexLoadPlan& plan,
 }
 
 inline std::vector<size_t>
-TakeJsonNonExistOffsets(storage::IndexLoadArtifact& artifact) {
-    const auto entry =
-        std::find_if(artifact.Entries().begin(),
-                     artifact.Entries().end(),
-                     [](const auto& value) {
-                         return value.name == INDEX_NON_EXIST_OFFSET_FILE_NAME;
-                     });
-    if (entry == artifact.Entries().end()) {
+TakeJsonNonExistOffsets(IndexLoadPlan& plan) {
+    const auto entry = std::find_if(
+        plan.entries.begin(), plan.entries.end(), [](const auto& value) {
+            return value.name == INDEX_NON_EXIST_OFFSET_FILE_NAME;
+        });
+    if (entry == plan.entries.end()) {
         return {};
     }
 

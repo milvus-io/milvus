@@ -49,7 +49,7 @@ ReadRequiredIndexMeta(const nlohmann::json& source, const char* key) {
     }
 }
 
-// Owns the directory lease until artifact commit or failure cleanup.
+// Owns the directory lease until plan commit or failure cleanup.
 struct IndexDirectoryLoadContext {
     ~IndexDirectoryLoadContext() {
         if (manager && !path.empty() &&

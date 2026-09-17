@@ -741,11 +741,9 @@ StringIndexSort::PlanLoad(const storage::IndexEntryDirectory& directory,
 }
 
 folly::coro::Task<void>
-StringIndexSort::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                                 const std::any& load_context,
-                                 const Config& config) {
+StringIndexSort::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     auto context = std::any_cast<const std::shared_ptr<StringSortLoadContext>&>(
-        load_context);
+        plan.load_context);
     AssertInfo(context != nullptr,
                "StringIndexSort FinishLoadAsync context is null");
 

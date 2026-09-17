@@ -170,9 +170,7 @@ class StringIndexMarisa : public StringIndex {
              const Config& config) override;
 
     folly::coro::Task<void>
-    FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                    const std::any& load_context,
-                    const Config& config) override;
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
  protected:
  public:

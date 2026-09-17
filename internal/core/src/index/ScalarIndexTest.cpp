@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "segcore/storagev2translator/StorageV2Config.h"
-#include "storage/IndexLoadPlan.h"
+#include "storage/IndexEntryTarget.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "folly/system/ThreadName.h"
@@ -252,8 +252,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
     }
 
     folly::coro::Task<void>
-    FinishLoadAsync(milvus::storage::IndexLoadArtifact& artifact,
-                    const std::any& load_context,
+    FinishLoadAsync(milvus::index::IndexLoadPlan& plan,
                     const milvus::Config&) override {
         finish_load_thread_ = folly::getCurrentThreadName().value_or("");
         finish_load_calls_++;
@@ -261,7 +260,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
             ThrowInfo(milvus::ErrorCode::FileWriteFailed,
                       "injected scalar finish-load failure");
         }
-        const auto& target = artifact.At("payload").target;
+        const auto& target = plan.At("payload").target;
         if (const auto* memory =
                 std::get_if<milvus::storage::MemoryEntryTarget>(&target)) {
             EXPECT_EQ(memory->bytes, sizeof(int32_t));

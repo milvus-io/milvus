@@ -959,12 +959,10 @@ RTreeIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
 
 template <typename T>
 folly::coro::Task<void>
-RTreeIndex<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                               const std::any& load_context,
-                               const Config& config) {
+RTreeIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     (void)config;
-    auto context =
-        std::any_cast<const std::shared_ptr<RTreeLoadContext>&>(load_context);
+    auto context = std::any_cast<const std::shared_ptr<RTreeLoadContext>&>(
+        plan.load_context);
     AssertInfo(context != nullptr, "RTree FinishLoadAsync context is null");
 
     auto new_wrapper = std::make_shared<RTreeIndexWrapper>(

@@ -1120,12 +1120,11 @@ InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
 
 template <typename T>
 folly::coro::Task<void>
-InvertedIndexTantivy<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                                         const std::any& load_context,
+InvertedIndexTantivy<T>::FinishLoadAsync(IndexLoadPlan& plan,
                                          const Config& config) {
     (void)config;
-    auto context =
-        std::any_cast<const std::shared_ptr<TantivyLoadContext>&>(load_context);
+    auto context = std::any_cast<const std::shared_ptr<TantivyLoadContext>&>(
+        plan.load_context);
     AssertInfo(context != nullptr,
                "InvertedIndexTantivy FinishLoadAsync context is null");
 

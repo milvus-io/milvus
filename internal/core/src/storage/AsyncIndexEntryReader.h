@@ -25,7 +25,7 @@
 #include "folly/coro/Task.h"
 #include "pb/common.pb.h"
 #include "storage/IndexEntryFormat.h"
-#include "storage/IndexLoadPlan.h"
+#include "storage/IndexEntryTarget.h"
 #include "storage/plugin/PluginInterface.h"
 
 namespace milvus::storage {
@@ -58,9 +58,10 @@ class AsyncIndexEntryReader {
 
     // Fill the entry targets on the shared async executor. Publish the first
     // failure before releasing admission, drain issued slices, and clean up
-    // uncommitted files on failure. This reader must outlive the task.
-    folly::coro::Task<IndexLoadArtifact>
-    ReadEntriesAsync(std::vector<EntryLoadPlan> entries,
+    // uncommitted files on failure. The reader and entry targets must outlive
+    // the task; callers retain the targets through engine finalization.
+    folly::coro::Task<void>
+    ReadEntriesAsync(const std::vector<EntryLoadPlan>& entries,
                      proto::common::LoadPriority priority,
                      folly::CancellationToken token = {});
 
@@ -76,9 +77,9 @@ class AsyncIndexEntryReader {
                        std::span<uint8_t> destination,
                        folly::CancellationToken token) const;
 
-    folly::coro::Task<IndexLoadArtifact>
+    folly::coro::Task<void>
     ReadEntriesAsyncImpl(
-        std::vector<EntryLoadPlan>& entries,
+        const std::vector<EntryLoadPlan>& entries,
         proto::common::LoadPriority priority,
         const std::vector<std::shared_ptr<IndexFileTarget>>& cleanup_targets,
         folly::CancellationToken token);

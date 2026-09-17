@@ -28,7 +28,8 @@
 #include "fmt/format.h"
 #include "index/Meta.h"
 #include "folly/coro/Task.h"
-#include "storage/IndexLoadPlan.h"
+#include "index/IndexLoadPlan.h"
+#include "storage/IndexEntryFormat.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -38,13 +39,6 @@ using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
 }  // namespace milvus::storage
 
 namespace milvus::index {
-
-// The scalar loader keeps engine state from PlanLoad through FinishLoadAsync.
-// Only the entry targets are passed to the storage reader.
-struct IndexLoadPlan {
-    std::vector<storage::EntryLoadPlan> entries;
-    std::any load_context;
-};
 
 enum class ScalarIndexType {
     NONE = 0,
@@ -313,12 +307,10 @@ class ScalarIndex : public IndexBase {
 
     // Complete index initialization after all planned entries pass verification.
     // Runs on the calling async worker; may await local-file writes (e.g. Bitmap's
-    // frozen file). The caller retains the PlanLoad context and artifact until
+    // frozen file). The caller retains the plan until
     // completion.
     virtual folly::coro::Task<void>
-    FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                    const std::any& load_context,
-                    const Config& config) {
+    FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         ThrowInfo(Unsupported, "Async V3 load finalization is not implemented");
         co_return;
     }

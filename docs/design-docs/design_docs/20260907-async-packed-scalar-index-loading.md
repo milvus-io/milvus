@@ -45,28 +45,36 @@ Loading proceeds in five stages:
    revisited if directories become large. The `_meta` entry still uses the same
    slice admission as other entry payloads.
 2. Let the scalar index choose the entries it needs and their destinations:
-   allocated memory or local files. This is `PlanLoad`.
-3. Call `reader->ReadEntriesAsync(entries, priority)` to prepare destinations and read slices
+   allocated memory or local files. `PlanLoad` returns an `IndexLoadPlan` that
+   owns those destinations and the index-specific initialization context.
+3. Call `reader->ReadEntriesAsync(plan.entries, priority)` to prepare destinations and read slices
    under shared admission. The reader places bytes at their destination offsets
-   and verifies checksums. The completed buffers and files form an
-   `IndexLoadArtifact`.
-4. Call the index's `FinishLoadAsync` to adopt the completed targets, initialize
+   and verifies checksums. It returns `void`; successful completion means the
+   original plan targets are filled and file writers are closed.
+4. Call the index's `FinishLoadAsync(plan, config)` to adopt the completed targets, initialize
    query state, and update index state using existing representation code.
    File writers close before this stage; read-only mappings and engine
    objects are opened here. Bitmap mmap loading also converts postings to frozen
    format and awaits local-file writes, so this stage remains asynchronous.
 5. Retain the files needed by the successful index and release temporary inputs.
-   This ownership transfer is `CommitTargets`. The cache caller publishes the
+   Call `plan.Commit()` to retain persistent files, then destroy the plan. The cache caller publishes the
    index only after loading succeeds.
 
 The call chain is `OpenInputStreamAsync` → reader `Open` → `PlanLoad` →
 `ReadEntriesAsync` →
-`FinishLoadAsync` → `CommitTargets`. The reader owns byte transfer and
+`FinishLoadAsync` → `plan.Commit()`. The reader owns byte transfer and
 validation; the scalar index owns destination selection and query-state restoration.
-The scalar loader retains engine-specific context from `PlanLoad` through
-`FinishLoadAsync` and releases file-backed context on `LocalFileIOPool`, including
-after a read failure. The reader only receives entry destinations, priority and
-cancellation; its artifact owns the completed targets, not engine state.
+The same plan retains targets and engine-specific context from `PlanLoad` through
+`FinishLoadAsync`. The reader borrows its entry descriptions until all submitted
+slice tasks join. File plans are released on `LocalFileIOPool`, including after
+read or finalization failure. The plan removes uncommitted files before releasing
+engine context and directory leases. There is no second set of completed-entry
+descriptions or separate result artifact.
+
+`index/IndexLoadPlan.h` defines the full plan. `storage/IndexEntryTarget.h` defines
+entry requests and memory/file destinations; the storage reader does not depend
+on index-specific context.
+
 `Directory()` exposes the validated entry layout; `IndexMeta()` exposes the JSON
 from the metadata entry. Both are read-only, perform no I/O, and remain valid for
 the reader's lifetime. `PlanLoad` receives these two inputs explicitly. Slice reads are
@@ -304,7 +312,7 @@ the reader cancels pending work, joins issued tasks, and then removes its
 staging files. The original exception is rethrown after cleanup. Admission leases
 return their bytes and slots on success, failure, or cancellation.
 
-`FinishLoadAsync` borrows the completed artifact. Synchronous engine calls
+`FinishLoadAsync` borrows the original plan after its reads have completed. Synchronous engine calls
 return before cancellation is honored and before their inputs are released. Bitmap checks
 cancellation between conversion/write batches. Cleanup is awaited without
 cancellation; it does not publish an index or retain an incomplete directory.

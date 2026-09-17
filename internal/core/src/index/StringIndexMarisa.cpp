@@ -1127,11 +1127,9 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryDirectory& directory,
 }
 
 folly::coro::Task<void>
-StringIndexMarisa::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                                   const std::any& load_context,
-                                   const Config& config) {
-    auto context =
-        std::any_cast<const std::shared_ptr<MarisaLoadContext>&>(load_context);
+StringIndexMarisa::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
+    auto context = std::any_cast<const std::shared_ptr<MarisaLoadContext>&>(
+        plan.load_context);
     AssertInfo(context != nullptr,
                "StringIndexMarisa FinishLoadAsync context is null");
 

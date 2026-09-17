@@ -1618,12 +1618,10 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
 
 template <typename T>
 folly::coro::Task<void>
-BitmapIndex<T>::FinishLoadAsync(storage::IndexLoadArtifact& artifact,
-                                const std::any& load_context,
-                                const Config& config) {
+BitmapIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     (void)config;
-    auto context =
-        std::any_cast<const std::shared_ptr<BitmapLoadContext>&>(load_context);
+    auto context = std::any_cast<const std::shared_ptr<BitmapLoadContext>&>(
+        plan.load_context);
     AssertInfo(context != nullptr, "Bitmap FinishLoadAsync context is null");
 
     total_num_rows_ = context->total_num_rows;

@@ -39,7 +39,7 @@
 #include "storage/Crc32cUtil.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryFormat.h"
-#include "storage/IndexLoadPlan.h"
+#include "storage/IndexEntryTarget.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/PluginLoader.h"
 
@@ -95,8 +95,7 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     entries_to_read.push_back(
         {MILVUS_V3_META_ENTRY_NAME,
          MemoryEntryTarget{data, data->data(), data->size()}});
-    auto metadata = co_await reader->ReadEntriesAsync(
-        std::move(entries_to_read), priority, token);
+    co_await reader->ReadEntriesAsync(entries_to_read, priority, token);
     if (!data->empty()) {
         try {
             reader->metadata_ =
@@ -249,8 +248,8 @@ BuildSlices(const EntryMeta& entry, bool file_target) {
 }
 
 struct EntryState {
-    EntryState(EntryLoadPlan entry_plan, const EntryMeta& source)
-        : plan(std::move(entry_plan)),
+    EntryState(const EntryLoadPlan& entry_plan, const EntryMeta& source)
+        : plan(entry_plan),
           source(source),
           slices(BuildSlices(
               source, std::holds_alternative<FileEntryTarget>(plan.target))),
@@ -258,7 +257,7 @@ struct EntryState {
           remaining_slices(slices.size()) {
     }
 
-    EntryLoadPlan plan;
+    const EntryLoadPlan& plan;
     // The immutable directory outlives all slice tasks and their entry states.
     const EntryMeta& source;
     std::vector<Slice> slices;
@@ -401,7 +400,7 @@ FinalizeEntry(EntryState& state) {
 }
 
 folly::coro::Task<void>
-PrepareFileTargetAsync(FileEntryTarget* target,
+PrepareFileTargetAsync(const FileEntryTarget* target,
                        proto::common::LoadPriority priority,
                        folly::CancellationToken cancellation_token) {
     ThrowIfCancelled(cancellation_token,
@@ -432,7 +431,7 @@ PrepareFileTargetAsync(FileEntryTarget* target,
 }
 
 folly::coro::Task<void>
-PrepareTargetsAsync(std::vector<EntryLoadPlan>& entries,
+PrepareTargetsAsync(const std::vector<EntryLoadPlan>& entries,
                     proto::common::LoadPriority priority,
                     folly::CancellationToken cancellation_token) {
     for (auto& entry : entries) {
@@ -489,9 +488,9 @@ NextRoundRobinSlice(const std::vector<std::shared_ptr<EntryState>>& states,
 
 // Keeps failure-cleanup ownership in the caller until every issued slice has
 // drained. Local-file executor tokens only span their individual I/O phase.
-folly::coro::Task<IndexLoadArtifact>
+folly::coro::Task<void>
 AsyncIndexEntryReader::ReadEntriesAsyncImpl(
-    std::vector<EntryLoadPlan>& entries,
+    const std::vector<EntryLoadPlan>& entries,
     proto::common::LoadPriority priority,
     const std::vector<std::shared_ptr<IndexFileTarget>>& cleanup_targets,
     folly::CancellationToken cancellation_token) {
@@ -512,7 +511,7 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     states.reserve(entries.size());
     for (auto& entry : entries) {
         const auto& source = Directory().At(entry.name);
-        auto state = std::make_shared<EntryState>(std::move(entry), source);
+        auto state = std::make_shared<EntryState>(entry, source);
         if (state->slices.empty()) {
             FinalizeEntry(*state);
         }
@@ -669,27 +668,20 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
             FinishFileTargetsAsync(cleanup_targets,
                                    operation_cancellation_token));
     }
-    auto artifact_cleanup_targets = cleanup_targets;
-    IndexLoadArtifact artifact;
-    artifact.entries_.reserve(states.size());
-    for (auto& state : states) {
-        artifact.entries_.push_back(
-            MaterializedEntry{state->plan.name, std::move(state->plan.target)});
-    }
-    artifact.cleanup_targets_ = std::move(artifact_cleanup_targets);
-    co_return artifact;
+    co_return;
 }
 
-folly::coro::Task<IndexLoadArtifact>
+folly::coro::Task<void>
 AsyncIndexEntryReader::ReadEntriesAsync(
-    std::vector<EntryLoadPlan> entries,
+    const std::vector<EntryLoadPlan>& entries,
     proto::common::LoadPriority priority,
     folly::CancellationToken cancellation_token) {
     const auto cleanup_targets = CollectIndexFileTargets(entries);
     std::exception_ptr failure;
     try {
-        co_return co_await ReadEntriesAsyncImpl(
+        co_await ReadEntriesAsyncImpl(
             entries, priority, cleanup_targets, cancellation_token);
+        co_return;
     } catch (...) {
         failure = std::current_exception();
     }
