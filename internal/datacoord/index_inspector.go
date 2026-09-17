@@ -211,7 +211,7 @@ func (i *indexInspector) createIndexForSegment(ctx context.Context, segment *Seg
 	indexType := GetIndexType(indexParams)
 	isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 	fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, indexID)
-	fieldSize := segment.getFieldBinlogSize(fieldID)
+	fieldSize := i.estimateIndexFieldSize(segment, fieldID)
 	taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
 
 	// rewrite the index type if needed, and this final index type will be persisted in the meta
@@ -278,7 +278,7 @@ func (i *indexInspector) reloadFromMeta() {
 			indexType := GetIndexType(indexParams)
 			isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 			fieldID := i.meta.indexMeta.GetFieldIDByIndexID(segment.CollectionID, segIndex.IndexID)
-			fieldSize := segment.getFieldBinlogSize(fieldID)
+			fieldSize := i.estimateIndexFieldSize(segment, fieldID)
 			taskSlot := calculateIndexTaskSlot(fieldSize, isVectorIndex)
 
 			i.scheduler.Enqueue(newIndexBuildTask(
@@ -291,4 +291,18 @@ func (i *indexInspector) reloadFromMeta() {
 			))
 		}
 	}
+}
+
+// estimateIndexFieldSize is the size of the indexed field the scalar task slot
+// is derived from: the same estimate the index task's memory is priced on
+// (estimateFieldSize), so the slot and the memory agree. Without a cached
+// schema, or when nothing can be estimated, it falls back to the field's binlog
+// size, which is what the slot used before.
+func (i *indexInspector) estimateIndexFieldSize(segment *SegmentInfo, fieldID int64) int64 {
+	if coll := i.meta.GetCollection(segment.GetCollectionID()); coll != nil && coll.Schema != nil {
+		if size := estimateFieldSize(segment, coll.Schema, fieldID); size > 0 {
+			return size
+		}
+	}
+	return segment.getFieldBinlogSize(fieldID)
 }

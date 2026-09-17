@@ -45,6 +45,7 @@ type bumpSchemaVersionTask struct {
 	meta      CompactionMeta
 	ievm      IndexEngineVersionManager
 	times     *taskcommon.Times
+	resource  resourceCache
 }
 
 func newBumpSchemaVersionTask(t *datapb.CompactionTask, allocator allocator.Allocator, meta CompactionMeta, ievm IndexEngineVersionManager) *bumpSchemaVersionTask {
@@ -72,6 +73,18 @@ func (t *bumpSchemaVersionTask) GetTaskState() taskcommon.State {
 
 func (t *bumpSchemaVersionTask) GetTaskProto() *datapb.CompactionTask {
 	return t.taskProto.Load().(*datapb.CompactionTask)
+}
+
+// GetTaskResource: a schema bump streams one segment through the mix
+// compaction writer, so it is priced like a mix compaction of that segment.
+func (t *bumpSchemaVersionTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return t.resource.get(func() (taskcommon.Resource, bool) {
+		inputSize, ok := compactionInputSize(t.meta, t.GetTaskProto())
+		if !ok {
+			return defaultTaskResource(), false
+		}
+		return mixCompactionTaskResource(inputSize), true
+	})
 }
 
 func (t *bumpSchemaVersionTask) GetTaskSlot() int64 {
@@ -227,7 +240,8 @@ func (t *bumpSchemaVersionTask) CreateTaskOnWorker(nodeID int64, cluster session
 		return
 	}
 
-	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateCompaction(nodeID, plan, t.GetTaskProto().GetCollectionID(), resource)
 	if err != nil {
 		log.Warn(context.TODO(), "bumpSchemaVersionTask failed to notify compaction tasks to DataNode",
 			mlog.Int64("planID", t.GetTaskProto().GetPlanID()),

@@ -1472,6 +1472,13 @@ message QuerySlotResponse {
   common.Status status = 1;
   int64 available_slots = 2;
   string version = 3; // Kept for wire compatibility; new schedulers do not use it
+  // Two-dimensional report. A worker that predates it leaves total_* at zero,
+  // and a coordinator that sees total_memory == 0 places on available_slots.
+  // available_* = total_* - sum(cpu/memory of accepted, unfinished tasks).
+  int64 total_cpu = 4;
+  int64 available_cpu = 5;
+  int64 total_memory = 6;   // bytes
+  int64 available_memory = 7; // bytes
 }
 
 enum CompactionTaskState {

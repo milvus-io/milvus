@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
@@ -52,6 +53,8 @@ type statsTask struct {
 	handler   Handler
 	allocator allocator.Allocator
 	ievm      IndexEngineVersionManager
+
+	resource resourceCache
 }
 
 var _ globalTask.Task = (*statsTask)(nil)
@@ -89,6 +92,28 @@ func (st *statsTask) GetTaskType() taskcommon.Type {
 
 func (st *statsTask) GetTaskState() taskcommon.State {
 	return st.GetState()
+}
+
+// GetTaskResource prices a stats task by the fields its sub job reads
+// (statsInputSize). Without a cached schema the fields cannot be told apart,
+// so the whole segment is charged and the answer is not cached: the schema
+// arriving later must be able to shrink the price.
+func (st *statsTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return st.resource.get(func() (taskcommon.Resource, bool) {
+		segment := st.meta.GetHealthySegment(context.TODO(), st.GetSegmentID())
+		if segment == nil {
+			return defaultTaskResource(), false
+		}
+		var schema *schemapb.CollectionSchema
+		if coll := st.meta.GetCollection(segment.GetCollectionID()); coll != nil {
+			schema = coll.Schema
+		}
+		size := statsInputSize(segment, schema, st.GetSubJobType())
+		if size <= 0 {
+			return defaultTaskResource(), false
+		}
+		return statsTaskResource(size), schema != nil
+	})
 }
 
 func (st *statsTask) GetTaskSlot() int64 {
@@ -211,7 +236,8 @@ func (st *statsTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		}
 	}()
 	// Execute task creation
-	if err = cluster.CreateStats(nodeID, req); err != nil {
+	resource, _ := st.GetTaskResource()
+	if err = cluster.CreateStats(nodeID, req, resource); err != nil {
 		log.Warn(context.TODO(), "failed to create stats task on worker", mlog.Err(err))
 		return
 	}
