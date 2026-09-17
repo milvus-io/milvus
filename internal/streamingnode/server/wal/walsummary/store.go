@@ -123,8 +123,8 @@ func (s *Store) ManifestKeyOfTerm(term int64) string {
 	return buildManifestKey(s.chunkManager, s.pchannel, term)
 }
 
-// TimeTickRange is complete WAL coverage (Start, End], including payload-free messages.
-type TimeTickRange struct{ Start, End uint64 }
+// TimeTickRange is complete WAL coverage (StartAfter, End], including payload-free messages.
+type TimeTickRange struct{ StartAfter, End uint64 }
 
 // WriteChunk writes one chunk object. It never overwrites a differing chunk at
 // the same key: an object with identical content is a retry (idempotent
@@ -170,7 +170,7 @@ func (s *Store) WriteChunk(
 		if existingFooter.GetPchannel() == footer.GetPchannel() &&
 			existingFooter.GetGeneration() == footer.GetGeneration() &&
 			existingFooter.GetTerm() == footer.GetTerm() &&
-			existingFooter.GetStartTimetick() == footer.GetStartTimetick() &&
+			existingFooter.GetStartAfterTimeTick() == footer.GetStartAfterTimeTick() &&
 			existingFooter.GetEndTimetick() == footer.GetEndTimetick() &&
 			chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
 			// The STORED footer and size, not the ones just built. The records
@@ -646,7 +646,7 @@ func marshalChunk(
 		footer.Chunks = append(footer.Chunks, index)
 	}
 
-	footer.StartTimetick, footer.EndTimetick = coverage.Start, coverage.End
+	footer.StartAfterTimeTick, footer.EndTimetick = coverage.StartAfter, coverage.End
 	if err := validateChunkIndex(chunkIndexEntryFromFooter(footer, 0)); err != nil {
 		return nil, nil, err
 	}
@@ -1032,7 +1032,7 @@ func recordChunk(manifest *streamingpb.PChannelSummaryManifest, entry *streaming
 	sort.Slice(manifest.Chunks, func(i, j int) bool { return manifest.Chunks[i].GetGeneration() < manifest.Chunks[j].GetGeneration() })
 	if manifest.Coverage == nil {
 		manifest.Coverage = &streamingpb.SummaryCoverage{
-			StartTimeTick: entry.GetStartTimetick(), Generation: entry.GetGeneration(),
+			StartAfterTimeTick: entry.GetStartAfterTimeTick(), Generation: entry.GetGeneration(),
 			Term: entry.GetTerm(), EndTimeTick: entry.GetEndTimetick(),
 		}
 	} else if entry.GetGeneration() > manifest.Coverage.GetGeneration() {
@@ -1049,12 +1049,12 @@ func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter, o
 		return nil
 	}
 	return &streamingpb.PChannelSummaryChunkIndexEntry{
-		Generation:    footer.GetGeneration(),
-		Term:          footer.GetTerm(),
-		ObjectSize:    objectSize,
-		StartTimetick: footer.GetStartTimetick(),
-		EndTimetick:   footer.GetEndTimetick(),
-		Vchannels:     footer.GetChunks(),
+		Generation:         footer.GetGeneration(),
+		Term:               footer.GetTerm(),
+		ObjectSize:         objectSize,
+		StartAfterTimeTick: footer.GetStartAfterTimeTick(),
+		EndTimetick:        footer.GetEndTimetick(),
+		Vchannels:          footer.GetChunks(),
 	}
 }
 
