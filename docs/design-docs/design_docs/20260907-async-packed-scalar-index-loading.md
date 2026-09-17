@@ -73,7 +73,11 @@ descriptions or separate result artifact.
 
 `index/IndexLoadPlan.h` defines the full plan. `storage/IndexEntryTarget.h` defines
 entry requests and memory/file destinations; the storage reader does not depend
-on index-specific context.
+on index-specific context. A `FileEntryTarget` selects a region of a shared
+`IndexFileTarget`, which owns the local writer and file cleanup. Finishing writes
+closes the writer; successful index finalization commits files marked for
+retention. Other files are removed on `LocalFileIOPool` before directory leases
+are released, even if the index context still holds a reference to the target.
 
 `Directory()` exposes the validated entry layout; `IndexMeta()` exposes the JSON
 from the metadata entry. Both are read-only, perform no I/O, and remain valid for

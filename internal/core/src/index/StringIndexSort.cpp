@@ -698,12 +698,8 @@ StringIndexSort::PlanLoad(const storage::IndexEntryDirectory& directory,
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         AssertInfo(!mmap_path.empty(),
                    "StringIndexSort mmap filepath is empty");
-        context->index_data_file =
-            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
-                mmap_path,
-                StringSortMmapFileSize(context->index_data_bytes),
-                true,
-                nullptr});
+        context->index_data_file = std::make_shared<storage::IndexFileTarget>(
+            mmap_path, StringSortMmapFileSize(context->index_data_bytes), true);
         plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
             storage::FileEntryTarget{context->index_data_file,
@@ -728,10 +724,9 @@ StringIndexSort::PlanLoad(const storage::IndexEntryDirectory& directory,
 
     if (context->is_mmap && context->has_persisted_offsets) {
         context->offsets_file = std::make_shared<storage::IndexFileTarget>(
-            storage::IndexFileTarget{context->index_data_file->path + "-meta",
-                                     context->offsets_bytes,
-                                     true,
-                                     nullptr});
+            context->index_data_file->path + "-meta",
+            context->offsets_bytes,
+            true);
         plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::FileEntryTarget{
@@ -770,14 +765,14 @@ StringIndexSort::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
 
     if (context->is_mmap) {
         AssertInfo(context->index_data_file != nullptr &&
-                       context->index_data_file->file != nullptr,
+                       context->index_data_file->Prepared(),
                    "StringIndexSort index_data mmap target is not prepared");
         new_impl = std::make_unique<StringIndexSortMmapImpl>();
         auto* mmap_impl = static_cast<StringIndexSortMmapImpl*>(new_impl.get());
         mmap_impl->SetMmapFilePath(context->index_data_file->path);
         if (context->has_persisted_offsets) {
             AssertInfo(context->offsets_file != nullptr &&
-                           context->offsets_file->file != nullptr,
+                           context->offsets_file->Prepared(),
                        "StringIndexSort offsets mmap target is not prepared");
             auto meta_file = File::Open(context->offsets_file->path, O_RDONLY);
             new_mmap_meta_data =

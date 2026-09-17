@@ -31,7 +31,7 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
-#include "storage/StagingIndexFile.h"
+#include "storage/FileWriter.h"
 
 namespace milvus::storage {
 
@@ -41,11 +41,50 @@ struct MemoryEntryTarget {
     size_t bytes;
 };
 
+// Shared by entries writing different regions of the same local file.
+// Prepare, Finish and Cleanup run on LocalFileIOPool. All writes must drain
+// before Finish, Commit or Cleanup; cleanup precedes releasing directory leases.
 struct IndexFileTarget {
-    std::string path;
-    size_t file_size;
-    bool retain_on_success;
-    std::shared_ptr<StagingIndexFile> file;
+    const std::string path;
+    const size_t file_size;
+    const bool retain_on_success;
+
+    // Describes the destination without opening it.
+    IndexFileTarget(std::string path, size_t file_size, bool retain_on_success);
+    IndexFileTarget(const IndexFileTarget&) = delete;
+    IndexFileTarget&
+    operator=(const IndexFileTarget&) = delete;
+    ~IndexFileTarget();
+
+    // Opens the writer once; validates the size before touching the file.
+    void
+    Prepare(io::Priority priority);
+    bool
+    Prepared() const noexcept {
+        return writer_ != nullptr || finished_;
+    }
+    // Writes a non-overlapping range using the shared write limiter.
+    void
+    WriteAt(size_t offset, const void* data, size_t bytes);
+    // Closes the writer, retaining ownership for failure cleanup.
+    void
+    Finish();
+    // Called after index finalization; preserves only retained targets.
+    void
+    Commit();
+    bool
+    Committed() const noexcept {
+        return committed_;
+    }
+    // Removes an uncommitted file, even when other shared owners remain.
+    // Safe to repeat; destruction also calls this as a fallback.
+    void
+    Cleanup() noexcept;
+
+ private:
+    std::unique_ptr<PositionedFileWriter> writer_;
+    bool finished_{false};
+    bool committed_{false};
 };
 
 struct FileEntryTarget {
@@ -91,9 +130,8 @@ inline void
 CleanupUncommittedFileTargets(
     const std::vector<std::shared_ptr<IndexFileTarget>>& targets) noexcept {
     for (const auto& target : targets) {
-        if (target != nullptr && target->file != nullptr &&
-            !target->file->Committed()) {
-            target->file.reset();
+        if (target != nullptr) {
+            target->Cleanup();
         }
     }
 }

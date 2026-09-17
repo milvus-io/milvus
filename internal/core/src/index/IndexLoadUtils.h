@@ -55,7 +55,7 @@ struct IndexDirectoryLoadContext {
         if (manager && !path.empty() &&
             (files.empty() ||
              !std::all_of(files.begin(), files.end(), [](const auto& file) {
-                 return file->file && file->file->Committed();
+                 return file->Committed();
              }))) {
             manager->RemoveIndexFiles();
         }
@@ -101,9 +101,8 @@ PlanIndexDirectory(const storage::IndexEntryDirectory& directory,
     plan.entries.reserve(plan.entries.size() + file_names.size());
     for (const auto& name : file_names) {
         const auto size = directory.At(name).plaintext_size;
-        auto file =
-            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
-                context->path + "/" + name, size, retain_on_success, nullptr});
+        auto file = std::make_shared<storage::IndexFileTarget>(
+            context->path + "/" + name, size, retain_on_success);
         context->files.push_back(file);
         plan.entries.push_back({name, storage::FileEntryTarget{file, 0, size}});
     }

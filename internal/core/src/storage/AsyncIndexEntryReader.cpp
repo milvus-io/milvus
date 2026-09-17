@@ -416,17 +416,14 @@ PrepareFileTargetAsync(const FileEntryTarget* target,
                target->offset + target->bytes,
                staging.path,
                staging.file_size);
-    if (staging.file != nullptr) {
+    if (staging.Prepared()) {
         co_return;
     }
     auto parent = std::filesystem::path(staging.path).parent_path();
     if (!parent.empty()) {
         std::filesystem::create_directories(parent);
     }
-    staging.file =
-        StagingIndexFile::Create(staging.path,
-                                 staging.file_size,
-                                 io::GetPriorityFromLoadPriority(priority));
+    staging.Prepare(io::GetPriorityFromLoadPriority(priority));
     co_return;
 }
 
@@ -437,7 +434,7 @@ PrepareTargetsAsync(const std::vector<EntryLoadPlan>& entries,
     for (auto& entry : entries) {
         auto* target = std::get_if<FileEntryTarget>(&entry.target);
         if (target == nullptr ||
-            (target->staging != nullptr && target->staging->file != nullptr)) {
+            (target->staging != nullptr && target->staging->Prepared())) {
             continue;
         }
         ThrowIfCancelled(cancellation_token,
@@ -459,9 +456,9 @@ FinishFileTargetsAsync(
     ThrowIfCancelled(cancellation_token,
                      "AsyncIndexEntryReader::FinishTargets");
     for (const auto& target : targets) {
-        AssertInfo(target != nullptr && target->file != nullptr,
+        AssertInfo(target != nullptr && target->Prepared(),
                    "Materialized file target is not prepared");
-        target->file->Finish();
+        target->Finish();
     }
     co_return;
 }
@@ -576,10 +573,9 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
                     [&] {
                         ThrowIfCancelled(cancellation_token,
                                          "AsyncIndexEntryReader::WriteSlice");
-                        file->staging->file->WriteAt(
-                            file->offset + slice.offset,
-                            buffer.data(),
-                            buffer.size());
+                        file->staging->WriteAt(file->offset + slice.offset,
+                                               buffer.data(),
+                                               buffer.size());
                     },
                     priority);
             }

@@ -1578,10 +1578,7 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
         context->final_mmap_path =
             GetValueFromConfig<std::string>(config, MMAP_FILE_PATH).value();
         context->index_data_file = std::make_shared<storage::IndexFileTarget>(
-            storage::IndexFileTarget{context->final_mmap_path + ".raw.tmp_load",
-                                     raw_data_size,
-                                     false,
-                                     nullptr});
+            context->final_mmap_path + ".raw.tmp_load", raw_data_size, false);
         plan.entries.push_back(storage::EntryLoadPlan{
             BITMAP_INDEX_DATA,
             storage::FileEntryTarget{
@@ -1644,7 +1641,7 @@ BitmapIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     ChooseIndexLoadMode(context->index_length);
     if (context->use_mmap) {
         AssertInfo(context->index_data_file != nullptr &&
-                       context->index_data_file->file != nullptr,
+                       context->index_data_file->Prepared(),
                    "Bitmap raw mmap target is not prepared");
         auto raw_size = context->index_data_file->file_size;
         AssertInfo(raw_size > 0, "Bitmap raw mmap target must not be empty");

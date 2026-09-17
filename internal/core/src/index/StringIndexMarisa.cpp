@@ -991,9 +991,8 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryDirectory& directory,
         boost::uuids::to_string(boost::uuids::random_generator()());
 
     auto trie_bytes = directory.At(MARISA_TRIE_INDEX).plaintext_size;
-    context->trie_file =
-        std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
-            context->file_name, trie_bytes, context->is_mmap, nullptr});
+    context->trie_file = std::make_shared<storage::IndexFileTarget>(
+        context->file_name, trie_bytes, context->is_mmap);
 
     context->str_ids_bytes = directory.At(MARISA_STR_IDS).plaintext_size;
     ValidateMarisaEntryElementSize(
@@ -1056,10 +1055,7 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryDirectory& directory,
 
     if (context->is_mmap) {
         context->str_ids_file = std::make_shared<storage::IndexFileTarget>(
-            storage::IndexFileTarget{context->file_name + ".str_ids",
-                                     context->str_ids_bytes,
-                                     true,
-                                     nullptr});
+            context->file_name + ".str_ids", context->str_ids_bytes, true);
         plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_STR_IDS,
             storage::FileEntryTarget{
@@ -1093,9 +1089,8 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryDirectory& directory,
             "marisa padded CSR file size overflow");
         auto csr_file_size =
             context->csr_offsets_file_offset + context->csr_offsets_bytes;
-        context->csr_file =
-            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
-                context->file_name + ".csr", csr_file_size, true, nullptr});
+        context->csr_file = std::make_shared<storage::IndexFileTarget>(
+            context->file_name + ".csr", csr_file_size, true);
         plan.entries.push_back(storage::EntryLoadPlan{
             MARISA_CSR_INDEX,
             storage::FileEntryTarget{

@@ -845,9 +845,8 @@ FMIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
             disk_file_manager_->AcquireLocalDirWriteLease(local_prefix));
         auto mmap_path =
             local_prefix + std::string("/") + FMINDEX_BLOB_FILE_NAME;
-        context->blob_file =
-            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
-                mmap_path, context->mmap_size, true, nullptr});
+        context->blob_file = std::make_shared<storage::IndexFileTarget>(
+            mmap_path, context->mmap_size, true);
         plan.entries.push_back(storage::EntryLoadPlan{
             FMINDEX_BLOB_FILE_NAME,
             storage::FileEntryTarget{
@@ -910,9 +909,9 @@ FMIndex::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         }
     });
     if (context->use_mmap) {
-        AssertInfo(context->blob_file != nullptr &&
-                       context->blob_file->file != nullptr,
-                   "FMIndex mmap target is not prepared");
+        AssertInfo(
+            context->blob_file != nullptr && context->blob_file->Prepared(),
+            "FMIndex mmap target is not prepared");
         int fd = open(context->blob_file->path.c_str(), O_RDONLY);
         if (fd < 0) {
             ThrowInfo(ErrorCode::FileOpenFailed,

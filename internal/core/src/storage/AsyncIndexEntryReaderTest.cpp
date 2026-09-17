@@ -398,11 +398,38 @@ TEST_F(AsyncIndexEntryReaderTest, InvalidFileSizeDoesNotRemoveExistingFile) {
         output << "keep";
     }
     EXPECT_THROW(
-        StagingIndexFile::Create(path, std::numeric_limits<size_t>::max()),
+        IndexFileTarget(path, std::numeric_limits<size_t>::max(), false)
+            .Prepare(io::Priority::MIDDLE),
         milvus::SegcoreError);
     ASSERT_TRUE(std::filesystem::exists(path));
     EXPECT_EQ(ReadLocalFileBytes(path),
               (std::vector<uint8_t>{'k', 'e', 'e', 'p'}));
+}
+
+TEST_F(AsyncIndexEntryReaderTest, FileTargetCleanupPreservesOwnership) {
+    std::filesystem::create_directories(GetRootPath());
+    const auto path = GetRootPath() + "/file_target_cleanup";
+    for (bool retain : {false, true}) {
+        for (bool commit : {false, true}) {
+            auto target = std::make_shared<IndexFileTarget>(path, 0, retain);
+            target->Prepare(io::Priority::MIDDLE);
+            target->Finish();
+            if (commit) {
+                target->Commit();
+            }
+            target->Cleanup();
+            EXPECT_EQ(std::filesystem::exists(path), retain && commit);
+            if (!(retain && commit)) {
+                // A lingering owner must not unlink a new file at the same path.
+                std::ofstream replacement(path);
+                replacement << "replacement";
+            }
+            target->Cleanup();
+            target.reset();
+            EXPECT_TRUE(std::filesystem::exists(path));
+            std::filesystem::remove(path);
+        }
+    }
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
@@ -1067,8 +1094,8 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
                                                            &direct_file);
 
-    auto staging = std::make_shared<IndexFileTarget>(
-        IndexFileTarget{staging_path, 2 * entry_size, false, nullptr});
+    auto staging =
+        std::make_shared<IndexFileTarget>(staging_path, 2 * entry_size, false);
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
         EntryLoadPlan{"a", FileEntryTarget{staging, 0, entry_size}});
@@ -1112,8 +1139,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         ReadLocalFileBytes(GetRootPath() + "/" + path), &direct);
     direct->SetAutoComplete(false);
     const auto local = GetRootPath() + "/limited_file_slice";
-    auto staging = std::make_shared<IndexFileTarget>(
-        IndexFileTarget{local, data.size(), false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(local, data.size(), false);
     auto permit = pool.AcquireWritePermit();
     auto load = std::async(std::launch::async, [&] {
         return folly::coro::blockingWait(ReadEntriesForTest(
@@ -1142,7 +1168,7 @@ TEST_F(AsyncIndexEntryReaderTest,
               std::future_status::ready);
     auto plan = load.get();
     EXPECT_EQ(ReadLocalFileBytes(local), data);
-    EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0), milvus::SegcoreError);
+    EXPECT_THROW(staging->WriteAt(0, nullptr, 0), milvus::SegcoreError);
     const bool released =
         budget.TryAcquire({1, 1}, LoadAdmissionPriority::High);
     EXPECT_TRUE(released);
@@ -1166,8 +1192,8 @@ TEST_F(AsyncIndexEntryReaderTest, SharedFilePadsEntryBoundaries) {
     }
     auto reader = OpenAsyncReader(CreateInputStream(path));
     const auto local = GetRootPath() + "/shared_unaligned_file";
-    auto staging = std::make_shared<IndexFileTarget>(IndexFileTarget{
-        local, FileWriter::ALIGNMENT_BYTES + b.size(), false, nullptr});
+    auto staging = std::make_shared<IndexFileTarget>(
+        local, FileWriter::ALIGNMENT_BYTES + b.size(), false);
     // The reserved padding must not overlap another entry's data.
     EXPECT_THROW(
         folly::coro::blockingWait(ReadEntriesForTest(
@@ -1206,8 +1232,8 @@ TEST_F(AsyncIndexEntryReaderTest,
     milvus::test::ControlledDirectReadFile* direct_file = nullptr;
     auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
                                                            &direct_file);
-    auto staging = std::make_shared<IndexFileTarget>(
-        IndexFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging =
+        std::make_shared<IndexFileTarget>(staging_path, data.size(), false);
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
@@ -1218,9 +1244,8 @@ TEST_F(AsyncIndexEntryReaderTest,
                                std::move(entries),
                                milvus::proto::common::LoadPriority::HIGH));
 
-        ASSERT_NE(staging->file, nullptr);
-        EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0),
-                     milvus::SegcoreError);
+        ASSERT_TRUE(staging->Prepared());
+        EXPECT_THROW(staging->WriteAt(0, nullptr, 0), milvus::SegcoreError);
         EXPECT_TRUE(std::filesystem::exists(staging_path));
     }
     EXPECT_FALSE(std::filesystem::exists(staging_path));
@@ -1250,8 +1275,8 @@ TEST_F(AsyncIndexEntryReaderTest,
 
     std::vector<EntryLoadPlan> entries;
 
-    auto staging = std::make_shared<IndexFileTarget>(
-        IndexFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging =
+        std::make_shared<IndexFileTarget>(staging_path, data.size(), false);
     entries.push_back(
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
 
@@ -1279,8 +1304,8 @@ TEST_F(AsyncIndexEntryReaderTest, ReadEntriesCancelsQueuedMmapPreparation) {
     milvus::test::ControlledDirectReadFile* direct_file = nullptr;
     auto reader = milvus::test::OpenDirectIndexEntryReader(
         ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
-    auto staging = std::make_shared<IndexFileTarget>(
-        IndexFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging =
+        std::make_shared<IndexFileTarget>(staging_path, data.size(), false);
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
@@ -1337,8 +1362,8 @@ TEST_F(AsyncIndexEntryReaderTest,
             direct_file->CorruptRemoteByte(source.remote_offset + 7);
         }
         direct_file->SetAutoComplete(false);
-        auto staging = std::make_shared<IndexFileTarget>(
-            IndexFileTarget{staging_path, data.size(), false, nullptr});
+        auto staging =
+            std::make_shared<IndexFileTarget>(staging_path, data.size(), false);
         std::vector<EntryLoadPlan> entries;
         entries.push_back(
             EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
@@ -1368,8 +1393,8 @@ TEST_F(AsyncIndexEntryReaderTest,
         ASSERT_TRUE(blocker.WaitForQueuedTask());
         EXPECT_EQ(load.wait_for(std::chrono::milliseconds(0)),
                   std::future_status::timeout);
-        ASSERT_NE(staging->file, nullptr);
-        EXPECT_NO_THROW(staging->file->WriteAt(0, nullptr, 0));
+        ASSERT_TRUE(staging->Prepared());
+        EXPECT_NO_THROW(staging->WriteAt(0, nullptr, 0));
         EXPECT_TRUE(std::filesystem::exists(staging_path));
         blocker.Release();
         if (outcome != Outcome::Success) {
@@ -1385,8 +1410,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         } else {
             auto plan = load.get();
 
-            EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0),
-                         milvus::SegcoreError);
+            EXPECT_THROW(staging->WriteAt(0, nullptr, 0), milvus::SegcoreError);
         }
         EXPECT_FALSE(std::filesystem::exists(staging_path));
     }
@@ -1410,8 +1434,8 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto reader = milvus::test::OpenDirectIndexEntryReader(
         ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
     direct_file->SetAutoComplete(false);
-    auto staging = std::make_shared<IndexFileTarget>(
-        IndexFileTarget{staging_path, data.size(), false, nullptr});
+    auto staging =
+        std::make_shared<IndexFileTarget>(staging_path, data.size(), false);
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
         EntryLoadPlan{"data", FileEntryTarget{staging, 0, data.size()}});
@@ -1439,7 +1463,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     direct_file->Complete(0);
     auto plan = load.get();
 
-    EXPECT_THROW(staging->file->WriteAt(0, nullptr, 0), milvus::SegcoreError);
+    EXPECT_THROW(staging->WriteAt(0, nullptr, 0), milvus::SegcoreError);
 }
 
 TEST_F(AsyncIndexEntryReaderTest,

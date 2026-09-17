@@ -799,10 +799,7 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
                                    STLSORT_INDEX_FILE_NAME
                              : MMAP_PATH_FOR_TEST;
         context->index_data_file = std::make_shared<storage::IndexFileTarget>(
-            storage::IndexFileTarget{mmap_path,
-                                     MmapFileSize(context->index_data_bytes),
-                                     true,
-                                     nullptr});
+            mmap_path, MmapFileSize(context->index_data_bytes), true);
         plan.entries.push_back(storage::EntryLoadPlan{
             "index_data",
             storage::FileEntryTarget{context->index_data_file,
@@ -854,9 +851,8 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
                  ? disk_file_manager_->GetLocalIndexObjectPrefix()
                  : MMAP_PATH_FOR_TEST) +
             "stlsort-meta";
-        context->offsets_file =
-            std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
-                mmap_meta_path, context->offsets_bytes, true, nullptr});
+        context->offsets_file = std::make_shared<storage::IndexFileTarget>(
+            mmap_meta_path, context->offsets_bytes, true);
         plan.entries.push_back(storage::EntryLoadPlan{
             "idx_to_offsets",
             storage::FileEntryTarget{
@@ -909,7 +905,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
 
     if (context->is_mmap) {
         AssertInfo(context->index_data_file != nullptr &&
-                       context->index_data_file->file != nullptr,
+                       context->index_data_file->Prepared(),
                    "ScalarIndexSort index_data mmap target is not prepared");
         auto file = File::Open(context->index_data_file->path, O_RDONLY);
         new_mmap_data =
@@ -935,7 +931,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         new_valid_bitset = std::move(*context->valid_bitset);
         if (context->is_mmap) {
             AssertInfo(context->offsets_file != nullptr &&
-                           context->offsets_file->file != nullptr,
+                           context->offsets_file->Prepared(),
                        "ScalarIndexSort offsets mmap target is not prepared");
             auto file = File::Open(context->offsets_file->path, O_RDONLY);
             new_mmap_meta_data =

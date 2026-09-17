@@ -242,8 +242,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
                 payload, payload->data(), payload->size()};
         } else {
             auto staging = std::make_shared<milvus::storage::IndexFileTarget>(
-                milvus::storage::IndexFileTarget{
-                    mmap_target_path_, bytes, false, nullptr});
+                mmap_target_path_, bytes, false);
             target = milvus::storage::FileEntryTarget{staging, 0, bytes};
         }
         plan.entries.push_back(milvus::storage::EntryLoadPlan{
@@ -268,7 +267,7 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
         } else {
             const auto& mmap =
                 std::get<milvus::storage::FileEntryTarget>(target);
-            EXPECT_THROW(mmap.staging->file->WriteAt(0, nullptr, 0),
+            EXPECT_THROW(mmap.staging->WriteAt(0, nullptr, 0),
                          milvus::SegcoreError);
             std::ifstream file(mmap.staging->path, std::ios::binary);
             file.read(reinterpret_cast<char*>(&loaded_payload_),

@@ -49,9 +49,8 @@ struct IndexLoadPlan {
         for (const auto& entry : entries) {
             const auto* target =
                 std::get_if<storage::FileEntryTarget>(&entry.target);
-            if (target && target->staging && target->staging->file &&
-                !target->staging->file->Committed()) {
-                target->staging->file.reset();
+            if (target && target->staging) {
+                target->staging->Cleanup();
             }
         }
     }
@@ -72,12 +71,10 @@ struct IndexLoadPlan {
         for (auto& entry : entries) {
             if (auto* target =
                     std::get_if<storage::FileEntryTarget>(&entry.target)) {
-                AssertInfo(target->staging && target->staging->file,
+                AssertInfo(target->staging && target->staging->Prepared(),
                            "Cannot commit unprepared file target for '{}'",
                            entry.name);
-                if (target->staging->retain_on_success) {
-                    target->staging->file->Commit();
-                }
+                target->staging->Commit();
             }
         }
     }
