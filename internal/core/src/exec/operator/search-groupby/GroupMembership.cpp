@@ -20,7 +20,6 @@
 #include <memory>
 #include <unordered_set>
 
-#include "index/ScalarIndex.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
@@ -34,70 +33,6 @@ using GroupKey = std::optional<T>;
 bool
 IsEligible(const TargetBitmap* base_filter, size_t offset) {
     return base_filter == nullptr || !(*base_filter)[offset];
-}
-
-void
-ApplyBaseFilter(TargetBitmap& membership, const TargetBitmap* base_filter) {
-    if (base_filter == nullptr) {
-        return;
-    }
-    membership -= *base_filter;
-}
-
-template <typename T>
-std::optional<TargetBitmap>
-BuildIndexMembership(const segcore::PinnedIndexView& pinned_indexes,
-                     size_t row_count,
-                     const std::vector<GroupKey<T>>& groups,
-                     const TargetBitmap* base_filter) {
-    if (pinned_indexes.empty()) {
-        return std::nullopt;
-    }
-
-    // Avoid vector<bool>: ScalarIndex<bool>::In needs a contiguous bool array.
-    auto values = std::make_unique<T[]>(groups.size());
-    size_t value_count = 0;
-    bool include_null = false;
-    for (const auto& group : groups) {
-        if (group.has_value()) {
-            values[value_count++] = *group;
-        } else {
-            include_null = true;
-        }
-    }
-    TargetBitmap membership;
-    membership.reserve(row_count);
-    size_t remaining = row_count;
-    for (auto& pinned_index : pinned_indexes) {
-        auto scalar_index =
-            dynamic_cast<const index::ScalarIndex<T>*>(pinned_index.get());
-        if (scalar_index == nullptr) {
-            return std::nullopt;
-        }
-        auto* mutable_index = const_cast<index::ScalarIndex<T>*>(scalar_index);
-        auto chunk_membership =
-            value_count > 0 ? mutable_index->In(value_count, values.get())
-                            : TargetBitmap(mutable_index->Count(), false);
-        if (include_null) {
-            auto matches = mutable_index->IsNull();
-            if (matches.size() != chunk_membership.size()) {
-                return std::nullopt;
-            }
-            chunk_membership |= matches;
-        }
-
-        auto append_size = std::min(remaining, chunk_membership.size());
-        membership.append(chunk_membership, 0, append_size);
-        remaining -= append_size;
-        if (remaining == 0) {
-            break;
-        }
-    }
-    if (membership.size() != row_count) {
-        return std::nullopt;
-    }
-    ApplyBaseFilter(membership, base_filter);
-    return membership;
 }
 
 template <typename T, typename Visitor>
@@ -168,8 +103,7 @@ ScanRawField(milvus::OpContext* op_ctx,
         reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
                                             field_id,
                                             chunk_id,
-                                            chunk_pos,
-                                            segcore::PinnedIndexView{});
+                                            chunk_pos);
     for (size_t offset = 0; offset < row_count; ++offset) {
         if ((offset & 1023) == 0) {
             segcore::CheckCancellation(op_ctx,
@@ -219,8 +153,11 @@ BuildGroupMembership(milvus::OpContext* op_ctx,
             return membership;
         }
     }
-    auto indexes = segment.PinIndex(op_ctx, field_id);
-    return BuildIndexMembership<T>(indexes, count, groups, base_filter);
+    // #53246 also built membership straight from a pinned ScalarIndex<T> when
+    // the field has no raw data. That path is not ported to the refactor's
+    // reader contract (IScalarPredicateReader / INullReader) yet; returning
+    // nullopt makes the caller fall back to the unoptimized iterator.
+    return std::nullopt;
 }
 
 template std::optional<TargetBitmap>

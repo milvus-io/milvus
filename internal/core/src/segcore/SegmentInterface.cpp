@@ -37,7 +37,7 @@
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "futures/Future.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"

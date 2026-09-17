@@ -292,8 +292,10 @@ TEST(GrowingVectorPublicationAcceptance,
         const auto* old_reader =
             dynamic_cast<const index::IVectorReader*>(&old_pin.Reader());
         ASSERT_NE(old_reader, nullptr);
-        EXPECT_EQ(old_reader->Count(), 2);
-        EXPECT_EQ(old_reader->CoordDomain(), index::Domain::Row);
+        // Count()/CoordDomain() live on IIndexReaderBase; IVectorReader is a
+        // separate query interface, so ask the pinned reader itself.
+        EXPECT_EQ(old_pin.Reader().Count(), 2);
+        EXPECT_EQ(old_pin.Reader().CoordDomain(), index::Domain::Row);
         EXPECT_TRUE(old_reader->HasValidData());
         EXPECT_EQ(old_reader->ValidCount(), 2);
         EXPECT_EQ(old_reader->OffsetMapping().GetTotalCount(), 4);
@@ -324,7 +326,7 @@ TEST(GrowingVectorPublicationAcceptance,
         const auto* new_reader =
             dynamic_cast<const index::IVectorReader*>(&new_pin.Reader());
         ASSERT_NE(new_reader, nullptr);
-        EXPECT_EQ(new_reader->Count(), 4);
+        EXPECT_EQ(new_pin.Reader().Count(), 4);
         EXPECT_TRUE(new_reader->HasValidData());
         EXPECT_EQ(new_reader->ValidCount(), 4);
         EXPECT_EQ(new_reader->OffsetMapping().GetTotalCount(), 7);
@@ -340,7 +342,7 @@ TEST(GrowingVectorPublicationAcceptance,
         EXPECT_FALSE(indexes.CanReleaseVectorColumn(field_id, 8));
 
         EXPECT_EQ(old_pin.CoveredRowEnd(), 4);
-        EXPECT_EQ(old_reader->Count(), 2);
+        EXPECT_EQ(old_pin.Reader().Count(), 2);
         EXPECT_EQ(old_reader->ValidCount(), 2);
         EXPECT_EQ(old_reader->OffsetMapping().GetTotalCount(), 4);
         EXPECT_EQ(old_reader->PhysicalOffset(1), -1);

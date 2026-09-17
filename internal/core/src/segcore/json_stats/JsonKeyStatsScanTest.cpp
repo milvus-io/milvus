@@ -23,7 +23,7 @@
 
 #include "common/Chunk.h"
 #include "exec/expression/UnaryExpr.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "mmap/ChunkedColumn.h"
 #include "segcore/SegcoreConfig.h"
 #include "test_utils/cachinglayer_test_utils.h"

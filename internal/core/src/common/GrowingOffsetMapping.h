@@ -122,6 +122,16 @@ class GrowingOffsetMapping final : public OffsetMapping {
     int64_t
     GetTotalCount() const override;
 
+    BitsetTransformStatus
+    TransformBitset(const BitsetView& bitset,
+                    TargetBitmap& result) const override;
+
+    void
+    TransformOffsets(std::vector<int64_t>& offsets) const override;
+
+    void
+    TransformLogicalOffsets(std::vector<int64_t>& offsets) const override;
+
     OffsetMappingIdView
     GetPhysicalToLogicalIds(int64_t physical_offset,
                             int64_t count) const override;

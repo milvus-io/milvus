@@ -144,14 +144,12 @@ CreateMissingFieldData(const storage::FileManagerContext& context,
         default_value = schema.default_value();
     }
 
-    auto batch = storage::CreateFieldData(field_type,
-                                          element_type,
-                                          /*nullable=*/true,
-                                          /*dim=*/1,
-                                          rows);
+    // #52905 removed FieldDataBase::FillFieldData(default_value, rows); build
+    // the batch straight from the default value instead.
+    auto batch = storage::CreateFieldDataFromDefaultValue(
+        field_type, /*nullable=*/true, static_cast<int64_t>(rows), default_value);
     AssertInfo(batch != nullptr,
                "failed to allocate missing-row field-data batch");
-    batch->FillFieldData(default_value, static_cast<ssize_t>(rows));
     return batch;
 }
 

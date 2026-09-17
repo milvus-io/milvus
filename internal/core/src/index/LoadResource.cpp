@@ -22,6 +22,7 @@
 
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 #include "index/Families.h"
 #include "index/Meta.h"
 #include "index/ResourceUsageUtils.h"
@@ -30,6 +31,7 @@
 #include "log/Log.h"
 #include "nlohmann/json.hpp"
 #include "storage/EntryStreamUtils.h"
+#include "storage/LoadAdmissionController.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/PluginLoader.h"
 
@@ -64,17 +66,16 @@ ScalarIndexStreamMemoryOverhead(
             storage::EntryStreamTransientBytes(index_size_in_bytes, encrypted);
         max_task_transient_bytes = storage::EntryStreamTransientBytes(
             storage::MaxEntryStreamTaskBytes(), encrypted);
-        if (encrypted &&
-            storage::TransientMemoryBudget::GetLoadTransientBudget()
-                    .CapacityBytes() == 0) {
+        if (encrypted && storage::LoadAdmissionController::GetInstance()
+                                 .CapacityBytes() == 0) {
             return total_transient_bytes;
         }
     }
 
     if (file_stream && !encrypted) {
-        total_transient_bytes = storage::SaturatingMultiply(
+        total_transient_bytes = milvus::SaturatingMultiply(
             total_transient_bytes, storage::kFileStreamBufferMultiplier);
-        max_task_transient_bytes = storage::SaturatingMultiply(
+        max_task_transient_bytes = milvus::SaturatingMultiply(
             max_task_transient_bytes, storage::kFileStreamBufferMultiplier);
     }
     if (stream_load_info.has_value()) {

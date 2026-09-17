@@ -155,6 +155,8 @@ class PinnedValueLookup final {
                 validate.template operator()<int32_t>();
                 break;
             case DataType::INT64:
+            // #52689: TIMESTAMPTZ is stored and indexed as int64.
+            case DataType::TIMESTAMPTZ:
                 validate.template operator()<int64_t>();
                 break;
             case DataType::FLOAT:

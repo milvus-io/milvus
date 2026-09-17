@@ -93,6 +93,8 @@ PhyCompareFilterExpr::GatherValues(
             gather.template operator()<int32_t>();
             break;
         case DataType::INT64:
+        // #52689: TIMESTAMPTZ is stored and indexed as int64.
+        case DataType::TIMESTAMPTZ:
             gather.template operator()<int64_t>();
             break;
         case DataType::FLOAT:

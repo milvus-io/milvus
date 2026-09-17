@@ -2857,6 +2857,27 @@ SegmentGrowingImpl::bulk_subscript(
     return result;
 }
 
+// The refactor's growing vector readers index only the non-null rows and
+// validate physical ids, so a retrieval by logical row offsets has to be
+// converted first. Master #50524 pushed this into knowhere's IdMap instead
+// and hands the reader logical ids.
+static const int64_t*
+ToReaderPhysicalOffsets(const index::IVectorReader& reader,
+                        const int64_t* seg_offsets,
+                        int64_t count,
+                        std::vector<int64_t>& storage) {
+    if (!reader.HasValidData()) {
+        return seg_offsets;
+    }
+    const auto& mapping = reader.OffsetMapping();
+    if (!mapping.IsEnabled()) {
+        return seg_offsets;
+    }
+    storage.assign(seg_offsets, seg_offsets + count);
+    mapping.TransformLogicalOffsets(storage);
+    return storage.data();
+}
+
 std::unique_ptr<DataArray>
 SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
                                    FieldId field_id,
@@ -3159,10 +3180,13 @@ SegmentGrowingImpl::bulk_subscript_sparse_float_vector_impl(
     AssertInfo(reader != nullptr && reader->HasRawData(),
                "growing sparse vector reader for field {} has no raw values",
                field_id.get());
+    std::vector<int64_t> physical_offsets;
+    const auto* reader_offsets =
+        ToReaderPhysicalOffsets(*reader, seg_offsets, count, physical_offsets);
     auto ids = std::make_shared<knowhere::DataSet>();
     ids->SetRows(count);
     ids->SetDim(1);
-    ids->SetIds(seg_offsets);
+    ids->SetIds(reader_offsets);
     ids->SetIsOwner(false);
     auto retrieved = reader->GetSparseVector(ids);
     SparseRowsToProto(
@@ -3244,10 +3268,13 @@ SegmentGrowingImpl::bulk_subscript_impl(milvus::OpContext* op_ctx,
     AssertInfo(reader != nullptr && reader->HasRawData(),
                "growing vector reader for field {} has no raw values",
                field_id.get());
+    std::vector<int64_t> physical_offsets;
+    const auto* reader_offsets =
+        ToReaderPhysicalOffsets(*reader, seg_offsets, count, physical_offsets);
     auto ids = std::make_shared<knowhere::DataSet>();
     ids->SetRows(count);
     ids->SetDim(1);
-    ids->SetIds(seg_offsets);
+    ids->SetIds(reader_offsets);
     ids->SetIsOwner(false);
     auto retrieved = reader->GetVector(ids);
     AssertInfo(retrieved.size() ==
@@ -4325,30 +4352,31 @@ SegmentGrowingImpl::fill_empty_field(const FieldMeta& field_meta,
                 filled, missing, data.get(), field_meta);
         }
         column->set_data_raw(filled, missing, data.get(), field_meta);
+
+        // Backfilled GEOMETRY rows must reach the cache too. Once ANY cache entry
+        // exists for a field, the filter path takes the cache branch exclusively
+        // (GISFunctionFilterExpr's cache lookup), and a newly added field has no
+        // growing R-Tree because Reopen does not rebuild indexing_record_. So if
+        // these rows were left out, the first insert would create the cache and
+        // write only at its own absolute offsets, leaving [filled, total_row_num)
+        // as default-invalid gaps -- every backfilled row would then read as
+        // nullptr and be judged non-matching, silently dropping rows that the
+        // default geometry should match (or flipping to false positives under a
+        // negated predicate), while the same query is correct with the cache
+        // disabled.
+        //
+        // The write is addressed at `filled`, not 0, for the same reason the two
+        // column writes above are: `data` holds only the `missing` suffix, so the
+        // rows it carries belong at absolute offsets [filled, total_row_num).
+        // Passing (0, total_row_num) here would both re-address the suffix onto
+        // the already-filled prefix and read total_row_num rows out of a payload
+        // that only has `missing` of them.
+        if (field_meta.get_data_type() == DataType::GEOMETRY &&
+            segcore_config_.get_enable_geometry_cache() && missing > 0) {
+            BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
+        }
     }
 
-    // Backfilled GEOMETRY rows must reach the cache too. Once ANY cache entry
-    // exists for a field, the filter path takes the cache branch exclusively
-    // (GISFunctionFilterExpr's cache lookup), and a newly added field has no
-    // growing R-Tree because Reopen does not rebuild indexing_record_. So if
-    // these rows were left out, the first insert would create the cache and
-    // write only at its own absolute offsets, leaving [filled, total_row_num)
-    // as default-invalid gaps -- every backfilled row would then read as
-    // nullptr and be judged non-matching, silently dropping rows that the
-    // default geometry should match (or flipping to false positives under a
-    // negated predicate), while the same query is correct with the cache
-    // disabled.
-    //
-    // The write is addressed at `filled`, not 0, for the same reason the two
-    // column writes above are: `data` holds only the `missing` suffix, so the
-    // rows it carries belong at absolute offsets [filled, total_row_num).
-    // Passing (0, total_row_num) here would both re-address the suffix onto
-    // the already-filled prefix and read total_row_num rows out of a payload
-    // that only has `missing` of them.
-    if (field_meta.get_data_type() == DataType::GEOMETRY &&
-        segcore_config_.get_enable_geometry_cache() && missing > 0) {
-        BuildGeometryCacheForInsert(field_id, data.get(), filled, missing);
-    }
 
     LOG_INFO("fill empty field {} (data type {}) for growing segment {} done",
              field_meta.get_data_type(),
