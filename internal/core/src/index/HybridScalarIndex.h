@@ -40,7 +40,7 @@ namespace index {
 // Shares the persisted-type and legacy standalone-file compatibility rules
 // between async resource admission and actual hybrid loading.
 ScalarIndexType
-ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
+ResolvePackedHybridIndexType(const nlohmann::json& metadata,
                              const Config& config);
 
 /*
@@ -205,7 +205,8 @@ class HybridScalarIndex : public ScalarIndex<T> {
                 const Config& config) override;
 
     IndexLoadPlan
-    PlanLoad(const storage::IndexEntryCatalog& catalog,
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
              const Config& config) override;
 
     folly::coro::Task<void>

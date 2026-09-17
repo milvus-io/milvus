@@ -378,7 +378,7 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     reader->ReadFooterAndDirectory();
     reader->CheckCancelled("IndexEntryReader::Open");
 
-    if (reader->is_encrypted_) {
+    if (reader->encryption_.has_value()) {
         reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
         if (!(reader->cipher_plugin_ != nullptr)) {
             ThrowInfo(ErrorCode::ConfigInvalid,
@@ -390,8 +390,8 @@ IndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     auto meta_entry = reader->ReadEntry(MILVUS_V3_META_ENTRY_NAME);
     if (!meta_entry.data.empty()) {
         try {
-            reader->catalog_.metadata_ = nlohmann::json::parse(
-                meta_entry.data.begin(), meta_entry.data.end());
+            reader->metadata_ = nlohmann::json::parse(meta_entry.data.begin(),
+                                                      meta_entry.data.end());
         } catch (const nlohmann::json::parse_error& e) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "Failed to parse V3 index meta JSON: {}",
@@ -423,18 +423,33 @@ IndexEntryReader::ValidateMagic() {
 
 void
 IndexEntryReader::ReadFooterAndDirectory() {
-    auto directory =
+    std::tie(directory_, encryption_) =
         ReadIndexEntryDirectory(input_, file_size_, cancellation_token_);
-    is_encrypted_ = directory.is_encrypted_;
-    edek_ = std::move(directory.edek_);
-    ez_id_ = directory.ez_id_;
-    catalog_ = IndexEntryCatalog(directory, file_size_);
-    stream_load_info_ = directory.stream_load_info_;
+    stream_load_info_.encrypted = encryption_.has_value();
+    for (const auto& entry : directory_.Entries()) {
+        if (const auto* encrypted =
+                std::get_if<EncryptedEntrySource>(&entry.source)) {
+            for (const auto& slice : encrypted->slices) {
+                AssertInfo(slice.plaintext_bytes <=
+                                   std::numeric_limits<size_t>::max() / 2 &&
+                               slice.remote_bytes <=
+                                   std::numeric_limits<size_t>::max() -
+                                       2 * slice.plaintext_bytes,
+                           "Encrypted stream budget size overflow");
+                const auto bytes =
+                    slice.remote_bytes + 2 * slice.plaintext_bytes;
+                stream_load_info_.total_transient_bytes = SaturatingAdd(
+                    stream_load_info_.total_transient_bytes, bytes);
+                stream_load_info_.max_task_transient_bytes =
+                    std::max(stream_load_info_.max_task_transient_bytes, bytes);
+            }
+        }
+    }
 }
 
 std::vector<std::string>
 IndexEntryReader::GetEntryNames() const {
-    return catalog_.entry_names_;
+    return directory_.EntryNames();
 }
 
 void
@@ -461,7 +476,7 @@ IndexEntryReader::DownloadRangeCount(uint64_t size) {
 }
 
 size_t
-IndexEntryReader::DownloadTaskCount(const IndexEntryCatalogEntry& meta) {
+IndexEntryReader::DownloadTaskCount(const EntryMeta& meta) {
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
         return std::get<EncryptedEntrySource>(meta.source).slices.size();
     }
@@ -469,7 +484,7 @@ IndexEntryReader::DownloadTaskCount(const IndexEntryCatalogEntry& meta) {
 }
 
 size_t
-IndexEntryReader::StreamDownloadTaskCount(const IndexEntryCatalogEntry& meta) {
+IndexEntryReader::StreamDownloadTaskCount(const EntryMeta& meta) {
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
         return std::get<EncryptedEntrySource>(meta.source).slices.size();
     }
@@ -485,7 +500,7 @@ IndexEntryReader::ReadEntry(const std::string& name) {
         return cache_it->second;
     }
 
-    const auto& meta = catalog_.At(name);
+    const auto& meta = directory_.At(name);
 
     Entry result;
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
@@ -502,7 +517,7 @@ IndexEntryReader::ReadEntry(const std::string& name) {
 }
 
 Entry
-IndexEntryReader::ReadPlainEntry(const IndexEntryCatalogEntry& meta) {
+IndexEntryReader::ReadPlainEntry(const EntryMeta& meta) {
     CheckCancelled("IndexEntryReader::ReadPlainEntry");
     const auto& pm = std::get<PlainEntrySource>(meta.source);
     Entry result;
@@ -570,7 +585,7 @@ IndexEntryReader::ReadPlainEntry(const IndexEntryCatalogEntry& meta) {
 }
 
 Entry
-IndexEntryReader::ReadEncryptedEntry(const IndexEntryCatalogEntry& meta) {
+IndexEntryReader::ReadEncryptedEntry(const EntryMeta& meta) {
     CheckCancelled("IndexEntryReader::ReadEncryptedEntry");
     const auto& em = std::get<EncryptedEntrySource>(meta.source);
     Entry result;
@@ -586,8 +601,8 @@ IndexEntryReader::ReadEncryptedEntry(const IndexEntryCatalogEntry& meta) {
     try {
         futures.reserve(em.slices.size());
         for (const auto& slice : em.slices) {
-            const auto this_output_offset = slice.target_offset;
-            const auto plain_len = slice.target_bytes;
+            const auto this_output_offset = slice.plaintext_offset;
+            const auto plain_len = slice.plaintext_bytes;
 
             futures.push_back(pool.Submit([this,
                                            slice,
@@ -607,8 +622,8 @@ IndexEntryReader::ReadEncryptedEntry(const IndexEntryCatalogEntry& meta) {
                               "Failed to read encrypted slice");
                 }
 
-                auto dec =
-                    cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+                auto dec = cipher_plugin_->GetDecryptor(
+                    encryption_->ez_id, collection_id_, encryption_->edek);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
                 if (!(plain.size() == plain_len)) {
@@ -640,7 +655,7 @@ IndexEntryReader::ReadEncryptedEntry(const IndexEntryCatalogEntry& meta) {
 IndexEntryReader::EntryDownloadState
 IndexEntryReader::PrepareEntryDownload(const std::string& name,
                                        const std::string& local_path,
-                                       const IndexEntryCatalogEntry& meta) {
+                                       const EntryMeta& meta) {
     CheckCancelled("IndexEntryReader::PrepareEntryDownload");
 
     int fd = ::open(local_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
@@ -681,7 +696,7 @@ IndexEntryReader::PrepareEntryDownload(const std::string& name,
 
 void
 IndexEntryReader::SubmitEntryDownloadTasks(
-    const IndexEntryCatalogEntry& meta,
+    const EntryMeta& meta,
     EntryDownloadState& state,
     std::vector<std::future<void>>& futures) {
     auto& pool = ThreadPools::GetThreadPool(priority_);
@@ -693,8 +708,8 @@ IndexEntryReader::SubmitEntryDownloadTasks(
 
         for (size_t i = 0; i < em.slices.size(); i++) {
             const auto& slice = em.slices[i];
-            const auto this_output_offset = slice.target_offset;
-            const auto plain_len = slice.target_bytes;
+            const auto this_output_offset = slice.plaintext_offset;
+            const auto plain_len = slice.plaintext_bytes;
 
             futures.push_back(pool.Submit([this,
                                            slice,
@@ -716,8 +731,8 @@ IndexEntryReader::SubmitEntryDownloadTasks(
                               "Failed to read encrypted slice");
                 }
 
-                auto dec =
-                    cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+                auto dec = cipher_plugin_->GetDecryptor(
+                    encryption_->ez_id, collection_id_, encryption_->edek);
                 auto plain = dec->Decrypt(cipher.data(), cipher.size());
 
                 if (!(plain.size() == plain_len)) {
@@ -812,7 +827,7 @@ IndexEntryReader::FinalizeEntryDownload(EntryDownloadState& state) {
 IndexEntryReader::EntryStreamDownloadState
 IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
                                              const std::string& local_path,
-                                             const IndexEntryCatalogEntry& meta,
+                                             const EntryMeta& meta,
                                              io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::PrepareEntryStreamDownload");
     auto slice_size = DefaultEntryStreamSliceSize();
@@ -849,7 +864,7 @@ IndexEntryReader::PrepareEntryStreamDownload(const std::string& name,
 // before the caller drains futures. Future state may retain the task closure.
 void
 IndexEntryReader::SubmitEntryStreamDownloadTasks(
-    const IndexEntryCatalogEntry& meta,
+    const EntryMeta& meta,
     EntryStreamDownloadState& state,
     std::vector<std::future<void>>& futures) {
     auto& pool = ThreadPools::GetThreadPool(priority_);
@@ -862,14 +877,14 @@ IndexEntryReader::SubmitEntryStreamDownloadTasks(
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
         const auto& em = std::get<EncryptedEntrySource>(meta.source);
         auto cipher_plugin = cipher_plugin_;
-        auto edek = edek_;
-        int64_t ez_id = ez_id_;
+        auto edek = encryption_->edek;
+        int64_t ez_id = encryption_->ez_id;
         int64_t collection_id = collection_id_;
 
         for (size_t i = 0; i < em.slices.size(); i++) {
             auto slice = em.slices[i];
-            const auto output_offset = slice.target_offset;
-            const auto plain_len = slice.target_bytes;
+            const auto output_offset = slice.plaintext_offset;
+            const auto plain_len = slice.plaintext_bytes;
             auto budget_guard = std::make_unique<LoadAdmissionGuard>(
                 EncryptedStreamBudgetBytes(slice.remote_bytes, plain_len),
                 budget_priority,
@@ -999,7 +1014,7 @@ void
 IndexEntryReader::ReadEntryToFile(const std::string& name,
                                   const std::string& local_path) {
     CheckCancelled("IndexEntryReader::ReadEntryToFile");
-    const auto& meta = catalog_.At(name);
+    const auto& meta = directory_.At(name);
 
     auto state = PrepareEntryDownload(name, local_path, meta);
     std::vector<std::future<void>> futures;
@@ -1051,7 +1066,7 @@ IndexEntryReader::ReadEntriesToFiles(
     try {
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
-            const auto& meta = catalog_.At(name);
+            const auto& meta = directory_.At(name);
             states.push_back(PrepareEntryDownload(name, path, meta));
             total_task_count += DownloadTaskCount(meta);
         }
@@ -1059,7 +1074,7 @@ IndexEntryReader::ReadEntriesToFiles(
         // Submit ALL tasks for ALL entries at once (avoids thread pool deadlock)
         all_futures.reserve(total_task_count);
         for (size_t i = 0; i < name_path_pairs.size(); i++) {
-            const auto& meta = catalog_.At(name_path_pairs[i].first);
+            const auto& meta = directory_.At(name_path_pairs[i].first);
             SubmitEntryDownloadTasks(meta, states[i], all_futures);
         }
 
@@ -1087,7 +1102,7 @@ IndexEntryReader::ReadEntryStreamToFile(const std::string& name,
                                         const std::string& local_path,
                                         io::Priority write_priority) {
     CheckCancelled("IndexEntryReader::ReadEntryStreamToFile");
-    if (!(catalog_.HasEntry(name))) {
+    if (!(directory_.HasEntry(name))) {
         ThrowInfo(ErrorCode::DataFormatBroken, "Entry not found: {}", name);
     }
     auto writer = FileWriter(local_path, write_priority);
@@ -1113,7 +1128,7 @@ IndexEntryReader::ReadEntriesStreamToFiles(
     try {
         size_t total_task_count = 0;
         for (const auto& [name, path] : name_path_pairs) {
-            const auto& meta = catalog_.At(name);
+            const auto& meta = directory_.At(name);
             states.push_back(
                 PrepareEntryStreamDownload(name, path, meta, write_priority));
             total_task_count += StreamDownloadTaskCount(meta);
@@ -1121,7 +1136,7 @@ IndexEntryReader::ReadEntriesStreamToFiles(
 
         all_futures.reserve(total_task_count);
         for (size_t i = 0; i < name_path_pairs.size(); i++) {
-            const auto& meta = catalog_.At(name_path_pairs[i].first);
+            const auto& meta = directory_.At(name_path_pairs[i].first);
             SubmitEntryStreamDownloadTasks(meta, states[i], all_futures);
         }
 
@@ -1147,7 +1162,7 @@ IndexEntryReader::ReadEntriesStreamToFiles(
 size_t
 IndexEntryReader::GetEntrySize(const std::string& name) const {
     CheckCancelled("IndexEntryReader::GetEntrySize");
-    return catalog_.At(name).plaintext_size;
+    return directory_.At(name).plaintext_size;
 }
 
 void
@@ -1156,7 +1171,7 @@ IndexEntryReader::ReadEntryStream(
     std::function<void(const uint8_t* data, size_t len)> slice_consumer,
     size_t slice_size) {
     CheckCancelled("IndexEntryReader::ReadEntryStream");
-    const auto& meta = catalog_.At(name);
+    const auto& meta = directory_.At(name);
 
     if (std::holds_alternative<EncryptedEntrySource>(meta.source)) {
         ReadEncryptedEntryStream(meta, slice_consumer);
@@ -1167,7 +1182,7 @@ IndexEntryReader::ReadEntryStream(
 
 void
 IndexEntryReader::ReadPlainEntryStream(
-    const IndexEntryCatalogEntry& meta,
+    const EntryMeta& meta,
     const std::function<void(const uint8_t* data, size_t len)>& slice_consumer,
     size_t slice_size) {
     const auto& pm = std::get<PlainEntrySource>(meta.source);
@@ -1219,13 +1234,13 @@ IndexEntryReader::ReadPlainEntryStream(
 
 void
 IndexEntryReader::ReadEncryptedEntryStream(
-    const IndexEntryCatalogEntry& meta,
+    const EntryMeta& meta,
     const std::function<void(const uint8_t* data, size_t len)>&
         slice_consumer) {
     const auto& em = std::get<EncryptedEntrySource>(meta.source);
     size_t num_slices = em.slices.size();
     auto slicePlainBytes = [&em](size_t seq) {
-        return em.slices[seq].target_bytes;
+        return em.slices[seq].plaintext_bytes;
     };
     auto sliceTransientBytes = [&](size_t seq) {
         auto plain_len = slicePlainBytes(seq);
@@ -1238,9 +1253,9 @@ IndexEntryReader::ReadEncryptedEntryStream(
     };
     auto input = input_;
     auto cipher_plugin = cipher_plugin_;
-    int64_t ez_id = ez_id_;
+    int64_t ez_id = encryption_->ez_id;
     int64_t collection_id = collection_id_;
-    auto edek = edek_;
+    auto edek = encryption_->edek;
     auto cancellation_token = cancellation_token_;
     auto load_slice = [input,
                        cipher_plugin,

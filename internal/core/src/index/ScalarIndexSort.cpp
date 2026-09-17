@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/IndexLoadUtils.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -762,12 +763,16 @@ ScalarIndexSort<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
 template <typename T>
 IndexLoadPlan
-ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                             const nlohmann::json& metadata,
                              const Config& config) {
     auto context = std::make_shared<ScalarSortLoadContext<T>>();
-    context->index_size = catalog.GetMeta<size_t>("index_length");
-    context->total_num_rows = catalog.GetMeta<size_t>("num_rows");
-    context->is_nested = is_nested_index_ || catalog.GetMeta<bool>("is_nested");
+    context->index_size =
+        ReadRequiredIndexMeta<size_t>(metadata, "index_length");
+    context->total_num_rows =
+        ReadRequiredIndexMeta<size_t>(metadata, "num_rows");
+    context->is_nested =
+        is_nested_index_ || ReadRequiredIndexMeta<bool>(metadata, "is_nested");
     context->is_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -781,10 +786,10 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                "ScalarIndexSort index_data size {} exceeds int64 range",
                context->index_data_bytes);
     AssertInfo(
-        catalog.At("index_data").plaintext_size == context->index_data_bytes,
+        directory.At("index_data").plaintext_size == context->index_data_bytes,
         "invalid index_data size: expected {}, got {}",
         context->index_data_bytes,
-        catalog.At("index_data").plaintext_size);
+        directory.At("index_data").plaintext_size);
 
     IndexLoadPlan plan;
     plan.load_context = context;
@@ -817,8 +822,8 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
     // Indexes built with scalar index engine version >= 3 always persist both
     // auxiliary entries, so has_persisted_aux is true for newly built indexes.
     // Keep the check for compatibility with older packed files.
-    context->has_persisted_aux =
-        catalog.HasEntry("idx_to_offsets") && catalog.HasEntry("valid_bitset");
+    context->has_persisted_aux = directory.HasEntry("idx_to_offsets") &&
+                                 directory.HasEntry("valid_bitset");
     if (!context->has_persisted_aux) {
         return plan;
     }
@@ -829,18 +834,19 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
                context->total_num_rows);
     context->offsets_bytes = context->total_num_rows * sizeof(int32_t);
     AssertInfo(
-        catalog.At("idx_to_offsets").plaintext_size == context->offsets_bytes,
+        directory.At("idx_to_offsets").plaintext_size == context->offsets_bytes,
         "invalid idx_to_offsets size: expected {}, got {}",
         context->offsets_bytes,
-        catalog.At("idx_to_offsets").plaintext_size);
+        directory.At("idx_to_offsets").plaintext_size);
 
     context->valid_bitset =
         std::make_shared<TargetBitmap>(context->total_num_rows, false);
     auto valid_bitset_bytes = context->valid_bitset->size_in_bytes();
-    AssertInfo(catalog.At("valid_bitset").plaintext_size == valid_bitset_bytes,
-               "invalid valid_bitset size: expected {}, got {}",
-               valid_bitset_bytes,
-               catalog.At("valid_bitset").plaintext_size);
+    AssertInfo(
+        directory.At("valid_bitset").plaintext_size == valid_bitset_bytes,
+        "invalid valid_bitset size: expected {}, got {}",
+        valid_bitset_bytes,
+        directory.At("valid_bitset").plaintext_size);
 
     if (context->is_mmap) {
         auto mmap_meta_path =
@@ -1020,10 +1026,12 @@ template <typename T>
 void
 ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
                                 const Config& config) {
-    size_t index_size = reader.Catalog().GetMeta<size_t>("index_length");
-    total_num_rows_ = reader.Catalog().GetMeta<size_t>("num_rows");
-    is_nested_index_ =
-        is_nested_index_ || reader.Catalog().GetMeta<bool>("is_nested");
+    size_t index_size =
+        ReadRequiredIndexMeta<size_t>(reader.IndexMeta(), "index_length");
+    total_num_rows_ =
+        ReadRequiredIndexMeta<size_t>(reader.IndexMeta(), "num_rows");
+    is_nested_index_ = is_nested_index_ || ReadRequiredIndexMeta<bool>(
+                                               reader.IndexMeta(), "is_nested");
 
     is_mmap_ = GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
@@ -1122,8 +1130,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
 
     // Load persisted idx_to_offsets and valid_bitset if both are available,
     // otherwise recompute (backward compat with older V3 files).
-    if (reader.Catalog().HasEntry("idx_to_offsets") &&
-        reader.Catalog().HasEntry("valid_bitset") && is_mmap_) {
+    if (reader.Directory().HasEntry("idx_to_offsets") &&
+        reader.Directory().HasEntry("valid_bitset") && is_mmap_) {
         // mmap path: stream idx_to_offsets to disk, then mmap it. valid_bitset
         // stays heap-resident for query masking, matching StringIndexSort.
         mmap_meta_filepath_ =
@@ -1168,8 +1176,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         idx_to_offsets_size_ = offsets_bytes / sizeof(int32_t);
 
         load_valid_bitset();
-    } else if (reader.Catalog().HasEntry("idx_to_offsets") &&
-               reader.Catalog().HasEntry("valid_bitset")) {
+    } else if (reader.Directory().HasEntry("idx_to_offsets") &&
+               reader.Directory().HasEntry("valid_bitset")) {
         // memory path: stream into vector
         auto offsets_bytes = get_idx_to_offsets_bytes();
         idx_to_offsets_.resize(total_num_rows_);

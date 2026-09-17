@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/IndexLoadUtils.h"
 #include <algorithm>
 #include "common/FastMem.h"
 #include <boost/algorithm/string.hpp>
@@ -1538,21 +1539,26 @@ BitmapIndex<T>::WriteEntries(storage::IndexEntryWriter* writer) {
 
 template <typename T>
 IndexLoadPlan
-BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+BitmapIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                         const nlohmann::json& metadata,
                          const Config& config) {
     static_assert(std::endian::native == std::endian::little,
                   "Direct packed bitmap reads require little-endian words");
     auto context = std::make_shared<BitmapLoadContext>();
-    context->index_length = catalog.GetMeta<size_t>(BITMAP_INDEX_LENGTH);
-    context->total_num_rows = catalog.GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
+    context->index_length =
+        ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_LENGTH);
+    context->total_num_rows =
+        ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_NUM_ROWS);
     AssertInfo(context->total_num_rows <=
                    std::numeric_limits<size_t>::max() -
                        (TargetBitmap::policy_type::data_bits - 1),
                "Bitmap valid bitset size overflow for {} rows",
                context->total_num_rows);
     context->is_nested =
-        catalog.GetMeta<bool>(BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
-    context->has_valid_bitset = catalog.HasEntry(BITMAP_INDEX_VALID_BITSET);
+        (metadata.contains(BITMAP_INDEX_IS_NESTED_META)
+             ? metadata.at(BITMAP_INDEX_IS_NESTED_META).get<bool>()
+             : is_nested_index_);
+    context->has_valid_bitset = directory.HasEntry(BITMAP_INDEX_VALID_BITSET);
     context->rebuild_validity_from_postings =
         schema_.nullable() && !context->is_nested && !context->has_valid_bitset;
     context->enable_offset_cache =
@@ -1561,7 +1567,7 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
         GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
             .value_or(proto::common::LoadPriority::HIGH);
 
-    auto raw_data_size = catalog.At(BITMAP_INDEX_DATA).plaintext_size;
+    auto raw_data_size = directory.At(BITMAP_INDEX_DATA).plaintext_size;
     context->use_mmap =
         config.contains(MMAP_FILE_PATH) &&
         context->index_length > DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
@@ -1592,7 +1598,7 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     if (context->has_valid_bitset) {
         auto valid_bitset_size =
-            catalog.At(BITMAP_INDEX_VALID_BITSET).plaintext_size;
+            directory.At(BITMAP_INDEX_VALID_BITSET).plaintext_size;
         auto expected_valid_bitset_size = (context->total_num_rows + 7) / 8;
         AssertInfo(valid_bitset_size == expected_valid_bitset_size,
                    "bitmap valid_bitset size mismatch, expect {}, got {}",
@@ -1710,10 +1716,14 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         GetValueFromConfig<bool>(config, ENABLE_OFFSET_CACHE);
 
     // V3 format: meta is in __meta__ entry
-    auto index_length = reader.Catalog().GetMeta<size_t>(BITMAP_INDEX_LENGTH);
-    total_num_rows_ = reader.Catalog().GetMeta<size_t>(BITMAP_INDEX_NUM_ROWS);
-    is_nested_index_ = reader.Catalog().GetMeta<bool>(
-        BITMAP_INDEX_IS_NESTED_META, is_nested_index_);
+    auto index_length =
+        ReadRequiredIndexMeta<size_t>(reader.IndexMeta(), BITMAP_INDEX_LENGTH);
+    total_num_rows_ = ReadRequiredIndexMeta<size_t>(reader.IndexMeta(),
+                                                    BITMAP_INDEX_NUM_ROWS);
+    is_nested_index_ =
+        (reader.IndexMeta().contains(BITMAP_INDEX_IS_NESTED_META)
+             ? reader.IndexMeta().at(BITMAP_INDEX_IS_NESTED_META).get<bool>()
+             : is_nested_index_);
     valid_bitset_ =
         TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
     bool rebuild_validity_from_postings =

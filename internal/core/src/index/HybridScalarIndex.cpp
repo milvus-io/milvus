@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/IndexLoadUtils.h"
 #include <string.h>
 #include "common/FastMem.h"
 #include <cstdint>
@@ -91,12 +92,12 @@ ParsePhysicalTypeFromPackedFileName(const std::string& filename) {
 }  // namespace
 
 ScalarIndexType
-ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
+ResolvePackedHybridIndexType(const nlohmann::json& metadata,
                              const Config& config) {
     ScalarIndexType type = ScalarIndexType::NONE;
-    if (catalog.HasMeta(INDEX_TYPE)) {
-        type =
-            static_cast<ScalarIndexType>(catalog.GetMeta<uint8_t>(INDEX_TYPE));
+    if (metadata.contains(INDEX_TYPE)) {
+        type = static_cast<ScalarIndexType>(
+            ReadRequiredIndexMeta<uint8_t>(metadata, INDEX_TYPE));
     } else {
         // Legacy 3.0.0 bug (#52359/#52360): struct-array sub-field HYBRID
         // indexes were built as a standalone STLSORT (or, hypothetically, other
@@ -115,11 +116,12 @@ ResolvePackedHybridIndexType(const storage::IndexEntryCatalog& catalog,
             }
         }
         if (type == ScalarIndexType::NONE) {
-            if (catalog.HasMeta("version") || catalog.HasMeta("index_length")) {
+            if (metadata.contains("version") ||
+                metadata.contains("index_length")) {
                 type = ScalarIndexType::STLSORT;
-            } else if (catalog.HasMeta("file_names")) {
+            } else if (metadata.contains("file_names")) {
                 type = ScalarIndexType::INVERTED;
-            } else if (catalog.HasMeta(BITMAP_INDEX_LENGTH)) {
+            } else if (metadata.contains(BITMAP_INDEX_LENGTH)) {
                 type = ScalarIndexType::BITMAP;
             } else {
                 ThrowInfo(UnexpectedError,
@@ -538,7 +540,7 @@ void
 HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                   const Config& config) {
     internal_index_type_ =
-        ResolvePackedHybridIndexType(reader.Catalog(), config);
+        ResolvePackedHybridIndexType(reader.IndexMeta(), config);
 
     LOG_INFO("LoadEntries hybrid index with internal index type: {}",
              ToString(internal_index_type_));
@@ -552,13 +554,14 @@ HybridScalarIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
 
 template <typename T>
 IndexLoadPlan
-HybridScalarIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+HybridScalarIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                               const nlohmann::json& metadata,
                                const Config& config) {
-    internal_index_type_ = ResolvePackedHybridIndexType(catalog, config);
+    internal_index_type_ = ResolvePackedHybridIndexType(metadata, config);
     LOG_INFO("PlanLoad hybrid index with internal index type: {}",
              ToString(internal_index_type_));
     auto index = GetInternalIndex();
-    return index->PlanLoad(catalog, config);
+    return index->PlanLoad(directory, metadata, config);
 }
 
 template <typename T>

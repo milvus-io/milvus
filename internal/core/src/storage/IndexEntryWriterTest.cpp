@@ -874,8 +874,9 @@ TEST_F(IndexEntryWriterV3Test, SetMetaRoundtrip) {
     EXPECT_EQ(names.back(), "__meta__");
 
     // Read and verify the meta content via GetMeta
-    EXPECT_EQ(reader->Catalog().GetMeta<std::string>("index_type"), "bitmap");
-    EXPECT_EQ(reader->Catalog().GetMeta<int>("build_id"), 42);
+    EXPECT_EQ(reader->IndexMeta().at("index_type").get<std::string>(),
+              "bitmap");
+    EXPECT_EQ(reader->IndexMeta().at("build_id").get<int>(), 42);
 
     // Regular data entry should still be readable
     auto data_entry = reader->ReadEntry("data");
@@ -1084,7 +1085,7 @@ TEST_F(IndexEntryWriterV3Test, LargeMetaLoadsSeparatelyFromDirectory) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     // Verify meta can be read
-    auto meta_value = reader->Catalog().GetMeta<std::string>("large_field");
+    auto meta_value = reader->IndexMeta().at("large_field").get<std::string>();
     ASSERT_EQ(meta_value.size(), 70 * 1024);
     ASSERT_EQ(meta_value, std::string(70 * 1024, 'X'));
 
@@ -1115,7 +1116,7 @@ TEST_F(IndexEntryWriterV3Test, LargeMetaEntryMultiRange) {
     auto reader = IndexEntryReader::Open(input, file_size);
 
     // Verify large meta
-    auto meta_value = reader->Catalog().GetMeta<std::string>("huge_field");
+    auto meta_value = reader->IndexMeta().at("huge_field").get<std::string>();
     ASSERT_EQ(meta_value.size(), 20 * 1024 * 1024);
     ASSERT_EQ(meta_value[0], 'Y');
     ASSERT_EQ(meta_value[meta_value.size() - 1], 'Y');
@@ -1366,7 +1367,7 @@ TEST_F(IndexEntryEncryptedV3Test, EncryptedLargeMetaMultiSlice) {
 
     auto input = CreateInputStream(file_path);
     auto reader = IndexEntryReader::Open(input, GetFileSize(file_path), 100);
-    EXPECT_EQ(reader->Catalog().GetMeta<std::string>("large_meta"),
+    EXPECT_EQ(reader->IndexMeta().at("large_meta").get<std::string>(),
               std::string(5000, 'M'));
 }
 

@@ -52,6 +52,7 @@
 #include "storage/IndexEntryEncryptedLocalWriter.h"
 #include "storage/IndexEntryReader.h"
 #include "storage/AsyncIndexEntryReader.h"
+#include "storage/IndexEntryFormat.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/IndexLoadPlan.h"
@@ -504,7 +505,7 @@ TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
         IndexEntryDirectStreamWriter writer(output);
         writer.WriteEntry("alpha", alpha.data(), alpha.size());
         writer.WriteEntry("beta", beta.data(), beta.size());
-        writer.PutMeta("catalog_value", 17);
+        writer.PutMeta("directory_value", 17);
         writer.Finish();
     }
 
@@ -513,41 +514,41 @@ TEST_F(AsyncIndexEntryReaderTest, CatalogExposesStablePlainEntrySources) {
     auto reader = OpenAsyncReader(recording);
     auto reads_after_open = recording->ReadRanges().size();
 
-    static_assert(
-        std::is_same_v<decltype(reader->Catalog()), const IndexEntryCatalog&>);
-    const auto& entries = reader->Catalog().Entries();
+    static_assert(std::is_same_v<decltype(reader->Directory()),
+                                 const IndexEntryDirectory&>);
+    const auto& entries = reader->Directory().Entries();
     ASSERT_EQ(entries.size(), 3);
 
-    EXPECT_EQ(reader->Catalog().At("alpha").name, "alpha");
-    EXPECT_EQ(reader->Catalog().At("alpha").plaintext_size, alpha.size());
-    EXPECT_EQ(reader->Catalog().At("alpha").expected_crc,
+    EXPECT_EQ(reader->Directory().At("alpha").name, "alpha");
+    EXPECT_EQ(reader->Directory().At("alpha").plaintext_size, alpha.size());
+    EXPECT_EQ(reader->Directory().At("alpha").expected_crc,
               Crc32cValue(alpha.data(), alpha.size()));
     ASSERT_TRUE(std::holds_alternative<PlainEntrySource>(
-        reader->Catalog().At("alpha").source));
+        reader->Directory().At("alpha").source));
     const auto& alpha_source =
-        std::get<PlainEntrySource>(reader->Catalog().At("alpha").source);
+        std::get<PlainEntrySource>(reader->Directory().At("alpha").source);
     EXPECT_EQ(alpha_source.remote_offset, MILVUS_V3_MAGIC_SIZE);
 
-    EXPECT_EQ(reader->Catalog().At("beta").name, "beta");
-    EXPECT_EQ(reader->Catalog().At("beta").plaintext_size, beta.size());
+    EXPECT_EQ(reader->Directory().At("beta").name, "beta");
+    EXPECT_EQ(reader->Directory().At("beta").plaintext_size, beta.size());
     const auto& beta_source =
-        std::get<PlainEntrySource>(reader->Catalog().At("beta").source);
+        std::get<PlainEntrySource>(reader->Directory().At("beta").source);
     EXPECT_EQ(beta_source.remote_offset, MILVUS_V3_MAGIC_SIZE + alpha.size());
 
-    EXPECT_EQ(reader->Catalog().At(MILVUS_V3_META_ENTRY_NAME).name,
+    EXPECT_EQ(reader->Directory().At(MILVUS_V3_META_ENTRY_NAME).name,
               MILVUS_V3_META_ENTRY_NAME);
-    EXPECT_TRUE(reader->Catalog().HasMeta("catalog_value"));
-    EXPECT_EQ(reader->Catalog().GetMeta<int>("catalog_value"), 17);
-    EXPECT_THROW(reader->Catalog().At("missing"), milvus::SegcoreError);
+    EXPECT_TRUE(reader->IndexMeta().contains("directory_value"));
+    EXPECT_EQ(reader->IndexMeta().at("directory_value").get<int>(), 17);
+    EXPECT_THROW(reader->Directory().At("missing"), milvus::SegcoreError);
 
     EXPECT_EQ(recording->ReadRanges().size(), reads_after_open);
 
     auto sync_input = CreateInputStream(file_path);
     auto sync_reader = IndexEntryReader::Open(sync_input, sync_input->Size());
-    EXPECT_EQ(sync_reader->Catalog().GetMeta<int>("catalog_value"), 17);
-    ASSERT_EQ(sync_reader->Catalog().Entries().size(), entries.size());
+    EXPECT_EQ(sync_reader->IndexMeta().at("directory_value").get<int>(), 17);
+    ASSERT_EQ(sync_reader->Directory().Entries().size(), entries.size());
     for (const auto& entry : entries) {
-        const auto& sync_entry = sync_reader->Catalog().At(entry.name);
+        const auto& sync_entry = sync_reader->Directory().At(entry.name);
         EXPECT_EQ(sync_entry.plaintext_size, entry.plaintext_size);
         EXPECT_EQ(sync_entry.expected_crc, entry.expected_crc);
         EXPECT_EQ(std::get<PlainEntrySource>(sync_entry.source).remote_offset,
@@ -585,7 +586,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto calls = direct_file->DirectReadCalls();
     ASSERT_EQ(calls.size(), 1);
     const auto& source =
-        std::get<PlainEntrySource>(reader->Catalog().At("data").source);
+        std::get<PlainEntrySource>(reader->Directory().At("data").source);
     EXPECT_EQ(calls[0].position, source.remote_offset);
     EXPECT_EQ(calls[0].nbytes, target.size());
     EXPECT_EQ(calls[0].destination, target.data());
@@ -776,9 +777,9 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto calls = direct_file->DirectReadCalls();
     ASSERT_EQ(calls.size(), 4);
     const auto& source_a =
-        std::get<PlainEntrySource>(reader->Catalog().At("a").source);
+        std::get<PlainEntrySource>(reader->Directory().At("a").source);
     const auto& source_b =
-        std::get<PlainEntrySource>(reader->Catalog().At("b").source);
+        std::get<PlainEntrySource>(reader->Directory().At("b").source);
     // Workers may start in any order. Complete each entry's second slice
     // before its first slice, independently of executor start order.
     std::vector<std::pair<int64_t, size_t>> positions;
@@ -1211,7 +1212,7 @@ TEST_F(AsyncIndexEntryReaderTest,
     auto reader = milvus::test::OpenDirectIndexEntryReader(std::move(packed),
                                                            &direct_file);
     const auto& source =
-        std::get<PlainEntrySource>(reader->Catalog().At("data").source);
+        std::get<PlainEntrySource>(reader->Directory().At("data").source);
     direct_file->CorruptRemoteByte(source.remote_offset + slice_size + 7);
 
     std::vector<EntryLoadPlan> entries;
@@ -1296,8 +1297,8 @@ TEST_F(AsyncIndexEntryReaderTest,
         auto reader = milvus::test::OpenDirectIndexEntryReader(
             ReadLocalFileBytes(GetRootPath() + "/" + file_path), &direct_file);
         if (outcome == Outcome::Corrupt) {
-            const auto& source =
-                std::get<PlainEntrySource>(reader->Catalog().At("data").source);
+            const auto& source = std::get<PlainEntrySource>(
+                reader->Directory().At("data").source);
             direct_file->CorruptRemoteByte(source.remote_offset + 7);
         }
         direct_file->SetAutoComplete(false);
@@ -1483,7 +1484,7 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
         writer.WriteEntry("other", other_data.data(), other_data.size());
         writer.Finish();
     }
-    // Read multiple encrypted entries in reverse catalog order to exercise
+    // Read multiple encrypted entries in reverse directory order to exercise
     // per-entry slice indices, distinct full slices, and partial final slices.
     for (const auto priority : {milvus::proto::common::LoadPriority::HIGH,
                                 milvus::proto::common::LoadPriority::LOW}) {
@@ -1503,16 +1504,16 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
                 other_target, other_target->data(), other_target->size()}});
         entries.push_back(EntryLoadPlan{
             "data", MemoryEntryTarget{target, target->data(), target->size()}});
-        ASSERT_EQ(
-            std::get<EncryptedEntrySource>(reader->Catalog().At("data").source)
-                .slices.size(),
-            3);
+        ASSERT_EQ(std::get<EncryptedEntrySource>(
+                      reader->Directory().At("data").source)
+                      .slices.size(),
+                  3);
         auto sync_input = CreateInputStream(path);
         auto sync_reader =
             IndexEntryReader::Open(sync_input, sync_input->Size(), 100);
         for (const auto* name : {"data", "other"}) {
-            const auto& sync_entry = sync_reader->Catalog().At(name);
-            const auto& async_entry = reader->Catalog().At(name);
+            const auto& sync_entry = sync_reader->Directory().At(name);
+            const auto& async_entry = reader->Directory().At(name);
             EXPECT_EQ(sync_entry.plaintext_size, async_entry.plaintext_size);
             EXPECT_EQ(sync_entry.expected_crc, async_entry.expected_crc);
             const auto& sync_slices =
@@ -1525,10 +1526,10 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
                           async_slices[i].remote_offset);
                 EXPECT_EQ(sync_slices[i].remote_bytes,
                           async_slices[i].remote_bytes);
-                EXPECT_EQ(sync_slices[i].target_offset,
-                          async_slices[i].target_offset);
-                EXPECT_EQ(sync_slices[i].target_bytes,
-                          async_slices[i].target_bytes);
+                EXPECT_EQ(sync_slices[i].plaintext_offset,
+                          async_slices[i].plaintext_offset);
+                EXPECT_EQ(sync_slices[i].plaintext_bytes,
+                          async_slices[i].plaintext_bytes);
             }
         }
         EXPECT_EQ(sync_reader->ReadEntry("data").data, data);
@@ -1548,4 +1549,48 @@ TEST_F(AsyncIndexEntryReaderTest, EncryptedMaterializationUsesSharedExecutor) {
                                       LoadAdmissionPriority::High));
         budget.Release({kStreamSliceAlignment, 1});
     }
+}
+
+TEST_F(AsyncIndexEntryReaderTest,
+       DirectoryParserValidatesSourceRangesAndNames) {
+    nlohmann::json json = {{"entries",
+                            {{{"name", "data"},
+                              {"offset", 0},
+                              {"size", 32},
+                              {"crc32", "00000000"}}}}};
+    auto parse = [&](int64_t file_size) {
+        const auto bytes = json.dump();
+        return ParseIndexEntryDirectory(
+            std::span(reinterpret_cast<const uint8_t*>(bytes.data()),
+                      bytes.size()),
+            file_size);
+    };
+    auto [directory, encryption] = parse(4096);
+    EXPECT_FALSE(encryption.has_value());
+    EXPECT_EQ(directory.At("data").plaintext_size, 32);
+    EXPECT_EQ(
+        std::get<PlainEntrySource>(directory.At("data").source).remote_offset,
+        MILVUS_V3_MAGIC_SIZE);
+    json["entries"].push_back(json["entries"][0]);
+    EXPECT_THROW(parse(4096), milvus::SegcoreError);
+    json["entries"].erase(1);
+    json["entries"][0]["offset"] = 4096;
+    EXPECT_THROW(parse(4096), milvus::SegcoreError);
+    json["__edek__"] = "key";
+    json["__ez_id__"] = "7";
+    json["slice_size"] = 4096;
+    json["entries"] = {{{"name", "data"},
+                        {"original_size", 33},
+                        {"crc32", "00000000"},
+                        {"slices", {{{"offset", 0}, {"size", 48}}}}}};
+    auto encrypted = parse(4096);
+    ASSERT_TRUE(encrypted.second.has_value());
+    EXPECT_EQ(encrypted.second->ez_id, 7);
+    EXPECT_EQ(encrypted.second->edek, "key");
+    const auto& source =
+        std::get<EncryptedEntrySource>(encrypted.first.At("data").source);
+    ASSERT_EQ(source.slices.size(), 1);
+    EXPECT_EQ(source.slices[0].plaintext_bytes, 33);
+    json["entries"][0]["original_size"] = 8192;
+    EXPECT_THROW(parse(4096), milvus::SegcoreError);
 }

@@ -1643,9 +1643,9 @@ TEST(BitmapIndexArrayNestedTest,
         ASSERT_NE(input, nullptr);
         auto reader = storage::IndexEntryReader::Open(input, input->Size());
         ASSERT_NE(reader, nullptr);
-        EXPECT_FALSE(reader->Catalog().HasMeta(INDEX_TYPE));
-        EXPECT_TRUE(reader->Catalog().HasMeta("version"));
-        EXPECT_TRUE(reader->Catalog().HasMeta("num_rows"));
+        EXPECT_FALSE(reader->IndexMeta().contains(INDEX_TYPE));
+        EXPECT_TRUE(reader->IndexMeta().contains("version"));
+        EXPECT_TRUE(reader->IndexMeta().contains("num_rows"));
     }
 
     // Now load that STLSORT file through the HYBRID (nested) index path.

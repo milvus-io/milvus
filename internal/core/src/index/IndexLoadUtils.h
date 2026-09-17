@@ -28,15 +28,14 @@ namespace milvus::index {
 
 template <typename T>
 T
-ReadRequiredIndexMeta(const storage::IndexEntryCatalog& source,
-                      const char* key) {
-    if (!source.HasMeta(key)) {
+ReadRequiredIndexMeta(const nlohmann::json& source, const char* key) {
+    if (!source.contains(key)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt scalar index: required metadata '{}' is missing",
                   key);
     }
     try {
-        return source.GetMeta<T>(key);
+        return source.at(key).get<T>();
     } catch (const SegcoreError&) {
         throw;
     } catch (const std::bad_alloc&) {
@@ -69,14 +68,15 @@ struct IndexDirectoryLoadContext {
 };
 
 inline std::shared_ptr<IndexDirectoryLoadContext>
-PlanIndexDirectory(const storage::IndexEntryCatalog& catalog,
+PlanIndexDirectory(const storage::IndexEntryDirectory& directory,
+                   const nlohmann::json& metadata,
                    const std::shared_ptr<storage::DiskFileManagerImpl>& manager,
                    bool retain_on_success,
                    IndexLoadPlan& plan) {
     AssertInfo(manager != nullptr, "Directory load requires DiskFileManager");
     auto context = std::make_shared<IndexDirectoryLoadContext>();
     const auto file_names =
-        ReadRequiredIndexMeta<std::vector<std::string>>(catalog, "file_names");
+        ReadRequiredIndexMeta<std::vector<std::string>>(metadata, "file_names");
     if (file_names.empty()) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt scalar index: file_names is empty");
@@ -87,7 +87,7 @@ PlanIndexDirectory(const storage::IndexEntryCatalog& catalog,
         const auto path = std::filesystem::path(name);
         if (name.empty() || path.is_absolute() || path.has_parent_path() ||
             path.filename() != path || name == "." || name == ".." ||
-            !names.insert(name).second || !catalog.HasEntry(name)) {
+            !names.insert(name).second || !directory.HasEntry(name)) {
             ThrowInfo(
                 ErrorCode::DataFormatBroken,
                 "corrupt scalar index: invalid, duplicate or missing file '{}'",
@@ -100,7 +100,7 @@ PlanIndexDirectory(const storage::IndexEntryCatalog& catalog,
     context->files.reserve(file_names.size());
     plan.entries.reserve(plan.entries.size() + file_names.size());
     for (const auto& name : file_names) {
-        const auto size = catalog.At(name).plaintext_size;
+        const auto size = directory.At(name).plaintext_size;
         auto file =
             std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
                 context->path + "/" + name, size, retain_on_success, nullptr});

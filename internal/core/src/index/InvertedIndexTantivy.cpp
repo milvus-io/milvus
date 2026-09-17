@@ -1028,9 +1028,9 @@ template <typename T>
 void
 InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
                                      const Config& config) {
-    auto file_names =
-        reader.Catalog().GetMeta<std::vector<std::string>>("file_names");
-    bool has_null = reader.Catalog().GetMeta<bool>("has_null");
+    auto file_names = ReadRequiredIndexMeta<std::vector<std::string>>(
+        reader.IndexMeta(), "file_names");
+    bool has_null = ReadRequiredIndexMeta<bool>(reader.IndexMeta(), "has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);
@@ -1076,25 +1076,26 @@ InvertedIndexTantivy<T>::LoadEntries(storage::IndexEntryReader& reader,
 
 template <typename T>
 IndexLoadPlan
-InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+InvertedIndexTantivy<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                                  const nlohmann::json& metadata,
                                   const Config& config) {
     auto context = std::make_shared<TantivyLoadContext>();
-    context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
+    context->has_null = ReadRequiredIndexMeta<bool>(metadata, "has_null");
     context->load_in_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
     IndexLoadPlan plan;
     plan.load_context = context;
     context->directory = PlanIndexDirectory(
-        catalog, disk_file_manager_, context->load_in_mmap, plan);
+        directory, metadata, disk_file_manager_, context->load_in_mmap, plan);
 
     if (!context->has_null) {
         return plan;
     }
-    if (!catalog.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
+    if (!directory.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt Tantivy index: null-offset Entry is missing");
     }
-    auto null_bytes = catalog.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
+    auto null_bytes = directory.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
     if (null_bytes % sizeof(size_t) != 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt Tantivy index: null-offset Entry size {} is not "

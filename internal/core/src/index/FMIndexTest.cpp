@@ -1913,7 +1913,7 @@ class ExposedFMIndex : public index::FMIndex {
     LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
                       const Config& config,
                       proto::common::LoadPriority priority) {
-        auto plan = PlanLoad(reader.Catalog(), config);
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
@@ -2050,7 +2050,8 @@ TEST(FMIndexV3AsyncLoadTest, PackedNullBitmapPreservesRowsAndRejectsTailBits) {
                 index::FMIndex load_index(fixture.ctx, {});
                 Config config;
                 config[index::ENABLE_MMAP] = mmap;
-                auto plan = load_index.PlanLoad(reader->Catalog(), config);
+                auto plan = load_index.PlanLoad(
+                    reader->Directory(), reader->IndexMeta(), config);
                 auto entry = std::find_if(
                     plan.entries.begin(),
                     plan.entries.end(),

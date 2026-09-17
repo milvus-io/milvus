@@ -145,7 +145,7 @@ class ExposedInvertedIndexTantivy
     LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
                       const Config& config,
                       proto::common::LoadPriority priority) {
-        auto plan = PlanLoad(reader.Catalog(), config);
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/IndexLoadUtils.h"
 #include "index/IndexFactory.h"
 
 #include "folly/coro/WithCancellation.h"
@@ -823,12 +824,13 @@ IndexFactory::ScalarIndexFileLoadResource(
                             storage::ResolveAsyncLoadExecutor(
                                 {}, proto::common::LoadPriority::HIGH)))
                       : folly::coro::blockingWait(inspect());
-    const auto& catalog = reader->Catalog();
+    const auto& directory = reader->Directory();
+    const auto& metadata = reader->IndexMeta();
     auto resolved_params = index_params;
     if (resolved_params.at("index_type") == HYBRID_INDEX_TYPE) {
         auto config = ParseConfigFromIndexParams(index_params);
         config[INDEX_FILES] = index_files;
-        const auto type = ResolvePackedHybridIndexType(catalog, config);
+        const auto type = ResolvePackedHybridIndexType(metadata, config);
         const auto resolved = HybridInternalIndexTypeToIndexType(type);
         AssertInfo(!resolved.empty(),
                    "Unknown async hybrid index type {}",
@@ -845,24 +847,24 @@ IndexFactory::ScalarIndexFileLoadResource(
     storage::EntryStreamLoadInfo legacy_stream;
     uint64_t total_transient = 0;
     uint64_t max_task = 0;
-    for (const auto& entry : catalog.Entries()) {
+    for (const auto& entry : directory.Entries()) {
         if (const auto* encrypted =
                 std::get_if<storage::EncryptedEntrySource>(&entry.source)) {
             legacy_stream.encrypted = true;
             for (const auto& slice : encrypted->slices) {
                 auto bytes = SaturatingAdd(
                     milvus::SaturatingMultiply(slice.remote_bytes, uint64_t{2}),
-                    slice.target_bytes);
+                    slice.plaintext_bytes);
                 if (may_write_files) {
                     bytes = SaturatingAdd(
                         bytes,
                         SaturatingAdd(
-                            slice.target_bytes,
+                            slice.plaintext_bytes,
                             uint64_t{2 * storage::FileWriter::ALIGNMENT_MASK}));
                 }
                 const auto legacy_bytes = SaturatingAdd(
                     slice.remote_bytes,
-                    SaturatingMultiply(slice.target_bytes, uint64_t{2}));
+                    SaturatingMultiply(slice.plaintext_bytes, uint64_t{2}));
                 legacy_stream.total_transient_bytes = SaturatingAdd(
                     legacy_stream.total_transient_bytes, legacy_bytes);
                 legacy_stream.max_task_transient_bytes = std::max(
@@ -906,35 +908,37 @@ IndexFactory::ScalarIndexFileLoadResource(
                                                             legacy_peak);
     uint64_t staging_bytes = 0;
     if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
-        catalog.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
+        directory.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
         // The whole sidecar survives until FinalizeSealed builds validity.
-        staging_bytes = catalog.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
+        staging_bytes =
+            directory.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
     } else if (type == BITMAP_INDEX_TYPE) {
         const bool loads_to_mmap =
-            mmap_enable && catalog.GetMeta<size_t>(BITMAP_INDEX_LENGTH) >
-                               DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+            mmap_enable &&
+            ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_LENGTH) >
+                DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
         if (!loads_to_mmap) {
-            staging_bytes = catalog.At(BITMAP_INDEX_DATA).plaintext_size;
+            staging_bytes = directory.At(BITMAP_INDEX_DATA).plaintext_size;
             mmap_enable = false;
         }
-        if (!use_async_load && catalog.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
+        if (!use_async_load && directory.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
             staging_bytes = SaturatingAdd(
                 staging_bytes,
-                catalog.At(BITMAP_INDEX_VALID_BITSET).plaintext_size);
+                directory.At(BITMAP_INDEX_VALID_BITSET).plaintext_size);
         }
     }
     // Async packed bitmaps are read into their final allocation. Synchronous
     // loaders still retain a packed sidecar while constructing TargetBitmap.
     if (!use_async_load && type == FMINDEX_INDEX_TYPE &&
-        catalog.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        directory.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
         staging_bytes = SaturatingAdd(
             staging_bytes,
-            catalog.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size);
+            directory.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size);
     }
     if (!use_async_load && type == ASCENDING_SORT &&
-        catalog.HasMeta("version") && catalog.HasEntry("valid_bitset")) {
+        metadata.contains("version") && directory.HasEntry("valid_bitset")) {
         staging_bytes = SaturatingAdd(
-            staging_bytes, catalog.At("valid_bitset").plaintext_size);
+            staging_bytes, directory.At("valid_bitset").plaintext_size);
     }
     auto request = ScalarIndexLoadResourceWithOverhead(field_type,
                                                        index_size,
@@ -946,14 +950,14 @@ IndexFactory::ScalarIndexFileLoadResource(
         request.max_memory_cost = SaturatingAdd(
             request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);
     }
-    if (type == RTREE_INDEX_TYPE && catalog.HasEntry("index_null_offset")) {
+    if (type == RTREE_INDEX_TYPE && directory.HasEntry("index_null_offset")) {
         request.final_memory_cost =
-            catalog.At("index_null_offset").plaintext_size;
+            directory.At("index_null_offset").plaintext_size;
     }
     if (field_type == DataType::JSON) {
         const auto non_exist_bytes =
-            catalog.HasEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME)
-                ? catalog.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size
+            directory.HasEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME)
+                ? directory.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size
                 : uint64_t{0};
         request.final_memory_cost = SaturatingAdd(
             request.final_memory_cost,

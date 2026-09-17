@@ -16,52 +16,87 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
-#include <unordered_map>
+#include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 #include "filemanager/InputStream.h"
 #include "folly/CancellationToken.h"
 #include "storage/IndexEntryWriter.h"
+#include "common/EasyAssert.h"
 
 namespace milvus::storage {
-struct EntryStreamLoadInfo {
-    // Exact encrypted-stream task bounds derived from persisted V3 directory
-    // slice metadata. Plaintext files leave both byte counts at zero.
-    bool encrypted{false};
-    size_t total_transient_bytes{0};
-    size_t max_task_transient_bytes{0};
-};
-struct PlainIndexEntryMeta {
-    uint64_t offset;
-    uint64_t size;
-    uint32_t crc32;
+
+// File encryption header. Readers own it alongside their decryption resources.
+struct IndexFileEncryption {
+    std::string edek;
+    int64_t ez_id;
 };
 
-struct EncryptedIndexEntryMeta {
-    uint64_t original_size;
-    uint32_t crc32;
-    std::vector<SliceMeta> slices;
+struct PlainEntrySource {
+    // Absolute offset in the packed V3 object.
+    uint64_t remote_offset;
+};
+struct EncryptedSliceSource {
+    uint64_t remote_offset;
+    size_t remote_bytes;
+    size_t plaintext_offset;
+    size_t plaintext_bytes;
+};
+struct EncryptedEntrySource {
+    std::vector<EncryptedSliceSource> slices;
 };
 
-struct IndexEntryMeta {
-    bool encrypted;
-    PlainIndexEntryMeta plain;
-    EncryptedIndexEntryMeta enc;
+// Describes an entry in the source file; does not own loaded entry data.
+struct EntryMeta {
+    std::string name;
+    size_t plaintext_size;
+    uint32_t expected_crc;
+    std::variant<PlainEntrySource, EncryptedEntrySource> source;
 };
 
-// Format metadata only: no executor, budget, decoded-entry cache or load policy.
-struct IndexEntryDirectory {
-    bool is_encrypted_{false};
-    std::string edek_;
-    int64_t ez_id_{0};
-    size_t slice_size_{0};
-    std::unordered_map<std::string, IndexEntryMeta> entry_index_;
-    EntryStreamLoadInfo stream_load_info_;
+// Validated entry locations, with absolute offsets. No I/O or load state.
+class IndexEntryDirectory {
+ public:
+    const std::vector<EntryMeta>&
+    Entries() const noexcept {
+        return entries_;
+    }
+
+    const std::vector<std::string>&
+    EntryNames() const noexcept {
+        return entry_names_;
+    }
+
+    const EntryMeta&
+    At(std::string_view name) const;
+
+    bool
+    HasEntry(std::string_view name) const noexcept {
+        const auto it =
+            std::lower_bound(entries_.begin(),
+                             entries_.end(),
+                             name,
+                             [](const auto& entry, std::string_view key) {
+                                 return entry.name < key;
+                             });
+        return it != entries_.end() && it->name == name;
+    }
+
+ private:
+    friend std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
+        ParseIndexEntryDirectory(std::span<const uint8_t>, int64_t);
+
+    // Preserve persisted order independently of the sorted lookup table.
     std::vector<std::string> entry_names_;
+    std::vector<EntryMeta> entries_;
 };
 
 // Validate footer bounds and return the directory byte count.
@@ -69,11 +104,11 @@ size_t
 IndexEntryDirectorySize(std::span<const uint8_t> footer, int64_t file_size);
 
 // Parse already-read directory bytes; no I/O or executor selection.
-IndexEntryDirectory
-ParseIndexEntryDirectory(std::span<const uint8_t> bytes);
+std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
+ParseIndexEntryDirectory(std::span<const uint8_t> bytes, int64_t file_size);
 
 // Reads the V3 directory using the caller's input stream; never schedules work.
-IndexEntryDirectory
+std::pair<IndexEntryDirectory, std::optional<IndexFileEncryption>>
 ReadIndexEntryDirectory(const std::shared_ptr<milvus::InputStream>& input,
                         int64_t file_size,
                         const folly::CancellationToken& token);

@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/IndexLoadUtils.h"
 #include "index/StringIndexSort.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
@@ -643,11 +644,12 @@ StringIndexSort::WriteEntries(storage::IndexEntryWriter* writer) {
 }
 
 IndexLoadPlan
-StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
+StringIndexSort::PlanLoad(const storage::IndexEntryDirectory& directory,
+                          const nlohmann::json& metadata,
                           const Config& config) {
     static_assert(std::endian::native == std::endian::little,
                   "Direct packed bitmap reads require little-endian words");
-    auto version = catalog.GetMeta<uint32_t>("version");
+    auto version = ReadRequiredIndexMeta<uint32_t>(metadata, "version");
     AssertInfo(version == SERIALIZATION_VERSION,
                "Unsupported StringIndexSort serialization version: {}, "
                "expected: {}",
@@ -655,11 +657,13 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
                SERIALIZATION_VERSION);
 
     auto context = std::make_shared<StringSortLoadContext>();
-    context->total_num_rows = catalog.GetMeta<size_t>("num_rows");
-    context->is_nested = is_nested_index_ || catalog.GetMeta<bool>("is_nested");
+    context->total_num_rows =
+        ReadRequiredIndexMeta<size_t>(metadata, "num_rows");
+    context->is_nested =
+        is_nested_index_ || ReadRequiredIndexMeta<bool>(metadata, "is_nested");
     context->is_mmap = config.contains(MMAP_FILE_PATH);
-    context->index_data_bytes = catalog.At("index_data").plaintext_size;
-    context->has_persisted_offsets = catalog.HasEntry("idx_to_offsets");
+    context->index_data_bytes = directory.At("index_data").plaintext_size;
+    context->has_persisted_offsets = directory.HasEntry("idx_to_offsets");
 
     AssertInfo(context->total_num_rows <=
                    std::numeric_limits<size_t>::max() / sizeof(int32_t),
@@ -667,11 +671,11 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
                context->total_num_rows);
     context->offsets_bytes = context->total_num_rows * sizeof(int32_t);
     if (context->has_persisted_offsets) {
-        AssertInfo(catalog.At("idx_to_offsets").plaintext_size ==
+        AssertInfo(directory.At("idx_to_offsets").plaintext_size ==
                        context->offsets_bytes,
                    "invalid idx_to_offsets size: expected {}, got {}",
                    context->offsets_bytes,
-                   catalog.At("idx_to_offsets").plaintext_size);
+                   directory.At("idx_to_offsets").plaintext_size);
     }
 
     AssertInfo(
@@ -679,11 +683,11 @@ StringIndexSort::PlanLoad(const storage::IndexEntryCatalog& catalog,
         "StringIndexSort valid bitset size overflow for {} rows",
         context->total_num_rows);
     auto expected_valid_bitset_bytes = (context->total_num_rows + 7) / 8;
-    AssertInfo(catalog.At("valid_bitset").plaintext_size ==
+    AssertInfo(directory.At("valid_bitset").plaintext_size ==
                    expected_valid_bitset_bytes,
                "invalid valid_bitset size: expected {}, got {}",
                expected_valid_bitset_bytes,
-               catalog.At("valid_bitset").plaintext_size);
+               directory.At("valid_bitset").plaintext_size);
     context->valid_bitset =
         std::make_shared<TargetBitmap>(context->total_num_rows, false);
 
@@ -842,7 +846,8 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                              const Config& config) {
     config_ = config;
 
-    uint32_t version = reader.Catalog().GetMeta<uint32_t>("version");
+    uint32_t version =
+        ReadRequiredIndexMeta<uint32_t>(reader.IndexMeta(), "version");
     if (version != SERIALIZATION_VERSION) {
         ThrowInfo(milvus::ErrorCode::Unsupported,
                   fmt::format("Unsupported StringIndexSort serialization "
@@ -850,9 +855,10 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
                               version,
                               SERIALIZATION_VERSION));
     }
-    total_num_rows_ = reader.Catalog().GetMeta<size_t>("num_rows");
-    is_nested_index_ =
-        is_nested_index_ || reader.Catalog().GetMeta<bool>("is_nested");
+    total_num_rows_ =
+        ReadRequiredIndexMeta<size_t>(reader.IndexMeta(), "num_rows");
+    is_nested_index_ = is_nested_index_ || ReadRequiredIndexMeta<bool>(
+                                               reader.IndexMeta(), "is_nested");
 
     // valid_bitset is small (num_rows/8 bytes), keep as ReadEntry
     auto valid_bitset_entry = reader.ReadEntry("valid_bitset");
@@ -918,7 +924,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             fw.Finish();
         }
 
-        if (reader.Catalog().HasEntry("idx_to_offsets")) {
+        if (reader.Directory().HasEntry("idx_to_offsets")) {
             // Stream idx_to_offsets to meta file, then mmap it
             mmap_meta_filepath_ = mmap_path + "-meta";
             size_t offsets_bytes = get_idx_to_offsets_bytes();

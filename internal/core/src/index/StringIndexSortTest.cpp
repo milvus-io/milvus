@@ -59,7 +59,7 @@ class ExposedStringIndexSort : public StringIndexSort {
     LoadDirectForTest(storage::AsyncIndexEntryReader& reader,
                       const Config& config,
                       proto::common::LoadPriority priority) {
-        auto plan = PlanLoad(reader.Catalog(), config);
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(
@@ -231,7 +231,8 @@ TEST(StringIndexSortV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
                 milvus::test::ControlledDirectReadFile* remote_file = nullptr;
                 auto reader = milvus::test::OpenDirectIndexEntryReader(
                     packed, &remote_file);
-                auto plan = load_index.PlanLoad(reader->Catalog(), config);
+                auto plan = load_index.PlanLoad(
+                    reader->Directory(), reader->IndexMeta(), config);
                 auto entry =
                     std::find_if(plan.entries.begin(),
                                  plan.entries.end(),

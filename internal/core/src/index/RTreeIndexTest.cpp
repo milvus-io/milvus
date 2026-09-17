@@ -2240,7 +2240,7 @@ class ExposedRTreeIndex : public milvus::index::RTreeIndex<std::string> {
     LoadDirectForTest(milvus::storage::AsyncIndexEntryReader& reader,
                       const milvus::Config& config,
                       milvus::proto::common::LoadPriority priority) {
-        auto plan = PlanLoad(reader.Catalog(), config);
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
         auto artifact = folly::coro::blockingWait(
             reader.ReadEntriesAsync(std::move(plan.entries), priority));
         folly::coro::blockingWait(

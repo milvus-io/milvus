@@ -32,7 +32,7 @@
 
 #include "common/EasyAssert.h"
 #include "pb/common.pb.h"
-#include "storage/IndexEntryCatalog.h"
+#include "storage/IndexEntryDirectory.h"
 #include "storage/StagingIndexFile.h"
 
 namespace milvus::storage {
@@ -65,7 +65,7 @@ EntryTargetSize(const EntryTarget& target) {
 }
 
 // Index code chooses destinations; AsyncIndexEntryReader derives slices and CRCs
-// from the immutable catalog.
+// from the immutable directory.
 struct EntryLoadPlan {
     std::string name;
     EntryTarget target;

@@ -305,7 +305,9 @@ class ScalarIndex : public IndexBase {
     // Describe final targets before IO; AsyncIndexEntryReader fills them.
     // Public so Hybrid can delegate both stages to its internal scalar index.
     virtual IndexLoadPlan
-    PlanLoad(const storage::IndexEntryCatalog& catalog, const Config& config) {
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
+             const Config& config) {
         ThrowInfo(Unsupported, "Async V3 load planning is not implemented");
     }
 

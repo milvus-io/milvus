@@ -240,11 +240,13 @@ NgramInvertedIndex::LoadEntries(storage::IndexEntryReader& reader,
 }
 
 IndexLoadPlan
-NgramInvertedIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
+NgramInvertedIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
+                             const nlohmann::json& metadata,
                              const Config& config) {
-    auto plan = InvertedIndexTantivy<std::string>::PlanLoad(catalog, config);
+    auto plan = InvertedIndexTantivy<std::string>::PlanLoad(
+        directory, metadata, config);
     auto avg_row_size_bytes =
-        catalog.At(NGRAM_AVG_ROW_SIZE_FILE_NAME).plaintext_size;
+        directory.At(NGRAM_AVG_ROW_SIZE_FILE_NAME).plaintext_size;
     AssertInfo(avg_row_size_bytes == sizeof(size_t),
                "invalid ngram avg_row_size Entry size: expected {}, got {}",
                sizeof(size_t),

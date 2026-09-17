@@ -23,12 +23,15 @@
 namespace milvus::index {
 inline void
 AppendJsonNonExistOffsetsPlan(IndexLoadPlan& plan,
-                              const storage::IndexEntryCatalog& catalog) {
-    if (!catalog.GetMeta<bool>("has_non_exist", false)) {
+                              const storage::IndexEntryDirectory& directory,
+                              const nlohmann::json& metadata) {
+    if (!(metadata.contains("has_non_exist")
+              ? metadata.at("has_non_exist").get<bool>()
+              : false)) {
         return;
     }
     const auto bytes =
-        catalog.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size;
+        directory.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size;
     AssertInfo(bytes % sizeof(size_t) == 0,
                "invalid non_exist_offsets Entry size {}",
                bytes);

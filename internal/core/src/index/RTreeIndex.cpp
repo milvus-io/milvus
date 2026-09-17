@@ -822,9 +822,9 @@ template <typename T>
 void
 RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                            const Config& config) {
-    auto file_names =
-        reader.Catalog().GetMeta<std::vector<std::string>>("file_names");
-    bool has_null = reader.Catalog().GetMeta<bool>("has_null");
+    auto file_names = ReadRequiredIndexMeta<std::vector<std::string>>(
+        reader.IndexMeta(), "file_names");
+    bool has_null = ReadRequiredIndexMeta<bool>(reader.IndexMeta(), "has_null");
 
     path_ = disk_file_manager_->GetLocalIndexObjectPrefix();
     boost::filesystem::create_directories(path_);
@@ -903,15 +903,16 @@ RTreeIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
 
 template <typename T>
 IndexLoadPlan
-RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
+RTreeIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
+                        const nlohmann::json& metadata,
                         const Config& config) {
     (void)config;
     auto context = std::make_shared<RTreeLoadContext>();
-    context->has_null = ReadRequiredIndexMeta<bool>(catalog, "has_null");
+    context->has_null = ReadRequiredIndexMeta<bool>(metadata, "has_null");
     IndexLoadPlan plan;
     plan.load_context = context;
     context->directory =
-        PlanIndexDirectory(catalog, disk_file_manager_, true, plan);
+        PlanIndexDirectory(directory, metadata, disk_file_manager_, true, plan);
     for (const auto& file : context->directory->files) {
         const auto& local = file->path;
         if (ends_with(local, ".bgi")) {
@@ -933,11 +934,11 @@ RTreeIndex<T>::PlanLoad(const storage::IndexEntryCatalog& catalog,
         return plan;
     }
     static constexpr std::string_view kNullEntry = "index_null_offset";
-    if (!catalog.HasEntry(kNullEntry)) {
+    if (!directory.HasEntry(kNullEntry)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt RTree index: null-offset Entry is missing");
     }
-    auto null_bytes = catalog.At(kNullEntry).plaintext_size;
+    auto null_bytes = directory.At(kNullEntry).plaintext_size;
     if (null_bytes % sizeof(size_t) != 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt RTree index: null-offset Entry size {} is not a "

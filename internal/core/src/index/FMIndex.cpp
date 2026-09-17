@@ -608,10 +608,10 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   field_id_,
                   schema_.data_type());
     }
-    total_rows_ = ReadRequiredIndexMeta<int64_t>(reader.Catalog(),
+    total_rows_ = ReadRequiredIndexMeta<int64_t>(reader.IndexMeta(),
                                                  FMINDEX_META_TOTAL_ROWS);
     bool nullable =
-        ReadRequiredIndexMeta<bool>(reader.Catalog(), FMINDEX_META_NULLABLE);
+        ReadRequiredIndexMeta<bool>(reader.IndexMeta(), FMINDEX_META_NULLABLE);
     if (total_rows_ < 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: total_rows is negative ({})",
@@ -624,7 +624,7 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
                   nullable,
                   schema_.nullable());
     }
-    if (!reader.Catalog().HasEntry(FMINDEX_BLOB_FILE_NAME)) {
+    if (!reader.Directory().HasEntry(FMINDEX_BLOB_FILE_NAME)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: blob entry '{}' is missing",
                   FMINDEX_BLOB_FILE_NAME);
@@ -745,7 +745,7 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
     // a null row and a genuine empty string are the same empty document.
     null_bitmap_ = TargetBitmap(total_rows_);
     if (nullable) {
-        if (!reader.Catalog().HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+        if (!reader.Directory().HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "corrupt FM index: nullable field is missing null bitmap "
                       "entry");
@@ -791,7 +791,8 @@ FMIndex::LoadEntries(storage::IndexEntryReader& reader, const Config& config) {
 }
 
 IndexLoadPlan
-FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
+FMIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
+                  const nlohmann::json& metadata,
                   const Config& config) {
     if (!IsSupportedFMIndexDataType(schema_.data_type())) {
         ThrowInfo(ErrorCode::DataFormatBroken,
@@ -803,9 +804,9 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
 
     auto context = std::make_shared<FMIndexLoadContext>();
     context->total_rows =
-        ReadRequiredIndexMeta<int64_t>(catalog, FMINDEX_META_TOTAL_ROWS);
+        ReadRequiredIndexMeta<int64_t>(metadata, FMINDEX_META_TOTAL_ROWS);
     context->nullable =
-        ReadRequiredIndexMeta<bool>(catalog, FMINDEX_META_NULLABLE);
+        ReadRequiredIndexMeta<bool>(metadata, FMINDEX_META_NULLABLE);
     if (context->total_rows < 0) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: total_rows is negative ({})",
@@ -818,13 +819,13 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
                   context->nullable,
                   schema_.nullable());
     }
-    if (!catalog.HasEntry(FMINDEX_BLOB_FILE_NAME)) {
+    if (!directory.HasEntry(FMINDEX_BLOB_FILE_NAME)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: blob entry '{}' is missing",
                   FMINDEX_BLOB_FILE_NAME);
     }
 
-    context->blob_size = catalog.At(FMINDEX_BLOB_FILE_NAME).plaintext_size;
+    context->blob_size = directory.At(FMINDEX_BLOB_FILE_NAME).plaintext_size;
     context->use_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true) &&
         disk_file_manager_ != nullptr;
@@ -863,7 +864,7 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
     if (!context->nullable) {
         return plan;
     }
-    if (!catalog.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
+    if (!directory.HasEntry(FMINDEX_NULL_BITMAP_FILE_NAME)) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: nullable field is missing null bitmap "
                   "entry");
@@ -872,7 +873,7 @@ FMIndex::PlanLoad(const storage::IndexEntryCatalog& catalog,
     auto expected_null_bytes = static_cast<size_t>(
         total_rows / 8 + static_cast<uint64_t>(total_rows % 8 != 0));
     auto actual_null_bytes =
-        catalog.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size;
+        directory.At(FMINDEX_NULL_BITMAP_FILE_NAME).plaintext_size;
     if (actual_null_bytes != expected_null_bytes) {
         ThrowInfo(ErrorCode::DataFormatBroken,
                   "corrupt FM index: null bitmap entry is {} bytes, expected "

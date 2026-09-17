@@ -51,7 +51,7 @@ ScalarIndex<T>::LoadUnifiedAsync(const std::string& packed_file,
         GetValueFromConfig<int64_t>(config, COLLECTION_ID).value_or(0);
     auto reader = co_await storage::AsyncIndexEntryReader::Open(
         std::move(input), collection_id, load_priority, cancellation_token);
-    auto plan = PlanLoad(reader->Catalog(), config);
+    auto plan = PlanLoad(reader->Directory(), reader->IndexMeta(), config);
     const bool has_file_targets = std::any_of(
         plan.entries.begin(), plan.entries.end(), [](const auto& entry) {
             return std::holds_alternative<storage::FileEntryTarget>(

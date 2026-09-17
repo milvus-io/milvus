@@ -31,7 +31,6 @@
 #include "nlohmann/json.hpp"
 #include "storage/FileWriter.h"
 #include "storage/IndexEntryFormat.h"
-#include "storage/IndexEntryCatalog.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -43,6 +42,13 @@ DefaultEntryStreamSliceSize();
 
 struct Entry {
     std::vector<uint8_t> data;
+};
+
+// Bounds for the synchronous encrypted entry-stream implementation.
+struct EntryStreamLoadInfo {
+    bool encrypted{false};
+    size_t total_transient_bytes{0};
+    size_t max_task_transient_bytes{0};
 };
 
 class IndexEntryReader {
@@ -111,9 +117,15 @@ class IndexEntryReader {
     GetEntrySize(const std::string& name) const;
 
     // Immutable metadata available immediately after Open(); no I/O.
-    const IndexEntryCatalog&
-    Catalog() const noexcept {
-        return catalog_;
+    const IndexEntryDirectory&
+    Directory() const noexcept {
+        return directory_;
+    }
+
+    // Index properties decoded from the metadata entry (not entry locations).
+    const nlohmann::json&
+    IndexMeta() const noexcept {
+        return metadata_;
     }
 
     IndexEntryReader(const IndexEntryReader&) = delete;
@@ -131,19 +143,19 @@ class IndexEntryReader {
     CheckCancelled(const std::string& operation) const;
 
     Entry
-    ReadPlainEntry(const IndexEntryCatalogEntry& meta);
+    ReadPlainEntry(const EntryMeta& meta);
     Entry
-    ReadEncryptedEntry(const IndexEntryCatalogEntry& meta);
+    ReadEncryptedEntry(const EntryMeta& meta);
 
     void
-    ReadPlainEntryStream(const IndexEntryCatalogEntry& meta,
+    ReadPlainEntryStream(const EntryMeta& meta,
                          const std::function<void(const uint8_t* data,
                                                   size_t len)>& slice_consumer,
                          size_t slice_size);
 
     void
     ReadEncryptedEntryStream(
-        const IndexEntryCatalogEntry& meta,
+        const EntryMeta& meta,
         const std::function<void(const uint8_t* data, size_t len)>&
             slice_consumer);
 
@@ -177,11 +189,11 @@ class IndexEntryReader {
     EntryDownloadState
     PrepareEntryDownload(const std::string& name,
                          const std::string& local_path,
-                         const IndexEntryCatalogEntry& meta);
+                         const EntryMeta& meta);
 
     // Submit download tasks for an entry to the futures vector (does not wait)
     void
-    SubmitEntryDownloadTasks(const IndexEntryCatalogEntry& meta,
+    SubmitEntryDownloadTasks(const EntryMeta& meta,
                              EntryDownloadState& state,
                              std::vector<std::future<void>>& futures);
 
@@ -189,7 +201,7 @@ class IndexEntryReader {
     DownloadRangeCount(uint64_t size);
 
     static size_t
-    DownloadTaskCount(const IndexEntryCatalogEntry& meta);
+    DownloadTaskCount(const EntryMeta& meta);
 
     // Verify CRC and close file descriptor
     void
@@ -198,16 +210,16 @@ class IndexEntryReader {
     EntryStreamDownloadState
     PrepareEntryStreamDownload(const std::string& name,
                                const std::string& local_path,
-                               const IndexEntryCatalogEntry& meta,
+                               const EntryMeta& meta,
                                io::Priority write_priority);
 
     void
-    SubmitEntryStreamDownloadTasks(const IndexEntryCatalogEntry& meta,
+    SubmitEntryStreamDownloadTasks(const EntryMeta& meta,
                                    EntryStreamDownloadState& state,
                                    std::vector<std::future<void>>& futures);
 
     static size_t
-    StreamDownloadTaskCount(const IndexEntryCatalogEntry& meta);
+    StreamDownloadTaskCount(const EntryMeta& meta);
 
     void
     FinalizeEntryStreamDownload(EntryStreamDownloadState& state);
@@ -218,13 +230,12 @@ class IndexEntryReader {
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
     folly::CancellationToken cancellation_token_;
 
-    bool is_encrypted_ = false;
-    std::string edek_;
-    int64_t ez_id_ = 0;
+    std::optional<IndexFileEncryption> encryption_;
 
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
-    IndexEntryCatalog catalog_;
+    IndexEntryDirectory directory_;
+    nlohmann::json metadata_;
     EntryStreamLoadInfo stream_load_info_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;

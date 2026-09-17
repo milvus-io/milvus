@@ -19,11 +19,12 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include "nlohmann/json.hpp"
 #include "filemanager/InputStream.h"
 #include "folly/CancellationToken.h"
 #include "folly/coro/Task.h"
 #include "pb/common.pb.h"
-#include "storage/IndexEntryCatalog.h"
+#include "storage/IndexEntryFormat.h"
 #include "storage/IndexLoadPlan.h"
 #include "storage/plugin/PluginInterface.h"
 
@@ -42,11 +43,17 @@ class AsyncIndexEntryReader {
          proto::common::LoadPriority priority,
          folly::CancellationToken token = {});
 
-    // Immutable entry layout and index metadata, used for destination planning
+    // Immutable entry layout, used for destination planning
     // and resource estimates. No I/O; the reference lives as long as this reader.
-    const IndexEntryCatalog&
-    Catalog() const noexcept {
-        return catalog_;
+    const IndexEntryDirectory&
+    Directory() const noexcept {
+        return directory_;
+    }
+
+    // Index properties decoded from the metadata entry (not entry locations).
+    const nlohmann::json&
+    IndexMeta() const noexcept {
+        return metadata_;
     }
 
     // Fill the entry targets on the shared async executor. Publish the first
@@ -60,10 +67,10 @@ class AsyncIndexEntryReader {
  private:
     AsyncIndexEntryReader() = default;
 
-    // Entry and slice come from the validated catalog and BuildSlices(). The
+    // Entry and slice come from the validated directory and BuildSlices(). The
     // caller owns the destination and admission lease through CRC and file-write completion.
     folly::coro::Task<void>
-    ReadSliceIntoAsync(const IndexEntryCatalogEntry& entry,
+    ReadSliceIntoAsync(const EntryMeta& entry,
                        size_t slice_index,
                        uint64_t offset,
                        std::span<uint8_t> destination,
@@ -86,10 +93,10 @@ class AsyncIndexEntryReader {
 
     std::shared_ptr<milvus::InputStream> input_;
     int64_t collection_id_{0};
-    std::string edek_;
-    int64_t ez_id_{0};
+    std::optional<IndexFileEncryption> encryption_;
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
-    IndexEntryCatalog catalog_;
+    IndexEntryDirectory directory_;
+    nlohmann::json metadata_;
 };
 
 }  // namespace milvus::storage

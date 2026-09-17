@@ -39,7 +39,7 @@ Loading proceeds in five stages:
 
 1. Await `FileManager::OpenInputStreamAsync` to open the packed object and cache
    its size. `AsyncIndexEntryReader::Open` then reads the directory and index
-   metadata through `InputStream::ReadAtAsync`. The resulting **catalog** describes
+   metadata through `InputStream::ReadAtAsync`. The resulting **directory** describes
    what is stored, without loading every entry. Magic/footer and directory reads
    bypass admission because they are normally small; this choice should be
    revisited if directories become large. The `_meta` entry still uses the same
@@ -67,8 +67,9 @@ The scalar loader retains engine-specific context from `PlanLoad` through
 `FinishLoadAsync` and releases file-backed context on `LocalFileIOPool`, including
 after a read failure. The reader only receives entry destinations, priority and
 cancellation; its artifact owns the completed targets, not engine state.
-`Catalog()` is a read-only view of the parsed entry layout and metadata. It
-performs no I/O and remains valid for the reader's lifetime. Slice reads are
+`Directory()` exposes the validated entry layout; `IndexMeta()` exposes the JSON
+from the metadata entry. Both are read-only, perform no I/O, and remain valid for
+the reader's lifetime. `PlanLoad` receives these two inputs explicitly. Slice reads are
 private so callers always go through admission and entry checksum verification.
 
 `PlanLoad` and `FinishLoadAsync` are public so Hybrid can delegate to its
@@ -79,12 +80,15 @@ internal index. `LoadUnifiedAsync` is a private implementation of `LoadUnified`.
 The synchronous path keeps `IndexEntryReader` and its HIGH/LOW scheduling. The
 async path uses `AsyncIndexEntryReader` for both directory and entry reads. Both
 readers reuse pure footer validation and directory parsing in `IndexEntryFormat`,
-then construct an `IndexEntryCatalog` during `Open`. The catalog owns index
-metadata and entry/slice descriptions, including absolute file offsets, plaintext
-sizes and checksums. Metadata queries go through `reader.Catalog()`; synchronous
-loading does not need `PlanLoad` to obtain it. Streams, scheduling, cancellation,
-decryption and decoded-entry caches remain reader responsibilities. Both use the
-same scalar representation parsers where applicable.
+which directly constructs `IndexEntryDirectory` during `Open`. Each `EntryMeta`
+describes a source entry, including absolute file offsets, plaintext sizes,
+checksums and encrypted slice ranges. There is no temporary directory-to-catalog
+conversion. The reader separately owns the encryption header and parsed index
+metadata. Synchronous loading obtains both without `PlanLoad`. Streams,
+scheduling, cancellation, decryption and decoded-entry caches remain reader
+responsibilities. Stream resource estimates are derived from the validated
+directory by the load code. Both readers use the same scalar representation
+parsers where applicable.
 
 ## Selection and executor ownership
 
@@ -259,7 +263,7 @@ outlive one slice remain request-local reservations. StringSort and Bitmap
 validity bits, and FMIndex null bits, are read directly into zero-initialized
 final bitmaps and moved into the index after CRC validation. Their async loads
 need no separate packed-byte sidecar; synchronous loads still reserve one.
-Scalar estimates use the larger compatible path cost and sum the catalog's
+Scalar estimates use the larger compatible path cost and sum the directory's
 possible slice scratch before global limits are applied, so a later
 admission-limit expansion does not rely on a smaller fixed per-load estimate.
 

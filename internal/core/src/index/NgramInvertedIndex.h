@@ -122,7 +122,8 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                 const Config& config) override;
 
     IndexLoadPlan
-    PlanLoad(const storage::IndexEntryCatalog& catalog,
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
              const Config& config) override;
 
     folly::coro::Task<void>

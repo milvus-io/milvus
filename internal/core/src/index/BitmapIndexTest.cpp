@@ -80,7 +80,7 @@ class ExposedBitmapIndex : public BitmapIndex<int32_t> {
     void
     LoadPlannedForTest(milvus::storage::AsyncIndexEntryReader& reader,
                        const milvus::Config& config) {
-        auto plan = PlanLoad(reader.Catalog(), config);
+        auto plan = PlanLoad(reader.Directory(), reader.IndexMeta(), config);
         auto artifact = folly::coro::blockingWait(reader.ReadEntriesAsync(
             std::move(plan.entries), proto::common::LoadPriority::HIGH));
         folly::coro::blockingWait(
@@ -261,7 +261,8 @@ TEST(BitmapIndexV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
                 AsyncTrackingRandomAccessFile* remote_file = nullptr;
                 auto reader = milvus::test::OpenAsyncIndexEntryReader(
                     packed, &remote_file);
-                auto plan = load_index.PlanLoad(reader->Catalog(), config);
+                auto plan = load_index.PlanLoad(
+                    reader->Directory(), reader->IndexMeta(), config);
                 auto entry = std::find_if(plan.entries.begin(),
                                           plan.entries.end(),
                                           [](const auto& entry) {

@@ -73,7 +73,6 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
     co_await reader->ReadExactlyAsync(
         file_size - sizeof(footer), footer, sizeof(footer), token);
     const auto directory_bytes = IndexEntryDirectorySize(footer, file_size);
-    IndexEntryDirectory directory;
     {
         std::vector<uint8_t> bytes(directory_bytes);
         co_await reader->ReadExactlyAsync(
@@ -81,20 +80,16 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
             bytes.data(),
             bytes.size(),
             token);
-        directory = ParseIndexEntryDirectory(bytes);
+        std::tie(reader->directory_, reader->encryption_) =
+            ParseIndexEntryDirectory(bytes, file_size);
     }
-    reader->edek_ = std::move(directory.edek_);
-    reader->ez_id_ = directory.ez_id_;
-    if (directory.is_encrypted_) {
+    if (reader->encryption_) {
         reader->cipher_plugin_ = PluginLoader::GetInstance().getCipherPlugin();
         AssertInfo(reader->cipher_plugin_ != nullptr,
                    "Cipher plugin required for encrypted V3 index");
     }
-    reader->catalog_ = IndexEntryCatalog(directory, file_size);
-    // Release the temporary parsed representation before entry materialization.
-    directory = {};
 
-    const auto& meta = reader->catalog_.At(MILVUS_V3_META_ENTRY_NAME);
+    const auto& meta = reader->directory_.At(MILVUS_V3_META_ENTRY_NAME);
     auto data = std::make_shared<std::vector<uint8_t>>(meta.plaintext_size);
     std::vector<EntryLoadPlan> entries_to_read;
     entries_to_read.push_back(
@@ -104,7 +99,7 @@ AsyncIndexEntryReader::Open(std::shared_ptr<milvus::InputStream> input,
         std::move(entries_to_read), priority, token);
     if (!data->empty()) {
         try {
-            reader->catalog_.metadata_ =
+            reader->metadata_ =
                 nlohmann::json::parse(data->begin(), data->end());
         } catch (const nlohmann::json::parse_error& error) {
             AssertInfo(
@@ -138,7 +133,7 @@ AsyncIndexEntryReader::ReadExactlyAsync(uint64_t offset,
 
 folly::coro::Task<void>
 AsyncIndexEntryReader::ReadSliceIntoAsync(
-    const IndexEntryCatalogEntry& entry,
+    const EntryMeta& entry,
     size_t slice_index,
     uint64_t offset,
     std::span<uint8_t> destination,
@@ -156,8 +151,8 @@ AsyncIndexEntryReader::ReadSliceIntoAsync(
     std::vector<uint8_t> ciphertext(slice.remote_bytes);
     co_await ReadExactlyAsync(
         slice.remote_offset, ciphertext.data(), ciphertext.size(), token);
-    auto decryptor =
-        cipher_plugin_->GetDecryptor(ez_id_, collection_id_, edek_);
+    auto decryptor = cipher_plugin_->GetDecryptor(
+        encryption_->ez_id, collection_id_, encryption_->edek);
     auto plaintext = decryptor->Decrypt(ciphertext.data(), ciphertext.size());
     AssertInfo(plaintext.size() == destination.size(),
                "Decrypted size mismatch: expected {}, got {}",
@@ -211,23 +206,23 @@ struct Slice {
     size_t admission_bytes;
 };
 
-// Slice layout is derived once from the catalog, never supplied by index code.
+// Slice layout is derived once from the directory, never supplied by index code.
 std::vector<Slice>
-BuildSlices(const IndexEntryCatalogEntry& entry, bool file_target) {
+BuildSlices(const EntryMeta& entry, bool file_target) {
     std::vector<Slice> slices;
     if (const auto* encrypted =
             std::get_if<EncryptedEntrySource>(&entry.source)) {
         slices.reserve(encrypted->slices.size());
         for (const auto& slice : encrypted->slices) {
             AssertInfo(
-                slice.remote_bytes <=
-                    (std::numeric_limits<size_t>::max() - slice.target_bytes) /
-                        2,
+                slice.remote_bytes <= (std::numeric_limits<size_t>::max() -
+                                       slice.plaintext_bytes) /
+                                          2,
                 "Encrypted slice budget overflow for '{}'",
                 entry.name);
-            slices.push_back({slice.target_offset,
-                              slice.target_bytes,
-                              2 * slice.remote_bytes + slice.target_bytes});
+            slices.push_back({slice.plaintext_offset,
+                              slice.plaintext_bytes,
+                              2 * slice.remote_bytes + slice.plaintext_bytes});
         }
     } else {
         const auto slice_size = DefaultStreamSliceSize();
@@ -254,7 +249,7 @@ BuildSlices(const IndexEntryCatalogEntry& entry, bool file_target) {
 }
 
 struct EntryState {
-    EntryState(EntryLoadPlan entry_plan, const IndexEntryCatalogEntry& source)
+    EntryState(EntryLoadPlan entry_plan, const EntryMeta& source)
         : plan(std::move(entry_plan)),
           source(source),
           slices(BuildSlices(
@@ -264,8 +259,8 @@ struct EntryState {
     }
 
     EntryLoadPlan plan;
-    // The immutable catalog outlives all slice tasks and their entry states.
-    const IndexEntryCatalogEntry& source;
+    // The immutable directory outlives all slice tasks and their entry states.
+    const EntryMeta& source;
     std::vector<Slice> slices;
     std::vector<RangeCrc> slice_crcs;
     std::atomic<size_t> remaining_slices;
@@ -280,7 +275,7 @@ BudgetPriority(proto::common::LoadPriority priority) {
 }
 
 void
-ValidatePlan(const IndexEntryCatalog& catalog,
+ValidatePlan(const IndexEntryDirectory& directory,
              const std::vector<EntryLoadPlan>& entries) {
     struct TargetWriteRange {
         std::string_view entry_name;
@@ -300,23 +295,23 @@ ValidatePlan(const IndexEntryCatalog& catalog,
         AssertInfo(names.insert(entry.name).second,
                    "Duplicate Entry '{}' in read targets",
                    entry.name);
-        const auto& catalog_entry = catalog.At(entry.name);
+        const auto& directory_entry = directory.At(entry.name);
         AssertInfo(
-            EntryTargetSize(entry.target) >= catalog_entry.plaintext_size,
+            EntryTargetSize(entry.target) >= directory_entry.plaintext_size,
             "Entry '{}' target size {} is smaller than entry size {}",
             entry.name,
             EntryTargetSize(entry.target),
-            catalog_entry.plaintext_size);
+            directory_entry.plaintext_size);
 
         if (const auto* memory =
                 std::get_if<MemoryEntryTarget>(&entry.target)) {
             AssertInfo(
-                memory->data != nullptr || catalog_entry.plaintext_size == 0,
+                memory->data != nullptr || directory_entry.plaintext_size == 0,
                 "Memory target for Entry '{}' is null",
                 entry.name);
             const auto begin = reinterpret_cast<uintptr_t>(memory->data);
             AssertInfo(
-                catalog_entry.plaintext_size <=
+                directory_entry.plaintext_size <=
                     std::numeric_limits<uintptr_t>::max() - begin,
                 "Memory target range for Entry '{}' overflows address space",
                 entry.name);
@@ -325,7 +320,7 @@ ValidatePlan(const IndexEntryCatalog& catalog,
                                  memory,
                                  nullptr,
                                  begin,
-                                 begin + catalog_entry.plaintext_size,
+                                 begin + directory_entry.plaintext_size,
                                  0,
                                  0});
         } else {
@@ -506,7 +501,7 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
         cancellation_token, caller_cancellation_token);
     ThrowIfCancelled(operation_cancellation_token,
                      "AsyncIndexEntryReader::PlanValidation");
-    ValidatePlan(Catalog(), entries);
+    ValidatePlan(Directory(), entries);
     auto work_executor = ResolveAsyncLoadExecutor({}, priority);
     AssertInfo(static_cast<bool>(work_executor),
                "Shared LoadExecutor is unavailable");
@@ -516,7 +511,7 @@ AsyncIndexEntryReader::ReadEntriesAsyncImpl(
     std::vector<std::shared_ptr<EntryState>> states;
     states.reserve(entries.size());
     for (auto& entry : entries) {
-        const auto& source = Catalog().At(entry.name);
+        const auto& source = Directory().At(entry.name);
         auto state = std::make_shared<EntryState>(std::move(entry), source);
         if (state->slices.empty()) {
             FinalizeEntry(*state);

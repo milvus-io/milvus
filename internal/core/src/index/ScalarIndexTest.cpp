@@ -227,10 +227,11 @@ class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
     }
 
     milvus::index::IndexLoadPlan
-    PlanLoad(const milvus::storage::IndexEntryCatalog& catalog,
+    PlanLoad(const milvus::storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
              const milvus::Config&) override {
         planned_thread_ = folly::getCurrentThreadName().value_or("");
-        const auto bytes = catalog.At("payload").plaintext_size;
+        const auto bytes = directory.At("payload").plaintext_size;
         milvus::index::IndexLoadPlan plan;
         plan.load_context =
             std::make_shared<CleanupThreadRecorder>(cleanup_thread_);

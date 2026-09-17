@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "index/IndexLoadUtils.h"
 #include <boost/uuid/uuid_io.hpp>
 #include <arrow/status.h>
 #include "common/FastMem.h"
@@ -976,7 +977,8 @@ StringIndexMarisa::WriteEntries(storage::IndexEntryWriter* writer) {
 }
 
 IndexLoadPlan
-StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
+StringIndexMarisa::PlanLoad(const storage::IndexEntryDirectory& directory,
+                            const nlohmann::json& metadata,
                             const Config& config) {
     auto context = std::make_shared<MarisaLoadContext>();
     context->is_mmap = config.contains(MMAP_FILE_PATH);
@@ -988,19 +990,19 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
         tmp_dir + "/" +
         boost::uuids::to_string(boost::uuids::random_generator()());
 
-    auto trie_bytes = catalog.At(MARISA_TRIE_INDEX).plaintext_size;
+    auto trie_bytes = directory.At(MARISA_TRIE_INDEX).plaintext_size;
     context->trie_file =
         std::make_shared<storage::IndexFileTarget>(storage::IndexFileTarget{
             context->file_name, trie_bytes, context->is_mmap, nullptr});
 
-    context->str_ids_bytes = catalog.At(MARISA_STR_IDS).plaintext_size;
+    context->str_ids_bytes = directory.At(MARISA_STR_IDS).plaintext_size;
     ValidateMarisaEntryElementSize(
         MARISA_STR_IDS, context->str_ids_bytes, sizeof(int64_t));
 
-    auto has_csr_index = catalog.HasEntry(MARISA_CSR_INDEX);
-    auto has_csr_offsets = catalog.HasEntry(MARISA_CSR_OFFSETS);
-    auto has_csr_num_keys = catalog.HasMeta("csr_num_keys");
-    auto has_csr_version = catalog.HasMeta(MARISA_CSR_FORMAT_VERSION_META);
+    auto has_csr_index = directory.HasEntry(MARISA_CSR_INDEX);
+    auto has_csr_offsets = directory.HasEntry(MARISA_CSR_OFFSETS);
+    auto has_csr_num_keys = metadata.contains("csr_num_keys");
+    auto has_csr_version = metadata.contains(MARISA_CSR_FORMAT_VERSION_META);
     auto has_any_csr =
         has_csr_index || has_csr_offsets || has_csr_num_keys || has_csr_version;
     if (has_any_csr) {
@@ -1012,22 +1014,24 @@ StringIndexMarisa::PlanLoad(const storage::IndexEntryCatalog& catalog,
                    has_csr_offsets,
                    has_csr_num_keys,
                    has_csr_version);
-        auto csr_format_version =
-            catalog.GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
+        auto csr_format_version = ReadRequiredIndexMeta<uint32_t>(
+            metadata, MARISA_CSR_FORMAT_VERSION_META);
         AssertInfo(csr_format_version == MARISA_CSR_FORMAT_VERSION,
                    "unsupported marisa CSR format version: expected {}, got {}",
                    MARISA_CSR_FORMAT_VERSION,
                    csr_format_version);
         context->has_csr = true;
-        context->csr_num_keys = catalog.GetMeta<size_t>("csr_num_keys");
+        context->csr_num_keys =
+            ReadRequiredIndexMeta<size_t>(metadata, "csr_num_keys");
         AssertInfo(
             context->csr_num_keys <=
                 std::numeric_limits<size_t>::max() / sizeof(uint32_t) - 1,
             "marisa CSR key count {} is too large",
             context->csr_num_keys);
-        context->csr_index_bytes = catalog.At(MARISA_CSR_INDEX).plaintext_size;
+        context->csr_index_bytes =
+            directory.At(MARISA_CSR_INDEX).plaintext_size;
         context->csr_offsets_bytes =
-            catalog.At(MARISA_CSR_OFFSETS).plaintext_size;
+            directory.At(MARISA_CSR_OFFSETS).plaintext_size;
         ValidateMarisaEntryElementSize(
             MARISA_CSR_INDEX, context->csr_index_bytes, sizeof(uint32_t));
         ValidateMarisaEntryElementSize(
@@ -1405,11 +1409,11 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
     }
 
     // Load persisted CSR or rebuild from str_ids
-    auto has_csr_index = reader.Catalog().HasEntry(MARISA_CSR_INDEX);
-    auto has_csr_offsets = reader.Catalog().HasEntry(MARISA_CSR_OFFSETS);
-    auto has_csr_num_keys = reader.Catalog().HasMeta("csr_num_keys");
+    auto has_csr_index = reader.Directory().HasEntry(MARISA_CSR_INDEX);
+    auto has_csr_offsets = reader.Directory().HasEntry(MARISA_CSR_OFFSETS);
+    auto has_csr_num_keys = reader.IndexMeta().contains("csr_num_keys");
     auto has_csr_version =
-        reader.Catalog().HasMeta(MARISA_CSR_FORMAT_VERSION_META);
+        reader.IndexMeta().contains(MARISA_CSR_FORMAT_VERSION_META);
     auto has_any_csr =
         has_csr_index || has_csr_offsets || has_csr_num_keys || has_csr_version;
 
@@ -1422,8 +1426,8 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                    has_csr_offsets,
                    has_csr_num_keys,
                    has_csr_version);
-        auto csr_format_version =
-            reader.Catalog().GetMeta<uint32_t>(MARISA_CSR_FORMAT_VERSION_META);
+        auto csr_format_version = ReadRequiredIndexMeta<uint32_t>(
+            reader.IndexMeta(), MARISA_CSR_FORMAT_VERSION_META);
         if (!(csr_format_version == MARISA_CSR_FORMAT_VERSION)) {
             ThrowInfo(
                 ErrorCode::DataFormatBroken,
@@ -1432,7 +1436,8 @@ StringIndexMarisa::LoadEntries(storage::IndexEntryReader& reader,
                 csr_format_version);
         }
 
-        csr_num_keys_ = reader.Catalog().GetMeta<size_t>("csr_num_keys");
+        csr_num_keys_ =
+            ReadRequiredIndexMeta<size_t>(reader.IndexMeta(), "csr_num_keys");
         if (!(csr_num_keys_ == trie_.num_keys())) {
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "invalid marisa CSR key count: expected {}, got {}",

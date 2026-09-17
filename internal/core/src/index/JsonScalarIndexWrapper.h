@@ -182,7 +182,9 @@ class JsonScalarIndexWrapper : public BaseIndex {
         BaseIndex::LoadEntries(reader, config);
 
         bool has_non_exist =
-            reader.Catalog().GetMeta<bool>("has_non_exist", false);
+            (reader.IndexMeta().contains("has_non_exist")
+                 ? reader.IndexMeta().at("has_non_exist").get<bool>()
+                 : false);
         if (has_non_exist) {
             auto e = reader.ReadEntry(INDEX_NON_EXIST_OFFSET_FILE_NAME);
             non_exist_offsets_.resize(e.data.size() / sizeof(size_t));
@@ -197,10 +199,11 @@ class JsonScalarIndexWrapper : public BaseIndex {
     }
 
     IndexLoadPlan
-    PlanLoad(const storage::IndexEntryCatalog& catalog,
+    PlanLoad(const storage::IndexEntryDirectory& directory,
+             const nlohmann::json& metadata,
              const Config& config) override {
-        auto plan = BaseIndex::PlanLoad(catalog, config);
-        AppendJsonNonExistOffsetsPlan(plan, catalog);
+        auto plan = BaseIndex::PlanLoad(directory, metadata, config);
+        AppendJsonNonExistOffsetsPlan(plan, directory, metadata);
         return plan;
     }
 
