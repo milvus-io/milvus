@@ -75,7 +75,7 @@ func TestDropPartitionFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) 
 					}},
 				},
 				Segments: metas, SegmentLifecycle: lifecycle,
-				SummaryReader: summary, Runtime: moduleapi.Runtime{Scheduler: scheduler},
+				Runtime: moduleapi.Runtime{Scheduler: scheduler},
 			})
 			require.NoError(t, err)
 			raw := message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
@@ -92,13 +92,12 @@ func TestDropPartitionFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) 
 			require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_DROPPED, module.vchannelView.meta.CollectionInfo.Partitions[0].State)
 			require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_NORMAL, module.vchannelView.meta.CollectionInfo.Partitions[1].State)
 			require.Zero(t, tracker.CompletedPoint().TimeTick)
-			require.Len(t, scheduler.tasks, len(expectedCommits), "flush every earlier L1 blocker")
+			require.Len(t, scheduler.tasks, len(expectedCommits)+1, "L1 and L0 schedule independently")
 			for i := range expectedCommits {
 				require.NoError(t, scheduler.tasks[i].Execute(ctx))
 				require.Zero(t, tracker.CompletedPoint().TimeTick, "L0 still holds the request")
 			}
 			require.ElementsMatch(t, expectedCommits, committed)
-			require.Equal(t, uint64(150), module.materializeUpperBound)
 			require.Len(t, scheduler.tasks, len(expectedCommits)+1)
 			require.NoError(t, scheduler.tasks[len(expectedCommits)].Execute(ctx))
 			require.Equal(t, uint64(100), module.l0Materializer.MaterializedTimeTick())

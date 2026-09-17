@@ -2,15 +2,12 @@ package vchannel
 
 import (
 	"context"
-	"math"
 	"sync"
-	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -18,11 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-// materializeBoundStallWarnInterval is how long the L1 materialization bound
-// may stay unchanged (blocked by an uncommitted L1 segment) before the module
-// starts warning with the blocking segment's identity.
-const materializeBoundStallWarnInterval = 1 * time.Minute
 
 // ModuleConfig contains the initial state and dependencies for one vchannel
 // recovery module.
@@ -37,7 +29,6 @@ type ModuleConfig struct {
 	Logger             *mlog.Logger
 	SegmentLifecycle   segment.Lifecycle
 	SegmentPackWriter  segment.PackWriter
-	SummaryReader      walsummary.TransformReader
 	L0Materializer     l0materializer.Materializer
 	L0MaterializeRows  uint64
 	L0MaterializeBytes uint64
@@ -69,15 +60,7 @@ type VChannelRecoveryModule struct {
 	cleanupSegments map[int64]*segment.SegmentView
 	pendingCleanup  map[int64]*segment.SegmentView
 
-	l0Materializer *l0materializer.L0Materializer
-
-	// materializeUpperBound mirrors the last bound published to the L0
-	// materializer, so refreshL0MaterializeUpperBoundLocked can skip unchanged
-	// publishes on the WAL observation hot path. The stall bookkeeping drives
-	// the stuck-L1 warning.
-	materializeUpperBound     uint64
-	materializeBoundChangedAt time.Time
-	materializeBoundWarnedAt  time.Time
+	l0Materializer *l0materializer.WALMaterializer
 
 	segmentLifecycle  segment.Lifecycle
 	segmentPackWriter segment.PackWriter
@@ -104,17 +87,15 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
 	}
 	module := &VChannelRecoveryModule{
-		pchannel:                  config.PChannel,
-		vchannel:                  config.VChannel,
-		runtime:                   config.Runtime,
-		logger:                    config.Logger,
-		segments:                  make(map[int64]*segment.SegmentView),
-		segmentLifecycle:          config.SegmentLifecycle,
-		segmentPackWriter:         config.SegmentPackWriter,
-		onCleanup:                 config.OnCleanup,
-		onL0Materialized:          config.OnL0Materialized,
-		materializeUpperBound:     math.MaxUint64,
-		materializeBoundChangedAt: time.Now(),
+		pchannel:          config.PChannel,
+		vchannel:          config.VChannel,
+		runtime:           config.Runtime,
+		logger:            config.Logger,
+		segments:          make(map[int64]*segment.SegmentView),
+		segmentLifecycle:  config.SegmentLifecycle,
+		segmentPackWriter: config.SegmentPackWriter,
+		onCleanup:         config.OnCleanup,
+		onL0Materialized:  config.OnL0Materialized,
 	}
 	if config.VChannelMeta != nil {
 		if adoptVChannelMeta {
@@ -140,22 +121,16 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 			module.cleanupSegments[id] = view
 		}
 	}
-	module.l0Materializer = l0materializer.New(l0materializer.Config{
-		VChannel: config.VChannel,
-		// Durable M proves successful output and registration through this
-		// position. A crash before publishing M may repeat physical L0 output;
-		// the outstanding Summary window is read lazily after ordered replay.
-		MaterializedTimeTick: config.VChannelMeta.GetTransformMaterializedTimeTick(),
-		Reader:               config.SummaryReader,
-		MaterializeMaxRows:   config.L0MaterializeRows,
-		MaterializeMaxBytes:  config.L0MaterializeBytes,
-		Materializer:         config.L0Materializer,
-		Runtime:              config.Runtime,
-		OnMaterialized:       module.markL0Materialized,
+	module.l0Materializer = l0materializer.NewWALMaterializer(l0materializer.WALConfig{
+		VChannel:                  config.VChannel,
+		MaterializedTimeTick:      config.VChannelMeta.GetTransformMaterializedTimeTick(),
+		MaterializeMaxRows:        config.L0MaterializeRows,
+		MaterializeMaxBytes:       config.L0MaterializeBytes,
+		Materializer:              config.L0Materializer,
+		Runtime:                   config.Runtime,
+		OnMaterialized:            module.markL0Materialized,
+		GrowingSegmentsRegistered: module.growingSegmentsRegistered,
 	})
-	module.mu.Lock()
-	module.refreshL0MaterializeUpperBoundLocked()
-	module.mu.Unlock()
 	return module, nil
 }
 
@@ -213,18 +188,7 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL:
 		m.flushAllSegmentsCreatedBefore(ctx, retained)
 	}
-	// Completion requests are separate from generic Barrier classification.
-	// Their L1 flushes were initiated above. Pin replay until L0 completes.
-	switch msg.MessageType() {
-	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
-		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
-		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL:
-		if m.vchannelView != nil {
-			m.l0Materializer.RequestFlush(retained)
-		}
-	}
-	// Summary coverage and Segment state are installed before advancing W.
-	m.l0Materializer.ObserveMessage(retained.Message())
+	m.l0Materializer.ObserveMessage(retained)
 	return true
 }
 
@@ -303,16 +267,6 @@ func (m *VChannelRecoveryModule) IsActive() bool {
 	return m.vchannelView != nil && m.vchannelView.IsActive()
 }
 
-// RequestMaterializationThrough accepts a Summary backlog request without
-// inventing observed coverage or bypassing L1 safety.
-func (m *VChannelRecoveryModule) RequestMaterializationThrough(through uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if !m.removed {
-		m.l0Materializer.RequestBacklogThrough(through)
-	}
-}
-
 // RequestPersistThrough schedules persistence for buffered data observed by
 // this VChannel through targetTimeTick.
 func (m *VChannelRecoveryModule) RequestPersistThrough(targetTimeTick uint64) {
@@ -327,6 +281,7 @@ func (m *VChannelRecoveryModule) RequestPersistThrough(targetTimeTick uint64) {
 	for _, view := range m.segments {
 		view.RequestPersistThrough(targetTimeTick)
 	}
+	m.l0Materializer.RequestPersistThrough(targetTimeTick)
 }
 
 func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) {
@@ -518,53 +473,6 @@ func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, v
 	}
 	m.tryFinalizeSegmentLocked(segmentID, view)
 	m.markSegmentDirty(segmentID, view)
-	m.refreshL0MaterializeUpperBoundLocked()
-}
-
-func (m *VChannelRecoveryModule) refreshL0MaterializeUpperBoundLocked() {
-	upperBound := uint64(math.MaxUint64)
-	blockerSegmentID := int64(0)
-	for _, view := range m.segments {
-		// Lock-free: L1MaterializationBlockerTimeTick reads an immutable tick
-		// and an atomically published commit flag, so the scan stays cheap on
-		// the WAL observation hot path.
-		if timetick, blocks := view.L1MaterializationBlockerTimeTick(); blocks && timetick < upperBound {
-			upperBound = timetick
-			blockerSegmentID = view.ID()
-		}
-	}
-	now := time.Now()
-	if upperBound == m.materializeUpperBound {
-		// Bound unchanged: skip the publish. Warn if the same uncommitted L1
-		// segment has pinned materialization (and therefore drop cleanup) for
-		// a while — previously this stalled silently.
-		m.warnIfMaterializeBoundStalledLocked(now, blockerSegmentID)
-		return
-	}
-	m.materializeUpperBound = upperBound
-	m.materializeBoundChangedAt = now
-	m.materializeBoundWarnedAt = time.Time{}
-	m.l0Materializer.SetMaterializeUpperBound(upperBound)
-}
-
-// warnIfMaterializeBoundStalledLocked emits at most one warning per interval
-// while the materialization bound stays pinned by an uncommitted L1 segment.
-func (m *VChannelRecoveryModule) warnIfMaterializeBoundStalledLocked(now time.Time, blockerSegmentID int64) {
-	if blockerSegmentID == 0 || m.materializeBoundChangedAt.IsZero() ||
-		now.Sub(m.materializeBoundChangedAt) < materializeBoundStallWarnInterval {
-		return
-	}
-	if !m.materializeBoundWarnedAt.IsZero() && now.Sub(m.materializeBoundWarnedAt) < materializeBoundStallWarnInterval {
-		return
-	}
-	m.materializeBoundWarnedAt = now
-	mlog.Warn(context.TODO(), "L1 materialization bound stalled by uncommitted segment",
-		mlog.String("pchannel", m.pchannel),
-		mlog.String("vchannel", m.vchannel),
-		mlog.Int64("segmentID", blockerSegmentID),
-		mlog.Uint64("boundTimeTick", m.materializeUpperBound),
-		mlog.Duration("stalledFor", now.Sub(m.materializeBoundChangedAt)),
-	)
 }
 
 func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view *segment.SegmentView) bool {
@@ -572,6 +480,19 @@ func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view 
 		return false
 	}
 	m.markSegmentDirty(segmentID, view)
+	return true
+}
+
+// L0 may precede L1 output, but DataCoord must know every earlier L1 so its
+// compaction policy can protect growing data. No L1 flush is requested here.
+func (m *VChannelRecoveryModule) growingSegmentsRegistered(through uint64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, view := range m.segments {
+		if view.CreateTimeTick() <= through && !view.Registered() {
+			return false
+		}
+	}
 	return true
 }
 
@@ -590,37 +511,6 @@ func (m *VChannelRecoveryModule) markL0Materialized(timeTick uint64) {
 	if m.runtime.Notifier != nil {
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
 	}
-}
-
-// FlushCheckpointTimeTick returns the vchannel-level flush position: the
-// largest timetick for which every insert and delete record of this vchannel
-// up to it has been durably flushed (inserts to L1 segments, deletes to L0
-// output). It is min of the transform materialization frontier and every
-// growing segment's durable checkpoint, both read from the vchannel / segment
-// metas that are persisted with the recovery catalog — the same values a
-// crash-recovery would observe, so DataCoord can trust the checkpoint to
-// report flush progress (GetFlushState).
-func (m *VChannelRecoveryModule) FlushCheckpointTimeTick() uint64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	minTick := uint64(math.MaxUint64)
-	if m.vchannelView != nil {
-		if matTick := m.vchannelView.PersistedMaterializedTimeTick(); matTick < minTick {
-			minTick = matTick
-		}
-	}
-	for _, view := range m.segments {
-		if !view.IsGrowing() {
-			continue
-		}
-		if cp := view.PersistedCheckpointTimeTick(); cp < minTick {
-			minTick = cp
-		}
-	}
-	if minTick == math.MaxUint64 {
-		return 0
-	}
-	return minTick
 }
 
 func (m *VChannelRecoveryModule) markSegmentSnapshotPersisted(
@@ -688,7 +578,8 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		)
 		if len(cleanupPartitions) > 0 {
 			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
-		} else if dropSnapshot != nil && len(m.segments) == 0 {
+		} else if dropSnapshot != nil && len(m.segments) == 0 &&
+			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) {
 			checkpointTimeTick := dropSnapshot.GetCheckpointTimeTick()
 			snapshots = append(snapshots,
 				newDirtySnapshot(
@@ -734,7 +625,6 @@ func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *s
 	}
 	delete(m.pendingCleanup, segmentID)
 	delete(m.segments, segmentID)
-	m.refreshL0MaterializeUpperBoundLocked()
 	m.dirtyMu.Lock()
 	delete(m.dirtySegments, segmentID)
 	m.dirtyMu.Unlock()

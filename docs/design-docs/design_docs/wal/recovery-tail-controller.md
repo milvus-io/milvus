@@ -9,6 +9,10 @@ The Recovery Tail Controller keeps the replayable WAL suffix within a target
 size. It does not decide how SegmentView or L0Materializer batches data and it
 does not solve object fragmentation.
 
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
+
 ## 1. Byte Frontiers
 
 RecoveryStorage tracks three runtime byte offsets:
@@ -88,9 +92,9 @@ Components implement idempotency:
 - SegmentView batches only its own segment data;
 - Summary seals its own PChannel staging buffer; it also runs independent
   age/pressure checks so summary-only backlog cannot be hidden by completed Ack;
-- [L0Materializer](l0_materializer.md) reads Summary in bounded batches under
-  its requested window and L1 bound; it holds no source handles and is not an
-  independent WAL checkpoint gate;
+- the currently wired [WAL L0 materializer](l0_materializer.md) handles the
+  same RequestPersistThrough contract as SegmentView and holds source Delete
+  handles until output/registration and dirty metadata installation;
 - non-persistence blockers such as BroadcastAck rely on their own retry paths.
   Explicit blocker classification is not implemented; a VChannel persist
   request may still be issued without resolving an Ack or poisoned-message stall.

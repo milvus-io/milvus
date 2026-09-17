@@ -12,6 +12,10 @@ are defined by [WAL Message Ack Design](message_ack.md).
 The shared observation path and capacity/API/Summary-backlog admission policy
 are implemented in [L0Materializer](l0_materializer.md).
 
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
+
 ## 1. Common Flow
 
 Observation is serialized in PChannel WAL order:
@@ -24,7 +28,7 @@ raw message M
   -> PChannelRecoveryManager.ObserveMessage(D)
        -> route to every affected VChannel
        -> each actual async Segment consumer clones its own handle
-       -> after Segment/L1 updates, L0Materializer records its window boundary
+       -> after Segment/L1 updates, WALMaterializer retains Delete and explicit completion handles
        -> QueryRuntime receives a plain immutable copy when needed (future)
   -> D.Release()
   -> BroadcastAck.Accept(O)
@@ -63,8 +67,8 @@ frontiers may differ. It does not decide whether a message is metadata or data.
 
 Each component's published `checkpoint_time_tick` moves only through its
 continuous relevant prefix. SegmentView enforces this with serial task execution;
-different Segments may complete independently. L0Materializer separately
-tracks materialized/requested window positions; a VChannel metadata no-op does
+different Segments may complete independently. WALMaterializer separately
+tracks materialized and observed positions; a VChannel metadata no-op does
 not skip its observation.
 
 ## 3. Ownership Table
@@ -76,7 +80,7 @@ not skip its observation.
 | VChannel dispatch Retained | Manager clones for each routed VChannel | Manager releases after synchronous VChannel observation. |
 | Segment Retained | Segment exposes concrete async work | Object/lifecycle work succeeds after recovery metadata is installed and dirty. |
 | WALSummary | Copies records without retaining a handle | `LastAcked()` independently bounds checkpoint publication. |
-| L0Materializer | Clones explicit Flush/lifecycle requests; ordinary observation holds no handle | Covered L0 output succeeds and recovery metadata is installed and dirty. Durable VChannel cursor separately controls GC. |
+| WALMaterializer | Clones Delete/Txn and explicit Flush/lifecycle requests | Covered L0 output succeeds and recovery metadata is installed and dirty. Durable VChannel cursor separately controls GC. |
 | QueryRuntime event | Plain immutable copy | QueryRuntime queue lifecycle; outside RecoveryStorage Ack. |
 
 ## 4. Typical Messages
@@ -108,10 +112,10 @@ resulting recovery metadata is installed.
 
 WALSummary copies the Delete record and advances `LastAcked()` only through its
 recoverable prefix. RecoveryStorage caps checkpoint publication at that frontier.
-L0Materializer advances its observed window boundary. The revised admission
-policy accumulates Deletes to capacity, or waits for an explicit completion or
-Summary backlog request; observation alone does not force output. It reads
-Summary independently without retaining the message.
+WALMaterializer retains the outer Delete/Txn message until L0 output and
+DataCoord registration succeed and dirty materialization metadata is installed.
+Size, age, explicit completion and recovery-tail requests drive output; only
+initial L1 registration is a prerequisite, not final L1 flush.
 
 ### Flush-Style Messages
 
@@ -121,8 +125,8 @@ work in multiple SegmentViews and L0Materializers. Each asynchronous Segment
 consumer owns an independent clone. L0Materializer merges the relevant boundary
 without storing a BarrierEntry. ManualFlush, FlushAll, DropCollection,
 DropPartition, TruncateCollection and AlterWAL additionally retain one handle
-per affected VChannel until the requested L0 boundary completes after L1 final
-commit. Dirty materialization metadata must be installed before these handles
+per affected VChannel until the requested L0 boundary completes. L1 and L0 tasks run independently
+and their handles join before message completion. Dirty materialization metadata must be installed before these handles
 release. This pins checkpoint and broadcast completion; unfinished requests
 are rebuilt from WAL replay. Ordinary Segment Flush and generic DDL barriers
 do not create explicit L0 requests.
@@ -131,7 +135,8 @@ do not create explicit L0 requests.
 
 A committed Txn is one WAL message. Each affected SegmentView retains an
 independent reference to the whole outer Txn. Summary copies records;
-L0Materializer classifies the Txn and records its outer TimeTick when applicable.
+WALMaterializer retains the whole Txn when it contains Delete and commits
+all Delete children together at the outer TimeTick.
 Children returned by `RangeOver` do not receive independent Tracker entries.
 
 One Txn may contain several inserts for the same segment. That SegmentView owns
@@ -141,12 +146,10 @@ SegmentView releases its handle.
 
 ## 5. RecoveryBarrier
 
-RecoveryBarrier passes through the same Observe flow. Summary records its
-readable coverage even though it has no payload; each affected L0Materializer
-advances its requested boundary. This exposes pre-checkpoint Summary backlog
-without needing new Deletes. Under the revised batching policy, Summary backlog
-or another admission reason requests actual materialization; RecoveryBarrier
-does not itself force the historical window into L0. Tracker accounts for any retained component work.
+RecoveryBarrier passes through the same Observe flow. Summary advances readable
+coverage. The current WAL materializer does not force output or retain the
+barrier; any earlier pending Delete already holds its own handle. The retained
+Summary consumer uses barriers to expose pre-checkpoint history when reconnected.
 
 The recovery controller separately observes its TimeTick to announce that the
 startup scanner caught up. The barrier does not change component behavior and
@@ -173,8 +176,8 @@ may be newer than the global checkpoint and uses its own
 1. Every observed message has exactly one Tracker Owner.
 2. Startup and live messages use the same complete Observe flow.
 3. Every asynchronous Segment consumer and explicit L0 completion consumer
-   clones before dispatch returns. Summary copies records; ordinary L0 window
-   observations retain no handle.
+   clones before dispatch returns. The current L0 consumer also clones ordinary
+   Delete/Txn messages. Summary only copies records.
 4. Txn children never have independent recovery ownership.
 5. QueryRuntime does not retain RecoveryStorage handles.
 6. Metadata/Segment filtering uses TimeTick and `checkpoint_time_tick`; L0

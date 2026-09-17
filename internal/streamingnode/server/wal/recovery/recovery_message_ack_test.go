@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -597,4 +598,47 @@ func TestBroadcastFlushAllWaitsForEveryVChannel(t *testing.T) {
 	for _, meta := range snapshot.VChannelBaseMetas {
 		require.Equal(t, uint64(20), meta.GetTransformMaterializedTimeTick(), "Ack must follow dirty metadata installation")
 	}
+}
+
+func TestDeletePinsGlobalCheckpointEvenAfterSummaryPersistence(t *testing.T) {
+	ctx := context.Background()
+	initial := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+	storage := newTestRecoveryStorage(t, initial)
+	t.Cleanup(storage.metrics.Close)
+	var tasks []nodescheduler.Task
+	submit := mockey.Mock(mockey.GetMethod(storage.taskScheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
+	defer submit.UnPatch()
+	summary := walsummary.NewManager(walsummary.ManagerConfig{})
+	ack := mockey.Mock((*walsummary.Manager).LastAcked).Return(uint64(30)).Build()
+	defer ack.UnPatch()
+	outputErr := context.DeadlineExceeded
+	write := mockey.Mock((*l0materializer.SyncMaterializer).Materialize).To(func(_ *l0materializer.SyncMaterializer, _ context.Context, _ l0materializer.MaterializeRequest) error {
+		return outputErr
+	}).Build()
+	defer write.UnPatch()
+	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
+		PChannel: storage.channel.Name, VChannelMetas: map[string]*streamingpb.VChannelMeta{"v1": {Vchannel: "v1", TransformMaterializedTimeTick: 10}},
+		Runtime: moduleapi.Runtime{Scheduler: storage.taskScheduler, Notifier: storage}, SummaryManager: summary, L0Materializer: &l0materializer.SyncMaterializer{}, L0MaterializeBytes: 1,
+	})
+	require.NoError(t, err)
+	defer manager.Close()
+	storage.vchannelManager = manager
+	storage.summaryManager = summary
+	storage.observeMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
+	storage.observeMessage(ctx, newAckTestTimeTickMessage(t, 30, 31))
+	require.Len(t, tasks, 1)
+	require.Error(t, tasks[0].Execute(ctx))
+	require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)
+	if batch := storage.consumeDirtySnapshot(); batch != nil {
+		require.Equal(t, uint64(10), batch.Checkpoint.TimeTick)
+	}
+	outputErr = nil
+	require.NoError(t, tasks[0].Execute(ctx))
+	batch := storage.consumeDirtySnapshot()
+	require.NotNil(t, batch)
+	require.Equal(t, uint64(30), batch.Checkpoint.TimeTick, "payload-free progress can exceed M")
+	snapshot, err := storage.buildRecoverySnapshot(batch)
+	require.NoError(t, err)
+	require.Equal(t, uint64(20), snapshot.VChannelBaseMetas["v1"].GetTransformMaterializedTimeTick())
+	require.Equal(t, uint64(10), storage.GetCheckpoint(ctx).TimeTick, "candidate is not yet published")
 }

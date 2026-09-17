@@ -16,6 +16,7 @@ import (
 )
 
 type testSegmentLifecycle struct {
+	Lifecycle
 	err   error
 	calls int
 }

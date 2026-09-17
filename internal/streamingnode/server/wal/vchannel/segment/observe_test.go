@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -75,6 +76,8 @@ func (w *durableSnapshotTestPackWriter) FlushInsertBuffer(_ context.Context, pac
 
 func TestSegmentSnapshotContainsOnlyDurableInsertEffects(t *testing.T) {
 	writer := &durableSnapshotTestPackWriter{}
+	publication := mockey.Mock((*segmentLifecycleWriter).PersistGrowingSegment).Return(nil).Build()
+	t.Cleanup(func() { publication.UnPatch() })
 	view := newSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
 			SegmentId:          1,
@@ -87,7 +90,7 @@ func TestSegmentSnapshotContainsOnlyDurableInsertEffects(t *testing.T) {
 		false,
 		writeOnlyInsertBuffer{},
 		nil,
-		runtimeConfig{packWriter: writer, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}},
+		runtimeConfig{packWriter: writer, lifecycle: &segmentLifecycleWriter{}, owner: testSegmentOwner{}, runtime: moduleapi.Runtime{Scheduler: &recordingSegmentScheduler{}}},
 	)
 
 	observe := func(timetick, rows, bytes uint64) {

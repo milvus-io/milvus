@@ -30,7 +30,7 @@ func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
 
 	require.Empty(t, manager.ConsumeCleanupSnapshots(equalCheckpoint))
 
-	pastTombstone := moduleapi.CleanupContext{PhysicalTimeTick: 11}
+	pastTombstone := moduleapi.CleanupContext{PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool { return true }}
 	deleteSnapshots := manager.ConsumeCleanupSnapshots(pastTombstone)
 	require.Len(t, deleteSnapshots, 1)
 	assert.Equal(t, moduleapi.ModuleNameVChannel, deleteSnapshots[0].ModuleName())
@@ -51,7 +51,7 @@ func TestPChannelRecoveryManagerDeletesSegmentsBeforeVChannel(t *testing.T) {
 	}
 	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
 		map[int64]*streamingpb.SegmentAssignmentMeta{100: segmentMeta})
-	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11}
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool { return true }}
 
 	segmentDeletes := manager.ConsumeCleanupSnapshots(cleanup)
 	require.Len(t, segmentDeletes, 1)
@@ -139,4 +139,24 @@ func newCleanupTestManager(
 	require.NoError(t, err)
 	t.Cleanup(manager.Close)
 	return manager
+}
+
+func TestVChannelTombstoneWaitsForSummaryRetirement(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	cleanup := moduleapi.CleanupContext{PhysicalTimeTick: 11}
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup), "no retirement proof")
+	retired := false
+	cleanup.SummaryRetired = func(vc string, through uint64) bool {
+		require.Equal(t, "v1", vc)
+		require.Equal(t, uint64(10), through)
+		return retired
+	}
+	require.Empty(t, manager.ConsumeCleanupSnapshots(cleanup))
+	require.NotNil(t, manager.Module("v1"))
+	retired = true
+	snapshots := manager.ConsumeCleanupSnapshots(cleanup)
+	require.Len(t, snapshots, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
+	snapshots[0].MarkPersisted()
+	require.Nil(t, manager.Module("v1"))
 }

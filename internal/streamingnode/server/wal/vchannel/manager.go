@@ -5,6 +5,7 @@ import (
 	"maps"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -16,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -29,7 +31,7 @@ type PChannelManagerConfig struct {
 	Logger            *mlog.Logger
 	SegmentLifecycle  segment.Lifecycle
 	SegmentPackWriter segment.PackWriter
-	// SummaryManager supplies shared Delete reads and accepts durable GC frontiers.
+	// SummaryManager accepts durable materialization and GC frontiers.
 	SummaryManager *walsummary.Manager
 	// L0Materializer writes and registers L0 output.
 	L0Materializer     l0materializer.Materializer
@@ -60,7 +62,10 @@ type PChannelRecoveryManager struct {
 	// PChannelCheckpointUpdater). Non-nil only when the config wires it.
 	checkpointUpdater *PChannelCheckpointUpdater
 
-	config PChannelManagerConfig
+	closeCh   chan struct{}
+	closeOnce sync.Once
+	wg        sync.WaitGroup
+	config    PChannelManagerConfig
 }
 
 func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecoveryManager, error) {
@@ -74,13 +79,13 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 		segmentsByVChannel: segmentsByVChannel,
 		dirtyModules:       make(map[string]*VChannelRecoveryModule),
 		config:             config,
+		closeCh:            make(chan struct{}),
 	}
 	if config.GetRecoveryCheckpoint != nil && config.CoordinatorBroker != nil {
 		manager.checkpointUpdater = newPChannelCheckpointUpdater(
 			config.PChannel,
 			manager.activeVChannels,
 			config.GetRecoveryCheckpoint,
-			manager.vChannelFlushTimeTick,
 			config.CoordinatorBroker,
 		)
 	}
@@ -108,19 +113,6 @@ func (m *PChannelRecoveryManager) activeVChannels() []string {
 	})
 	sort.Strings(vchannels)
 	return vchannels
-}
-
-// vChannelFlushTimeTick returns the vchannel-level flush position of one
-// vchannel (see VChannelRecoveryModule.FlushCheckpointTimeTick). It is 0 for
-// a vchannel whose module is not (yet) registered; DataCoord's forward-only
-// UpdateChannelCheckpoint guard then simply keeps the previously reported
-// position.
-func (m *PChannelRecoveryManager) vChannelFlushTimeTick(vchannel string) uint64 {
-	module, ok := m.modules.Get(vchannel)
-	if !ok {
-		return 0
-	}
-	return module.FlushCheckpointTimeTick()
 }
 
 func (m *PChannelRecoveryManager) initialVChannels(config PChannelManagerConfig) []string {
@@ -262,31 +254,38 @@ func (m *PChannelRecoveryManager) RequestPersistThrough(vchannel string, targetT
 	module.RequestPersistThrough(targetTimeTick)
 }
 
-// RequestMaterializationThrough routes Summary consumption pressure only to
-// an existing VChannel; it must not synthesize state ahead of ordered replay.
-func (m *PChannelRecoveryManager) RequestMaterializationThrough(vc string, through uint64) {
-	if module := m.Module(vc); module != nil {
-		module.RequestMaterializationThrough(through)
-	}
-}
-
-// Start starts the deprecated DataCoord channel-checkpoint reporting loop
-// (PChannelCheckpointUpdater). Every other manager resource runs on the
-// recovery storage's scopedTaskScheduler and needs no start hook.
+// Start runs the legacy checkpoint reporter and one shared L0 age check.
 func (m *PChannelRecoveryManager) Start() {
 	if m.checkpointUpdater != nil {
-		go m.checkpointUpdater.Start()
+		m.wg.Add(1)
+		go func() { defer m.wg.Done(); m.checkpointUpdater.Start() }()
 	}
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.closeCh:
+				return
+			case now := <-ticker.C:
+				maxAge := paramtable.Get().DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
+				m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool {
+					module.l0Materializer.FlushStale(now, maxAge)
+					return true
+				})
+			}
+		}
+	}()
 }
 
-// Close stops the deprecated DataCoord channel-checkpoint reporting loop.
-// Every module task runs on the recovery storage's scopedTaskScheduler,
-// which recoveryStorageImpl.Close cancels and drains; no other resource
-// owned by the manager survives beyond that teardown.
 func (m *PChannelRecoveryManager) Close() {
+	m.closeOnce.Do(func() { close(m.closeCh) })
 	if m.checkpointUpdater != nil {
 		m.checkpointUpdater.Close()
 	}
+	m.wg.Wait()
 }
 
 func (m *PChannelRecoveryManager) shouldBroadcast(msg message.ImmutableMessage) bool {
@@ -344,7 +343,6 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		Logger:             m.config.Logger,
 		SegmentLifecycle:   m.config.SegmentLifecycle,
 		SegmentPackWriter:  m.config.SegmentPackWriter,
-		SummaryReader:      m.config.SummaryManager,
 		L0Materializer:     m.config.L0Materializer,
 		L0MaterializeRows:  m.config.L0MaterializeRows,
 		L0MaterializeBytes: m.config.L0MaterializeBytes,

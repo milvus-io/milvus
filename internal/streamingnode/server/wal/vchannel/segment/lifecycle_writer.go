@@ -54,7 +54,18 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 }
 
 func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
+	return w.saveBinlogPaths(ctx, meta, true)
+}
+
+// TODO: Remove after enabling queryview. Existing query recovery loads growing
+// binlogs through DataCoord, so publication must precede Insert completion.
+func (w *segmentLifecycleWriter) PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
+	return w.saveBinlogPaths(ctx, meta, false)
+}
+
+func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, flushed bool) error {
 	req := buildCommitL1SegmentRequest(w.serverID, meta)
+	req.Flushed = flushed
 	// Same bounded retry loop for the coordinator client's built-in retries as
 	// in EnsureGrowingSegment; further retries happen at the task layer.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)

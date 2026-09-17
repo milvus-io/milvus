@@ -145,7 +145,7 @@ func TestSegmentTaskUnclassifiedErrorIsRetryable(t *testing.T) {
 
 // failingLifecycle fails both lifecycle calls with an unrecoverable
 // (InputError-class) error, simulating a permanent coordinator rejection.
-type failingLifecycle struct{}
+type failingLifecycle struct{ Lifecycle }
 
 func (failingLifecycle) EnsureGrowingSegment(context.Context, *streamingpb.SegmentAssignmentMeta) error {
 	return retry.Unrecoverable(merr.WrapErrParameterInvalid("v2", "v3"))

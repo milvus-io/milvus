@@ -361,3 +361,34 @@ func TestSummaryDoesNotPersistBarrierEntries(t *testing.T) {
 		})
 	}
 }
+
+func TestDroppedVChannelRetirementSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	manager, store := newTransformTestManagerWithStore(t)
+	var released bool
+	flushTransform(t, manager, "dropped", 100, &released)
+	meta := map[string]*streamingpb.VChannelMeta{
+		"dropped": {
+			State:              streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED,
+			CheckpointTimeTick: 100, TransformMaterializedTimeTick: 100,
+		},
+	}
+	manager.RestoreTransformGCTimeTicks(meta)
+	require.NoError(t, gcSummary(ctx, manager))
+	require.False(t, manager.CanCleanupVChannel("dropped", 100), "retained chunk still needs the tombstone")
+	recovered := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 3), 1)
+	require.NoError(t, recovered.Restore(ctx))
+	recovered.RestoreTransformGCTimeTicks(meta)
+	require.NoError(t, recovered.GCOnce(ctx))
+	require.Empty(t, recovered.Manifest().GetChunks())
+	require.False(t, recovered.CanCleanupVChannel("dropped", 100), "in-memory retirement is not enough")
+	require.NoError(t, (&manifestWriteTask{manager: recovered}).Execute(ctx))
+	require.True(t, recovered.CanCleanupVChannel("dropped", 100))
+	// Crash after manifest publication and catalog deletion but before object GC.
+	again := newTestManager(t, NewStore(store.chunkManager, store.PChannel(), 4), 1)
+	require.NoError(t, again.Restore(ctx))
+	again.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{})
+	require.NoError(t, (&manifestWriteTask{manager: again}).Execute(ctx))
+	require.Empty(t, again.Manifest().GetChunks())
+	require.True(t, again.CanCleanupVChannel("dropped", 100))
+}

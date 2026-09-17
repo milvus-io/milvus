@@ -12,6 +12,10 @@ persistence component.
 The common lifetime contract is defined in
 [WAL Message Ack Design](message_ack.md).
 
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
+
 ## 1. Ownership
 
 ```go
@@ -30,8 +34,8 @@ BroadcastAck registers one exclusive callback. The callback fires when all
 local Retained consumers have released and BroadcastAck is the only remaining
 Owner holder. Explicit Flush/lifecycle requests include L0Materializer among
 these consumers: readiness waits for L1 final commit, required L0 output, and
-installation of dirty materialization metadata. Ordinary Delete materialization
-from Summary does not retain a source handle.
+installation of dirty materialization metadata. The current WAL materializer also retains ordinary Delete handles through
+output and registration. L1/L0 work on an explicit request joins independently.
 
 For successful consumers the callback marks the task ready and nonblockingly
 wakes the dispatcher; it performs no Coordinator I/O. If any consumer poisoned
