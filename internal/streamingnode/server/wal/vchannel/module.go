@@ -197,25 +197,21 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	case message.MessageTypeSchemaChange:
 		m.handleSchemaChangeMessage(message.MustAsImmutableSchemaChangeMessageV2(msg))
 	case message.MessageTypeAlterCollection:
-		m.handleAlterCollectionMessage(ctx, message.MustAsRetainedImmutableAlterCollectionMessageV2(retained))
+		m.handleAlterCollectionMessage(ctx, retained)
 	case message.MessageTypeDropCollection:
-		m.handleDropCollectionMessage(ctx, message.MustAsRetainedImmutableDropCollectionMessageV1(retained))
+		m.handleDropCollectionMessage(ctx, retained)
 	case message.MessageTypeDropPartition:
-		m.handleDropPartitionMessage(ctx, message.MustAsRetainedImmutableDropPartitionMessageV1(retained))
+		m.handleDropPartitionMessage(ctx, retained)
 	case message.MessageTypeTruncateCollection:
-		m.handleTruncateCollectionMessage(ctx, message.MustAsRetainedImmutableTruncateCollectionMessageV2(retained))
+		m.handleTruncateCollectionMessage(ctx, retained)
 	case message.MessageTypeCreateSegment:
 		m.handleCreateSegmentMessage(ctx, message.MustAsRetainedImmutableCreateSegmentMessageV2(retained))
 	case message.MessageTypeInsert, message.MessageTypeTxn:
 		m.handleInsertMessage(ctx, retained)
 	case message.MessageTypeFlush:
-		m.handleFlushMessage(ctx, message.MustAsRetainedImmutableFlushMessageV2(retained))
-	case message.MessageTypeManualFlush:
-		m.handleManualFlushMessage(ctx, retained)
-	case message.MessageTypeFlushAll:
-		m.handleFlushAllMessage(ctx, retained)
-	case message.MessageTypeAlterWAL:
-		m.handleAlterWALMessage(ctx, retained)
+		m.handleFlushMessage(ctx, retained)
+	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL:
+		m.flushAllSegmentsCreatedBefore(ctx, retained)
 	}
 	// Completion requests are separate from generic Barrier classification.
 	// Their L1 flushes were initiated above. Pin replay until L0 completes.
@@ -360,56 +356,48 @@ func (m *VChannelRecoveryModule) handleSchemaChangeMessage(msg message.Immutable
 
 func (m *VChannelRecoveryModule) handleAlterCollectionMessage(
 	ctx context.Context,
-	owned message.RetainedImmutableAlterCollectionMessageV2,
+	owned message.RetainedImmutableMessage,
 ) {
-	msg := owned.Message()
+	msg := message.MustAsImmutableAlterCollectionMessageV2(owned.Message())
 	if m.vchannelView != nil {
 		m.vchannelView.ObserveAlterCollectionMessageV2(msg)
 	}
 	if messageutil.IsSchemaChange(msg.Header()) {
-		handle := owned.CloneHandle()
-		defer handle.Release()
-		m.flushAllSegmentsCreatedBefore(ctx, handle)
+		m.flushAllSegmentsCreatedBefore(ctx, owned)
 	}
 }
 
 func (m *VChannelRecoveryModule) handleDropCollectionMessage(
 	ctx context.Context,
-	owned message.RetainedImmutableDropCollectionMessageV1,
+	owned message.RetainedImmutableMessage,
 ) {
-	msg := owned.Message()
+	msg := message.MustAsImmutableDropCollectionMessageV1(owned.Message())
 	if m.vchannelView != nil {
 		m.vchannelView.ObserveDropCollectionMessageV1(msg)
 	}
-	handle := owned.CloneHandle()
-	defer handle.Release()
-	m.flushAllSegmentsCreatedBefore(ctx, handle)
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
 }
 
 func (m *VChannelRecoveryModule) handleDropPartitionMessage(
 	ctx context.Context,
-	owned message.RetainedImmutableDropPartitionMessageV1,
+	owned message.RetainedImmutableMessage,
 ) {
-	msg := owned.Message()
+	msg := message.MustAsImmutableDropPartitionMessageV1(owned.Message())
 	if m.vchannelView != nil {
 		m.vchannelView.ObserveDropPartitionMessageV1(msg)
 	}
-	handle := owned.CloneHandle()
-	defer handle.Release()
-	m.flushPartitionSegmentsCreatedBefore(ctx, handle, msg.Header().GetPartitionId())
+	m.flushPartitionSegmentsCreatedBefore(ctx, owned, msg.Header().GetPartitionId())
 }
 
 func (m *VChannelRecoveryModule) handleTruncateCollectionMessage(
 	ctx context.Context,
-	owned message.RetainedImmutableTruncateCollectionMessageV2,
+	owned message.RetainedImmutableMessage,
 ) {
-	msg := owned.Message()
+	msg := message.MustAsImmutableTruncateCollectionMessageV2(owned.Message())
 	if m.vchannelView != nil {
 		m.vchannelView.ObserveTruncateCollectionMessageV2(msg)
 	}
-	handle := owned.CloneHandle()
-	defer handle.Release()
-	m.flushAllSegmentsCreatedBefore(ctx, handle)
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
 }
 
 func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
@@ -441,11 +429,7 @@ func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
 		m.segments[id] = view
 		created = true
 	}
-	changed := created
-	if view != nil && view.ObserveCreateSegmentMessageV2(ctx, msg) {
-		changed = true
-	}
-	if changed {
+	if view.ObserveCreateSegmentMessageV2(ctx, msg) || created {
 		m.markSegmentUpdatedLocked(id)
 	}
 }
@@ -479,37 +463,15 @@ func (m *VChannelRecoveryModule) handleInsertMessage(
 
 func (m *VChannelRecoveryModule) handleFlushMessage(
 	ctx context.Context,
-	msg message.RetainedImmutableFlushMessageV2,
+	owned message.RetainedImmutableMessage,
 ) {
-	id := msg.Message().Header().GetSegmentId()
+	msg := message.MustAsImmutableFlushMessageV2(owned.Message())
+	id := msg.Header().GetSegmentId()
 	if segment := m.segments[id]; segment != nil {
-		handle := msg.CloneHandle()
-		defer handle.Release()
-		if segment.Flush(ctx, handle) {
+		if segment.Flush(ctx, owned) {
 			m.markSegmentUpdatedLocked(id)
 		}
 	}
-}
-
-func (m *VChannelRecoveryModule) handleManualFlushMessage(
-	ctx context.Context,
-	msg message.RetainedImmutableMessage,
-) {
-	m.flushAllSegmentsCreatedBefore(ctx, msg)
-}
-
-func (m *VChannelRecoveryModule) handleFlushAllMessage(
-	ctx context.Context,
-	msg message.RetainedImmutableMessage,
-) {
-	m.flushAllSegmentsCreatedBefore(ctx, msg)
-}
-
-func (m *VChannelRecoveryModule) handleAlterWALMessage(
-	ctx context.Context,
-	msg message.RetainedImmutableMessage,
-) {
-	m.flushAllSegmentsCreatedBefore(ctx, msg)
 }
 
 func (m *VChannelRecoveryModule) flushAllSegmentsCreatedBefore(

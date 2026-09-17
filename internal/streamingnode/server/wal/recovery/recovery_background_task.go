@@ -36,23 +36,20 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
 			return
 		}
-		if err := rs.gcSummaryStore(rs.backgroundTaskNotifier.Context()); err != nil {
-			return
-		}
+		rs.gcSummaryStore(rs.backgroundTaskNotifier.Context())
 	}
 }
 
 // gcSummaryStore runs the WALSummary retention sweep. The sweep is cheap when
 // there is nothing to release; a failure here (e.g. object storage outage)
 // must not stall checkpoint persistence, so errors only log.
-func (rs *recoveryStorageImpl) gcSummaryStore(ctx context.Context) error {
+func (rs *recoveryStorageImpl) gcSummaryStore(ctx context.Context) {
 	if rs.summaryManager == nil {
-		return nil
+		return
 	}
 	if err := rs.summaryManager.GCOnce(ctx); err != nil {
 		rs.Logger().Warn(context.TODO(), "failed to gc summary store", mlog.Err(err))
 	}
-	return nil
 }
 
 // persistDirtySnapshot persists the dirty snapshot to the catalog.
