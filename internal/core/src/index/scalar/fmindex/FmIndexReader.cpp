@@ -51,6 +51,25 @@ Bytes(std::string_view value) {
     return reinterpret_cast<const uint8_t*>(value.data());
 }
 
+// Every other family answers PatternOp::Match by translating the LIKE pattern
+// (TranslatePatternMatchToRegex / LikePatternMatcher), which rejects a
+// dangling escape with ExprInvalid. FM's phase-1 candidate path only splits on
+// unescaped wildcards, and split_by_wildcard() drops a trailing backslash
+// silently -- so validate here or a malformed pattern would answer "no rows"
+// whenever the recheck is skipped for an empty candidate set.
+void
+RejectDanglingEscape(std::string_view pattern) {
+    bool escape_mode = false;
+    for (const char c : pattern) {
+        escape_mode = !escape_mode && c == '\\';
+    }
+    if (escape_mode) {
+        ThrowInfo(ExprInvalid,
+                  "Invalid LIKE pattern: trailing backslash with nothing "
+                  "to escape");
+    }
+}
+
 }  // namespace
 
 FmIndexMappedFile::FmIndexMappedFile(void* data,
@@ -330,6 +349,7 @@ FmIndexReader::PatternMatch(std::string_view pattern, PatternOp op) const {
             // consumer must recheck each candidate against the raw column
             // (PhyUnaryRangeFilterExpr::ExecFMMatch). Null rows are excluded
             // up front: a NULL never matches a LIKE under either polarity.
+            RejectDanglingEscape(pattern);
             auto not_null = IsNotNull();
             const auto rarest = RarestMatchFragment(pattern);
             if (!rarest.has_value()) {

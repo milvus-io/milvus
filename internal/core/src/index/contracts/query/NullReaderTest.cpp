@@ -39,7 +39,7 @@ void
 ExpectRowCountValidity(const ScalarTestData<T>& data,
                        const INullReader& reader) {
     const auto count = data.values.size();
-    const auto exact = reader.IsNotNull(static_cast<int64_t>(count));
+    auto exact = reader.IsNotNull(static_cast<int64_t>(count));
     ASSERT_EQ(exact.size(), count);
     ExpectBitmap(exact, reader.IsNotNull());
 

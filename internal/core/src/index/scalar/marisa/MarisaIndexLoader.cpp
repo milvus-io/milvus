@@ -200,12 +200,23 @@ OpenTrie(const std::string& path, bool mmap_enabled) {
         }
         return trie;
     } catch (const marisa::Exception& error) {
-        // A blanket DataFormatBroken here would report a read failure or an
-        // allocation failure as permanently corrupt data, so the index
-        // scheduler gives up on an artifact that a retry would have loaded.
-        ThrowInfo(ClassifyMarisaError(error, FileReadFailed, DataFormatBroken),
-                  "invalid marisa trie entry: {}",
-                  error.what());
+        // A blanket DataFormatBroken here would report an allocation failure
+        // as permanently corrupt data, so the index scheduler gives up on an
+        // artifact that a retry would have loaded: MARISA_MEMORY_ERROR must
+        // stay MemAllocateFailed (retriable).
+        //
+        // MARISA_IO_ERROR, however, is NOT transient at this site. `path` is
+        // always a file this loader already materialised into its own staging
+        // directory (ReadEntryToLocalFile above); any object-storage failure
+        // was raised there. What reaches marisa is the artifact's own bytes,
+        // so "size_read <= 0" means a truncated/corrupt payload -- permanent.
+        // Hence DataFormatBroken for both the IO and the format/size arm.
+        // (Master passes FileReadFailed here because its call sites read the
+        // index file directly; the refactor's staging step removes that case.)
+        ThrowInfo(
+            ClassifyMarisaError(error, DataFormatBroken, DataFormatBroken),
+            "invalid marisa trie entry: {}",
+            error.what());
     }
 }
 
