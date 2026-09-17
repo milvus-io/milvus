@@ -38,10 +38,11 @@ import (
 // The segment encoding is chosen by action type: an ActionAdd writes the
 // segment record plus its binlog KVs (a new segment); an ActionUpdate writes
 // the segment record, record-only by default, or via the legacy AlterSegments
-// encoding (record + GC-compat binlog KVs for a dropped pre-prefix segment)
-// when SegmentEntry.AlterEncoding is set. Entries this catalog does not own,
-// or Type/Entry combinations it does not implement, are a caller programming
-// error and are rejected with a ServiceInternal error and no write.
+// encoding when SegmentEntry.AlterEncoding is set. That encoding may also
+// carry a binlog increment, and preserves the GC-compat write for a dropped
+// pre-prefix segment. Entries this catalog does not own, or Type/Entry
+// combinations it does not implement, are a caller programming error and are
+// rejected with a ServiceInternal error and no write.
 func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
 	b := txn.New()
 	for _, action := range actions {
@@ -61,6 +62,12 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				e.SegmentIndex.BuildID,
 			)
 			switch action.Type {
+			case metastore.ActionAdd:
+				value, err := proto.Marshal(model.MarshalSegmentIndexModel(e.SegmentIndex))
+				if err != nil {
+					return err
+				}
+				b.Save(key, string(value))
 			case metastore.ActionDelete:
 				// Remove, not CommitRemove: an action set containing a segment
 				// index entry never takes the ordered fallback path (see
@@ -95,6 +102,98 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 			default:
 				return unsupportedAction(action)
 			}
+		case metastore.CopySegmentTaskEntry:
+			switch action.Type {
+			case metastore.ActionAdd:
+				if e.Task == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil copy segment task in UpdateAction")
+				}
+				value, err := proto.Marshal(e.Task)
+				if err != nil {
+					return err
+				}
+				b.Save(buildCopySegmentTaskKey(e.Task.GetTaskId()), string(value))
+			case metastore.ActionDelete:
+				b.Remove(buildCopySegmentTaskKey(e.TaskID))
+			default:
+				return unsupportedAction(action)
+			}
+		case metastore.CopySegmentJobEntry:
+			if action.Type != metastore.ActionUpdate {
+				return unsupportedAction(action)
+			}
+			if e.Job == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil copy segment job in UpdateAction")
+			}
+			value, err := proto.Marshal(e.Job)
+			if err != nil {
+				return err
+			}
+			b.Save(buildCopySegmentJobKey(e.Job.GetJobId()), string(value))
+		case metastore.ImportTaskEntry:
+			switch action.Type {
+			case metastore.ActionUpdate:
+				if e.Task == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil import task in UpdateAction")
+				}
+				value, err := proto.Marshal(e.Task)
+				if err != nil {
+					return err
+				}
+				b.Save(buildImportTaskKey(e.Task.GetTaskID()), string(value))
+			case metastore.ActionDelete:
+				b.Remove(buildImportTaskKey(e.TaskID))
+			default:
+				return unsupportedAction(action)
+			}
+		case metastore.PreImportTaskEntry:
+			switch action.Type {
+			case metastore.ActionUpdate:
+				if e.Task == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil pre-import task in UpdateAction")
+				}
+				value, err := proto.Marshal(e.Task)
+				if err != nil {
+					return err
+				}
+				b.Save(buildPreImportTaskKey(e.Task.GetTaskID()), string(value))
+			case metastore.ActionDelete:
+				b.Remove(buildPreImportTaskKey(e.TaskID))
+			default:
+				return unsupportedAction(action)
+			}
+		case metastore.StatsTaskEntry:
+			switch action.Type {
+			case metastore.ActionAdd:
+				if e.Task == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil stats task in UpdateAction")
+				}
+				value, err := proto.Marshal(e.Task)
+				if err != nil {
+					return err
+				}
+				b.Save(buildStatsTaskKey(e.Task.GetTaskID()), string(value))
+			case metastore.ActionDelete:
+				b.Remove(buildStatsTaskKey(e.TaskID))
+			default:
+				return unsupportedAction(action)
+			}
+		case metastore.CompactionTaskEntry:
+			if e.Task == nil {
+				return merr.WrapErrServiceInternalMsg("datacoord catalog: nil compaction task in UpdateAction")
+			}
+			switch action.Type {
+			case metastore.ActionAdd:
+				key, value, err := buildCompactionTaskKV(proto.Clone(e.Task).(*datapb.CompactionTask))
+				if err != nil {
+					return err
+				}
+				b.Save(key, value)
+			case metastore.ActionDelete:
+				b.Remove(buildCompactionTaskPath(e.Task))
+			default:
+				return unsupportedAction(action)
+			}
 		case metastore.RefreshJobEntry:
 			switch action.Type {
 			case metastore.ActionUpdate:
@@ -121,10 +220,21 @@ func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction
 				return unsupportedAction(action)
 			}
 		case metastore.AnalyzeTaskEntry:
-			if action.Type != metastore.ActionDelete {
+			switch action.Type {
+			case metastore.ActionAdd:
+				if e.Task == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil analyze task in UpdateAction")
+				}
+				value, err := proto.Marshal(e.Task)
+				if err != nil {
+					return err
+				}
+				b.Save(buildAnalyzeTaskKey(e.Task.GetTaskID()), string(value))
+			case metastore.ActionDelete:
+				b.Remove(buildAnalyzeTaskKey(e.TaskID))
+			default:
 				return unsupportedAction(action)
 			}
-			b.Remove(buildAnalyzeTaskKey(e.TaskID))
 		case metastore.PartitionStatsVersionEntry:
 			if action.Type != metastore.ActionUpdate {
 				return unsupportedAction(action)
@@ -221,8 +331,8 @@ func containsSegmentIndexUpdate(actions []metastore.UpdateAction) bool {
 //   - ActionUpdate -> segment record rewrite; the caller supplies the
 //     already-mutated segment value. AlterEncoding selects the encoding:
 //     false -> record-only (SaveDroppedSegmentsInBatch), true -> the legacy
-//     AlterSegments encoding, which for a Dropped segment also writes the
-//     handleDroppedSegment GC-compat binlog KVs.
+//     AlterSegments encoding, including an optional binlog increment and, for
+//     a Dropped segment, the handleDroppedSegment GC-compat binlog KVs.
 //   - anything else (e.g. ActionDelete: physical segment removal) is not
 //     wired yet and is rejected.
 func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t metastore.ActionType, e metastore.SegmentEntry) error {
@@ -271,6 +381,9 @@ func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t meta
 				b.Remove(k)
 			}
 			return nil
+		}
+		if len(e.Binlogs) > 0 {
+			return merr.WrapErrServiceInternalMsg("datacoord catalog: segment binlog increment requires AlterEncoding")
 		}
 		kvs, err := buildDroppedSegmentKvs([]*datapb.SegmentInfo{e.Segment})
 		if err != nil {

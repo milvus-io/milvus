@@ -39,7 +39,7 @@ if mlog.LevelEnabled(mlog.DebugLevel) {
 | `Info` | Normal operational events: startup, shutdown, configuration loaded, request completed, task finished. |
 | `Warn` | Unexpected but recoverable situations: timeout retry, transient RPC failure with retry, fallback path taken, deprecated API called. |
 | `Error` | Operation failed and cannot be completed: unrecoverable RPC failure, data corruption, invariant broken. Always attach `mlog.Err(err)`. |
-| `Fatal` | Process cannot continue. Calls `os.Exit(1)`. Use only during initialization for unrecoverable setup failures. |
+| `Fatal` | Process cannot continue. Calls `os.Exit(1)`. Use for unrecoverable initialization failures, or a narrowly scoped runtime fail-stop after an ambiguous authoritative metadata write when continuing could overwrite durable state. |
 | `DPanic` / `Panic` | Reserved for "should never happen" invariant violations. Rarely used. |
 Each level has a corresponding `Rated` variant. Logger methods have the same signature as package-level functions.
 

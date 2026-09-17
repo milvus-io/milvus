@@ -724,9 +724,9 @@ verify:
 	// Step 7: Regression for issue #48626 — explore temp dir must be
 	// reclaimed after the refresh job reaches a terminal state, not
 	// left as orphaned 0-byte placeholders on object storage.
-	// The datacoord Finished handler fires cleanupExploreTempForJob
-	// via defer, so by the time GetRefreshExternalCollectionProgress
-	// reports Completed + schema updated, the prefix must be gone.
+	// DataCoord removes the Explore directory before publishing Finished,
+	// so by the time GetRefreshExternalCollectionProgress reports
+	// Completed + schema updated, the prefix must be gone.
 	// ---------------------------------------------------------------
 	exploreTempPrefix := fmt.Sprintf("__explore_temp__/coord_%d/", jobID)
 	var leaked []string

@@ -130,14 +130,13 @@ func TestInitMetaDoesNotReplayManifestScan(t *testing.T) {
 			b.EXPECT().ShowCollectionIDs(mock.Anything).Return(&rootcoordpb.ShowCollectionIDsResponse{
 				Status: merr.Success(), DbCollections: []*rootcoordpb.DBCollections{{DbName: "default", CollectionIDs: []int64{100}}},
 			}, nil).Once()
-			collectionsLoaded := make(chan struct{})
-			b.EXPECT().ListDatabases(mock.Anything).Run(func(context.Context) { close(collectionsLoaded) }).Return(nil, nil).Maybe()
+			// DataCoord keeps no local collection cache: initMeta does not walk
+			// RootCoord's databases, so there is no asynchronous load to wait for.
 			server := &Server{ctx: ctx, kv: kv, broker: b}
 			err := server.initMeta(cm)
 			require.Equal(t, 1, reads[good])
 			if mode == "transient" {
 				require.NoError(t, err)
-				<-collectionsLoaded
 				require.NotNil(t, server.meta)
 				require.Equal(t, 2, reads[bad])
 			} else {

@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -130,7 +132,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) generateBasicTask() *bumpSchemaVe
 		Channel: "ch-1",
 	}
 
-	task := newBumpSchemaVersionTask(compactionTask, s.mockAlloc, s.meta, s.ievm)
+	task := newBumpSchemaVersionTask(context.TODO(), compactionTask, s.mockAlloc, s.meta, s.ievm)
 	return task
 }
 
@@ -140,12 +142,12 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBumpSchemaVersionCompactionTa
 	// Test basic getters
 	s.Equal(int64(1), task.GetTaskID())
 	s.Equal(taskcommon.Compaction, task.GetTaskType())
-	s.Equal(int64(1), task.GetSlotUsage())
-	s.Equal("10-ch-1", task.GetLabel())
+	s.Equal(int64(1), task.GetTaskSlot())
+	s.Equal("10-ch-1", compactionTaskLabel(task.GetTask()))
 	s.Equal(int64(0), task.GetTaskVersion())
 
 	// Test task proto
-	taskProto := task.GetTaskProto()
+	taskProto := task.GetTask()
 	s.NotNil(taskProto)
 	s.Equal(int64(1), taskProto.GetPlanID())
 	s.Equal(int64(19530), taskProto.GetTriggerID())
@@ -201,7 +203,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequest() {
 	s.Equal(int64(1), plan.GetSegmentBinlogs()[0].GetCollectionID())
 	s.Equal(int64(10), plan.GetSegmentBinlogs()[0].GetPartitionID())
 	s.Require().NotNil(plan.GetSchema())
-	s.Equal(task.GetTaskProto().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
+	s.Equal(task.GetTask().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
 	s.Equal(int32(3), plan.GetCurrentScalarIndexVersion())
 }
 
@@ -241,8 +243,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestCarries
 	s.Equal(manifest, plan.GetSegmentBinlogs()[0].GetManifest())
 	s.Equal(commitTimestamp, plan.GetSegmentBinlogs()[0].GetCommitTimestamp())
 	s.Require().NotNil(plan.GetSchema())
-	s.Equal(task.GetTaskProto().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
-	s.Equal(task.GetTaskProto().GetPreAllocatedSegmentIDs(), plan.GetPreAllocatedSegmentIDs())
+	s.Equal(task.GetTask().GetSchema().GetVersion(), plan.GetSchema().GetVersion())
+	s.Equal(task.GetTask().GetPreAllocatedSegmentIDs(), plan.GetPreAllocatedSegmentIDs())
 	s.Require().NotNil(plan.GetPreAllocatedLogIDs())
 	s.Greater(plan.GetPreAllocatedLogIDs().GetEnd(), plan.GetPreAllocatedLogIDs().GetBegin())
 	s.Equal(plan.GetPreAllocatedLogIDs().GetBegin(), plan.GetBeginLogID())
@@ -268,7 +270,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestBuildCompactionRequestPreAllo
 	allocErr := errors.New("alloc failed")
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocN(mock.Anything).Return(int64(0), int64(0), allocErr).Once()
-	task := newBumpSchemaVersionTask(s.generateBasicTask().GetTaskProto(), mockAlloc, s.meta, s.ievm)
+	task := newBumpSchemaVersionTask(context.TODO(), s.generateBasicTask().GetTask(), mockAlloc, s.meta, s.ievm)
 
 	plan, err := task.BuildCompactionRequest()
 	s.ErrorIs(err, allocErr)
@@ -290,7 +292,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
 		task.CreateTaskOnWorker(1, cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("CreateTaskOnWorker fail, CreateCompaction error", func() {
@@ -319,12 +321,125 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 
 		task := s.generateBasicTask()
 		cluster := session.NewMockCluster(s.T())
+		// ErrNodeNotFound is DataCoord's own registry losing the node, not an
+		// answer from the worker. The DataNode process deregisters from etcd
+		// before it tears down its running compactions, so this is what a rolling
+		// upgrade produces while the worker is still writing. Re-dispatching the
+		// same planID here would put two full rewrites on the same output segment
+		// ID and the same text-index keys, so the attempt is abandoned and the
+		// work is rebuilt under a fresh planID instead.
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(merr.WrapErrNodeNotFound(1))
 		task.CreateTaskOnWorker(1, cluster)
-		// Should remain in pipelining state when CreateCompaction fails
-		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-		// NodeID should be set to NullNodeID (-1) when CreateCompaction fails
-		s.Equal(int64(-1), task.GetTaskProto().GetNodeID())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
+	})
+
+	s.Run("CreateTaskOnWorker refused by worker, abandon for replan", func() {
+		// A rejection the worker actually sent -- typically its slot limit -- does
+		// prove the plan is not running anywhere, so the same planID could safely
+		// go to another node. But that safety depends on classifying the refusal
+		// correctly, and getting it wrong hands a live plan to a second node. A
+		// fresh planID and a fresh output range remove the need to classify at
+		// all: this attempt is abandoned exactly like an unreadable outcome.
+		//
+		// SetupSubTest gives every subtest a fresh meta, so the input segment has
+		// to be registered here or BuildCompactionRequest fails the task before
+		// the RPC is ever attempted.
+		err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            101,
+				CollectionID:  1,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				Level:         datapb.SegmentLevel_L1,
+				State:         commonpb.SegmentState_Flushed,
+				NumOfRows:     1000,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 101,
+						Binlogs: []*datapb.Binlog{{LogID: 1000, EntriesNum: 1000}},
+					},
+				},
+			},
+		})
+		s.NoError(err)
+
+		task := s.generateBasicTask()
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).
+			Return(merr.WrapErrServiceInternalMsg("no slot"))
+		task.CreateTaskOnWorker(1, cluster)
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
+	})
+
+	s.Run("CreateTaskOnWorker outcome unknown, abandon for replan", func() {
+		// A lost response must not send this plan anywhere else: a full rewrite
+		// derives its output segment ID from the pre-allocated range's begin and
+		// writes its text index on fixed names under a base path derived from it,
+		// so a second execution of the same plan overwrites the first in place.
+		// The attempt is abandoned and the work rebuilt with new IDs.
+		segmentID := int64(101)
+		err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  1,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				Level:         datapb.SegmentLevel_L1,
+				State:         commonpb.SegmentState_Flushed,
+				NumOfRows:     1000,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 101,
+						Binlogs: []*datapb.Binlog{
+							{LogID: 1000, EntriesNum: 1000},
+						},
+					},
+				},
+			},
+		})
+		s.NoError(err)
+
+		task := s.generateBasicTask()
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).
+			Return(context.DeadlineExceeded)
+		task.CreateTaskOnWorker(1, cluster)
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
+	})
+
+	s.Run("CreateTaskOnWorker duplicated, keep assignment", func() {
+		// The worker answers duplicated only when it already holds the plan, so
+		// the retried request's first attempt was accepted. Releasing the
+		// assignment here would run the same plan on a second node.
+		segmentID := int64(101)
+		err := s.meta.AddSegment(context.TODO(), &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  1,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				Level:         datapb.SegmentLevel_L1,
+				State:         commonpb.SegmentState_Flushed,
+				NumOfRows:     1000,
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 101,
+						Binlogs: []*datapb.Binlog{
+							{LogID: 1000, EntriesNum: 1000},
+						},
+					},
+				},
+			},
+		})
+		s.NoError(err)
+
+		task := s.generateBasicTask()
+		cluster := session.NewMockCluster(s.T())
+		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).
+			Return(merr.WrapErrDuplicatedCompactionTask())
+		task.CreateTaskOnWorker(1, cluster)
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTask().GetState())
+		s.Equal(int64(1), task.GetTask().GetNodeID())
 	})
 
 	s.Run("CreateTaskOnWorker succeed", func() {
@@ -355,93 +470,99 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestCreateTaskOnWorker() {
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().CreateCompaction(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		task.CreateTaskOnWorker(1, cluster)
-		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
-		s.Equal(int64(1), task.GetTaskProto().GetNodeID())
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTask().GetState())
+		s.Equal(int64(1), task.GetTask().GetNodeID())
 	})
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 	s.Run("QueryTaskOnWorker, node not found", func() {
+		// The node left the cluster, but its process deregisters from etcd
+		// before it tears down running compactions, so the plan may still be
+		// executing there. Abandon the attempt rather than hand the same plan
+		// -- same output segment ID, same text-index keys -- to a second node.
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(nil, merr.WrapErrNodeNotFound(1)).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_pipelining, task.GetTaskProto().GetState())
-		s.Equal(int64(-1), task.GetTaskProto().GetNodeID())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
+		s.Equal(int64(1), task.GetTask().GetNodeID())
 	})
 
 	s.Run("QueryTaskOnWorker, result is nil", func() {
+		// The current DataNode always answers with a result for the queried
+		// plan, so a nil result is no answer -- and a round that ends without
+		// an answer ends the attempt, same as the create path.
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(nil, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		// State should remain unchanged when result is nil
-		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, completed with empty segments", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State:    datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{},
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, pipelining state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_pipelining,
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		// State should remain unchanged
-		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, executing state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_executing,
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
 		// State should remain unchanged
-		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, timeout state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_timeout,
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, failed state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_failed,
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, completed with ValidateSegmentState error (segment not in meta)", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		// segment 101 is NOT in meta → ValidateSegmentStateBeforeCompleteCompactionMutation returns error
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
@@ -449,7 +570,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 			Segments: []*datapb.CompactionSegment{{SegmentID: 101}},
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, completed with ErrIllegalCompactionPlan from saveSegmentMeta", func() {
@@ -470,14 +591,14 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		s.NoError(err)
 
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State:    datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{{SegmentID: 999}}, // mismatched → ErrIllegalCompactionPlan
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
 
 	s.Run("QueryTaskOnWorker, completed success path", func() {
@@ -501,7 +622,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		s.NoError(err)
 
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_completed,
@@ -514,8 +635,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 			}},
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
-		s.Equal([]int64{segmentID}, task.GetTaskProto().GetResultSegments())
+		s.Equal(datapb.CompactionTaskState_completed, task.GetTask().GetState())
+		s.Equal([]int64{segmentID}, task.GetTask().GetResultSegments())
 	})
 
 	s.Run("QueryTaskOnWorker, completed replacement success path", func() {
@@ -538,7 +659,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		s.NoError(err)
 
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(
+		task.SetTask(cloneCompactionTask(task.GetTask(),
 			setState(datapb.CompactionTaskState_executing),
 			setNodeID(1),
 			func(t *datapb.CompactionTask) {
@@ -557,8 +678,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 			}},
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
-		s.Equal([]int64{newSegmentID}, task.GetTaskProto().GetResultSegments())
+		s.Equal(datapb.CompactionTaskState_completed, task.GetTask().GetState())
+		s.Equal([]int64{newSegmentID}, task.GetTask().GetResultSegments())
 		s.Equal(commonpb.SegmentState_Dropped, s.meta.GetSegment(context.TODO(), segmentID).GetState())
 		s.Equal(commonpb.SegmentState_Flushed, s.meta.GetSegment(context.TODO(), newSegmentID).GetState())
 	})
@@ -583,7 +704,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 		s.NoError(err)
 
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_completed,
@@ -593,54 +714,113 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorker() {
 			}},
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
-		s.Contains(task.GetTaskProto().GetFailReason(), "StorageV3 manifest")
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
+		s.Contains(task.GetTask().GetFailReason(), "StorageV3 manifest")
 	})
 
 	s.Run("QueryTaskOnWorker, default unknown state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 		cluster := session.NewMockCluster(s.T())
 		cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
 			State: datapb.CompactionTaskState_unknown,
 		}, nil).Once()
 		task.QueryTaskOnWorker(cluster)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_retrying, task.GetTask().GetState())
 	})
+}
+
+func (s *BumpSchemaVersionCompactionTaskSuite) TestQueryTaskOnWorkerInPlaceCatalogErrorFailStops() {
+	const segmentID = int64(101)
+	currentManifest := packed.MarshalManifestPath("/data/segments/101", 1)
+	resultManifest := packed.MarshalManifestPath("/data/segments/101", 2)
+	err := s.meta.AddSegment(context.Background(), &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			ID:             segmentID,
+			CollectionID:   1,
+			PartitionID:    10,
+			InsertChannel:  "ch-1",
+			Level:          datapb.SegmentLevel_L1,
+			State:          commonpb.SegmentState_Flushed,
+			NumOfRows:      1000,
+			SchemaVersion:  1,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   currentManifest,
+		},
+		isCompacting: true,
+	})
+	s.Require().NoError(err)
+
+	writeErr := errors.New("ambiguous catalog response")
+	mockCatalog := mocks.NewDataCoordCatalog(s.T())
+	mockCatalog.EXPECT().AlterSegments(mock.Anything, mock.MatchedBy(func(segments []*datapb.SegmentInfo) bool {
+		return len(segments) == 1 && segments[0].GetID() == segmentID &&
+			segments[0].GetManifestPath() == resultManifest
+	}), mock.Anything).Return(writeErr).Once()
+	s.meta.catalog = mockCatalog
+
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	task := s.generateBasicTask()
+	task.SetTask(cloneCompactionTask(task.GetTask(),
+		setState(datapb.CompactionTaskState_executing),
+		setNodeID(1),
+	))
+	cluster := session.NewMockCluster(s.T())
+	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		State: datapb.CompactionTaskState_completed,
+		Segments: []*datapb.CompactionSegment{{
+			SegmentID:      segmentID,
+			StorageVersion: storage.StorageV3,
+			Manifest:       resultManifest,
+			BaseManifest:   currentManifest,
+		}},
+	}, nil).Once()
+
+	task.QueryTaskOnWorker(cluster)
+
+	s.True(fatalCalled)
+	s.Equal(currentManifest, s.meta.GetSegment(context.Background(), segmentID).GetManifestPath())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestProcess() {
 	s.Run("Process meta_saved state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_meta_saved)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_meta_saved)))
 		result := task.Process()
 		// processMetaSaved should transition to completed and return true
 		s.True(result)
-		s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_completed, task.GetTask().GetState())
 	})
 
 	s.Run("Process completed state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_completed)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_completed)))
 		result := task.Process()
 		s.True(result)
-		s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_completed, task.GetTask().GetState())
 	})
 
 	s.Run("Process failed state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_failed)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_failed)))
 		result := task.Process()
 		s.True(result)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_failed, task.GetTask().GetState())
 	})
 
 	s.Run("Process timeout state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_timeout)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_timeout)))
 		result := task.Process()
 		s.True(result)
-		s.Equal(datapb.CompactionTaskState_timeout, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_timeout, task.GetTask().GetState())
 	})
 
 	s.Run("Process other states return false", func() {
@@ -651,7 +831,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestProcess() {
 		}
 		for _, state := range testStates {
 			task := s.generateBasicTask()
-			task.SetTask(task.ShadowClone(setState(state)))
+			task.SetTask(cloneCompactionTask(task.GetTask(), setState(state)))
 			result := task.Process()
 			s.False(result, "state %s should return false", state.String())
 		}
@@ -680,7 +860,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestClean() {
 
 	result := task.Clean()
 	s.True(result)
-	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTaskProto().GetState())
+	s.Equal(datapb.CompactionTaskState_cleaned, task.GetTask().GetState())
 
 	// Verify segment compacting flag is reset
 	seg := s.meta.GetSegment(context.TODO(), segmentID)
@@ -688,45 +868,12 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestClean() {
 	s.False(seg.isCompacting)
 }
 
-func (s *BumpSchemaVersionCompactionTaskSuite) TestNeedReAssignNodeID() {
-	s.Run("NeedReAssignNodeID, pipelining with nodeID 0", func() {
-		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_pipelining), setNodeID(0)))
-		s.True(task.NeedReAssignNodeID())
-	})
-
-	s.Run("NeedReAssignNodeID, pipelining with NullNodeID", func() {
-		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_pipelining), setNodeID(-1)))
-		s.True(task.NeedReAssignNodeID())
-	})
-
-	s.Run("NeedReAssignNodeID, pipelining with valid nodeID", func() {
-		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_pipelining), setNodeID(1)))
-		s.False(task.NeedReAssignNodeID())
-	})
-
-	s.Run("NeedReAssignNodeID, non-pipelining state", func() {
-		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(0)))
-		s.False(task.NeedReAssignNodeID())
-	})
-}
-
 func (s *BumpSchemaVersionCompactionTaskSuite) TestDropTaskOnWorker() {
 	task := s.generateBasicTask()
-	task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing), setNodeID(1)))
+	task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing), setNodeID(1)))
 	cluster := session.NewMockCluster(s.T())
 	cluster.EXPECT().DropCompaction(mock.Anything, mock.Anything).Return(nil).Once()
 	task.DropTaskOnWorker(cluster)
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestSetNodeID() {
-	task := s.generateBasicTask()
-	err := task.SetNodeID(100)
-	s.NoError(err)
-	s.Equal(int64(100), task.GetTaskProto().GetNodeID())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestSaveSegmentMeta() {
@@ -773,7 +920,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSaveSegmentMeta() {
 		}
 		err = task.saveSegmentMeta(result)
 		s.NoError(err)
-		s.Equal(datapb.CompactionTaskState_meta_saved, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_meta_saved, task.GetTask().GetState())
 	})
 
 	s.Run("CompleteCompactionMutation error", func() {
@@ -808,7 +955,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestProcessCompleted() {
 	s.NoError(err)
 
 	task := s.generateBasicTask()
-	task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_completed)))
+	task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_completed)))
 
 	result := task.processCompleted()
 	s.True(result)
@@ -820,41 +967,36 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestUpdateAndSaveTaskMeta() {
 		task := s.generateBasicTask()
 		err := task.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_executing))
 		s.NoError(err)
-		s.Equal(datapb.CompactionTaskState_executing, task.GetTaskProto().GetState())
+		s.Equal(datapb.CompactionTaskState_executing, task.GetTask().GetState())
 		// EndTime should not be set for non-terminal states
-		s.Equal(int64(0), task.GetTaskProto().GetEndTime())
+		s.Equal(int64(0), task.GetTask().GetEndTime())
 	})
 
 	s.Run("terminal state sets end time", func() {
 		task := s.generateBasicTask()
 		// First set to completed state
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_completed)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_completed)))
 		// Then call updateAndSaveTaskMeta which checks current state
 		err := task.updateAndSaveTaskMeta()
 		s.NoError(err)
-		s.Equal(datapb.CompactionTaskState_completed, task.GetTaskProto().GetState())
-		s.NotZero(task.GetTaskProto().GetEndTime())
+		s.Equal(datapb.CompactionTaskState_completed, task.GetTask().GetState())
+		s.NotZero(task.GetTask().GetEndTime())
 	})
 
 	s.Run("failed state sets end time", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_failed)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_failed)))
 		err := task.updateAndSaveTaskMeta()
 		s.NoError(err)
-		s.Equal(datapb.CompactionTaskState_failed, task.GetTaskProto().GetState())
-		s.NotZero(task.GetTaskProto().GetEndTime())
+		s.Equal(datapb.CompactionTaskState_failed, task.GetTask().GetState())
+		s.NotZero(task.GetTask().GetEndTime())
 	})
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestProcessFailed() {
 	task := s.generateBasicTask()
-	task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_failed)))
+	task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_failed)))
 	s.True(task.processFailed())
-}
-
-func (s *BumpSchemaVersionCompactionTaskSuite) TestGetSlotUsage() {
-	task := s.generateBasicTask()
-	s.Equal(int64(1), task.GetSlotUsage())
 }
 
 func (s *BumpSchemaVersionCompactionTaskSuite) TestSetTaskTime() {
@@ -867,28 +1009,28 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestSetTaskTime() {
 func (s *BumpSchemaVersionCompactionTaskSuite) TestGetTaskState() {
 	s.Run("pipelining state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_pipelining)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_pipelining)))
 		state := task.GetTaskState()
 		s.Equal(taskcommon.Init, state)
 	})
 
 	s.Run("executing state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_executing)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_executing)))
 		state := task.GetTaskState()
 		s.Equal(taskcommon.InProgress, state)
 	})
 
 	s.Run("completed state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_completed)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_completed)))
 		state := task.GetTaskState()
 		s.Equal(taskcommon.Finished, state)
 	})
 
 	s.Run("failed state", func() {
 		task := s.generateBasicTask()
-		task.SetTask(task.ShadowClone(setState(datapb.CompactionTaskState_failed)))
+		task.SetTask(cloneCompactionTask(task.GetTask(), setState(datapb.CompactionTaskState_failed)))
 		state := task.GetTaskState()
 		s.Equal(taskcommon.Failed, state)
 	})
@@ -933,7 +1075,7 @@ func (s *BumpSchemaVersionCompactionTaskSuite) TestResetSegmentCompacting() {
 
 	task := s.generateBasicTask()
 	// Override input segments to include both IDs.
-	task.SetTask(task.ShadowClone(func(t *datapb.CompactionTask) {
+	task.SetTask(cloneCompactionTask(task.GetTask(), func(t *datapb.CompactionTask) {
 		t.InputSegments = []int64{101, 102}
 	}))
 

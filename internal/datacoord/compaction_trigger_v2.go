@@ -168,7 +168,7 @@ func NewCompactionTriggerManager(alloc allocator.Allocator, handler Handler, ins
 	}
 	// Initialize policies and keep separate pointers for frequently accessed ones
 
-	m.l0Policy = newL0CompactionPolicy(meta, alloc)
+	m.l0Policy = newL0CompactionPolicy(meta, alloc, m.handler)
 	m.clusteringPolicy = newClusteringCompactionPolicy(meta, m.allocator, m.handler)
 	m.singlePolicy = newSingleCompactionPolicy(meta, m.allocator, m.handler)
 

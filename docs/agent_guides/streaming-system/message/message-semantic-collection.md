@@ -30,7 +30,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| RefreshExternalCollection | Broadcast: CChannel | No | — |
+| RefreshExternalCollection | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 
 ## Message Descriptions
 
@@ -50,7 +50,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **AlterRLSMetadata**: Persists a complete row-policy or principal-tag post-image in the ACK callback. CChannel-only and serialized with collection/schema DDL.
 - **DropRLSMetadata**: Drops a row policy or principal-tag record by stable logical identity in the ACK callback. A policy name resolves through RootCoord's collection metadata to its internal policy ID, allowing the callback to remove the single ID-keyed etcd record without a prefix scan. CChannel-only and serialized with collection/schema DDL.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
-- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
+- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only and serialized with other DDL on the same collection.
 
 ## Replication Compatibility
 
