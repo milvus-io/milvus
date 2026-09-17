@@ -280,13 +280,15 @@ func (c *managerClientImpl) Remove(ctx context.Context, pchannel types.PChannelI
 	_, err = manager.Remove(ctx, &streamingpb.StreamingNodeManagerRemoveRequest{
 		Pchannel: types.NewProtoFromPChannelInfo(pchannel.Channel),
 	})
-	// The following error can be treated as success.
-	// 1. err is nil, a real remove operation at streaming node has been happened.
-	// 2. err is ErrSubConnNoExist, the streaming node is not alive at view of session, so the wal on it is already removed.
-	// 3. err is SkippedOperation, the streaming node is not the owner of the wal, so the wal on it is already removed.
-	if err == nil || picker.IsErrSubConnNoExist(err) {
+	// A real remove operation at streaming node has been happened.
+	if err == nil {
 		return nil
 	}
+	// The streaming node is not in the session view, the wal on it is not confirmed closed.
+	if picker.IsErrSubConnNoExist(err) {
+		return types.ErrNotAlive
+	}
+	// The streaming node is not the owner of the wal (SkippedOperation), so the wal on it is already removed.
 	statusErr := status.AsStreamingError(err)
 	if statusErr == nil || statusErr.IsSkippedOperation() {
 		return nil

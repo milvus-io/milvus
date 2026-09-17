@@ -3,6 +3,7 @@ package walmanager
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -144,4 +145,43 @@ func assertShutdownError(t *testing.T, err error) {
 	assert.Error(t, err)
 	e := status.AsStreamingError(err)
 	assert.Equal(t, e.Code, streamingpb.StreamingCode_STREAMING_CODE_ON_SHUTDOWN)
+}
+
+func TestManagerCloseCancelsOpen(t *testing.T) {
+	mixcoord := mocks.NewMockMixCoordClient(t)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(mixcoord)
+	resource.InitForTest(
+		t,
+		resource.OptMixCoordClient(fMixcoord),
+	)
+
+	openStarted := make(chan struct{})
+	opener := mock_wal.NewMockOpener(t)
+	opener.EXPECT().Open(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, oo *wal.OpenOption) (wal.WAL, error) {
+			close(openStarted)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+	opener.EXPECT().Close().Return()
+
+	m := newManager(opener)
+	openErr := make(chan error, 1)
+	go func() {
+		openErr <- m.Open(context.Background(), types.PChannelInfo{Name: "ch1", Term: 1})
+	}()
+	<-openStarted
+
+	closed := make(chan struct{})
+	go func() {
+		m.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("manager close is blocked by the in-progress wal open")
+	}
+	assert.ErrorIs(t, <-openErr, context.Canceled)
 }
