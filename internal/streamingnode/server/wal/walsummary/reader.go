@@ -19,27 +19,25 @@ package walsummary
 import (
 	"context"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
-
-// ErrTransformTruncated identifies a cursor whose required Delete history was released.
-var ErrTransformTruncated = errors.New("summary transform history truncated")
 
 // ReadLimits bounds a batch. Zero disables a limit; one whole Entry may exceed it.
 type ReadLimits struct{ MaxRows, MaxBytes uint64 }
 
-// TransformBatch proves complete coverage of (after, CoveredThrough]. Entries
+// TransformBatch proves complete coverage of (max(after, FastForwardTimeTick),
+// CoveredThrough]; any earlier interval is explicitly skipped. Entries
 // belong to the caller and include whole transactions only. Changed is captured
 // atomically with coverage: a reader waiting at the tail cannot lose a wakeup.
 type TransformBatch struct {
 	Entries         []*streamingpb.TransformLogEntry
 	CoveredThrough  uint64
 	ReadableThrough uint64
-	Changed         <-chan struct{}
+	// FastForwardTimeTick explicitly identifies retired history skipped by this read.
+	FastForwardTimeTick uint64
+	Changed             <-chan struct{}
 }
 
 // TransformReader is the storage contract shared by L0 and future subscriptions.
@@ -79,7 +77,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	}
 	batch := TransformBatch{CoveredThrough: after, ReadableThrough: m.readableThrough, Changed: m.readableChanged}
 	terminal := m.terminalErr
-	truncated := m.manifest.GetTransformTruncatedThrough()[vchannel]
+	fastForward := m.manifest.GetTransformFastForwardTimeTick()[vchannel]
 	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
 	// Only copy slice descriptors, never the unmaterialized payload window.
 	sealed := make([][]*stagedRecord, 0, len(m.pendingSealed))
@@ -91,13 +89,16 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	if terminal != nil {
 		return batch, terminal
 	}
-	if after < truncated {
-		return batch, &markedStoreError{err: merr.WrapErrServiceInternalMsg("summary history for %s before %d has been truncated (cursor %d)", vchannel, truncated, after), target: ErrTransformTruncated}
-	}
 	target := min(through, batch.ReadableThrough)
+	if after < fastForward {
+		batch.FastForwardTimeTick = fastForward
+	}
 	if target <= after {
 		return batch, ctx.Err()
 	}
+	after = min(target, max(after, fastForward))
+	batch.CoveredThrough = after
+
 	var rows, bytes uint64
 	appendEntry := func(entry *streamingpb.TransformLogEntry) bool {
 		if entry == nil || entry.GetTimeTick() <= after || entry.GetTimeTick() > target {

@@ -129,15 +129,19 @@ materializations. There are exactly three sources of requests:
 
 | Source | Admission rule | Completion boundary |
 |---|---|---|
-| Capacity | Delete rows or logical bytes in `(M,min(W,L)]` reach the configured batch target. | Process a bounded batch, then re-evaluate capacity; a small remaining tail waits. |
+| Capacity | Delete logical bytes in `(M,min(W,L)]` reach the configured byte target. | Process a bounded batch, then re-evaluate capacity; a small remaining tail waits. |
 | Explicit completion | An API/lifecycle operation requires L0 progress through F, and its related L1 flushes are complete. | Complete the captured F subject to W and L, including a below-target tail. |
 | Summary backlog | Summary requests progress through B for outstanding Delete consumption or retention pressure. | Complete the requested bounded prefix subject to W and L; coalesce repeated requests. |
 
-Capacity initially uses the existing `FlushL0MaxRowNum` and `FlushL0MaxSize`
-targets (defaults: 500,000 Delete rows or 32 MiB). Barrier counts, Insert sizes,
-and Deletes beyond L do not satisfy this condition. Summary supplies the range
-statistics; entry count is not Delete row count. The materializer does not
-recreate a payload backlog or perform object I/O in ObserveMessage to count it.
+Capacity uses `FlushL0MaxSize` (default 32 MiB). `FlushL0MaxRowNum`
+(default 500,000 rows) limits output batches but is not an admission trigger.
+Barrier counts, Insert sizes and Deletes beyond L do not count toward capacity.
+Summary supplies section-level lower/upper byte bounds without I/O. Below-target
+upper bounds do not schedule work. Uncertain partial sections are checked by a
+bounded asynchronous byte probe before any physical output. A below-target
+probe is remembered through its captured safe boundary to prevent a task loop;
+new Delete coverage or a raised safety boundary may enable another check.
+There is no per-entry permanent statistics index or copied payload backlog.
 
 ManualFlush, FlushAll and lifecycle operations whose completion/cleanup needs
 L0 output create explicit requests through the VChannel owner. Ordinary
@@ -187,7 +191,8 @@ Each VChannel executes materialization batches serially:
 2. Capture a finite target bounded by W and L. Explicit API work also waits
    for its related L1 flush completion; retain blocked requests without polling
    them as ready tasks.
-3. Read Delete records in `(M,target]` from Summary, bounded by rows/bytes.
+3. Reject a fast-forward beyond M; missing required Delete history is an
+   integrity failure. Read Delete records in `(M,target]` from Summary, bounded by rows/bytes.
 4. Use returned `CoveredThrough`, not the requested target, as the possible
    commit position; group Deletes by partition/PK representation, write L0
    deltalogs and register all resulting output with DataCoord.

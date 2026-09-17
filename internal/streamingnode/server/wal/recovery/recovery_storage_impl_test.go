@@ -1242,13 +1242,14 @@ func newSummaryManagerWithStagedDelete(t *testing.T, vchannel string, timetick u
 		RetentionMaxBytes: 1 << 30,
 	})
 	require.NoError(t, manager.Restore(context.Background()))
+	manager.ObserveMessage(context.Background(), newAckTestTimeTickMessage(t, timetick-1, int64(timetick-2)))
 	msg := newRecoveryTestDeleteMessage(t, vchannel, timetick)
 	owner := message.NewOwnedImmutableMessage(msg, func() {})
 	retained := owner.Clone()
 	manager.ObserveMessage(context.Background(), retained.Message())
 	retained.Release()
 	owner.Release()
-	require.NotNil(t, manager.LastAcked())
+	require.Positive(t, manager.LastAcked())
 	return manager
 }
 
@@ -1263,6 +1264,8 @@ func TestRecoverySummaryBacklogUnblocksCandidateWithoutTrackerStall(t *testing.T
 			rs.cfg.ackStallTimeout = timeout
 			rs.cfg.persistInterval = time.Millisecond
 			rs.summaryManager = newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
+			rs.ackTracker.Track(newAckTestTimeTickMessage(t, 49, 48)).Release()
+			rs.ackTracker.Track(newAckTestTimeTickMessage(t, 50, 50)).Release()
 			rs.ackTracker.Track(newAckTestTimeTickMessage(t, 100, 99)).Release()
 			require.Zero(t, rs.ackTracker.Pending())
 			require.Equal(t, uint64(49), rs.consumeDirtySnapshot().Checkpoint.TimeTick)
@@ -1273,7 +1276,7 @@ func TestRecoverySummaryBacklogUnblocksCandidateWithoutTrackerStall(t *testing.T
 			})
 			rs.startSummaryBacklog()
 			require.Eventually(t, func() bool {
-				return rs.summaryManager.LastAcked().TimeTick == 50
+				return rs.summaryManager.LastAcked() == 50
 			}, time.Second, time.Millisecond)
 			require.Equal(t, uint64(50), rs.consumeDirtySnapshot().Checkpoint.TimeTick,
 				"summary-only backlog must release the candidate without new WAL messages")
@@ -1286,66 +1289,35 @@ func TestRecoverySummaryBacklogUnblocksCandidateWithoutTrackerStall(t *testing.T
 // tracker has confirmed a newer message, but a delete record staged in the
 // summary is not durable yet, so the checkpoint must stay at the summary's
 // frontier.
-func TestConsumeDirtySnapshotMergesSummaryLastAcked(t *testing.T) {
-	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{
-		MessageID: walimplstest.NewTestMessageID(1),
-		TimeTick:  10,
-		Magic:     utility.RecoveryMagicRecoveryStorageV2,
-	})
+func TestConsumeDirtySnapshotSelectsTrackedPositionThroughSummary(t *testing.T) {
+	storage := newTestRecoveryStorage(t, &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10, Magic: utility.RecoveryMagicRecoveryStorageV2})
 	summary := newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
 	storage.summaryManager = summary
-	// The summary's frontier is pinned at the record's last-confirmed message
-	// 50 (the staged record itself has MessageID 51).
-
-	// The ack tracker confirms a newer message (TimeTick 100, last-confirmed
-	// 99): without the summary merge the checkpoint would advance to 99.
-	msg := newAckTestTimeTickMessage(t, 100, 99)
-	retained := storage.ackTracker.Track(msg)
-	retained.Release()
-	completed := storage.ackTracker.CompletedPoint()
-	require.Equal(t, int64(99), messageIDIntForRecoveryTest(completed.MessageID))
-
+	storage.ackTracker.Track(newAckTestTimeTickMessage(t, 49, 48)).Release()
+	storage.ackTracker.Track(newAckTestTimeTickMessage(t, 50, 50)).Release()
+	storage.ackTracker.Track(newAckTestTimeTickMessage(t, 100, 99)).Release()
 	snapshot := storage.consumeDirtySnapshot()
 	require.NotNil(t, snapshot)
-	require.True(t, snapshot.CheckpointDirty)
-	require.NotNil(t, snapshot.Checkpoint)
-	assert.Equal(t, int64(50), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID),
-		"checkpoint must stay at the summary frontier while a record is staged")
-	assert.Equal(t, uint64(49), snapshot.Checkpoint.TimeTick)
-
-	// Once the staged record is durable, the summary frontier advances to the
-	// record (51). It is still behind the tracker point (99), so the merged
-	// checkpoint follows the summary: the checkpoint must never exceed the
-	// summary's own confirmation.
+	require.Equal(t, uint64(49), snapshot.Checkpoint.TimeTick)
+	require.Equal(t, int64(48), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID))
+	firstOffset := snapshot.LogicalEndOffset
 	summary.RequestFlushThrough(50)
-	assert.Equal(t, int64(50), messageIDIntForRecoveryTest(summary.LastAcked().MessageID))
+	require.Equal(t, uint64(50), summary.LastAcked())
 	snapshot = storage.consumeDirtySnapshot()
-	require.NotNil(t, snapshot)
-	require.True(t, snapshot.CheckpointDirty)
-	assert.Equal(t, int64(50), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID),
-		"checkpoint follows the summary's confirmation while it is behind the tracker")
-
-	// The summary observes and durably flushes a newer delete record (201):
-	// its frontier now passes the tracker point, and the merge no longer caps
-	// the checkpoint — it follows the tracker.
-	msg2 := newRecoveryTestDeleteMessage(t, "test-vchannel", 200)
-	owner2 := message.NewOwnedImmutableMessage(msg2, func() {})
-	retained2 := owner2.Clone()
-	summary.ObserveMessage(context.Background(), retained2.Message())
-	retained2.Release()
-	owner2.Release()
+	require.Equal(t, uint64(50), snapshot.Checkpoint.TimeTick)
+	require.Equal(t, int64(50), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID))
+	require.Greater(t, snapshot.LogicalEndOffset, firstOffset)
+	summary.ObserveMessage(context.Background(), newRecoveryTestDeleteMessage(t, "test-vchannel", 200))
 	summary.RequestFlushThrough(200)
-	assert.Equal(t, int64(200), messageIDIntForRecoveryTest(summary.LastAcked().MessageID))
+	require.Equal(t, uint64(200), summary.LastAcked())
 	snapshot = storage.consumeDirtySnapshot()
-	require.NotNil(t, snapshot)
-	require.True(t, snapshot.CheckpointDirty)
-	assert.Equal(t, int64(99), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID),
-		"checkpoint follows the tracker once the summary has caught up")
+	require.Equal(t, uint64(100), snapshot.Checkpoint.TimeTick)
+	require.Equal(t, int64(99), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID))
 }
 
 // TestConsumeDirtySnapshotIgnoresSummaryWhenNoRecordStaged verifies the merge
 // is a no-op when the summary has no confirmation frontier (nothing observed).
-func TestConsumeDirtySnapshotIgnoresSummaryWhenNoRecordStaged(t *testing.T) {
+func TestConsumeDirtySnapshotWaitsForUnobservedSummary(t *testing.T) {
 	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
@@ -1363,16 +1335,17 @@ func TestConsumeDirtySnapshotIgnoresSummaryWhenNoRecordStaged(t *testing.T) {
 	})
 	require.NoError(t, summary.Restore(context.Background()))
 	rs.summaryManager = summary
-	assert.Nil(t, summary.LastAcked())
+	assert.Zero(t, summary.LastAcked())
 
 	msg := newAckTestTimeTickMessage(t, 100, 99)
-	retained := rs.ackTracker.Track(msg)
-	retained.Release()
+	rs.ackTracker.Track(msg).Release()
 	snapshot := rs.consumeDirtySnapshot()
+	require.Nil(t, snapshot, "unobserved Summary cannot confirm a tracked message")
+	summary.ObserveMessage(context.Background(), msg)
+	snapshot = rs.consumeDirtySnapshot()
 	require.NotNil(t, snapshot)
-	require.True(t, snapshot.CheckpointDirty)
-	assert.Equal(t, int64(99), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID),
-		"no summary frontier: the tracker point is used as-is")
+	require.Equal(t, uint64(100), snapshot.Checkpoint.TimeTick)
+	require.Equal(t, int64(99), messageIDIntForRecoveryTest(snapshot.Checkpoint.MessageID))
 }
 
 func messageIDIntForRecoveryTest(id message.MessageID) int64 {
@@ -1391,13 +1364,15 @@ func TestConsumeDirtySnapshotCapsSummaryWithEqualMessageID(t *testing.T) {
 	})
 	rs.channel.Term = 7
 	rs.summaryManager = newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
+	rs.ackTracker.Track(newAckTestTimeTickMessage(t, 49, 50)).Release()
+	_, expectedOffset := rs.ackTracker.Completed()
 	owner := rs.ackTracker.Track(newAckTestTimeTickMessage(t, 100, 50))
 	owner.Release()
 	snapshot := rs.consumeDirtySnapshot()
 	require.NotNil(t, snapshot)
 	assert.Equal(t, uint64(49), snapshot.Checkpoint.TimeTick)
 	assert.Equal(t, int64(7), snapshot.Checkpoint.Term)
-	assert.Equal(t, uint64(0), snapshot.LogicalEndOffset,
+	assert.Equal(t, expectedOffset, snapshot.LogicalEndOffset,
 		"a later tracker byte offset must not be published with the capped checkpoint")
 }
 

@@ -23,7 +23,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -59,18 +58,18 @@ func (m *Manager) Restore(ctx context.Context) error {
 		}
 	}
 	original := proto.Clone(manifest).(*streamingpb.PChannelSummaryManifest)
-	if found && (manifest.LastChunk == nil || manifest.LastChunk.GetGeneration() != math.MaxUint64) {
+	if found && (manifest.Coverage == nil || manifest.Coverage.GetGeneration() != math.MaxUint64) {
 		from := uint64(0)
-		if manifest.LastChunk != nil {
-			from = manifest.LastChunk.GetGeneration() + 1
+		if manifest.Coverage != nil {
+			from = manifest.Coverage.GetGeneration() + 1
 		}
 		tail, err := m.cfg.Store.ProbeChunkForwardOfTerm(ctx, sourceTerm, from)
 		if err != nil {
 			return err
 		}
 		for _, entry := range tail {
-			if entry.GetStartTimetick() <= manifest.GetCoveredPosition().GetTimeTick() {
-				return storeCorruptedf("summary tail overlaps the covered WAL prefix at generation %d", entry.GetGeneration())
+			if manifest.Coverage != nil && entry.GetStartTimetick() != manifest.Coverage.GetEndTimeTick() {
+				return storeCorruptedf("summary tail is not contiguous with covered WAL prefix at generation %d", entry.GetGeneration())
 			}
 			recordChunk(manifest, entry)
 		}
@@ -87,24 +86,20 @@ func (m *Manager) Restore(ctx context.Context) error {
 	if m.manifestPublished && proto.Equal(original, manifest) {
 		m.publishedVersion = 1
 	}
-	if last := manifest.GetLastChunk(); last != nil {
+	if last := manifest.GetCoverage(); last != nil {
 		m.generationExhausted = last.GetGeneration() == math.MaxUint64
 		if !m.generationExhausted {
 			m.nextGeneration = last.GetGeneration() + 1
 		}
 	}
-	m.latestCoveredTimeTick = manifest.GetCoveredPosition().GetTimeTick()
+	m.latestCoveredTimeTick = manifest.GetCoverage().GetEndTimeTick()
 	m.restoredTimeTick = m.latestCoveredTimeTick
 	m.advanceReadableLocked(m.restoredTimeTick)
-	m.advanceLastAckedLocked(summaryCheckpoint(manifest.GetCoveredPosition()))
+	m.advanceLastAckedLocked(m.restoredTimeTick)
+	m.sealedThrough = m.restoredTimeTick
 	for _, chunk := range manifest.GetChunks() {
 		for _, index := range chunk.GetVchannels() {
 			m.durableFrontiers[index.GetVchannel()] = max(m.durableFrontiers[index.GetVchannel()], index.GetEndTimetick())
-			var rows, bytes uint64
-			for _, stat := range index.GetTransformStats() {
-				m.appendTransformStatLocked(index.GetVchannel(), stat.GetTimeTick(), stat.GetRows()-rows, stat.GetBytes()-bytes)
-				rows, bytes = stat.GetRows(), stat.GetBytes()
-			}
 		}
 	}
 	m.mu.Unlock()
@@ -114,46 +109,49 @@ func (m *Manager) Restore(ctx context.Context) error {
 
 // validateManifest checks structure without reading retained chunk bodies.
 func validateManifest(manifest *streamingpb.PChannelSummaryManifest) error {
-	if err := validateSummaryPosition(manifest.GetCoveredPosition()); err != nil {
-		return err
+	coverage := manifest.GetCoverage()
+	if coverage != nil && (coverage.GetStartTimeTick() >= coverage.GetEndTimeTick() || coverage.GetTerm() <= 0) {
+		return storeCorruptedf("invalid summary coverage")
 	}
-	if manifest.GetLastChunk() == nil && manifest.GetCoveredPosition() != nil {
-		return storeCorruptedf("summary coverage has no generation boundary")
-	}
-	if manifest.GetLastChunk() != nil && manifest.GetCoveredPosition() == nil {
-		return storeCorruptedf("summary generation boundary has no covered position")
-	}
-	for _, frontier := range manifest.GetTransformTruncatedThrough() {
-		if frontier > manifest.GetCoveredPosition().GetTimeTick() {
-			return storeCorruptedf("summary truncation exceeds covered position")
+	for _, frontier := range manifest.GetTransformFastForwardTimeTick() {
+		if frontier > coverage.GetEndTimeTick() {
+			return storeCorruptedf("summary fast-forward exceeds coverage")
 		}
 	}
 	if len(manifest.GetChunks()) == 0 {
 		return nil
 	}
-	if manifest.LastChunk == nil {
-		return storeCorruptedf("summary manifest is missing its coverage boundary")
+	if coverage == nil {
+		return storeCorruptedf("summary manifest is missing coverage")
 	}
 	var previous *streamingpb.PChannelSummaryChunkIndexEntry
 	for _, chunk := range manifest.GetChunks() {
-		if chunk == nil || chunk.GetStartTimetick() > chunk.GetEndTimetick() || chunk.GetGeneration() > manifest.LastChunk.GetGeneration() ||
-			chunk.GetEndTimetick() > manifest.GetCoveredPosition().GetTimeTick() ||
-			(previous != nil && (previous.GetGeneration() == math.MaxUint64 || chunk.GetGeneration() != previous.GetGeneration()+1 || chunk.GetStartTimetick() <= previous.GetEndTimetick())) {
+		if err := validateChunkIndex(chunk); err != nil {
+			return err
+		}
+		if chunk.GetStartTimetick() < coverage.GetStartTimeTick() || chunk.GetEndTimetick() > coverage.GetEndTimeTick() ||
+			(previous != nil && (previous.GetGeneration() == math.MaxUint64 || chunk.GetGeneration() != previous.GetGeneration()+1 || chunk.GetStartTimetick() != previous.GetEndTimetick())) {
 			return storeCorruptedf("invalid or discontinuous summary manifest")
-		}
-		if position := chunk.GetCoveredPosition(); position != nil &&
-			(position.GetTimeTick() < chunk.GetEndTimetick() || position.GetTimeTick() > manifest.GetCoveredPosition().GetTimeTick()) {
-			return storeCorruptedf("summary chunk coverage is outside its manifest boundary")
-		}
-		for _, index := range chunk.GetVchannels() {
-			if err := validateTransformStats(index); err != nil {
-				return err
-			}
 		}
 		previous = chunk
 	}
-	if previous.GetGeneration() != manifest.LastChunk.GetGeneration() || previous.GetTerm() != manifest.LastChunk.GetTerm() {
-		return storeCorruptedf("summary manifest tail differs from its coverage boundary")
+	if previous.GetGeneration() != coverage.GetGeneration() || previous.GetTerm() != coverage.GetTerm() || previous.GetEndTimetick() != coverage.GetEndTimeTick() {
+		return storeCorruptedf("summary manifest tail differs from coverage")
+	}
+	return nil
+}
+
+func validateChunkIndex(chunk *streamingpb.PChannelSummaryChunkIndexEntry) error {
+	if chunk == nil || chunk.GetStartTimetick() >= chunk.GetEndTimetick() {
+		return storeCorruptedf("invalid summary chunk coverage")
+	}
+	for _, index := range chunk.GetVchannels() {
+		if index.GetStartTimetick() <= chunk.GetStartTimetick() || index.GetEndTimetick() > chunk.GetEndTimetick() || index.GetStartTimetick() > index.GetEndTimetick() {
+			return storeCorruptedf("summary section exceeds chunk coverage")
+		}
+		if err := validateTransformIndex(index); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -179,15 +177,4 @@ func (m *Manager) RestoreTransformGCTimeTicks(vchannels map[string]*streamingpb.
 			m.materializedFrontiers[vchannel] = max(m.materializedFrontiers[vchannel], frontier)
 		}
 	}
-}
-
-// Validate untrusted persisted message IDs before using the checkpoint helpers.
-func validateSummaryPosition(position *streamingpb.PChannelSummaryPosition) error {
-	if position.GetMessageId() == nil {
-		return nil
-	}
-	if _, err := message.UnmarshalMessageID(position.GetMessageId()); err != nil {
-		return markStoreCorrupted(merr.Wrap(err, "invalid summary coverage message ID"))
-	}
-	return nil
 }

@@ -28,6 +28,7 @@ import (
 type materializeTask struct {
 	materializer *L0Materializer
 	target       uint64
+	capacity     bool
 	done         atomic.Bool
 }
 
@@ -38,7 +39,7 @@ func (t *materializeTask) Execute(ctx context.Context) error {
 	if t.done.Load() {
 		return nil
 	}
-	if err := m.materialize(ctx, t.target); err != nil {
+	if err := m.materialize(ctx, t.target, t.capacity); err != nil {
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	// Completion and the next scheduling decision share observation's lock.

@@ -17,7 +17,7 @@
 package walsummary
 
 import (
-	"sort"
+	"context"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -26,20 +26,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
-// TransformStats describes retained Delete entries within a readable range.
-// Rows are primary keys, not entry count. Bytes use the reader's logical size.
+// TransformStats bounds logical bytes in (after,through]. Fully included
+// sections contribute to both bounds; intersected sections only to UpperBytes.
+// Boundary sections need an asynchronous read to establish exact capacity.
 type TransformStats struct {
-	Rows, Bytes                 uint64
+	Bytes, UpperBytes           uint64
 	FirstTimeTick, LastTimeTick uint64
 }
-
-type (
-	transformPoint struct{ tick, rows, bytes uint64 }
-	transformIndex struct {
-		points              []transformPoint
-		baseRows, baseBytes uint64
-	}
-)
 
 func transformEntrySize(entry *streamingpb.TransformLogEntry) (uint64, uint64) {
 	var rows uint64
@@ -49,131 +42,139 @@ func transformEntrySize(entry *streamingpb.TransformLogEntry) (uint64, uint64) {
 	return rows, uint64(proto.Size(entry))
 }
 
-func (m *Manager) appendTransformStatLocked(vc string, tick, rows, bytes uint64) {
-	index := m.transformIndexes[vc]
+func addTransformSize(indexes map[string]*streamingpb.VChannelSummaryTransformIndex, vc string, entry *streamingpb.TransformLogEntry) {
+	index := indexes[vc]
 	if index == nil {
-		index = &transformIndex{}
-		m.transformIndexes[vc] = index
+		index = &streamingpb.VChannelSummaryTransformIndex{StartTimeTick: entry.GetTimeTick()}
+		indexes[vc] = index
 	}
-	if n := len(index.points); n > 0 {
-		rows += index.points[n-1].rows
-		bytes += index.points[n-1].bytes
-	} else {
-		rows += index.baseRows
-		bytes += index.baseBytes
-	}
-	index.points = append(index.points, transformPoint{tick: tick, rows: rows, bytes: bytes})
+	index.EndTimeTick = entry.GetTimeTick()
+	_, size := transformEntrySize(entry)
+	index.TotalSize += size
 }
 
-func (index *transformIndex) stats(after, through uint64) TransformStats {
-	if index == nil || through <= after {
-		return TransformStats{}
+func (stats *TransformStats) add(index *streamingpb.VChannelSummaryTransformIndex, after, through uint64) {
+	if index == nil || through <= after || index.GetEndTimeTick() <= after || index.GetStartTimeTick() > through {
+		return
 	}
-	start := sort.Search(len(index.points), func(i int) bool { return index.points[i].tick > after })
-	end := sort.Search(len(index.points), func(i int) bool { return index.points[i].tick > through })
-	if start == end {
-		return TransformStats{}
+	if index.GetStartTimeTick() > after && index.GetEndTimeTick() <= through {
+		stats.Bytes += index.GetTotalSize()
 	}
-	rows, bytes := index.baseRows, index.baseBytes
-	if start > 0 {
-		rows = index.points[start-1].rows
-		bytes = index.points[start-1].bytes
+	stats.UpperBytes += index.GetTotalSize()
+	start := max(index.GetStartTimeTick(), after+1)
+	if stats.FirstTimeTick == 0 || start < stats.FirstTimeTick {
+		stats.FirstTimeTick = start
 	}
-	last := index.points[end-1]
-	return TransformStats{Rows: last.rows - rows, Bytes: last.bytes - bytes, FirstTimeTick: index.points[start].tick, LastTimeTick: last.tick}
+	stats.LastTimeTick = max(stats.LastTimeTick, min(index.GetEndTimeTick(), through))
 }
 
-// TransformStats does no payload reads. The prefix index spans hot and durable
-// storage; moving a record between them neither adds nor removes its statistics.
+// visitTransformsLocked visits each immutable or pending section exactly once.
+func (m *Manager) visitTransformsLocked(visit func(string, *streamingpb.VChannelSummaryTransformIndex)) {
+	for _, chunk := range m.manifest.GetChunks() {
+		for _, index := range chunk.GetVchannels() {
+			if index.GetTransform() != nil {
+				visit(index.GetVchannel(), index.GetTransform())
+			}
+		}
+	}
+	for _, chunk := range m.pendingSealed {
+		for vc, index := range chunk.Transforms {
+			visit(vc, index)
+		}
+	}
+	for vc, index := range m.pendingTransforms {
+		visit(vc, index)
+	}
+}
+
+// TransformStats does no object I/O and retains no per-entry index.
 func (m *Manager) TransformStats(vc string, after, through uint64) TransformStats {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.transformIndexes[vc].stats(after, min(through, m.readableThrough))
+	var stats TransformStats
+	m.visitTransformsLocked(func(channel string, index *streamingpb.VChannelSummaryTransformIndex) {
+		if channel == vc {
+			stats.add(index, after, min(through, m.readableThrough))
+		}
+	})
+	return stats
 }
 
-func (m *Manager) trimTransformStatsLocked(vc string, through uint64) {
-	index := m.transformIndexes[vc]
-	if index == nil {
-		return
-	}
-	n := sort.Search(len(index.points), func(i int) bool { return index.points[i].tick > through })
-	if n == 0 {
-		return
-	}
-	if n == len(index.points) {
-		delete(m.transformIndexes, vc)
-		return
-	}
-	index.baseRows, index.baseBytes = index.points[n-1].rows, index.points[n-1].bytes
-	index.points = append([]transformPoint(nil), index.points[n:]...)
-}
-
-// ReportMaterialized records successful output before metadata publication.
-// This suppresses redundant consumption requests but never authorizes GC.
+// ReportMaterialized suppresses redundant backlog work but never authorizes GC.
 func (m *Manager) ReportMaterialized(vc string, through uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.materializedFrontiers[vc] = max(m.materializedFrontiers[vc], through)
 }
 
-// requestMaterializationBacklog extends the existing Summary backlog worker to
-// retained Deletes. No materializer timer exists. The existing Summary age
-// budget applies to the source WAL time, including after upload or restart.
-func (m *Manager) requestMaterializationBacklog(now time.Time, maxAge time.Duration) {
+// requestMaterializationBacklog runs in Summary's existing background worker.
+// A partial section's oldest remaining Delete is resolved by a bounded read,
+// never by an object read from ObserveMessage or a per-materializer timer.
+func (m *Manager) requestMaterializationBacklog(ctx context.Context, now time.Time, maxAge time.Duration) {
 	if m.cfg.RequestMaterialization == nil {
 		return
 	}
+	type candidate struct {
+		after uint64
+		stats TransformStats
+	}
+	candidates := make(map[string]candidate)
 	requests := make(map[string]uint64)
 	m.mu.Lock()
 	if m.terminalErr != nil {
 		m.mu.Unlock()
 		return
 	}
-	for vc, index := range m.transformIndexes {
-		after := max(m.gcFrontiers[vc], m.materializedFrontiers[vc])
-		stats := index.stats(after, m.readableThrough)
-		if stats.LastTimeTick > 0 && maxAge > 0 && now.Sub(tsoutil.PhysicalTime(stats.FirstTimeTick)) >= maxAge {
-			requests[vc] = stats.LastTimeTick
-		}
-	}
-	// Retention pressure requests only the oldest blocking chunk. Subsequent
-	// checks reassess after durable metadata and GC, rather than draining all VCs.
+	m.visitTransformsLocked(func(vc string, index *streamingpb.VChannelSummaryTransformIndex) {
+		c := candidates[vc]
+		c.after = max(m.gcFrontiers[vc], m.materializedFrontiers[vc])
+		c.stats.add(index, c.after, m.readableThrough)
+		candidates[vc] = c
+	})
 	var retained uint64
 	for _, chunk := range m.manifest.Chunks {
 		retained += chunk.GetObjectSize()
 	}
 	if len(m.manifest.Chunks) > 0 && m.overRetentionLocked(retained, len(m.manifest.Chunks)) {
 		for _, index := range m.manifest.Chunks[0].GetVchannels() {
-			vc, through := index.GetVchannel(), index.GetTransformEndTimetick()
+			vc, through := index.GetVchannel(), index.GetTransform().GetEndTimeTick()
 			if through > max(m.gcFrontiers[vc], m.materializedFrontiers[vc]) {
-				requests[vc] = max(requests[vc], through)
+				requests[vc] = through
 			}
 		}
 	}
 	m.mu.Unlock()
-	// Never call into a VChannel while holding the Summary lock: observations
-	// acquire their component locks before consulting range statistics.
+	for vc, c := range candidates {
+		if c.stats.LastTimeTick == 0 || maxAge <= 0 || now.Sub(tsoutil.PhysicalTime(c.stats.FirstTimeTick)) < maxAge {
+			continue
+		}
+		first := c.stats.FirstTimeTick
+		if c.stats.Bytes != c.stats.UpperBytes {
+			batch, err := m.ReadTransform(ctx, vc, c.after, c.stats.LastTimeTick, ReadLimits{MaxRows: 1, MaxBytes: 1})
+			if err != nil || len(batch.Entries) == 0 {
+				continue
+			}
+			first = batch.Entries[0].GetTimeTick()
+		}
+		if now.Sub(tsoutil.PhysicalTime(first)) >= maxAge {
+			requests[vc] = max(requests[vc], c.stats.LastTimeTick)
+		}
+	}
+	// VChannel callbacks must never execute while holding the Summary lock.
 	for vc, target := range requests {
 		m.cfg.RequestMaterialization(vc, target)
 	}
 }
 
-// Statistics are part of the recovery index, not an optional estimate. Missing
-// or inconsistent entries cannot silently turn a retained backlog into zero.
-func validateTransformStats(index *streamingpb.VChannelSummaryChunkIndex) error {
-	stats := index.GetTransformStats()
-	if uint64(len(stats)) != index.GetTransform().GetRecordCount() {
-		return storeCorruptedf("incomplete transform statistics for %s", index.GetVchannel())
+func validateTransformIndex(index *streamingpb.VChannelSummaryChunkIndex) error {
+	transform := index.GetTransform()
+	if transform == nil {
+		return nil
 	}
-	var tick, rows, bytes uint64
-	for _, stat := range stats {
-		if stat.GetTimeTick() <= tick || stat.GetTimeTick() < index.GetStartTimetick() || stat.GetTimeTick() > index.GetEndTimetick() || stat.GetRows() < rows || stat.GetBytes() <= bytes {
-			return storeCorruptedf("invalid transform statistics for %s", index.GetVchannel())
-		}
-		tick, rows, bytes = stat.GetTimeTick(), stat.GetRows(), stat.GetBytes()
-	}
-	if len(stats) > 0 && tick != index.GetTransformEndTimetick() {
-		return storeCorruptedf("transform statistics boundary differs for %s", index.GetVchannel())
+	if transform.GetRef() == nil || transform.GetRef().GetRecordCount() == 0 || transform.GetTotalSize() == 0 ||
+		transform.GetStartTimeTick() < index.GetStartTimetick() || transform.GetEndTimeTick() > index.GetEndTimetick() ||
+		transform.GetStartTimeTick() > transform.GetEndTimeTick() {
+		return storeCorruptedf("invalid transform index for %s", index.GetVchannel())
 	}
 	return nil
 }

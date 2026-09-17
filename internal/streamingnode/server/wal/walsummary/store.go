@@ -123,6 +123,9 @@ func (s *Store) ManifestKeyOfTerm(term int64) string {
 	return buildManifestKey(s.chunkManager, s.pchannel, term)
 }
 
+// TimeTickRange is complete WAL coverage (Start, End], including payload-free messages.
+type TimeTickRange struct{ Start, End uint64 }
+
 // WriteChunk writes one chunk object. It never overwrites a differing chunk at
 // the same key: an object with identical content is a retry (idempotent
 // no-op), and one with different content is corruption. The key is term-scoped,
@@ -131,9 +134,9 @@ func (s *Store) WriteChunk(
 	ctx context.Context,
 	generation uint64,
 	sectionsByVChannel map[string]*ChunkSections,
-	positions ...*streamingpb.PChannelSummaryPosition,
+	coverage TimeTickRange,
 ) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
-	payload, footer, err := marshalChunk(s.pchannel, generation, s.term, sectionsByVChannel, positions...)
+	payload, footer, err := marshalChunk(s.pchannel, generation, s.term, sectionsByVChannel, coverage)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -167,7 +170,8 @@ func (s *Store) WriteChunk(
 		if existingFooter.GetPchannel() == footer.GetPchannel() &&
 			existingFooter.GetGeneration() == footer.GetGeneration() &&
 			existingFooter.GetTerm() == footer.GetTerm() &&
-			proto.Equal(existingFooter.GetCoveredPosition(), footer.GetCoveredPosition()) &&
+			existingFooter.GetStartTimetick() == footer.GetStartTimetick() &&
+			existingFooter.GetEndTimetick() == footer.GetEndTimetick() &&
 			chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
 			// The STORED footer and size, not the ones just built. The records
 			// match but the encodings do not, and the manifest carries the
@@ -583,7 +587,7 @@ func marshalChunk(
 	generation uint64,
 	term int64,
 	sectionsByVChannel map[string]*ChunkSections,
-	positions ...*streamingpb.PChannelSummaryPosition,
+	coverage TimeTickRange,
 ) ([]byte, *streamingpb.PChannelSummaryChunkFooter, error) {
 	buf := bytes.NewBuffer(make([]byte, 0))
 	buf.Write(newChunkHeader())
@@ -627,26 +631,24 @@ func marshalChunk(
 			if err != nil {
 				return nil, nil, err
 			}
-			var rows, bytes uint64
+			var totalSize uint64
 			for _, record := range records {
-				entry := &streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}
-				r, b := transformEntrySize(entry)
-				rows += r
-				bytes += b
-				index.TransformStats = append(index.TransformStats, &streamingpb.TransformEntryStats{TimeTick: record.GetTimeTick(), Rows: rows, Bytes: bytes})
+				_, size := transformEntrySize(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}})
+				totalSize += size
 			}
-			index.Transform = ref
 			transformStart, transformEnd := transformRecordTimetickRange(records)
-			index.TransformEndTimetick = transformEnd
+			index.Transform = &streamingpb.VChannelSummaryTransformIndex{
+				Ref: ref, StartTimeTick: transformStart, EndTimeTick: transformEnd, TotalSize: totalSize,
+			}
 			start, end = min(start, transformStart), max(end, transformEnd)
 		}
 		index.StartTimetick, index.EndTimetick = start, end
-		extendFooterRange(footer, index.StartTimetick, index.EndTimetick)
 		footer.Chunks = append(footer.Chunks, index)
 	}
 
-	if len(positions) > 0 {
-		footer.CoveredPosition = positions[0]
+	footer.StartTimetick, footer.EndTimetick = coverage.Start, coverage.End
+	if err := validateChunkIndex(chunkIndexEntryFromFooter(footer, 0)); err != nil {
+		return nil, nil, err
 	}
 	footerPayload, err := marshalOptions.Marshal(footer)
 	if err != nil {
@@ -920,15 +922,6 @@ func newChunkHeader() []byte {
 	return header
 }
 
-func extendFooterRange(footer *streamingpb.PChannelSummaryChunkFooter, start, end uint64) {
-	if start > 0 && (footer.GetStartTimetick() == 0 || start < footer.GetStartTimetick()) {
-		footer.StartTimetick = start
-	}
-	if end > footer.GetEndTimetick() {
-		footer.EndTimetick = end
-	}
-}
-
 // chunkSectionsByVChannelEqual compares what two chunks actually contain, every
 // section included. It is what decides whether a same-term rewrite of the same
 // generation is an idempotent retry or corruption, so a difference confined to
@@ -1037,12 +1030,15 @@ func recordChunk(manifest *streamingpb.PChannelSummaryManifest, entry *streaming
 	}
 	manifest.Chunks = append(manifest.Chunks, entry)
 	sort.Slice(manifest.Chunks, func(i, j int) bool { return manifest.Chunks[i].GetGeneration() < manifest.Chunks[j].GetGeneration() })
-	if manifest.LastChunk == nil || entry.GetGeneration() > manifest.LastChunk.GetGeneration() {
-		manifest.LastChunk = &streamingpb.PChannelSummaryChunkRef{Generation: entry.GetGeneration(), Term: entry.GetTerm()}
-		manifest.CoveredPosition = entry.GetCoveredPosition()
-		if manifest.CoveredPosition == nil {
-			manifest.CoveredPosition = &streamingpb.PChannelSummaryPosition{TimeTick: entry.GetEndTimetick()}
+	if manifest.Coverage == nil {
+		manifest.Coverage = &streamingpb.SummaryCoverage{
+			StartTimeTick: entry.GetStartTimetick(), Generation: entry.GetGeneration(),
+			Term: entry.GetTerm(), EndTimeTick: entry.GetEndTimetick(),
 		}
+	} else if entry.GetGeneration() > manifest.Coverage.GetGeneration() {
+		manifest.Coverage.Generation = entry.GetGeneration()
+		manifest.Coverage.Term = entry.GetTerm()
+		manifest.Coverage.EndTimeTick = entry.GetEndTimetick()
 	}
 }
 
@@ -1053,13 +1049,12 @@ func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter, o
 		return nil
 	}
 	return &streamingpb.PChannelSummaryChunkIndexEntry{
-		Generation:      footer.GetGeneration(),
-		Term:            footer.GetTerm(),
-		ObjectSize:      objectSize,
-		StartTimetick:   footer.GetStartTimetick(),
-		EndTimetick:     footer.GetEndTimetick(),
-		Vchannels:       footer.GetChunks(),
-		CoveredPosition: footer.GetCoveredPosition(),
+		Generation:    footer.GetGeneration(),
+		Term:          footer.GetTerm(),
+		ObjectSize:    objectSize,
+		StartTimetick: footer.GetStartTimetick(),
+		EndTimetick:   footer.GetEndTimetick(),
+		Vchannels:     footer.GetChunks(),
 	}
 }
 
@@ -1089,7 +1084,7 @@ func unmarshalTransformSection(
 	index *streamingpb.VChannelSummaryChunkIndex,
 ) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
 	vchannel := index.GetVchannel()
-	ref := index.GetTransform()
+	ref := index.GetTransform().GetRef()
 	if ref == nil {
 		return nil, storeCorruptedf("missing transform section for vchannel %s", vchannel)
 	}
@@ -1146,13 +1141,13 @@ func transformRecordTimetickRange(records []*streamingpb.VChannelSummaryTransfor
 
 // sweepGarbage rediscovers unreferenced objects after a committed manifest.
 // It never touches later terms or the current term's recoverable upload tail.
-func (s *Store) sweepGarbage(ctx context.Context, term int64, last *streamingpb.PChannelSummaryChunkRef, referenced map[ChunkRef]struct{}, budget int) (int, bool, error) {
+func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamingpb.SummaryCoverage, referenced map[ChunkRef]struct{}, budget int) (int, bool, error) {
 	prefix := buildChunkPrefix(s.chunkManager, s.pchannel)
 	deleted, finished := 0, true
 	var deleteErr error
 	err := s.chunkManager.WalkWithPrefix(ctx, prefix, false, func(info *storage.ChunkObjectInfo) bool {
 		generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(info.FilePath, prefix))
-		if !ok || keyTerm > term || (keyTerm == term && (last == nil || generation > last.Generation)) {
+		if !ok || keyTerm > term || (keyTerm == term && (coverage == nil || generation > coverage.Generation)) {
 			return true
 		}
 		if _, keep := referenced[ChunkRef{Generation: generation, Term: keyTerm}]; keep {
