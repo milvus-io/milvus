@@ -1216,13 +1216,28 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context, progress ma
 		// task actually has cannot be asked anything else: such a task is
 		// registered for a resource group added to a collection that is already
 		// loaded, so every partition sits at 100 and the loop above skips them
-		// all. It is asked at all because the per-resource-group percentage is
-		// measured against the NEXT target and so reaches 100 while the
-		// promotion of the current target is still pending -- and until that
-		// lands the group cannot serve, since shard leader readiness is
-		// measured against the current target. Finishing there would drop this
-		// group's supervision, its timeout and its teardown, at the moment it
-		// carries everything and answers nothing.
+		// all.
+		//
+		// What the term guards is a collection with NO current target at all:
+		// a coordinator that restarted without a saved target (TargetManager.
+		// Recover restores only what a clean shutdown saved) rebuilds its
+		// scoped tasks for loaded collections before the first promotion, and
+		// until that lands nothing can serve, since shard leader readiness is
+		// measured against the current target. Finishing there would drop the
+		// group's supervision at the moment it carries everything and answers
+		// nothing.
+		//
+		// It does NOT wait for the promotion of the target the percentage was
+		// measured against, and on the expansion path it is always true: a
+		// loaded collection has a current target. The percentage is measured
+		// against the NEXT target, so the task can finish a moment before the
+		// delegators are told of that target. Comparing versions would not
+		// express "promoted" either - the target observer promotes and refills
+		// the next target in one step (TargetObserver.check), so the next
+		// version leads the current one almost always, and such a gate would
+		// hold every task open. Supervision ending at 100 is what master does
+		// for any loaded collection; the promotion is the target observer's,
+		// which retries it on every tick whether or not a load task is watching.
 		//
 		// And a task that still owes the replica-count write-back of a
 		// teardown (ReplicaNumberPending) does not finish: its survivors may
