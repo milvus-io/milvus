@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -58,8 +59,12 @@ func (g *collectionGroup) refreshRows(ctx context.Context, broker Broker, scope 
 			}
 			partitions := typeutil.NewSet(parts...)
 			for _, segment := range segments {
-				// Match the load scope, including collection-wide L0 data. DC owns recovery
-				// frontier selection; in particular do not filter Dropped compaction parents.
+				// Legacy segments are L1 by the SegmentInfo compatibility contract.
+				if segment.GetLevel() != datapb.SegmentLevel_L1 && segment.GetLevel() != datapb.SegmentLevel_Legacy {
+					continue
+				}
+				// DC owns recovery frontier selection; retain selected Dropped L1
+				// compaction parents and match the loaded partition scope.
 				if partitions.Contain(segment.GetPartitionID()) || segment.GetPartitionID() == common.AllPartitionsID {
 					rows[id] += segment.GetNumOfRows()
 				}
