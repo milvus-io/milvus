@@ -202,9 +202,11 @@ func newGroupTestState(t *testing.T, allow []string) *groupTestState {
 		}
 		require.Equal(t, []int64{id + 1}, parts)
 		return nil, []*datapb.SegmentInfo{
-			{ID: id, PartitionID: id + 1, NumOfRows: s.rows[id] - 1, State: commonpb.SegmentState_Dropped},
+			{ID: id, PartitionID: id + 1, NumOfRows: s.rows[id] - 1, State: commonpb.SegmentState_Dropped, Level: datapb.SegmentLevel_L1},
 			{ID: id + 100, PartitionID: common.AllPartitionsID, NumOfRows: 1},
-			{ID: id + 200, PartitionID: 999, NumOfRows: 1000000},
+			{ID: id + 200, PartitionID: 999, NumOfRows: 1000000, Level: datapb.SegmentLevel_L1},
+			{ID: id + 300, PartitionID: common.AllPartitionsID, NumOfRows: 1000000, Level: datapb.SegmentLevel_L0},
+			{ID: id + 400, PartitionID: id + 1, NumOfRows: 2000000, Level: datapb.SegmentLevel_L2},
 		}, nil
 	}).Build()
 	return s
@@ -250,6 +252,37 @@ func TestCollectionGroupRecovery(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestCollectionGroupRowLevels(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		level datapb.SegmentLevel
+		rows  int64
+	}{
+		{"L1", datapb.SegmentLevel_L1, 17},
+		{"legacy L1", datapb.SegmentLevel_Legacy, 17},
+		{"L0", datapb.SegmentLevel_L0, 0},
+		{"L2", datapb.SegmentLevel_L2, 0},
+		{"unknown", datapb.SegmentLevel(99), 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mockey.PatchConvey("count only L1 recovery rows in loaded partitions", t, func() {
+				g := &collectionGroup{members: []int64{10}}
+				mockey.Mock((*CoordinatorBroker).GetRecoveryInfoV2).To(func(_ *CoordinatorBroker, _ context.Context, id int64, parts ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+					require.Equal(t, int64(10), id)
+					require.Equal(t, []int64{11}, parts)
+					return nil, []*datapb.SegmentInfo{
+						{ID: 1, PartitionID: 11, NumOfRows: 10, State: commonpb.SegmentState_Flushed, Level: tc.level},
+						{ID: 2, PartitionID: 11, NumOfRows: 7, State: commonpb.SegmentState_Dropped, Level: tc.level},
+						{ID: 3, PartitionID: 12, NumOfRows: 1000, State: commonpb.SegmentState_Flushed, Level: tc.level},
+					}, nil
+				}).Build()
+				require.NoError(t, g.refreshRows(context.Background(), &CoordinatorBroker{}, map[int64][]int64{10: {11}}))
+				require.Equal(t, tc.rows, g.rows[10])
+			})
+		})
+	}
 }
 
 func TestCollectionGroupDisabled(t *testing.T) {
