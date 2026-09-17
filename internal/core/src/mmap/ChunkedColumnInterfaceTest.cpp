@@ -389,6 +389,7 @@ CreateNullableEmptyArrayColumn() {
                          DataType::ARRAY,
                          DataType::INT64,
                          /*nullable=*/true,
+                         /*element_nullable=*/false,
                          std::nullopt);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
@@ -1753,9 +1754,10 @@ TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(owned.validity);
     const auto* arrays = owned.values.data_as<ArrayView>();
     EXPECT_EQ(arrays[0].length(), 0);
-    EXPECT_EQ(arrays[0].get_element_type(), DataType::INT64);
+    EXPECT_EQ(arrays[0].output_data().data_case(), ScalarFieldProto::kLongData);
     EXPECT_NE(arrays[0].data(), nullptr);
-    EXPECT_EQ(arrays[1].get_element_type(), DataType::NONE);
+    EXPECT_EQ(arrays[1].output_data().data_case(),
+              ScalarFieldProto::DATA_NOT_SET);
     EXPECT_EQ(arrays[1].data(), nullptr);
 }
 

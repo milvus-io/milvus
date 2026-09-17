@@ -673,9 +673,9 @@ TEST(storage, InsertDataVectorArrayNullablePreservesNullRows) {
             new_payload);
     ASSERT_NE(vector_array_payload, nullptr);
     ASSERT_EQ(vector_array_payload->get_element_type(), DataType::VECTOR_FLOAT);
-    EXPECT_EQ(vector_array_payload->value_at(0)->length(), 1);
-    EXPECT_EQ(vector_array_payload->value_at(1)->length(), 0);
-    EXPECT_EQ(vector_array_payload->value_at(2)->length(), 2);
+    EXPECT_EQ(vector_array_payload->value_at(0)->physical_length(), 1);
+    EXPECT_EQ(vector_array_payload->value_at(1)->physical_length(), 0);
+    EXPECT_EQ(vector_array_payload->value_at(2)->physical_length(), 2);
 }
 
 TEST(storage, ExternalBinaryVectorListNormalizesToFixedSizeBinary) {

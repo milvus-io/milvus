@@ -68,21 +68,16 @@ class Array {
           size_t size,
           DataType element_type,
           const uint32_t* offsets_ptr)
-        : Array(data,
-                len,
-                size,
-                element_type,
-                offsets_ptr,
-                TargetBitmapView(),
-                false) {
+        : Array(data, len, size, element_type, offsets_ptr, nullptr, false) {
     }
 
+    // Validity contains len bits starting at bit zero, rounded up to uint64_t words.
     Array(char* data,
           int len,
           size_t size,
           DataType element_type,
           const uint32_t* offsets_ptr,
-          const TargetBitmapView& element_valid_data,
+          const uint64_t* element_valid_data,
           bool element_nullable)
         : size_(size),
           length_(len),
@@ -214,8 +209,12 @@ class Array {
                                         array.get_offsets_data(),
                                         array.length() * sizeof(uint32_t));
         }
-        if (element_nullable_) {
-            element_valid_data_ = array.element_valid_data_.clone();
+        if (element_nullable_ && length_ > 0) {
+            const auto word_count = (static_cast<size_t>(length_) + 63) / 64;
+            element_valid_data_ = std::make_unique<uint64_t[]>(word_count);
+            milvus::fastmem::FastMemcpy(element_valid_data_.get(),
+                                        array.element_valid_data_.get(),
+                                        word_count * sizeof(uint64_t));
         }
     }
 
@@ -257,6 +256,21 @@ class Array {
     }
 
     bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    const uint64_t*
+    get_element_valid_data() const {
+        return element_valid_data_.get();
+    }
+
+    bool
+    has_invalid_element() const {
+        return has_invalid_element_;
+    }
+
+    bool
     is_element_valid(int index) const {
         AssertInfo(index >= 0 && index < length_,
                    "index out of range, index={}, length={}",
@@ -265,7 +279,8 @@ class Array {
         if (!element_nullable_) {
             return true;
         }
-        return element_valid_data_[index];
+        return (element_valid_data_[index / 64] &
+                (uint64_t{1} << (index % 64))) != 0;
     }
 
     uint32_t*
@@ -524,22 +539,38 @@ class Array {
     }
 
     void
-    init_element_valid_data(const TargetBitmapView& element_valid_data) {
+    init_element_valid_data(const uint64_t* element_valid_data) {
         if (!element_nullable_) {
-            AssertInfo(element_valid_data.size() == 0,
+            AssertInfo(element_valid_data == nullptr,
                        "non-element-nullable array cannot carry element valid "
-                       "data, bitmap_length={}",
-                       element_valid_data.size());
+                       "data");
             return;
         }
 
-        AssertInfo(element_valid_data.size() == length_,
-                   "element valid data bitmap length must equal array logical "
-                   "length, bitmap_length={}, array_length={}",
-                   element_valid_data.size(),
-                   length_);
-        element_valid_data_ = TargetBitmap(element_valid_data);
-        has_invalid_element_ = !element_valid_data_.all();
+        AssertInfo(element_valid_data != nullptr || length_ == 0,
+                   "non-empty element-nullable array requires element valid "
+                   "data");
+        if (length_ == 0) {
+            return;
+        }
+        const auto word_count = (static_cast<size_t>(length_) + 63) / 64;
+        element_valid_data_ = std::make_unique<uint64_t[]>(word_count);
+        milvus::fastmem::FastMemcpy(element_valid_data_.get(),
+                                    element_valid_data,
+                                    word_count * sizeof(uint64_t));
+        const auto full_words = length_ / 64;
+        for (int i = 0; i < full_words; ++i) {
+            if (element_valid_data_[i] != ~uint64_t{0}) {
+                has_invalid_element_ = true;
+                return;
+            }
+        }
+        const auto tail_bits = length_ % 64;
+        if (tail_bits != 0) {
+            const auto mask = (uint64_t{1} << tail_bits) - 1;
+            has_invalid_element_ =
+                (element_valid_data_[full_words] & mask) != mask;
+        }
     }
 
     void
@@ -555,14 +586,18 @@ class Array {
                    element_valid_data.size(),
                    length_);
 
-        element_valid_data_ = TargetBitmap(length_, false);
-
+        if (length_ == 0) {
+            return;
+        }
+        element_valid_data_ = std::make_unique<uint64_t[]>(
+            (static_cast<size_t>(length_) + 63) / 64);
         for (int i = 0; i < length_; ++i) {
             if (element_valid_data.Get(i)) {
-                element_valid_data_.set(i);
+                element_valid_data_[i / 64] |= uint64_t{1} << (i % 64);
+            } else {
+                has_invalid_element_ = true;
             }
         }
-        has_invalid_element_ = !element_valid_data_.all();
     }
 
     std::unique_ptr<char[]> data_{nullptr};
@@ -571,11 +606,7 @@ class Array {
     DataType element_type_ = DataType::NONE;
     std::unique_ptr<uint32_t[]> offsets_ptr_{nullptr};
     bool element_nullable_ = false;
-    // TODO: TargetBitmap currently adds 32 bytes per row on 64-bit builds,
-    // including for non-element-nullable arrays. If this becomes an issue, use
-    // std::unique_ptr<uint64_t[]> for the validity bitmap or move nullable
-    // storage into a dedicated NullableArray class.
-    TargetBitmap element_valid_data_{};
+    std::unique_ptr<uint64_t[]> element_valid_data_;
     bool has_invalid_element_ = false;
 };
 
@@ -611,37 +642,39 @@ class ArrayView {
                     size,
                     element_type,
                     offsets_ptr,
-                    TargetBitmapView(),
+                    nullptr,
+                    false,
                     false) {
     }
 
+    // The bitmap contains len bits starting at bit zero;
+    // has_invalid_element is precomputed by the caller.
     ArrayView(char* data,
               int len,
               size_t size,
               DataType element_type,
               uint32_t* offsets_ptr,
-              const TargetBitmapView& element_valid_data,
-              bool element_nullable)
+              const uint64_t* element_valid_data,
+              bool element_nullable,
+              bool has_invalid_element)
         : data_(data),
           length_(len),
           size_(size),
           element_type_(element_type),
           offsets_ptr_(offsets_ptr),
           element_nullable_(element_nullable),
-          element_valid_data_(element_valid_data) {
+          element_valid_data_(element_valid_data),
+          has_invalid_element_(has_invalid_element) {
+        AssertInfo(
+            len >= 0, "array length must be non-negative, length={}", len);
         if (element_nullable_) {
-            AssertInfo(
-                element_valid_data_.size() == length_,
-                "element valid data bitmap length must equal array logical "
-                "length, bitmap_length={}, array_length={}",
-                element_valid_data_.size(),
-                length_);
-            has_invalid_element_ = !element_valid_data_.all();
+            AssertInfo(element_valid_data_ != nullptr || length_ == 0,
+                       "non-empty element-nullable array requires element "
+                       "valid data");
         } else {
-            AssertInfo(element_valid_data_.size() == 0,
+            AssertInfo(element_valid_data_ == nullptr,
                        "non-element-nullable array cannot carry element valid "
-                       "data, bitmap_length={}",
-                       element_valid_data_.size());
+                       "data");
         }
         AssertInfo(data != nullptr || (length_ == 0 && size_ == 0),
                    "data pointer for non-empty ArrayView cannot be nullptr");
@@ -668,7 +701,8 @@ class ArrayView {
         if (!element_nullable_) {
             return true;
         }
-        return element_valid_data_[index];
+        return (element_valid_data_[index / 64] &
+                (uint64_t{1} << (index % 64))) != 0;
     }
 
     void
@@ -928,8 +962,11 @@ class ArrayView {
     //offsets ptr
     uint32_t* offsets_ptr_{nullptr};
     bool element_nullable_ = false;
-    TargetBitmapView element_valid_data_{};
+    const uint64_t* element_valid_data_ = nullptr;
     bool has_invalid_element_ = false;
 };
+
+static_assert(sizeof(Array) == sizeof(ArrayView));
+static_assert(alignof(Array) == alignof(ArrayView));
 
 }  // namespace milvus

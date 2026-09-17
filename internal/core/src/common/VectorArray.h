@@ -466,6 +466,12 @@ class VectorArrayView {
         return vector_field;
     }
 
+    // Logical element count, including null elements.
+    int
+    length() const {
+        return length_;
+    }
+
     int
     physical_length() const {
         return physical_length_;

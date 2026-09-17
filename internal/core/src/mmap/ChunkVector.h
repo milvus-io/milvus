@@ -498,12 +498,15 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
             return std::string_view(chunk[chunk_offset].data(),
                                     chunk[chunk_offset].size());
         } else if constexpr (std::is_same_v<Array, Type>) {
-            auto& src = chunk[chunk_offset];
+            const auto& src = chunk[chunk_offset];
             return ArrayView(const_cast<char*>(src.data()),
                              src.length(),
                              src.byte_size(),
                              src.get_element_type(),
-                             src.get_offsets_data());
+                             src.get_offsets_data(),
+                             src.get_element_valid_data(),
+                             src.is_element_nullable(),
+                             src.has_invalid_element());
         } else if constexpr (std::is_same_v<ArrayValue, Type>) {
             return chunk[chunk_offset].View();
         } else if constexpr (std::is_same_v<VectorArray, Type>) {

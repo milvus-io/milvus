@@ -10,12 +10,14 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <stdint.h>
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
 #include "common/Array.h"
+#include "common/Span.h"
 #include "common/Types.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
@@ -40,12 +42,12 @@ ExpectArraysEqualForTest(const milvus::Array& left,
               OutputArrayForTest(right).SerializeAsString());
 }
 
-milvus::TargetBitmap
+std::vector<uint64_t>
 ElementValidityForTest(const milvus::ScalarFieldProto& input) {
-    milvus::TargetBitmap validity(input.valid_data_size(), false);
+    std::vector<uint64_t> validity((input.valid_data_size() + 63) / 64, 0);
     for (int i = 0; i < input.valid_data_size(); ++i) {
         if (input.valid_data(i)) {
-            validity.set(i);
+            validity[i / 64] |= uint64_t{1} << (i % 64);
         }
     }
     return validity;
@@ -57,19 +59,23 @@ MakeArrayViewForTest(const milvus::Array& array) {
                              array.length(),
                              array.byte_size(),
                              array.get_element_type(),
-                             array.get_offsets_data());
+                             array.get_offsets_data(),
+                             array.get_element_valid_data(),
+                             array.is_element_nullable(),
+                             array.has_invalid_element());
 }
 
 milvus::ArrayView
 MakeElementNullableArrayViewForTest(const milvus::Array& array,
-                                    const milvus::TargetBitmap& validity) {
+                                    const std::vector<uint64_t>& validity) {
     return milvus::ArrayView(const_cast<char*>(array.data()),
                              array.length(),
                              array.byte_size(),
                              array.get_element_type(),
                              array.get_offsets_data(),
-                             validity.view(0),
-                             true);
+                             validity.data(),
+                             true,
+                             array.has_invalid_element());
 }
 
 }  // namespace
@@ -372,8 +378,8 @@ TEST(Array, ElementNullableRoundTripPreservesDensePayloadAndValidity) {
     Array restored(output, true);
     ExpectArraysEqualForTest(restored, array);
 
-    auto validity = ElementValidityForTest(input);
-    auto view = MakeElementNullableArrayViewForTest(array, validity);
+    auto view = MakeArrayViewForTest(array);
+    EXPECT_EQ(view.data(), array.data());
     auto view_output = view.output_data();
     EXPECT_EQ(view_output.SerializeAsString(), output.SerializeAsString());
 
@@ -386,16 +392,14 @@ TEST(Array, ElementNullableRawConstructorPreservesDensePayloadAndValidity) {
     using namespace milvus;
 
     std::vector<int32_t> values = {10, 20, 30};
-    TargetBitmap validity(values.size(), false);
-    validity.set(0);
-    validity.set(2);
+    const uint64_t validity[] = {0b101};
 
     Array array(reinterpret_cast<char*>(values.data()),
                 static_cast<int>(values.size()),
                 values.size() * sizeof(int32_t),
                 DataType::INT32,
                 nullptr,
-                validity.view(),
+                validity,
                 true);
 
     ASSERT_EQ(array.length(), 3);
@@ -410,6 +414,128 @@ TEST(Array, ElementNullableRawConstructorPreservesDensePayloadAndValidity) {
     EXPECT_TRUE(output.valid_data(0));
     EXPECT_FALSE(output.valid_data(1));
     EXPECT_TRUE(output.valid_data(2));
+}
+
+TEST(Array, ElementValidityPreservesWordBoundariesAndOwnership) {
+    using namespace milvus;
+
+    for (int length : {0, 1, 63, 64, 65, 129}) {
+        for (int pattern : {0, 1, 2}) {
+            SCOPED_TRACE(length);
+            SCOPED_TRACE(pattern);
+            std::vector<int32_t> values(length);
+            std::vector<bool> valid_data(length);
+            proto::plan::Array literal;
+            literal.set_same_type(true);
+            for (int i = 0; i < length; ++i) {
+                values[i] = i + 10;
+                valid_data[i] = pattern == 0 || (pattern == 2 && i % 2 == 0);
+                literal.add_array()->set_int64_val(values[i]);
+            }
+            auto input = BuildElementNullableIntArray(values, valid_data);
+            Array copied;
+            {
+                Array source(input, true);
+                copied = source;
+            }
+            Array moved(std::move(copied));
+            auto view = MakeArrayViewForTest(moved);
+            EXPECT_EQ(view.data(), moved.data());
+            EXPECT_EQ(view.output_data().SerializeAsString(),
+                      input.SerializeAsString());
+            const bool all_valid = std::all_of(
+                valid_data.begin(), valid_data.end(), [](bool valid) {
+                    return valid;
+                });
+            EXPECT_EQ(moved.is_same_array(literal), all_valid);
+            EXPECT_EQ(view.is_same_array(literal), all_valid);
+
+            auto validity = ElementValidityForTest(input);
+            auto raw_view =
+                MakeElementNullableArrayViewForTest(moved, validity);
+            EXPECT_EQ(raw_view.is_same_array(literal), all_valid);
+            ArrayView copied_view(raw_view);
+            Array restored;
+            copied_view.output_data(restored);
+            ExpectArraysEqualForTest(restored, moved);
+            EXPECT_TRUE(restored.is_element_nullable());
+            EXPECT_EQ(restored.has_invalid_element(), !all_valid);
+        }
+    }
+}
+
+TEST(Array, ElementValidityRawCopyOwnsWordsAndIgnoresPadding) {
+    using namespace milvus;
+
+    constexpr int length = 129;
+    std::vector<int32_t> values(length, 10);
+    std::vector<uint64_t> validity((length + 63) / 64, 0);
+    for (int i = 0; i < length; ++i) {
+        if (i % 3 != 0) {
+            validity[i / 64] |= uint64_t{1} << (i % 64);
+        }
+    }
+    Array array(reinterpret_cast<char*>(values.data()),
+                length,
+                values.size() * sizeof(int32_t),
+                DataType::INT32,
+                nullptr,
+                validity.data(),
+                true);
+    std::fill(validity.begin(), validity.end(), 0);
+    auto view = MakeArrayViewForTest(array);
+    for (int i = 0; i < length; ++i) {
+        EXPECT_EQ(array.is_element_valid(i), i % 3 != 0);
+        EXPECT_EQ(view.is_element_valid(i), i % 3 != 0);
+    }
+
+    // Only bit zero in the last word belongs to the array.
+    std::fill(validity.begin(), validity.end(), ~uint64_t{0});
+    validity.back() = 1;
+    Array all_valid(reinterpret_cast<char*>(values.data()),
+                    length,
+                    values.size() * sizeof(int32_t),
+                    DataType::INT32,
+                    nullptr,
+                    validity.data(),
+                    true);
+    EXPECT_FALSE(all_valid.has_invalid_element());
+
+    validity.back() = ~uint64_t{1};
+    Array tail_null(reinterpret_cast<char*>(values.data()),
+                    length,
+                    values.size() * sizeof(int32_t),
+                    DataType::INT32,
+                    nullptr,
+                    validity.data(),
+                    true);
+    EXPECT_TRUE(tail_null.has_invalid_element());
+    EXPECT_FALSE(tail_null.is_element_valid(length - 1));
+}
+
+TEST(Array, LegacySpanPreservesRowStrideAndElementValidity) {
+    using namespace milvus;
+
+    std::vector<Array> rows;
+    rows.emplace_back();
+    rows.emplace_back(BuildElementNullableIntArray({10, 20}, {}), false);
+    rows.emplace_back(
+        BuildElementNullableIntArray({30, 40, 50}, {true, false, true}), true);
+    rows.emplace_back(
+        BuildElementNullableStringArray({"first", "placeholder", "last"},
+                                        {true, false, true}),
+        true);
+    rows.emplace_back(BuildElementNullableIntArray({}, {}), true);
+    const Span<ArrayView> views(
+        SpanBase(rows.data(), rows.size(), sizeof(Array)));
+    for (size_t i = 0; i < rows.size(); ++i) {
+        SCOPED_TRACE(i);
+        const auto& view = views.data()[i];
+        EXPECT_EQ(view.length(), rows[i].length());
+        EXPECT_EQ(view.data(), rows[i].data());
+        EXPECT_EQ(view.output_data().SerializeAsString(),
+                  rows[i].output_data().SerializeAsString());
+    }
 }
 
 TEST(Array, ElementNullableTypedEmptyArrayPreservesElementType) {
@@ -462,8 +588,8 @@ TEST(Array, ElementNullableStringRoundTripPreservesOffsets) {
     auto input = BuildElementNullableStringArray(
         {"alpha", "placeholder", "gamma"}, {true, false, true});
     Array array(input, true);
-    auto validity = ElementValidityForTest(input);
-    auto view = MakeElementNullableArrayViewForTest(array, validity);
+    auto view = MakeArrayViewForTest(array);
+    EXPECT_EQ(view.data(), array.data());
 
     EXPECT_TRUE(view.is_element_valid(0));
     EXPECT_FALSE(view.is_element_valid(1));
@@ -485,6 +611,30 @@ TEST(Array, ElementNullableValidationRejectsAmbiguousInput) {
 
     input.add_valid_data(true);
     EXPECT_ANY_THROW(Array(input, true));
+
+    int32_t value = 1;
+    auto* payload = reinterpret_cast<char*>(&value);
+    const uint64_t validity = 1;
+    EXPECT_ANY_THROW(Array(
+        payload, 1, sizeof(value), DataType::INT32, nullptr, nullptr, true));
+    EXPECT_ANY_THROW(ArrayView(payload,
+                               1,
+                               sizeof(value),
+                               DataType::INT32,
+                               nullptr,
+                               nullptr,
+                               true,
+                               false));
+    EXPECT_ANY_THROW(Array(
+        payload, 1, sizeof(value), DataType::INT32, nullptr, &validity, false));
+    EXPECT_ANY_THROW(ArrayView(payload,
+                               1,
+                               sizeof(value),
+                               DataType::INT32,
+                               nullptr,
+                               &validity,
+                               false,
+                               false));
 }
 
 TEST(Array, ElementNullablePlanLiteralRequiresAllElementsValid) {
