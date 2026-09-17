@@ -379,19 +379,20 @@ QueryNode keeps working depends on which search path is executing. Measured on
 a single node, 100k rows of dim 768, nq 10000, cancelled about 0.3 s into the
 request:
 
-| Search path | QueryNode kept working | Why |
+| Search path | Before | After |
 |---|---|---|
-| HNSW, and any other knowhere index | ~70 ms after the cancel | knowhere checks the cancellation token before each query vector |
-| FLAT, i.e. segcore's own brute-force scan | 21 s, the whole scan | `SearchOnSealed` / `SearchOnGrowing` / `SearchBruteForce` receive the `OpContext` but never read its token; the only checks are at the operator and segment boundaries, and one segment's scan crosses neither |
+| HNSW, and any other knowhere index | ~70 ms after the cancel | ~30 ms |
+| FLAT, i.e. a brute-force scan | 21 s, the whole scan | ~13 ms |
 
-So a cancelled indexed search stops almost at once, while a cancelled
-brute-force search returns to its client immediately and goes on burning a
-core until the scan ends. That is the wrong way round for an operator: the
-unindexed query is the one worth stopping. Making it interruptible means
-reading the token inside those scan loops, one relaxed atomic read per chunk.
-It is tracked separately and is not part of this design.
+The brute-force scan was the outlier and had to be fixed: a cancelled scan
+returned to its client at once and then went on burning a core to the end,
+which is the wrong way round, since the unindexed query is the one worth
+stopping. Neither segcore's scan loops nor knowhere's brute force read the
+cancellation token they are handed, although every knowhere index does. Both
+now check it, one relaxed atomic read per chunk and per query vector
+respectively, which is what brings 21 s down to 13 ms.
 
-Other limits:
+Remaining limits:
 
 - Scalar filtering is interruptible every 8192 rows, so a filter-heavy request
   stops promptly even on the brute-force path.
