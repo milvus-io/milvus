@@ -146,7 +146,6 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		// position. A crash before publishing M may repeat physical L0 output;
 		// the outstanding Summary window is read lazily after ordered replay.
 		MaterializedTimeTick: config.VChannelMeta.GetTransformMaterializedTimeTick(),
-		FlushThrough:         config.VChannelMeta.GetL0FlushTimeTick(),
 		Reader:               config.SummaryReader,
 		MaterializeMaxRows:   config.L0MaterializeRows,
 		MaterializeMaxBytes:  config.L0MaterializeBytes,
@@ -219,14 +218,13 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleAlterWALMessage(ctx, retained)
 	}
 	// Completion requests are separate from generic Barrier classification.
-	// Their L1 flushes were initiated above. Persist intent before dispatch ends.
+	// Their L1 flushes were initiated above. Pin replay until L0 completes.
 	switch msg.MessageType() {
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
 		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
 		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL:
 		if m.vchannelView != nil {
-			m.vchannelView.RequestL0Flush(msg.TimeTick())
-			m.l0Materializer.RequestFlushThrough(msg.TimeTick())
+			m.l0Materializer.RequestFlush(retained)
 		}
 	}
 	// Summary coverage and Segment state are installed before advancing W.

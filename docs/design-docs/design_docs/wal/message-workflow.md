@@ -76,7 +76,7 @@ not skip its observation.
 | VChannel dispatch Retained | Manager clones for each routed VChannel | Manager releases after synchronous VChannel observation. |
 | Segment Retained | Segment exposes concrete async work | Object/lifecycle work succeeds after recovery metadata is installed and dirty. |
 | WALSummary | Copies records without retaining a handle | `LastAcked()` independently bounds checkpoint publication. |
-| L0Materializer | Observes window boundaries only, with no handle | Reads Summary lazily; durable VChannel cursor controls its GC release. |
+| L0Materializer | Clones explicit Flush/lifecycle requests; ordinary observation holds no handle | Covered L0 output succeeds and recovery metadata is installed and dirty. Durable VChannel cursor separately controls GC. |
 | QueryRuntime event | Plain immutable copy | QueryRuntime queue lifecycle; outside RecoveryStorage Ack. |
 
 ## 4. Typical Messages
@@ -118,11 +118,14 @@ Summary independently without retaining the message.
 Flush, ManualFlush, FlushAll, DropCollection, DropPartition,
 TruncateCollection, schema-changing AlterCollection, and AlterWAL may create
 work in multiple SegmentViews and L0Materializers. Each asynchronous Segment
-consumer owns an independent clone; L0Materializer only merges the relevant
-boundary into its requested window, without storing a BarrierEntry. Under the
-revised batching policy, operations requiring completed L0 output also record
-explicit completion intent and wait for related L1 flush/final-commit completion.
-Barrier classification alone does not establish that requirement.
+consumer owns an independent clone. L0Materializer merges the relevant boundary
+without storing a BarrierEntry. ManualFlush, FlushAll, DropCollection,
+DropPartition, TruncateCollection and AlterWAL additionally retain one handle
+per affected VChannel until the requested L0 boundary completes after L1 final
+commit. Dirty materialization metadata must be installed before these handles
+release. This pins checkpoint and broadcast completion; unfinished requests
+are rebuilt from WAL replay. Ordinary Segment Flush and generic DDL barriers
+do not create explicit L0 requests.
 
 ### Txn
 
@@ -169,8 +172,9 @@ may be newer than the global checkpoint and uses its own
 
 1. Every observed message has exactly one Tracker Owner.
 2. Startup and live messages use the same complete Observe flow.
-3. Every asynchronous Segment consumer clones before dispatch returns;
-   Summary copies records and L0Materializer records only window boundaries.
+3. Every asynchronous Segment consumer and explicit L0 completion consumer
+   clones before dispatch returns. Summary copies records; ordinary L0 window
+   observations retain no handle.
 4. Txn children never have independent recovery ownership.
 5. QueryRuntime does not retain RecoveryStorage handles.
 6. Metadata/Segment filtering uses TimeTick and `checkpoint_time_tick`; L0

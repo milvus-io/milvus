@@ -166,7 +166,7 @@ func TestRestoredLifecycleStillPinsUnfinishedMaterialization(t *testing.T) {
 			flushTransform(t, m, "v1", 100, &unused)
 			recovered := newTestManager(t, store, 1)
 			require.NoError(t, recovered.Restore(context.Background()))
-			recovered.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{"v1": {State: state, CheckpointTimeTick: 200, L0FlushTimeTick: 200, TransformMaterializedTimeTick: 50}})
+			recovered.RestoreTransformGCTimeTicks(map[string]*streamingpb.VChannelMeta{"v1": {State: state, CheckpointTimeTick: 200, TransformMaterializedTimeTick: 50}})
 			require.NoError(t, gcSummary(context.Background(), recovered))
 			require.Len(t, recovered.Manifest().GetChunks(), 1, "lifecycle state cannot discard outstanding Delete@100")
 			var requested uint64

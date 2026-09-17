@@ -28,7 +28,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -130,7 +132,7 @@ func TestL1BoundAndCompletionWakeup(t *testing.T) {
 	m.SetMaterializeUpperBound(150)
 	observeDelete(t, m, 100)
 	observeBarrier(t, m, 200)
-	m.RequestFlushThrough(200)
+	requestFlush(t, m, 200)
 	require.Empty(t, *tasks, "explicit completion must wait for all earlier L1 commits")
 	m.SetMaterializeUpperBound(199)
 	require.Empty(t, *tasks)
@@ -231,7 +233,7 @@ func TestObservationClassificationAndEmptyWindows(t *testing.T) {
 	require.Empty(t, *tasks)
 	observeBarrier(t, m, 300)
 	require.Empty(t, *tasks)
-	m.RequestFlushThrough(300)
+	requestFlush(t, m, 300)
 	require.NoError(t, (*tasks)[0].Execute(context.Background()))
 	require.Equal(t, uint64(300), m.MaterializedTimeTick())
 	require.Empty(t, *batches)
@@ -310,7 +312,7 @@ func TestForcedGoalDoesNotChaseNewSmallTail(t *testing.T) {
 				observeDelete(t, m, tt)
 			}
 			if explicit {
-				m.RequestFlushThrough(300)
+				requestFlush(t, m, 300)
 			} else {
 				m.RequestBacklogThrough(300)
 			}
@@ -331,17 +333,103 @@ func TestForcedGoalDoesNotChaseNewSmallTail(t *testing.T) {
 	}
 }
 
-func TestRestoredFlushIntentWaitsForReplayAndL1(t *testing.T) {
-	m, tasks, _ := testMaterializer(t, 50)
-	m.materializeMaxRows = 10
-	m.flushThrough = 200 // Config.FlushThrough restored from VChannelMeta.
-	m.SetMaterializeUpperBound(100)
+func flushMessage(tt uint64) message.ImmutableMessage {
+	return message.NewManualFlushMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().
+		WithTimeTick(tt).WithLastConfirmed(walimplstest.NewTestMessageID(int64(tt - 1))).IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tt)))
+}
+
+func requestFlush(t *testing.T, m *L0Materializer, tt uint64) {
+	t.Helper()
+	owner := message.NewOwnedImmutableMessage(flushMessage(tt), nil)
+	handle := owner.Clone()
+	m.RequestFlush(handle)
+	handle.Release()
+	owner.Release()
+}
+
+func trackFlush(t *testing.T, m *L0Materializer, tracker *messageack.Tracker, tt uint64) {
+	t.Helper()
+	raw := flushMessage(tt)
+	owner := tracker.Track(raw)
+	retained := owner.Clone()
+	m.reader.(*walsummary.Manager).ObserveMessage(context.Background(), raw)
+	m.RequestFlush(retained)
+	m.ObserveMessage(raw)
+	retained.Release()
+	owner.Release()
+}
+
+func TestFlushHandlesReleaseOnlyCoveredPrefixAfterDirtyCallback(t *testing.T) {
+	outputErr := context.DeadlineExceeded
+	m, tasks, _ := testMaterializer(t, 0, &outputErr)
+	m.materializeMaxRows = 2
+	m.SetMaterializeUpperBound(0)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	observeDelete(t, m, 100)
-	observeBarrier(t, m, 250)
-	require.Empty(t, *tasks)
+	trackFlush(t, m, tracker, 120)
+	observeDelete(t, m, 150)
+	observeDelete(t, m, 200)
+	trackFlush(t, m, tracker, 250)
 	m.SetMaterializeUpperBound(math.MaxUint64)
 	require.Len(t, *tasks, 1)
+	require.Error(t, (*tasks)[0].Execute(context.Background()))
+	require.Zero(t, tracker.CompletedPoint().TimeTick, "failed output cannot release Flush")
+	require.Len(t, m.pendingFlushes, 2)
+	m.onMaterialized = func(tt uint64) {
+		require.Less(t, tracker.CompletedPoint().TimeTick, tt, "install dirty metadata before releasing handles")
+	}
+	outputErr = nil
 	require.NoError(t, (*tasks)[0].Execute(context.Background()))
-	require.Equal(t, uint64(200), m.MaterializedTimeTick())
-	require.Len(t, *tasks, 1)
+	require.Equal(t, uint64(120), tracker.CompletedPoint().TimeTick)
+	require.Len(t, m.pendingFlushes, 1, "only covered requests release after a partial batch")
+	require.Len(t, *tasks, 2)
+	outputErr = context.Canceled
+	require.Error(t, (*tasks)[1].Execute(context.Background()))
+	require.Equal(t, uint64(120), tracker.CompletedPoint().TimeTick, "cancellation leaves unfinished work replayable")
+	outputErr = nil
+	require.NoError(t, (*tasks)[1].Execute(context.Background()))
+	require.Equal(t, uint64(250), tracker.CompletedPoint().TimeTick)
+	require.Empty(t, m.pendingFlushes)
+	require.NoError(t, (*tasks)[1].Execute(context.Background()))
+}
+
+func TestFlushWaitsForMetadataCallback(t *testing.T) {
+	m, tasks, _ := testMaterializer(t, 0)
+	m.materializeMaxRows = 10
+	observeDelete(t, m, 100)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	trackFlush(t, m, tracker, 200)
+	entered, release := make(chan struct{}), make(chan struct{})
+	m.onMaterialized = func(tt uint64) {
+		if tt == 200 {
+			close(entered)
+			<-release
+		}
+	}
+	done := make(chan error, 1)
+	go func() { done <- (*tasks)[0].Execute(context.Background()) }()
+	<-entered
+	// Output is complete, but metadata is still being installed. Later Flush
+	// arrival must neither release this request early nor extend its active goal.
+	trackFlush(t, m, tracker, 250)
+	require.Zero(t, tracker.CompletedPoint().TimeTick)
+	close(release)
+	require.NoError(t, <-done)
+	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+	require.Len(t, m.pendingFlushes, 1)
+	require.Len(t, *tasks, 2)
+	require.NoError(t, (*tasks)[1].Execute(context.Background()))
+	require.Equal(t, uint64(250), tracker.CompletedPoint().TimeTick)
+	require.Empty(t, m.pendingFlushes)
+}
+
+func TestFlushReplayAfterPersistedMNeedsNoNewOutput(t *testing.T) {
+	m, tasks, batches := testMaterializer(t, 200)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	trackFlush(t, m, tracker, 200)
+	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
+	require.Empty(t, m.pendingFlushes)
+	require.Empty(t, *tasks)
+	require.Empty(t, *batches)
 }

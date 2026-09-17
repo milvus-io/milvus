@@ -15,8 +15,8 @@ RecoveryStorage also restores idempotency windows from retained Summary history
 and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
 
 The L0Materializer ownership below is implemented without a copied payload
-window. Capacity/API/Summary-backlog admission and persisted explicit completion
-intent are implemented. See
+window. Capacity/API/Summary-backlog admission and WAL-backed explicit completion
+requests are implemented. See
 [L0 Materializer](l0_materializer.md) for the complete window and recovery rules.
 
 ## 1. Ownership
@@ -64,8 +64,9 @@ observation.
 
 For a PChannel-scoped message, the manager gives every affected VChannel an
 independent dispatch clone. Every SegmentView exposing asynchronous work clones
-again before VChannel observation returns. L0Materializer records only a
-window boundary and retains no source handle.
+again before VChannel observation returns. L0Materializer records ordinary
+window boundaries without retaining handles; explicit Flush/lifecycle requests
+clone a handle until L0 completion and installation of dirty metadata.
 
 ## 3. VChannel Metadata State
 
@@ -99,9 +100,10 @@ Rules include:
 - dirty SegmentViews.
 
 L0Materializer has no independent snapshot: its materialization frontier is
-carried by VChannelMeta. `l0_flush_time_tick` persists the explicit completion
-boundary before checkpoint can skip its WAL message. Restored Segment state
-supplies the L1 dependencies; F > M means the request remains pending.
+carried by VChannelMeta. Explicit completion requests retain WAL handles until
+L0 succeeds and the owner installs dirty M. Checkpoint cannot skip an unfinished
+request, so replay reconstructs F without another metadata field. Restored
+Segment state supplies the L1 dependencies.
 After either a full or a base-only VChannel snapshot is durable, report its
 captured frontier to Summary;
 a newer in-memory value cannot authorize GC.
