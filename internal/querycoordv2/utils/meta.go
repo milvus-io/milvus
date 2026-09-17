@@ -28,10 +28,8 @@ import (
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
-	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -162,42 +160,10 @@ func AssignReplica(ctx context.Context, m *meta.Meta, resourceGroups []string, r
 			return nil, err
 		}
 
-		// The regular count is master's rule: a group holds as many replicas
-		// as it has regular query nodes. Delegator capacity is checked over
-		// the collection's whole layout by CheckDelegatorCapacity, using the
-		// same pooling the assignment uses, and is not this rule's business.
-		//
-		// One waiver, for an installed form with the streaming service on: a
-		// group that has streaming query nodes passes the regular bound. The
-		// query node embedded in a streaming node is deliberately kept out of
-		// the resource manager (ResourceManager.handleNodeUp returns early
-		// for it) and reaches a replica through the streaming node manager,
-		// so such a group may have no regular node at all and still serve a
-		// replica; counting only the resource manager's nodes would refuse a
-		// load the spawn that follows would have placed perfectly well. Only
-		// a form runs a group on streaming nodes alone, so only a form takes
-		// the waiver and the stock admission stays exactly what it was.
-		//
-		// Under strict isolation a group with no streaming node of its own
-		// cannot host a delegator at all, whatever its regular count, and is
-		// refused here; with the flag off its delegators come from a pool
-		// the pool check bounds, and master's rule stands.
-		regularNodes := len(nodes)
-		enough := num <= regularNodes
-		if extension.FormInstalled() && streamingutil.IsStreamingServiceEnabled() {
-			switch {
-			case snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup()[rgName].Len() > 0:
-				enough = true
-			case paramtable.Get().StreamingCfg.StrictResourceGroupIsolationEnabled.GetAsBool():
-				enough = false
-				regularNodes = 0
-			}
-		}
-
-		if !enough {
+		if num > len(nodes) {
 			mlog.Warn(ctx, "failed to check resource group", mlog.Err(err))
 			if checkNodeNum {
-				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, regularNodes, num)
+				err := merr.WrapErrResourceGroupNodeNotEnough(rgName, len(nodes), num)
 				return nil, err
 			}
 		}

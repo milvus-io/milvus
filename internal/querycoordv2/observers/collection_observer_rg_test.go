@@ -1213,44 +1213,6 @@ func (s *CollectionObserverRGSuite) TestAGroupThatHasServedKeepsItsReplicasWhenI
 	s.EqualValues(2, collection.GetReplicaNumber(), "and the replica count is untouched")
 }
 
-// TestAScopedGroupGetsTwiceTheLoadTimeoutBeforeTeardown pins the scoped stall
-// clock against the repair it has to wait for. When a replica loses its
-// regular query node, the segment checker keeps its sealed segments waiting a
-// full load timeout before placing them on a streaming node's query node, and
-// those placements then need time to move the figure. One load timeout for
-// both would tear the group down at about the moment the fallback starts
-// repairing it.
-func (s *CollectionObserverRGSuite) TestAScopedGroupGetsTwiceTheLoadTimeoutBeforeTeardown() {
-	s.registerLoadingCollection(1910, 1911, "1910-dmc0", 2, 19101, 19102)
-	s.putReplica(1910, 191001, 111, rgA)
-	// Not serviceable: this group never satisfies the readiness shield, so
-	// the stall clock alone decides.
-	s.putDelegator(1910, 111, "1910-dmc0", 19101)
-	s.putReplica(1910, 191002, 112, rgB)
-	s.putDelegator(1910, 112, "1910-dmc0", 19101, 19102)
-	s.markCollectionLoaded(1910, 1911)
-
-	s.ob.LoadCollection(s.ctx, 1910, rgA)
-	key := s.taskKey(1910, rgA)
-	defer s.scriptResourceGroupPercentage(rgA, 50)()
-	loadTimeout := Params.QueryCoordCfg.LoadTimeoutSeconds.GetAsDuration(time.Second)
-
-	s.ob.Observe(s.ctx)
-	task, ok := s.ob.loadTasks.Get(key)
-	s.Require().True(ok)
-	s.Require().EqualValues(50, task.LastProgress)
-
-	s.ageTaskWatermark(key, loadTimeout+time.Minute)
-	s.ob.Observe(s.ctx)
-	s.True(s.ob.loadTasks.Contain(key), "one load timeout is not enough to tear a scoped group down")
-	s.Len(s.replicaIDsInRG(1910, rgA), 1, "and its replica is untouched")
-
-	s.ageTaskWatermark(key, 2*loadTimeout+time.Minute)
-	s.ob.Observe(s.ctx)
-	s.Empty(s.replicaIDsInRG(1910, rgA), "twice the load timeout without progress releases the stalled replica")
-	s.Len(s.replicaIDsInRG(1910, rgB), 1, "the sibling group keeps its own")
-}
-
 // taskIsQuiet is what decides both whether a tick pushes the checkers for a
 // task and whether it writes that task's line at full rate. Both matter only
 // because a scoped task can now live as long as its collection does.

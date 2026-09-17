@@ -56,10 +56,9 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	// adds no replica to the groups it names - the same load re-sent while
 	// a node of the group restarts, or one that changes only its partitions
 	// at the same counts - places nothing and is not admitted against
-	// anything, exactly as in the LoadCollection callback: under strict
-	// isolation the per-group rule would otherwise refuse a re-send for a
-	// group whose streaming nodes are all away at once, against a
-	// collection that is still serving from its regular nodes.
+	// anything, exactly as in the LoadCollection callback: the per-group rule
+	// would otherwise refuse a re-send for a group whose query node is
+	// restarting, against a collection that is still serving.
 	requestedReplicasNumber, err := utils.ReplicaNumberByResourceGroup(resourceGroups, replicaNumber)
 	if err != nil {
 		return err
@@ -69,13 +68,6 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForLoadPartitions(ctx conte
 	expectedReplicasNumber, err := utils.AssignReplica(ctx, s.meta, resourceGroups, replicaNumber, checkNodeNum)
 	if err != nil {
 		return err
-	}
-	// Same bound as the LoadCollection callback: the delegator capacity over
-	// the collection's whole layout, in the pools the assignment will use.
-	if checkNodeNum {
-		if err := utils.CheckDelegatorCapacity(ctx, s.meta, req.GetCollectionID(), expectedReplicasNumber, len(scopedResourceGroups) > 0); err != nil {
-			return err
-		}
 	}
 
 	// With a form installed, a request that names resource groups speaks only

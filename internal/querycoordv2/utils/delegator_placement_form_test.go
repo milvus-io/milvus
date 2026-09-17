@@ -20,20 +20,72 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
+	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// formHook is the smallest thing a distribution can install: the admission
+// only asks whether a hook is there, never what it does.
+type formHook struct{ hook.Hook }
+
+// installForm turns this test's binary into one a distribution has compiled
+// itself into, and turns it back into a stock binary when the test ends.
+func installForm(t *testing.T) {
+	t.Helper()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+	ext.SetHook(formHook{})
+}
+
+// stockBinary makes sure nothing is installed, so the test speaks for a stock
+// deployment whatever an earlier test left behind.
+func stockBinary(t *testing.T) {
+	t.Helper()
+	ext.ResetForTest()
+	t.Cleanup(ext.ResetForTest)
+}
+
+// withStreamingQueryNodes turns the streaming service on and makes the
+// streaming node manager answer from byRG, so a test can state which resource
+// group holds which streaming query nodes without one running.
+//
+// The cluster-wide set is derived from byRG rather than given separately: the
+// two are the same nodes, and letting them disagree would test a state that
+// cannot happen. It is needed as well as the per-group map, because
+// AssignReplica's first check - the one milvus has always had - refuses a
+// replica count above the number of streaming nodes in the whole cluster.
+func withStreamingQueryNodes(byRG map[string]typeutil.UniqueSet) func() {
+	all := typeutil.NewUniqueSet()
+	for _, nodes := range byRG {
+		all.Insert(nodes.Collect()...)
+	}
+	enabled := mockey.Mock(streamingutil.IsStreamingServiceEnabled).Return(true).Build()
+	byGroup := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDsByResourceGroup).
+		Return(byRG).Build()
+	cluster := mockey.Mock((*snmanager.StreamingNodeManager).GetStreamingQueryNodeIDs).
+		Return(all).Build()
+	return func() {
+		cluster.UnPatch()
+		byGroup.UnPatch()
+		enabled.UnPatch()
+	}
+}
 
 // metaWithQueryClusters builds a meta holding one resource group per name,
 // each with one regular query node: the shape of a form's query clusters.
