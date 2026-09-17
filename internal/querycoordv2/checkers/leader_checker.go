@@ -94,7 +94,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 		replicas := c.meta.GetByCollection(ctx, collectionID)
 		for _, replica := range replicas {
 			nodes := replica.GetRWNodes()
-			if streamingutil.IsStreamingServiceEnabled() {
+			if streamingutil.UseStreamingQueryNodeAsDelegator() {
 				nodes = replica.GetRWSQNodes()
 			}
 			for _, node := range nodes {

@@ -310,7 +310,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	groupKeys := make([]string, 0)
 	for _, ch := range channels {
 		var rwNodes []int64
-		if streamingutil.IsStreamingServiceEnabled() {
+		if streamingutil.UseStreamingQueryNodeAsDelegator() {
 			rwNodes = replica.GetRWSQNodes()
 		} else {
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
