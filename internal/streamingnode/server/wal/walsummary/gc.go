@@ -227,3 +227,22 @@ func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkInd
 	}
 	return true
 }
+
+// CanCleanupVChannel reports whether recovery no longer needs the VChannel's
+// durable materialization frontier to retire any retained Delete history.
+// The WAL cleanup fence independently prevents replay from recreating it.
+func (m *Manager) CanCleanupVChannel(vchannel string, through uint64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.terminalErr != nil || m.lastAcked < through || m.manifestVersion != m.publishedVersion {
+		return false
+	}
+	for _, chunk := range m.manifest.GetChunks() {
+		for _, index := range chunk.GetVchannels() {
+			if index.GetVchannel() == vchannel && index.GetTransform() != nil {
+				return false
+			}
+		}
+	}
+	return true
+}

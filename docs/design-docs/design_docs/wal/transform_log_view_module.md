@@ -5,12 +5,17 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
+
 The agreed design separates shared storage, L0 materialization, and subscriptions:
 
 - [WALSummary](summary.md): sole record storage, bounded reads, readable
   coverage, durability, confirmation, and retention.
-- [L0 Materializer](l0_materializer.md): VChannel-owned component that observes
-  window boundaries and reads Summary to produce L0. Implemented in `vchannel/l0materializer`, replacing the former copied window.
+- [WAL L0 Materializer](l0_materializer.md): current VChannel-owned consumer
+  retaining WAL Delete handles through L0 output. The
+  [Summary consumer](summary_l0_materializer.md) is retained for future wiring.
 - [TransformLog Subscription Adaptor](transform_log.md): future read-only
   wrapper over Summary, outside this PR; no observation or materialization.
 
@@ -18,13 +23,14 @@ The agreed design separates shared storage, L0 materialization, and subscription
 RecoveryStorage -> WALSummary
                 -> PChannelRecoveryManager
                      -> VChannelRecoveryModule
-                          -> L0Materializer -> Summary reads
+                          -> WALMaterializer -> retained WAL Delete batches
 
 Future TransformLog adaptor -> the same Summary reads
 ```
 
 The materializer's durable cursor is carried by VChannelMeta; it has no separate
-catalog. Neither materialization nor subscription delivery retains WAL handles.
+catalog. The current WAL consumer retains Delete and explicit Flush handles.
+Future subscriptions do not participate in message completion.
 RecoveryStorage combines Tracker completion with `WALSummary.LastAcked()` before
 publishing the global checkpoint.
 

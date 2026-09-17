@@ -8,5 +8,7 @@ import (
 
 type Lifecycle interface {
 	EnsureGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error
+	// TODO: Remove after enabling queryview.
+	PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error
 	CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error
 }

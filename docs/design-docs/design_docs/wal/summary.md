@@ -12,7 +12,7 @@ The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
 The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
-integration are implemented, including range statistics and Summary-owned
+implementation is retained for future wiring, including range statistics and Summary-owned
 materialization-backlog requests described in
 [L0Materializer §5](l0_materializer.md#5-read-and-materialize). TransformLog
 subscriptions (§5.5) are a separate future integration.
@@ -21,6 +21,10 @@ The protocol added by this feature is still under development. Intermediate
 branch versions are not compatibility targets: removed draft messages and
 fields are deleted without reservations, and Transform indexes must provide
 the current section boundaries and statistics.
+
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
 
 ## 1. Core Purpose
 
@@ -242,7 +246,7 @@ requested window. This ordering does not wait for upload or publication.
 The caller owns the scheduler lifetime. The existing convention that a zero
 `FlushMaxBytes` disables size-triggered sealing is unchanged.
 
-Summary also governs **materialization backlog**: Deletes not yet consumed into L0, whether pending, sealed or already
+For the future Summary consumer, Summary also governs **materialization backlog**: Deletes not yet consumed into L0, whether pending, sealed or already
 persisted. An upload does not discharge this work. Backlog governance may issue
 a coalesced, bounded progress request to the VChannel owner even with an empty
 pending buffer and no new WAL traffic. It must account for recovered retained
@@ -371,7 +375,13 @@ that still needs the oldest chunk.
 Unmaterialized transform records cannot be discarded merely to meet a budget;
 missing consumer metadata does not prove cleanup. Restored DROPPED/TOMBSTONED
 metadata also uses its persisted materialization frontier: the lifecycle state
-alone does not prove that L0 has completed.
+alone does not prove that L0 has completed. A cleaned-up VChannel retains its
+durable tombstone until the recovery-authoritative manifest no longer retains
+its Delete history. `CanCleanupVChannel` also requires confirmed observation
+through its cleanup boundary and completed manifest publication; an in-memory
+retirement is insufficient. This keeps the materialization/GC frontier
+recoverable across restart without adding a manifest GC work queue. Physical
+object deletion can finish after the tombstone is removed.
 
 GC has no persistent work queue inside the manifest:
 
@@ -447,7 +457,7 @@ future insert-only consumer would need to provide that observation policy.
 A primary-key index requiring full history would also need a retention contract
 beyond the bounded idempotency tail.
 
-### 5.2 L0Materializer
+### 5.2 Summary L0 Consumer (Future Runtime Wiring)
 
 [L0Materializer](l0_materializer.md) consumes the transform section directly.
 It observes WAL messages only to merge a requested materialization boundary;
@@ -697,19 +707,17 @@ Local read pins protect the captured objects against physical GC.
 `ReadTransformEntries` remains an uncapped convenience wrapper; production L0
 consumption uses bounded reads exclusively.
 
-RecoveryStorage observes Summary before VChannel modules. L0Materializer
-restores only its durable cursor, and replay/RecoveryBarrier requests the
-window to read; startup no longer preloads Delete payloads. Both full and
-base-only VChannel snapshot commits report their captured materialization
-frontiers. The manifest persists per-VChannel transform fast-forward TimeTicks,
-including after removal of the last chunk.
+RecoveryStorage observes Summary before VChannel modules. The current WAL L0
+consumer holds Delete handles and rebuilds its buffer from WAL replay. It
+reports in-memory materialization completion and durable GC positions as before;
+both full and base-only VChannel snapshot commits use their captured frontier.
+The manifest persists transform fast-forward TimeTicks, even after the last
+chunk is removed.
 
-L0 admission uses capacity, explicit completion, or Summary backlog requests.
-Explicit requests retain their WAL handles while waiting for L1 final commit
-and L0 completion. Dirty VChannel M is installed before handles release;
-unfinished requests are replayed from WAL without a persisted request field. Capacity completion rechecks thresholds without draining a small
-tail. Forced requests use captured finite goals. The policy has no L0 age timer
-and does not use `FlushL0MaxLifetime` as a trigger.
+The retained Summary consumer implements capacity/API/backlog admission, bounded
+reads, and L1-final-commit safety as described in its separate design. The
+current RecoveryStorage does not wire Summary's materialization-request callback;
+Summary persistence, confirmation and GC still run independently.
 
 `TransformStats(vchannel, after, through)` returns lower/upper logical-byte
 bounds from section totals spanning hot, sealed and durable records. The

@@ -14,10 +14,9 @@ restores the Summary index, and caps checkpoint publication at `LastAcked`.
 RecoveryStorage also restores idempotency windows from retained Summary history
 and startup replay before accepting writes. QueryRuntime wiring remains follow-up work.
 
-The L0Materializer ownership below is implemented without a copied payload
-window. Capacity/API/Summary-backlog admission and WAL-backed explicit completion
-requests are implemented. See
-[L0 Materializer](l0_materializer.md) for the complete window and recovery rules.
+The current [WAL L0 materializer](l0_materializer.md) retains Delete handles.
+The [Summary consumer](summary_l0_materializer.md) is retained for QueryView;
+its future scheduling and recovery integration is outlined in sections 5–6.
 
 ## 1. Ownership
 
@@ -34,7 +33,7 @@ The module owns:
 - collection, partition, schema, lifecycle, and tombstone state;
 - one continuous VChannel metadata `checkpoint_time_tick`;
 - SegmentView creation, lookup, routing, and snapshot aggregation;
-- the VChannel L0Materializer and its L1 safety bound;
+- the VChannel WALMaterializer and its growing-registration prerequisite;
 - DataView recovery state and QueryRuntime live-event forwarding (design
   intent, pending the qviews feature — not yet wired in the current code).
 
@@ -47,26 +46,25 @@ broadcast acknowledgement, or QueryView state transitions.
 ObserveMessage(Retained)
   -> apply VChannel metadata when not already covered
   -> route the same retained message to affected SegmentViews
-  -> refresh the L1 safety bound
-  -> let L0Materializer observe the requested window boundary
+  -> let WALMaterializer retain Delete/Flush messages and schedule batches
   -> forward a plain live event to QueryRuntime when present
   -> mark changed recovery components dirty
 ```
 
 RecoveryStorage first installs the message's Summary records and readable
 coverage, then dispatches to this module. L0Materializer observation follows
-Segment state changes, so its window never runs ahead of local L1 state.
+Segment state changes, so it knows all earlier L1 registration dependencies.
 
 There is no mode argument. Metadata and Segment effects use their loaded
 `checkpoint_time_tick` to choose apply versus no-op. L0Materializer uses its own
-materialized/requested positions; a metadata no-op must not suppress its window
+materialized/observed positions; a metadata no-op must not suppress its Delete
 observation.
 
 For a PChannel-scoped message, the manager gives every affected VChannel an
 independent dispatch clone. Every SegmentView exposing asynchronous work clones
-again before VChannel observation returns. L0Materializer records ordinary
-window boundaries without retaining handles; explicit Flush/lifecycle requests
-clone a handle until L0 completion and installation of dirty metadata.
+again before VChannel observation returns. WALMaterializer clones Delete/Txn
+and explicit Flush/lifecycle messages until L0 completion and installation of
+dirty metadata.
 
 ## 3. VChannel Metadata State
 
@@ -100,7 +98,7 @@ Rules include:
 - dirty SegmentViews.
 
 L0Materializer has no independent snapshot: its materialization frontier is
-carried by VChannelMeta. Explicit completion requests retain WAL handles until
+carried by VChannelMeta. Delete and explicit completion requests retain WAL handles until
 L0 succeeds and the owner installs dirty M. Checkpoint cannot skip an unfinished
 request, so replay reconstructs F without another metadata field. Restored
 Segment state supplies the L1 dependencies.
@@ -115,7 +113,7 @@ clear later mutations.
 The owning RecoveryStorage writes these component snapshots before the one
 global checkpoint.
 
-## 5. Segment Completion And L0 Scheduling
+## 5. Segment Completion And Summary L0 Scheduling (Future Wiring)
 
 One message may have independent effects:
 
@@ -130,10 +128,12 @@ The reference graph joins these effects without a VChannel-level Meta/Data
 state machine. Each component advances its own durable state and releases its
 own handle. Successful Tracker completion requires the entire graph to reach
 zero without poison. Summary copies Txn records separately; its `LastAcked`
-additionally bounds checkpoint publication. L0Materializer reads those records
-without joining this reference graph.
+additionally bounds checkpoint publication. The retained Summary materializer reads those records without joining this
+reference graph. The currently wired WAL consumer retains Delete handles and
+uses only the growing-registration prerequisite described in
+[WAL L0 Materializer](l0_materializer.md).
 
-The VChannel module also computes the L0 materialization safety bound across
+When the Summary consumer is reconnected, the VChannel module computes the L0 materialization safety bound across
 its SegmentViews. An L1 Segment blocks L0 materialization after its
 creation TimeTick until its final commit completes. This is scheduling
 coordination only; it does not merge Segment and L0 persistence or
@@ -145,7 +145,7 @@ therefore flushes all Segments in the VChannel created before its boundary,
 including Segments belonging to other partitions; its logical tombstone still
 applies only to the target partition.
 
-## 6. Recovery
+## 6. Summary L0 Recovery (Future Wiring)
 
 `PChannelRecoveryManager` creates VChannel modules from persisted VChannel and
 Segment metadata. L0Materializer restores M from VChannelMeta and initializes
@@ -185,7 +185,10 @@ wait for a second global recovery checkpoint.
 Cleanup is logical before physical:
 
 1. persist a VChannel or child tombstone;
-2. retain state while serving, recovery, or QueryView rules require it;
+2. retain state while serving, recovery, or QueryView rules require it; a
+   VChannel tombstone also remains until Summary has durably retired its
+   retained Delete history. Its persisted materialization frontier authorizes
+   Summary GC before catalog removal, including after restart;
 3. persist removal from recovery metadata;
 4. remove object data asynchronously afterward.
 
@@ -202,3 +205,17 @@ checkpoint by itself.
 5. QueryRuntime observation never delays Message Ack.
 6. Dirty snapshots are stable and precede global checkpoint publication.
 7. VChannel cleanup cannot delete child state still required for recovery.
+
+## 10. Temporary legacy query checkpoint reporting
+
+Until QueryView is enabled, the [WAL L0 materializer](l0_materializer.md)
+retains Delete handles through output/registration and dirty cursor installation.
+SegmentView retains Insert handles through growing publication. cp_updater can
+therefore report the published global checkpoint's original MessageID and
+TimeTick directly. There is no per-VChannel candidate queue, progress minimum,
+or completed-Flush fallback. RPC failures retry a published point next tick.
+This bridge is marked `TODO: Remove after enabling queryview.`
+
+This change does not yet adjust WAL truncation. Backends that physically remove
+history independently of this conservative query position still need the
+separate truncation/retention integration before relying on older query seeks.

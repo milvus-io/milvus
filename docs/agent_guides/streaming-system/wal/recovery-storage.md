@@ -13,21 +13,19 @@ Persists WAL consumer state to the catalog (etcd) and object storage. The author
 ## Recovery Flow
 
 1. RW WAL opening appends a RecoveryBarrier to fence the old writer.
-2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. L0Materializer restores its cursor and rebuilds its requested window through replay, without preloading Delete payloads.
+2. **Metadata recovery** (`recoverRecoveryInfoFromMeta`): Claim the checkpoint with the assignment term, load component metadata and restore WALSummary. WALMaterializer restores its cursor and rebuilds unmaterialized Delete handles through WAL replay.
 3. **Startup recovery** (`runBoundedRecovery`): Use the ordinary scanner to observe the WAL from the checkpoint through this open's exact barrier. Capture the write-path snapshot and an independent copy of unfinished transaction builders, and restore idempotency snapshots from retained Summary history plus replayed records (failing WAL open if history cannot be read); pause further raw input until write-path initialization finishes. Asynchronous persistence need not have finished.
 4. Resume the same scanner exclusively after the barrier through the opener-provided WAB, retaining its ordering and transaction state. An empty WAB needs no additional persisted TimeTick to switch; eviction uses durable catchup without replacing that state. Run AckTracker stall checks, independent Summary backlog checks, and catalog publication. Component snapshots precede checkpoint publication and WAL truncation. Poisoned messages remain incomplete and block the checkpoint.
 
 Control may persist its latest state ahead of the global checkpoint, like a Segment snapshot. Its `control_checkpoint_time_tick` suppresses already covered control effects without skipping data replay. External effects still require idempotent retries when a crash precedes metadata publication. Startup failure and normal shutdown close the retained stream, including when it is paused at the barrier.
 
-L0 materialization is admitted by Delete row/byte capacity, an explicit completion
-request after L1 final commit, or a Summary-owned backlog request. Capacity
-batches leave small tails to accumulate; there is no L0 age/idle timer.
-Summary indexes provide payload-free range statistics over hot and durable data.
-Explicit Flush/lifecycle requests retain WAL handles until L0 completes and
-dirty materialization metadata is installed. They pin checkpoint/BroadcastAck;
-restart rebuilds unfinished requests from WAL, with no persisted request field.
-Only persisted materialization progress releases Delete history, including when
-restored metadata is DROPPED/TOMBSTONED.
+The temporary WAL L0 materializer retains Delete/Txn and explicit Flush handles.
+Size, buffer age, explicit Flush and recovery-tail requests trigger output.
+Earlier L1 segments must be registered in DataCoord, but need not be flushed.
+L1/L0 Flush work joins via message handles. The global published checkpoint is
+reported directly by cp_updater. The Summary reader materializer is retained for
+future QueryView wiring and is not active simultaneously. Durable materialized
+metadata still governs Summary GC and tombstone retirement.
 
 ## Key Packages
 

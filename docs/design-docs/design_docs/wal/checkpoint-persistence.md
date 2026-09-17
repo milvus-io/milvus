@@ -9,6 +9,10 @@ This document defines the single global checkpoint and the catalog publication
 protocol. Message lifetime is defined in
 [WAL Message Ack Design](message_ack.md).
 
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
+
 ## 1. Global Checkpoint Model
 
 ```go
@@ -83,10 +87,10 @@ message.TimeTick >  component.checkpoint_time_tick -> apply complete effect
 ```
 
 L0Materializer's materialized cursor is independent of VChannel metadata's
-`checkpoint_time_tick`. Its requested window is runtime-only and reconstructed
+`checkpoint_time_tick`. Its pending Delete/Flush handles are runtime-only and reconstructed
 through replay. After either a full or base-only VChannel snapshot is durable,
 its captured materialized cursor may be reported to Summary for retention;
-in-memory completion alone does not release stored Delete history. Explicit
+in-memory completion alone does not release stored Delete history. Delete and explicit
 Flush/lifecycle requests retain their WAL handles until L0 completion and dirty
 M installation, so unfinished requests remain replayable without a persisted
 request field. The publisher must save M before publishing past the request.

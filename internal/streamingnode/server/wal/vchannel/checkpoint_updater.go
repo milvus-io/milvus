@@ -51,15 +51,7 @@ type PChannelCheckpointUpdater struct {
 	pchannel      string
 	vchannels     func() []string
 	getCheckpoint func() *utility.WALCheckpoint
-	// getVChannelFlushTimeTick returns the vchannel-level flush position of
-	// one vchannel (see VChannelRecoveryModule.FlushCheckpointTimeTick): the
-	// largest timetick whose insert and delete data of that vchannel has been
-	// durably flushed. UpdateChannelCheckpoint is a vchannel-level operation,
-	// so each reported position must carry its own vchannel's flush position
-	// as the timestamp — the pchannel-level recovery checkpoint TimeTick is
-	// not a per-vchannel flush bound.
-	getVChannelFlushTimeTick func(vchannel string) uint64
-	reporter                 checkpointReporter
+	reporter      checkpointReporter
 
 	tickInterval time.Duration
 
@@ -69,22 +61,19 @@ type PChannelCheckpointUpdater struct {
 
 // newPChannelCheckpointUpdater creates the updater. getCheckpoint must
 // return the pchannel-level recovery checkpoint (RecoveryStorage.GetCheckpoint)
-// or nil when none is published yet; vchannels must return the currently
-// active vchannels of the pchannel; getVChannelFlushTimeTick must return the
-// vchannel-level flush position of a vchannel.
+// or nil when none is published yet; vchannels returns the channels to report.
+// Insert and Delete handles guarantee that the published point is query-safe.
 func newPChannelCheckpointUpdater(
 	pchannel string,
 	vchannels func() []string,
 	getCheckpoint func() *utility.WALCheckpoint,
-	getVChannelFlushTimeTick func(vchannel string) uint64,
 	reporter checkpointReporter,
 ) *PChannelCheckpointUpdater {
 	return &PChannelCheckpointUpdater{
-		pchannel:                 pchannel,
-		vchannels:                vchannels,
-		getCheckpoint:            getCheckpoint,
-		getVChannelFlushTimeTick: getVChannelFlushTimeTick,
-		reporter:                 reporter,
+		pchannel:      pchannel,
+		vchannels:     vchannels,
+		getCheckpoint: getCheckpoint,
+		reporter:      reporter,
 		// Same cadence as the removed flusher's ChannelCheckpointUpdater
 		// (dataNode.channel.channelCheckpointUpdateTickInSeconds).
 		tickInterval: paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.GetAsDuration(time.Second),
@@ -135,7 +124,7 @@ func (u *PChannelCheckpointUpdater) execute() {
 		channelCPs = append(channelCPs, &msgpb.MsgPosition{
 			ChannelName: vchannel,
 			MsgID:       msgIDBytes,
-			Timestamp:   u.getVChannelFlushTimeTick(vchannel),
+			Timestamp:   checkpoint.TimeTick,
 			WALName:     commonpb.WALName(checkpoint.MessageID.WALName()),
 		})
 	}

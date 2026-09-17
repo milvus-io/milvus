@@ -55,12 +55,11 @@ func (s *stubCheckpointReporter) snap() (int, []*msgpb.MsgPosition) {
 	return s.calls, s.lastCPs
 }
 
-func newTestCheckpointUpdater(reporter *stubCheckpointReporter, getCheckpoint func() *utility.WALCheckpoint, getVChannelFlushTimeTick func(vchannel string) uint64) *PChannelCheckpointUpdater {
+func newTestCheckpointUpdater(reporter *stubCheckpointReporter, getCheckpoint func() *utility.WALCheckpoint) *PChannelCheckpointUpdater {
 	updater := newPChannelCheckpointUpdater(
 		"by-dev-rootcoord-dml_0",
 		func() []string { return []string{"v1", "v2"} },
 		getCheckpoint,
-		getVChannelFlushTimeTick,
 		reporter,
 	)
 	// keep the periodic loop fast for Start/Close tests
@@ -70,7 +69,7 @@ func newTestCheckpointUpdater(reporter *stubCheckpointReporter, getCheckpoint fu
 
 func TestCheckpointUpdaterExecuteNoCheckpoint(t *testing.T) {
 	reporter := &stubCheckpointReporter{}
-	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint { return nil }, nil)
+	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint { return nil })
 	updater.execute()
 	updater.execute()
 	calls, _ := reporter.snap()
@@ -81,7 +80,7 @@ func TestCheckpointUpdaterExecuteNilMessageID(t *testing.T) {
 	reporter := &stubCheckpointReporter{}
 	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint {
 		return &utility.WALCheckpoint{TimeTick: 100, Magic: 1}
-	}, nil)
+	})
 	updater.execute()
 	calls, _ := reporter.snap()
 	assert.Zero(t, calls)
@@ -92,13 +91,6 @@ func TestCheckpointUpdaterExecuteReportsPerVChannel(t *testing.T) {
 	messageID := rmq.NewRmqID(42)
 	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint {
 		return &utility.WALCheckpoint{MessageID: messageID, TimeTick: 100, Magic: 1}
-	}, func(vchannel string) uint64 {
-		// Each vchannel reports its own flush position, not the pchannel
-		// recovery checkpoint time tick.
-		if vchannel == "v1" {
-			return 200
-		}
-		return 300
 	})
 	updater.execute()
 
@@ -106,7 +98,7 @@ func TestCheckpointUpdaterExecuteReportsPerVChannel(t *testing.T) {
 	require.Equal(t, 1, calls)
 	require.Len(t, cps, 2)
 	expectedMsgID := adaptor.MustGetMQWrapperIDFromMessage(messageID).Serialize()
-	expectedTicks := map[string]uint64{"v1": 200, "v2": 300}
+	expectedTicks := map[string]uint64{"v1": 100, "v2": 100}
 	for _, cp := range cps {
 		assert.Equal(t, expectedMsgID, cp.GetMsgID())
 		assert.Equal(t, expectedTicks[cp.GetChannelName()], cp.GetTimestamp())
@@ -122,7 +114,6 @@ func TestCheckpointUpdaterExecuteEmptyVChannels(t *testing.T) {
 		func() *utility.WALCheckpoint {
 			return &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 100, Magic: 1}
 		},
-		func(string) uint64 { return 100 },
 		reporter,
 	)
 	updater.execute()
@@ -137,7 +128,7 @@ func TestCheckpointUpdaterExecuteUnsupportedMessageID(t *testing.T) {
 	reporter := &stubCheckpointReporter{}
 	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint {
 		return &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 100, Magic: 1}
-	}, func(string) uint64 { return 100 })
+	})
 	require.NotPanics(t, updater.execute)
 	calls, _ := reporter.snap()
 	assert.Zero(t, calls)
@@ -147,7 +138,7 @@ func TestCheckpointUpdaterExecuteReporterError(t *testing.T) {
 	reporter := &stubCheckpointReporter{err: errors.New("coordinator down")}
 	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint {
 		return &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 100, Magic: 1}
-	}, func(string) uint64 { return 100 })
+	})
 	// must not panic; failure keeps the previous checkpoint for the next tick
 	require.NotPanics(t, updater.execute)
 	calls, _ := reporter.snap()
@@ -158,7 +149,7 @@ func TestCheckpointUpdaterStartClose(t *testing.T) {
 	reporter := &stubCheckpointReporter{}
 	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint {
 		return &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 100, Magic: 1}
-	}, func(string) uint64 { return 100 })
+	})
 
 	go updater.Start()
 	time.Sleep(60 * time.Millisecond)
@@ -168,4 +159,20 @@ func TestCheckpointUpdaterStartClose(t *testing.T) {
 
 	calls, _ := reporter.snap()
 	assert.GreaterOrEqual(t, calls, 1)
+}
+
+func TestCheckpointUpdaterRetryUsesCurrentPublishedPair(t *testing.T) {
+	reporter := &stubCheckpointReporter{err: context.DeadlineExceeded}
+	cp := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 100}
+	updater := newTestCheckpointUpdater(reporter, func() *utility.WALCheckpoint { return cp })
+	updater.execute()
+	cp = &utility.WALCheckpoint{MessageID: rmq.NewRmqID(2), TimeTick: 200}
+	reporter.err = nil
+	updater.execute()
+	calls, positions := reporter.snap()
+	require.Equal(t, 2, calls)
+	for _, position := range positions {
+		require.Equal(t, uint64(200), position.GetTimestamp())
+		require.Equal(t, adaptor.MustGetMQWrapperIDFromMessage(cp.MessageID).Serialize(), position.GetMsgID())
+	}
 }

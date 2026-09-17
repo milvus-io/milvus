@@ -25,14 +25,9 @@ are split by responsibility:
 - [Broadcast Ack Module](broadcast_ack_module.md)
 - [StreamingNode VChannel WAL Input View](streamingnode_vchannel_wal_view.md)
 
-The L0Materializer/shared-reader split is implemented without a copied payload
-window. Integration status is tracked in
-[Summary §7](summary.md#7-implementation-and-integration-status).
-Capacity/API/Summary-backlog admission and WAL-backed explicit completion
-requests are implemented. Explicit requests pin checkpoint/BroadcastAck until
-L0 output succeeds and dirty materialization metadata is installed. L0 has no age timer, and explicit API output waits for
-related L1 flush completion.
-TransformLog subscription integration is deferred.
+**Current runtime:** [WAL L0 Materializer](l0_materializer.md) retains Delete
+handles for legacy query recovery. The [Summary consumer](summary_l0_materializer.md)
+is retained for future QueryView wiring; the two implementations are not run together.
 
 ## 1. Goals
 
@@ -180,7 +175,7 @@ raw WAL message M
   -> PChannelRecoveryManager.ObserveMessage(D)
        -> PChannel/VChannel metadata
        -> affected SegmentViews and L1 materialization bound
-       -> L0Materializer.ObserveMessage records the requested boundary only
+       -> WALMaterializer.ObserveMessage retains Delete/explicit Flush handles
        -> QueryRuntime plain immutable event (future integration)
   -> D.Release()
   -> BroadcastAck.Accept(O)
@@ -216,8 +211,8 @@ recovery_tail_bytes = observed_tail_offset - published_checkpoint_offset
 AckTracker requests persistence from VChannels blocking the oldest incomplete
 prefix. Summary independently checks staged-record age and tail pressure, so
 already released messages do not hide its backlog. SegmentView and Summary own
-their batching decisions; L0Materializer reads Summary in bounded batches
-under its observed window and L1 safety bound. RecoveryStorage does not aggregate
+their batching decisions; the current WALMaterializer batches retained Deletes without waiting for L1
+final flush. Its shared age check also makes progress during idle traffic. RecoveryStorage does not aggregate
 objects across segments.
 
 Background persistence gives a soft target. A strict upper bound requires WAL
@@ -235,7 +230,7 @@ feature branch receives a reader, writer, migration path, or fallback.
 1. WAL replay is the source of truth for all state after the global checkpoint.
 2. A message is dispatched once and has one Tracker Owner.
 3. Async Segment consumers own independent Retained handles; Summary copies
-   records, while L0Materializer records only window boundaries.
+   records, while WALMaterializer retains Delete/explicit Flush handles.
 4. Successful release requires recoverability; poisoned release frees memory but leaves checkpoint progress blocked.
 5. Tracker advancement uses only the continuous completed WAL prefix.
 6. Component `checkpoint_time_tick` fields are continuous component-local prefixes.
@@ -244,6 +239,7 @@ feature branch receives a reader, writer, migration path, or fallback.
 9. RecoveryBarrier is not a checkpoint or observation-mode boundary.
 10. QueryRuntime does not participate in persistence acknowledgement.
 11. Summary confirmation independently bounds every published checkpoint.
-12. Summary installs readable records before VChannel observation advances the
-    L0 materialization window; this does not require Summary persistence.
-13. RecoveryBarrier rebuilds requested L0 windows without preloading payloads.
+12. Summary installs readable records before VChannel observation; this does not
+    require Summary persistence.
+13. The current L0 consumer rebuilds unfinished Delete handles from WAL replay.
+    Only the future Summary consumer needs a barrier to expose pre-checkpoint Deletes.

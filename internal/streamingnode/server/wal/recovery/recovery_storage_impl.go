@@ -232,8 +232,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		idalloc.NewMAllocator(resource.Resource().IDAllocator()),
 		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID()),
 	)
-	// L0 recovery restores only its cursor. Ordered replay (including the
-	// RecoveryBarrier) requests windows that are read lazily from Summary.
+	// The temporary L0 consumer rebuilds retained Delete handles from WAL replay.
 	// Deprecated: the manager periodically reports the pchannel recovery
 	// checkpoint to DataCoord (DataCoord.UpdateChannelCheckpoint) so that
 	// GetFlushState can observe flush progress. The recovery storage write
@@ -256,7 +255,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 		SummaryManager:        summaryManager,
 		L0Materializer:        l0Writer,
 		L0MaterializeRows:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxRowNum.GetAsInt()),
-		L0MaterializeBytes:    uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
+		L0MaterializeBytes:    uint64(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()),
 		GetRecoveryCheckpoint: func() *utility.WALCheckpoint { return r.GetCheckpoint(context.TODO()) },
 		CoordinatorBroker:     coordinatorBroker,
 	})
@@ -291,9 +290,6 @@ func (r *recoveryStorageImpl) newSummaryManager(runtime moduleapi.Runtime) *wals
 		FlushMaxBytes:     uint64(paramtable.Get().StreamingCfg.FlushL0MaxSize.GetAsSize()),
 		RetentionMaxBytes: uint64(paramtable.Get().StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize()),
 		Logger:            r.Logger(),
-		RequestMaterialization: func(vc string, through uint64) {
-			r.vchannelManager.RequestMaterializationThrough(vc, through)
-		},
 	})
 }
 
@@ -347,12 +343,11 @@ func (r *recoveryStorageImpl) closeRecoveryResources() {
 	if r.broadcastAck != nil {
 		r.broadcastAck.Close()
 	}
+	if r.vchannelManager != nil {
+		r.vchannelManager.Close()
+	}
 	if r.taskScheduler != nil {
 		r.taskScheduler.Close()
-	}
-	if r.vchannelManager != nil {
-		// Stops the deprecated DataCoord channel-checkpoint reporting loop.
-		r.vchannelManager.Close()
 	}
 	r.metrics.Close()
 }
@@ -442,6 +437,9 @@ func (r *recoveryStorageImpl) consumeDirtySnapshot() *dirtyPersistSnapshot {
 	r.mu.Unlock()
 
 	cleanup := moduleapi.CleanupContext{}
+	if r.summaryManager != nil {
+		cleanup.SummaryRetired = r.summaryManager.CanCleanupVChannel
+	}
 	if checkpoint != nil {
 		cleanup.PhysicalTimeTick = checkpoint.TimeTick
 	}

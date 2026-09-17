@@ -81,7 +81,14 @@ Append the retained Insert to the segment's pending L1 buffer and update live
 row/byte accounting. SegmentView may batch subsequent Inserts for this segment
 when flushing.
 
-After the object chunk succeeds:
+Before QueryView is enabled, each written growing pack is also registered with
+DataCoord through `SaveBinlogPaths(Flushed=false, WithFullBinlogs=true)`. The
+request uses the cumulative stable pack snapshot, including matching row counts
+and checkpoint. Object output is retained across RPC retries. Registration must
+succeed before installing the durable snapshot or releasing Insert handles.
+This temporary query-recovery bridge is marked `TODO: Remove after enabling queryview.`
+
+After the object chunk and this temporary registration succeed:
 
 1. install the chunk reference into stable state;
 2. complete the current task in the Segment's serial queue;

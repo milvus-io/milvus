@@ -10,6 +10,9 @@ import (
 
 type CleanupContext struct {
 	PhysicalTimeTick uint64
+	// SummaryRetired proves the persisted manifest no longer needs this
+	// VChannel tombstone to recover its transform GC frontier.
+	SummaryRetired func(vchannel string, through uint64) bool
 }
 
 type ModuleName string
