@@ -115,6 +115,11 @@ message AckedCheckpoint {
     common.MessageID message_id = 1;  // the message id that has been acked.
     common.MessageID last_confirmed_message_id = 2; // the last confirmed message id that has been acked.
     uint64 time_tick = 3; // the time tick of the message that has been acked.
+    // the extra append response the WAL attached to the acked replica (for
+    // example messages.SplitShardExtraResponse), persisted so the ack callback
+    // reads it even after a coordinator restart or when the ack came from the
+    // consuming side. Empty for a message type that has none.
+    google.protobuf.Any extra = 4;
 }
 
 //
@@ -138,6 +143,19 @@ service StreamingCoordBroadcastService {
 
     // Ack acknowledge broadcast message is consumed.
     rpc Ack(BroadcastAckRequest) returns (BroadcastAckResponse) {}
+
+    // WaitVChannelsAcked blocks until every named vchannel of the given
+    // broadcast has been acked in THIS cluster, or the context ends.
+    //
+    // It exists for the secondary cluster's append gate: a replicated
+    // broadcast whose header names append-first vchannels must land those
+    // replicas before any other replica of the same broadcast is appended
+    // here, and the broadcast task's per-vchannel ack state is the only fact
+    // a secondary has to order them by. The broadcast task itself may not
+    // exist yet when the call arrives -- the first replica to reach a
+    // secondary is whichever the replicate streams deliver first -- so the
+    // wait covers the task's creation too.
+    rpc WaitVChannelsAcked(WaitVChannelsAckedRequest) returns (WaitVChannelsAckedResponse) {}
 }
 
 // BroadcastRequest is the request of the Broadcast RPC.
@@ -158,6 +176,17 @@ message BroadcastAckRequest {
 }
 
 message BroadcastAckResponse {
+}
+
+// WaitVChannelsAckedRequest is the request of the WaitVChannelsAcked RPC.
+message WaitVChannelsAckedRequest {
+    uint64 broadcast_id       = 1; // the broadcast to wait on.
+    repeated string vchannels = 2; // the vchannels of that broadcast that must be acked, named in THIS cluster.
+}
+
+// WaitVChannelsAckedResponse is the response of the WaitVChannelsAcked RPC.
+// Empty: the call answers by returning, and every failure is an error.
+message WaitVChannelsAckedResponse {
 }
 
 //
@@ -342,6 +371,11 @@ enum StreamingCode {
     STREAMING_CODE_SCHEMA_VERSION_MISMATCH = 15; // wrong schema version
     STREAMING_CODE_RATE_LIMIT_REJECTED    = 16; // rate limit rejected
     STREAMING_CODE_PARTIAL_UPDATE_RETRYABLE = 17; // Proxy must re-query, merge, and retry.
+    STREAMING_CODE_SHARD_FENCED           = 18; // vchannel is fenced by shard split; the client is meant to refresh routing and write to the new shards (proxy side not implemented yet)
+    // 19 was STREAMING_CODE_ROUTING_STALE, which had no producer; reserved so the
+    // number is never reused for a different meaning.
+    reserved 19;
+    reserved "STREAMING_CODE_ROUTING_STALE";
     STREAMING_CODE_UNKNOWN                   = 999;  // unknown error
 }
 
@@ -349,6 +383,18 @@ enum StreamingCode {
 message StreamingError {
     StreamingCode code = 1;
     string cause       = 2;
+    // fenced_time_tick is set only on a SHARD_FENCED error that refuses a
+    // SplitShard source replica of another split task: it is T_switch, the time
+    // tick at which that task fenced the vchannel. A DML write refused by a fence
+    // carries zero. A re-fence by the same task is not refused; it reports
+    // T_switch in SplitShardExtraResponse.
+    uint64 fenced_time_tick = 3;
+    // fenced_split_task_id is set alongside fenced_time_tick: the id of the split
+    // task that placed the fence. It is what lets the caller tell ITS OWN retry
+    // apart from another task's fence -- a re-fence carrying a different id means
+    // a concurrent split already owns this source, and rolling forward on it
+    // would give two tasks the same source.
+    int64 fenced_split_task_id = 4;
 }
 
 //
@@ -794,6 +840,14 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 split_time_tick = 5; // T_switch as the source handler reported it on the fence record (_ae), set when state becomes SPLITTED. It is earlier than the record's own tick when the first fence append failed. A tombstone rebuilt after a restart reports it again.
+    int64 split_task_id = 6; // The split task that placed the fence, returned on a re-fence so a caller can tell its own retry from another task's fence.
+    bool retired = 7; // Set by the routing commit that delists a SPLITTED vchannel. The meta is removed once the flusher checkpoint passes split_time_tick.
+    // The genesis position of a vchannel created by a SplitShard target replica: the replica's last confirmed message id
+    // and its time tick; unset for every other vchannel. DataCoord learns a target's position only from the SplitShard
+    // ack callback or from the target's own checkpoint reports, so a flusher recovering before either rebuilds the
+    // target's data sync service from this position instead of skipping the target.
+    WALCheckpoint split_genesis_checkpoint = 8;
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -823,7 +877,7 @@ enum VChannelState {
     VCHANNEL_STATE_NORMAL  = 1;  // vchannel is normal.
     VCHANNEL_STATE_DROPPED = 2;  // vchannel is dropped.
     VCHANNEL_STATE_TOMBSTONED = 3; // vchannel data has caught up and this retained meta is a replay filter.
-    // VCHANNEL_STATE_SPLITTED = 4; // TODO: vchannel is splitted to other vchannels, used to support shard-splitting.
+    VCHANNEL_STATE_SPLITTED = 4; // vchannel is splitted into other vchannels by shard split, fenced for any new DML.
 }
 
 // PartitionState is the state of partition

@@ -1073,6 +1073,13 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
 		Params := &params.DataCoordCfg
+		// Off by default, and refreshable: it is read each time a split is issued.
+		assert.False(t, Params.ShardSplitEnable.GetAsBool())
+		params.Save(Params.ShardSplitEnable.Key, "true")
+		assert.True(t, Params.ShardSplitEnable.GetAsBool())
+		params.Reset(Params.ShardSplitEnable.Key)
+		assert.False(t, Params.ShardSplitEnable.GetAsBool())
+
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime.GetAsDuration(time.Second))
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
