@@ -247,6 +247,10 @@ func TestCapacityScanRecoversDroppedSealNotification(t *testing.T) {
 
 func TestStatsManagerCeilingRejectsOversizedMessageOnEmptySegment(t *testing.T) {
 	paramtable.Init()
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SizeMetric.Key) })
+	// The whole-row ceiling is only enforced under the mainIndex metric.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SizeMetric.Key, typeutil.SizeMetricMainIndex)
+
 	m := NewStatsManager()
 	sealOperator := mock_utils.NewMockSealOperator(t)
 	sealOperator.EXPECT().Channel().Return(types.PChannelInfo{Name: "pchannel"})

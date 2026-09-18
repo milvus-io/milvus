@@ -897,6 +897,7 @@ message SegmentAssignmentStat {
     uint64 create_segment_time_tick           = 7; // The timetick of create segment message in wal.
     data.SegmentLevel level                   = 8; // The level of the segment, only L0 or L1.
     uint64 max_rows                           = 9; // The max rows of the segment.
+    uint64 modified_seal_size                 = 10; // The bytes consumed against the seal budget in the active size metric (whole-row or main-index-column); NOT set under wholeRow so old readers are unaffected.
 }
 
 // WALCheckpoint is the published global recovery point. Component snapshots

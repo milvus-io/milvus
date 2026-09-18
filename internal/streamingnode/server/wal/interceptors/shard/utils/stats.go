@@ -5,7 +5,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -77,6 +76,7 @@ func NewSegmentStatFromProto(statProto *streamingpb.SegmentAssignmentStat) *Segm
 		Modified: ModifiedMetrics{
 			Rows:       statProto.ModifiedRows,
 			BinarySize: statProto.ModifiedBinarySize,
+			SealSize:   statProto.GetModifiedSealSize(),
 		},
 		MaxRows:               maxRows,
 		MaxBinarySize:         statProto.MaxBinarySize,
@@ -90,13 +90,23 @@ func NewSegmentStatFromProto(statProto *streamingpb.SegmentAssignmentStat) *Segm
 }
 
 // maxFullSegmentSizeBytes returns the configured hard whole-row ceiling in
-// bytes (0 = disabled).
+// bytes (0 = disabled). The ceiling is only consulted under the mainIndex
+// metric; under wholeRow it is a no-op so current behavior is preserved (I4 of
+// the better-segmentation design).
 func maxFullSegmentSizeBytes() uint64 {
+	if !isMainIndexSizeMetric() {
+		return 0
+	}
 	value := paramtable.Get().DataCoordCfg.MaxFullSegmentSize.GetAsInt64()
 	if value <= 0 {
 		return 0
 	}
 	return uint64(value) * 1024 * 1024
+}
+
+// isMainIndexSizeMetric reports whether the active size metric is mainIndex.
+func isMainIndexSizeMetric() bool {
+	return typeutil.IsMainIndexSizeMetric(paramtable.Get().DataCoordCfg.SizeMetric.GetValue())
 }
 
 // NewProtoFromSegmentStat creates a new proto from segment assignment stat.
@@ -109,6 +119,7 @@ func NewProtoFromSegmentStat(stat *SegmentStats) *streamingpb.SegmentAssignmentS
 		MaxBinarySize:         stat.MaxBinarySize,
 		ModifiedRows:          stat.Modified.Rows,
 		ModifiedBinarySize:    stat.Modified.BinarySize,
+		ModifiedSealSize:      stat.Modified.SealSize,
 		CreateTimestamp:       stat.CreateTime.Unix(),
 		CreateSegmentTimeTick: stat.CreateSegmentTimeTick,
 		BinlogCounter:         stat.BinLogCounter,
@@ -128,10 +139,10 @@ func (s *SegmentStats) AllocRows(m ModifiedMetrics) bool {
 		return false
 	}
 
-	// The whole-row ceiling is a hard bound (I4): an allocation that alone
-	// would push the segment past it is never accepted, not even as the single
-	// crossing allocation.
-	if s.MaxFullSegmentSize > 0 && m.BinarySize > s.wholeRowCeilingCanBeAssign() {
+	// The whole-row ceiling is a hard bound (I4), enforced only under the
+	// mainIndex metric: an allocation that alone would push the segment past it
+	// is never accepted, not even as the single crossing allocation.
+	if isMainIndexSizeMetric() && s.MaxFullSegmentSize > 0 && m.BinarySize > s.wholeRowCeilingCanBeAssign() {
 		s.ReachLimit = true
 		return false
 	}
@@ -163,13 +174,16 @@ func (s *SegmentStats) canAssign(m ModifiedMetrics) bool {
 }
 
 // isOverAssignmentTarget reports whether the segment's accumulated data is
-// already past its soft assignment target. The size comparison uses the seal
-// budget accumulator (SealSize when present, whole-row bytes otherwise), so
+// already past its soft assignment target (strictly over, so a segment exactly
+// at the target still accepts its single crossing allocation). The size
+// comparison uses the seal budget accumulator in the active metric's unit, so
 // under mainIndex a main-column budget is never compared against whole-row
-// bytes. Used both at admission time and to recover the sealing decision after
-// SegmentStats is rebuilt from persisted stats (ReachLimit is not persisted).
+// bytes, and under wholeRow a persisted main-index SealSize (from a previous
+// mainIndex period) is never reinterpreted as whole-row bytes. Used both at
+// admission time and to recover the sealing decision after SegmentStats is
+// rebuilt from persisted stats (ReachLimit is not persisted).
 func (s *SegmentStats) isOverAssignmentTarget() bool {
-	if s.SealBudgetCanBeAssign() == 0 {
+	if s.sealBudgetUsed() > s.MaxBinarySize {
 		return true
 	}
 	return s.MaxRows != 0 && s.Modified.Rows > s.MaxRows
@@ -202,49 +216,42 @@ func (s *SegmentStats) FlushSize() uint64 {
 }
 
 // incomingSealBudget returns the bytes a message consumes against the seal
-// budget. The seal-specific accumulator (SealSize) is authoritative when
-// present; otherwise the whole-row payload size is used (wholeRow metric, L0
-// delete messages, or messages whose vector column could not be measured).
+// budget. Under mainIndex the seal-specific accumulator (SealSize) is
+// authoritative when present; otherwise the whole-row payload size is used
+// (wholeRow metric, or a message whose vector column could not be measured —
+// premature, safe-direction sealing, see C1 of the third-party review). Under
+// wholeRow SealSize is ignored so a persisted main-index value is never
+// consumed as whole-row bytes.
 func incomingSealBudget(m ModifiedMetrics) uint64 {
-	if m.SealSize > 0 {
+	if isMainIndexSizeMetric() && m.SealSize > 0 {
 		return m.SealSize
 	}
 	return m.BinarySize
 }
 
+// sealBudgetUsed returns the bytes consumed against the seal budget in the
+// active metric's unit: main-index-column bytes when the mainIndex metric is
+// active and SealSize is present, whole-row bytes otherwise. It never mixes
+// units across the metric.
+func (s *SegmentStats) sealBudgetUsed() uint64 {
+	if isMainIndexSizeMetric() && s.Modified.SealSize > 0 {
+		return s.Modified.SealSize
+	}
+	return s.Modified.BinarySize
+}
+
 // SealBudgetCanBeAssign returns the capacity of the seal budget in the active
 // size metric's unit. Falls back to accumulated whole-row bytes when the
-// seal-specific accumulator is empty (e.g. after recovery, where SealSize is
-// not persisted). The result is saturated to 0 — never underflowed — so a
-// recovered segment whose whole-row bytes already reached the main-column
-// budget is treated as full (seals) instead of becoming unbounded.
+// seal-specific accumulator is empty (e.g. a pre-upgrade segment recovered
+// without SealSize). The result is saturated to 0 — never underflowed — so a
+// recovered segment whose bytes already reached the budget is treated as full
+// (seals) instead of becoming unbounded.
 func (s *SegmentStats) SealBudgetCanBeAssign() uint64 {
-	used := s.Modified.SealSize
-	if used == 0 {
-		used = s.Modified.BinarySize
-	}
+	used := s.sealBudgetUsed()
 	if used >= s.MaxBinarySize {
 		return 0
 	}
 	return s.MaxBinarySize - used
-}
-
-// BackfillSealSizeFromSchema reconstructs the seal-size accumulator of a
-// recovered segment from the schema fallback (rows × mainIndexPerRecord).
-// SealSize is not persisted in recovery meta; without a backfill the budget
-// check would compare a main-column budget against whole-row bytes and either
-// underflow (losing the size seal) or over-restrict. Sparse/ArrayOfVector-only
-// schemas have no dense vector field and are left as-is (they seal via the
-// saturated whole-row fallback in SealBudgetCanBeAssign).
-func BackfillSealSizeFromSchema(s *SegmentStats, schema *schemapb.CollectionSchema) {
-	if s == nil || schema == nil || s.Modified.SealSize > 0 || s.Modified.Rows == 0 {
-		return
-	}
-	perRecord, err := typeutil.EstimateMainIndexSizePerRecord(schema)
-	if err != nil || perRecord <= 0 {
-		return
-	}
-	s.Modified.SealSize = s.Modified.Rows * uint64(perRecord)
 }
 
 // BinaryCanBeAssign returns the capacity of binary size can be inserted.

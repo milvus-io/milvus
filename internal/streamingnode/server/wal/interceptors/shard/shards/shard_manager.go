@@ -46,6 +46,7 @@ var (
 	ErrWaitForNewSegment = errors.New("wait for new segment")
 	ErrNotGrowing        = errors.New("segment is not growing")
 	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
+	ErrTooLargeInsert    = stats.ErrTooLargeInsert
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.
@@ -117,12 +118,11 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		stat := m.partitionManagers[belong.PartitionUniqueKey()].segments[belong.SegmentID].GetStatFromRecovery()
 		if info := m.collections[belong.CollectionID]; info != nil {
 			stat.RuntimeFlushSize = info.RuntimeFlushSize(stat.Modified)
-			// SealSize is not persisted; reconstruct it from the schema so the
-			// main-column budget is compared against main-column bytes after
-			// recovery (no-op for wholeRow and sparse-only schemas).
-			if typeutil.IsMainIndexSizeMetric(paramtable.Get().DataCoordCfg.SizeMetric.GetValue()) {
-				utils.BackfillSealSizeFromSchema(stat, info.SchemaInfo())
-			}
+			// SealSize is persisted in recovery meta (modified_seal_size), so
+			// the main-column budget is compared against main-column bytes after
+			// recovery with no backfill needed. Pre-upgrade segments read 0 and
+			// start from a full budget, bounded by the persisted row cap (fixed
+			// dim) and the whole-row ceiling (variable size).
 		}
 		stats = append(stats, stat)
 	}

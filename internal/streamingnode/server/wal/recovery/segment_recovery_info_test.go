@@ -61,6 +61,7 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 		PartitionId: 1,
 		Rows:        1,
 		BinarySize:  10,
+		SealSize:    7,
 		SegmentAssignment: &messagespb.SegmentAssignment{
 			SegmentId: 2,
 		},
@@ -73,6 +74,7 @@ func TestSegmentRecoveryInfo(t *testing.T) {
 	assert.False(t, info.dirty)
 
 	assert.Equal(t, uint64(10), snapshot.Stat.ModifiedBinarySize)
+	assert.Equal(t, uint64(7), snapshot.Stat.ModifiedSealSize)
 	snapshot, shouldBeRemoved = info.ConsumeDirtyAndGetSnapshot()
 	assert.Nil(t, snapshot)
 	assert.False(t, shouldBeRemoved)

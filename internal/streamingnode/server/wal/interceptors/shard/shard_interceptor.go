@@ -269,13 +269,18 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// version gate is off (matching pre-feature behavior).
 			partition.BinarySize = uint64(msg.EstimateSize())
 		}
+		// Carry the seal budget bytes on the WAL message header so recovery
+		// replay (segmentRecoveryInfo.ObserveInsert) can persist
+		// modified_seal_size and the main-column budget survives restart under
+		// mainIndex.
+		partition.SealSize = sealSizeOrDefault(sealSize, partition.GetBinarySize())
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),
 			PartitionID:  partition.GetPartitionId(),
 			ModifiedMetrics: stats.ModifiedMetrics{
 				Rows:       partition.GetRows(),
 				BinarySize: partition.GetBinarySize(),
-				SealSize:   sealSizeOrDefault(sealSize, partition.GetBinarySize()),
+				SealSize:   partition.GetSealSize(),
 			},
 			TimeTick: msg.TimeTick(),
 		}
@@ -292,8 +297,10 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// we just redo it to refresh a new latest timetick.
 			return nil, redo.ErrRedo
 		}
-		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
-			// The target metadata no longer exists, so retrying cannot recover the operation.
+		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound, shards.ErrTooLargeInsert) {
+			// The target metadata no longer exists, or the message alone can
+			// never fit any segment (e.g. it exceeds the whole-row ceiling), so
+			// retrying cannot recover the operation.
 			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}

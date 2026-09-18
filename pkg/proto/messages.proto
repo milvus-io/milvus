@@ -220,6 +220,7 @@ message PartitionSegmentAssignment {
     uint64 rows                          = 2;
     uint64 binary_size                   = 3;
     SegmentAssignment segment_assignment = 4;
+    uint64 seal_size                     = 5; // bytes consumed against the seal budget in the active size metric (main-index-column under mainIndex; whole-row otherwise).
 }
 
 // SegmentAssignment is the assignment of a segment.

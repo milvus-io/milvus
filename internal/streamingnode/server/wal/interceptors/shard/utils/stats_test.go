@@ -7,12 +7,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// setSizeMetricForTest switches dataCoord.segment.sizeMetric for the test and
+// restores the previous value on cleanup.
+func setSizeMetricForTest(t *testing.T, metric string) {
+	t.Helper()
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SizeMetric.Key, metric)
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SizeMetric.Key) })
+}
 
 func TestStatsConvention(t *testing.T) {
 	assert.Nil(t, NewProtoFromSegmentStat(nil))
@@ -227,6 +235,7 @@ func TestSegmentStatsExactLimitDoesNotSealBeforeFirstCrossingAllocation(t *testi
 }
 
 func TestAllocRowsSealBudgetUsesSealSize(t *testing.T) {
+	setSizeMetricForTest(t, typeutil.SizeMetricMainIndex)
 	stat := &SegmentStats{
 		MaxBinarySize: 100,
 	}
@@ -241,18 +250,20 @@ func TestAllocRowsSealBudgetUsesSealSize(t *testing.T) {
 	assert.False(t, stat.ShouldBeSealed())
 
 	// Another insert whose seal budget crosses the limit seals the segment
-	// even though the whole-row bytes remain below the budget.
+	// even though the whole-row bytes remain below the budget. The crossing
+	// allocation itself is accepted once, and the segment seals afterwards.
 	inserted = stat.AllocRows(ModifiedMetrics{
 		Rows:       10,
 		BinarySize: 10,
 		SealSize:   50,
 	})
-	assert.False(t, inserted)
+	assert.True(t, inserted)
 	assert.True(t, stat.ShouldBeSealed())
-	assert.Equal(t, uint64(60), stat.Modified.SealSize)
+	assert.Equal(t, uint64(110), stat.Modified.SealSize)
 }
 
 func TestAllocRowsCeilingSealsOnWholeRowBytes(t *testing.T) {
+	setSizeMetricForTest(t, typeutil.SizeMetricMainIndex)
 	stat := &SegmentStats{
 		MaxBinarySize:      1000,
 		MaxFullSegmentSize: 200,
@@ -284,8 +295,11 @@ func TestAllocRowsRowCap(t *testing.T) {
 	}
 	inserted := stat.AllocRows(ModifiedMetrics{Rows: 60, BinarySize: 10, SealSize: 10})
 	assert.True(t, inserted)
+	assert.False(t, stat.ShouldBeSealed())
+	// The second insert crosses the row cap; it is accepted as the single
+	// crossing allocation and the segment seals afterwards.
 	inserted = stat.AllocRows(ModifiedMetrics{Rows: 50, BinarySize: 10, SealSize: 10})
-	assert.False(t, inserted)
+	assert.True(t, inserted)
 	assert.True(t, stat.ShouldBeSealed())
 }
 
@@ -321,6 +335,7 @@ func TestSealBudgetCanBeAssignSaturatesAfterRecovery(t *testing.T) {
 }
 
 func TestAllocRowsCeilingSaturatesWhenWholeRowExceedsCeiling(t *testing.T) {
+	setSizeMetricForTest(t, typeutil.SizeMetricMainIndex)
 	// The ceiling is recomputed from config on recovery; if it is lowered below
 	// the segment's existing whole-row bytes, the ceiling capacity must
 	// saturate to 0 so the segment seals immediately instead of the check being
@@ -337,39 +352,62 @@ func TestAllocRowsCeilingSaturatesWhenWholeRowExceedsCeiling(t *testing.T) {
 	assert.True(t, stat.ShouldBeSealed())
 }
 
-func TestBackfillSealSizeFromSchema(t *testing.T) {
+func TestSealSizeRoundTripPersistsInRecoveryMeta(t *testing.T) {
+	setSizeMetricForTest(t, typeutil.SizeMetricMainIndex)
+	stat := &SegmentStats{
+		Modified: ModifiedMetrics{
+			Rows:       10,
+			BinarySize: 200,
+			SealSize:   60,
+		},
+		MaxBinarySize:         100,
+		CreateTime:            time.Now(),
+		LastModifiedTime:      time.Now(),
+		BinLogCounter:         3,
+		CreateSegmentTimeTick: 7,
+		Level:                 datapb.SegmentLevel_L1,
+	}
+
+	pb := NewProtoFromSegmentStat(stat)
+	assert.Equal(t, uint64(60), pb.GetModifiedSealSize())
+
+	recovered := NewSegmentStatFromProto(pb)
+	assert.Equal(t, uint64(60), recovered.Modified.SealSize)
+	assert.Equal(t, uint64(200), recovered.Modified.BinarySize)
+}
+
+func TestSealSizeConsumedOnlyUnderMainIndex(t *testing.T) {
 	paramtable.Init()
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-		{FieldID: 10, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "8"}}},
-	}}
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().DataCoordCfg.SizeMetric.Key) })
 
-	t.Run("backfills rows × perRecord", func(t *testing.T) {
-		stat := &SegmentStats{Modified: ModifiedMetrics{Rows: 100, BinarySize: 4096}}
-		BackfillSealSizeFromSchema(stat, schema)
-		assert.Equal(t, uint64(100*8*4), stat.Modified.SealSize)
-	})
+	// A persisted main-index SealSize must never be consumed as whole-row bytes
+	// when the metric is wholeRow (cross-restart metric-switch, C4).
+	stat := &SegmentStats{
+		Modified:      ModifiedMetrics{Rows: 10, BinarySize: 500, SealSize: 20},
+		MaxBinarySize: 100,
+	}
 
-	t.Run("no-op when SealSize already present", func(t *testing.T) {
-		stat := &SegmentStats{Modified: ModifiedMetrics{Rows: 100, BinarySize: 4096, SealSize: 42}}
-		BackfillSealSizeFromSchema(stat, schema)
-		assert.Equal(t, uint64(42), stat.Modified.SealSize)
-	})
+	// wholeRow (default): the seal budget compares whole-row BinarySize.
+	assert.Equal(t, uint64(0), stat.SealBudgetCanBeAssign()) // 500 >= 100, saturated
+	assert.False(t, stat.canAssign(ModifiedMetrics{Rows: 1, BinarySize: 10, SealSize: 5}))
 
-	t.Run("no-op for nil schema or no rows", func(t *testing.T) {
-		stat := &SegmentStats{Modified: ModifiedMetrics{Rows: 100, BinarySize: 4096}}
-		BackfillSealSizeFromSchema(stat, nil)
-		assert.Zero(t, stat.Modified.SealSize)
-		stat2 := &SegmentStats{}
-		BackfillSealSizeFromSchema(stat2, schema)
-		assert.Zero(t, stat2.Modified.SealSize)
-	})
+	// mainIndex: the seal budget compares main-column SealSize.
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.SizeMetric.Key, typeutil.SizeMetricMainIndex)
+	assert.Equal(t, uint64(80), stat.SealBudgetCanBeAssign()) // 100 - 20
+}
 
-	t.Run("no-op for sparse-only schema", func(t *testing.T) {
-		sparseSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-			{FieldID: 10, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector},
-		}}
-		stat := &SegmentStats{Modified: ModifiedMetrics{Rows: 100, BinarySize: 4096}}
-		BackfillSealSizeFromSchema(stat, sparseSchema)
-		assert.Zero(t, stat.Modified.SealSize)
+func TestRecoveredWithoutSealSizeStartsFromFullBudget(t *testing.T) {
+	setSizeMetricForTest(t, typeutil.SizeMetricMainIndex)
+	// Pre-upgrade segments have no persisted SealSize. They start from a full
+	// main-column budget (falling back to whole-row bytes when accounting), so
+	// they are not spuriously sealed on recovery; the persisted row cap and the
+	// whole-row ceiling still bound them.
+	stat := NewSegmentStatFromProto(&streamingpb.SegmentAssignmentStat{
+		MaxRows:            math.MaxUint64,
+		MaxBinarySize:      100,
+		ModifiedRows:       10,
+		ModifiedBinarySize: 50,
 	})
+	assert.False(t, stat.ShouldBeSealed())
+	assert.Equal(t, uint64(50), stat.SealBudgetCanBeAssign())
 }
