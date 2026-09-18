@@ -1767,3 +1767,37 @@ func TestSplitWindowCurrentTargetRefusedWhenTheSourceIsGone(t *testing.T) {
 	assert.Empty(t, f.synced, "the marked targets are still held back from sync")
 	assert.Empty(t, f.currentChannels())
 }
+
+// M1: GetShardLeaders enumerates the current target, and proxies cache what it
+// answered. When the current target changes its channel set -- a shard split's
+// flip drops the retired source and adds its targets -- the proxies' cached
+// leaders must be dropped at once, not when the source's release reaches
+// them. A flip that keeps the channel set invalidates nothing.
+func TestCurrentTargetChannelSetChangeInvalidatesShardLeaders(t *testing.T) {
+	ctx := context.Background()
+	channels := func(names ...string) map[string]*meta.DmChannel {
+		out := make(map[string]*meta.DmChannel, len(names))
+		for _, name := range names {
+			out[name] = &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: name}}
+		}
+		return out
+	}
+	run := func(t *testing.T, before, after map[string]*meta.DmChannel, promoted bool) []int64 {
+		targetMgr := meta.NewMockTargetManager(t)
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.CurrentTarget).Return(before).Once()
+		targetMgr.EXPECT().UpdateCollectionCurrentTarget(mock.Anything, int64(1)).Return(promoted).Once()
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.CurrentTarget).Return(after).Maybe()
+		ob := NewTargetObserver(nil, targetMgr, nil, nil, nil, nil)
+		var invalidated []int64
+		ob.SetShardLeaderInvalidator(func(collectionIDs ...int64) {
+			invalidated = append(invalidated, collectionIDs...)
+		})
+		ob.updateCurrentTarget(ctx, 1)
+		return invalidated
+	}
+
+	assert.Equal(t, []int64{1}, run(t, channels("v0"), channels("v1", "v2"), true), "the flip past a split source")
+	assert.Equal(t, []int64{1}, run(t, nil, channels("v0"), true), "the first current target")
+	assert.Empty(t, run(t, channels("v0", "v1"), channels("v1", "v0"), true), "same channel set")
+	assert.Empty(t, run(t, channels("v0"), channels("v1"), false), "nothing promoted")
+}

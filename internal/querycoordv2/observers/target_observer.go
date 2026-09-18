@@ -103,6 +103,10 @@ type TargetObserver struct {
 	// pulled inside it is refreshed right away. nil disables that refresh.
 	splitState *meta.ShardSplitStateCache
 
+	// invalidateShardLeaders drops the proxies' cached shard leaders of the
+	// given collections. nil disables it. Set before Start.
+	invalidateShardLeaders func(collectionIDs ...int64)
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
@@ -851,9 +855,33 @@ func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context,
 	}
 }
 
+// SetShardLeaderInvalidator wires what drops the proxies' cached shard leaders
+// of a collection when its current target changes its channel set. Call it
+// before Start.
+func (ob *TargetObserver) SetShardLeaderInvalidator(invalidate func(collectionIDs ...int64)) {
+	ob.invalidateShardLeaders = invalidate
+}
+
 func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {
 	mlog.RatedInfo(ctx, rate.Limit(10), "observer trigger update current target", mlog.FieldCollectionID(collectionID))
+	var before []string
+	if ob.invalidateShardLeaders != nil {
+		before = lo.Keys(ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget))
+	}
 	if ob.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID) {
+		// GetShardLeaders enumerates the current target and proxies cache its
+		// answer. When the channel set changes -- a shard split's flip drops the
+		// retired source and adds its targets -- a proxy holding the old answer
+		// would keep routing to the source until its release, and then fail
+		// with a non-retriable ErrChannelNotFound.
+		if ob.invalidateShardLeaders != nil {
+			after := lo.Keys(ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget))
+			if beforeSet := typeutil.NewSet(before...); len(before) != len(after) || !beforeSet.Contain(after...) {
+				mlog.Info(ctx, "current target changed its channel set, invalidate the proxies' shard leaders",
+					mlog.FieldCollectionID(collectionID), mlog.Strings("before", before), mlog.Strings("after", after))
+				ob.invalidateShardLeaders(collectionID)
+			}
+		}
 		ob.mut.Lock()
 		defer ob.mut.Unlock()
 		notifiers := ob.readyNotifiers[collectionID]
