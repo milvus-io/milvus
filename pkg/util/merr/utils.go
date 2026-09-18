@@ -1673,14 +1673,14 @@ func WrapErrCompactionBlocked(reason string, msg ...string) error {
 	return err
 }
 
-// WrapErrRequestCancelled marks a request stopped by an operator. operator is
+// WrapErrRequestCanceled marks a request stopped by an operator. operator is
 // the user that issued the cancel and may be empty on a node that only
 // executes the cancellation and never authenticated the caller; reason is the
-// free-text reason the operator gave, and is what the cancelled client reads.
-func WrapErrRequestCancelled(operator string, reason string) error {
-	err := error(ErrRequestCancelled)
+// free-text reason the operator gave, and is what the canceled client reads.
+func WrapErrRequestCanceled(operator string, reason string) error {
+	err := error(ErrRequestCanceled)
 	if operator != "" {
-		err = wrapFields(ErrRequestCancelled, value("operator", operator))
+		err = wrapFields(ErrRequestCanceled, value("operator", operator))
 	}
 	if reason != "" {
 		err = errors.Wrap(err, reason)

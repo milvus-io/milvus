@@ -79,11 +79,11 @@ func (node *Proxy) unregisterRequest(entry *reqregistry.Entry) {
 	node.requests.Unregister(entry)
 }
 
-// statusIfCancelled replaces status with merr.ErrRequestCancelled when the
+// statusIfCanceled replaces status with merr.ErrRequestCanceled when the
 // request ctx was ended by an operator cancel. Inner layers only ever see the
 // plain ctx error; this single conversion at the outermost RPC layer is what
 // lets the client tell an operator cancel from its own timeout.
-func statusIfCancelled(ctx context.Context, status *commonpb.Status) *commonpb.Status {
+func statusIfCanceled(ctx context.Context, status *commonpb.Status) *commonpb.Status {
 	if cause := reqregistry.CancelCause(ctx); cause != nil {
 		return merr.Status(cause)
 	}
@@ -99,15 +99,15 @@ func (node *Proxy) listRunningRequests(filter reqregistry.Filter) []reqregistry.
 }
 
 // cancelRequests cancels the given requests on this proxy on behalf of
-// operator, writes one audit line per cancelled request and counts it.
-func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, operator, reason string) (cancelled []reqregistry.Info, notFound []int64) {
+// operator, writes one audit line per canceled request and counts it.
+func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, operator, reason string) (canceled []reqregistry.Info, notFound []int64) {
 	if node.requests == nil {
 		return nil, requestIDs
 	}
-	cancelled, notFound = node.requests.Cancel(requestIDs, operator, reason, time.Now())
+	canceled, notFound = node.requests.Cancel(requestIDs, operator, reason, time.Now())
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
-	for _, info := range cancelled {
-		mlog.Info(ctx, "request cancelled by operator",
+	for _, info := range canceled {
+		mlog.Info(ctx, "request canceled by operator",
 			mlog.String("operator", operator),
 			mlog.String("reason", reason),
 			mlog.Int64("requestID", info.RequestID),
@@ -121,9 +121,9 @@ func (node *Proxy) cancelRequests(ctx context.Context, requestIDs []int64, opera
 			mlog.Int64("elapsedMs", info.ElapsedMS),
 			mlog.Int64s("taskIDs", info.TaskIDs),
 			mlog.String("traceID", info.TraceID))
-		metrics.ProxyRequestCancelledTotal.WithLabelValues(nodeID, info.Type).Inc()
+		metrics.ProxyRequestCanceledTotal.WithLabelValues(nodeID, info.Type).Inc()
 	}
-	return cancelled, notFound
+	return canceled, notFound
 }
 
 func clientAddrFromContext(ctx context.Context) string {
@@ -267,8 +267,8 @@ func (node *Proxy) CancelRequests(ctx context.Context, request *milvuspb.CancelR
 	if err != nil {
 		return &milvuspb.CancelRequestsResponse{Status: merr.Status(err)}, nil
 	}
-	for _, info := range resp.GetCancelled() {
-		mlog.Info(ctx, "request cancelled by operator",
+	for _, info := range resp.GetCanceled() {
+		mlog.Info(ctx, "request canceled by operator",
 			mlog.String("operator", operator),
 			mlog.String("reason", request.GetReason()),
 			mlog.Int64("requestID", info.GetRequestId()),
@@ -315,13 +315,13 @@ func (node *Proxy) CancelLocalRequests(ctx context.Context, request *milvuspb.Ca
 	}
 
 	// The operator authenticated against the proxy that received the public
-	// call, not against this one, so the cancelled client is told the reason
+	// call, not against this one, so the canceled client is told the reason
 	// rather than a name this node cannot vouch for. The audit line naming the
 	// operator is written there.
-	cancelled, notFound := node.cancelRequests(ctx, request.GetRequestIds(), "", request.GetReason())
+	canceled, notFound := node.cancelRequests(ctx, request.GetRequestIds(), "", request.GetReason())
 	return &milvuspb.CancelRequestsResponse{
-		Status:    merr.Success(),
-		Cancelled: toRunningRequestInfos(cancelled),
-		NotFound:  notFound,
+		Status:   merr.Success(),
+		Canceled: toRunningRequestInfos(canceled),
+		NotFound: notFound,
 	}, nil
 }

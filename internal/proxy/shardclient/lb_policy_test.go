@@ -744,20 +744,20 @@ func (s *LBPolicySuite) TestExecuteWithRetryUnsupportedSkipsBlacklist() {
 	s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1))
 }
 
-// TestExecuteWithRetryCancelledContextSkipsBlacklist verifies that once the
+// TestExecuteWithRetryCanceledContextSkipsBlacklist verifies that once the
 // request's own ctx is done, an error from Exec is attributed to the
 // cancellation rather than to the node: no retry, no blacklist, no per-request
 // exclusion. The decision keys on ctx state, not on the error code the node
 // returned, so it holds for a raw context.Canceled, a segcore FollyCancel and
 // an inner error raised while the node unwinds.
-func (s *LBPolicySuite) TestExecuteWithRetryCancelledContextSkipsBlacklist() {
+func (s *LBPolicySuite) TestExecuteWithRetryCanceledContextSkipsBlacklist() {
 	channel := s.channels[0]
 	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
 	s.lbPolicy.retryOnReplica = 3
 
 	for _, execErr := range []error{
 		context.Canceled,
-		errors.Wrapf(merr.ErrSegcoreFollyCancel, "cancelled on QueryNode %d", 1),
+		errors.Wrapf(merr.ErrSegcoreFollyCancel, "canceled on QueryNode %d", 1),
 		errors.Wrapf(merr.KnowhereError, "faiss inner error while unwinding on QueryNode %d", 1),
 	} {
 		s.Run(execErr.Error(), func() {
@@ -780,24 +780,24 @@ func (s *LBPolicySuite) TestExecuteWithRetryCancelledContextSkipsBlacklist() {
 				Nq:             1,
 				Exec: func(ctx context.Context, nodeID UniqueID, qn types.QueryNodeClient, channel string) error {
 					execCount++
-					// the request is cancelled while the node is serving it
+					// the request is canceled while the node is serving it
 					cancel()
 					return execErr
 				},
 			})
 
 			s.Error(err)
-			s.Equal(1, execCount, "a cancelled request must not be re-dispatched")
+			s.Equal(1, execCount, "a canceled request must not be re-dispatched")
 			s.NotContains(s.lbPolicy.blacklist.GetBlacklistedNodes(channel), int64(1),
-				"a node that failed a cancelled request is healthy")
+				"a node that failed a canceled request is healthy")
 		})
 	}
 }
 
-// TestExecuteWithRetryCancelledContextClientFailureSkipsBlacklist covers the
+// TestExecuteWithRetryCanceledContextClientFailureSkipsBlacklist covers the
 // other error branch of tryExecute: obtaining the client fails because the
-// request is already cancelled. The node is not at fault.
-func (s *LBPolicySuite) TestExecuteWithRetryCancelledContextClientFailureSkipsBlacklist() {
+// request is already canceled. The node is not at fault.
+func (s *LBPolicySuite) TestExecuteWithRetryCanceledContextClientFailureSkipsBlacklist() {
 	channel := s.channels[0]
 	nodes := []NodeInfo{{NodeID: 1, Address: "localhost:9000", Serviceable: true}}
 	s.lbPolicy.retryOnReplica = 3

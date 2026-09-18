@@ -1756,7 +1756,7 @@ func (t *SearchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	result, err = qn.Search(ctx, req)
 	if err != nil {
 		log.Warn(ctx, "QueryNode search return error", mlog.Err(err))
-		// A request that is already cancelled or timed out fails here for
+		// A request that is already canceled or timed out fails here for
 		// that reason alone; the shard leader cache is still valid.
 		if ctx.Err() == nil {
 			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})

@@ -68,34 +68,34 @@ func TestCancel(t *testing.T) {
 	e.MarkRunning(30 * time.Millisecond)
 
 	now := time.Now()
-	cancelled, notFound := r.Cancel([]int64{7, 8}, "root", "too heavy", now)
-	require.Len(t, cancelled, 1)
+	canceled, notFound := r.Cancel([]int64{7, 8}, "root", "too heavy", now)
+	require.Len(t, canceled, 1)
 	assert.Equal(t, []int64{8}, notFound)
-	assert.Equal(t, int64(7), cancelled[0].RequestID)
-	assert.Equal(t, []int64{100, 101}, cancelled[0].TaskIDs)
-	assert.Equal(t, StateRunning, cancelled[0].State)
-	assert.Equal(t, int64(30), cancelled[0].QueuedMS)
+	assert.Equal(t, int64(7), canceled[0].RequestID)
+	assert.Equal(t, []int64{100, 101}, canceled[0].TaskIDs)
+	assert.Equal(t, StateRunning, canceled[0].State)
+	assert.Equal(t, int64(30), canceled[0].QueuedMS)
 
 	// the ctx is done with the operator cancel as its cause
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 	cause := CancelCause(ctx)
 	require.Error(t, cause)
-	assert.ErrorIs(t, cause, merr.ErrRequestCancelled)
+	assert.ErrorIs(t, cause, merr.ErrRequestCanceled)
 	assert.Contains(t, cause.Error(), "root")
 	assert.Contains(t, cause.Error(), "too heavy")
 
-	at, ok := e.CancelledAt()
+	at, ok := e.CanceledAt()
 	assert.True(t, ok)
 	assert.Equal(t, now, at)
 
 	// a second cancel of the same request is not reported again
-	cancelled, notFound = r.Cancel([]int64{7}, "root", "again", now)
-	assert.Empty(t, cancelled)
+	canceled, notFound = r.Cancel([]int64{7}, "root", "again", now)
+	assert.Empty(t, canceled)
 	assert.Empty(t, notFound)
 
 	// Unregister after cancel keeps the operator cause on the ctx
 	r.Unregister(e)
-	assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCancelled)
+	assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 }
 
 func TestCancelCauseIgnoresClientCancellation(t *testing.T) {
@@ -182,9 +182,9 @@ func TestConcurrentUse(t *testing.T) {
 			e.AddTask(id * 10)
 			e.MarkRunning(time.Millisecond)
 			if id%2 == 0 {
-				cancelled, _ := r.Cancel([]int64{id}, "op", "", time.Now())
-				assert.Len(t, cancelled, 1)
-				assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCancelled)
+				canceled, _ := r.Cancel([]int64{id}, "op", "", time.Now())
+				assert.Len(t, canceled, 1)
+				assert.ErrorIs(t, CancelCause(ctx), merr.ErrRequestCanceled)
 			}
 			_ = r.List(Filter{DBName: "db"}, time.Now())
 			r.Unregister(e)
