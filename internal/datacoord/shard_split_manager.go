@@ -307,7 +307,23 @@ func splittableCollection(collection *collectionInfo) bool {
 	if collection.Schema.GetEnableNamespace() {
 		return false
 	}
-	return !typeutil.IsExternalCollection(collection.Schema)
+	return !typeutil.IsExternalCollection(collection.Schema) && splitRefusalReason(collection.Schema) == ""
+}
+
+// splitRefusalReason names why a collection that is otherwise splittable
+// cannot be split by rewrite, "" when it can.
+//
+// A TEXT field is stored through LOB references the rewrite writer does not
+// carry, so every rewrite plan of such a collection would fail and the split,
+// which cannot abort past its fence, would never finish. Rootcoord refuses to
+// add a TEXT field while a split is in flight (Splitting or Creating shards),
+// so a collection refused here is refused on every check from planning to the
+// write switch.
+func splitRefusalReason(schema *schemapb.CollectionSchema) string {
+	if typeutil.HasTextField(schema) {
+		return "the collection has a TEXT field, which a shard split rewrite cannot carry yet"
+	}
+	return ""
 }
 
 // detectOnce inspects every splittable collection and creates a split task for
@@ -334,6 +350,11 @@ func (m *shardSplitManager) detectOnce() {
 	maxConcurrent := params.ShardSplitMaxConcurrentTasks.GetAsInt()
 	active := m.activeTaskCount()
 	for _, collection := range m.meta.GetCollections() {
+		if reason := splitRefusalReason(collection.Schema); reason != "" {
+			logger.RatedInfo(m.ctx, 600, "shard split trigger skips a collection it cannot split",
+				mlog.FieldCollectionID(collection.ID), mlog.String("reason", reason))
+			continue
+		}
 		if !splittableCollection(collection) || m.hasActiveTaskOnCollection(collection.ID) {
 			continue
 		}
@@ -385,6 +406,11 @@ func (m *shardSplitManager) planSplit(collectionID int64, stats *shardStats) (*d
 	}
 	if coll.EnableNamespace || coll.schema.GetEnableNamespace() {
 		// datacoord's cached copy said otherwise; the record wins.
+		return nil, nil
+	}
+	if reason := splitRefusalReason(coll.schema); reason != "" {
+		mlog.RatedInfo(m.ctx, 600, "not planning a shard split of the collection",
+			mlog.FieldComponent("shard-split-manager"), mlog.FieldCollectionID(collectionID), mlog.String("reason", reason))
 		return nil, nil
 	}
 	info, ok := coll.ShardInfos[stats.vchannel]

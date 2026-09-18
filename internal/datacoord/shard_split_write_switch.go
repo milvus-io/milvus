@@ -115,6 +115,11 @@ func (s *Server) issueShardSplit(ctx context.Context, task *datapb.SplitShardTas
 	if fenced {
 		return nil
 	}
+	if reason := splitRefusalReason(coll.schema); reason != "" {
+		// Checked again under the collection's keys: a schema change raced the
+		// target allocation. The task is past its abort point, so it waits.
+		return merr.WrapErrOperationNotSupportedMsg("refuse to issue shard split task %d: %s", task.GetTaskId(), reason)
+	}
 	param, err := buildSplitShardParam(task, coll, controlChannel)
 	if err != nil {
 		return err

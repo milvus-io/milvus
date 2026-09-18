@@ -318,6 +318,48 @@ func TestSplittableCollection(t *testing.T) {
 	external := splitTestSchema(false)
 	external.Fields[1].ExternalField = "embedding"
 	assert.False(t, splittableCollection(&collectionInfo{Schema: external}))
+	// The rewrite writer is not TEXT-aware (LOB references): a collection
+	// with a TEXT field is never selected, or every rewrite plan would fail.
+	assert.False(t, splittableCollection(&collectionInfo{Schema: splitTestSchemaWithText()}))
+	assert.Equal(t, "the collection has a TEXT field, which a shard split rewrite cannot carry yet",
+		splitRefusalReason(splitTestSchemaWithText()))
+	assert.Empty(t, splitRefusalReason(splitTestSchema(false)))
+}
+
+// splitTestSchemaWithText is splitTestSchema with a TEXT field.
+func splitTestSchemaWithText() *schemapb.CollectionSchema {
+	schema := splitTestSchema(false)
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{FieldID: 102, Name: "doc", DataType: schemapb.DataType_Text})
+	return schema
+}
+
+// The record wins over datacoord's cache: a TEXT field rootcoord reports is
+// refused at planning even if the cached schema lacked it.
+func TestShardSplitPlanRefusesACollectionWithATextField(t *testing.T) {
+	desc := splitTestDescribe([]string{splitMgrV0}, nil, 0)
+	desc.Schema = splitTestSchemaWithText()
+	coordinator := &fakeSplitCoordinator{coll: splitCollectionFromDescribe(desc, []int64{10})}
+	manager, _ := newSplitTestManager(t, coordinator)
+	task, err := manager.planSplit(splitMgrCollection, &shardStats{vchannel: splitMgrV0})
+	assert.NoError(t, err)
+	assert.Nil(t, task)
+	assert.Empty(t, manager.store.list())
+}
+
+// A TEXT field added between planning and the target allocation aborts the
+// task: nothing of it is in any WAL yet.
+func TestShardSplitPreparingAbortsOnATextField(t *testing.T) {
+	manager, coordinator, vchannels := newPreparingCase(t)
+	desc := splitTestDescribe([]string{splitMgrV0}, nil, 0)
+	desc.Schema = splitTestSchemaWithText()
+	coordinator.coll = splitCollectionFromDescribe(desc, []int64{10})
+
+	manager.advanceTasks()
+	task := mustTask(t, manager, 100)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAborted, task.GetState())
+	assert.Contains(t, task.GetFailReason(), "TEXT")
+	assert.Empty(t, vchannels.params, "no target is allocated")
+	assert.Empty(t, coordinator.issued)
 }
 
 func TestShardSplitTriggerPlansAnOverThresholdShard(t *testing.T) {
@@ -349,6 +391,19 @@ func TestShardSplitTriggerPlansAnOverThresholdShard(t *testing.T) {
 	// it again.
 	manager.detectOnce()
 	assert.Len(t, manager.store.list(), 1)
+}
+
+func TestShardSplitTriggerSkipsACollectionWithATextField(t *testing.T) {
+	enableShardSplit(t)
+	coordinator := &fakeSplitCoordinator{
+		coll: splitCollectionFromDescribe(splitTestDescribe([]string{splitMgrV0}, nil, 0), []int64{10}),
+	}
+	manager, _ := newSplitTestManager(t, coordinator)
+	addSplitTestCollection(manager.meta, splitTestSchemaWithText(), splitMgrV0)
+	addSplitTestSegment(manager.meta, 1, splitMgrV0, 5000, 1)
+
+	manager.detectOnce()
+	assert.Empty(t, manager.store.list())
 }
 
 func TestShardSplitTriggerGates(t *testing.T) {
