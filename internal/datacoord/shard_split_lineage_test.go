@@ -189,13 +189,42 @@ func TestSplitSourceViewInheritsFlushedTargetSegments(t *testing.T) {
 		assert.Contains(t, view.GetDroppedSegmentIds(), int64(100))
 	})
 
-	t.Run("an unindexed output falls back to its indexed input", func(t *testing.T) {
+	// R3. The outputs carry the deletes of the source's L0s, folded in while the
+	// rows were routed; the input's own deltalogs never received them, and the
+	// L0s are retired once nothing on the source is left to fold them. So the
+	// index fallback must NOT serve an unindexed output through its Dropped
+	// input: that read would resurrect every row deleted through a source L0.
+	t.Run("an unindexed output is served directly, never through its rewrite input", func(t *testing.T) {
 		f := newLineageFixture(t)
 		f.add(t, lineageSegment{id: 100, channel: src, state: commonpb.SegmentState_Dropped, indexed: true})
 		f.add(t, lineageSegment{id: 901, channel: t1, state: commonpb.SegmentState_Flushed, compactionFrom: []int64{100}, indexed: true})
 		f.add(t, lineageSegment{id: 902, channel: t2, state: commonpb.SegmentState_Flushed, compactionFrom: []int64{100}})
 
-		assert.ElementsMatch(t, []int64{100}, f.view(src).GetFlushedSegmentIds())
+		view := f.view(src)
+		assert.ElementsMatch(t, []int64{901, 902}, view.GetFlushedSegmentIds(),
+			"both outputs serve; 902 is read unindexed until its index builds")
+		assert.Contains(t, view.GetDroppedSegmentIds(), int64(100))
+
+		// The recovery info QueryCoord builds its target from says the same,
+		// and attributes both outputs to the source while it is listed.
+		f.describing(t, src, t1, t2)
+		segments, _ := f.recovery(t)
+		assert.NotContains(t, segments, int64(100))
+		for _, id := range []int64{901, 902} {
+			require.Contains(t, segments, id)
+			assert.Equal(t, src, segments[id].GetInsertChannel())
+		}
+	})
+
+	// No blanket refusal: an ordinary compaction on the source writes its
+	// outputs back to the source, and its parent answers the same rows.
+	t.Run("a same-channel compaction still falls back to its parent", func(t *testing.T) {
+		f := newLineageFixture(t)
+		f.add(t, lineageSegment{id: 100, channel: src, state: commonpb.SegmentState_Dropped, indexed: true})
+		f.add(t, lineageSegment{id: 101, channel: src, state: commonpb.SegmentState_Flushed, compactionFrom: []int64{100}})
+
+		assert.ElementsMatch(t, []int64{100}, f.view(src).GetFlushedSegmentIds(),
+			"the indexed parent serves until 101 is indexed")
 	})
 
 	t.Run("target growing, L0, importing and invisible never reach the source", func(t *testing.T) {
@@ -441,4 +470,26 @@ func TestRecoveryInfoWithoutFamilyViewer(t *testing.T) {
 	segments, _ := f.recovery(t)
 	assert.ElementsMatch(t, []int64{903}, lo.Keys(segments))
 	assert.Equal(t, t1, segments[903].GetInsertChannel())
+}
+
+// crossChannelParents is the mark the index fallback refuses on: only a shard
+// split rewrite writes an output to a vchannel other than its input's.
+func TestCrossChannelParents(t *testing.T) {
+	seg := func(id int64, channel string, from ...int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: id, InsertChannel: channel, CompactionFrom: from}}
+	}
+	view := func(segments ...*SegmentInfo) map[int64]*SegmentInfo {
+		out := make(map[int64]*SegmentInfo, len(segments))
+		for _, s := range segments {
+			out[s.GetID()] = s
+		}
+		return out
+	}
+
+	assert.ElementsMatch(t, []int64{100}, crossChannelParents(view(
+		seg(100, "src"), seg(901, "t1", 100), seg(902, "t2", 100))).Collect(), "a rewrite input, once")
+	assert.Empty(t, crossChannelParents(view(
+		seg(100, "src"), seg(101, "src"), seg(102, "src", 100, 101))).Collect(), "a same-channel parent")
+	assert.Empty(t, crossChannelParents(view(seg(901, "t1", 100))).Collect(), "a parent outside the view")
+	assert.Empty(t, crossChannelParents(view(seg(100, "src"))).Collect(), "no lineage")
 }

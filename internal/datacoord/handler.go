@@ -262,7 +262,19 @@ func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, s
 		return indexed.Contain(segID) || ((validSegmentInfos[segID].GetIsSorted() || validSegmentInfos[segID].GetIsSortedByNamespace()) && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
-	fallbackParentReady := func(segID UniqueID) bool { return indexed.Contain(segID) }
+	// The index fallback serves an unindexed child through its ready parents,
+	// which is only sound while the parent still answers the same rows as the
+	// child. A shard split rewrite's parent does not: its outputs carry the
+	// deletes of the source channel's L0s, folded in while the rows were
+	// routed, and those L0s are retired once nothing on the source is left to
+	// fold them. The parent's own deltalogs never received them, so a read
+	// served through it would resurrect deleted rows. The fallback is refused
+	// for such a parent and the outputs serve unindexed instead: the rows stay
+	// readable, brute-force until their index builds.
+	rewriteInputs := crossChannelParents(validSegmentInfos)
+	fallbackParentReady := func(segID UniqueID) bool {
+		return indexed.Contain(segID) && !rewriteInputs.Contain(segID)
+	}
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed, fallbackParentReady)
 
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
@@ -282,6 +294,24 @@ func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, s
 		PartitionStatsVersions: partStatsVersionsMap,
 		DeleteCheckpoint:       deleteCheckPoint,
 	}
+}
+
+// crossChannelParents collects the segments in the view that have a compaction
+// child on a DIFFERENT vchannel: the inputs of a shard split rewrite, and
+// nothing else -- a mix, sort or clustering compaction writes its outputs back
+// to the channel it read. A parent's children are all one way or the other: one
+// plan writes every output of one input.
+func crossChannelParents(validSegmentInfos map[int64]*SegmentInfo) typeutil.UniqueSet {
+	parents := make(typeutil.UniqueSet)
+	for _, child := range validSegmentInfos {
+		for _, parentID := range child.GetCompactionFrom() {
+			parent, ok := validSegmentInfos[parentID]
+			if ok && parent != nil && parent.GetInsertChannel() != child.GetInsertChannel() {
+				parents.Insert(parentID)
+			}
+		}
+	}
+	return parents
 }
 
 func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,
