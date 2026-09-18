@@ -12,6 +12,7 @@ Build the C++ libraries and ordinary Milvus server, then run `make build-cmek-fi
 | --- | --- | --- |
 | `raw_data_v2_test.go` | `TestRawDataV2Suite` | Scalar, vector and StructArray raw data in Storage V2: inspect every binlog-referenced Parquet object, then release/reload and check actual values. |
 | `raw_data_v3_test.go` | `TestRawDataV3Suite` | Non-TEXT scalar, vector and StructArray raw data in Storage V3: inspect every manifest-referenced Parquet object, verify loaded manifest identities, then check actual values after release/reload. The scalar case also verifies correct, missing and wrong keys on one real object. |
+| `raw_data_v3_growing_test.go` | `TestRawDataV3GrowingSuite` | The V3 Parquet campaigns with growing-source flush enabled and the collection loaded before insert. Existing completion logs tie every inspected manifest to a nonempty growing-source flush. Compaction stays disabled. |
 | `scalar_index_v2_test.go` | `TestScalarIndexV2Campaign` | STL_SORT, Trie, BITMAP, HYBRID, INVERTED, NGRAM, RTREE and TextMatch artifacts under scalar engine version 2 and legacy IndexData format V2. |
 | `scalar_index_v3_test.go` | `TestScalarIndexV3Campaign` | The same scalar families under scalar engine version 3 and packed index artifact format V3, including object checks and query results after reload. |
 | `scalar_index_fmindex_v3_test.go` | `TestScalarIndexFMINDEXCampaign` | FMINDEX under scalar engine version 5 and packed artifact format V3. Its cost-ratio setting makes the small fixture's LIKE query use FMINDEX. |
@@ -29,7 +30,7 @@ Segment Storage Version, index engine version and index artifact format are sepa
 | `scalar_index_oracle_test.go` | Scalar-index test inputs, index parameters, query predicates and expected IDs/counts for each family. `assertOracle` compares Milvus query results with those expectations. |
 | `fixture_keys_test.go` | Independently authenticate fixture EDEKs and derive object DEKs for the real Parquet object's three key modes. |
 
-Raw-data suites disable compaction before starting the cluster and keep growing-source flush disabled. After `Flush` and `WaitForFlush`, they inspect every object referenced by the returned segments, then perform one release/reload. V3 also uses existing QueryNode distribution RPCs to confirm that the inspected segments and manifests are loaded and serviceable, without growing data serving the query. Unexpected segment, manifest, node or load-version changes fail the test.
+All raw-data suites disable compaction before starting the cluster. Growing-source flush is enabled only in `TestRawDataV3GrowingSuite`; the canonical suites keep it disabled. After `Flush` and `WaitForFlush`, they inspect every object referenced by the returned segments, then perform one release/reload. V3 also uses existing QueryNode distribution RPCs to confirm that the inspected segments and manifests are loaded and serviceable, without growing data serving the query. Unexpected segment, manifest, node or load-version changes fail the test.
 
 The V3 scalar scenario uses one nonempty Parquet object for the format's key baseline. An independent Arrow Go reader fully reads its known payload with the correct fixture-derived key, rejects missing decryption configuration and rejects a legal-length wrong key. All three modes use the same bytes and a fresh reader.
 
@@ -61,4 +62,6 @@ The current V2 and testable V3 raw-data scenarios both store Parquet files. Thei
 
 Tool and fixture checks verify the reliability of the IT's supporting code; they are not additional product scenarios. Product acceptance runs through collection, flush/build and release/reload. There is no separate packed-writer regression in this IT suite.
 
-V3 raw-data Vortex, TEXT/LOB and growing-source capabilities remain blocked and are outside current coverage. Start raw-data verification with the V3 scalar scenario, then run the V2/V3 matrix; investigate an unexpected failure before expanding the run.
+The C++ fixture requires a registered collection context before creating an encryptor and rejects it after unref. Growing-source acceptance therefore depends on QueryNode's real Collection Ref path, including when the writer supplies only lookup IDs.
+
+V3 raw-data Vortex and TEXT/LOB remain outside current coverage. Growing-source coverage is limited to non-TEXT Parquet groups. Start raw-data verification with the V3 scalar scenario, then run the V2/V3 matrix; investigate an unexpected failure before expanding the run.

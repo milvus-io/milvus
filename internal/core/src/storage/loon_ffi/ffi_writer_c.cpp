@@ -34,7 +34,7 @@
  *
  * @details This function performs the following steps:
  *   1. Loads the cipher plugin from PluginLoader singleton
- *   2. Updates the plugin with encryption zone ID, collection ID, and key
+ *   2. Registers a supplied key, or reuses the caller's existing collection context
  *   3. Retrieves the encryptor for the given zone and collection
  *   4. Encodes key metadata containing zone ID, collection ID, and key version
  *   5. Returns the Base64-encoded key and metadata as newly allocated strings
@@ -55,9 +55,13 @@ GetEncParams(CPluginContext* c_plugin_context,
             milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
         AssertInfo(plugin_ptr != nullptr, "plugin_ptr is nullptr");
 
-        plugin_ptr->Update(c_plugin_context->ez_id,
-                           c_plugin_context->collection_id,
-                           std::string(c_plugin_context->key));
+        // QueryNode registers keys through Collection.Ref. Its flush writer
+        // supplies IDs only; canonical DataNode writers still import the key.
+        if (c_plugin_context->key != nullptr) {
+            plugin_ptr->Update(c_plugin_context->ez_id,
+                               c_plugin_context->collection_id,
+                               std::string(c_plugin_context->key));
+        }
         auto got = plugin_ptr->GetEncryptor(c_plugin_context->ez_id,
                                             c_plugin_context->collection_id);
         auto metadata =

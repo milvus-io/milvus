@@ -42,8 +42,10 @@ import (
 // rawDataSuite owns the cluster setup and metadata assertions shared by V2 and V3.
 type rawDataSuite struct {
 	integration.MiniClusterSuite
-	dbName string
-	ezID   int64
+	dbName        string
+	ezID          int64
+	growingSource bool
+	growingLogDir string
 }
 
 func (s *rawDataSuite) setupRawData(storageVersion int64) {
@@ -51,11 +53,16 @@ func (s *rawDataSuite) setupRawData(storageVersion int64) {
 	s.WithMilvusConfig("common.storage.useLoonFFI", strconv.FormatBool(storageVersion == 3))
 	s.WithMilvusConfig("dataNode.storage.format", "parquet")
 	s.WithMilvusConfig("dataCoord.enableCompaction", "false")
-	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", "false")
+	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", strconv.FormatBool(s.growingSource))
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", "1024")
 	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarField", "sync")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorField", "sync")
+	if s.growingSource {
+		s.growingLogDir = s.T().TempDir()
+		s.WithMilvusConfig("log.file.rootPath", s.growingLogDir)
+		s.WithMilvusConfig("log.format", "json")
+	}
 	s.SetupSuite()
 
 	ctx := s.Cluster.GetContext()

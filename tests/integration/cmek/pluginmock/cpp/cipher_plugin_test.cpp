@@ -108,6 +108,15 @@ main() {
         }
         require(wrong_key_rejected, "wrong imported EZK was accepted");
 
+        bool missing_context_rejected = false;
+        try {
+            static_cast<void>(first->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            missing_context_rejected = true;
+        }
+        require(missing_context_rejected,
+                "writer accepted a missing collection context");
+
         const std::string expected_ezk =
             "quQBfSKoD9W+tUibjbO/ei3OZsOejiHyC8d0M6BU04c=";
         first->Update(17, 23, expected_ezk);
@@ -117,6 +126,16 @@ main() {
         auto second_edek = second->GetEncryptor(17, 23).second;
         require(first_edek != second_edek,
                 "independent plugin instances reused an EDEK");
+
+        first->Update(17, 23, "");
+        bool released_context_rejected = false;
+        try {
+            static_cast<void>(first->GetEncryptor(17, 23));
+        } catch (const std::exception&) {
+            released_context_rejected = true;
+        }
+        require(released_context_rejected,
+                "writer accepted a released collection context");
     } catch (const std::exception& error) {
         std::cerr << error.what() << std::endl;
         return 1;

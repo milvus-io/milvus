@@ -36,6 +36,9 @@ var errGrowingSourceProviderClosed = errors.New("growing source provider is clos
 const unknownGrowingSourceChannel = "unknown"
 
 type delegatorGrowingSourceProvider struct {
+	collectionManager segments.CollectionManager
+	collectionID      int64
+
 	segmentManager  segments.SegmentManager
 	waitFence       func(context.Context, uint64) error
 	getTSafe        func() uint64
@@ -53,9 +56,12 @@ type delegatorGrowingSourceProvider struct {
 	handoffAllowed  map[int64]struct{}
 }
 
-func newDelegatorGrowingSourceProvider(segmentManager segments.SegmentManager, waitFence func(context.Context, uint64) error, getTSafe ...func() uint64) *delegatorGrowingSourceProvider {
+func newDelegatorGrowingSourceProvider(manager *segments.Manager, collectionID int64, waitFence func(context.Context, uint64) error, getTSafe ...func() uint64) *delegatorGrowingSourceProvider {
 	provider := &delegatorGrowingSourceProvider{
-		segmentManager:  segmentManager,
+		collectionManager: manager.Collection,
+		collectionID:      collectionID,
+
+		segmentManager:  manager.Segment,
 		waitFence:       waitFence,
 		channelName:     unknownGrowingSourceChannel,
 		retained:        make(map[int64]*retainedGrowingFlushSource),
@@ -250,6 +256,12 @@ func (p *delegatorGrowingSourceProvider) registerRetained(segmentID int64, targe
 		p.observeRetainedMetricsLocked()
 		return nil
 	}
+	// A retained source may outlive the channel's collection reference. Keep
+	// its native cipher context alive until the retained segment is released.
+	if !p.collectionManager.Ref(p.collectionID, 1) {
+		segment.Unpin()
+		return merr.WrapErrCollectionNotFound(p.collectionID, "retain growing flush source")
+	}
 	p.retained[segmentID] = &retainedGrowingFlushSource{
 		segment:      segment,
 		targetOffset: targetOffset,
@@ -312,6 +324,7 @@ func (p *delegatorGrowingSourceProvider) rollbackRetained(snapshot map[int64]ret
 	p.mu.Unlock()
 	for _, segment := range toUnpin {
 		segment.Unpin()
+		p.collectionManager.Unref(p.collectionID, 1)
 	}
 }
 
@@ -474,6 +487,7 @@ func (p *delegatorGrowingSourceProvider) releaseRetained(registration *syncmgr.G
 	// keep Exist() reporting the segment forever.
 	retained.segment.Unpin()
 	p.segmentManager.ReleaseDetached(context.Background(), retained.segment)
+	p.collectionManager.Unref(p.collectionID, 1)
 	syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
 }
 
@@ -537,6 +551,7 @@ func (p *delegatorGrowingSourceProvider) Close() {
 	p.mu.Unlock()
 	for _, source := range retained {
 		source.segment.Unpin()
+		p.collectionManager.Unref(p.collectionID, 1)
 	}
 	syncmgr.DefaultGrowingSourceRegistry().Unregister(registration)
 }
@@ -621,6 +636,12 @@ func (s *delegatorGrowingFlushSource) CurrentOffset() int64 {
 }
 
 func (s *delegatorGrowingFlushSource) FlushGrowingData(ctx context.Context, startOffset, endOffset int64, config *syncmgr.GrowingFlushConfig) (*syncmgr.GrowingFlushResult, error) {
+	// Source resolution also runs on insert-buffer probes. Refresh the native
+	// cipher context only for the actual write, following the query path's Ref.
+	if !s.provider.collectionManager.Ref(s.provider.collectionID, 1) {
+		return nil, merr.WrapErrCollectionNotFound(s.provider.collectionID, "flush growing source")
+	}
+	defer s.provider.collectionManager.Unref(s.provider.collectionID, 1)
 	result, err := s.segment.FlushData(ctx, startOffset, endOffset, &segments.FlushConfig{
 		SegmentBasePath:         config.SegmentBasePath,
 		PartitionBasePath:       config.PartitionBasePath,

@@ -92,6 +92,13 @@ func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCamp
 		// Finish logical-index broadcasts before insert/flush starts the segment lifecycle.
 		s.createRawVectorIndexes(ctx, collection, description.GetSchema())
 	}
+	if s.growingSource {
+		status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+			DbName: s.dbName, CollectionName: collection,
+		})
+		s.Require().NoError(merr.CheckRPCCall(status, err))
+		s.WaitForLoadWithDB(ctx, s.dbName, collection)
+	}
 	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
 		DbName: s.dbName, CollectionName: collection, FieldsData: c.fields,
 		HashKeys: integration.GenerateHashKeys(rawDataRows), NumRows: rawDataRows,
@@ -112,6 +119,9 @@ func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCamp
 		rows += segment.GetNumOfRows()
 	}
 	s.Require().Equal(int64(rawDataRows), rows)
+	if s.growingSource {
+		s.assertGrowingSourceFlush(segments)
+	}
 	s.T().Logf("stage=flush campaign=%s collection=%d segments=%v rows=%d", c.name, description.GetCollectionID(), ids, rows)
 	return description, segments
 }
