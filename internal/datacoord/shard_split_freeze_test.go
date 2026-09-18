@@ -82,6 +82,28 @@ func TestCompactionFrozenBySplit(t *testing.T) {
 	assert.True(t, inspector.frozenBySplit(sort()))
 }
 
+// The split's own rewrite runs on the frozen source by construction: it is the
+// redistribution, so the freeze and the preemption both spare it.
+func TestShardSplitRewriteIsExemptFromTheFreeze(t *testing.T) {
+	inspector, mockMeta := newFreezeTestInspector(t)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 })
+	rewrite := &datapb.CompactionTask{
+		TriggerID: 1, PlanID: 7, Channel: splitMgrV0, Type: datapb.CompactionType_HashSplitCompaction,
+		InputSegments: []int64{700},
+	}
+	assert.False(t, inspector.frozenBySplit(rewrite))
+
+	mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, []int64{700}).Return(true, true).Once()
+	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	require.NoError(t, inspector.enqueueCompaction(rewrite))
+	_, isMix := inspector.getCompactionTask(7).(*mixCompactionTask)
+	assert.True(t, isMix, "a rewrite runs the mix task's lifecycle")
+
+	inspector.preemptTasksByChannel(splitMgrV0)
+	assert.NotNil(t, inspector.getCompactionTask(7), "the preemption spares the split's own rewrite")
+}
+
 func TestEnqueueCompactionRejectedOnSplittingChannel(t *testing.T) {
 	inspector, _ := newFreezeTestInspector(t)
 	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 })

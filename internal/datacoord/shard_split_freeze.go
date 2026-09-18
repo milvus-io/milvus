@@ -52,12 +52,19 @@ func (c *compactionInspector) setChannelSplittingChecker(checker func(channel st
 // exemptFromSplitFreeze reports whether a compaction may run on a splitting
 // channel.
 //
-// An import's own sort step is exempt. It rewrites segments the import is
+// The split's own rewrite is exempt: it IS the redistribution, dispatched by
+// the split task on the source channel by construction, and freezing or
+// preempting it would undo the split's work as fast as it is dispatched.
+//
+// An import's own sort step is exempt too. It rewrites segments the import is
 // still committing (IsImporting): no reader and no redistribution sees them
 // until the import finishes, and the split cannot finish before the import
 // does -- its drain waits for every unfinished import on the source. Frozen,
 // the import would never leave its sort step and the split would never drain.
 func (c *compactionInspector) exemptFromSplitFreeze(task *datapb.CompactionTask) bool {
+	if task.GetType() == datapb.CompactionType_HashSplitCompaction {
+		return true
+	}
 	if task.GetType() != datapb.CompactionType_SortCompaction || len(task.GetInputSegments()) == 0 {
 		return false
 	}

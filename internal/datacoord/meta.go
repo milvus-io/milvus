@@ -2965,6 +2965,10 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 		return m.completeSortCompactionMutation(t, result)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
 		return m.completeBumpSchemaVersionCompactionMutation(t, result)
+	case datapb.CompactionType_HashSplitCompaction:
+		// Not the mix mutation: a rewrite's outputs belong to other vchannels
+		// (meta_hash_split.go).
+		return m.completeHashSplitCompactionMutation(t, result)
 	}
 	return nil, nil, merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 }
