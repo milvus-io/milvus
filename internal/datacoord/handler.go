@@ -282,6 +282,7 @@ func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, s
 	if len(levelZeroIDs) == 0 {
 		deleteCheckPoint = seekPosition
 	}
+	deleteCheckPoint = h.clampSplitSourceDeleteCheckpoint(channel.GetName(), splitTargets, deleteCheckPoint)
 
 	return &datapb.VchannelInfo{
 		CollectionID:           channel.GetCollectionID(),
@@ -294,6 +295,44 @@ func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, s
 		PartitionStatsVersions: partStatsVersionsMap,
 		DeleteCheckpoint:       deleteCheckPoint,
 	}
+}
+
+// clampSplitSourceDeleteCheckpoint holds a split source's delete checkpoint at
+// or below its own T_switch for as long as its split is active (not Done or
+// Aborted).
+//
+// The delegator discards every buffered delete and every L0 below the delete
+// checkpoint. While a source L0 is alive it pins the checkpoint below T_switch,
+// but the rewrite retires those L0s once nothing on the source is left to fold
+// them, and the checkpoint would then jump to the channel's own seek position,
+// at or past T_switch and advancing. The source delegator would discard the
+// deletes its children forward from the target WALs, and any segment loaded
+// into it afterwards -- a querynode restart, a balance move, a target-flushed
+// segment newly attributed to the source -- would come up without them. The
+// rewrite's own outputs are safe either way, their deletes are folded in; a
+// target-flushed segment is not, so the ceiling holds for the whole window.
+//
+// splitTargets is the caller's own family read: non-empty exactly when the
+// channel is the source of an active split. Only the timestamp is lowered, on a
+// copy (the position may be an L0's own StartPosition out of meta); the delete
+// checkpoint is consumed by timestamp alone.
+func (h *ServerHandler) clampSplitSourceDeleteCheckpoint(
+	channelName string,
+	splitTargets []string,
+	deleteCheckPoint *msgpb.MsgPosition,
+) *msgpb.MsgPosition {
+	if len(splitTargets) == 0 || deleteCheckPoint == nil || h.s.shardSplitManager == nil {
+		return deleteCheckPoint
+	}
+	fence := h.s.shardSplitManager.activeSplitSourceFenceTick(channelName)
+	// Fence not recorded yet: the source still takes writes, its own L0s still
+	// carry them, and there is no tick to clamp to.
+	if fence == 0 || deleteCheckPoint.GetTimestamp() <= fence {
+		return deleteCheckPoint
+	}
+	clamped := proto.Clone(deleteCheckPoint).(*msgpb.MsgPosition)
+	clamped.Timestamp = fence
+	return clamped
 }
 
 // crossChannelParents collects the segments in the view that have a compaction
