@@ -397,17 +397,25 @@ enum ImportJobState {
   Sorting = 7;
   Uncommitted = 8;
   Committing  = 9;
+  AssigningIDRange = 10;
 }
 
 message ImportFile {
   int64 id = 1;
   // A singular row-based file or multiple column-based files.
   repeated string paths = 2;
-  // Primary-allocated autoID PK range for this file, carried from the replicated
-  // ImportMsg so the secondary derives identical primary keys. Same name and type
-  // as msgpb.ImportFile.pre_allocated_auto_ids, which it is copied from. Unset on
-  // legacy / non-autoID / backup imports.
-  common.IDRange pre_allocated_auto_ids = 3;
+  // Reserved: this number was `pre_allocated_auto_ids` on 3.0, an over-reserved autoID PK
+  // range (rows * dataCoord.import.preAllocateIDExpansionFactor). A job persisted before
+  // the upgrade must not decode that value into a range with different semantics, so the
+  // number is retired rather than reused; such a job decodes with `id_range` unset and
+  // re-enters the range assignment.
+  reserved 3;
+  // The primary-allocated exact per-file ID range: the autoID PK range on an autoID
+  // collection, or the RowID range on an explicit-PK one. The range is always sized to
+  // the file's exact post-preimport row count, so its size IS the primary's count and is
+  // the cross-cluster divergence authority each cluster checks its local count against.
+  // Unset on backup / L0 / legacy imports.
+  common.IDRange id_range = 4;
 }
 
 message ImportRequestInternal {
