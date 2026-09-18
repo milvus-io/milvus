@@ -474,8 +474,10 @@ func TestImportTaskPreExecuteRefusesASplitCollection(t *testing.T) {
 		"adopted": splitCollectionInfo(100, 2, []string{"v1", "v2"},
 			splitShardInfo(schemapb.ShardState_ShardNormal, "v1", 0),
 			splitShardInfo(schemapb.ShardState_ShardNormal, "v2", 1)),
-		"splitting shard listed": {CollID: 100, VChannels: []string{"v0"},
-			ShardInfos: []*schemapb.CollectionShardInfo{splitShardInfo(schemapb.ShardState_ShardSplitting, "v0")}},
+		"splitting shard listed": {
+			CollID: 100, VChannels: []string{"v0"},
+			ShardInfos: []*schemapb.CollectionShardInfo{splitShardInfo(schemapb.ShardState_ShardSplitting, "v0")},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cache := NewMockCache(t)
