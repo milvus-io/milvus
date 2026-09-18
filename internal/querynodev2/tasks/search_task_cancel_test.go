@@ -75,27 +75,27 @@ func assertNotNotified(t *testing.T, task *SearchTask) {
 	}
 }
 
-func TestMergeRefusesCancelledTasks(t *testing.T) {
-	cancelledCtx, cancel := context.WithCancel(context.Background())
+func TestMergeRefusesCanceledTasks(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
 	owner := newGroupMember(context.Background(), 1)
-	assert.False(t, owner.Merge(newGroupMember(cancelledCtx, 1)), "a cancelled task must not join a group")
+	assert.False(t, owner.Merge(newGroupMember(canceledCtx, 1)), "a canceled task must not join a group")
 	assert.Empty(t, owner.others)
 
-	cancelledOwner := newGroupMember(cancelledCtx, 1)
-	assert.False(t, cancelledOwner.Merge(newGroupMember(context.Background(), 1)), "a cancelled owner must not accept members")
+	canceledOwner := newGroupMember(canceledCtx, 1)
+	assert.False(t, canceledOwner.Merge(newGroupMember(context.Background(), 1)), "a canceled owner must not accept members")
 
 	assert.True(t, owner.Merge(newGroupMember(context.Background(), 2)))
 	assert.Equal(t, int64(3), owner.nq)
 }
 
-func TestPruneCancelledKeepsGroupIntact(t *testing.T) {
+func TestPruneCanceledKeepsGroupIntact(t *testing.T) {
 	owner := newGroupMember(context.Background(), 1)
 	m1 := newGroupMember(context.Background(), 2)
 	require.True(t, owner.Merge(m1))
 
-	pruned := owner.PruneCancelled()
+	pruned := owner.PruneCanceled()
 	assert.Same(t, owner, pruned)
 	assert.Equal(t, []*SearchTask{m1}, owner.others)
 	assert.Equal(t, int64(3), owner.nq)
@@ -103,7 +103,7 @@ func TestPruneCancelledKeepsGroupIntact(t *testing.T) {
 	assertNotNotified(t, m1)
 }
 
-func TestPruneCancelledDropsCancelledMember(t *testing.T) {
+func TestPruneCanceledDropsCanceledMember(t *testing.T) {
 	m1Ctx, cancelM1 := context.WithCancel(context.Background())
 	owner := newGroupMember(context.Background(), 1)
 	m1 := newGroupMember(m1Ctx, 2)
@@ -113,7 +113,7 @@ func TestPruneCancelledDropsCancelledMember(t *testing.T) {
 	require.Equal(t, int64(7), owner.nq)
 
 	cancelM1()
-	pruned := owner.PruneCancelled()
+	pruned := owner.PruneCanceled()
 
 	require.NotNil(t, pruned)
 	assert.Same(t, owner, pruned, "the owner survives and keeps owning the group")
@@ -121,13 +121,13 @@ func TestPruneCancelledDropsCancelledMember(t *testing.T) {
 	assert.Equal(t, int64(5), owner.nq)
 	assert.Equal(t, []int64{1, 4}, owner.originNqs)
 	assert.Equal(t, int64(2), owner.groupSize)
-	// the cancelled member is told its own error, right away
+	// the canceled member is told its own error, right away
 	assert.ErrorIs(t, waitResult(t, m1), context.Canceled)
 	assertNotNotified(t, owner)
 	assertNotNotified(t, m2)
 }
 
-func TestPruneCancelledRegroupsWhenOwnerIsCancelled(t *testing.T) {
+func TestPruneCanceledRegroupsWhenOwnerIsCanceled(t *testing.T) {
 	ownerCtx, cancelOwner := context.WithCancel(context.Background())
 	owner := newGroupMember(ownerCtx, 1)
 	m1 := newGroupMember(context.Background(), 2)
@@ -136,7 +136,7 @@ func TestPruneCancelledRegroupsWhenOwnerIsCancelled(t *testing.T) {
 	require.True(t, owner.Merge(m2))
 
 	cancelOwner()
-	pruned := owner.PruneCancelled()
+	pruned := owner.PruneCanceled()
 
 	require.NotNil(t, pruned)
 	newOwner, ok := pruned.(*SearchTask)
@@ -149,7 +149,7 @@ func TestPruneCancelledRegroupsWhenOwnerIsCancelled(t *testing.T) {
 	assert.Equal(t, []int64{2, 4}, newOwner.originNqs)
 	assert.Equal(t, []int64{10, 10}, newOwner.originTopks)
 	assert.Equal(t, int64(2), newOwner.groupSize)
-	// the cancelled owner is out of the picture: notified once, with its own error
+	// the canceled owner is out of the picture: notified once, with its own error
 	assert.ErrorIs(t, waitResult(t, owner), context.Canceled)
 	assertNotNotified(t, m1)
 	assertNotNotified(t, m2)
@@ -157,31 +157,31 @@ func TestPruneCancelledRegroupsWhenOwnerIsCancelled(t *testing.T) {
 	assert.Empty(t, owner.others)
 }
 
-func TestPruneCancelledReturnsNilWhenEveryoneIsCancelled(t *testing.T) {
+func TestPruneCanceledReturnsNilWhenEveryoneIsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	owner := newGroupMember(ctx, 1)
 	m1 := newGroupMember(ctx, 2)
 	require.True(t, owner.Merge(m1))
 
 	cancel()
-	assert.Nil(t, owner.PruneCancelled())
+	assert.Nil(t, owner.PruneCanceled())
 	assert.ErrorIs(t, waitResult(t, owner), context.Canceled)
 	assert.ErrorIs(t, waitResult(t, m1), context.Canceled)
 }
 
-func TestPruneCancelledStandaloneTask(t *testing.T) {
+func TestPruneCanceledStandaloneTask(t *testing.T) {
 	live := newGroupMember(context.Background(), 1)
-	assert.Same(t, live, live.PruneCancelled())
+	assert.Same(t, live, live.PruneCanceled())
 	assertNotNotified(t, live)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	dead := newGroupMember(ctx, 1)
-	assert.Nil(t, dead.PruneCancelled())
+	assert.Nil(t, dead.PruneCanceled())
 	assert.ErrorIs(t, waitResult(t, dead), context.Canceled)
 }
 
-func TestDoneGivesCancelledMembersTheirOwnError(t *testing.T) {
+func TestDoneGivesCanceledMembersTheirOwnError(t *testing.T) {
 	m1Ctx, cancelM1 := context.WithCancel(context.Background())
 	owner := newGroupMember(context.Background(), 1)
 	m1 := newGroupMember(m1Ctx, 2)
@@ -189,7 +189,7 @@ func TestDoneGivesCancelledMembersTheirOwnError(t *testing.T) {
 	require.True(t, owner.Merge(m1))
 	require.True(t, owner.Merge(m2))
 
-	// m1 is cancelled while the group is executing; the group still succeeds
+	// m1 is canceled while the group is executing; the group still succeeds
 	cancelM1()
 	owner.Done(nil)
 	assert.NoError(t, waitResult(t, owner))
@@ -209,7 +209,7 @@ func TestDonePropagatesGroupErrorToLiveMembers(t *testing.T) {
 }
 
 func TestDoneStandaloneTaskKeepsGroupOutcome(t *testing.T) {
-	// A task that is not part of a group keeps the historical behaviour:
+	// A task that is not part of a group keeps the historical behavior:
 	// whatever Execute returned is delivered, even if the ctx ended meanwhile.
 	ctx, cancel := context.WithCancel(context.Background())
 	task := newGroupMember(ctx, 1)
@@ -218,7 +218,7 @@ func TestDoneStandaloneTaskKeepsGroupOutcome(t *testing.T) {
 	assert.NoError(t, waitResult(t, task))
 }
 
-func TestGroupContextCancelsOnlyWhenEveryMemberIsCancelled(t *testing.T) {
+func TestGroupContextCancelsOnlyWhenEveryMemberIsCanceled(t *testing.T) {
 	ownerCtx, cancelOwner := context.WithCancel(context.Background())
 	m1Ctx, cancelM1 := context.WithCancel(context.Background())
 	owner := newGroupMember(ownerCtx, 1)
@@ -232,13 +232,13 @@ func TestGroupContextCancelsOnlyWhenEveryMemberIsCancelled(t *testing.T) {
 
 	cancelOwner()
 	time.Sleep(10 * time.Millisecond)
-	assert.NoError(t, groupCtx.Err(), "one cancelled member must not stop the group")
+	assert.NoError(t, groupCtx.Err(), "one canceled member must not stop the group")
 
 	cancelM1()
 	select {
 	case <-groupCtx.Done():
 	case <-time.After(time.Second):
-		t.Fatal("the group context must end once every member is cancelled")
+		t.Fatal("the group context must end once every member is canceled")
 	}
 
 	restore()
@@ -263,7 +263,7 @@ func TestGroupContextRestoreReleasesListeners(t *testing.T) {
 
 // TestSearchTaskIsPrunableThroughTheSchedulerInterface closes the gap between
 // "SearchTask prunes correctly" and "the scheduler prunes SearchTasks": the
-// scheduler only ever holds a scheduler.Task and reaches PruneCancelled
+// scheduler only ever holds a scheduler.Task and reaches PruneCanceled
 // through a run-time type assertion, so a group must still be pruned when it
 // is held by that interface. Without this a group could silently take the
 // single-task path and one member's cancellation would end the others.
@@ -294,12 +294,12 @@ func TestMergeWithoutContext(t *testing.T) {
 	}
 
 	owner, other := newTask(10), newTask(5)
-	require.True(t, owner.Merge(other), "a task with no context is not a cancelled task")
+	require.True(t, owner.Merge(other), "a task with no context is not a canceled task")
 	assert.Equal(t, int64(15), owner.nq)
 	assert.Equal(t, int64(2), owner.groupSize)
 
 	// The rest of the group handling has to survive the absent context too.
-	assert.Same(t, owner, owner.PruneCancelled())
+	assert.Same(t, owner, owner.PruneCanceled())
 	assert.NoError(t, owner.resultErr(nil))
 }
 
@@ -311,10 +311,10 @@ func TestSearchTaskIsPrunableThroughTheSchedulerInterface(t *testing.T) {
 
 	var asTask scheduler.Task = owner
 	prunable, ok := asTask.(scheduler.PrunableTask)
-	require.True(t, ok, "the scheduler must recognise a search group as prunable")
+	require.True(t, ok, "the scheduler must recognize a search group as prunable")
 
 	cancelOwner()
-	pruned := prunable.PruneCancelled()
+	pruned := prunable.PruneCanceled()
 	require.NotNil(t, pruned)
 	assert.Same(t, scheduler.Task(survivor), pruned, "the surviving member is what the scheduler executes")
 	assert.ErrorIs(t, waitResult(t, owner), context.Canceled)

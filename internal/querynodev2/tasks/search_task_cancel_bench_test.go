@@ -48,35 +48,35 @@ func benchGroup(b *testing.B, size int) *SearchTask {
 	return owner
 }
 
-// PruneCancelled runs twice for every search the node executes, at dequeue and
+// PruneCanceled runs twice for every search the node executes, at dequeue and
 // again before execution, and almost always finds nothing to prune. These
 // measure that path, which is the one that has to stay cheap.
-func BenchmarkPruneCancelledStandalone(b *testing.B) {
+func BenchmarkPruneCanceledStandalone(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	t := benchTask(ctx, 10)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = t.PruneCancelled()
+		_ = t.PruneCanceled()
 	}
 }
 
-func BenchmarkPruneCancelledGroupOf8(b *testing.B) {
+func BenchmarkPruneCanceledGroupOf8(b *testing.B) {
 	t := benchGroup(b, 8)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = t.PruneCancelled()
+		_ = t.PruneCanceled()
 	}
 }
 
-func BenchmarkPruneCancelledGroupOf3(b *testing.B) {
+func BenchmarkPruneCanceledGroupOf3(b *testing.B) {
 	t := benchGroup(b, 3)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = t.PruneCancelled()
+		_ = t.PruneCanceled()
 	}
 }
 

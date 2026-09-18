@@ -285,11 +285,11 @@ func (s *scheduler) exec() {
 			mlog.Info(context.TODO(), "scheduler execChan closed, worker exit")
 			return
 		}
-		// Drop the task, or the cancelled members of a merged group, if the
+		// Drop the task, or the canceled members of a merged group, if the
 		// cancellation happened between dequeue and execution. Members that
 		// are dropped here have already been completed with their own
 		// context error; the survivors keep running.
-		if t = pruneCancelled(t); t == nil {
+		if t = pruneCanceled(t); t == nil {
 			mlog.Warn(context.TODO(), "task canceled before executing")
 			continue
 		}
@@ -354,10 +354,10 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			// Remember the NQ the counters were credited with before any
 			// member is pruned away.
 			lastWaitingTask.accountedNQ = lastWaitingTask.NQ()
-			// A cancelled task is dropped; a merged group loses only its
-			// cancelled members and goes on with the rest. Dropped members
+			// A canceled task is dropped; a merged group loses only its
+			// canceled members and goes on with the rest. Dropped members
 			// are completed with their own context error.
-			survivor := pruneCancelled(lastWaitingTask.Task)
+			survivor := pruneCanceled(lastWaitingTask.Task)
 			if survivor == nil {
 				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
