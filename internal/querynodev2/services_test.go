@@ -2098,6 +2098,7 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 	suite.NoError(err)
 
 	sd1 := delegator.NewMockShardDelegator(suite.T())
+	sd1.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	sd1.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	sd1.EXPECT().Collection().Return(100)
 	sd1.EXPECT().GetDeleteBufferSize().Return(10, 1000)
@@ -2107,6 +2108,7 @@ func (suite *ServiceSuite) TestGetMetric_Normal() {
 	defer suite.node.delegators.GetAndRemove("qn_unitest_dml_0_100v0")
 
 	sd2 := delegator.NewMockShardDelegator(suite.T())
+	sd2.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	sd2.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	sd2.EXPECT().Collection().Return(100)
 	sd2.EXPECT().GetTSafe().Return(200)
@@ -2282,6 +2284,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	mockDelegator.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"), false).
 		Return(errors.New("mocked error"))
@@ -2327,6 +2330,7 @@ func (suite *ServiceSuite) TestGetDataDistribution_DeltaReportsFailedLeaderSegme
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 		Return(errors.New("mocked error"))
@@ -2474,6 +2478,7 @@ func (suite *ServiceSuite) TestSyncDistribution_PartialSetFailureReportsLeaderVi
 	).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	mockDelegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 		RunAndReturn(func(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
@@ -2546,6 +2551,7 @@ func (suite *ServiceSuite) TestSyncDistribution_RemoveFailureAfterLeaderViewUpda
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).RunAndReturn(func(context.Context) map[int64]int64 {
 		return partitionStatsVersions
 	}).Maybe()
+	mockDelegator.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	mockDelegator.EXPECT().SyncPartitionStats(mock.Anything, mock.Anything).Run(func(ctx context.Context, versions map[int64]int64) {
 		partitionStatsVersions = versions
@@ -2599,6 +2605,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ErrorReportsLeaderViewDelta() {
 	mockDelegator.EXPECT().GetSegmentInfo(false).Return(nil, nil).Maybe()
 	mockDelegator.EXPECT().GetChannelQueryView().Return(delegator.NewChannelQueryView(nil, nil, nil, 1)).Maybe()
 	mockDelegator.EXPECT().GetPartitionStatsVersions(mock.Anything).Return(nil).Maybe()
+	mockDelegator.EXPECT().IsUnadoptedSplitChild().Return(false).Maybe()
 	mockDelegator.EXPECT().CatchingUpStreamingData().Return(false).Maybe()
 	suite.node.delegators.Insert(channel, mockDelegator)
 	defer suite.node.delegators.GetAndRemove(channel)
