@@ -32,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -100,9 +102,26 @@ type fakeSplitCoordinator struct {
 	issueErr    error
 	onIssue     func(task *datapb.SplitShardTask)
 	issued      []*datapb.SplitShardTask
-	drained     bool
 	drainReason string
 	fenceReason string
+	adoptErr    error
+	adopted     []*datapb.SplitShardTask
+	served      bool
+	servedErr   error
+}
+
+func (f *fakeSplitCoordinator) issueShardSplitAdoption(_ context.Context, task *datapb.SplitShardTask, controlChannel string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if controlChannel != splitMgrControl {
+		return errors.New("wrong control channel")
+	}
+	f.adopted = append(f.adopted, task)
+	return f.adoptErr
+}
+
+func (f *fakeSplitCoordinator) splitSourceServed(context.Context, int64, string) (bool, error) {
+	return f.served, f.servedErr
 }
 
 func (f *fakeSplitCoordinator) describeSplitCollection(_ context.Context, _ int64) (*splitCollection, error) {
@@ -126,10 +145,6 @@ func (f *fakeSplitCoordinator) issueShardSplit(_ context.Context, task *datapb.S
 		onIssue(task)
 	}
 	return err
-}
-
-func (f *fakeSplitCoordinator) splitSourcesDrained(context.Context, *datapb.SplitShardTask) bool {
-	return f.drained
 }
 
 func (f *fakeSplitCoordinator) splitDrainBlockReason(context.Context, *datapb.SplitShardTask) string {
@@ -753,10 +768,11 @@ func TestShardSplitRedistributingRunsOnlyPastTheFence(t *testing.T) {
 			hashInfo(splitMgrV2, schemapb.ShardState_ShardCreating, 1),
 		}, 2), []int64{10}),
 	}
+	coordinator.drainReason = "source still has a live segment"
 	manager, _ := newSplitTestManager(t, coordinator)
 	require.NoError(t, manager.store.create(context.Background(), manager.catalog, fencedTask(datapb.SplitShardTaskState_SplitShardTaskRedistributing)))
 
-	// No redistribution wired: the task stays in its window.
+	// No redistribution wired: a source with data stays in its window.
 	manager.advanceTasks()
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, mustTask(t, manager, 100).GetState())
 
@@ -842,10 +858,18 @@ func TestShardSplitManagerStartStop(t *testing.T) {
 func TestShardSplitManagerDefaultWiring(t *testing.T) {
 	// The replication role is read off the balancer; one that is not up yet is
 	// an error, which the trigger reads as "not primary".
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := balancerReplicationRole(ctx)
+	notReady := mockey.Mock(balance.GetWithContext).Return(nil, errors.New("balancer not ready")).Build()
+	_, err := balancerReplicationRole(context.Background())
 	assert.Error(t, err)
+	notReady.UnPatch()
+
+	b := mock_balancer.NewMockBalancer(t)
+	b.EXPECT().ReplicateRole().Return(replicateutil.RoleSecondary)
+	ready := mockey.Mock(balance.GetWithContext).Return(b, nil).Build()
+	role, err := balancerReplicationRole(context.Background())
+	ready.UnPatch()
+	require.NoError(t, err)
+	assert.Equal(t, replicateutil.RoleSecondary, role)
 
 	// The allocator is the streaming node manager's, resolved at call time.
 	alloc := mockey.Mock((*snmanager.StreamingNodeManager).AllocVirtualChannels).Return([]string{splitMgrV1}, nil).Build()

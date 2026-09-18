@@ -76,15 +76,19 @@ type splitCoordinator interface {
 	// issueShardSplit broadcasts a planned task's write switch under the
 	// collection's resource keys (Server.issueShardSplit).
 	issueShardSplit(ctx context.Context, task *datapb.SplitShardTask, controlChannel string) error
-	// splitSourcesDrained is the drain predicate CheckShardSplitDrained answers
-	// the adoption gate with.
-	splitSourcesDrained(ctx context.Context, task *datapb.SplitShardTask) bool
 	// splitDrainBlockReason names the drain conjunct a task still waits on, ""
-	// once it is drained.
+	// once it is drained: the predicate CheckShardSplitDrained answers the
+	// adoption gate with (splitSourcesDrained).
 	splitDrainBlockReason(ctx context.Context, task *datapb.SplitShardTask) string
 	// fenceFlushBlockReason names the source whose fence is not recorded or
 	// whose checkpoint is short of it, "" once the redistribution may start.
 	fenceFlushBlockReason(task *datapb.SplitShardTask) string
+	// issueShardSplitAdoption broadcasts a drained task's adoption under the
+	// collection's resource keys (Server.issueShardSplitAdoption).
+	issueShardSplitAdoption(ctx context.Context, task *datapb.SplitShardTask, controlChannel string) error
+	// splitSourceServed reports whether this cluster's QueryCoord still serves
+	// the source.
+	splitSourceServed(ctx context.Context, collectionID int64, source string) (bool, error)
 }
 
 // splitRedistributor moves a fenced split's source data into its targets. The

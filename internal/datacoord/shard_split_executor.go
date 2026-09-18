@@ -50,6 +50,8 @@ func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
 		m.advanceFencing(task)
 	case datapb.SplitShardTaskState_SplitShardTaskRedistributing:
 		m.advanceRedistributing(task)
+	case datapb.SplitShardTaskState_SplitShardTaskAdopting:
+		m.advanceAdopting(task)
 	}
 }
 
@@ -238,11 +240,29 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		logger.RatedInfo(m.ctx, 60, "shard split redistribution waits for its source to pass the fence", mlog.String("reason", reason))
 		return
 	}
-	if m.redistributor == nil {
-		logger.RatedWarn(m.ctx, 60, "no shard split redistribution is wired, the split stays in its redistribution window")
+	if m.redistributor != nil {
+		m.redistributor.redistribute(m.ctx, task)
+	} else {
+		logger.RatedWarn(m.ctx, 60, "no shard split redistribution is wired, only an empty source drains")
+	}
+	// The drain is the adoption gate's own predicate (CheckShardSplitDrained):
+	// asking anything weaker would only issue an adoption whose callback then
+	// waits, holding the collection's keys.
+	if reason := m.coordinator.splitDrainBlockReason(m.ctx, task); reason != "" {
+		logger.RatedInfo(m.ctx, 60, "shard split redistribution in progress", mlog.String("waitingOn", reason))
 		return
 	}
-	m.redistributor.redistribute(m.ctx, task)
+	if _, err := m.store.modify(m.ctx, m.catalog, task.GetTaskId(), func(t *datapb.SplitShardTask) bool {
+		if t.GetState() != datapb.SplitShardTaskState_SplitShardTaskRedistributing {
+			return false
+		}
+		t.State = datapb.SplitShardTaskState_SplitShardTaskAdopting
+		return true
+	}); err != nil {
+		logger.Warn(m.ctx, "persist the adopting shard split task failed", mlog.Err(err))
+		return
+	}
+	logger.Info(m.ctx, "shard split source drained, adopting its targets")
 }
 
 // liveCollection reads the task's collection from rootcoord. A dropped
