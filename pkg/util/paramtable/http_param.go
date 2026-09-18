@@ -174,19 +174,30 @@ cost. Disabling restores the old always-decode behavior.`,
 
 	p.ReadTimeout = ParamItem{
 		Key:          "proxy.http.readTimeout",
-		DefaultValue: "0s",
+		DefaultValue: "30s",
 		Version:      "2.6.0",
-		Doc:          "HTTP server timeout for reading the entire request, including the body. 0 disables this timeout",
-		Export:       true,
+		Doc: `REST-only budget for reading a single request's body, in addition to its headers. 0 disables this
+timeout. Applied per-request via http.ResponseController inside httpserver.BodyDeadlineMiddleware, NOT via
+http.Server.ReadTimeout: in the default (shared-port) deployment this proxy's http.Server also carries external
+gRPC traffic, and a Server-wide ReadTimeout would also cut long-running gRPC RPCs (Go's HTTP/2 implementation
+arms per-stream deadlines directly from Server.ReadTimeout). This value is a hard, connection-level ceiling
+independent of the per-request Request-Timeout header that proxy.http.requestTimeoutMs otherwise honors -- a
+client cannot raise its body-read budget past this value via that header.`,
+		Export: true,
 	}
 	p.ReadTimeout.Init(base.mgr)
 
 	p.WriteTimeout = ParamItem{
 		Key:          "proxy.http.writeTimeout",
-		DefaultValue: "0s",
+		DefaultValue: "60s",
 		Version:      "2.6.0",
-		Doc:          "HTTP server timeout for handling requests and writing responses. 0 disables this timeout",
-		Export:       true,
+		Doc: `REST-only budget for writing a response, in addition to handler processing time. 0 disables this
+timeout. Applied per-request via http.ResponseController inside httpserver.BodyDeadlineMiddleware, NOT via
+http.Server.WriteTimeout, for the same shared-port/gRPC reason documented on proxy.http.readTimeout. Kept above
+proxy.http.requestTimeoutMs so the graceful in-app timeout response (see timeoutMiddleware) has a chance to be
+written before this deadline would otherwise abort the connection mid-write; unlike Server.WriteTimeout this is a
+per-request deadline set from request-start, so it does not also need to account for readTimeout separately.`,
+		Export: true,
 	}
 	p.WriteTimeout.Init(base.mgr)
 
