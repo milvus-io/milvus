@@ -208,6 +208,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 func (p *ComponentParam) versionGateItems() []*ParamItem {
 	return []*ParamItem{
 		&p.FunctionCfg.EnableWriteBeforeMaterialization,
+		&p.DataCoordCfg.ImportEnableIDRangeMsg,
 	}
 }
 
@@ -6252,7 +6253,7 @@ type dataCoordConfig struct {
 	ImportInReplicatingCluster      ParamItem `refreshable:"true"`
 	EnableL0Import                  ParamItem `refreshable:"true"`
 	ImportPreAllocIDExpansionFactor ParamItem `refreshable:"true"`
-	ImportParquetFooterMaxSize      ParamItem `refreshable:"true"`
+	ImportEnableIDRangeMsg          ParamItem `refreshable:"true"`
 	ImportFileNumPerSlot            ParamItem `refreshable:"true"`
 	ImportMemoryLimitPerSlot        ParamItem `refreshable:"true"`
 	MaxSegmentsPerCopyTask          ParamItem `refreshable:"true"`
@@ -7683,15 +7684,35 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 	}
 	p.ImportPreAllocIDExpansionFactor.Init(base.mgr)
 
-	p.ImportParquetFooterMaxSize = ParamItem{
-		Key:          "dataCoord.import.parquetFooterMaxSize",
-		Version:      "3.0.0",
-		DefaultValue: "67108864",
-		Doc: `Largest parquet footer, in bytes, that import sizing will read to obtain an exact row count.
-A file declaring a longer footer is rejected at submit. Footer size tracks row_groups * columns, so
-raise this for files written with small row groups, many columns, or untruncated string statistics.`,
+	// ImportEnableIDRangeMsg gates the two-phase per-file ID range path: after
+	// preimport reports the row counts, the primary assigns one range per file and
+	// broadcasts them via the new ImportIDRange V2 WAL message. It is version-gated
+	// on purpose: the ImportIDRange message is a new V2 type, so broadcasting it
+	// while a streaming node from an older build is still online crashes that node's
+	// flusher (no case for the type -> panic on WAL replay). Until the gate flips,
+	// the config resolves to "false" and import stays on the legacy local-allocator
+	// path, which every version understands.
+	p.ImportEnableIDRangeMsg = ParamItem{
+		Key:          "dataCoord.import.enableIDRangeMsg",
+		Version:      "3.0.3-beta",
+		Export:       false,
+		PanicIfEmpty: false,
+		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
+			"the ImportIDRange WAL message. auto: switch on automatically once the whole cluster " +
+			"(including streaming nodes) has reached the gate version and the stability window " +
+			"elapses; false: always keep the legacy local-allocator path (escape hatch, and the safe " +
+			"value while older streaming nodes are still online); true: force enable and bypass the " +
+			"version gate (use with caution).",
+		DefaultValue: "auto",
+		VersionGateSwitcher: &VersionGateSwitcher{
+			EnableAutoSwitchValue: "auto",
+			PreSwitchValue:        "false",
+			GateVersion:           "3.0.3-beta",
+			TargetValue:           "true",
+			SwitchDelay:           1 * time.Minute,
+		},
 	}
-	p.ImportParquetFooterMaxSize.Init(base.mgr)
+	p.ImportEnableIDRangeMsg.Init(base.mgr)
 
 	p.ImportFileNumPerSlot = ParamItem{
 		Key:          "dataCoord.import.fileNumPerSlot",

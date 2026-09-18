@@ -120,6 +120,21 @@ func UpdateJobCompleteTime(completeTime string) UpdateJobAction {
 	}
 }
 
+// UpdateJobIDRanges applies the per-file ID ranges allocated and broadcast after
+// preimport. The slice is keyed by position: the caller guarantees
+// len(ranges) == len(job.GetFiles()), so entry i belongs to Files[i]. Each range is
+// sized to that file's exact post-preimport row count, so its size is also the
+// cross-cluster divergence authority the gate compares each cluster's local count
+// against. The range configures the datanode's PK/RowID cursor.
+func UpdateJobIDRanges(ranges []*commonpb.IDRange) UpdateJobAction {
+	return func(job ImportJob) {
+		j := job.(*importJob)
+		for i, r := range ranges {
+			j.Files[i].IdRange = r
+		}
+	}
+}
+
 type ImportJob interface {
 	GetJobID() int64
 	GetCollectionID() int64
