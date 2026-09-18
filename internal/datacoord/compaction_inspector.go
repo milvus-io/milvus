@@ -95,6 +95,11 @@ type compactionInspector struct {
 	// wired. Such a channel takes no compaction but the split's own
 	// (frozenBySplit).
 	isChannelSplitting func(channel string) bool
+	// compactionEnabled is dataCoord.enableCompaction as read when the
+	// inspector is built (the switch is not refreshable). The schedule loop
+	// runs either way, for the rewrite of a shard split already in the WAL;
+	// with the switch off it admits only those rewrites.
+	compactionEnabled bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -190,16 +195,17 @@ func newCompactionInspector(meta CompactionMeta,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
-		queueTasks:       NewCompactionQueue(capacity, getPrioritizer()),
-		meta:             meta,
-		allocator:        allocator,
-		stopCh:           make(chan struct{}),
-		executingTasks:   make(map[int64]CompactionTask),
-		cleaningTasks:    make(map[int64]CompactionTask),
-		handler:          handler,
-		scheduler:        scheduler,
-		analyzeScheduler: analyzeScheduler,
-		ievm:             ievm,
+		queueTasks:        NewCompactionQueue(capacity, getPrioritizer()),
+		meta:              meta,
+		allocator:         allocator,
+		stopCh:            make(chan struct{}),
+		executingTasks:    make(map[int64]CompactionTask),
+		cleaningTasks:     make(map[int64]CompactionTask),
+		handler:           handler,
+		scheduler:         scheduler,
+		analyzeScheduler:  analyzeScheduler,
+		ievm:              ievm,
+		compactionEnabled: paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool(),
 	}
 }
 
@@ -287,6 +293,13 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			continue
 		}
 		selectedBefore := len(selected)
+		if !c.compactionEnabled && t.GetTaskProto().GetType() != datapb.CompactionType_HashSplitCompaction {
+			// Compaction is off: only a shard split's rewrite runs. Anything
+			// else left in the queue, such as a task persisted before a
+			// restart, waits for the switch to be turned back on.
+			excluded = append(excluded, t)
+			continue
+		}
 		if channel := t.GetTaskProto().GetChannel(); t.GetTaskProto().GetType() == datapb.CompactionType_HashSplitCompaction {
 			if otherChannels.Contain(channel) {
 				excluded = append(excluded, t)
