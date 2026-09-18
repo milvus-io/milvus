@@ -79,13 +79,23 @@ func (c *compactionInspector) frozenBySplit(task *datapb.CompactionTask) bool {
 	return !c.exemptFromSplitFreeze(task)
 }
 
-// preemptTasksByChannel removes every queued and executing compaction of the
-// channel that the freeze forbids, and cleans it properly: the cleaned state
-// is persisted, so the task is not revived from the catalog after a restart,
-// and the input segments' compacting flags are released, so a segment locked
-// by a dead task never starves the split's redistribution. A preempted task
-// still running on its worker is orphaned, and its result is rejected at
-// report time because the task is no longer tracked, as on a channel release.
+// preemptTasksByChannel stops every queued and executing compaction of the
+// channel that the freeze forbids.
+//
+// Each victim is removed from the inspector AND aborted in the global
+// scheduler (AbortAndRemoveTask), which drops it on its worker and stops
+// polling it. Removing it from the inspector alone is not enough: the
+// scheduler would keep querying the worker and, once the worker finished,
+// commit the result -- a mix on the source past its fence, or an L0 that
+// retires the source's L0s before the split has folded them. The abort takes
+// the scheduler's per-task lock, so it waits for a check already polling the
+// task and no check runs after it; only then is the task cleaned, its cleaned
+// state persisted (it is not revived from the catalog after a restart) and
+// its inputs' compacting flags released (a segment locked by a dead task never
+// starves the split's redistribution). A result a check committed before the
+// abort took the lock is committed; the freeze exists from the moment the task
+// is created, so that is a compaction already running before the split
+// started, and the fence comes after the preemption.
 func (c *compactionInspector) preemptTasksByChannel(channel string) {
 	ctx := context.TODO()
 	victim := func(task CompactionTask) bool {
@@ -112,6 +122,7 @@ func (c *compactionInspector) preemptTasksByChannel(channel string) {
 	c.executingGuard.Unlock()
 
 	for _, task := range preempted {
+		c.scheduler.AbortAndRemoveTask(task.GetTaskProto().GetPlanID())
 		mlog.Info(ctx, "compaction task preempted by a shard split",
 			mlog.String("channel", channel),
 			mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
