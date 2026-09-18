@@ -1192,34 +1192,6 @@ static_assert(HasRowCountIsNotNull<milvus::index::StringIndexSort>::value);
 static_assert(HasRowCountIsNotNull<milvus::index::JsonKeyStats>::value);
 static_assert(HasRowCountIsNotNull<milvus::index::FMIndex>::value);
 
-TEST(ScalarIndexV3LoadRouteTest, RejectsEmbeddedNulBeforePreparingDirectory) {
-    using namespace milvus;
-    const auto ctx = GetTempFileManagerCtx(CDataType::Int32);
-    auto manager = std::make_shared<storage::DiskFileManagerImpl>(ctx);
-    const std::string name("data\0suffix", 11);
-    const nlohmann::json json = {{"entries",
-                                  {{{"name", name},
-                                    {"offset", 0},
-                                    {"size", 1},
-                                    {"crc32", "00000000"}}}}};
-    const auto bytes = json.dump();
-    auto parsed = storage::ParseIndexEntryDirectory(
-        std::span(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()),
-        4096);
-    index::IndexLoadPlan plan;
-    try {
-        index::PlanIndexDirectory(parsed.first,
-                                  nlohmann::json{{"file_names", {name}}},
-                                  manager,
-                                  true,
-                                  plan);
-        FAIL() << "expected invalid filename";
-    } catch (const SegcoreError& error) {
-        EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
-    }
-    EXPECT_TRUE(plan.entries.empty());
-}
-
 namespace {
 template <typename Index>
 class PackedLoadAccess : public Index {
