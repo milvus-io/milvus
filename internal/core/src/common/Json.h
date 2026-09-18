@@ -46,6 +46,35 @@
     } while (0)
 namespace milvus {
 
+// Classify a simdjson error at a *parse / required-structure* boundary into a
+// segcore ErrorCode, so a malformed JSON does not collapse to the generic
+// UnexpectedError(2001). segcore parses JSON read back from storage, so an
+// unrecognized parse failure means the stored bytes are malformed
+// (DataFormatBroken); MEMALLOC / IO are transient; a few codes mean milvus
+// itself mis-sized / mis-used the parser (a bug) and stay UnexpectedError.
+//
+// NOTE: this is for parse / required-structure boundaries only. simdjson's
+// NO_SUCH_FIELD / INCORRECT_TYPE / OUT_OF_BOUNDS are the normal negative result
+// of optional-field / dynamic-type access and MUST NOT be routed here -- those
+// call sites (exist(), path_exists(), at<T>()) keep swallowing them into a
+// bool / nullopt.
+inline ErrorCode
+SimdjsonParseErrorToErrorCode(simdjson::error_code err) {
+    switch (err) {
+        case simdjson::MEMALLOC:
+            return ErrorCode::MemAllocateFailed;  // 2034, retriable OOM
+        case simdjson::IO_ERROR:
+            return ErrorCode::FileReadFailed;  // 2014, retriable
+        case simdjson::CAPACITY:
+        case simdjson::UNINITIALIZED:
+        case simdjson::INSUFFICIENT_PADDING:
+        case simdjson::UNEXPECTED_ERROR:
+            return ErrorCode::UnexpectedError;  // milvus-side misuse / bug
+        default:
+            return ErrorCode::DataFormatBroken;  // 2024, malformed stored JSON
+    }
+}
+
 bool
 isObjectEmpty(simdjson::ondemand::value value);
 bool
