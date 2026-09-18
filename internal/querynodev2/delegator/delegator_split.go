@@ -557,6 +557,10 @@ func (sd *shardDelegator) frontingChildren() []*shardDelegator {
 // recovery info, so the read is refused at once with a retriable System error
 // for the proxy to retry, rather than held on the source.
 func (sd *shardDelegator) frontingFamily() (*familyNode, error) {
+	if sd.retiredWithoutFamily.Load() {
+		return nil, merr.WrapErrServiceUnavailable("retired shard split source",
+			fmt.Sprintf("source %s is no longer listed by its collection and fronts none of its split targets", sd.vchannelName))
+	}
 	return sd.takeFamily(true)
 }
 
@@ -753,6 +757,25 @@ func (sd *shardDelegator) IsUnadoptedSplitChild() bool {
 // an already-released source.
 func (sd *shardDelegator) MarkReleasing() {
 	sd.releasing.Store(true)
+}
+
+// RefuseReadsAsRetiredSource makes every public read through this delegator
+// fail with a retriable error, for good. The querynode calls it on a delegator
+// watched for a vchannel its collection no longer lists: a shard split source
+// that an adoption retired.
+//
+// Such a delegator has no family. Adoption delisted the source, so there is no
+// Creating target left to re-derive and front, and the targets it used to
+// front are shards of their own. Its own view is the source's key range as of
+// the fence, without the targets' writes since: answering from it alone would
+// miss their inserts and return rows they deleted. querycoord never watches a
+// delisted vchannel, so this is a safeguard; the refusal is a System error
+// (nothing in the request causes it) and retriable, so the proxy retries until
+// its shard leaders move to the targets at the flip.
+func (sd *shardDelegator) RefuseReadsAsRetiredSource(ctx context.Context) {
+	if sd.retiredWithoutFamily.CompareAndSwap(false, true) {
+		sd.getLogger(ctx).Warn(ctx, "watched a shard split source its collection no longer lists; refusing every read through it")
+	}
 }
 
 // ProcessSplitShard reacts to the SplitShard fence message consumed on the

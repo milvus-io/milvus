@@ -213,6 +213,24 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
 
+	t.Run("a source the collection no longer lists refuses reads", func(t *testing.T) {
+		mc := mocks.NewMockMixCoordClient(t)
+		// adoption delisted src: the post-image names only its targets.
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			VirtualChannelNames: []string{"t1", "t2"},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardNormal},
+				{State: schemapb.ShardState_ShardNormal},
+			},
+		}, nil)
+		source := delegator.NewMockShardDelegator(t)
+		// ProcessSplitShard is never set up: the retired source has no target
+		// left to front, so it must refuse reads instead of serving alone.
+		source.EXPECT().RefuseReadsAsRetiredSource(mock.Anything).Return().Once()
+		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+	})
+
 	t.Run("no-op when the source is not splitting", func(t *testing.T) {
 		mc := mocks.NewMockMixCoordClient(t)
 		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
