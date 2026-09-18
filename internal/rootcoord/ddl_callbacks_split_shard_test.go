@@ -97,6 +97,12 @@ func splitTestResult(postImage *messagespb.AlterCollectionMessageUpdates, header
 // splitTestResultWithGenesisProperties is splitTestResult whose genesis schema
 // carries the given collection properties.
 func splitTestResultWithGenesisProperties(postImage *messagespb.AlterCollectionMessageUpdates, properties []*commonpb.KeyValuePair, headerOpts ...func(*message.SplitShardMessageHeader)) message.BroadcastResultSplitShardMessageV2 {
+	return splitTestResultWithGenesisSchema(postImage, &schemapb.CollectionSchema{Name: splitTestCollection, Properties: properties}, headerOpts...)
+}
+
+// splitTestResultWithGenesisSchema is splitTestResult whose genesis carries the
+// given collection schema.
+func splitTestResultWithGenesisSchema(postImage *messagespb.AlterCollectionMessageUpdates, schema *schemapb.CollectionSchema, headerOpts ...func(*message.SplitShardMessageHeader)) message.BroadcastResultSplitShardMessageV2 {
 	header := &message.SplitShardMessageHeader{
 		CollectionId:    splitTestCollID,
 		SplitTaskId:     7,
@@ -112,7 +118,7 @@ func splitTestResultWithGenesisProperties(postImage *messagespb.AlterCollectionM
 	raw := message.NewSplitShardMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&message.SplitShardMessageBody{
-			Genesis: &msgpb.CreateCollectionRequest{CollectionSchema: &schemapb.CollectionSchema{Name: splitTestCollection, Properties: properties}},
+			Genesis: &msgpb.CreateCollectionRequest{CollectionSchema: schema},
 			Routing: postImage,
 		}).
 		WithBroadcast(
@@ -687,7 +693,8 @@ func TestSplitShardAckCallbackRefusesAPostImageThatDoesNotTile(t *testing.T) {
 // the callback re-runs the message-only checks SplitShardParam.Validate ran
 // before the broadcast, as read-only assertions BEFORE CommitShardSplit, so a
 // message that fails them records no task at datacoord and writes no meta. A
-// valid namespace split passes both and commits.
+// namespace split that passes admission and granularity is still refused:
+// namespace collections are not split yet (design §1.3).
 func TestSplitShardAckCallbackAssertsNamespaceAdmissionBeforeCommitting(t *testing.T) {
 	namespacePlaced := []*commonpb.KeyValuePair{
 		{Key: common.NamespaceShardingEnabledKey, Value: "true"},
@@ -734,14 +741,70 @@ func TestSplitShardAckCallbackAssertsNamespaceAdmissionBeforeCommitting(t *testi
 		})
 	}
 
-	t.Run("a valid namespace split commits", func(t *testing.T) {
+	t.Run("a namespace split that passes admission is deferred", func(t *testing.T) {
 		h := newSplitCallbackHarness(t, fresh())
-		h.expectCommit(merr.Success(), nil).Once()
-		h.expectApply(nil).Once()
-		require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(),
-			splitTestResultWithGenesisProperties(namespaced(), namespacePlaced, buckets(16))))
-		require.Equal(t, []string{"CommitShardSplit", "ApplyShardSplitRouting"}, h.calls)
+		err := h.callback.splitShardV2AckCallback(context.Background(),
+			splitTestResultWithGenesisSchema(namespaced(),
+				&schemapb.CollectionSchema{Name: splitTestCollection, EnableNamespace: true, Properties: namespacePlaced}, buckets(16)))
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		require.False(t, merr.IsRetryableErr(err))
+		require.ErrorContains(t, err, "namespace collections are not split")
+		require.Empty(t, h.calls, "CommitShardSplit is not called")
+		require.Equal(t, 0, h.broadcasts)
 	})
+}
+
+// TestSplitShardAckCallbackRefusesANamespaceCollection (design §1.3): a
+// SplitShard of a namespace collection is refused by the callback's re-run of
+// ValidateSplitShardMessage, in either namespace.mode and under a hash(pk)
+// post-image, before CommitShardSplit: no task is recorded and no meta written.
+// The same collection without namespaces commits.
+func TestSplitShardAckCallbackRefusesANamespaceCollection(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+	}{
+		{
+			name: "partition_key mode",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceShardingEnabledKey, Value: "true"},
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartitionKey},
+			},
+		},
+		{
+			name: "partition mode",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceShardingEnabledKey, Value: "false"},
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh := func() *model.Collection {
+				coll := splitTestCollectionMeta([]string{splitTestSource}, map[string]*model.ShardInfo{
+					splitTestSource: {VChannelName: splitTestSource, State: schemapb.ShardState_ShardNormal},
+				}, 0)
+				coll.Properties = tc.properties
+				return coll
+			}
+
+			h := newSplitCallbackHarness(t, fresh())
+			err := h.callback.splitShardV2AckCallback(context.Background(), splitTestResultWithGenesisSchema(splitTestPostImage(),
+				&schemapb.CollectionSchema{Name: splitTestCollection, EnableNamespace: true, Properties: tc.properties}))
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.False(t, merr.IsRetryableErr(err))
+			require.ErrorContains(t, err, "namespace collections are not split")
+			require.Empty(t, h.calls, "CommitShardSplit is not called")
+			require.Equal(t, 0, h.broadcasts)
+
+			h = newSplitCallbackHarness(t, fresh())
+			h.expectCommit(merr.Success(), nil).Once()
+			h.expectApply(nil).Once()
+			require.NoError(t, h.callback.splitShardV2AckCallback(context.Background(),
+				splitTestResultWithGenesisProperties(splitTestPostImage(), tc.properties)))
+			require.Equal(t, []string{"CommitShardSplit", "ApplyShardSplitRouting"}, h.calls)
+		})
+	}
 }
 
 // TestSplitShardAckCallbackRefusesGenesisPropertiesTheMetaDisagreesWith (F5):
