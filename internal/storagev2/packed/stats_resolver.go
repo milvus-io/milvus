@@ -221,7 +221,8 @@ type StatsResult struct {
 }
 
 // TextAndJSONIndexStats returns text index and JSON key stats.
-// For manifest: parsed from manifest metadata (highest version wins per field).
+// For manifest: parsed only for fields registered in the corresponding segment
+// metadata map (highest version wins per field).
 // For legacy: returns the WithTextStatsLogs/WithJSONKeyStats maps directly.
 func (r *StatsResolver) TextAndJSONIndexStats() (
 	map[int64]*datapb.TextIndexStats, map[int64]*datapb.JsonKeyStats, error,
@@ -231,7 +232,7 @@ func (r *StatsResolver) TextAndJSONIndexStats() (
 }
 
 // TextAndJSONIndexStatsWithBasePaths returns stats with base path information.
-// For V3 (manifest): basePaths are extracted from the manifest stat paths.
+// For V3 (manifest): basePaths are extracted from registered manifest stat paths.
 // For V2 (legacy): basePaths are empty (backward compat).
 func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr {
 	if !r.isManifest() {
@@ -260,8 +261,16 @@ func (r *StatsResolver) TextAndJSONIndexStatsWithBasePaths() *StatsResultWithErr
 			continue
 		}
 
+		// A StorageV3 manifest retains text/JSON entries when a skip-index
+		// snapshot or restore omits their segment metadata. The metadata is the
+		// registration allowlist: an entry is loadable only while its field is
+		// present in TextStatsLogs or JsonKeyStats. An index rebuild atomically
+		// publishes the replacement manifest and metadata to make it loadable.
 		switch prefix {
 		case "text_index":
+			if _, ok := r.textStatsLogs[fieldID]; !ok {
+				continue
+			}
 			// For V3: extract basePath and convert to relative paths.
 			statBasePath := basePath + "/_stats/" + key
 			resolvedPaths := r.resolveStatPaths(stat.Paths)
