@@ -297,6 +297,10 @@ func TestShardStatesListingRules(t *testing.T) {
 	assert.NoError(t, adopted.CheckWatchable("v1"))
 	assert.ErrorIs(t, adopted.CheckWatchable("v0"), merr.ErrChannelNotFound)
 
+	window := ShardStatesOf(splittingCollectionResp())
+	assert.NoError(t, window.CheckWatchable("v0"))
+	assert.ErrorIs(t, window.CheckWatchable("v1"), merr.ErrServiceUnavailable, "a Creating target is not adopted yet")
+
 	current := map[string]*DmChannel{
 		"v0": {VchannelInfo: &datapb.VchannelInfo{ChannelName: "v0"}},
 		"v1": {VchannelInfo: &datapb.VchannelInfo{ChannelName: "v1"}},
