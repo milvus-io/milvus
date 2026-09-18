@@ -123,6 +123,10 @@ func TestReadThroughSourceIsRefusedWhileAChildIsSpawning(t *testing.T) {
 			_, err := tc.read(ctx, source)
 			assertRetriableFamilyRefusal(t, err)
 			assert.Equal(t, 0, pinMock.Times(), "a refused read must not pin any segment")
+			// Refused at entry: the read never recorded a timestamp to wait for.
+			// The post-wait re-check alone would refuse it too, but only after
+			// resolving and waiting for its timestamp.
+			assert.Zero(t, source.GetLatestRequiredMVCCTimeTick(), "the read must be refused before it resolves its timestamp")
 
 			// the spawn completes: the retried read passes the family gate and is
 			// served through the child.
