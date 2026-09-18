@@ -190,16 +190,6 @@ func (m *shardSplitManager) rewriteRound(
 	// drain false.
 	m.retireSourceLevelZeroSegments(ctx, task)
 
-	if totalPendingRewrites(pending) == 0 && len(stillDispatched) == 0 {
-		// Nothing left to rewrite and nothing in flight. The manager moves the
-		// task on once the drain holds; say which conjunct it still waits on,
-		// since this round has nothing else to report.
-		if reason := m.coordinator.splitDrainBlockReason(ctx, task); reason != "" {
-			logger.RatedInfo(ctx, 30, "shard split rewrite has nothing left to rewrite, waiting for the source to drain",
-				mlog.String("reason", reason))
-		}
-	}
-
 	// 3. Dispatch, bounded by the plans the task has in flight.
 	dispatchedNow := make([]int64, 0)
 	budget := batchSize - len(stillDispatched)
