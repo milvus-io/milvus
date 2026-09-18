@@ -109,6 +109,28 @@ func TestFilterNodeSplitShard(t *testing.T) {
 		assert.Len(t, warned, 1, "the refusal must be logged above debug")
 	})
 
+	t.Run("the fence's own trace context reaches ProcessSplitShard", func(t *testing.T) {
+		// Not context.Background(): the fence carries the trace the broadcast
+		// (and its log lines) were consumed under, and losing it here would
+		// orphan the spawn from that trace in observability tooling.
+		type ctxKey struct{}
+		traced := context.WithValue(context.Background(), ctxKey{}, "fence-trace")
+		var got context.Context
+		mockDelegator := delegator.NewMockShardDelegator(t)
+		mockDelegator.EXPECT().ProcessSplitShard(mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, _ []string) error {
+				got = ctx
+				return nil
+			}).Once()
+
+		fNode := newFilterNode(splitTestCollectionID, splitTestSource, nil, mockDelegator, 8)
+		tsMsg := buildSplitShardTsMsg(t, splitTestCollectionID, splitTestSource, source, splitTestTarget1)
+		tsMsg.SetTraceCtx(traced)
+
+		assert.NoError(t, fNode.filtrate(nil, tsMsg))
+		assert.Equal(t, "fence-trace", got.Value(ctxKey{}), "ProcessSplitShard must run under the fence's own trace context")
+	})
+
 	t.Run("a fence for another collection is rejected", func(t *testing.T) {
 		mockDelegator := delegator.NewMockShardDelegator(t)
 		// ProcessSplitShard must not be called for a mismatched collection.
