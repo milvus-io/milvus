@@ -1185,6 +1185,39 @@ func (_c *MockShardDelegator_QueryStream_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// RefuseReadsAsRetiredSource provides a mock function with given fields: ctx
+func (_m *MockShardDelegator) RefuseReadsAsRetiredSource(ctx context.Context) {
+	_m.Called(ctx)
+}
+
+// MockShardDelegator_RefuseReadsAsRetiredSource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefuseReadsAsRetiredSource'
+type MockShardDelegator_RefuseReadsAsRetiredSource_Call struct {
+	*mock.Call
+}
+
+// RefuseReadsAsRetiredSource is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockShardDelegator_Expecter) RefuseReadsAsRetiredSource(ctx interface{}) *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	return &MockShardDelegator_RefuseReadsAsRetiredSource_Call{Call: _e.mock.On("RefuseReadsAsRetiredSource", ctx)}
+}
+
+func (_c *MockShardDelegator_RefuseReadsAsRetiredSource_Call) Run(run func(ctx context.Context)) *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_RefuseReadsAsRetiredSource_Call) Return() *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_RefuseReadsAsRetiredSource_Call) RunAndReturn(run func(context.Context)) *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ReleaseSegments provides a mock function with given fields: ctx, req, force
 func (_m *MockShardDelegator) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error {
 	ret := _m.Called(ctx, req, force)
