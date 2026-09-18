@@ -198,8 +198,11 @@ var (
 	LevelPrioritizer Prioritizer = func(task CompactionTask) int {
 		switch task.GetTaskProto().GetType() {
 		case datapb.CompactionType_HashSplitCompaction:
-			// A shard split's rewrite runs while its source is frozen for every
-			// other compaction, and the split cannot finish without it.
+			// Ahead of every other type within one schedule pass: a shard
+			// split's rewrite is considered for selection first, since its
+			// source is frozen for every other compaction. It does not jump the
+			// global scheduler's slot queue, which is ordered by plan ID, nor
+			// the one mix-family plan per channel the pass admits.
 			return 0
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 1
@@ -217,8 +220,11 @@ var (
 	MixFirstPrioritizer Prioritizer = func(task CompactionTask) int {
 		switch task.GetTaskProto().GetType() {
 		case datapb.CompactionType_HashSplitCompaction:
-			// A shard split's rewrite runs while its source is frozen for every
-			// other compaction, and the split cannot finish without it.
+			// Ahead of every other type within one schedule pass: a shard
+			// split's rewrite is considered for selection first, since its
+			// source is frozen for every other compaction. It does not jump the
+			// global scheduler's slot queue, which is ordered by plan ID, nor
+			// the one mix-family plan per channel the pass admits.
 			return 0
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
