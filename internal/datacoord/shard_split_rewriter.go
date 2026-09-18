@@ -99,11 +99,20 @@ func isRewriteInput(segment *SegmentInfo) bool {
 }
 
 // dispatchableForRewrite reports whether a rewrite input can be dispatched this
-// round: no other worker is changing it. A compacting segment is held by a
-// running compaction (the split's own plan, once dispatched), and an importing
-// one is still being committed by its import.
-func dispatchableForRewrite(segment *SegmentInfo) bool {
-	return isRewriteInput(segment) && !segment.isCompacting && !segment.GetIsImporting()
+// round: no other worker is changing it and no snapshot holds it. A compacting
+// segment is held by a running compaction (the split's own plan, once
+// dispatched), and an importing one is still being committed by its import.
+//
+// A segment a snapshot protects, or one of a collection whose compaction is
+// blocked until its snapshot RefIndex loads, is refused at commit
+// (ValidateSegmentStateBeforeCompleteCompactionMutation), exactly as every
+// compaction policy skips it. Dispatching it anyway would fail the plan and
+// dispatch it again every round for as long as the protection lasts. It stays
+// listed, and the drain waits for it.
+func (m *shardSplitManager) dispatchableForRewrite(segment *SegmentInfo) bool {
+	return isRewriteInput(segment) && !segment.isCompacting && !segment.GetIsImporting() &&
+		!m.meta.isCollectionCompactionBlocked(segment.GetCollectionID()) &&
+		!m.meta.isSegmentCompactionProtected(segment.GetID())
 }
 
 // rewriteRound runs one rewrite round of a task:
@@ -200,7 +209,7 @@ func (m *shardSplitManager) rewriteRound(
 				break
 			}
 			segment := m.meta.GetSegment(ctx, segmentID)
-			if !dispatchableForRewrite(segment) {
+			if !m.dispatchableForRewrite(segment) {
 				result.skipped++
 				continue
 			}

@@ -820,3 +820,36 @@ func TestRewriteHoldsTheL0RetireWhileAnyDataRemains(t *testing.T) {
 		})
 	}
 }
+
+// A snapshot-protected segment, or a collection whose compaction is blocked
+// until its snapshot RefIndex loads, is refused at commit
+// (ValidateSegmentStateBeforeCompleteCompactionMutation): dispatching it
+// anyway would fail every plan and dispatch it again every round for as long as
+// the protection lasts. It is skipped, as every compaction policy skips it; the
+// drain waits for it all the same.
+func TestRewriteSkipsSnapshotProtectedSegments(t *testing.T) {
+	t.Run("a protected segment", func(t *testing.T) {
+		c := newRewriteCase(t, newHashRewriteMeta(t, []int64{101, 102}), newHashTask(nil))
+		protected := mockey.Mock((*meta).isSegmentCompactionProtected).To(func(_ *meta, segmentID int64) bool {
+			return segmentID == 101
+		}).Build()
+		defer protected.UnPatch()
+
+		res := c.tick()
+		assert.ElementsMatch(t, []int64{102}, res.dispatched)
+		assert.Equal(t, 1, res.skipped)
+		assert.ElementsMatch(t, []int64{101, 102}, c.pending(), "a protected segment stays listed")
+	})
+
+	t.Run("a collection whose compaction is blocked", func(t *testing.T) {
+		c := newRewriteCase(t, newHashRewriteMeta(t, []int64{101}), newHashTask(nil))
+		blocked := mockey.Mock((*meta).isCollectionCompactionBlocked).Return(true).Build()
+		res := c.tick()
+		blocked.UnPatch()
+		assert.Empty(t, res.dispatched)
+		assert.Empty(t, c.dispatcher.dispatched)
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+
+		assert.ElementsMatch(t, []int64{101}, c.tick().dispatched, "dispatched once the block lifts")
+	})
+}
