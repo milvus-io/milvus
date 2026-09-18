@@ -358,6 +358,7 @@ func buildBumpFixture(t *testing.T, opts ...fixtureOpt) *bumpFixture {
 	jsonParams, err := compaction.GenerateJSONParams(targetSchema)
 	require.NoError(t, err)
 	plan := &datapb.CompactionPlan{
+		EnableManifestDelta:    true,
 		PlanID:                 999,
 		Type:                   datapb.CompactionType_BumpSchemaVersionCompaction,
 		SegmentBinlogs:         []*datapb.CompactionSegmentBinlogs{segment},
@@ -891,6 +892,54 @@ func TestBumpUTBumpOnlyEchoesSource(t *testing.T) {
 	// Source data still fully readable and golden.
 	verifySegmentData(t, fix.cfg, seg.GetManifest(),
 		&schemapb.CollectionSchema{Fields: physicalReadFields(fix.sourceSchema)}, fix.rows)
+}
+
+func TestBumpUTLegacyCoordinatorGetsCompleteManifest(t *testing.T) {
+	setupBumpUTEnv(t)
+	fix := buildBumpFixture(t, withBM25Target())
+	fix.task.plan.EnableManifestDelta = false // omitted by a pre-52621 coordinator
+
+	seg := runCompact(t, fix)
+	require.Nil(t, seg.GetManifestDelta())
+	require.NotEmpty(t, seg.GetManifest())
+	require.Equal(t, fix.sourceManifest, seg.GetBaseManifest())
+	require.Equal(t, fix.segment.GetSegmentID(), seg.GetSegmentID())
+	require.Equal(t, storage.StorageV3, seg.GetStorageVersion())
+	base, version, err := packed.UnmarshalManifestPath(seg.GetManifest())
+	require.NoError(t, err)
+	sourceBase, sourceVersion, err := packed.UnmarshalManifestPath(fix.sourceManifest)
+	require.NoError(t, err)
+	require.Equal(t, sourceBase, base)
+	require.Greater(t, version, sourceVersion)
+
+	// Read the real worker-committed revision, without a coordinator-side commit.
+	verifySegmentData(t, fix.cfg, seg.GetManifest(),
+		&schemapb.CollectionSchema{Fields: physicalReadFields(fix.sourceSchema)}, fix.rows)
+	verifyManifestFields(t, fix.cfg, seg.GetManifest(), []int64{102}, nil)
+	texts := make([]string, len(fix.rows))
+	for i := range texts {
+		texts[i] = bumpFxVarchar(bumpFxTextField, i)
+	}
+	expected := expectedBM25SparseRows(t, fix.targetSchema, fix.targetSchema.GetFunctions()[0], texts)
+	requireSparseRows(t, fix, seg.GetManifest(), 102, len(fix.rows), expected)
+	stats, err := packed.NewStatsResolver(seg.GetManifest(), fix.cfg).BM25StatsPaths()
+	require.NoError(t, err)
+	require.NotEmpty(t, stats[102])
+	require.NotNil(t, seg.GetStats())
+	require.Positive(t, seg.GetStats().GetStatsBinlogSize())
+}
+
+func TestBumpUTLegacyManifestCommitFailure(t *testing.T) {
+	setupBumpUTEnv(t)
+	fix := additiveFixture(t)
+	fix.task.plan.EnableManifestDelta = false
+	patch := mockey.Mock(packed.CommitManifestUpdates).Return("", errBumpUTInjected).Build()
+	defer patch.UnPatch()
+
+	result, err := fix.task.Compact()
+	require.ErrorIs(t, err, errBumpUTInjected)
+	require.Nil(t, result)
+	verifySourceIntact(t, fix)
 }
 
 // [A1][S0] additive: +nullable int64 — every historical row gets NULL, the new

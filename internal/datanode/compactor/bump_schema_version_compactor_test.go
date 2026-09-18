@@ -161,7 +161,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupTest() {
 	}
 
 	plan := &datapb.CompactionPlan{
-		PlanID: 999,
+		EnableManifestDelta: true,
+		PlanID:              999,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID:        1,
 			PartitionID:         1,
@@ -250,7 +251,8 @@ func (s *BumpSchemaVersionCompactionTaskSuite) setupMinHashTest() {
 	s.Require().NoError(err)
 
 	plan := &datapb.CompactionPlan{
-		PlanID: 999,
+		EnableManifestDelta: true,
+		PlanID:              999,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{{
 			CollectionID:   1,
 			PartitionID:    1,
