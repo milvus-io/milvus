@@ -192,6 +192,44 @@ func TestShardSplitStateCache(t *testing.T) {
 		assert.False(t, cache.IsShardSplitting(ctx, 11))
 	})
 
+	t.Run("CreatingTargetChannelsAsOf reports not-known for an entry that predates the pull", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(13)).Return(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"src"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		}, nil).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		// populate the cache with a pre-fence read.
+		assert.Empty(t, cache.CreatingTargetChannels(ctx, 13))
+
+		// the pull this entry is asked about happened strictly after that read.
+		channels, ok := cache.CreatingTargetChannelsAsOf(ctx, 13, time.Now().Add(time.Millisecond))
+		assert.False(t, ok)
+		assert.Nil(t, channels)
+	})
+
+	t.Run("CreatingTargetChannelsAsOf reports the creating channels for an entry no older than the pull", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(14)).Return(splittingCollectionResp(), nil).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		before := time.Now()
+		channels, ok := cache.CreatingTargetChannelsAsOf(ctx, 14, before)
+		assert.True(t, ok)
+		assert.ElementsMatch(t, []string{"v1", "v2"}, channels)
+	})
+
+	t.Run("CreatingTargetChannelsAsOf reports not-known when nothing is cached", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(15)).Return(nil, errors.New("coord down")).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		channels, ok := cache.CreatingTargetChannelsAsOf(ctx, 15, time.Time{})
+		assert.False(t, ok)
+		assert.Nil(t, channels)
+	})
+
 	t.Run("Invalidate forces a refetch", func(t *testing.T) {
 		broker := NewMockBroker(t)
 		broker.EXPECT().DescribeCollection(mock.Anything, int64(4)).Return(splittingCollectionResp(), nil).Once()
