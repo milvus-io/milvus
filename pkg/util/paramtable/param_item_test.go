@@ -19,6 +19,7 @@ package paramtable
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -196,5 +197,67 @@ func TestGetWithRaw_FallbackKeyCacheSuccess(t *testing.T) {
 
 		result := param.GetAsInt()
 		assert.Equal(t, 42, result)
+	})
+}
+
+func TestGetAsDuration_UnitIsPartOfCacheKey(t *testing.T) {
+	// GetAsDuration caches the converted time.Duration. The unit takes part in the
+	// conversion, so a value cached for one unit must never be served to a caller
+	// asking for another unit. QueryCoordCfg.BrokerTimeout ("5000") is read at
+	// time.Millisecond by the coordinator brokers and at time.Second by the
+	// querycoordv2 observers, so both orders happen in a real process.
+	const rawValue = "5000"
+
+	type read struct {
+		unit     time.Duration
+		expected time.Duration
+	}
+
+	millis := read{unit: time.Millisecond, expected: 5 * time.Second}
+	seconds := read{unit: time.Second, expected: 5000 * time.Second}
+
+	cases := []struct {
+		name  string
+		key   string
+		reads []read
+	}{
+		{name: "millisecond_first", key: "test.duration.unit.ms_first", reads: []read{millis, seconds, millis}},
+		{name: "second_first", key: "test.duration.unit.s_first", reads: []read{seconds, millis, seconds}},
+		{name: "alternating", key: "test.duration.unit.alternating", reads: []read{millis, seconds, millis, seconds}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := config.NewManager()
+			manager.SetConfig(tc.key, rawValue)
+
+			param := &ParamItem{Key: tc.key, DefaultValue: rawValue}
+			param.Init(manager)
+
+			for i, r := range tc.reads {
+				assert.Equal(t, r.expected, param.GetAsDuration(r.unit),
+					"read #%d at unit %v returned a duration converted with a different unit", i, r.unit)
+			}
+		})
+	}
+
+	t.Run("survives_config_refresh", func(t *testing.T) {
+		// A config refresh evicts the cache; repopulating it must not let whichever
+		// unit happens to read first win again.
+		key := "test.duration.unit.refresh"
+		manager := config.NewManager()
+		manager.SetConfig(key, rawValue)
+
+		param := &ParamItem{Key: key, DefaultValue: rawValue}
+		param.Init(manager)
+
+		assert.Equal(t, 5*time.Second, param.GetAsDuration(time.Millisecond))
+		assert.Equal(t, 5000*time.Second, param.GetAsDuration(time.Second))
+
+		manager.SetConfig(key, "7000")
+		manager.EvictCachedValue(key)
+
+		assert.Equal(t, 7000*time.Second, param.GetAsDuration(time.Second))
+		assert.Equal(t, 7*time.Second, param.GetAsDuration(time.Millisecond))
 	})
 }

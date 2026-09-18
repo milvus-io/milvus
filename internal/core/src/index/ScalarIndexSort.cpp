@@ -232,7 +232,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
                 data_.emplace_back(
-                    IndexStructure(array->get_data<T>(j), offset));
+                    IndexStructure(array->get_data_unchecked<T>(j), offset));
                 offset++;
             }
         }
