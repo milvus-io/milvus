@@ -339,3 +339,49 @@ func (s ShardStates) CheckWatchable(vchannel string) error {
 	}
 	return nil
 }
+
+// CheckShardSplitMovable reports whether a shard split forbids moving the
+// collection's channels or segments between nodes right now: nil when it does
+// not, else a retriable System error naming why. It is the one rule behind
+// both the balance freeze (normal and stopping) and the refusal of manual
+// moves (LoadBalance, TransferSegment, TransferChannel).
+//
+// Moving a split source rebuilds its delegator on another node without the
+// in-process children it fronts, which is wrong for as long as reads can route
+// to it. So a move is refused:
+//
+//   - while the next target marks split window targets. The mark is taken from
+//     a fresh state read before the pull, so it gives a fence away even while
+//     the cached states below still show a read from before it;
+//   - while the shard states are unknown, since none of the rules below can be
+//     ruled out. The cache keeps its last read on a failed refresh, so this is
+//     only before the first read of a collection succeeds;
+//   - while a shard is a fenced source (ShardSplitting): the split window;
+//   - while the current target lists a vchannel the collection no longer
+//     lists: a source retired by an adoption that reads still route to until
+//     the current target flips past it.
+//
+// A nil cache disables the rule.
+func CheckShardSplitMovable(ctx context.Context, cache *ShardSplitStateCache, targetMgr TargetManagerInterface, collectionID int64) error {
+	if cache == nil {
+		return nil
+	}
+	if window := targetMgr.GetSplitWindowTargets(ctx, collectionID, NextTarget); len(window) > 0 {
+		return merr.WrapErrServiceUnavailable("shard split window open",
+			fmt.Sprintf("collection %d: the next target marks split window targets %v", collectionID, window.Collect()))
+	}
+	states, ok := cache.ChannelStates(ctx, collectionID)
+	if !ok {
+		return merr.WrapErrServiceUnavailable("shard split state unknown",
+			fmt.Sprintf("collection %d: its shard states could not be read", collectionID))
+	}
+	if states.Splitting() {
+		return merr.WrapErrServiceUnavailable("shard split window open",
+			fmt.Sprintf("collection %d has a fenced split source", collectionID))
+	}
+	if retired := states.Delisted(targetMgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)); len(retired) > 0 {
+		return merr.WrapErrServiceUnavailable("retired shard split source still current",
+			fmt.Sprintf("collection %d: the current target still routes reads to %v", collectionID, retired))
+	}
+	return nil
+}
