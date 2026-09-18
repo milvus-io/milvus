@@ -1803,3 +1803,14 @@ function:
     local_resource_path: /var/lib/milvus/analyzer
     concurrency_per_cpu_core: 8 # The concurrency per cpu core for analyzer, pipeline not included
     runner_concurrency: 8 # The concurrency for each function runner to tokenize text
+  pyUDF:
+    enabled: false # Whether to enable PyUDF in processes that use it. Enabling it on Proxy also requires common.fileResource.mode.proxy: sync. Restart is required after changing this value.
+    address: 127.0.0.1:19090 # Shared local IPv4 address and port of the PyUDF workers. Restart is required after changing this value.
+    rpcTimeout: 30s # Deadline for one PyUDF Execute call, including serialization. Range: 5s to 300s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.
+    connectionPoolSize: 10 # Number of reused client connections; this does not limit concurrent RPCs. Restart is required after changing this value.
+    maxMessageBytes: 67108864 # Maximum serialized size of one PyUDF gRPC message in bytes. Restart is required after changing this value.
+    server:
+      workerCount: 1 # Number of Python worker processes sharing the configured address. Restart is required after changing this value.
+      grpcConcurrency: 10 # Per-worker gRPC executor threads. Restart is required after changing this value.
+      maxConcurrentRPCs: 100 # Maximum in-flight RPCs per Python worker, including requests waiting in the gRPC executor. Restart is required after changing this value.
+      shutdownTimeout: 30s # Python worker termination escalation deadline. Range: 5s to 60s, in whole milliseconds; invalid values log an error and use 30s. Restart is required after changing this value.
