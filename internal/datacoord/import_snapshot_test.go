@@ -349,7 +349,10 @@ func TestSnapshotPartitionMappingResolution(t *testing.T) {
 		{"missing_source", `{"A":"X"}`, []int64{300}, false, nil, merr.ErrImportFailed},
 		{"unknown_source", `{"A":"X","B":"X","D":"X"}`, []int64{300}, false, nil, merr.ErrImportFailed},
 		{"missing_ids", `{"A":"X","B":"X","C":"X"}`, nil, false, nil, merr.ErrServiceInternal},
+		{"fewer_ids", `{"A":"X","B":"Y","C":"Z"}`, []int64{300, 100}, false, nil, merr.ErrServiceInternal},
+		{"extra_ids", `{"A":"X","B":"X","C":"X"}`, []int64{300, 100}, false, nil, merr.ErrServiceInternal},
 		{"invalid_id", `{"A":"X","B":"X","C":"X"}`, []int64{0}, false, nil, merr.ErrServiceInternal},
+		{"invalid_last_id", `{"A":"X","B":"Y","C":"Z"}`, []int64{300, 100, -1}, false, nil, merr.ErrServiceInternal},
 		{"partition_key", `{"A":"X","B":"X","C":"X"}`, []int64{300}, true, nil, merr.ErrImportFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -362,6 +365,7 @@ func TestSnapshotPartitionMappingResolution(t *testing.T) {
 			got, err := resolveSnapshotPartitionMapping(source, tc.ids, schema, opts)
 			if tc.wantErr != nil {
 				require.ErrorIs(t, err, tc.wantErr)
+				require.Nil(t, got, "invalid metadata must not produce a partial partition mapping")
 				return
 			}
 			require.NoError(t, err)
@@ -627,8 +631,10 @@ func TestSnapshotPartitionMappingTasksAndWAL(t *testing.T) {
 	sources := make([]*internalpb.SnapshotImportSource, 0, 3)
 	msgFiles := make([]*msgpb.ImportFile, 0, 3)
 	for i, partition := range []int64{300, 100, 200} {
-		sources = append(sources, &internalpb.SnapshotImportSource{Version: 3, TargetPartitionId: partition,
-			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7), SourceCommitTimestamp: 100})
+		sources = append(sources, &internalpb.SnapshotImportSource{
+			Version: 3, TargetPartitionId: partition,
+			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7), SourceCommitTimestamp: 100,
+		})
 		msgFiles = append(msgFiles, &msgpb.ImportFile{Id: int64(i + 1)})
 	}
 	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{SnapshotSources: sources}).
@@ -645,8 +651,10 @@ func TestSnapshotPartitionMappingTasksAndWAL(t *testing.T) {
 	for i, source := range replica.Header().GetSnapshotSources() {
 		require.True(t, proto.Equal(sources[i], source))
 	}
-	encoded, err := proto.Marshal(&datapb.ImportJob{JobID: 1, CollectionID: 2, Files: files, Options: opts,
-		PartitionIDs: []int64{300, 100, 200}, Vchannels: []string{"target_v1"}, Schema: snapshotImportTestSchema(), DataTs: 100, AutoCommit: false})
+	encoded, err := proto.Marshal(&datapb.ImportJob{
+		JobID: 1, CollectionID: 2, Files: files, Options: opts,
+		PartitionIDs: []int64{300, 100, 200}, Vchannels: []string{"target_v1"}, Schema: snapshotImportTestSchema(), DataTs: 100, AutoCommit: false,
+	})
 	require.NoError(t, err)
 	reloaded := &datapb.ImportJob{}
 	require.NoError(t, proto.Unmarshal(encoded, reloaded))
@@ -673,10 +681,12 @@ func TestSnapshotPartitionMappingTasksAndWAL(t *testing.T) {
 		require.Len(t, req.GetPartitionIDs(), 1)
 		require.NoError(t, importutilv2.ValidateSnapshotTaskPartitions(req.GetImportFiles(), req.GetPartitionIDs()))
 		for _, file := range req.GetImportFiles() {
-			stats = append(stats, &datapb.ImportFileStats{ImportFile: file, TotalRows: 8, TotalMemorySize: 8,
+			stats = append(stats, &datapb.ImportFileStats{
+				ImportFile: file, TotalRows: 8, TotalMemorySize: 8,
 				HashedStats: map[string]*datapb.PartitionImportStats{"target_v1": {
 					PartitionRows: map[int64]int64{req.PartitionIDs[0]: 8}, PartitionDataSize: map[int64]int64{req.PartitionIDs[0]: 8},
-				}}})
+				}},
+			})
 		}
 	}
 	segments := make(map[int64]*SegmentInfo)
@@ -1314,8 +1324,7 @@ func TestValidateSnapshotImportSchema_FieldIdentity(t *testing.T) {
 			switch mode {
 			case "reordered_schema":
 				source.Fields[1], source.Fields[2] = source.Fields[2], source.Fields[1]
-				source.StructArrayFields[0].Fields[0], source.StructArrayFields[0].Fields[1] =
-					source.StructArrayFields[0].Fields[1], source.StructArrayFields[0].Fields[0]
+				source.StructArrayFields[0].Fields[0], source.StructArrayFields[0].Fields[1] = source.StructArrayFields[0].Fields[1], source.StructArrayFields[0].Fields[0]
 			case "renamed_field":
 				source.Fields[1].Name = "renamed"
 			case "swapped_fields":

@@ -140,15 +140,22 @@ func TestSnapshotCMEKTargetOnlyNullableTextBothPhases(t *testing.T) {
 	file := &internalpb.ImportFile{Id: 1, SnapshotSource: &internalpb.SnapshotImportSource{
 		Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/data/20", 7), SourceCommitTimestamp: 100,
 	}}
-	options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"},
-		{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}, {Key: importutilv2.EZK, Value: "source-ezk"}}
+	options := importutilv2.Options{
+		{Key: importutilv2.BackupFlag, Value: "true"},
+		{Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot},
+		{Key: importutilv2.EZK, Value: "source-ezk"},
+	}
 	manager := NewTaskManager()
-	pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, Options: options,
-		ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{10}, Vchannels: []string{"target"}}, manager, nil).(*PreImportTask)
+	pre := NewPreImportTask(&datapb.PreImportRequest{
+		TaskID: 1, Schema: schema, Options: options,
+		ImportFiles: []*internalpb.ImportFile{file}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
+	}, manager, nil).(*PreImportTask)
 	defer pre.Cancel()
 	manager.Add(pre)
-	imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, Options: options,
-		Ts: 999, IDRange: &datapb.IDRange{Begin: 100, End: 110}, PartitionIDs: []int64{10}, Vchannels: []string{"target"}}, manager, nil, nil).(*ImportTask)
+	imp := NewImportTask(&datapb.ImportRequest{
+		TaskID: 2, Schema: schema, Options: options,
+		Ts: 999, IDRange: &datapb.IDRange{Begin: 100, End: 110}, PartitionIDs: []int64{10}, Vchannels: []string{"target"},
+	}, manager, nil, nil).(*ImportTask)
 	defer imp.Cancel()
 	// Exercise the actual shared reader, statistics, NULL fill and row hashing.
 	// Only manifest/crypto dependencies and the final storage sync are mocked.

@@ -285,11 +285,13 @@ func resolveSnapshotPartitionMapping(sourcePartitions map[string]int64, targetID
 		return nil, merr.WrapErrServiceInternalMsg("partition_mapping target IDs do not match Proxy's resolved destinations")
 	}
 	targets := make(map[string]int64, len(names))
-	for i, name := range names {
+	// Keep both bounds explicit for static analysis; the equality check above
+	// still rejects mismatched metadata instead of accepting a partial mapping.
+	for i := 0; i < len(names) && i < len(targetIDs); i++ {
 		if targetIDs[i] <= 0 {
 			return nil, merr.WrapErrServiceInternalMsg("partition_mapping contains an invalid resolved target ID")
 		}
-		targets[name] = targetIDs[i]
+		targets[names[i]] = targetIDs[i]
 	}
 	result := make(map[int64]int64, len(mapping))
 	for source, target := range mapping {

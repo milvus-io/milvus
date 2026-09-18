@@ -1111,8 +1111,10 @@ func TestSelectImportFields_BackupCompatibility(t *testing.T) {
 			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			{FieldID: 101, Name: "renamed", DataType: schemapb.DataType_Int64},
 			{FieldID: 102, Name: "nullable", DataType: schemapb.DataType_Int64, Nullable: true},
-			{FieldID: 103, Name: "default", DataType: schemapb.DataType_Int64,
-				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}},
+			{
+				FieldID: 103, Name: "default", DataType: schemapb.DataType_Int64,
+				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+			},
 			{FieldID: 104, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
 		},
 	})
@@ -1201,8 +1203,10 @@ func TestStorageV3Reader_BackupFieldSelection(t *testing.T) {
 		{FieldID: 101, Name: "target_name", DataType: schemapb.DataType_Int64},
 		// A matching name at source ID 999 must not remap data into target ID 102.
 		{FieldID: 102, Name: "source_only", DataType: schemapb.DataType_Int64, Nullable: true},
-		{FieldID: 103, Name: "default", DataType: schemapb.DataType_Int64,
-			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}},
+		{
+			FieldID: 103, Name: "default", DataType: schemapb.DataType_Int64,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+		},
 		{FieldID: 104, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
 	}}
 	patchStorageV3TestFieldIDs(t, 100, 101, 999)

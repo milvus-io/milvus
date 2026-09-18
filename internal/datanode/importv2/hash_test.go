@@ -1,11 +1,11 @@
 package importv2
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -86,8 +86,10 @@ func TestSnapshotImportPartitionKeyDefaultBothPhases(t *testing.T) {
 					schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 						{FieldID: pkID, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
 						part,
-						{FieldID: optionalID, Name: "optional", DataType: schemapb.DataType_Int64,
-							DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}}},
+						{
+							FieldID: optionalID, Name: "optional", DataType: schemapb.DataType_Int64,
+							DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 7}},
+						},
 					}}
 					options := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}, {Key: "source_type", Value: "snapshot"}}
 					channels := []string{"v1", "v2"}
@@ -167,8 +169,10 @@ func TestSnapshotImportPartitionKeyDefaultBothPhases(t *testing.T) {
 func TestGetRowsStatsPartitionKeyDefaultError(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-		{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true,
-			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}}},
+		{
+			FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: true,
+			DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+		},
 	}}
 	pre := NewPreImportTask(&datapb.PreImportRequest{
 		Schema: schema, PartitionIDs: []int64{20, 10}, Vchannels: []string{"v1"},
