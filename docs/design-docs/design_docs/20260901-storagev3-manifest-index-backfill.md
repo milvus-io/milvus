@@ -1,8 +1,8 @@
 # StorageV3 Manifest Index Backfill and Rollback
 
 - **Created:** 2026-09-01
-- **Updated:** 2026-09-15
-- **Status:** Design; implementation in the dependent stack layers
+- **Updated:** 2026-09-18
+- **Status:** Under Review; design and implementation in one PR
 - **Component:** DataCoord, StorageV3
 - **Depends on:** [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md),
   [DataCoord Segment-Scoped Manifest Commit Framework](20260817-datacoord-segment-manifest-commit.md)
@@ -554,18 +554,12 @@ merge commit `240b9c0a916f9633da53230e58854da08d8412f8`, on master snapshot
 batched GC retractions, bounded recovery, verified marker clearing, and durable
 copy cleanup are the baseline.
 
-1. **Design only** (`feat/datacoord-manifest-index-backfill-design`, targets
-   master): goals, protocol, rollout, failure cases, and validation plan in this
-   document.
-2. **Complete historical index migration**
-   (`feat/datacoord-manifest-index-backfill`, targets the design branch):
-   inspector, catalog provenance, atomic backfill mutation, GC integration,
-   configuration/metrics, and regression tests as one independently testable
-   capability.
-3. **Complete reverse migration** (`feat/datacoord-manifest-index-rollback`,
-   targets the forward implementation): independent switch, atomic restoration
-   to etcd, GC/copy coordination, completion checks and tests, as specified in
-   the [rollback protocol](#rollback-to-etcd).
+The complete change is delivered in one PR targeting `master`:
+[PR #53479](https://github.com/milvus-io/milvus/pull/53479), on
+`feat/datacoord-manifest-index-rollback`. It includes this design, historical
+index backfill, reverse migration, configuration/metrics, GC/copy coordination,
+and their regression tests. Both migration directions build on the already
+merged publication framework; neither requires a separate unmerged PR.
 
 Each backfill supplies exactly one `SegmentIndexBackfill` in
 `SegmentCatalogMutation.SegmentIndexes`. It must satisfy the same publication
