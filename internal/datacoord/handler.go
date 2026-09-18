@@ -139,6 +139,35 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // dropped segmentIDs    ---> dropped segments
 // level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
+	var splitTargets []string
+	if manager := h.s.shardSplitManager; manager != nil {
+		splitTargets = manager.SplitTargetsOfSource(channel.GetName())
+	}
+	return h.GetQueryVChanPositionsOfSplitFamily(channel, splitTargets, partitionIDs...)
+}
+
+// getRealSegmentsForSplitFamily returns the channel's segments plus, when the
+// channel is the source of a lineage window, the flushed non-L0 segments of its
+// splitTargets (inheritedBySplitSource): the rewrite outputs published there
+// and the data flushed from the target WALs during the window.
+func (h *ServerHandler) getRealSegmentsForSplitFamily(channelName string, splitTargets []string) []*SegmentInfo {
+	segments := h.s.meta.GetRealSegmentsForChannel(channelName)
+	for _, target := range splitTargets {
+		for _, segment := range h.s.meta.GetRealSegmentsForChannel(target) {
+			if inheritedBySplitSource(segment) {
+				segments = append(segments, segment)
+			}
+		}
+	}
+	return segments
+}
+
+// GetQueryVChanPositionsOfSplitFamily is GetQueryVChanPositions over a split
+// family the caller has already resolved: splitTargets are the targets whose
+// flushed segments the channel's view takes in, nil when it is no split source.
+// A caller that also attributes the targets to the channel passes the family it
+// attributed, so the view and the attribution come from one task-state read.
+func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, splitTargets []string, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	filterWithPartition := len(validPartitions) > 0
 	validPartitionsMap := make(map[int64]bool)
@@ -163,7 +192,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
+	segments := h.getRealSegmentsForSplitFamily(channel.GetName(), splitTargets)
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
@@ -192,6 +221,13 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		case !isFlushState(s.GetState()) || s.GetIsInvisible():
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
+			if s.GetInsertChannel() != channel.GetName() {
+				// The L0 list and the delete checkpoint are the channel's own,
+				// even over a split family: a target's L0 is loaded by the
+				// target, and its later start would let the source drop
+				// buffered deletes that segments it loads later still need.
+				continue
+			}
 			levelZeroIDs.Insert(s.GetID())
 			// use smallest start position of l0 segments as deleteCheckPoint, so query coord will only maintain stream delete record  after this ts
 			if deleteCheckPoint == nil || s.GetStartPosition().GetTimestamp() < deleteCheckPoint.GetTimestamp() {
