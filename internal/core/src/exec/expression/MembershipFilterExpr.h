@@ -38,6 +38,13 @@
 //     helpers; an empty mask degenerates to the unmasked behavior, so one
 //     code path serves both.
 //   * JSON probing exists only where the policy supports it (bloom kind).
+//
+// Index selection runs on the index contract, not on a concrete index class:
+// the reverse-lookup fallback asks for a typed value-lookup reader
+// (RequiredReader::ValueLookup) and additionally requires the selected
+// inventory entry to advertise caps.cheap_value_lookup, which is where the
+// "a BITMAP index without its offset cache is O(cardinality) per row"
+// exclusion now lives.
 
 #include <cstddef>
 #include <cstdint>
@@ -193,18 +200,18 @@ class PhyMembershipFilterExpr : public SegmentExpr {
             exec_path_ = ExprExecPath::RawData;
             return;
         }
-        // No raw data. Try to pin a scalar index that can reverse-look-up the
-        // stored values; HasCompatibleScalarIndex() may report true for a
-        // vector/binlog-index-only field or a mid-load state where PinIndex()
-        // still yields nothing, so verify the pin and its reverse-lookup
-        // capability before committing to the index path.
-        if (HasCompatibleScalarIndex()) {
-            EnsurePinnedIndex();
-            if (!pinned_index_.empty() && IndexSupportsReverseLookup()) {
-                exec_path_ = ExprExecPath::ScalarIndex;
-                return;
-            }
+        // No raw data. Try to select an index that can reverse-look-up the
+        // stored values. Selection is metadata-only, so both halves must be
+        // checked: the requirement pins one inventory entry exposing a typed
+        // value-lookup reader, and IndexSupportsReverseLookup() then confirms
+        // the reader really is typed for this column and that the entry
+        // advertises a cheap per-row lookup.
+        auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
+        req.value_type = expr_->column_.data_type_;
+        if (SelectAndPinIndex(req) && IndexSupportsReverseLookup()) {
+            return;
         }
+        ClearSelectedIndex();
         // No raw data and no usable index: keep RawData. ExecVisitorImpl
         // detects this (num_data_chunk_ == 0, not UseIndexCursor()) and throws
         // a clear SegcoreError instead of asserting.
@@ -217,7 +224,7 @@ class PhyMembershipFilterExpr : public SegmentExpr {
     }
 
     // Membership filters are never index-native: on the index-only fallback
-    // they probe per row via ScalarIndex::Reverse_Lookup. The base class
+    // they probe per row through the value-lookup reader. The base class
     // treats any non-RawData path as "execute all at once", which would size
     // the batch to the whole segment and materialize an active_count-wide
     // OffsetVector (~400MiB for 100M rows) in a single pass. Force batched
@@ -255,8 +262,8 @@ class PhyMembershipFilterExpr : public SegmentExpr {
     VectorPtr
     ExecVisitorImpl(EvalCtx& context);
 
-    // Index-only path: recover each value from the scalar index via
-    // Reverse_Lookup and probe it exactly as the raw-data path would,
+    // Index-only path: recover each value from the selected index's typed
+    // value-lookup reader and probe it exactly as the raw-data path would,
     // reusing the framework's mask-aware reverse-lookup helper.
     template <typename T>
     VectorPtr
@@ -273,16 +280,18 @@ class PhyMembershipFilterExpr : public SegmentExpr {
     VectorPtr
     ExecVisitorImplJson(EvalCtx& context);
 
-    // True iff the pinned scalar index is usable for the per-row reverse-
-    // lookup probe: it must (1) expose stored values via Reverse_Lookup
-    // (HasRawData()) AND (2) do so cheaply. A BITMAP index without its offset
-    // cache reverse-looks-up in O(cardinality) per row, which would turn the
-    // index-only probe into an O(rows * cardinality) scan — exclude it so the
-    // filter falls through to the clear "no usable index" error instead of
-    // silently running billions of checks.
+    // True iff the selected index is usable for the per-row reverse-lookup
+    // probe: it must (1) expose the stored values through a typed
+    // IScalarValueReader AND (2) do so cheaply. A BITMAP index without its
+    // offset cache reverse-looks-up in O(cardinality) per row, which would
+    // turn the index-only probe into an O(rows * cardinality) scan — the
+    // inventory reports that as caps.cheap_value_lookup == false, so such an
+    // entry is excluded here and the filter falls through to the clear
+    // "no usable index" error instead of silently running billions of checks.
     bool
     IndexSupportsReverseLookup() const {
-        if (pinned_index_.empty() || pinned_index_[0].get() == nullptr) {
+        if (!selected_index_entry_.has_value() ||
+            !selected_index_entry_->caps.cheap_value_lookup) {
             return false;
         }
         switch (expr_->column_.data_type_) {
@@ -297,33 +306,31 @@ class PhyMembershipFilterExpr : public SegmentExpr {
             case DataType::VARCHAR:
                 if constexpr (ProbePolicy::kSupportsVarChar) {
                     return IndexUsableForReverseLookup<std::string>();
+                } else {
+                    return false;
                 }
-                return false;
             default:
                 return false;
         }
     }
 
-    // Both gates for the reverse-lookup path: recoverable raw values, and a
-    // cheap (non-O(cardinality)) per-row Reverse_Lookup.
+    // Both gates for the reverse-lookup path: recoverable raw values through a
+    // typed value reader, and a cheap (non-O(cardinality)) per-row lookup.
+    // STL_SORT (O(1)) and MARISA (O(strlen)) advertise a cheap lookup;
+    // BITMAP-without-offset-cache (and a HYBRID wrapping it) do not.
     template <typename T>
     bool
     IndexUsableForReverseLookup() const {
         return IndexHasRawData<T>() && IndexSupportsFastReverseLookup<T>();
     }
 
-    // Mirrors SegmentExpr::IndexHasRawData<T>() (Expr.h): pins the concrete
-    // scalar index and asks whether its per-row Reverse_Lookup is cheap.
+    // Metadata-only half of the gate: the inventory entry's declared
+    // reverse-lookup cost, checked without touching the index object.
     template <typename T>
     bool
     IndexSupportsFastReverseLookup() const {
-        typedef std::
-            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
-                IndexInnerType;
-        using Index = index::ScalarIndex<IndexInnerType>;
-        auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
-        return scalar_index != nullptr &&
-               scalar_index->SupportFastReverseLookup();
+        return selected_index_entry_.has_value() &&
+               selected_index_entry_->caps.cheap_value_lookup;
     }
 
  private:

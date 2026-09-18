@@ -18,7 +18,7 @@
 #include "cachinglayer/Translator.h"
 #include "common/Types.h"
 #include "common/LoadInfo.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "storage/FileManager.h"
 
 namespace milvus::segcore::storagev1translator {

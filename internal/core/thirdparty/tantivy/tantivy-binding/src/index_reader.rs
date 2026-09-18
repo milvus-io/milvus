@@ -58,6 +58,25 @@ impl IndexReaderWrapper {
     }
 
     pub fn from_index(index: Arc<Index>, set_bitset: SetBitsetFn) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index_with_policy(
+            index,
+            set_bitset,
+            ReloadPolicy::OnCommitWithDelay,
+        )
+    }
+
+    pub fn from_index_snapshot(
+        index: Arc<Index>,
+        set_bitset: SetBitsetFn,
+    ) -> Result<IndexReaderWrapper> {
+        IndexReaderWrapper::from_index_with_policy(index, set_bitset, ReloadPolicy::Manual)
+    }
+
+    fn from_index_with_policy(
+        index: Arc<Index>,
+        set_bitset: SetBitsetFn,
+        reload_policy: ReloadPolicy,
+    ) -> Result<IndexReaderWrapper> {
         let field = index.schema().fields().next().unwrap().0;
         let schema = index.schema();
         let field_name = String::from(schema.get_field_name(field));
@@ -70,7 +89,7 @@ impl IndexReaderWrapper {
 
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay) // OnCommitWithDelay serve for growing segment.
+            .reload_policy(reload_policy)
             .try_into()?;
         reader.reload()?;
 
@@ -91,13 +110,13 @@ impl IndexReaderWrapper {
     }
 
     pub fn count(&self) -> Result<u32> {
-        let metas = self.index.searchable_segment_metas()?;
+        let searcher = self.reader.searcher();
         let mut sum: u32 = 0;
-        for meta in metas {
+        for segment_reader in searcher.segment_readers() {
             if self.user_specified_doc_id {
-                sum = std::cmp::max(sum, meta.max_doc());
+                sum = std::cmp::max(sum, segment_reader.max_doc());
             } else {
-                sum += meta.max_doc();
+                sum += segment_reader.max_doc();
             }
         }
         Ok(sum)

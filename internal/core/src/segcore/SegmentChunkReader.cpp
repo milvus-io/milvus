@@ -21,43 +21,17 @@
 #include <string_view>
 #include <utility>
 
-#include "cachinglayer/CacheSlot.h"
+#include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Span.h"
 #include "common/type_c.h"
 #include "folly/FBVector.h"
-#include "index/Index.h"
-#include "index/ScalarIndex.h"
+#include "mmap/ChunkedColumnInterface.h"
 #include "segcore/SegcoreConfig.h"
 #include "storage/MmapManager.h"
 #include "storage/Types.h"
 
 namespace milvus::segcore {
-namespace {
-std::pair<const index::IndexBase*, int64_t>
-GetIndexAndBaseOffset(const SegmentInternalInterface* segment,
-                      FieldId field_id,
-                      int chunk_id,
-                      PinnedIndexView pinned_index) {
-    if (pinned_index.empty()) {
-        return {nullptr, 0};
-    }
-
-    if (chunk_id >= 0 && segment->type() == SegmentType::Sealed &&
-        segment->is_chunked() && pinned_index.size() == 1) {
-        auto base_offset =
-            chunk_id == 0 ? 0
-                          : segment->num_rows_until_chunk(field_id, chunk_id);
-        return {pinned_index[0].get(), base_offset};
-    }
-
-    if (chunk_id >= 0 && static_cast<size_t>(chunk_id) < pinned_index.size()) {
-        return {pinned_index[static_cast<size_t>(chunk_id)].get(), 0};
-    }
-
-    return {nullptr, 0};
-}
-}  // namespace
 
 struct StringScanState::State {
     std::shared_ptr<ChunkedColumnInterface> column;
@@ -69,29 +43,7 @@ MultipleChunkDataAccessor
 SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
-    int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index) const {
-    const index::IndexBase* index = nullptr;
-    if (current_chunk_id < pinned_index.size()) {
-        index = pinned_index[current_chunk_id].get();
-    }
-    if (index) {
-        auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
-        if (index_ptr->HasRawData()) {
-            return
-                [&,
-                 index_ptr = std::move(index_ptr)]() -> const data_access_type {
-                    if (current_chunk_pos >= active_count_) {
-                        return std::nullopt;
-                    }
-                    auto raw = index_ptr->Reverse_Lookup(current_chunk_pos++);
-                    if (!raw.has_value()) {
-                        return std::nullopt;
-                    }
-                    return raw.value();
-                };
-        }
-    }
+    int64_t& current_chunk_pos) const {
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(current_chunk_id < num_chunks,
                "field {} cursor chunk_id {} exceeds num_chunks {}",
@@ -137,30 +89,8 @@ SegmentChunkReader::GetMultipleChunkStringDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index,
     int64_t scan_batch_size,
     StringScanState* scan_state) const {
-    const index::IndexBase* index = nullptr;
-    if (current_chunk_id < pinned_index.size()) {
-        index = pinned_index[current_chunk_id].get();
-    }
-    if (index) {
-        auto index_ptr =
-            dynamic_cast<const index::ScalarIndex<std::string>*>(index);
-        if (index_ptr->HasRawData()) {
-            return [&, index_ptr = std::move(index_ptr)]() mutable
-                   -> const data_access_type {
-                if (current_chunk_pos >= active_count_) {
-                    return std::nullopt;
-                }
-                auto raw = index_ptr->Reverse_Lookup(current_chunk_pos++);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-        }
-    }
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(current_chunk_id < num_chunks,
                "field {} cursor chunk_id {} exceeds num_chunks {}",
@@ -313,39 +243,37 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
     FieldId field_id,
     int64_t& current_chunk_id,
     int64_t& current_chunk_pos,
-    PinnedIndexView pinned_index,
     int64_t scan_batch_size,
     StringScanState* scan_state) const {
     switch (data_type) {
         case DataType::BOOL:
             return GetMultipleChunkDataAccessor<bool>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::INT8:
             return GetMultipleChunkDataAccessor<int8_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::INT16:
             return GetMultipleChunkDataAccessor<int16_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::INT32:
             return GetMultipleChunkDataAccessor<int32_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::INT64:
             return GetMultipleChunkDataAccessor<int64_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::TIMESTAMPTZ:
             return GetMultipleChunkDataAccessor<int64_t>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::FLOAT:
             return GetMultipleChunkDataAccessor<float>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::DOUBLE:
             return GetMultipleChunkDataAccessor<double>(
-                field_id, current_chunk_id, current_chunk_pos, pinned_index);
+                field_id, current_chunk_id, current_chunk_pos);
         case DataType::VARCHAR: {
             return GetMultipleChunkStringDataAccessor(field_id,
                                                       current_chunk_id,
                                                       current_chunk_pos,
-                                                      pinned_index,
                                                       scan_batch_size,
                                                       scan_state);
         }
@@ -357,23 +285,7 @@ SegmentChunkReader::GetMultipleChunkDataAccessor(
 template <typename T>
 ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
-                                         int chunk_id,
-                                         PinnedIndexView pinned_index) const {
-    auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
-    auto index = index_and_base_offset.first;
-    auto base_offset = index_and_base_offset.second;
-    auto index_ptr = dynamic_cast<const index::ScalarIndex<T>*>(index);
-    if (index_ptr != nullptr && index_ptr->HasRawData()) {
-        return
-            [index_ptr, base_offset](int i) mutable -> const data_access_type {
-                auto raw = index_ptr->Reverse_Lookup(base_offset + i);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-    }
+                                         int chunk_id) const {
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
@@ -395,23 +307,7 @@ SegmentChunkReader::GetChunkDataAccessor(FieldId field_id,
 template <>
 ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor<std::string>(
-    FieldId field_id, int chunk_id, PinnedIndexView pinned_index) const {
-    auto index_and_base_offset =
-        GetIndexAndBaseOffset(segment_, field_id, chunk_id, pinned_index);
-    auto index = index_and_base_offset.first;
-    auto base_offset = index_and_base_offset.second;
-    auto index_ptr =
-        dynamic_cast<const index::ScalarIndex<std::string>*>(index);
-    if (index_ptr != nullptr && index_ptr->HasRawData()) {
-        return
-            [index_ptr, base_offset](int i) mutable -> const data_access_type {
-                auto raw = index_ptr->Reverse_Lookup(base_offset + i);
-                if (!raw.has_value()) {
-                    return std::nullopt;
-                }
-                return raw.value();
-            };
-    }
+    FieldId field_id, int chunk_id) const {
     auto num_chunks = NumChunkData(field_id);
     AssertInfo(chunk_id >= 0 && chunk_id < num_chunks,
                "field {} chunk_id {} exceeds raw data chunks {}",
@@ -459,24 +355,10 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
 }
 
 ChunkDataAccessor
-SegmentChunkReader::GetStringDataAccessorByOffsets(
-    FieldId field_id, OffsetView offsets, PinnedIndexView pinned_index) const {
+SegmentChunkReader::GetStringDataAccessorByOffsets(FieldId field_id,
+                                                   OffsetView offsets) const {
     AssertInfo(segment_->type() == SegmentType::Sealed,
                "string Take accessor requires a sealed segment");
-    if (!pinned_index.empty()) {
-        const auto* index =
-            dynamic_cast<const index::ScalarIndex<std::string>*>(
-                pinned_index.front().get());
-        if (index != nullptr && index->HasRawData()) {
-            // A sealed scalar index addresses the entire field. Keep its
-            // reverse lookup and the caller-owned pin instead of loading raw.
-            return [index, offsets](int i) -> const data_access_type {
-                auto value = index->Reverse_Lookup(offsets[i]);
-                return value.has_value() ? data_access_type(std::move(*value))
-                                         : std::nullopt;
-            };
-        }
-    }
     auto column = GetStringColumn(field_id);
     AssertInfo(column != nullptr, "string field has no column");
     std::shared_ptr<TakeResult> take =
@@ -492,34 +374,26 @@ SegmentChunkReader::GetStringDataAccessorByOffsets(
 ChunkDataAccessor
 SegmentChunkReader::GetChunkDataAccessor(DataType data_type,
                                          FieldId field_id,
-                                         int chunk_id,
-                                         PinnedIndexView pinned_index) const {
+                                         int chunk_id) const {
     switch (data_type) {
         case DataType::BOOL:
-            return GetChunkDataAccessor<bool>(field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<bool>(field_id, chunk_id);
         case DataType::INT8:
-            return GetChunkDataAccessor<int8_t>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<int8_t>(field_id, chunk_id);
         case DataType::INT16:
-            return GetChunkDataAccessor<int16_t>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<int16_t>(field_id, chunk_id);
         case DataType::INT32:
-            return GetChunkDataAccessor<int32_t>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<int32_t>(field_id, chunk_id);
         case DataType::TIMESTAMPTZ:
         case DataType::INT64:
-            return GetChunkDataAccessor<int64_t>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<int64_t>(field_id, chunk_id);
         case DataType::FLOAT:
-            return GetChunkDataAccessor<float>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<float>(field_id, chunk_id);
         case DataType::DOUBLE:
-            return GetChunkDataAccessor<double>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<double>(field_id, chunk_id);
         case DataType::VARCHAR:
         case DataType::TEXT: {
-            return GetChunkDataAccessor<std::string>(
-                field_id, chunk_id, pinned_index);
+            return GetChunkDataAccessor<std::string>(field_id, chunk_id);
         }
         default:
             ThrowInfo(DataTypeInvalid, "unsupported data type: {}", data_type);

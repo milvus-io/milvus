@@ -37,7 +37,6 @@
 #include "expr/ITypeExpr.h"
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
-#include "index/IndexInfo.h"
 #include "index/IndexStats.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
@@ -63,6 +62,7 @@
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
+#include "test_utils/LegacyIndexParams.h"
 #include "test_utils/storage_test_utils.h"
 
 using namespace milvus;

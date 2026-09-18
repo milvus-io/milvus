@@ -24,14 +24,14 @@
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "exec/operator/Utils.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/dataset.h"
 #include "query/helper.h"
 
 namespace milvus::query {
 void
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
-              const index::VectorIndex& indexing,
+              const index::IVectorReader& reader,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
               milvus::OpContext* op_context,
@@ -39,12 +39,12 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
               bool is_sparse) {
     auto num_queries = search_dataset.num_queries;
     auto dim = search_dataset.dim;
-    auto metric_type = search_dataset.metric_type;
     auto dataset =
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
 
     BitsetView search_bitset = bitset;
+    bool owns_search_bitset = false;
     const auto active_count = search_conf.active_count_;
 
     // A growing interim index can advance after the plan freezes its visible
@@ -54,7 +54,9 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     // gets a chance to validate their offsets.
     //
     // Indexed nullable mapping lives inside Knowhere IdMap, so the visible
-    // prefix stays in logical row space.
+    // prefix stays in logical row space: Knowhere filters every backend id
+    // whose public row is >= bitmap.size(), which also covers rows added after
+    // this bitmap is constructed.
     if (active_count >= 0 && active_count == 0) {
         FillEmptySearchResult(search_result, num_queries, search_conf.topk_);
         return;
@@ -63,6 +65,7 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto pin_visible_prefix = [&](int64_t count) {
         TargetBitmap visible_prefix(count, false);
         search_bitset = search_result.PinBitset(std::move(visible_prefix));
+        owns_search_bitset = true;
     };
 
     if (active_count >= 0 && bitset.empty()) {
@@ -74,8 +77,8 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         // the incoming bitset normally already carries the bound.
         //
         // A caller without a plan node can still hand in a longer bitset --
-        // FloatSegmentIndexSearch resolves active_count_ from the segment for
-        // those. Narrow the view rather than rejecting the search: scanning
+        // SearchOnGrowing resolves active_count_ from the segment for those.
+        // Narrow the view rather than rejecting the search: scanning
         // past the frozen bound is the failure this function exists to
         // prevent, and the subview aliases the caller's buffer, so this costs
         // nothing. A shorter bitset already bounds the scan more tightly than
@@ -85,25 +88,46 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
         }
     }
 
+    if (milvus::exec::UseVectorIterator(search_conf) &&
+        !owns_search_bitset) {
+        AssertInfo(active_count >= 0,
+                   "growing vector iterator requires a fixed logical prefix");
+        TargetBitmap owned_filter(static_cast<size_t>(active_count), true);
+        if (search_bitset.empty()) {
+            owned_filter.set(0, owned_filter.size(), false);
+        } else {
+            const auto copy_count =
+                std::min(owned_filter.size(), search_bitset.size());
+            for (size_t i = 0; i < copy_count; ++i) {
+                owned_filter[i] = search_bitset.test(i);
+            }
+        }
+        search_bitset =
+            search_result.PinBitset(std::move(owned_filter));
+    }
+
     if (milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
                                                       num_queries,
                                                       dataset,
                                                       search_result,
                                                       search_bitset,
-                                                      indexing,
+                                                      reader,
                                                       op_context)) {
         return;
     }
 
     if (search_conf.iterator_v2_info_.has_value()) {
         auto iter = CachedSearchIterator(
-            indexing, dataset, search_conf, search_bitset, op_context);
+            reader, dataset, search_conf, search_bitset, op_context);
         iter.NextBatch(search_conf, search_result);
         return;
     }
 
-    indexing.Query(
-        dataset, search_conf, search_bitset, op_context, search_result);
+    reader.Search(dataset,
+                  milvus::exec::ProjectVectorSearchParams(search_conf),
+                  search_bitset,
+                  op_context,
+                  search_result);
 }
 
 }  // namespace milvus::query

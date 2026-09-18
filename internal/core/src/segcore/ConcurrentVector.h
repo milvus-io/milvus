@@ -692,6 +692,20 @@ class ConcurrentVectorImpl : public VectorBase {
         return chunks_ptr_->acquire();
     }
 
+    // The growing vector index needs a typed owner for the same chunk storage
+    // used by this column. Sharing this handle does not copy any values. It
+    // lets a DataView callback retain the storage without retaining the
+    // Segment or this ConcurrentVector wrapper.
+    std::shared_ptr<ChunkVectorBase<Type>>
+    share_chunk_storage() const {
+        return chunks_ptr_;
+    }
+
+    int64_t
+    elements_per_row() const {
+        return elements_per_row_;
+    }
+
     bool
     is_mmap() const {
         return chunks_ptr_->is_mmap();
@@ -814,7 +828,7 @@ class ConcurrentVectorImpl : public VectorBase {
     // HasFieldData/empty) dereference it without holding chunk locks. The
     // swap that backs share_chunk_storage() happens INSIDE the container,
     // under its own mutex.
-    ChunkVectorPtr<Type> chunks_ptr_ = nullptr;
+    std::shared_ptr<ChunkVectorBase<Type>> chunks_ptr_ = nullptr;
     ThreadSafeValidDataPtr valid_data_ptr_ = nullptr;
 
     const bool use_mapping_storage_;

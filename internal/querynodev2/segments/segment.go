@@ -1230,7 +1230,9 @@ func GetCLoadInfoWithFunc(ctx context.Context,
 			mlog.Warn(ctx, "fail to append load index info", mlog.Err(err))
 			return nil, err
 		}
-		loadIndexInfo.setShard(loadInfo.GetInsertChannel())
+		if err := loadIndexInfo.setShard(ctx, loadInfo.GetInsertChannel()); err != nil {
+			return nil, err
+		}
 		return nil, f(loadIndexInfo)
 	}).Await()
 	return err
