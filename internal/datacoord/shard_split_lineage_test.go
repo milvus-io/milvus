@@ -493,3 +493,110 @@ func TestCrossChannelParents(t *testing.T) {
 	assert.Empty(t, crossChannelParents(view(seg(901, "t1", 100))).Collect(), "a parent outside the view")
 	assert.Empty(t, crossChannelParents(view(seg(100, "src"))).Collect(), "no lineage")
 }
+
+// Retiring the source L0s takes away what pinned the source's delete
+// checkpoint below T_switch. Left alone it would jump to the channel's own,
+// advancing seek position, and the source delegator would discard the deletes
+// its children forward from the target WALs. So it is held at T_switch for as
+// long as the split is active.
+func TestSplitSourceDeleteCheckpointStaysPinnedAtTheFence(t *testing.T) {
+	const src = hashSrcVChannel
+
+	// A source past its fence with every L0 retired: nothing else pins it.
+	newRetiredSource := func(t *testing.T) *lineageFixture {
+		f := newLineageFixture(t)
+		require.NoError(t, f.svr.meta.UpdateChannelCheckpoint(context.TODO(), src,
+			&msgpb.MsgPosition{ChannelName: src, MsgID: []byte{1}, Timestamp: 500}))
+		f.add(t, lineageSegment{
+			id: 200, channel: src, state: commonpb.SegmentState_Dropped,
+			level: datapb.SegmentLevel_L0, startTs: 50,
+		})
+		return f
+	}
+
+	t.Run("held at T_switch while the split is active", func(t *testing.T) {
+		f := newRetiredSource(t)
+		view := f.view(src)
+		require.Empty(t, view.GetLevelZeroSegmentIds(), "the source L0 is retired")
+		assert.EqualValues(t, 500, view.GetSeekPosition().GetTimestamp())
+		assert.EqualValues(t, hashFenceTick, view.GetDeleteCheckpoint().GetTimestamp(),
+			"without the clamp this would be the seek position, and forwarded target deletes would be dropped")
+		assert.EqualValues(t, 500, view.GetSeekPosition().GetTimestamp(), "only a copy is lowered")
+	})
+
+	t.Run("held through Adopting, released at Done", func(t *testing.T) {
+		f := newRetiredSource(t)
+		f.setState(t, datapb.SplitShardTaskState_SplitShardTaskAdopting)
+		assert.EqualValues(t, hashFenceTick, f.view(src).GetDeleteCheckpoint().GetTimestamp())
+
+		f.setState(t, datapb.SplitShardTaskState_SplitShardTaskDone)
+		assert.EqualValues(t, 500, f.view(src).GetDeleteCheckpoint().GetTimestamp())
+	})
+
+	t.Run("no clamp before the fence is recorded", func(t *testing.T) {
+		f := newRetiredSource(t)
+		_, err := f.mgr.store.modify(context.TODO(), f.mgr.catalog, hashTaskID, func(task *datapb.SplitShardTask) bool {
+			task.Sources[0].SwitchTimeTick = 0
+			return true
+		})
+		require.NoError(t, err)
+		assert.EqualValues(t, 500, f.view(src).GetDeleteCheckpoint().GetTimestamp(),
+			"a source still taking writes has its own L0s and no tick to clamp to")
+	})
+
+	t.Run("a live source L0 already below the fence is left alone", func(t *testing.T) {
+		f := newLineageFixture(t)
+		require.NoError(t, f.svr.meta.UpdateChannelCheckpoint(context.TODO(), src,
+			&msgpb.MsgPosition{ChannelName: src, MsgID: []byte{1}, Timestamp: 500}))
+		f.add(t, lineageSegment{id: 201, channel: src, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, startTs: 50})
+
+		view := f.view(src)
+		assert.ElementsMatch(t, []int64{201}, view.GetLevelZeroSegmentIds())
+		assert.EqualValues(t, 50, view.GetDeleteCheckpoint().GetTimestamp(), "the clamp is a ceiling, never a floor")
+	})
+
+	t.Run("the ceiling applies to an L0-derived checkpoint too", func(t *testing.T) {
+		// Only reachable were an L0 registered on the source after its fence,
+		// which the fence forbids; the ceiling does not rely on it.
+		f := newLineageFixture(t)
+		require.NoError(t, f.svr.meta.UpdateChannelCheckpoint(context.TODO(), src,
+			&msgpb.MsgPosition{ChannelName: src, MsgID: []byte{1}, Timestamp: 500}))
+		f.add(t, lineageSegment{id: 202, channel: src, state: commonpb.SegmentState_Flushed, level: datapb.SegmentLevel_L0, startTs: 300})
+
+		view := f.view(src)
+		assert.ElementsMatch(t, []int64{202}, view.GetLevelZeroSegmentIds())
+		assert.EqualValues(t, hashFenceTick, view.GetDeleteCheckpoint().GetTimestamp())
+		assert.EqualValues(t, 300, f.svr.meta.GetSegment(context.TODO(), 202).GetStartPosition().GetTimestamp(),
+			"the L0's own start position in meta is not touched")
+	})
+
+	t.Run("a channel that is no split source is untouched", func(t *testing.T) {
+		f := newLineageFixture(t)
+		require.NoError(t, f.svr.meta.UpdateChannelCheckpoint(context.TODO(), hashTgtA,
+			&msgpb.MsgPosition{ChannelName: hashTgtA, MsgID: []byte{1}, Timestamp: 500}))
+		assert.EqualValues(t, 500, f.view(hashTgtA).GetDeleteCheckpoint().GetTimestamp())
+	})
+
+	t.Run("the recovery info carries the clamp", func(t *testing.T) {
+		f := newRetiredSource(t)
+		f.describing(t, src, hashTgtA, hashTgtB)
+		_, channels := f.recovery(t)
+		assert.EqualValues(t, hashFenceTick, channels[src].GetDeleteCheckpoint().GetTimestamp())
+	})
+}
+
+func TestActiveSplitSourceFenceTick(t *testing.T) {
+	c := newRewriteCase(t, newHashRewriteMeta(t, nil), newHashTask(nil))
+	mgr := c.manager
+	assert.EqualValues(t, hashFenceTick, mgr.activeSplitSourceFenceTick(hashSrcVChannel))
+	assert.Zero(t, mgr.activeSplitSourceFenceTick(hashTgtA), "a target is not a source")
+	assert.Zero(t, mgr.activeSplitSourceFenceTick(splitMgrV3), "no task at all")
+
+	mgr.finishTask(c.task(), "")
+	assert.Zero(t, mgr.activeSplitSourceFenceTick(hashSrcVChannel), "a finished task has no window")
+
+	// Without a manager nothing is clamped.
+	handler := &ServerHandler{s: &Server{}}
+	position := &msgpb.MsgPosition{Timestamp: 500}
+	assert.Same(t, position, handler.clampSplitSourceDeleteCheckpoint(hashSrcVChannel, []string{hashTgtA}, position))
+}

@@ -88,6 +88,18 @@ func (m *shardSplitManager) SplitLineageOfListedSources(listed typeutil.Set[stri
 	return lineage
 }
 
+// activeSplitSourceFenceTick is the T_switch recorded for vchannel as the
+// source of a split that is not Done or Aborted, 0 when there is none or its
+// fence is not recorded yet.
+func (m *shardSplitManager) activeSplitSourceFenceTick(vchannel string) uint64 {
+	for _, task := range m.store.list() {
+		if isSplitShardTaskActive(task) && splitTaskSource(task) == vchannel {
+			return task.GetSources()[0].GetSwitchTimeTick()
+		}
+	}
+	return 0
+}
+
 // splitFamiliesOf inverts a target -> source lineage into source -> targets,
 // with each source's targets sorted.
 func splitFamiliesOf(lineage map[string]string) map[string][]string {
