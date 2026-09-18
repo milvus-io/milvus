@@ -770,6 +770,11 @@ enum CompactionType {
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
   BumpSchemaVersionCompaction = 12;
+  // HashSplitCompaction is the rewrite of a shard split: it reads one flushed
+  // segment of the split's source and writes its rows into one output segment
+  // per split target, each on that target's vchannel, routing every row by its
+  // primary key's residue against the post-split routing modulus.
+  HashSplitCompaction = 13;
 }
 
 message CompactionStateRequest {
@@ -854,6 +859,13 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  // Set only for HashSplitCompaction: the shard-split targets this plan
+  // repartitions its input segment into. Each carries the residues whose rows
+  // it takes and the vchannel its output segments belong to.
+  repeated SplitShardTaskTarget hash_split_targets = 32;
+  // Set only for HashSplitCompaction: the routing modulus the targets'
+  // residues are taken against.
+  uint64 hash_split_modulus = 33;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column
@@ -1638,6 +1650,12 @@ message CompactionTask{
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
   uint64 create_ts = 30;
+  // Set only for HashSplitCompaction: the shard-split targets the plan
+  // repartitions its input segment into, copied onto the plan it builds.
+  repeated SplitShardTaskTarget hash_split_targets = 33;
+  // Set only for HashSplitCompaction: the routing modulus the targets'
+  // residues are taken against.
+  uint64 hash_split_modulus = 34;
 }
 
 message PartitionStatsInfo {
