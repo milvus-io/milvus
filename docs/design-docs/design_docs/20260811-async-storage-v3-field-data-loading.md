@@ -867,7 +867,7 @@ sealed-segment tests, and `make verifiers`.
 |---|---|
 | bounded async reader preparation | `internal/core/src/segcore/storagev2translator/AsyncChunkReader.{h,cpp}` |
 | coroutine pipeline and window planner | `internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.{h,cpp}` |
-| shared async executor and priority | `internal/core/src/segcore/storagev2translator/AsyncLoadExecutor.{h,cpp}` |
+| shared async executor and priority | `internal/core/src/storage/AsyncLoadExecutor.{h,cpp}` |
 | native exception classification | `internal/core/src/segcore/storagev2translator/AsyncLoadException.h` |
 | manifest translator integration | `internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.{h,cpp}` |
 | per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.{h,cpp}` |
