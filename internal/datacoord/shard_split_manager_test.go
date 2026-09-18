@@ -969,3 +969,43 @@ func TestShardSplitTriggerPlansOneSplitPerCollection(t *testing.T) {
 	manager.detectOnce()
 	assert.Len(t, manager.store.list(), 2, "the next split of the collection starts once the first is Done")
 }
+
+// A split's targets become shards the trigger must watch the moment rootcoord
+// commits them. rootcoord tells datacoord only through BroadcastAlteredCollection,
+// so a target that grows past the thresholds is split again -- the cascade --
+// only if that broadcast reaches the list the trigger iterates.
+func TestShardSplitTriggerSeesTargetsAfterTheAlteredCollectionBroadcast(t *testing.T) {
+	enableShardSplit(t)
+	postSplit := []string{splitMgrV1, splitMgrV2}
+	coordinator := &fakeSplitCoordinator{
+		coll: splitCollectionFromDescribe(splitTestDescribe(postSplit, []*schemapb.CollectionShardInfo{
+			hashInfo(splitMgrV1, schemapb.ShardState_ShardNormal, 0),
+			hashInfo(splitMgrV2, schemapb.ShardState_ShardNormal, 1),
+		}, 2), []int64{10}),
+	}
+	manager, _ := newSplitTestManager(t, coordinator)
+	// datacoord cached the collection before the split.
+	addSplitTestCollection(manager.meta, splitTestSchema(false), splitMgrV0)
+	// The target V1 is over the thresholds.
+	addSplitTestSegment(manager.meta, 1, splitMgrV1, 600, 1)
+	addSplitTestSegment(manager.meta, 2, splitMgrV1, 600, 1)
+	// Its sibling V2 holds its half, under the thresholds: the doubling
+	// relieved the source, so the target may be split again.
+	addSplitTestSegment(manager.meta, 3, splitMgrV2, 900, 1)
+
+	server := &Server{meta: manager.meta}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+		CollectionID: splitMgrCollection,
+		Schema:       splitTestSchema(false),
+		PartitionIDs: []int64{10},
+		VChannels:    postSplit,
+	})
+	require.NoError(t, merr.CheckRPCCall(resp, err))
+
+	manager.detectOnce()
+	tasks := manager.store.list()
+	require.Len(t, tasks, 1, "the trigger must consider the split's target after the broadcast")
+	assert.Equal(t, splitMgrV1, splitTaskSource(tasks[0]))
+	assert.EqualValues(t, 4, tasks[0].GetRoutingModulus(), "a single-residue target doubles the modulus")
+}

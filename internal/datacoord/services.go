@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -1825,6 +1826,19 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 	clonedColl.Properties = properties
 	// add field will change the schema
 	clonedColl.Schema = req.GetSchema()
+	// A shard split and its adoption change the vchannel list while the
+	// collection lives, and rootcoord announces the new list only through this
+	// broadcast. Every datacoord reader of the cached list -- the split trigger,
+	// flush, import, force merge -- would otherwise keep the pre-split shards
+	// until a restart reloaded the cache. A request without a list leaves the
+	// cached one: a collection always has at least one vchannel.
+	if vchannels := req.GetVChannels(); len(vchannels) > 0 && !slices.Equal(vchannels, clonedColl.VChannelNames) {
+		mlog.Info(ctx, "the altered collection changes its vchannels",
+			mlog.FieldCollectionID(req.GetCollectionID()),
+			mlog.Strings("oldVChannels", clonedColl.VChannelNames),
+			mlog.Strings("newVChannels", vchannels))
+		clonedColl.VChannelNames = slices.Clone(vchannels)
+	}
 	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil
 }
