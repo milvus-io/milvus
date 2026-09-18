@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -168,6 +169,87 @@ func TestQueryShardCollectsOnlySuccessfulSnapshots(t *testing.T) {
 	require.NoError(t, task.queryShard(context.Background(), 1, qn, "skipped"))
 	_, ok := task.actualChannelsMvcc.Get("skipped")
 	require.False(t, ok)
+}
+
+func TestQueryTaskPreExecuteUsesStrongVisibility(t *testing.T) {
+	const (
+		collectionID = int64(100)
+		partitionID  = int64(200)
+	)
+	beginTime := time.Unix(1_700_000_000, 0)
+	queryUpdateTime := beginTime.Add(time.Second)
+	schedulerTime := beginTime.Add(2 * time.Second)
+	schedulerTS := tsoutil.ComposeTSByTime(schedulerTime)
+	collectionTTL := time.Hour
+
+	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: []*schemapb.FieldSchema{{
+			FieldID:      100,
+			Name:         "id",
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+		}},
+	})
+	collectionInfo := &collectionInfo{
+		CollID:        collectionID,
+		Schema:        schema,
+		CollectionTTL: uint64(collectionTTL),
+	}
+	metaCache := &MetaCache{}
+	collectionIDMocker := mockey.Mock((*MetaCache).GetCollectionID).Return(collectionID, nil).Build()
+	defer collectionIDMocker.UnPatch()
+	collectionInfoMocker := mockey.Mock((*MetaCache).GetCollectionInfo).Return(collectionInfo, nil).Build()
+	defer collectionInfoMocker.UnPatch()
+	collectionSchemaMocker := mockey.Mock((*MetaCache).GetCollectionSchema).Return(schema, nil).Build()
+	defer collectionSchemaMocker.UnPatch()
+	partitionsMocker := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]UniqueID{
+		Params.CommonCfg.DefaultPartitionName.GetValue(): partitionID,
+	}, nil).Build()
+	defer partitionsMocker.UnPatch()
+
+	for _, tc := range []struct {
+		name          string
+		updateTime    time.Time
+		guaranteeTime time.Time
+	}{
+		{name: "query timestamp", updateTime: queryUpdateTime, guaranteeTime: schedulerTime},
+		{name: "newer schema", updateTime: schedulerTime.Add(time.Second), guaranteeTime: schedulerTime.Add(time.Second)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collectionInfo.UpdateTimestamp = tsoutil.ComposeTSByTime(tc.updateTime)
+			ctx := context.Background()
+			task := &queryTask{
+				baseTask:  baseTask{MetaCache: metaCache},
+				Condition: NewTaskCondition(ctx),
+				RetrieveRequest: &internalpb.RetrieveRequest{
+					Base: &commonpb.MsgBase{},
+				},
+				ctx: ctx,
+				request: &milvuspb.QueryRequest{
+					Base:               &commonpb.MsgBase{},
+					DbName:             "default",
+					CollectionName:     "test_collection",
+					Expr:               "id in [1]",
+					OutputFields:       []string{"id"},
+					ConsistencyLevel:   commonpb.ConsistencyLevel_Strong,
+					GuaranteeTimestamp: 0,
+				},
+			}
+			require.NoError(t, task.OnEnqueue())
+			require.False(t, task.CanSkipAllocTimestamp())
+			task.SetTs(schedulerTS)
+
+			require.NoError(t, task.PreExecute(ctx))
+			require.Equal(t, commonpb.ConsistencyLevel_Strong, task.GetConsistencyLevel())
+			require.Equal(t, tsoutil.ComposeTSByTime(tc.guaranteeTime), task.GetGuaranteeTimestamp())
+			// Strong Query uses its own timestamp plus the metadata fence, leaving
+			// MVCC selection to QueryNode. TTL clocks follow normal preprocessing.
+			require.Zero(t, task.GetMvccTimestamp())
+			require.Equal(t, uint64(tc.guaranteeTime.UnixMilli()*1000), task.GetEntityTtlPhysicalTime())
+			require.Equal(t, tsoutil.ComposeTSByTime(schedulerTime.Add(-collectionTTL)), task.GetCollectionTtlTimestamps())
+		})
+	}
 }
 
 func TestQueryTask_all(t *testing.T) {

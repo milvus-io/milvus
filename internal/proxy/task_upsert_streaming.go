@@ -88,7 +88,7 @@ func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
 // preparePartialUpdateRetryAttempt restores the original payload and rebuilds
 // terms, Strong query snapshots, and DML state for one retry.
 func (ut *upsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
-	if err := ut.preparePartialUpdate(ctx); err != nil {
+	if err := ut.prepareUpsert(ctx); err != nil {
 		return err
 	}
 	if err := ut.insertPreExecute(ctx); err != nil {
@@ -219,12 +219,16 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 }
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		// Fall back only when no delete subset was prepared; an empty subset
+		// means no lookup IDs should be deleted.
 		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	}
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels
