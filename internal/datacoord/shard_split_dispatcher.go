@@ -17,10 +17,15 @@
 package datacoord
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -214,4 +219,51 @@ func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) int64 
 		}
 	}
 	return 0
+}
+
+// hashSplitDeleteSources lists the L0 segments a rewrite plan on this channel
+// and partition folds, as plan segment entries carrying their deltalogs.
+//
+// The rewrite commit drops its input, and the source's L0s are retired once no
+// data is left on the source to fold them. So the rewrite is the last chance to
+// apply a delete that flushed into a source L0 and never reached an L1
+// deltalog: every plan carries every healthy source L0 in its input's
+// partition or in AllPartitions -- the scope the L0 compaction view uses, since
+// a delete of another partition's rows must not touch this input -- and the
+// datanode folds them while it routes rows, so the outputs it writes are
+// already delete-applied.
+//
+// They are delete sources, not inputs: they are NOT on the task's
+// InputSegments, so the commit neither rewrites nor drops them and the
+// inspector never marks them compacting. Several plans of one task share them.
+//
+// Resolved at plan-build time rather than recorded at dispatch: a plan is
+// rebuilt every time it is assigned to a worker, so a retry after a restart
+// re-reads the set from meta. Nothing is dispatched before the source is past
+// its T_switch, from which point its L0 set is final.
+func hashSplitDeleteSources(ctx context.Context, m CompactionMeta, channel string, partitionID int64) []*datapb.CompactionSegmentBinlogs {
+	return lo.Map(hashSplitDeleteSourceSegments(ctx, m, channel, partitionID), func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
+		return &datapb.CompactionSegmentBinlogs{
+			SegmentID:     info.GetID(),
+			CollectionID:  info.GetCollectionID(),
+			PartitionID:   info.GetPartitionID(),
+			Level:         datapb.SegmentLevel_L0,
+			InsertChannel: info.GetInsertChannel(),
+			Deltalogs:     info.GetDeltalogs(),
+			Manifest:      info.GetManifestPath(),
+		}
+	})
+}
+
+// hashSplitDeleteSourceSegments is the one definition of which L0 segments a
+// rewrite plan on this channel and partition folds, in id order so the same
+// plan rebuilt twice is identical.
+func hashSplitDeleteSourceSegments(ctx context.Context, m CompactionMeta, channel string, partitionID int64) []*SegmentInfo {
+	segments := m.SelectSegments(ctx, WithChannel(channel), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return isSegmentHealthy(info) &&
+			info.GetLevel() == datapb.SegmentLevel_L0 &&
+			(info.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == partitionID)
+	}))
+	slices.SortFunc(segments, func(a, b *SegmentInfo) int { return cmp.Compare(a.GetID(), b.GetID()) })
+	return segments
 }

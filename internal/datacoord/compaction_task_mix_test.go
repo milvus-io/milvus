@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -105,6 +107,145 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitRouting() {
 	s.Equal("src", plan.GetChannel(), "the plan runs on the source, where its input lives")
 	s.Len(plan.GetHashSplitTargets(), 2)
 	s.EqualValues(2, plan.GetHashSplitModulus())
+}
+
+// Every rewrite plan carries the source channel's L0 deltalogs, so the datanode
+// can fold the deletes that never reached an L1 deltalog.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitCarriesSourceLevelZero() {
+	const (
+		srcChannel  = "src"
+		partitionID = int64(10)
+	)
+	input := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: srcChannel,
+		PartitionID: partitionID, State: commonpb.SegmentState_Flushed,
+	}}
+	levelZero := func(id, partition int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, Level: datapb.SegmentLevel_L0, InsertChannel: srcChannel,
+			PartitionID: partition, State: commonpb.SegmentState_Flushed,
+			ManifestPath: fmt.Sprintf("manifest/%d", id),
+			Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("delta/%d", id)}}}},
+		}}
+	}
+	// SelectSegments applies the caller's filters, exactly as the real meta does,
+	// so the partition and level rules below are the production ones.
+	selectFrom := func(pool []*SegmentInfo) func(context.Context, ...SegmentFilter) []*SegmentInfo {
+		return func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			return lo.Filter(pool, func(info *SegmentInfo, _ int) bool {
+				for _, filter := range filters {
+					if !filter.Match(info) {
+						return false
+					}
+				}
+				return true
+			})
+		}
+	}
+	buildPlan := func(pool []*SegmentInfo) *datapb.CompactionPlan {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(input).Once()
+		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(selectFrom(pool))
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:           1,
+			Type:             datapb.CompactionType_HashSplitCompaction,
+			Channel:          srcChannel,
+			PartitionID:      partitionID,
+			InputSegments:    []int64{200},
+			Schema:           &schemapb.CollectionSchema{Version: 1},
+			HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+			HashSplitModulus: 2,
+		}, nil, meta, newMockVersionManager())
+		alloc := allocator.NewMockAllocator(s.T())
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+		task.allocator = alloc
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		return plan
+	}
+
+	s.Run("the source L0s ride along, in id order, with their deltalogs", func() {
+		plan := buildPlan([]*SegmentInfo{input, levelZero(302, partitionID), levelZero(301, partitionID)})
+		s.Require().Len(plan.GetSegmentBinlogs(), 3)
+		s.EqualValues(200, plan.GetSegmentBinlogs()[0].GetSegmentID())
+		s.Equal(datapb.SegmentLevel_L0, plan.GetSegmentBinlogs()[1].GetLevel())
+		s.EqualValues([]int64{301, 302}, lo.Map(plan.GetSegmentBinlogs()[1:],
+			func(seg *datapb.CompactionSegmentBinlogs, _ int) int64 { return seg.GetSegmentID() }))
+		s.Equal("delta/301", plan.GetSegmentBinlogs()[1].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+		s.Equal("manifest/301", plan.GetSegmentBinlogs()[1].GetManifest())
+	})
+
+	s.Run("the L0s are delete sources, not inputs", func() {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(input).Once()
+		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(selectFrom([]*SegmentInfo{input, levelZero(301, partitionID)}))
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:           1,
+			Type:             datapb.CompactionType_HashSplitCompaction,
+			Channel:          srcChannel,
+			PartitionID:      partitionID,
+			InputSegments:    []int64{200},
+			Schema:           &schemapb.CollectionSchema{Version: 1},
+			HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+			HashSplitModulus: 2,
+		}, nil, meta, newMockVersionManager())
+		alloc := allocator.NewMockAllocator(s.T())
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+		task.allocator = alloc
+
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Len(plan.GetSegmentBinlogs(), 2)
+		// Nothing put the L0 on the task's InputSegments, which is the only list
+		// the commit retires and the inspector marks compacting. Several plans of
+		// one task share these L0s; retiring them per plan would pull them out
+		// from under the plans still running.
+		s.EqualValues([]int64{200}, task.GetTaskProto().GetInputSegments())
+	})
+
+	s.Run("another partition's L0 is left behind", func() {
+		plan := buildPlan([]*SegmentInfo{input, levelZero(301, partitionID+1), levelZero(302, common.AllPartitionsID)})
+		s.Require().Len(plan.GetSegmentBinlogs(), 2)
+		s.EqualValues(302, plan.GetSegmentBinlogs()[1].GetSegmentID())
+	})
+
+	s.Run("a dropped L0 is not a delete source", func() {
+		dropped := levelZero(301, partitionID)
+		dropped.State = commonpb.SegmentState_Dropped
+		plan := buildPlan([]*SegmentInfo{input, dropped})
+		s.Len(plan.GetSegmentBinlogs(), 1)
+	})
+
+	s.Run("no source L0 leaves the plan exactly as before", func() {
+		plan := buildPlan([]*SegmentInfo{input})
+		s.Len(plan.GetSegmentBinlogs(), 1)
+	})
+}
+
+// A mix compaction must not start carrying L0s: its own commit would retire them
+// as inputs, and L0 compaction is what folds deletes for it.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixCarriesNoLevelZero() {
+	meta := NewMockCompactionMeta(s.T())
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: "src", State: commonpb.SegmentState_Flushed,
+	}}).Once()
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		Channel:       "src",
+		InputSegments: []int64{200},
+		Schema:        &schemapb.CollectionSchema{Version: 1},
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	s.Len(plan.GetSegmentBinlogs(), 1)
+	// SelectSegments was never called: mockery fails the test on an unexpected call.
 }
 
 func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {

@@ -430,6 +430,20 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 		segments = append(segments, segInfo)
 	}
 
+	if taskProto.GetType() == datapb.CompactionType_HashSplitCompaction {
+		// The source channel's pending deletes, carried the way an L0
+		// compaction plan carries them. Appended after the input, so the
+		// datanode's one data segment is unambiguous, and left out of
+		// `segments`: they are not rewritten and need no output log ids.
+		deleteSources := hashSplitDeleteSources(context.TODO(), t.meta, taskProto.GetChannel(), taskProto.GetPartitionID())
+		plan.SegmentBinlogs = append(plan.SegmentBinlogs, deleteSources...)
+		mlog.Info(context.TODO(), "shard split rewrite plan carries the source channel's L0 deletes",
+			mlog.Int64("planID", plan.GetPlanID()),
+			mlog.String("sourceChannel", taskProto.GetChannel()),
+			mlog.Int64s("levelZeroSegmentIDs", lo.Map(deleteSources,
+				func(seg *datapb.CompactionSegmentBinlogs, _ int) int64 { return seg.GetSegmentID() })))
+	}
+
 	logIDRange, err := PreAllocateBinlogIDs(t.allocator, segments, taskSchema)
 	if err != nil {
 		return nil, err
