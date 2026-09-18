@@ -645,8 +645,34 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 
 	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
 	syncedChannelNames := lo.Uniq(lo.Map(readyDelegatorsInCollection, func(ch *meta.DmChannel, _ int) string { return ch.ChannelName }))
-	// only after all channel are synced, we can consider the current target is ready
-	if !syncSuccess || !lo.Every(syncedChannelNames, lo.Keys(channelNames)) {
+
+	// The channels that must be synced before the current target can advance are
+	// the ones the promotion will actually list. For a next target pulled inside
+	// a shard split window that is its channels minus the window targets, which
+	// are held back above and can therefore never be among the synced ones:
+	// requiring them would keep the collection without a usable current target
+	// for the whole window. The exclusion is only ever granted while the
+	// collection's shard states still describe that window, and the promotion
+	// re-derives it under the same rule, so a state change between the two costs
+	// at most a refused promotion on this round.
+	servingChannelNames := lo.Keys(channelNames)
+	exclusions, _ := ob.targetMgr.GetSplitWindowExclusions(ctx, collectionID, meta.NextTarget)
+	if len(exclusions) > 0 {
+		servingChannelNames = lo.Filter(servingChannelNames, func(name string, _ int) bool {
+			return !exclusions.Contain(name)
+		})
+		if len(servingChannelNames) == 0 {
+			// defense in depth: the exclusion rule guarantees a fenced source
+			// stays, so this cannot be reached. lo.Every over an empty list is
+			// vacuously true, which would advance the current target to nothing.
+			log.Warn(ctx, "refuse to advance the current target to no channel at all",
+				mlog.Strings("excluded", exclusions.Collect()))
+			return false
+		}
+	}
+
+	// only after all serving channels are synced, we can consider the current target is ready
+	if !syncSuccess || !lo.Every(syncedChannelNames, servingChannelNames) {
 		return false
 	}
 
