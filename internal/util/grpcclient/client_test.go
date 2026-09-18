@@ -17,6 +17,7 @@
 package grpcclient
 
 import (
+	"bytes"
 	"context"
 	"log"
 	"math/rand"
@@ -35,8 +36,10 @@ import (
 	"google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -139,21 +142,16 @@ func TestClientBase_NodeSessionNotExist(t *testing.T) {
 }
 
 func TestClientBase_Call(t *testing.T) {
-	testCall(t, false)
+	testCall(t)
 }
 
-func TestClientBase_CompressCall(t *testing.T) {
-	testCall(t, true)
-}
-
-func testCall(t *testing.T, compressed bool) {
+func testCall(t *testing.T) {
 	// mock client with nothing
 	base := ClientBase[*mockClient]{
 		maxCancelError: 10,
 		MaxAttempts:    3,
 		isNode:         true,
 	}
-	base.CompressionEnabled = compressed
 	initClient := func() {
 		base.grpcClientMtx.Lock()
 		base.grpcClient = &clientConnWrapper[*mockClient]{client: &mockClient{}}
@@ -482,27 +480,61 @@ func TestClientBase_RetryPolicy(t *testing.T) {
 	assert.Equal(t, res.(*milvuspb.ComponentStates).GetState().GetNodeID(), randID)
 }
 
+// mockCompressionServer echoes the request payload back, so a compressed RPC
+// carries real bytes in both directions.
+type mockCompressionServer struct {
+	rootcoordpb.UnimplementedRootCoordServer
+}
+
+func (s *mockCompressionServer) CreateCollection(_ context.Context, in *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{Reason: string(in.GetSchema())}, nil
+}
+
+// inboundEncoding records the grpc-encoding the server saw on each request.
+type inboundEncoding struct{ seen chan string }
+
+func (o *inboundEncoding) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (o *inboundEncoding) HandleRPC(_ context.Context, event stats.RPCStats) {
+	if h, ok := event.(*stats.InHeader); ok {
+		select {
+		case o.seen <- h.Compression:
+		default:
+		}
+	}
+}
+
+func (o *inboundEncoding) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+func (o *inboundEncoding) HandleConn(context.Context, stats.ConnStats) {}
+
+// Exercise a real compressed RPC end to end for every algorithm. Both
+// directions carry a payload on purpose: grpc's compress() returns early on
+// `in.Len() == 0`, so an RPC with empty request and response never reaches a
+// codec at all and would pass with the whole compression path broken.
 func TestClientBase_Compression(t *testing.T) {
 	lis, err := net.Listen("tcp", "localhost:")
 	if err != nil {
 		t.Fatalf("failed to listen: %v", err)
 	}
 	address := lis.Addr()
-	kaep := keepalive.EnforcementPolicy{
-		MinTime:             5 * time.Second,
-		PermitWithoutStream: true,
-	}
-	kasp := keepalive.ServerParameters{
-		Time:    60 * time.Second,
-		Timeout: 60 * time.Second,
-	}
 
-	maxAttempts := 1
+	observed := &inboundEncoding{seen: make(chan string, 8)}
 	s := grpc.NewServer(
-		grpc.KeepaliveEnforcementPolicy(kaep),
-		grpc.KeepaliveParams(kasp),
+		grpc.StatsHandler(observed),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             5 * time.Second,
+			PermitWithoutStream: true,
+		}),
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    60 * time.Second,
+			Timeout: 60 * time.Second,
+		}),
 	)
-	helloworld.RegisterGreeterServer(s, &server{SuccessCount: uint(1)})
+	rootcoordpb.RegisterRootCoordServer(s, &mockCompressionServer{})
 	reflection.Register(s)
 	go func() {
 		// s.Stop() causes Serve to return; ignore the error
@@ -510,39 +542,68 @@ func TestClientBase_Compression(t *testing.T) {
 	}()
 	defer s.Stop()
 
-	clientBase := ClientBase[rootcoordpb.RootCoordClient]{
-		ClientMaxRecvSize:      1 * 1024 * 1024,
-		ClientMaxSendSize:      1 * 1024 * 1024,
-		DialTimeout:            60 * time.Second,
-		KeepAliveTime:          60 * time.Second,
-		KeepAliveTimeout:       60 * time.Second,
-		RetryServiceNameConfig: "helloworld.Greeter",
-		MaxAttempts:            maxAttempts,
-		InitialBackoff:         10.0,
-		MaxBackoff:             60.0,
-		CompressionEnabled:     true,
-	}
-	clientBase.SetRole(typeutil.DataCoordRole)
-	clientBase.SetGetAddrFunc(func() (string, error) {
-		return address.String(), nil
-	})
-	clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
-		return rootcoordpb.NewRootCoordClient(cc)
-	})
-	defer clientBase.Close()
+	// Compressible, and well past the 128KB block size of every codec here, so
+	// the payload spans several blocks rather than a single one.
+	payload := bytes.Repeat([]byte("milvus grpc compression payload "), (512<<10)/32)
 
-	ctx := context.Background()
-	randID := rand.Int63()
-	res, err := clientBase.Call(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
-		return &milvuspb.ComponentStates{
-			State: &milvuspb.ComponentInfo{
-				NodeID: randID,
-			},
-			Status: merr.Success(),
-		}, nil
-	})
-	assert.NoError(t, err)
-	assert.Equal(t, res.(*milvuspb.ComponentStates).GetState().GetNodeID(), randID)
+	for _, tc := range []struct {
+		name      string
+		enabled   bool
+		algorithm string
+		wire      string // grpc-encoding the server must see
+	}{
+		{name: "disabled", enabled: false, algorithm: Zstd, wire: ""},
+		{name: Zstd, enabled: true, algorithm: Zstd, wire: Zstd},
+		{name: Snappy, enabled: true, algorithm: Snappy, wire: Snappy},
+		{name: S2, enabled: true, algorithm: S2, wire: S2},
+		// an algorithm no build registers must degrade to zstd rather than
+		// failing every RPC on the connection
+		{name: "unknown falls back to zstd", enabled: true, algorithm: "brotli", wire: Zstd},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clientBase := ClientBase[rootcoordpb.RootCoordClient]{
+				ClientMaxRecvSize:      8 * 1024 * 1024,
+				ClientMaxSendSize:      8 * 1024 * 1024,
+				DialTimeout:            60 * time.Second,
+				KeepAliveTime:          60 * time.Second,
+				KeepAliveTimeout:       60 * time.Second,
+				RetryServiceNameConfig: "milvus.proto.rootcoord.RootCoord",
+				MaxAttempts:            1,
+				InitialBackoff:         10.0,
+				MaxBackoff:             60.0,
+				CompressionEnabled:     tc.enabled,
+				CompressionAlgorithm:   tc.algorithm,
+			}
+			clientBase.SetRole(typeutil.DataCoordRole)
+			clientBase.SetGetAddrFunc(func() (string, error) { return address.String(), nil })
+			clientBase.SetNewGrpcClientFunc(func(cc *grpc.ClientConn) rootcoordpb.RootCoordClient {
+				return rootcoordpb.NewRootCoordClient(cc)
+			})
+			defer clientBase.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			for len(observed.seen) > 0 { // drop anything an earlier subtest left
+				<-observed.seen
+			}
+
+			res, err := clientBase.Call(ctx, func(client rootcoordpb.RootCoordClient) (any, error) {
+				return client.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{Schema: payload})
+			})
+			assert.NoError(t, err)
+			// The echo proves the request was decompressed by the server and
+			// the response decompressed by the client, both intact.
+			assert.Equal(t, string(payload), res.(*commonpb.Status).GetReason())
+
+			select {
+			case got := <-observed.seen:
+				assert.Equal(t, tc.wire, got, "grpc-encoding on the wire")
+			case <-ctx.Done():
+				t.Fatal("server never reported a request header")
+			}
+		})
+	}
 }
 
 func TestVerifySession(t *testing.T) {
