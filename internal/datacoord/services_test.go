@@ -3500,7 +3500,7 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 		defer mockBroadcast.UnPatch()
 
 		server := &Server{
-			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, newRestoreAbsentTargetBroker(t), nil, nil),
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -3510,8 +3510,8 @@ func TestServer_RestoreSnapshot(t *testing.T) {
 			TargetCollectionName: "new_collection",
 		})
 
-		assert.NoError(t, err)
-		assert.Error(t, merr.Error(resp.GetStatus()))
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrSnapshotNotFound)
 	})
 }
 
