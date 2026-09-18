@@ -18,8 +18,11 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -27,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -263,4 +267,55 @@ func assertTextFieldExists(t *testing.T, ctx context.Context, core *Core, dbName
 		}
 	}
 	require.Fail(t, "field not found")
+}
+
+// A shard split rewrites the collection's data with a writer that does not
+// carry TEXT fields, so a TEXT field may not be added while one is in flight.
+func TestShardSplitInFlightRefusesATextField(t *testing.T) {
+	shard := func(state schemapb.ShardState) *model.ShardInfo { return &model.ShardInfo{State: state} }
+	newColl := func(states ...schemapb.ShardState) *model.Collection {
+		coll := &model.Collection{CollectionID: 7, ShardInfos: map[string]*model.ShardInfo{}}
+		for i, state := range states {
+			coll.ShardInfos[fmt.Sprintf("v%d", i)] = shard(state)
+		}
+		return coll
+	}
+	text := &schemapb.FieldSchema{Name: "doc", DataType: schemapb.DataType_Text}
+	scalar := &schemapb.FieldSchema{Name: "n", DataType: schemapb.DataType_Int64}
+
+	assert.NoError(t, refuseTextFieldDuringShardSplit(newColl(), text), "never split")
+	assert.NoError(t, refuseTextFieldDuringShardSplit(newColl(schemapb.ShardState_ShardNormal), text))
+	for _, state := range []schemapb.ShardState{schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating} {
+		err := refuseTextFieldDuringShardSplit(newColl(schemapb.ShardState_ShardNormal, state), text)
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable, state.String())
+		assert.True(t, merr.IsRetryableErr(err), "a split in flight is transient")
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		assert.NoError(t, refuseTextFieldDuringShardSplit(newColl(state), scalar), "only TEXT is refused")
+	}
+	nilShard := newColl()
+	nilShard.ShardInfos["v"] = nil
+	assert.NoError(t, refuseTextFieldDuringShardSplit(nilShard, text))
+}
+
+func TestDDLCallbacksAlterCollectionAddTextFieldDuringShardSplit(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key) })
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+
+	splitting := mockey.Mock(collectionHasShardSplitInFlight).Return(true).Build()
+	resp, err := core.AddCollectionField(ctx, &milvuspb.AddCollectionFieldRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Schema:         getTextFieldSchema("text_field", true, nil),
+	})
+	splitting.UnPatch()
+	addErr := merr.CheckRPCCall(resp, err)
+	require.ErrorIs(t, addErr, merr.ErrServiceUnavailable)
+	require.ErrorContains(t, addErr, "shard split")
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
 }
