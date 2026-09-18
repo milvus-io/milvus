@@ -212,6 +212,7 @@ func (t *hashSplitCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 			return nil, err
 		}
 		out := w.GetCompactionSegments()
+		inheritInputSortOrder(t.input, out)
 		// A target with no rows produces no segment; that is legal (an empty
 		// half), and datacoord drops the input all the same.
 		segments = append(segments, out...)
@@ -234,6 +235,24 @@ func (t *hashSplitCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		Segments: segments,
 		Type:     t.GetCompactionType(),
 	}, nil
+}
+
+// inheritInputSortOrder flags the outputs sorted exactly as the input is.
+//
+// The rewrite never reorders: each target receives the subsequence of the
+// input's rows it owns, in input order (routeRecord appends per target in row
+// order, and records are consumed in stored order), and a target's writer cuts
+// that stream into consecutive output segments. A subsequence of a pk-sorted
+// sequence is pk-sorted, and the same holds for the (partition key, pk) order
+// of a namespace-sorted input, so each flag carries over unchanged. Without it
+// every output of a sorted input would come out unsorted, and the index and
+// stats inspectors skip unsorted segments until a sort compaction re-emits
+// them.
+func inheritInputSortOrder(input *datapb.CompactionSegmentBinlogs, outputs []*datapb.CompactionSegment) {
+	for _, out := range outputs {
+		out.IsSorted = input.GetIsSorted()
+		out.IsSortedByNamespace = input.GetIsSortedByNamespace()
+	}
 }
 
 // newTargetWriters builds one writer per target, each bound to that target's

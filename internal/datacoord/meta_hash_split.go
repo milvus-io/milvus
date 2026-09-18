@@ -93,6 +93,11 @@ func (m *meta) completeHashSplitCompactionMutation(
 		return nil, nil, merr.WrapErrIllegalCompactionPlan("shard split rewrite task names no target vchannel")
 	}
 	fallbackStart, fallbackDml := getCompactionFallbackPositions(inputs)
+	// The rewrite keeps its input's row order (inheritInputSortOrder on the
+	// datanode), so a sorted input's outputs are indexable at once. An output
+	// is only trusted to be sorted when its input was: a segment flagged
+	// sorted is binary-searched by pk.
+	inputsSorted, inputsNamespaceSorted := hashSplitInputSortOrder(inputs)
 
 	outputs := make([]*SegmentInfo, 0, len(result.GetSegments()))
 	for _, out := range result.GetSegments() {
@@ -133,9 +138,9 @@ func (m *meta) completeHashSplitCompactionMutation(
 			StorageVersion:      out.GetStorageVersion(),
 			StartPosition:       startPos,
 			DmlPosition:         dmlPos,
-			IsSorted:            out.GetIsSorted(),
+			IsSorted:            out.GetIsSorted() && inputsSorted,
 			ManifestPath:        out.GetManifest(),
-			IsSortedByNamespace: out.GetIsSortedByNamespace(),
+			IsSortedByNamespace: out.GetIsSortedByNamespace() && inputsNamespaceSorted,
 			ExpirQuantiles:      out.GetExpirQuantiles(),
 			SchemaVersion:       t.GetSchema().GetVersion(),
 			CommitTimestamp:     0, // Normalized: the datanode rewrote the row timestamps.
@@ -183,6 +188,17 @@ func (m *meta) completeHashSplitCompactionMutation(
 		mlog.Int64s("sourceSegments", inputIDs),
 		mlog.Int64s("outputs", lo.Map(outputs, func(info *SegmentInfo, _ int) int64 { return info.GetID() })))
 	return outputs, metricMutation, nil
+}
+
+// hashSplitInputSortOrder reports whether every input of a rewrite is sorted by
+// pk, and whether every input is sorted by namespace.
+func hashSplitInputSortOrder(inputs []*SegmentInfo) (sorted bool, namespaceSorted bool) {
+	sorted, namespaceSorted = true, true
+	for _, input := range inputs {
+		sorted = sorted && input.GetIsSorted()
+		namespaceSorted = namespaceSorted && input.GetIsSortedByNamespace()
+	}
+	return sorted, namespaceSorted
 }
 
 // RetireLevelZeroSegments drops the given L0 segments exactly as an L0
