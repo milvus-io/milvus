@@ -334,10 +334,16 @@ func TestWriteRouteModulus(t *testing.T) {
 	assert.EqualValues(t, 4, newSplitWriteRoute(info.VChannels, info.SplitRouting).modulus())
 }
 
-// The id of row offset i has residue i % M, so offset i lands on the shard
-// owning residue i % M -- and a split, which only refines residues, leaves the
-// offsets of the shards it did not touch where they were.
-func TestReassignAutoIDByResidueBucketsEveryOffsetByItsResidue(t *testing.T) {
+// stabilizeAutoIDs draws int64 auto ids for route the way an idempotent
+// auto-id insert does.
+func stabilizeAutoIDs(ids []int64, route *writeRoute, alloc func(uint32) (int64, int64, error)) error {
+	return reassignAutoIDByResidue(ids, schemapb.DataType_Int64, newAutoIDPlacement(route), 0, alloc)
+}
+
+// Row offset i lands on the shard owning residue i % M -- and a split, which
+// only refines residues, leaves the offsets of the shards it did not touch
+// where they were.
+func TestReassignAutoIDByResidueKeepsTheOffsetsOfAnUntouchedShard(t *testing.T) {
 	info := twoShardSplitInfo()
 	route := newSplitWriteRoute(info.VChannels, info.SplitRouting)
 	rowIDs := make([]int64, 40)
@@ -347,17 +353,101 @@ func TestReassignAutoIDByResidueBucketsEveryOffsetByItsResidue(t *testing.T) {
 		next += int64(count)
 		return begin, next, nil
 	}
-	require.NoError(t, reassignAutoIDByResidue(rowIDs, schemapb.DataType_Int64, route.modulus(), 0, alloc))
-	residues, err := routing.PKResidues(int64IDs(rowIDs...), route.modulus())
-	require.NoError(t, err)
-	for i, residue := range residues {
-		assert.EqualValues(t, uint64(i)%route.modulus(), residue, "offset %d", i)
-		owner, _ := route.table.Lookup(residue)
-		legacyOwner := []string{"v0", "v1"}[i%2]
-		if legacyOwner == "v1" {
+	require.NoError(t, stabilizeAutoIDs(rowIDs, route, alloc))
+	for i, id := range rowIDs {
+		owner, err := route.table.VChannelOfPK(id)
+		require.NoError(t, err)
+		if i%2 == 1 {
 			assert.Equal(t, "v1", owner, "the untouched shard keeps offset %d", i)
 		} else {
 			assert.Contains(t, []string{"v2", "v3"}, owner, "the split shard's offset %d goes to a target", i)
 		}
+	}
+}
+
+// The placement of a never-split collection is one residue per shard, in
+// channel order; a split one follows its table.
+func TestNewAutoIDPlacement(t *testing.T) {
+	legacy := newAutoIDPlacement(legacyWriteRoute([]string{"a", "b", "c"}))
+	assert.EqualValues(t, 3, legacy.modulus)
+	assert.Equal(t, []int{0, 1, 2}, legacy.ownerOf)
+	assert.Equal(t, []int{1, 1, 1}, legacy.share)
+
+	info := twoShardSplitInfo()
+	split := newAutoIDPlacement(newSplitWriteRoute(info.VChannels, info.SplitRouting))
+	assert.EqualValues(t, 4, split.modulus)
+	assert.Equal(t, 3, split.owners)
+	assert.Equal(t, split.ownerOf[1], split.ownerOf[3], "v1 owns residues 1 and 3")
+	assert.Equal(t, 2, split.share[split.ownerOf[1]])
+}
+
+// hotShardSplitInfo is a collection whose single hot shard was split six
+// times: M = 64, seven shards. Residue r belongs to the shard named by its
+// lowest set bit, so the shares are 1/2, 1/4, ..., 1/64 and 1/64 (residue 0).
+func hotShardSplitInfo() *collectionInfo {
+	const modulus = 64
+	vchannels := make([]string, 7)
+	buckets := make([][]uint64, 7)
+	for i := range vchannels {
+		vchannels[i] = fmt.Sprintf("hot-v%d", i)
+	}
+	for r := uint64(0); r < modulus; r++ {
+		owner := 0
+		if r != 0 {
+			for r>>owner&1 == 0 {
+				owner++
+			}
+			owner++
+		}
+		buckets[owner] = append(buckets[owner], r)
+	}
+	infos := make([]*schemapb.CollectionShardInfo, len(vchannels))
+	for i, vchannel := range vchannels {
+		infos[i] = splitShardInfo(schemapb.ShardState_ShardNormal, vchannel, buckets[i]...)
+	}
+	return splitCollectionInfo(1, modulus, vchannels, infos...)
+}
+
+// An id only has to route to the owner of residue i % M, so a row costs about
+// 1/share draws: a 100-row insert into a collection whose hot shard was split
+// six times allocates about the sum over its rows of 1/share, not 100 x 64.
+func TestAutoIDBucketingAllocatesByTheOwnersShare(t *testing.T) {
+	info := hotShardSplitInfo()
+	route := newSplitWriteRoute(info.VChannels, info.SplitRouting)
+	const rows = 100
+	shares := make(map[string]int)
+	for r := uint64(0); r < route.modulus(); r++ {
+		owner, _ := route.table.Lookup(r)
+		shares[owner]++
+	}
+	expected := 0.0
+	for i := 0; i < rows; i++ {
+		owner, _ := route.table.Lookup(uint64(i) % route.modulus())
+		expected += float64(route.modulus()) / float64(shares[owner])
+	}
+
+	rowIDs := make([]int64, rows)
+	next := int64(1 << 30)
+	for i := range rowIDs {
+		rowIDs[i] = next
+		next++
+	}
+	allocated := 0
+	alloc := func(count uint32) (int64, int64, error) {
+		allocated += int(count)
+		begin := next
+		next += int64(count)
+		return begin, next, nil
+	}
+	require.NoError(t, stabilizeAutoIDs(rowIDs, route, alloc))
+
+	t.Logf("allocated %d ids, sum of 1/share over the rows is %.0f", allocated, expected)
+	assert.Less(t, float64(allocated), 2*expected)
+	assert.Less(t, allocated, rows*int(route.modulus())/4)
+	for i, id := range rowIDs {
+		owner, err := route.table.VChannelOfPK(id)
+		require.NoError(t, err)
+		want, _ := route.table.Lookup(uint64(i) % route.modulus())
+		assert.Equal(t, want, owner, "offset %d", i)
 	}
 }
