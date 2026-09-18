@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/zilliztech/woodpecker/common/config"
 	wpMetrics "github.com/zilliztech/woodpecker/common/metrics"
@@ -39,7 +40,11 @@ func (b *builderImpl) Name() message.WALName {
 }
 
 // Build build a wal instance.
+//
+// The registry caches the opener per walName, so this runs at most once per process and
+// the storage mode picked here is never revisited.
 func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
+	mlog.Info(context.TODO(), "start building wp opener")
 	cfg, err := b.getWpConfig()
 	if err != nil {
 		return nil, err
@@ -59,6 +64,8 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 	}
 	mlog.Info(context.TODO(), "create etcd client finish while building wp opener")
 	var wpClient woodpecker.Client
+	mlog.Info(context.TODO(), "create woodpecker client",
+		mlog.String("storageType", cfg.Woodpecker.Storage.Type))
 	if cfg.Woodpecker.Storage.IsStorageService() {
 		wpClient, err = woodpecker.NewClient(context.Background(), cfg, etcdCli, true)
 	} else {
@@ -75,6 +82,24 @@ func (b *builderImpl) Build() (walimpls.OpenerImpls, error) {
 }
 
 func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
+	// The etcd config source is only refreshed by a periodic poll, while a WAL switch
+	// reaches this node through the WAL broadcast within milliseconds. Read etcd
+	// linearizably first so a woodpecker configuration written just before the switch is
+	// already visible here; the opener is built once, so a stale read would be permanent.
+	if bt := paramtable.GetBaseTable(); bt != nil {
+		start := time.Now()
+		refreshed, err := bt.RefreshRemoteConfigsLinearizable()
+		if err != nil {
+			// Fail closed: the last polled snapshot may be exactly the stale one this refresh
+			// is meant to replace. The opener is only cached on success, so the WAL open is
+			// retried instead of settling on the wrong mode for the life of the process.
+			return nil, merr.Wrap(err, "failed to refresh remote configs before building wp opener")
+		}
+		if refreshed {
+			mlog.Info(context.TODO(), "refreshed remote configs linearizably before building wp opener",
+				mlog.Duration("cost", time.Since(start)))
+		}
+	}
 	wpConfig, err := config.NewConfiguration()
 	if err != nil {
 		return nil, err
