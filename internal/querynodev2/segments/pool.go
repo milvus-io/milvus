@@ -61,6 +61,12 @@ var (
 	mutatePool     atomic.Pointer[conc.Pool[any]]
 	mutatePoolOnce sync.Once
 
+	// insertPool is the outer ProcessInsert fan-out pool. It MUST stay separate
+	// from mutatePool because Segment.Insert submits to mutatePool and waits, so
+	// sharing one pool would risk a nested-submit deadlock.
+	insertPool     atomic.Pointer[conc.Pool[struct{}]]
+	insertPoolOnce sync.Once
+
 	// deletePool is the outer dispatch pool for DeleteBatch fan-out across
 	// segments. It MUST stay separate from mutatePool: each dispatched task
 	// calls segment.Delete which submits the CGO onto mutatePool and waits, so
@@ -177,6 +183,26 @@ func initMutatePool() {
 	})
 }
 
+func insertPoolSize() int {
+	return mutatePoolSize()
+}
+
+func initInsertPool() {
+	insertPoolOnce.Do(func() {
+		pt := paramtable.Get()
+		size := insertPoolSize()
+		pool := conc.NewPool[struct{}](size)
+		insertPool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.MutatePoolSizeFactor.Key, config.NewHandler("qn.insertpool.sizefactor", ResizeInsertPool))
+		// Reconcile a config update between the initial size read and watcher registration.
+		currentSize := insertPoolSize()
+		if currentSize != size {
+			resizePool(pool, currentSize, "InsertPool")
+		}
+		mlog.Info(context.TODO(), "init insertPool done", mlog.Int("size", size))
+	})
+}
+
 func initBFApplyPool() {
 	bfApplyOnce.Do(func() {
 		pt := paramtable.Get()
@@ -243,6 +269,12 @@ func GetMutatePool() *conc.Pool[any] {
 	return mutatePool.Load()
 }
 
+// GetInsertPool returns the singleton pool for ProcessInsert fan-out.
+func GetInsertPool() *conc.Pool[struct{}] {
+	initInsertPool()
+	return insertPool.Load()
+}
+
 func ResizeSQPool(evt *config.Event) {
 	if evt.HasUpdated {
 		pt := paramtable.Get()
@@ -275,6 +307,12 @@ func ResizeMutatePool(evt *config.Event) {
 	}
 }
 
+func ResizeInsertPool(evt *config.Event) {
+	if evt.HasUpdated {
+		resizePool(GetInsertPool(), insertPoolSize(), "InsertPool")
+	}
+}
+
 func ResizeDynamicPool(evt *config.Event) {
 	if evt.HasUpdated {
 		resizePool(GetDynamicPool(), dynamicPoolSize(), "DynamicPool")
@@ -304,6 +342,7 @@ func CollectPoolStats() []metrics.PoolStats {
 		{"DynamicPool", GetDynamicPool()},
 		{"LoadPool", GetLoadPool()},
 		{"MutatePool", GetMutatePool()},
+		{"InsertPool", GetInsertPool()},
 		{"BFApplyPool", GetBFApplyPool()},
 		{"DeletePool", GetDeletePool()},
 	}
