@@ -140,6 +140,53 @@ func ValidateAlterSchemaAddFunctionPlan(plan *AlterSchemaAddPlan) error {
 	}
 }
 
+// ValidateAddFunctionBackfillConfig rejects adding a function to an existing
+// collection unless the storage and compaction paths that materialize its
+// output for pre-existing sealed segments are enabled. New writes compute the
+// function output at flush, so this guard applies only to add_function_field:
+//   - Compaction must be enabled so the backfill infrastructure is running.
+//   - StorageV3 is required because schema-version bump works only on V3 segments.
+//   - schema-version bump compaction backfills pre-existing V3 segments.
+//   - storage-version compaction upgrades pre-existing V2 segments before backfill.
+func ValidateAddFunctionBackfillConfig(compactionEnabled, storageV3Enabled, bumpSchemaVersionEnabled, storageVersionEnabled bool) error {
+	if !compactionEnabled {
+		return merr.WrapErrServiceUnavailableMsg("adding a function field requires compaction; enable dataCoord.enableCompaction")
+	}
+	if !storageV3Enabled {
+		return merr.WrapErrServiceUnavailableMsg("adding a function field requires StorageV3; enable common.storage.useLoonFFI")
+	}
+	if !bumpSchemaVersionEnabled {
+		return merr.WrapErrServiceUnavailableMsg("adding a function field requires schema-bump compaction to backfill existing segments; enable dataCoord.compaction.bumpSchemaVersion.enabled")
+	}
+	if !storageVersionEnabled {
+		return merr.WrapErrServiceUnavailableMsg("adding a function field requires the storage-version upgrade compaction; enable dataCoord.compaction.storageVersion.enabled")
+	}
+	return nil
+}
+
+// ValidateAddFunctionInputNotText rejects BM25/MinHash backfill from TEXT
+// fields because existing TEXT values are stored as binary LOB references.
+func ValidateAddFunctionInputNotText(schema *schemapb.CollectionSchema, function *schemapb.FunctionSchema) error {
+	switch function.GetType() {
+	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
+	default:
+		return nil
+	}
+
+	fieldByName := make(map[string]*schemapb.FieldSchema, len(schema.GetFields()))
+	for _, field := range schema.GetFields() {
+		fieldByName[field.GetName()] = field
+	}
+	for _, inputFieldName := range function.GetInputFieldNames() {
+		if field, ok := fieldByName[inputFieldName]; ok && field.GetDataType() == schemapb.DataType_Text {
+			return merr.WrapErrParameterInvalidMsg(
+				"adding a %s function with a TEXT input field (%s) is not supported: its output cannot be backfilled into existing segments; use a VARCHAR input field",
+				function.GetType().String(), inputFieldName)
+		}
+	}
+	return nil
+}
+
 func validateAddFunctionFieldAllowed(function *schemapb.FunctionSchema) error {
 	switch function.GetType() {
 	case schemapb.FunctionType_BM25, schemapb.FunctionType_MinHash:
