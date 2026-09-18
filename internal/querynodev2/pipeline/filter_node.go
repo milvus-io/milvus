@@ -170,15 +170,26 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		if header.GetCollectionId() != fNode.collectionID {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
-		// One broadcast reaches every vchannel of the collection, and only the
-		// source's replica is a fence. A target's replica is its genesis: its
-		// child would front itself. A bystander's replica concerns it not at all:
-		// fronting the targets from there would return their rows through a
-		// second parent. Both pass through as no-ops.
-		if role := message.SplitShardRoleOf(header, fNode.channel); role != message.SplitShardRoleSource {
-			mlog.Debug(context.TODO(), "shard-split replica is not a fence on this vchannel, nothing to spawn",
+		// The broadcast reaches the source, the targets and the control channel,
+		// and only the source's replica is a fence. A target's replica is its
+		// genesis: its child would front itself, so it passes through as a no-op.
+		// Any other vchannel was never a destination of the broadcast; a replica
+		// there is a misroute and must not spawn either, since fronting the
+		// targets from a second parent would return their rows twice.
+		switch role := message.SplitShardRoleOf(header, fNode.channel); role {
+		case message.SplitShardRoleSource:
+		case message.SplitShardRoleTarget:
+			mlog.Debug(msg.TraceCtx(), "shard-split genesis replica on a target vchannel, nothing to spawn",
 				mlog.Int64("collectionID", header.GetCollectionId()),
 				mlog.String("vchannel", fNode.channel),
+				mlog.Int64("splitTaskID", header.GetSplitTaskId()))
+			return nil
+		default:
+			mlog.RatedWarn(msg.TraceCtx(), rate.Every(10*time.Second), "shard-split replica on a vchannel the split does not name, ignored",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.String("vchannel", fNode.channel),
+				mlog.String("sourceVChannel", header.GetSourceVchannel()),
+				mlog.Strings("targetVChannels", header.GetTargetVchannels()),
 				mlog.Int64("splitTaskID", header.GetSplitTaskId()),
 				mlog.Int("role", int(role)))
 			return nil
@@ -187,11 +198,11 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 		// because its absence is indistinguishable, in every other log, from a
 		// split whose targets simply have no traffic — and the whole fronting
 		// window depends on this line being reached.
-		mlog.Info(context.TODO(), "source vchannel consumed its shard-split fence",
+		mlog.Info(msg.TraceCtx(), "source vchannel consumed its shard-split fence",
 			mlog.Int64("collectionID", header.GetCollectionId()),
 			mlog.String("vchannel", fNode.channel),
 			mlog.Int64("splitTaskID", header.GetSplitTaskId()),
-			mlog.Int("targets", len(header.GetTargetVchannels())))
+			mlog.Strings("targetVChannels", header.GetTargetVchannels()))
 		if err := fNode.delegator.ProcessSplitShard(context.Background(), header.GetTargetVchannels()); err != nil {
 			// Logged here, above Debug: Operate logs every filtrate error at Debug,
 			// which hides a fence that cannot be fronted. The targets stay pending
