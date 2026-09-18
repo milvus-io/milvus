@@ -197,6 +197,10 @@ var (
 
 	LevelPrioritizer Prioritizer = func(task CompactionTask) int {
 		switch task.GetTaskProto().GetType() {
+		case datapb.CompactionType_HashSplitCompaction:
+			// A shard split's rewrite runs while its source is frozen for every
+			// other compaction, and the split cannot finish without it.
+			return 0
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 1
 		case datapb.CompactionType_MixCompaction:
@@ -212,6 +216,10 @@ var (
 
 	MixFirstPrioritizer Prioritizer = func(task CompactionTask) int {
 		switch task.GetTaskProto().GetType() {
+		case datapb.CompactionType_HashSplitCompaction:
+			// A shard split's rewrite runs while its source is frozen for every
+			// other compaction, and the split cannot finish without it.
+			return 0
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
 		case datapb.CompactionType_MixCompaction:
