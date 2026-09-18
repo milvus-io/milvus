@@ -295,8 +295,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// startBroadcastWithCollectionID describes the collection before and after locking.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},

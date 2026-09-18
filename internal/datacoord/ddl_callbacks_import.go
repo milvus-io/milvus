@@ -300,7 +300,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, lockedCollection, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, coll, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -316,13 +316,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
 	}
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return 0, false, err
-	}
-	if lockedCollection.GetDbName() != coll.GetDbName() || lockedCollection.GetCollectionName() != coll.GetCollectionName() {
-		return 0, false, merr.WrapErrServiceUnavailableMsg("collection metadata changed while acquiring import resource keys")
-	}
 	if schema == nil || coll.GetSchema() == nil {
 		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema is unavailable during import admission")
 	}
