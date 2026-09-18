@@ -119,8 +119,7 @@ func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 	}
 
 	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
-	route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), it.insertMsg.GetCollectionName(), it.collectionID,
-		func() ([]string, error) { return it.chMgr.GetVChannels(it.collectionID) })
+	route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), it.insertMsg.GetCollectionName(), it.collectionID)
 	if err != nil {
 		log.Warn(ctx, "get vChannels for idempotent autoID assignment failed",
 			mlog.Int64("collectionID", it.collectionID),

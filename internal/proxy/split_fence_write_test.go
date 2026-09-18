@@ -105,10 +105,7 @@ type splitFenceFixture struct {
 	// staleRefreshes is how many evictions still re-describe the pre-split
 	// routing: the fence lands before the routing commit.
 	staleRefreshes int
-	// channelErr fails every channel-list read from failChannelReadAt on.
-	channelErr        error
-	failChannelReadAt int
-	channelReads      int
+	channelReads   int
 	// infoErr fails every describe of the collection, partitionErr every
 	// partition lookup.
 	infoErr      error
@@ -160,9 +157,6 @@ func (f *splitFenceFixture) routing() *collectionInfo {
 func (f *splitFenceFixture) chMgr() channelmgr.ChannelsMgr {
 	return channelmgr.NewChannelsMgr(func(typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
 		f.channelReads++
-		if f.failChannelReadAt > 0 && f.channelReads >= f.failChannelReadAt {
-			return channelmgr.ChannelInfo{}, f.channelErr
-		}
 		info := f.routing()
 		return channelmgr.ChannelInfo{VChans: info.VChannels, PChans: info.PChannels}, nil
 	})
@@ -660,21 +654,6 @@ func TestInsertExecuteReportsARoutingReadFailureWithoutAppending(t *testing.T) {
 	assert.Zero(t, f.evictions)
 }
 
-func TestInsertExecuteReportsAChannelReadFailureOnRetry(t *testing.T) {
-	useSingleMessageRepack(t)
-	pre, post := oneShardSplit()
-	f := newSplitFenceFixture(t, pre, post)
-	f.staleRefreshes = 1
-	f.channelErr = errors.New("channels unavailable")
-	f.failChannelReadAt = 2 // the first attempt's read succeeds, the retry's fails
-	wal := installSplitFenceTestWAL(t, splitSource)
-	task := f.insertTask(seqPKs(4))
-
-	assert.ErrorContains(t, task.Execute(context.Background()), "channels unavailable")
-	assert.Contains(t, task.result.GetStatus().GetReason(), "channels unavailable")
-	assert.Len(t, wal.batches, 1)
-}
-
 // A collection with a routing modulus has been split; the legacy modulo over
 // its grown channel list places rows on shards that do not own them. Without a
 // routing table -- malformed meta the cache refused to derive -- the write is
@@ -931,19 +910,6 @@ func TestDeleteExecuteReportsARoutingReadFailure(t *testing.T) {
 	assert.Empty(t, wal.batches)
 }
 
-func TestDeleteExecuteReportsAChannelReadFailureOnRetry(t *testing.T) {
-	pre, post := oneShardSplit()
-	f := newSplitFenceFixture(t, pre, post)
-	f.staleRefreshes = 1
-	f.channelErr = errors.New("channels unavailable")
-	f.failChannelReadAt = 1 // a delete reads its channels again only on a retry
-	wal := installSplitFenceTestWAL(t, splitSource)
-
-	err := f.deleteTask(seqPKs(4)).Execute(context.Background())
-	assert.ErrorContains(t, err, "channels unavailable")
-	assert.Len(t, wal.batches, 1)
-}
-
 // A delete task that resolved its channels before the routing commit still
 // routes a split collection by the list its table was derived from.
 func TestDeleteExecuteRoutesASplitCollectionByTheListOfItsTable(t *testing.T) {
@@ -1126,9 +1092,9 @@ func TestInsertExecuteReportsAKeyReusedWithADifferentPayload(t *testing.T) {
 	assert.Empty(t, wal.insertedRowIDs[splitSource])
 }
 
-// A never-split collection's first attempt keeps the channel list PreExecute
-// resolved.
-func TestInsertExecuteKeepsTheChannelsPreExecuteResolved(t *testing.T) {
+// A never-split collection routes by the channel list of its routing lookup;
+// the channel manager is not read a second time.
+func TestInsertExecuteReadsNoSecondChannelList(t *testing.T) {
 	useSingleMessageRepack(t)
 	pre, _ := twoShardSplit()
 	f := newSplitFenceFixture(t, pre, pre)
@@ -1191,4 +1157,42 @@ func TestDeleteExecuteReportsARepackFailureWithoutAppending(t *testing.T) {
 	err := f.deleteTask(seqPKs(4)).Execute(context.Background())
 	assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	assert.Empty(t, wal.batches)
+}
+
+// staleVerdictChMgr is a channel manager whose read already sees the committed
+// routing while the cache lookup that decided "never split" did not.
+func staleVerdictChMgr(post *collectionInfo) channelmgr.ChannelsMgr {
+	return channelmgr.NewChannelsMgr(func(typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
+		return channelmgr.ChannelInfo{VChans: post.VChannels, PChans: post.PChannels}, nil
+	})
+}
+
+// The never-split verdict and the channel list must come from one cache
+// lookup: a routing commit landing between two lookups would run the legacy
+// modulo over the grown list.
+func TestInsertExecuteTakesTheLegacyChannelListFromTheRoutingLookup(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := twoShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := installSplitFenceTestWAL(t, splitSource)
+	pks := seqPKs(16)
+	task := f.insertTask(pks)
+	task.chMgr = staleVerdictChMgr(post)
+
+	require.NoError(t, task.Execute(context.Background()))
+	require.True(t, merr.Ok(task.result.GetStatus()), task.result.GetStatus().GetReason())
+	assertRowsLandedOnceOnTheirOwner(t, wal, post, pks, 1)
+}
+
+func TestDeleteExecuteTakesTheLegacyChannelListFromTheRoutingLookup(t *testing.T) {
+	pre, post := twoShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	f.staleRefreshes = 1
+	wal := installSplitFenceTestWAL(t, splitSource)
+	pks := seqPKs(16)
+	task := f.deleteTask(pks)
+	task.chMgr = staleVerdictChMgr(post)
+
+	require.NoError(t, task.Execute(context.Background()))
+	assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
 }

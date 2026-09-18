@@ -233,18 +233,17 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testi
 		},
 	})
 	require.NoError(t, err)
-	cache := newInsertTaskIdempotencyMockCache(t, schema, true)
-	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	// The stored vchannel order follows pchannel load at allocation time, so it is
 	// not lexicographic; the insert must route against it verbatim.
 	storedChannels := []string{"ch2", "ch0", "ch1"}
+	cache := newInsertTaskIdempotencyMockCache(t, schema, true, storedChannels...)
+	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 
 	var firstRowIDs []int64
 	var firstRoutes []string
 	var firstKey string
 	for idx := 0; idx < 2; idx++ {
 		chMgr := channelmgr.NewMockChannelsMgr(t)
-		chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(slices.Clone(storedChannels), nil)
 		task := newInsertTaskForIdempotencyAutoIDTest(cache, idAllocator, chMgr)
 
 		require.NoError(t, task.PreExecute(ctx))
@@ -318,9 +317,8 @@ func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(
 		AutoID:       true,
 	}
 	chMgr := channelmgr.NewMockChannelsMgr(t)
-	chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(slices.Clone(channels), nil)
 	task := insertTask{
-		baseTask:           baseTask{MetaCache: neverSplitRoutingCache(t)},
+		baseTask:           baseTask{MetaCache: neverSplitRoutingCache(t, channels...)},
 		ctx:                ctx,
 		collectionID:       100,
 		idAllocator:        idAllocator,

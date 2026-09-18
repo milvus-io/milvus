@@ -552,10 +552,11 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 // coordinator to describe with.
 type neverSplitTestMetaCache struct {
 	*MetaCache
+	vchannels []string
 }
 
 func (c *neverSplitTestMetaCache) GetCollectionInfo(context.Context, string, string, int64) (*collectionInfo, error) {
-	return &collectionInfo{}, nil
+	return &collectionInfo{VChannels: c.vchannels}, nil
 }
 
 func createTestUpdateTask() *upsertTask {
@@ -825,6 +826,9 @@ var partialUpdateCASTestVChannels = []string{
 }
 
 func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
+	if cache, ok := task.MetaCache.(*neverSplitTestMetaCache); ok {
+		cache.vchannels = vchannels
+	}
 	task.chMgr = channelmgr.NewChannelsMgr(func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
 		vchans := make([]string, 0, len(vchannels))
 		pchans := make([]string, 0, len(vchannels))
@@ -1500,7 +1504,7 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			defer collectionPatch.UnPatch()
 
-			infoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{}, nil).Build()
+			infoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{VChannels: partialUpdateCASTestVChannels[:1]}, nil).Build()
 			defer infoPatch.UnPatch()
 
 			primaryPatch := mockey.Mock(repackInsertDataForStreamingService).
@@ -1634,7 +1638,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{Schema: task.schema}, nil).Build()
+	m = mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{Schema: task.schema, VChannels: partialUpdateCASTestVChannels}, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*MetaCache).GetCollectionSchema).Return(task.schema, nil).Build()
 	defer m.UnPatch()
@@ -7297,7 +7301,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			}
 			patch(validateAndNormalizeFieldDataValidData, failure("valid_data"))
 			patch((*MetaCache).GetCollectionID, int64(1001), nil)
-			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, failure("collection_info"))
+			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema, VChannels: partialUpdateCASTestVChannels}, failure("collection_info"))
 			patch((*MetaCache).GetCollectionSchema, task.schema, failure("schema"))
 			patch(validateTextStorageV3Enabled, failure("text_storage"))
 			implicit := stage == "implicit_partial_namespace"

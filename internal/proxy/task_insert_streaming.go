@@ -66,15 +66,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	var mergeErr, packErr error
 	attempt := 0
 	appendErr := retry.Handle(ctx, func() (bool, error) {
-		legacyChannels := func() ([]string, error) {
-			// The first attempt keeps the channel list PreExecute resolved; a
-			// retry follows the refreshed cache.
-			if attempt == 0 && len(it.vChannels) > 0 {
-				return it.vChannels, nil
-			}
-			return it.chMgr.GetVChannels(collID)
-		}
-		route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), collectionName, collID, legacyChannels)
+		route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), collectionName, collID)
 		attempt++
 		if err != nil {
 			mlog.Warn(ctx, "resolve the write route failed", mlog.FieldCollectionID(collID), mlog.Err(err))

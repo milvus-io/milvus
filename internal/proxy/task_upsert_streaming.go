@@ -220,8 +220,7 @@ func (ut *upsertTask) partialUpdateFenceRefusal(ctx context.Context, resp stream
 
 // writeRoute reads the route of one upsert attempt.
 func (ut *upsertTask) writeRoute(ctx context.Context) (*writeRoute, error) {
-	return resolveWriteRoute(ctx, ut.GetMetaCache(), ut.req.GetDbName(), ut.req.GetCollectionName(), ut.collectionID,
-		func() ([]string, error) { return ut.chMgr.GetVChannels(ut.collectionID) })
+	return resolveWriteRoute(ctx, ut.GetMetaCache(), ut.req.GetDbName(), ut.req.GetCollectionName(), ut.collectionID)
 }
 
 // deletePrimaryKeys returns the keys the upsert's delete half tombstones:
@@ -395,9 +394,6 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 // reading. Strong reads bind their actual snapshots after the query succeeds.
 func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	ut.partialUpdateCASGroups = nil
-	if ut.chMgr == nil {
-		return merr.WrapErrServiceInternalMsg("partial update channel manager is unavailable")
-	}
 	route, err := ut.writeRoute(ctx)
 	if err != nil {
 		return err

@@ -57,15 +57,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	pending := newPendingRows(typeutil.GetSizeOfIDs(dt.primaryKeys), fence)
 	attempt := 0
 	err = retry.Handle(ctx, func() (bool, error) {
-		legacyChannels := func() ([]string, error) {
-			// The first attempt keeps the channel list the runner resolved; a
-			// retry follows the refreshed cache.
-			if attempt == 0 && len(dt.vChannels) > 0 {
-				return dt.vChannels, nil
-			}
-			return dt.chMgr.GetVChannels(dt.collectionID)
-		}
-		route, err := resolveWriteRoute(ctx, dt.GetMetaCache(), dt.req.GetDbName(), dt.req.GetCollectionName(), dt.collectionID, legacyChannels)
+		route, err := resolveWriteRoute(ctx, dt.GetMetaCache(), dt.req.GetDbName(), dt.req.GetCollectionName(), dt.collectionID)
 		attempt++
 		if err != nil {
 			return false, err

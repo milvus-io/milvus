@@ -84,12 +84,13 @@ func splitCollectionInfo(collectionID int64, modulus uint64, vchannels []string,
 	}
 }
 
-// neverSplitRoutingCache is a cache whose collections have never been split,
-// for write-path tests that are not about routing: the write path reads the
-// collection's routing on every attempt.
-func neverSplitRoutingCache(t *testing.T) *MockCache {
+// neverSplitRoutingCache is a cache whose collections have never been split
+// and have vchannels, for write-path tests that are not about routing: the
+// write path reads the collection's routing and channels on every attempt.
+func neverSplitRoutingCache(t *testing.T, vchannels ...string) *MockCache {
 	cache := NewMockCache(t)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(&collectionInfo{VChannels: vchannels}, nil).Maybe()
 	return cache
 }
 
@@ -289,22 +290,19 @@ func TestResolveWriteRoute(t *testing.T) {
 	legacyInfo := splitCollectionInfo(1, 0, []string{"v0", "v1"})
 	cache := NewMockCache(t)
 
-	t.Run("never split keeps the legacy channel list", func(t *testing.T) {
+	t.Run("never split routes by the channel list of the same lookup", func(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(legacyInfo, nil).Once()
-		route, err := resolveWriteRoute(ctx, cache, "db", "c", 1, func() ([]string, error) { return []string{"x", "y"}, nil })
+		route, err := resolveWriteRoute(ctx, cache, "db", "c", 1)
 		require.NoError(t, err)
 		assert.False(t, route.split())
-		assert.Equal(t, []string{"x", "y"}, route.vchannels)
-		assert.Equal(t, []string{"x", "y"}, route.writable)
+		assert.Equal(t, []string{"v0", "v1"}, route.vchannels)
+		assert.Equal(t, []string{"v0", "v1"}, route.writable)
 		assert.Empty(t, route.fenced)
 	})
 
 	t.Run("a split collection routes by the list its table was derived from", func(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(twoShardSplitInfo(), nil).Once()
-		route, err := resolveWriteRoute(ctx, cache, "db", "c", 1, func() ([]string, error) {
-			t.Fatal("the legacy channel list is not read for a split collection")
-			return nil, nil
-		})
+		route, err := resolveWriteRoute(ctx, cache, "db", "c", 1)
 		require.NoError(t, err)
 		assert.True(t, route.split())
 		assert.Equal(t, []string{"v0", "v1", "v2", "v3"}, route.vchannels)
@@ -314,16 +312,16 @@ func TestResolveWriteRoute(t *testing.T) {
 
 	t.Run("errors", func(t *testing.T) {
 		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(nil, errors.New("describe failed")).Once()
-		_, err := resolveWriteRoute(ctx, cache, "db", "c", 1, nil)
+		_, err := resolveWriteRoute(ctx, cache, "db", "c", 1)
 		assert.ErrorContains(t, err, "describe failed")
 
-		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(legacyInfo, nil).Once()
-		_, err = resolveWriteRoute(ctx, cache, "db", "c", 1, func() ([]string, error) { return nil, errors.New("channels failed") })
-		assert.ErrorContains(t, err, "channels failed")
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(&collectionInfo{}, nil).Once()
+		_, err = resolveWriteRoute(ctx, cache, "db", "c", 1)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal, "a collection always has a vchannel")
 
 		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(
 			splitCollectionInfo(1, 4, []string{"v0"}, splitShardInfo(schemapb.ShardState_ShardNormal, "v0", 0)), nil).Once()
-		_, err = resolveWriteRoute(ctx, cache, "db", "c", 1, nil)
+		_, err = resolveWriteRoute(ctx, cache, "db", "c", 1)
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
 	})
 }
