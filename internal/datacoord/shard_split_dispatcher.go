@@ -119,6 +119,12 @@ func (d *inspectorRewriteDispatcher) DispatchHashSplit(task *datapb.SplitShardTa
 		return 0, merr.WrapErrServiceInternalMsg(
 			"refuse to rewrite segment %d for shard split %d: the task does not name two target vchannels", segmentID, task.GetTaskId())
 	}
+	// The rewrite drops the rows the collection's TTL expired, as every other
+	// compaction of the collection does.
+	collectionTTL, err := common.GetCollectionTTLFromMap(collection.Properties)
+	if err != nil {
+		return 0, merr.WrapErrServiceInternalErr(err, "read the TTL of collection %d to rewrite segment %d", task.GetCollectionId(), segmentID)
+	}
 
 	planID, err := d.alloc.AllocID(d.ctx)
 	if err != nil {
@@ -133,13 +139,14 @@ func (d *inspectorRewriteDispatcher) DispatchHashSplit(task *datapb.SplitShardTa
 	}
 	now := time.Now().Unix()
 	plan := &datapb.CompactionTask{
-		PlanID:       planID,
-		TriggerID:    task.GetTaskId(),
-		State:        datapb.CompactionTaskState_pipelining,
-		StartTime:    now,
-		Type:         datapb.CompactionType_HashSplitCompaction,
-		CollectionID: task.GetCollectionId(),
-		PartitionID:  segment.GetPartitionID(),
+		PlanID:        planID,
+		TriggerID:     task.GetTaskId(),
+		State:         datapb.CompactionTaskState_pipelining,
+		StartTime:     now,
+		CollectionTtl: collectionTTL.Nanoseconds(),
+		Type:          datapb.CompactionType_HashSplitCompaction,
+		CollectionID:  task.GetCollectionId(),
+		PartitionID:   segment.GetPartitionID(),
 		// The plan runs on the SOURCE channel: that is where its input lives.
 		// Its outputs are put on the targets through HashSplitTargets.
 		Channel:                segment.GetInsertChannel(),

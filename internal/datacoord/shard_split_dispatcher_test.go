@@ -19,11 +19,13 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -286,4 +288,32 @@ func TestDispatcherPlanStateLookup(t *testing.T) {
 	done, running, _ = d.forTask(hashTaskID + 1).HashSplitPlanState(555)
 	assert.False(t, done)
 	assert.False(t, running)
+}
+
+// The rewrite drops rows the collection's TTL expired, the way every other
+// compaction of the collection does.
+func TestDispatcherCarriesTheCollectionTTL(t *testing.T) {
+	t.Run("a collection TTL", func(t *testing.T) {
+		d, inspector, _, m := newTestRewriteDispatcher(t, []int64{301})
+		m.GetCollection(splitMgrCollection).Properties = map[string]string{common.CollectionTTLConfigKey: "3600"}
+		_, err := d.DispatchHashSplit(newHashTask(nil), 301)
+		require.NoError(t, err)
+		require.Len(t, inspector.enqueued, 1)
+		assert.Equal(t, time.Hour.Nanoseconds(), inspector.enqueued[0].GetCollectionTtl())
+	})
+
+	t.Run("no collection TTL", func(t *testing.T) {
+		d, inspector, _, _ := newTestRewriteDispatcher(t, []int64{301})
+		_, err := d.DispatchHashSplit(newHashTask(nil), 301)
+		require.NoError(t, err)
+		assert.EqualValues(t, -1, inspector.enqueued[0].GetCollectionTtl())
+	})
+
+	t.Run("an unparsable collection TTL", func(t *testing.T) {
+		d, inspector, _, m := newTestRewriteDispatcher(t, []int64{301})
+		m.GetCollection(splitMgrCollection).Properties = map[string]string{common.CollectionTTLConfigKey: "soon"}
+		_, err := d.DispatchHashSplit(newHashTask(nil), 301)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Empty(t, inspector.enqueued)
+	})
 }
