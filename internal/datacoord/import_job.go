@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ImportJobFilter func(job ImportJob) bool
@@ -65,8 +66,27 @@ type UpdateJobAction func(job ImportJob)
 
 const importJobReasonAbortedByUser = "aborted by user"
 
+// UnfailableJobStates are the committed states: the commit fence is out and
+// HandleCommitVchannel may already have made segments visible, so failing the
+// job would drop committed data.
+var UnfailableJobStates = typeutil.NewSet(
+	internalpb.ImportJobState_Committing,
+	internalpb.ImportJobState_Completed,
+)
+
+// isIllegalJobTransition reports whether moving job to state must be refused.
+func isIllegalJobTransition(job ImportJob, state internalpb.ImportJobState) bool {
+	return state == internalpb.ImportJobState_Failed && UnfailableJobStates.Contain(job.GetState())
+}
+
 func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
+		if isIllegalJobTransition(job, state) {
+			mlog.Warn(context.TODO(), "refused illegal import job state transition",
+				mlog.FieldJobID(job.GetJobID()),
+				mlog.String("from", job.GetState().String()), mlog.String("to", state.String()))
+			return
+		}
 		job.(*importJob).State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
 			// releases requested disk resource
