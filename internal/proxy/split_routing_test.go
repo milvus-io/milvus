@@ -327,3 +327,39 @@ func TestResolveWriteRoute(t *testing.T) {
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
 	})
 }
+
+// A route places rows by the table's modulus once the collection is split, by
+// the shard count before.
+func TestWriteRouteModulus(t *testing.T) {
+	assert.EqualValues(t, 3, legacyWriteRoute([]string{"a", "b", "c"}).modulus())
+	info := twoShardSplitInfo()
+	assert.EqualValues(t, 4, newSplitWriteRoute(info.VChannels, info.SplitRouting).modulus())
+}
+
+// The id of row offset i has residue i % M, so offset i lands on the shard
+// owning residue i % M -- and a split, which only refines residues, leaves the
+// offsets of the shards it did not touch where they were.
+func TestReassignAutoIDByResidueBucketsEveryOffsetByItsResidue(t *testing.T) {
+	info := twoShardSplitInfo()
+	route := newSplitWriteRoute(info.VChannels, info.SplitRouting)
+	rowIDs := make([]int64, 40)
+	next := int64(1 << 20)
+	alloc := func(count uint32) (int64, int64, error) {
+		begin := next
+		next += int64(count)
+		return begin, next, nil
+	}
+	require.NoError(t, reassignAutoIDByResidue(rowIDs, schemapb.DataType_Int64, route.modulus(), 0, alloc))
+	residues, err := routing.PKResidues(int64IDs(rowIDs...), route.modulus())
+	require.NoError(t, err)
+	for i, residue := range residues {
+		assert.EqualValues(t, uint64(i)%route.modulus(), residue, "offset %d", i)
+		owner, _ := route.table.Lookup(residue)
+		legacyOwner := []string{"v0", "v1"}[i%2]
+		if legacyOwner == "v1" {
+			assert.Equal(t, "v1", owner, "the untouched shard keeps offset %d", i)
+		} else {
+			assert.Contains(t, []string{"v2", "v3"}, owner, "the split shard's offset %d goes to a target", i)
+		}
+	}
+}

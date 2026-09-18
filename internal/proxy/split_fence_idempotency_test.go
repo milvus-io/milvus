@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -261,4 +262,49 @@ func TestKeyedInsertReportsAProbeAnswerForADifferentPayload(t *testing.T) {
 	require.NoError(t, task.Execute(context.Background()))
 	st := task.result.GetStatus()
 	assert.Equal(t, merr.Code(merr.ErrParameterInvalid), st.GetCode(), st.GetReason())
+}
+
+// drawAutoIDs draws n auto ids the way an idempotent auto-id insert does for
+// route, from the id space starting at base.
+func drawAutoIDs(t *testing.T, n int, base int64, route *writeRoute) []int64 {
+	t.Helper()
+	ids := make([]int64, n)
+	next := base
+	for i := range ids {
+		ids[i] = next
+		next++
+	}
+	alloc := func(count uint32) (int64, int64, error) {
+		begin := next
+		next += int64(count)
+		return begin, next, nil
+	}
+	require.NoError(t, reassignAutoIDByResidue(ids, schemapb.DataType_Int64, route.modulus(), 0, alloc))
+	return ids
+}
+
+// An idempotent auto-id insert acked before a split's routing is visible, and
+// retried by the client after it with re-drawn ids: the untouched sibling keeps
+// exactly the offsets it holds, the source answers for its own, and no row
+// lands twice.
+func TestKeyedAutoIDInsertRetriedAcrossASplitKeepsEveryOffsetOnItsShard(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := twoShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := installSplitFenceTestWAL(t)
+	const n = 12
+
+	first := f.keyedInsertTask(drawAutoIDs(t, n, 1000, legacyWriteRoute(pre.VChannels)), "auto-key")
+	require.NoError(t, first.Execute(context.Background()))
+	require.NotEmpty(t, wal.insertedRowIDs[splitSource])
+	require.NotEmpty(t, wal.insertedRowIDs[splitSibling])
+
+	wal.fenced[splitSource] = struct{}{}
+	f.committed = true
+
+	retry := f.keyedInsertTask(drawAutoIDs(t, n, 50000, newSplitWriteRoute(post.VChannels, post.SplitRouting)), "auto-key")
+	require.NoError(t, retry.Execute(context.Background()))
+	require.True(t, merr.Ok(retry.result.GetStatus()), retry.result.GetStatus().GetReason())
+	assertEveryRowLandedOnce(t, wal, n)
+	assert.Equal(t, first.result.GetIDs().GetIntId().GetData(), retry.result.GetIDs().GetIntId().GetData())
 }

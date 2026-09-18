@@ -127,9 +127,7 @@ func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 			mlog.Err(err))
 		return err
 	}
-	// A split collection buckets over the shards that own a residue: a fenced
-	// source owns none, so no candidate id would ever fill its bucket.
-	if err := it.reassignAutoIDForStableIdempotency(primaryFieldSchema, route.writable, route.table); err != nil {
+	if err := it.reassignAutoIDForStableIdempotency(primaryFieldSchema, route); err != nil {
 		log.Warn(ctx, "stabilize idempotent autoID assignment failed", mlog.Err(err))
 		return err
 	}
