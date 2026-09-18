@@ -707,6 +707,9 @@ func (s *Server) initCompaction() {
 		// A split freezes compaction on its source and targets until it is Done,
 		// and preempts what is already compacting its source.
 		cph.setChannelSplittingChecker(s.shardSplitManager.IsVChannelSplitting)
+		// Except the sort of a rewrite output on a target, so it is indexed
+		// inside the window.
+		cph.setChannelSplitTargetChecker(s.shardSplitManager.IsVChannelSplitTarget)
 		s.shardSplitManager.setCompactionPreempter(cph)
 		// A split redistributes its source by rewrite plans the inspector runs.
 		s.shardSplitManager.setRedistributor(newHashSplitRewriter(s.shardSplitManager,

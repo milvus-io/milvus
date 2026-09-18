@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -31,12 +32,16 @@ import (
 // and its targets take no compaction but the split's own rewrite: a
 // compaction on the source would replace the segments the rewrite reads and
 // fold the source's L0 deletes into L1 behind its back, and one on a target
-// would replace rewrite outputs the source's view presents, before the
-// cross-channel lineage and the index fallback on targets are tested. Every
+// would replace segments a child delegator tells apart by id. Every
 // compaction path -- mix, L0, clustering, sort, manual, an import's sort step
 // -- funnels through enqueueCompaction, which is the single freeze point, and
 // a compaction already running on the source when the split starts is
 // preempted (preemptTasksByChannel).
+//
+// One compaction on a target is let through: the sort of a rewrite output
+// (exemptFromSplitFreeze). An output of an unsorted input is published
+// unsorted, and the index and stats inspectors skip an unsorted segment, so
+// frozen it would be served brute-force from raw vectors for the whole window.
 
 // compactionPreempter kills the queued and executing compactions of a
 // channel; implemented by the compaction inspector.
@@ -47,6 +52,12 @@ type compactionPreempter interface {
 // setChannelSplittingChecker installs the freeze predicate.
 func (c *compactionInspector) setChannelSplittingChecker(checker func(channel string) bool) {
 	c.isChannelSplitting = checker
+}
+
+// setChannelSplitTargetChecker installs the predicate that tells a split's
+// targets from its source (shardSplitManager.IsVChannelSplitTarget).
+func (c *compactionInspector) setChannelSplitTargetChecker(checker func(channel string) bool) {
+	c.isChannelSplitTarget = checker
 }
 
 // exemptFromSplitFreeze reports whether a compaction may run on a splitting
@@ -61,16 +72,58 @@ func (c *compactionInspector) setChannelSplittingChecker(checker func(channel st
 // until the import finishes, and the split cannot finish before the import
 // does -- its drain waits for every unfinished import on the source. Frozen,
 // the import would never leave its sort step and the split would never drain.
+//
+// So is the sort of rewrite outputs on a target (sortsRewriteOutputsOnTarget).
 func (c *compactionInspector) exemptFromSplitFreeze(task *datapb.CompactionTask) bool {
-	if task.GetType() == datapb.CompactionType_HashSplitCompaction {
+	switch task.GetType() {
+	case datapb.CompactionType_HashSplitCompaction:
 		return true
+	case datapb.CompactionType_SortCompaction:
+		return c.allInputsAre(task, (*SegmentInfo).GetIsImporting) || c.sortsRewriteOutputsOnTarget(task)
+	default:
+		return false
 	}
-	if task.GetType() != datapb.CompactionType_SortCompaction || len(task.GetInputSegments()) == 0 {
+}
+
+// sortsRewriteOutputsOnTarget reports whether a sort runs on a split's target
+// over nothing but rewrite outputs.
+//
+// A rewrite output holds rows no target WAL ever carried, so no child
+// delegator holds a copy of it: it reaches the reads only through the
+// source's view, which takes in its sorted replacement and drops it at one
+// target version, exactly as an ordinary sort replaces a segment. A segment
+// flushed from a target WAL is different: the child consuming that WAL still
+// serves its rows as growing and skips them only by segment id once the
+// source serves them sealed, and a sort gives them a new id -- so it stays
+// frozen until Done.
+//
+// On a target, a compaction output is a rewrite output: nothing else compacts
+// there while the split is in flight, and the target did not exist before it.
+// An invisible one is a compaction's staging output, not a rewrite's, and is
+// not let through. A source is never a target here, even when it is a target
+// of an earlier split still in flight.
+func (c *compactionInspector) sortsRewriteOutputsOnTarget(task *datapb.CompactionTask) bool {
+	if c.isChannelSplitTarget == nil || !c.isChannelSplitTarget(task.GetChannel()) {
+		return false
+	}
+	return c.allInputsAre(task, isVisibleCompactionOutput)
+}
+
+// isVisibleCompactionOutput reports whether a segment was written by a
+// compaction and is visible.
+func isVisibleCompactionOutput(segment *SegmentInfo) bool {
+	return segment.GetCreatedByCompaction() && !segment.GetIsInvisible()
+}
+
+// allInputsAre reports whether the task has inputs and every one of them is a
+// healthy segment satisfying pred.
+func (c *compactionInspector) allInputsAre(task *datapb.CompactionTask, pred func(*SegmentInfo) bool) bool {
+	if len(task.GetInputSegments()) == 0 {
 		return false
 	}
 	for _, segmentID := range task.GetInputSegments() {
 		segment := c.meta.GetHealthySegment(context.TODO(), segmentID)
-		if segment == nil || !segment.GetIsImporting() {
+		if segment == nil || !pred(segment) {
 			return false
 		}
 	}
@@ -151,6 +204,24 @@ func (c *compactionInspector) preemptTasksByChannel(channel string) {
 // trigger's exclusion all read it, so all three last exactly until Done.
 func (m *shardSplitManager) IsVChannelSplitting(vchannel string) bool {
 	return m.hasActiveTaskOnVChannel(vchannel)
+}
+
+// IsVChannelSplitTarget reports whether a split task that is not Done or
+// Aborted names the vchannel as one of its targets and none names it as its
+// source. The compaction freeze lets the sort of a rewrite output through on
+// such a channel only.
+func (m *shardSplitManager) IsVChannelSplitTarget(vchannel string) bool {
+	target := false
+	for _, task := range m.store.list() {
+		if !isSplitShardTaskActive(task) {
+			continue
+		}
+		if slices.Contains(splitSourceVChannels(task), vchannel) {
+			return false
+		}
+		target = target || slices.Contains(splitTaskTargetVChannels(task), vchannel)
+	}
+	return target
 }
 
 // setCompactionPreempter wires the compaction inspector in.

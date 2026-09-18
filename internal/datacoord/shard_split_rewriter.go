@@ -463,6 +463,13 @@ func (m *shardSplitManager) rewriteInputIDs(vchannel string) []int64 {
 // rewrittenSourceSegments returns the source segment ids that have committed
 // rewrite outputs on the targets: an output records the segment it was
 // rewritten from in its compaction lineage (SegmentInfo.CompactionFrom).
+//
+// It is a lower bound. An output sorted on its target during the window is
+// replaced by a copy that names the output, not the source segment, and an
+// input whose rows were all deleted has no output at all. Both inputs are
+// Dropped by their rewrite's commit, so every reader of this set also treats
+// a segment that is no longer a rewrite input as done (planAlreadyCommitted,
+// forgetNonInputSegments), and neither is ever queued again.
 func (m *shardSplitManager) rewrittenSourceSegments(task *datapb.SplitShardTask) typeutil.Set[int64] {
 	out := typeutil.NewSet[int64]()
 	for _, target := range task.GetTargets() {

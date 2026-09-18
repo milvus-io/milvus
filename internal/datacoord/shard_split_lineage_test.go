@@ -76,6 +76,10 @@ type lineageSegment struct {
 	importing      bool
 	invisible      bool
 	startTs        uint64
+	// compacted marks a compaction output (CreatedByCompaction), sorted a
+	// segment sorted by pk.
+	compacted bool
+	sorted    bool
 }
 
 func (f *lineageFixture) add(t *testing.T, s lineageSegment) {
@@ -93,6 +97,7 @@ func (f *lineageFixture) add(t *testing.T, s lineageSegment) {
 		CompactionFrom: s.compactionFrom,
 		IsImporting:    s.importing,
 		IsInvisible:    s.invisible,
+		IsSorted:       s.sorted,
 		StartPosition:  &msgpb.MsgPosition{ChannelName: s.channel, MsgID: []byte{1}, Timestamp: s.startTs},
 		DmlPosition:    &msgpb.MsgPosition{ChannelName: s.channel, MsgID: []byte{1}, Timestamp: s.startTs + 1},
 		Binlogs: []*datapb.FieldBinlog{{
@@ -100,6 +105,7 @@ func (f *lineageFixture) add(t *testing.T, s lineageSegment) {
 			Binlogs: []*datapb.Binlog{{EntriesNum: 2048, LogID: s.id}},
 		}},
 	}
+	info.CreatedByCompaction = s.compacted
 	require.NoError(t, f.svr.meta.AddSegment(context.TODO(), NewSegmentInfo(info)))
 	if s.indexed {
 		require.NoError(t, f.svr.meta.indexMeta.AddSegmentIndex(context.TODO(), &model.SegmentIndex{
@@ -599,4 +605,75 @@ func TestActiveSplitSourceFenceTick(t *testing.T) {
 	handler := &ServerHandler{s: &Server{}}
 	position := &msgpb.MsgPosition{Timestamp: 500}
 	assert.Same(t, position, handler.clampSplitSourceDeleteCheckpoint(hashSrcVChannel, []string{hashTgtA}, position))
+}
+
+// F1: an unsorted rewrite output is sorted during the window, and the sorted
+// output -- a new segment id on the same target -- is indexed, is a stats
+// candidate, replaces the output in the source's view, and leaves the rewrite's
+// bookkeeping of its input intact.
+func TestAnUnsortedRewriteOutputIsSortedAndIndexedInTheWindow(t *testing.T) {
+	const src, t1 = hashSrcVChannel, hashTgtA
+	const input, output, flushed, sorted = int64(100), int64(901), int64(920), int64(931)
+	ctx := context.TODO()
+	f := newLineageFixture(t)
+	f.add(t, lineageSegment{id: input, channel: src, state: commonpb.SegmentState_Dropped, indexed: true})
+	f.add(t, lineageSegment{id: output, channel: t1, state: commonpb.SegmentState_Flushed, compactionFrom: []int64{input}, compacted: true})
+	f.add(t, lineageSegment{id: flushed, channel: t1, state: commonpb.SegmentState_Flushed, invisible: true})
+
+	inspector, ok := f.svr.compactionInspector.(*compactionInspector)
+	require.True(t, ok)
+	sortOf := func(segmentID int64) *datapb.CompactionTask {
+		return &datapb.CompactionTask{
+			PlanID: 5000 + segmentID, Channel: t1, Type: datapb.CompactionType_SortCompaction,
+			CollectionID: lineageCollectionID, InputSegments: []int64{segmentID}, Schema: newTestSchema(),
+		}
+	}
+	assert.False(t, inspector.frozenBySplit(sortOf(output)), "the rewrite output is sortable in the window")
+	assert.True(t, inspector.frozenBySplit(sortOf(flushed)), "a target-flushed segment is not")
+
+	// Unsorted, the output is skipped by the index and the stats inspectors.
+	require.NoError(t, f.svr.indexInspector.createIndexesForSegment(ctx, f.svr.meta.GetSegment(ctx, output)))
+	assert.Empty(t, f.svr.meta.indexMeta.GetSegmentIndexes(lineageCollectionID, output))
+	assert.False(t, needDoTextIndex(f.svr.meta.GetSegment(ctx, output), []int64{1}, false))
+	assert.False(t, needDoJSONKeyIndex(f.svr.meta.GetSegment(ctx, output), []int64{1}, false))
+
+	_, _, err := f.svr.meta.CompleteCompactionMutation(ctx, sortOf(output), &datapb.CompactionPlanResult{
+		PlanID: 5000 + output,
+		Segments: []*datapb.CompactionSegment{{
+			SegmentID: sorted, NumOfRows: 2048, IsSorted: true, Channel: t1,
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: 1, Binlogs: []*datapb.Binlog{{EntriesNum: 2048, LogID: sorted}}}},
+		}},
+	})
+	require.NoError(t, err)
+	got := f.svr.meta.GetSegment(ctx, sorted)
+	require.NotNil(t, got)
+	assert.True(t, got.GetIsSorted())
+	assert.False(t, got.GetIsInvisible())
+	assert.True(t, got.GetCreatedByCompaction())
+	assert.Equal(t, []int64{output}, got.GetCompactionFrom())
+
+	// Sorted, both inspectors pick it up.
+	require.NoError(t, f.svr.indexInspector.createIndexesForSegment(ctx, got))
+	assert.Contains(t, f.svr.meta.indexMeta.GetSegmentIndexes(lineageCollectionID, sorted), lineageIndexID)
+	assert.True(t, needDoTextIndex(got, []int64{1}, false))
+	assert.True(t, needDoJSONKeyIndex(got, []int64{1}, false))
+
+	// The source's view swaps the output for its sorted copy and serves the
+	// copy directly while it is unindexed: a target's Dropped segments never
+	// enter the source's view (inheritedBySplitSource), so the output is no
+	// fallback parent, and the rewrite input above it never is one either.
+	view := f.view(src)
+	assert.ElementsMatch(t, []int64{sorted}, view.GetFlushedSegmentIds())
+	assert.Contains(t, view.GetDroppedSegmentIds(), input)
+
+	// The sorted copy names the output, not the input, so the input drops out
+	// of the rewritten set; the rewrite still counts it done because it is no
+	// longer a rewrite input, and never queues it again.
+	task := mustTask(t, f.mgr, hashTaskID)
+	rewritten := f.mgr.rewrittenSourceSegments(task)
+	assert.False(t, rewritten.Contain(input))
+	assert.True(t, f.mgr.planAlreadyCommitted(ctx, []int64{input}, rewritten))
+	assert.NotContains(t, f.mgr.rewriteInputIDs(src), input)
+	pending := map[string]typeutil.Set[int64]{src: typeutil.NewSet(input)}
+	assert.Equal(t, 1, forgetNonInputSegments(pending, func(id int64) *SegmentInfo { return f.svr.meta.GetSegment(ctx, id) }))
 }
