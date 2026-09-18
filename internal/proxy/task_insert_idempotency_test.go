@@ -206,8 +206,8 @@ func TestReassignAutoIDByOffsetChannelsUsesAssignChannelsByPK(t *testing.T) {
 		nextID += int64(count)
 		return begin, nextID, nil
 	}
-	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs1, schemapb.DataType_Int64, channels, 0, alloc))
-	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs2, schemapb.DataType_Int64, channels, 0, alloc))
+	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs1, schemapb.DataType_Int64, channels, nil, 0, alloc))
+	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs2, schemapb.DataType_Int64, channels, nil, 0, alloc))
 
 	actualChannels1 := rowChannelsByPK(&schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: rowIDs1}},
@@ -576,7 +576,7 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 }
 
 func rowChannelsByPK(ids *schemapb.IDs, channels []string) []string {
-	offsetsByChannel, _ := assignChannelsByPK(ids, channels, &BaseInsertTask{
+	offsetsByChannel, _ := assignChannelsByPK(nil, ids, channels, &BaseInsertTask{
 		InsertRequest: &msgpb.InsertRequest{},
 	})
 	rowChannels := make([]string, len(idsByOffsetsForTest(ids)))

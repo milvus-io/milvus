@@ -5,12 +5,17 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan) error {
+// reassignAutoIDForStableIdempotency re-draws the auto ids of an idempotent
+// insert so that row offset i always lands on channelNames[i % n]. table is the
+// routing table of a split collection (channelNames are then the vchannels that
+// own a residue, in vchannel order), nil for one that has never been split.
+func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan, table *routing.ResidueTable) error {
 	if len(channelNames) <= 1 || len(it.insertMsg.GetRowIDs()) == 0 {
 		return nil
 	}
@@ -25,13 +30,16 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 	// manager: PK routing is index-based (HashPK2Channels only uses len(channels),
 	// then channelNames[idx]), and delete / the delete leg of upsert hash against
 	// that same unpermuted list. Reordering it here would map a PK to a different
-	// vchannel than delete later picks for the very same PK.
+	// vchannel than delete later picks for the very same PK. A split collection
+	// routes by residue rather than by index, and its vchannel list is read
+	// again with its table on every write attempt.
 	it.vChannels = channelNames
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
 	if err := reassignAutoIDByOffsetChannels(
 		it.insertMsg.RowIDs,
 		primaryFieldSchema.GetDataType(),
 		channelNames,
+		table,
 		clusterID,
 		it.idAllocator.Alloc,
 	); err != nil {
@@ -67,6 +75,7 @@ func reassignAutoIDByOffsetChannels(
 	rowIDs []int64,
 	primaryDataType schemapb.DataType,
 	channelNames []vChan,
+	table *routing.ResidueTable,
 	clusterID uint64,
 	allocFunc func(uint32) (int64, int64, error),
 ) error {
@@ -89,7 +98,7 @@ func reassignAutoIDByOffsetChannels(
 	}
 
 	buckets := make([][]int64, numChannels)
-	if err := appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames); err != nil {
+	if err := appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames, table); err != nil {
 		return err
 	}
 	// Each round allocates ids and routes them to buckets by PK hash, which
@@ -132,7 +141,7 @@ func reassignAutoIDByOffsetChannels(
 		if err != nil {
 			return err
 		}
-		if err := appendAutoIDRangeCandidates(buckets, begin, end, primaryDataType, channelNames); err != nil {
+		if err := appendAutoIDRangeCandidates(buckets, begin, end, primaryDataType, channelNames, table); err != nil {
 			return err
 		}
 	}
@@ -146,20 +155,20 @@ func reassignAutoIDByOffsetChannels(
 	return nil
 }
 
-func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, channelNames []vChan) error {
+func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, channelNames []vChan, table *routing.ResidueTable) error {
 	rowIDs := make([]int64, 0, end-begin)
 	for id := begin; id < end; id++ {
 		rowIDs = append(rowIDs, id)
 	}
-	return appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames)
+	return appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames, table)
 }
 
-func appendAutoIDCandidatesByChannels(buckets [][]int64, rowIDs []int64, primaryDataType schemapb.DataType, channelNames []vChan) error {
+func appendAutoIDCandidatesByChannels(buckets [][]int64, rowIDs []int64, primaryDataType schemapb.DataType, channelNames []vChan, table *routing.ResidueTable) error {
 	ids, err := autoIDCandidatesToPrimaryIDs(rowIDs, primaryDataType)
 	if err != nil {
 		return err
 	}
-	channel2RowOffsets, err := assignChannelsByPK(ids, channelNames, &msgstream.InsertMsg{
+	channel2RowOffsets, err := assignChannelsByPK(table, ids, channelNames, &msgstream.InsertMsg{
 		InsertRequest: &msgpb.InsertRequest{},
 	})
 	if err != nil {

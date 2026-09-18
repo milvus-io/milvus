@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/function/models"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -2785,8 +2786,12 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, metaCache Cache
 	return partitionNames, nil
 }
 
-func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
-	hashValues, err := typeutil.HashPK2Channels(pks, channelNames)
+// assignChannelsByPK maps a write's primary keys to the vchannels that own them.
+//
+// table is the routing table of a collection that has been split, nil for one
+// that has never been split (see pkChannelIndexes).
+func assignChannelsByPK(table *routing.ResidueTable, pks *schemapb.IDs, channelNames []string, insertMsg *msgstream.InsertMsg) (map[string][]int, error) {
+	hashValues, err := pkChannelIndexes(table, pks, channelNames)
 	if err != nil {
 		return nil, err
 	}

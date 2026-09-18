@@ -105,7 +105,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSelectsRows(t *testing.T)
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a", "bb", "ccc", "dddd")
 	selection := []int{1, 3}
 
-	msgs, err := repackInsertDataByPartitionForStreamingService(
+	msgs, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"target-partition",
@@ -160,7 +160,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceCarriesPartialUpdateCASIn
 		ObservedPchannelTerm: 1,
 	}
 
-	msgs, err := repackInsertDataByPartitionForStreamingService(
+	msgs, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"target-partition",
@@ -215,7 +215,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSelectsCompactNullableVec
 		},
 	}
 
-	msgs, err := repackInsertDataByPartitionForStreamingService(
+	msgs, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"target-partition",
@@ -247,7 +247,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceRejectsInvalidSelection(t
 		"descending":   {2, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			msgs, err := repackInsertDataByPartitionForStreamingService(
+			msgs, _, err := repackInsertDataByPartitionForStreamingService(
 				context.Background(), 200, "target-partition", selection, "vchannel-1", source, nil, 7, nil,
 				nil,
 			)
@@ -262,7 +262,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceEmptySelection(t *testing
 	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a")
 
-	msgs, err := repackInsertDataByPartitionForStreamingService(
+	msgs, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"target-partition",
@@ -285,7 +285,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *tes
 
 	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("true")
 	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
-	msgs, err := repackInsertDataByPartitionForStreamingService(
+	msgs, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(), 200, "target-partition", []int{0, 1}, "vchannel-1", source, nil, 7, nil,
 		nil,
 	)
@@ -293,7 +293,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *tes
 	require.Len(t, msgs, 2)
 
 	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	msgs, err = repackInsertDataByPartitionForStreamingService(
+	msgs, _, err = repackInsertDataByPartitionForStreamingService(
 		context.Background(), 200, "target-partition", []int{0, 1}, "vchannel-1", source, nil, 7, nil,
 		nil,
 	)

@@ -2556,6 +2556,10 @@ type proxyConfig struct {
 	// WAL payload chunking rollout switch.
 	SplitChunkProxy ParamItem `refreshable:"true"`
 
+	// ShardSplitMaxFenceRetryWait caps how long a write with no deadline keeps
+	// re-routing what a shard split fence refused.
+	ShardSplitMaxFenceRetryWait ParamItem `refreshable:"true"`
+
 	TimeTickInterval               ParamItem `refreshable:"false"`
 	HealthCheckTimeout             ParamItem `refreshable:"true"`
 	MsgStreamTimeTickBufSize       ParamItem `refreshable:"true"`
@@ -2656,6 +2660,17 @@ For migration, enable streaming.splitChunkSN first, then disable proxy.splitChun
 		Export: true,
 	}
 	p.SplitChunkProxy.Init(base.mgr)
+
+	p.ShardSplitMaxFenceRetryWait = ParamItem{
+		Key:          "proxy.shardSplit.maxFenceRetryWait",
+		Version:      "3.0.0",
+		DefaultValue: "60s",
+		Doc: `How long a write keeps re-routing the rows or tombstones a shard split fence refused, when its request carries no deadline.
+The proxy refreshes the collection's routing and re-sends only what the fenced vchannel refused until the split's routing commit is visible.
+A request with a deadline retries until that deadline instead.`,
+		Export: false,
+	}
+	p.ShardSplitMaxFenceRetryWait.Init(base.mgr)
 
 	p.TimeTickInterval = ParamItem{
 		Key:          "proxy.timeTickInterval",
