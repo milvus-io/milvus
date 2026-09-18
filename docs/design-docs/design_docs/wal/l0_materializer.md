@@ -33,6 +33,16 @@ Each VChannel has an ordered pending buffer and at most one active serial task.
 The buffer holds immutable WAL handles, not another durable record store.
 Mixed transactions count only their Delete payloads for capacity admission;
 all Delete children use the outer commit TimeTick and complete together.
+
+The WAL consumer passes runtime-only positions to the output writer. Each
+physical L0 group's StartPosition comes from its first Delete's TimeTick and
+LastConfirmedMessageID; all groups use the captured batch-end message's complete
+position as their checkpoint. Transaction positions come from the outer Txn,
+never an individual child or the raw Commit message ID. Positions include the
+consumer VChannel and WAL name, including for PChannel-wide Flush messages.
+Summary storage gains no MessageID fields. Its retained consumer still supplies
+only timestamps for future QueryView integration.
+
 Snapshot replay filters against the materialized cursor, independently of the
 VChannel metadata checkpoint. Observed positions suppress duplicate pending work.
 

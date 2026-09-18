@@ -25,7 +25,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
 
@@ -164,4 +166,43 @@ func TestUpdateImportSegmentPosition(t *testing.T) {
 		assert.NotNil(t, segment.GetDmlPosition())
 		assert.Equal(t, uint64(0), segment.GetDmlPosition().GetTimestamp())
 	})
+}
+
+// Complete data positions must survive a later position-free final commit.
+// A newer growing segment must block only the Deletes that can affect its rows.
+func TestGrowingDataPositionsProtectL0AndSurviveFinalCommit(t *testing.T) {
+	m := &meta{ctx: context.Background(), segments: NewSegmentsInfo()}
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 1, CollectionID: 1, PartitionID: 1, InsertChannel: "ch",
+		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+	})
+	m.segments.SetSegment(1, segment)
+	pack := &updateSegmentPack{meta: m, segments: map[int64]*SegmentInfo{1: segment}}
+	start := &msgpb.MsgPosition{ChannelName: "ch", Timestamp: 100, MsgID: []byte{1}, WALName: commonpb.WALName_Pulsar}
+	checkpoint := &msgpb.MsgPosition{ChannelName: "ch", Timestamp: 150, MsgID: []byte{2}, WALName: commonpb.WALName_Pulsar}
+	require.True(t, UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: start}})(pack))
+	require.True(t, UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10, Position: checkpoint}}, true)(pack))
+
+	label := &CompactionGroupLabel{CollectionID: 1, PartitionID: 1, Channel: "ch"}
+	require.True(t, proto.Equal(start, m.GetEarliestStartPositionOfGrowingSegments(label)))
+	policy := &l0CompactionPolicy{meta: m}
+	views := policy.groupL0ViewsByPartChan(1, []*SegmentView{
+		{ID: 2, label: label, dmlPos: &msgpb.MsgPosition{Timestamp: 90}},
+		{ID: 3, label: label, dmlPos: &msgpb.MsgPosition{Timestamp: 125}},
+	}, 1)
+	require.Len(t, views, 1)
+	eligible := views[0].(*LevelZeroCompactionView).l0Segments
+	require.Len(t, eligible, 1)
+	require.Equal(t, int64(2), eligible[0].ID)
+
+	// Final SaveBinlogPaths and its recovery retry omit positions. In
+	// particular V3 keeps its existing authoritative row count without a CP.
+	for range 2 {
+		require.True(t, UpdateStartPosition(nil)(pack))
+		require.True(t, UpdateCheckPointOperator(1, nil, true)(pack))
+	}
+	require.True(t, proto.Equal(start, segment.GetStartPosition()))
+	require.True(t, proto.Equal(checkpoint, segment.GetDmlPosition()))
+	require.Equal(t, int64(10), segment.GetNumOfRows())
 }

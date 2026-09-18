@@ -24,7 +24,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -206,10 +208,12 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		return nodescheduler.ErrDelay
 	}
 	var entries []*streamingpb.TransformLogEntry
+	positions := make(map[uint64]*msgpb.MsgPosition)
 	for _, handle := range t.handles {
 		entry := messageutil.BuildTransformLogEntry(handle.Message(), messageutil.TransformEntryOption{})
 		if entry != nil && entry.GetDelete() != nil {
 			entries = append(entries, entry)
+			positions[entry.GetTimeTick()] = utility.NewMessagePosition(handle.Message(), m.vchannel)
 		}
 	}
 	if len(entries) > 0 {
@@ -219,6 +223,8 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 		if err := m.writer.Materialize(ctx, MaterializeRequest{
 			VChannel: m.vchannel, TargetTimeTick: t.through,
 			Entries: entries, MaxRows: m.maxRows, MaxBytes: m.maxBytes,
+			StartPositions: positions,
+			Checkpoint:     utility.NewMessagePosition(t.handles[len(t.handles)-1].Message(), m.vchannel),
 		}); err != nil {
 			return errors.Mark(err, nodescheduler.ErrDelay)
 		}

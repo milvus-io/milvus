@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -87,8 +87,8 @@ func observeSummaryDelete(t *testing.T, manager *walsummary.Manager, vchannel st
 		}).
 		MustBuildMutable()
 	raw := mutable.WithTimeTick(timetick).
-		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick))).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
 	owner := message.NewOwnedImmutableMessage(raw, func() { *finalized = true })
 	retained := owner.Clone()
 	manager.ObserveMessage(context.Background(), retained.Message())
@@ -112,8 +112,8 @@ func observeVChannelDelete(t *testing.T, module *VChannelRecoveryModule, vchanne
 		}).
 		MustBuildMutable()
 	raw := mutable.WithTimeTick(timetick).
-		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick))).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
 	owner := message.NewOwnedImmutableMessage(raw, nil)
 	retained := owner.Clone()
 	for _, summary := range summaries {

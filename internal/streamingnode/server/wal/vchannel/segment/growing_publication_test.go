@@ -14,6 +14,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -75,6 +77,46 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 	require.Equal(t, uint64(10), snapshot.GetCheckpointTimeTick())
 	require.Equal(t, uint64(3), snapshot.GetStat().GetModifiedRows())
 	require.Len(t, snapshot.GetPersistedStorage().GetBinlogs(), 1)
+	require.Len(t, requests[1].GetStartPositions(), 1)
+	start := requests[1].GetStartPositions()[0].GetStartPosition()
+	require.Equal(t, uint64(10), start.GetTimestamp(), "first Insert, not CreateSegment")
+	require.Equal(t, adaptor.MustGetMQWrapperIDFromMessage(rmq.NewRmqID(10)).Serialize(), start.GetMsgID(), "LastConfirmed, not the raw message ID 11")
+	require.Equal(t, commonpb.WALName_RocksMQ, start.GetWALName())
+	require.True(t, proto.Equal(start, requests[1].GetCheckPoints()[0].GetPosition()))
+
+	// Simulate losing the successful first publication's SN snapshot. Replay
+	// must rebuild the same first position already accepted by Coordinator.
+	replayed := newObserveTestSegment(5)
+	replayed.lifecycle, replayed.packWriter = view.lifecycle, view.packWriter
+	original := view
+	view = replayed
+	completed := false
+	observe(10, &completed)
+	view.RequestPersistThrough(10)
+	require.NoError(t, view.FlushInsertChunk(ctx, 10))
+	require.True(t, completed)
+	require.True(t, proto.Equal(start, requests[2].GetStartPositions()[0].GetStartPosition()))
+	view = original
+
+	// Once the SN snapshot is durable, recovery skips the first pack and
+	// subsequent packs leave Coordinator's original StartPosition untouched.
+	recovered := newSegmentViewFromMeta(snapshot, nil, runtimeConfig{lifecycle: view.lifecycle, packWriter: view.packWriter, owner: testSegmentOwner{}})
+	view = recovered
+	completed = false
+	observe(20, &completed)
+	view.mu.Lock()
+	through = view.enqueuePendingFlushChunkLocked()
+	view.mu.Unlock()
+	require.NoError(t, view.FlushInsertChunk(ctx, through))
+	require.True(t, completed)
+	require.Empty(t, requests[3].GetStartPositions())
+	require.Equal(t, uint64(20), requests[3].GetCheckPoints()[0].GetPosition().GetTimestamp())
+	require.Equal(t, adaptor.MustGetMQWrapperIDFromMessage(rmq.NewRmqID(20)).Serialize(), requests[3].GetCheckPoints()[0].GetPosition().GetMsgID())
+	require.NoError(t, view.lifecycle.CommitL1Segment(ctx, view.AssignmentMeta()))
+	require.True(t, requests[4].GetFlushed())
+	require.Empty(t, requests[4].GetStartPositions())
+	require.Empty(t, requests[4].GetCheckPoints(), "final commit preserves the already registered DmlPosition")
+	view = original
 	view.mu.Lock()
 	pending := view.pending.takeAll()
 	view.mu.Unlock()

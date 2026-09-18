@@ -95,6 +95,15 @@ Flush/lifecycle requests retain their WAL handles until L0 completion and dirty
 M installation, so unfinished requests remain replayable without a persisted
 request field. The publisher must save M before publishing past the request.
 
+Before QueryView integration, DataCoord still receives full Segment data
+positions. These are published before the corresponding SN stable state; they
+are not additional RecoveryStorage cursors. L1's first data pack publishes its
+StartPosition once and every data pack publishes its end position. Final L1
+commit preserves those positions. The WAL L0 consumer reconstructs output
+positions from retained Delete/Txn and batch-end handles. No additional physical
+position fields are persisted in SN Segment metadata or WALSummary.
+
+
 ## 3. Why Component Checkpoints Are Required
 
 Suppose M1 affects Segment A and is blocked, while M2 affects Segment B and

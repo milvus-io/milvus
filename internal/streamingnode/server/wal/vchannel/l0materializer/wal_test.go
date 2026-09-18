@@ -22,22 +22,23 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
 func walDelete(tt uint64) message.ImmutableMessage {
-	return message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).WithBody(&msgpb.DeleteRequest{CollectionID: 1, PartitionID: 10, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, Timestamps: []uint64{tt}}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(walimplstest.NewTestMessageID(int64(tt - 1))).IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tt)))
+	return message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DeleteMessageHeader{CollectionId: 1, Rows: 1}).WithBody(&msgpb.DeleteRequest{CollectionID: 1, PartitionID: 10, PrimaryKeys: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}, Timestamps: []uint64{tt}}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
 }
 
 func walFlush(tt uint64) message.ImmutableMessage {
-	return message.NewManualFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(walimplstest.NewTestMessageID(int64(tt - 1))).IntoImmutableMessage(walimplstest.NewTestMessageID(int64(tt)))
+	return message.NewManualFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
 }
 
 func walObserve(m *WALMaterializer, tracker *messageack.Tracker, msg message.ImmutableMessage) {
@@ -132,13 +133,13 @@ func TestWALMaterializerReplayUsesMaterializedFrontier(t *testing.T) {
 
 func walTxn(t *testing.T, children ...message.ImmutableMessage) message.ImmutableMessage {
 	txnContext := message.TxnContext{TxnID: 1}
-	id := walimplstest.NewTestMessageID(1)
+	id := rmq.NewRmqID(1)
 	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(1).WithLastConfirmed(id).IntoImmutableMessage(id)
 	builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
 	for _, child := range children {
 		builder.Add(child)
 	}
-	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(300).WithLastConfirmed(id).IntoImmutableMessage(walimplstest.NewTestMessageID(300))
+	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(300).WithLastConfirmed(id).IntoImmutableMessage(rmq.NewRmqID(300))
 	txn, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit))
 	require.NoError(t, err)
 	return txn
@@ -148,7 +149,7 @@ func TestWALMaterializerWholeTxnAndRegistrationGate(t *testing.T) {
 	m, tasks, batches := testWALMaterializer(t, 0, 1)
 	registered := false
 	m.growingSegmentsRegistered = func(tt uint64) bool { require.Equal(t, uint64(300), tt); return registered }
-	insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTimeTick(50).WithLastConfirmed(walimplstest.NewTestMessageID(49)).IntoImmutableMessage(walimplstest.NewTestMessageID(50))
+	insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTimeTick(50).WithLastConfirmed(rmq.NewRmqID(49)).IntoImmutableMessage(rmq.NewRmqID(50))
 	txn := walTxn(t, insert, walDelete(100), walDelete(200))
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 	walObserve(m, tracker, txn)
@@ -163,15 +164,34 @@ func TestWALMaterializerWholeTxnAndRegistrationGate(t *testing.T) {
 	require.Len(t, (*batches)[0].Entries, 1)
 	require.Len(t, (*batches)[0].Entries[0].GetDelete().GetBlocks(), 2)
 	require.Equal(t, uint64(300), (*batches)[0].Entries[0].GetTimeTick())
+	require.Len(t, (*batches)[0].StartPositions, 1)
+	position := utility.NewMessagePosition(txn, "v1")
+	require.True(t, proto.Equal(position, (*batches)[0].StartPositions[300]))
+	require.True(t, proto.Equal(position, (*batches)[0].Checkpoint))
 }
 
 func TestWALMaterializerInsertAndBarrierDoNotFlush(t *testing.T) {
 	m, tasks, _ := testWALMaterializer(t, 0, 1)
 	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
-	insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(walimplstest.NewTestMessageID(99)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+	insert := message.NewInsertMessageBuilderV1().WithVChannel("v1").WithHeader(&message.InsertMessageHeader{}).WithBody(&msgpb.InsertRequest{}).MustBuildMutable().WithTimeTick(100).WithLastConfirmed(rmq.NewRmqID(99)).IntoImmutableMessage(rmq.NewRmqID(100))
 	walObserve(m, tracker, insert)
 	walObserve(m, tracker, walTxn(t, insert))
 	require.Equal(t, uint64(300), tracker.CompletedPoint().TimeTick)
 	require.Empty(t, *tasks)
 	require.Zero(t, m.MaterializedTimeTick(), "no empty L0 needed to advance the global prefix")
+}
+
+func TestWALMaterializerUsesFlushBoundaryPosition(t *testing.T) {
+	m, tasks, batches := testWALMaterializer(t, 0, 1<<20)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	deleted, flushed := walDelete(100), walFlush(200)
+	walObserve(m, tracker, deleted)
+	walObserve(m, tracker, flushed)
+	require.Len(t, *tasks, 1)
+	require.NoError(t, (*tasks)[0].Execute(context.Background()))
+	require.Len(t, *batches, 1)
+	req := (*batches)[0]
+	require.True(t, proto.Equal(utility.NewMessagePosition(deleted, "v1"), req.StartPositions[100]))
+	require.True(t, proto.Equal(utility.NewMessagePosition(flushed, "v1"), req.Checkpoint))
+	require.Equal(t, uint64(200), tracker.CompletedPoint().TimeTick)
 }

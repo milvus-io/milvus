@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -602,7 +603,7 @@ func TestBroadcastFlushAllWaitsForEveryVChannel(t *testing.T) {
 
 func TestDeletePinsGlobalCheckpointEvenAfterSummaryPersistence(t *testing.T) {
 	ctx := context.Background()
-	initial := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+	initial := &utility.WALCheckpoint{MessageID: rmq.NewRmqID(1), TimeTick: 10}
 	storage := newTestRecoveryStorage(t, initial)
 	t.Cleanup(storage.metrics.Close)
 	var tasks []nodescheduler.Task
@@ -624,8 +625,11 @@ func TestDeletePinsGlobalCheckpointEvenAfterSummaryPersistence(t *testing.T) {
 	defer manager.Close()
 	storage.vchannelManager = manager
 	storage.summaryManager = summary
-	storage.observeMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
-	storage.observeMessage(ctx, newAckTestTimeTickMessage(t, 30, 31))
+	raw := message.MustAsImmutableDeleteMessageV1(newRecoveryTestDeleteMessage(t, "v1", 20))
+	deleted := message.NewDeleteMessageBuilderV1().WithVChannel("v1").WithHeader(raw.Header()).WithBody(raw.MustBody()).MustBuildMutable().WithTimeTick(20).WithLastConfirmed(rmq.NewRmqID(20)).IntoImmutableMessage(rmq.NewRmqID(21))
+	storage.observeMessage(ctx, deleted)
+	tick := message.NewTimeTickMessageBuilderV1().WithAllVChannel().WithHeader(&message.TimeTickMessageHeader{}).WithBody(&msgpb.TimeTickMsg{}).MustBuildMutable().WithTimeTick(30).WithLastConfirmed(rmq.NewRmqID(31)).IntoImmutableMessage(rmq.NewRmqID(32))
+	storage.observeMessage(ctx, tick)
 	require.Len(t, tasks, 1)
 	require.Error(t, tasks[0].Execute(ctx))
 	require.Equal(t, uint64(10), storage.ackTracker.CompletedPoint().TimeTick)

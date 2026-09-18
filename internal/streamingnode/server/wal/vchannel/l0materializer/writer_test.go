@@ -8,10 +8,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -31,6 +33,11 @@ func TestWriterSplitsOutputWithoutSplittingCursorCommit(t *testing.T) {
 		deleteEntry(200, 20, &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"a", "b"}}}}),
 		deleteEntry(300, 20, &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}}),
 	}}
+	req.StartPositions = map[uint64]*msgpb.MsgPosition{
+		100: utility.NewMessagePosition(walDelete(100), req.VChannel),
+		200: utility.NewMessagePosition(walDelete(200), req.VChannel),
+	}
+	req.Checkpoint = utility.NewMessagePosition(walFlush(300), req.VChannel)
 	groups := splitMaterializeGroups(req)
 	require.Len(t, groups, 4)
 	for _, g := range groups {
@@ -43,6 +50,8 @@ func TestWriterSplitsOutputWithoutSplittingCursorCommit(t *testing.T) {
 	fail := true
 	patch := mockey.Mock((*syncmgr.SyncTask).Run).To(func(task *syncmgr.SyncTask, _ context.Context) error {
 		require.Positive(t, task.SegmentID())
+		require.True(t, proto.Equal(req.StartPositions[task.StartPosition().GetTimestamp()], task.StartPosition()), "each split output uses its own first Delete position")
+		require.True(t, proto.Equal(req.Checkpoint, task.Checkpoint()), "all output groups share the completed batch position")
 		calls++
 		if fail && calls == 2 {
 			return context.DeadlineExceeded
