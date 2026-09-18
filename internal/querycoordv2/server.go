@@ -416,8 +416,8 @@ func (s *Server) initMeta() error {
 
 	s.dist = meta.NewDistributionManager(s.nodeMgr)
 	// One split state view for the target manager (window marks on each
-	// next-target pull) and the checkers, so they never disagree about when a
-	// window ended.
+	// next-target pull), the target observer (window-end refresh) and the
+	// checkers, so none of them disagrees about when a window ended.
 	s.splitState = checkers.NewSplitStateCache(s.broker)
 	s.targetMgr = meta.NewTargetManagerWithSplitState(s.broker, s.meta, s.splitState)
 	err = s.targetMgr.Recover(s.ctx, s.store)
@@ -431,13 +431,14 @@ func (s *Server) initMeta() error {
 
 func (s *Server) initObserver() {
 	mlog.Info(s.ctx, "init observers")
-	s.targetObserver = observers.NewTargetObserver(
+	s.targetObserver = observers.NewTargetObserverWithSplitState(
 		s.meta,
 		s.targetMgr,
 		s.dist,
 		s.broker,
 		s.cluster,
 		s.nodeMgr,
+		s.splitState,
 	)
 	s.collectionObserver = observers.NewCollectionObserver(
 		s.dist,
