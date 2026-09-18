@@ -493,6 +493,13 @@ func TestImportTaskPreExecuteRefusesASplitCollection(t *testing.T) {
 	}
 }
 
+// A nil collectionInfo -- the cache never returns one alongside a nil error,
+// but refuseImportIntoSplitCollection is a plain function and must not panic
+// dereferencing an absent info -- never refuses.
+func TestRefuseImportIntoSplitCollectionAllowsANilInfo(t *testing.T) {
+	assert.NoError(t, refuseImportIntoSplitCollection(nil))
+}
+
 func TestImportTaskPreExecuteReportsARoutingReadFailure(t *testing.T) {
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, "db", "c").Return(int64(100), nil)
