@@ -343,6 +343,9 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	resp.ShardsNum = c.ShardsNum
 	resp.Aliases = c.Aliases
 	resp.Properties = c.Properties
+	resp.ShardInfos = c.ShardInfos
+	resp.RoutingModulus = c.RoutingModulus
+	resp.ShardBy = c.ShardBy
 	log.Debug(ctx, "DescribeCollection done",
 		mlog.FieldCollectionID(resp.GetCollectionID()),
 		mlog.Int("fieldCount", len(resp.GetSchema().GetFields())),
