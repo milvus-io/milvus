@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
@@ -134,6 +135,49 @@ func (s *EtcdSourceSuite) TestRefreshLinearizableSeesWriteBeforeNextPoll() {
 	s.Require().ErrorIs(err, ErrKeyNotFound)
 
 	s.Require().NoError(source.RefreshConfigurationsLinearizable())
+
+	value, err := source.GetConfigurationByKey(key)
+	s.Require().NoError(err)
+	s.Equal("service", value)
+}
+
+// TestStaleSnapshotDoesNotRollBackNewerRefresh replays two refreshes finishing out of order.
+// The etcd read happens before the source serializes publication, so a poll that read etcd
+// before a write can still publish after a linearizable refresh has published that write. The
+// older snapshot must not roll the configuration back.
+func (s *EtcdSourceSuite) TestStaleSnapshotDoesNotRollBackNewerRefresh() {
+	ctx := context.Background()
+	prefix := fmt.Sprintf("test-monotonic-%d", time.Now().UnixNano())
+	key := "woodpeckerstoragetype"
+	fullKey := prefix + "/config/" + key
+
+	etcdCli, err := newEtcdClient(&EtcdInfo{Endpoints: s.endpoints, DialTimeout: 5 * time.Second})
+	s.Require().NoError(err)
+	defer etcdCli.Close()
+	defer etcdCli.Delete(ctx, prefix, clientv3.WithPrefix())
+
+	source, err := NewEtcdSource(etcdCli, &EtcdInfo{
+		Endpoints:       s.endpoints,
+		KeyPrefix:       prefix,
+		DialTimeout:     5 * time.Second,
+		RefreshInterval: time.Hour,
+	})
+	s.Require().NoError(err)
+	defer source.Close()
+
+	// A slow poll reads etcd before the new value is written ...
+	_, err = etcdCli.Put(ctx, fullKey, "minio")
+	s.Require().NoError(err)
+	stale, err := etcdCli.Get(ctx, prefix+"/config", clientv3.WithPrefix())
+	s.Require().NoError(err)
+
+	// ... the value is written and a linearizable refresh publishes it ...
+	_, err = etcdCli.Put(ctx, fullKey, "service")
+	s.Require().NoError(err)
+	s.Require().NoError(source.RefreshConfigurationsLinearizable())
+
+	// ... and only then does the slow poll publish what it read.
+	s.Require().NoError(source.update(map[string]string{key: string(stale.Kvs[0].Value)}, stale.Header.Revision))
 
 	value, err := source.GetConfigurationByKey(key)
 	s.Require().NoError(err)

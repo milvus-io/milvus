@@ -87,20 +87,19 @@ func (b *builderImpl) getWpConfig() (*config.Configuration, error) {
 	// reaches this node through the WAL broadcast within milliseconds. Read etcd
 	// linearizably first so a woodpecker configuration written just before the switch is
 	// already visible here; the opener is built once, so a stale read would be permanent.
-	start := time.Now()
-	refreshed, refreshErr := false, error(nil)
 	if bt := paramtable.GetBaseTable(); bt != nil {
-		refreshed, refreshErr = bt.RefreshRemoteConfigsLinearizable()
-	}
-	switch {
-	case refreshErr != nil:
-		// Best effort: the last polled snapshot stays in place, so the build continues with
-		// whatever the poll last delivered.
-		mlog.Warn(context.TODO(), "failed to refresh remote configs before building wp opener, falling back to the last polled snapshot",
-			mlog.Err(refreshErr))
-	case refreshed:
-		mlog.Info(context.TODO(), "refreshed remote configs linearizably before building wp opener",
-			mlog.Duration("cost", time.Since(start)))
+		start := time.Now()
+		refreshed, err := bt.RefreshRemoteConfigsLinearizable()
+		if err != nil {
+			// Fail closed: the last polled snapshot may be exactly the stale one this refresh
+			// is meant to replace. The opener is only cached on success, so the WAL open is
+			// retried instead of settling on the wrong mode for the life of the process.
+			return nil, merr.Wrap(err, "failed to refresh remote configs before building wp opener")
+		}
+		if refreshed {
+			mlog.Info(context.TODO(), "refreshed remote configs linearizably before building wp opener",
+				mlog.Duration("cost", time.Since(start)))
+		}
 	}
 	wpConfig, err := config.NewConfiguration()
 	if err != nil {
