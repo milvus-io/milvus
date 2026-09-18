@@ -53,6 +53,7 @@ type ReplicaManagerInterface interface {
 	MoveReplica(ctx context.Context, collectionID typeutil.UniqueID, dstRGName string, toMove []*Replica) error
 	RemoveCollection(ctx context.Context, collectionID typeutil.UniqueID) error
 	RemoveReplicas(ctx context.Context, collectionID typeutil.UniqueID, replicas ...typeutil.UniqueID) error
+	RemoveReplicasInResourceGroup(ctx context.Context, collectionID typeutil.UniqueID, rgName string, replicas ...typeutil.UniqueID) ([]typeutil.UniqueID, error)
 
 	// Query operations
 	GetByCollection(ctx context.Context, collectionID typeutil.UniqueID) []*Replica
@@ -585,6 +586,52 @@ func (m *ReplicaManager) RemoveReplicas(ctx context.Context, collectionID typeut
 
 	mlog.Info(ctx, "release replicas", mlog.FieldCollectionID(collectionID), mlog.Int64s("replicas", replicaIDs))
 	return m.removeReplicas(ctx, collectionID, replicaIDs...)
+}
+
+// RemoveReplicasInResourceGroup removes those of the given replicas that are
+// still in rgName, and answers which ones it removed. A caller that read the
+// replica list, decided on some replicas by the group they were in, and
+// removes them afterwards is racing TransferReplica, which keeps a replica's
+// ID and rewrites its group: removing by ID alone would delete a replica that
+// now belongs to another group. The group is re-checked here, under the
+// collection lock the transfer also takes, and a replica that has left it -
+// or is gone already - is skipped and logged.
+func (m *ReplicaManager) RemoveReplicasInResourceGroup(ctx context.Context, collectionID typeutil.UniqueID, rgName string, replicaIDs ...typeutil.UniqueID) ([]typeutil.UniqueID, error) {
+	m.collLock.Lock(collectionID)
+	defer m.collLock.Unlock(collectionID)
+
+	if _, ok := m.coll2Replicas.Get(collectionID); !ok {
+		return nil, nil
+	}
+
+	toRemove := make([]typeutil.UniqueID, 0, len(replicaIDs))
+	skipped := make([]typeutil.UniqueID, 0)
+	for _, replicaID := range replicaIDs {
+		replica, ok := m.flatReplicas.Get(replicaID)
+		if !ok || replica.GetCollectionID() != collectionID || replica.GetResourceGroup() != rgName {
+			skipped = append(skipped, replicaID)
+			continue
+		}
+		toRemove = append(toRemove, replicaID)
+	}
+	if len(skipped) > 0 {
+		mlog.Info(ctx, "skipping replicas that left the resource group since they were read",
+			mlog.FieldCollectionID(collectionID),
+			mlog.String("resourceGroup", rgName),
+			mlog.Int64s("replicas", skipped))
+	}
+	if len(toRemove) == 0 {
+		return nil, nil
+	}
+
+	mlog.Info(ctx, "release replicas of resource group",
+		mlog.FieldCollectionID(collectionID),
+		mlog.String("resourceGroup", rgName),
+		mlog.Int64s("replicas", toRemove))
+	if err := m.removeReplicas(ctx, collectionID, toRemove...); err != nil {
+		return nil, err
+	}
+	return toRemove, nil
 }
 
 // removeReplicas removes specific replicas while holding collLock.Lock.
