@@ -864,6 +864,18 @@ func TestCheckSplitShardAgainstCollection(t *testing.T) {
 		coll.Properties = namespacePlacedProperties()
 		requireRefused(t, check(coll, param), namespaceDeferral)
 	})
+
+	// The genesis says the collection is not a namespace collection, the meta
+	// says it is: the meta wins and the split is refused before the fence.
+	t.Run("a namespace collection whose genesis says otherwise", func(t *testing.T) {
+		param := newSplitShardParam()
+		require.False(t, param.Schema.GetEnableNamespace())
+		require.NoError(t, streaming.ValidateSplitShardMessage(splitShardMessageOf(param)))
+		coll := legacy()
+		coll.EnableNamespace = true
+		requireRefused(t, check(coll, param), namespaceDeferral)
+		assert.ErrorContains(t, check(coll, param), "the collection meta has enable_namespace set")
+	})
 }
 
 // TestSplitShardParamRefusesAControlChannelInTheWrongRole pins the three
