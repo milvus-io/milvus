@@ -359,6 +359,16 @@ func TestIssueShardSplitRefusals(t *testing.T) {
 		assert.ErrorIs(t, svr.issueShardSplit(ctx, task, splitMgrControl), merr.ErrServiceInternal)
 	})
 
+	t.Run("a collection with a TEXT field is refused under the keys", func(t *testing.T) {
+		task := fencedTask(datapb.SplitShardTaskState_SplitShardTaskPreparing)
+		desc := splitTestDescribe([]string{splitMgrV0}, nil, 0)
+		desc.Schema = splitTestSchemaWithText()
+		svr, _ := newRefusalCase(t, task, task, desc)
+		err := svr.issueShardSplit(ctx, task, splitMgrControl)
+		assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+		assert.ErrorContains(t, err, "TEXT")
+	})
+
 	t.Run("a failed broadcast is returned for the next tick", func(t *testing.T) {
 		task := fencedTask(datapb.SplitShardTaskState_SplitShardTaskPreparing)
 		svr, bapi := newRefusalCase(t, task, task)
