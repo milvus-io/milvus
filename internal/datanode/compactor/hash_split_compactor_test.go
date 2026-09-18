@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -74,7 +75,7 @@ func TestHashSplitCompactorRejectsMalformedPlans(t *testing.T) {
 		{
 			name:   "no input segment",
 			plan:   hashSplitPlan(doublingPlanTargets(), 0, idRange),
-			errStr: "exactly one input segment",
+			errStr: "got 0 among 0 plan segments",
 		},
 		{
 			name:   "fewer than two targets",
@@ -107,6 +108,64 @@ func TestHashSplitCompactorRejectsMalformedPlans(t *testing.T) {
 			assert.Contains(t, err.Error(), tc.errStr)
 		})
 	}
+}
+
+// withSourceLevelZero appends n L0 delete-source segments to a plan, the way
+// datacoord attaches the source channel's pending deletes to a rewrite.
+func withSourceLevelZero(plan *datapb.CompactionPlan, n int) *datapb.CompactionPlan {
+	for i := range n {
+		plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+			SegmentID:    int64(2000 + i),
+			CollectionID: 1,
+			PartitionID:  2,
+			Level:        datapb.SegmentLevel_L0,
+			Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "delta/l0"}}}},
+		})
+	}
+	return plan
+}
+
+func TestHashSplitCompactorSeparatesTheInputFromItsDeleteSources(t *testing.T) {
+	idRange := &datapb.IDRange{Begin: 10000, End: 10100}
+
+	t.Run("one input and its L0 delete sources", func(t *testing.T) {
+		plan := withSourceLevelZero(hashSplitPlan(doublingPlanTargets(), 1, idRange), 2)
+		task := NewHashSplitCompactionTask(context.Background(), nil, plan, compaction.GenParams())
+		require.NoError(t, task.preCompact())
+		require.NotNil(t, task.input)
+		assert.Equal(t, int64(1000), task.input.GetSegmentID())
+		assert.Equal(t, []int64{2000, 2001}, lo.Map(task.deleteSources,
+			func(seg *datapb.CompactionSegmentBinlogs, _ int) int64 { return seg.GetSegmentID() }))
+		// The L0s must not be mistaken for data: the scope still comes from the
+		// one segment that is actually rewritten.
+		assert.Equal(t, int64(2), task.partitionID)
+	})
+
+	t.Run("the L0s do not hide a second input", func(t *testing.T) {
+		plan := withSourceLevelZero(hashSplitPlan(doublingPlanTargets(), 2, idRange), 1)
+		task := NewHashSplitCompactionTask(context.Background(), nil, plan, compaction.GenParams())
+		err := task.preCompact()
+		require.Error(t, err)
+		// The count is over the whole plan, not "everything seen so far that was
+		// not an L0": the L0 entries follow the inputs.
+		assert.Contains(t, err.Error(), "got 2 among 3 plan segments")
+	})
+
+	t.Run("delete sources alone are not a rewrite", func(t *testing.T) {
+		plan := withSourceLevelZero(hashSplitPlan(doublingPlanTargets(), 0, idRange), 2)
+		task := NewHashSplitCompactionTask(context.Background(), nil, plan, compaction.GenParams())
+		err := task.preCompact()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "got 0 among 2 plan segments")
+	})
+
+	t.Run("a second preCompact does not accumulate delete sources", func(t *testing.T) {
+		plan := withSourceLevelZero(hashSplitPlan(doublingPlanTargets(), 1, idRange), 2)
+		task := NewHashSplitCompactionTask(context.Background(), nil, plan, compaction.GenParams())
+		require.NoError(t, task.preCompact())
+		require.NoError(t, task.preCompact())
+		assert.Len(t, task.deleteSources, 2)
+	})
 }
 
 func TestHashSplitCompactorPreCompactCachesScope(t *testing.T) {

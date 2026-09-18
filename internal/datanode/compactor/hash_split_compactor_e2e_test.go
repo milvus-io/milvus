@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
@@ -234,6 +235,84 @@ func (s *HashSplitRewriteSuite) TestRewriteRoutesByPrimaryKeyAndFoldsDeletes() {
 	s.Equal(want, got)
 }
 
+// appendSourceLevelZero attaches one L0 delete-source segment to a rewrite plan,
+// the way datacoord attaches the source channel's pending deletes, and arms the
+// Download of its deltalog.
+func (s *HashSplitRewriteSuite) appendSourceLevelZero(plan *datapb.CompactionPlan, segmentID int64, path string, deletedPKs []int64) {
+	s.appendSourceLevelZeroAt(plan, segmentID, path, deletedPKs,
+		tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), 20))
+}
+
+// appendSourceLevelZeroAt is appendSourceLevelZero with an explicit delete
+// timestamp, so a test can place the delete before or after the rows.
+func (s *HashSplitRewriteSuite) appendSourceLevelZeroAt(plan *datapb.CompactionPlan, segmentID int64, path string, deletedPKs []int64, deleteTs uint64) {
+	tss := make([]uint64, len(deletedPKs))
+	for i := range tss {
+		tss[i] = deleteTs
+	}
+	blob, err := getInt64DeltaBlobs(segmentID, deletedPKs, tss)
+	s.Require().NoError(err)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{path}).
+		Return([][]byte{blob.GetValue()}, nil).Once()
+	plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+		SegmentID:    segmentID,
+		CollectionID: CollectionID,
+		PartitionID:  PartitionID,
+		Level:        datapb.SegmentLevel_L0,
+		Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: path}}}},
+	})
+}
+
+// A delete that flushed into a source L0 and never reached an L1 deltalog is the
+// fork-1 case: after the commit the rows live on the targets and the L0 is
+// retired, so the rewrite is the only place those deletes can still be applied.
+func (s *HashSplitRewriteSuite) TestRewriteFoldsTheSourceChannelLevelZeroDeletes() {
+	const numRows = 1000
+	ownDeleted := []int64{3, 7}
+	l0Deleted := []int64{11, 500, 999}
+	plan := s.prepareRewrite(genCollectionSchema(), numRows, nil, ownDeleted)
+	s.appendSourceLevelZero(plan, 3002, "deltalog/l0-3002", l0Deleted)
+
+	got := s.rowsPerChannel(plan)
+	want := s.expectedByPK(numRows, append(append([]int64{}, ownDeleted...), l0Deleted...))
+	s.Len(want, 2, "both halves must own rows for the check to mean anything")
+	s.Equal(want, got)
+	// Without the fold the two halves would carry 5 rows more between them.
+	s.EqualValues(numRows-len(ownDeleted)-len(l0Deleted), lo.Sum(lo.Values(got)))
+}
+
+// Several L0s, and a pk deleted by more than one of them, still yield one
+// delete set; an L0 delete of a pk the input never held is simply inert.
+func (s *HashSplitRewriteSuite) TestRewriteFoldsSeveralLevelZeroSegments() {
+	const numRows = 200
+	plan := s.prepareRewrite(genCollectionSchema(), numRows, nil, nil)
+	s.appendSourceLevelZero(plan, 3002, "deltalog/l0-3002", []int64{1, 2, 3})
+	s.appendSourceLevelZero(plan, 3003, "deltalog/l0-3003", []int64{3, 4, numRows + 50})
+
+	got := s.rowsPerChannel(plan)
+	want := s.expectedByPK(numRows, []int64{1, 2, 3, 4})
+	s.Equal(want, got)
+	s.EqualValues(numRows-4, lo.Sum(lo.Values(got)))
+}
+
+// A delete is only a delete for rows that existed when it was issued. An L0
+// entry older than the row it names must leave the row alone -- the rewrite
+// applies the same rule to a folded L0 delete as to the input's own, because it
+// is the same EntityFilter either way.
+func (s *HashSplitRewriteSuite) TestRewriteIgnoresALevelZeroDeleteOlderThanItsRow() {
+	const numRows = 200
+	stale := []int64{1, 2, 3}
+	plan := s.prepareRewrite(genCollectionSchema(), numRows, nil, nil)
+	// The rows are written at getMilvusBirthday() with logical 0; this delete
+	// predates every one of them.
+	s.appendSourceLevelZeroAt(plan, 3004, "deltalog/l0-3004", stale,
+		tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday().Add(-time.Hour), 0))
+
+	got := s.rowsPerChannel(plan)
+	s.Equal(s.expectedByPK(numRows, nil), got, "a stale delete removes nothing")
+	s.EqualValues(numRows, lo.Sum(lo.Values(got)))
+}
+
 // datacoord keeps binlogs with the path stripped to a log id, so a rewrite plan
 // arrives carrying ids. The compactor must rebuild the paths before reading,
 // exactly as the mix and L0 compactors do -- otherwise the input's own
@@ -260,6 +339,39 @@ func (s *HashSplitRewriteSuite) TestRewriteRebuildsCompressedBinlogPaths() {
 		Return([][]byte{blob.GetValue()}, nil).Once()
 	// As meta holds it: a log id and no path at all.
 	plan.SegmentBinlogs[0].Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: deltaLogID}}}}
+
+	got := s.rowsPerChannel(plan)
+	s.Equal(s.expectedByPK(numRows, deleted), got)
+	s.EqualValues(numRows-len(deleted), lo.Sum(lo.Values(got)))
+}
+
+// An L0 delete source arrives compressed like the input, and must be rebuilt
+// too, or the fold silently reads nothing from it.
+func (s *HashSplitRewriteSuite) TestRewriteRebuildsTheDeleteSourcesBinlogPaths() {
+	const numRows = 200
+	const l0SegmentID, l0LogID = int64(3009), int64(4242)
+	deleted := []int64{5, 6}
+
+	plan := s.prepareRewrite(genCollectionSchema(), numRows, nil, nil)
+	rootPath := compaction.GenParams().StorageConfig.GetRootPath()
+	wantPath := fmt.Sprintf("%s/delta_log/%d/%d/%d/%d", rootPath, CollectionID, PartitionID, l0SegmentID, l0LogID)
+
+	deleteTs := tsoutil.ComposeTSByTimeWithLogical(getMilvusBirthday(), 20)
+	tss := make([]uint64, len(deleted))
+	for i := range tss {
+		tss[i] = deleteTs
+	}
+	blob, err := getInt64DeltaBlobs(l0SegmentID, deleted, tss)
+	s.Require().NoError(err)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, []string{wantPath}).
+		Return([][]byte{blob.GetValue()}, nil).Once()
+	plan.SegmentBinlogs = append(plan.SegmentBinlogs, &datapb.CompactionSegmentBinlogs{
+		SegmentID:    l0SegmentID,
+		CollectionID: CollectionID,
+		PartitionID:  PartitionID,
+		Level:        datapb.SegmentLevel_L0,
+		Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: l0LogID}}}},
+	})
 
 	got := s.rowsPerChannel(plan)
 	s.Equal(s.expectedByPK(numRows, deleted), got)

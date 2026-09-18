@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -68,8 +69,12 @@ type hashSplitCompactionTask struct {
 	partitionID  int64
 	maxRows      int64
 	currentTime  time.Time
-	// input is the one data segment this plan rewrites, resolved by preCompact.
-	input *datapb.CompactionSegmentBinlogs
+	// input is the one data segment this plan rewrites, and deleteSources the
+	// other segments of the plan whose deltalogs the rewrite folds on top of
+	// the input's own -- the source channel's L0 segments. Both are resolved by
+	// preCompact, from the plan's segment list.
+	input         *datapb.CompactionSegmentBinlogs
+	deleteSources []*datapb.CompactionSegmentBinlogs
 	// ttlFieldID is the collection's row-level TTL field, or -1 when it has
 	// none. Resolved once, as a mix compaction does.
 	ttlFieldID int64
@@ -120,13 +125,33 @@ func (t *hashSplitCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 // A hash split rewrite is strictly one data segment per plan: datacoord
 // dispatches one plan per source segment so that a lost plan retries exactly
 // that segment, and so the pre-allocated output ids are unambiguous.
+//
+// The plan may carry further segments at level L0. Those are not rewritten and
+// are not retired by the commit: they are the source channel's pending deletes,
+// carried the way an L0 compaction plan carries them, and the rewrite folds
+// their deltalogs into the outputs it writes. Without them a delete that flushed
+// into a source L0 but never reached an L1 deltalog would be lost the moment the
+// rows move to the targets.
 func (t *hashSplitCompactionTask) preCompact() error {
-	t.input = nil
-	if len(t.plan.GetSegmentBinlogs()) != 1 {
-		return merr.WrapErrServiceInternalMsg(
-			"a hash split rewrite takes exactly one input segment, got %d", len(t.plan.GetSegmentBinlogs()))
+	t.input, t.deleteSources = nil, nil
+	dataSegments := 0
+	for _, seg := range t.plan.GetSegmentBinlogs() {
+		if seg.GetLevel() == datapb.SegmentLevel_L0 {
+			t.deleteSources = append(t.deleteSources, seg)
+			continue
+		}
+		dataSegments++
+		if t.input == nil {
+			t.input = seg
+		}
 	}
-	t.input = t.plan.GetSegmentBinlogs()[0]
+	// Counted over the whole list: the L0 entries follow the input, so a
+	// running difference would misreport how many data segments the plan holds.
+	if dataSegments != 1 {
+		return merr.WrapErrServiceInternalMsg(
+			"a hash split rewrite takes exactly one input segment, got %d among %d plan segments",
+			dataSegments, len(t.plan.GetSegmentBinlogs()))
+	}
 	// A shard split has exactly two targets. That they tile the input's
 	// residues with no overlap is not a count and is checked by the partitioner.
 	if len(t.plan.GetHashSplitTargets()) != 2 {
@@ -198,6 +223,8 @@ func (t *hashSplitCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 
 	logger.Info(ctx, "hash split rewrite finished",
 		mlog.Int64("sourceSegmentID", t.input.GetSegmentID()),
+		mlog.Int64s("foldedLevelZeroSegmentIDs", lo.Map(t.deleteSources,
+			func(seg *datapb.CompactionSegmentBinlogs, _ int) int64 { return seg.GetSegmentID() })),
 		mlog.Duration("elapse", t.tr.RecordSpan()))
 
 	return &datapb.CompactionPlanResult{
@@ -269,9 +296,11 @@ func (t *hashSplitCompactionTask) newTargetWriters(
 // the writer of the target that owns its primary key.
 //
 // Deleted and expired rows are dropped exactly as an ordinary compaction drops
-// them, so the rewrite folds the input's deltalogs instead of carrying them
-// over: the commit drops the input, and a delete missing from the outputs here
-// is a delete lost for good.
+// them, so the rewrite folds the deletes instead of carrying them over. The fold
+// spans the input's own deltalogs AND the plan's L0 delete sources (the source
+// channel's pending deletes): the commit drops the input and the source's L0s
+// are retired once nothing on the source is left to fold them, so a delete
+// missing from the outputs here is a delete lost for good.
 func (t *hashSplitCompactionTask) rewriteSegment(
 	ctx context.Context,
 	seg *datapb.CompactionSegmentBinlogs,
@@ -289,7 +318,11 @@ func (t *hashSplitCompactionTask) rewriteSegment(
 		return nil, err
 	}
 
-	delta, err := compaction.ComposeDeleteFromDeltalogs(ctx, pkField.DataType, seg,
+	// The input first, then the L0s. The composed map keeps the latest
+	// timestamp per pk, so the order is immaterial; it is the union that
+	// matters.
+	deleteFrom := append([]*datapb.CompactionSegmentBinlogs{seg}, t.deleteSources...)
+	delta, err := compaction.ComposeDeleteFromSegments(ctx, pkField.DataType, deleteFrom,
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig))
 	if err != nil {
