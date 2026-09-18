@@ -289,6 +289,10 @@ func (node *QueryNode) releaseSplitChildren(ctx context.Context, source delegato
 				mlog.String("childVChannel", childVChannel))
 			continue
 		}
+		// An un-adopted child that was split in turn fronts un-adopted children of
+		// its own. Release those first, so none of them outlives it registered on
+		// the node with a running pipeline and no parent.
+		node.releaseSplitChildren(ctx, child, collectionID)
 		node.delegators.GetAndRemove(childVChannel)
 		node.pipelineManager.Remove(childVChannel)
 		child.Close()
