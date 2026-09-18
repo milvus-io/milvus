@@ -90,6 +90,10 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 		ctx, params.CollectionID, params.ReplicaID, targetVChannel, params.Version,
 		node.clusterManager, node.manager, node.loader, seekPosition.GetTimestamp(),
 		node.queryHook, node.chunkManager, queryView, node.binlogSaver,
+		// A child is a shard like any other: once its key range outgrows the
+		// split threshold a second split fences it, and it must front that split
+		// just as a watched delegator does, both before and after its adoption.
+		delegator.WithChildSpawner(node),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to create split child delegator")
