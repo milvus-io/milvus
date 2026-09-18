@@ -6094,6 +6094,9 @@ type dataCoordConfig struct {
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
+	// --- SHARD SPLIT ---
+	ShardSplitEnable ParamItem `refreshable:"true"`
+
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
@@ -6490,6 +6493,16 @@ Compaction merges small-size segments into a large segment, and clears the entit
 		Export: true,
 	}
 	p.EnableCompaction.Init(base.mgr)
+
+	p.ShardSplitEnable = ParamItem{
+		Key:          "dataCoord.shardSplit.enable",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether a new shard split may be issued. While it is off, the split builder refuses to issue one.
+It never affects a split already written to the WAL: that split is always carried through, on every cluster.`,
+		Export: true,
+	}
+	p.ShardSplitEnable.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",
