@@ -49,7 +49,11 @@ func TestInitPluginLoaderLogsProtectConfig(t *testing.T) {
 	// ordinary HandleCStatus and is then printed by startup callers again.
 	err := InitPluginLoader()
 	require.Error(t, err)
-	assert.Equal(t, int32(merr.CodeUnexpectedError), merr.Code(err))
+	// In 2.6, C++ UnexpectedError maps to ErrSegcore while retaining its
+	// original code in the error details.
+	assert.ErrorIs(t, err, merr.ErrSegcore)
+	assert.Equal(t, merr.Code(merr.ErrSegcore), merr.Code(err))
+	assert.Contains(t, err.Error(), "segcoreCode=2001")
 	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	assert.False(t, merr.IsRetryableErr(err))
 	log.Ctx(context.TODO()).Error("startup failed", zap.Error(err))
