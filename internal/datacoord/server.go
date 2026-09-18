@@ -121,6 +121,10 @@ type Server struct {
 	// shardSplitTasks is datacoord's record of the shard splits it has been
 	// told about, recovered from the catalog at start (shard_split_task.go).
 	shardSplitTasks *shardSplitTasks
+	// shardSplitManager plans this cluster's shard splits and drives every
+	// split task the store records.
+	shardSplitManager *shardSplitManager
+
 	importInspector ImportInspector
 	importChecker   ImportChecker
 	importJobLock   *lock.KeyLock[int64]
@@ -330,6 +334,7 @@ func (s *Server) initDataCoord() error {
 		return err
 	}
 	mlog.Info(s.ctx, "load shard split tasks done")
+	s.shardSplitManager = newShardSplitManager(s.ctx, s.meta, s.allocator, s.shardSplitTasks, s)
 
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
@@ -751,6 +756,12 @@ func (s *Server) startServerLoop() {
 
 	s.garbageCollector.start()
 
+	// On every cluster, whatever the compaction switch: a split already in the
+	// WAL is carried through, and a secondary's tasks come from its callbacks.
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Start()
+	}
+
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
 
@@ -1090,6 +1101,11 @@ func (s *Server) Stop() error {
 	s.copySegmentChecker.Close()
 	mlog.Info(s.ctx, "datacoord copy segment inspector and checker stopped")
 
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Stop()
+		mlog.Info(s.ctx, "datacoord shard split manager stopped")
+	}
+
 	s.stopCompaction()
 	mlog.Info(s.ctx, "datacoord compaction stopped")
 
@@ -1165,6 +1181,14 @@ func (s *Server) registerMetricsRequest() {
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ShardSplitTaskKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			if s.shardSplitManager == nil {
+				return "[]", nil
+			}
+			return s.shardSplitManager.TaskStatsJSON(), nil
 		})
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
