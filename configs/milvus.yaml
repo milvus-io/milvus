@@ -488,7 +488,6 @@ queryCoord:
 queryNode:
   groupBy:
     strictGroupStrategy: per_group # Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.
-    strictGroupDebug: false # Opt-in segment/stage diagnostic logs; no per-candidate logs or customer field values.
     strictGroupPhase1CandidateWeight: 0 # Strict group phase-one consumer Next limit is topk * group_size * weight; zero disables truncation. Overflow saturates at INT64_MAX. Only group discovery is limited; completion is not. May reduce recall.
     strictGroupSkipRefine: false # Skip query-time refinement consistently in both phases of single-query strict grouping with group size greater than one. May reduce recall.
   stats:

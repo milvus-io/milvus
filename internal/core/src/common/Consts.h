@@ -23,7 +23,6 @@
 
 const int64_t INVALID_FIELD_ID = -1;
 inline constexpr char kStrictGroupStrategy[] = "strict_group_strategy";
-inline constexpr char kStrictGroupDebug[] = "strict_group_debug";
 inline constexpr char kStrictGroupPhase1CandidateWeight[] =
     "strict_group_phase1_candidate_weight";
 inline constexpr char kStrictGroupSkipRefine[] = "strict_group_skip_refine";
