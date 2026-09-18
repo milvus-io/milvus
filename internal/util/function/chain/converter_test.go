@@ -167,7 +167,7 @@ func (s *ConverterSuite) TestFromSearchResultData_Basic() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"name", "age"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "name", "age"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -218,7 +218,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NeededFieldsFilter() {
 		},
 	}
 
-	// nil neededFields: skip all field columns (same as empty)
+	// A nil plan skips all field columns.
 	df, err := FromSearchResultData(resultData, s.pool, nil)
 	s.Require().NoError(err)
 	s.True(df.HasColumn(types.IDFieldName))
@@ -227,8 +227,8 @@ func (s *ConverterSuite) TestFromSearchResultData_NeededFieldsFilter() {
 	s.False(df.HasColumn("age"))
 	df.Release()
 
-	// empty neededFields: skip all fields, only $id and $score
-	df, err = FromSearchResultData(resultData, s.pool, []string{})
+	// An empty plan skips all fields, leaving only $id and $score.
+	df, err = FromSearchResultData(resultData, s.pool, nil)
 	s.Require().NoError(err)
 	s.True(df.HasColumn(types.IDFieldName))
 	s.True(df.HasColumn(types.ScoreFieldName))
@@ -236,8 +236,8 @@ func (s *ConverterSuite) TestFromSearchResultData_NeededFieldsFilter() {
 	s.False(df.HasColumn("age"))
 	df.Release()
 
-	// specific neededFields: only import "name"
-	df, err = FromSearchResultData(resultData, s.pool, []string{"name"})
+	// A plan containing only "name" imports only that field.
+	df, err = FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "name"))
 	s.Require().NoError(err)
 	s.True(df.HasColumn("name"))
 	s.False(df.HasColumn("age"))
@@ -428,7 +428,7 @@ func (s *ConverterSuite) TestToSearchResultData() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"name"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "name"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -599,7 +599,7 @@ func (s *ConverterSuite) TestGroupByFieldValue_RoundTrip() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"name"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "name"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -902,7 +902,9 @@ func (s *ConverterSuite) TestImportExport_AllDataTypes() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"bool_col", "int8_col", "int16_col", "int32_col", "int64_col", "float_col", "double_col", "varchar_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(
+		resultData, "bool_col", "int8_col", "int16_col", "int32_col", "int64_col", "float_col", "double_col", "varchar_col",
+	))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -982,7 +984,7 @@ func (s *ConverterSuite) TestMemoryLeak_ImportExport() {
 	}
 
 	for range 10 {
-		df, err := FromSearchResultData(resultData, s.pool, []string{"name"})
+		df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "name"))
 		s.Require().NoError(err)
 
 		_, err = ToSearchResultData(df)
@@ -1024,7 +1026,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_Int64() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_col"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1075,7 +1077,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_String() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_str"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_str"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1120,7 +1122,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_Int8() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_int8"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_int8"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1162,7 +1164,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_Int16() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_int16"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_int16"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1205,7 +1207,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_MultipleChunks()
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_float"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_float"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1280,7 +1282,9 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableField_AllTypes() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_bool", "nullable_int32", "nullable_double"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(
+		resultData, "nullable_bool", "nullable_int32", "nullable_double",
+	))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1335,7 +1339,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NonNullableField() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"non_nullable_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "non_nullable_col"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1405,7 +1409,7 @@ func TestFromSearchResultData_MemoryLeakOnError(t *testing.T) {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, pool, []string{"name", "vector"})
+	df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "name", "vector"))
 	assert.Error(t, err)
 	assert.Nil(t, df)
 	assert.Contains(t, err.Error(), "unsupported")
@@ -1443,23 +1447,15 @@ func TestFromSearchResultData_MemoryLeakOnError_WithCheckedAllocator(t *testing.
 				},
 			},
 			{
-				Type:      schemapb.DataType_JSON, // Unsupported!
+				Type:      schemapb.DataType_JSON,
 				FieldName: "json_col",
 				FieldId:   101,
-				Field: &schemapb.FieldData_Scalars{
-					Scalars: &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_JsonData{
-							JsonData: &schemapb.JSONArray{
-								Data: [][]byte{[]byte(`{}`), []byte(`{}`), []byte(`{}`), []byte(`{}`), []byte(`{}`)},
-							},
-						},
-					},
-				},
+				Field:     nil,
 			},
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, checkedPool, []string{"col1", "json_col"})
+	df, err := FromSearchResultData(resultData, checkedPool, testDataFrameInputPlan(resultData, "col1", "json_col"))
 	assert.Error(t, err)
 	assert.Nil(t, df)
 
@@ -1502,7 +1498,7 @@ func TestFromSearchResultData_NoLeakOnSuccess(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		df, err := FromSearchResultData(resultData, checkedPool, []string{"name"})
+		df, err := FromSearchResultData(resultData, checkedPool, testDataFrameInputPlan(resultData, "name"))
 		require.NoError(t, err)
 		require.NotNil(t, df)
 		df.Release()
@@ -1559,7 +1555,7 @@ func TestFromSearchResultData_MemoryLeakQuantification(t *testing.T) {
 
 	iterations := 100
 	for i := 0; i < iterations; i++ {
-		df, err := FromSearchResultData(resultData, checkedPool, []string{"large_col", "vector"})
+		df, err := FromSearchResultData(resultData, checkedPool, testDataFrameInputPlan(resultData, "large_col", "vector"))
 		assert.Error(t, err)
 		assert.Nil(t, df)
 	}
@@ -1618,10 +1614,10 @@ func TestFromSearchResultData_DuplicateFieldNames(t *testing.T) {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, pool, []string{"dup_field"})
+	df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "dup_field"))
 	assert.Error(t, err)
 	assert.Nil(t, df)
-	assert.Contains(t, err.Error(), "duplicate field name")
+	assert.Contains(t, err.Error(), "appears more than once")
 	assert.Contains(t, err.Error(), "dup_field")
 }
 
@@ -1675,7 +1671,9 @@ func TestFromSearchResultData_DuplicateFieldIDs(t *testing.T) {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, pool, []string{"field_a", "field_b"})
+	df, err := FromSearchResultData(resultData, pool, &DataFrameInputPlan{Inputs: []ResolvedChainInput{{
+		LogicalName: "field_a", SourceFieldID: 100, FieldName: "field_a", DataType: schemapb.DataType_Int64,
+	}}})
 	assert.Error(t, err)
 	assert.Nil(t, df)
 	assert.Contains(t, err.Error(), "duplicate field id")
@@ -1752,7 +1750,7 @@ func TestMemoryLeakStress(t *testing.T) {
 	}
 
 	for range 100 {
-		df, err := FromSearchResultData(resultData, pool, []string{"col1", "col2", "col3"})
+		df, err := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "col1", "col2", "col3"))
 		assert.NoError(t, err)
 
 		_ = df.Column(types.IDFieldName)
@@ -1840,7 +1838,7 @@ func (s *ConverterSuite) TestExportValidData_AllValid() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_col"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -1888,14 +1886,14 @@ func (s *ConverterSuite) TestFromSearchResultData_NilScalars() {
 				},
 			}
 
-			_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+			_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 			s.Require().Error(err)
 			s.Contains(err.Error(), "scalars is nil")
 		})
 	}
 }
 
-func (s *ConverterSuite) TestFromSearchResultData_UnsupportedFieldType() {
+func (s *ConverterSuite) TestFromSearchResultData_RejectsCompleteJSONRoot() {
 	resultData := &schemapb.SearchResultData{
 		NumQueries: 1,
 		TopK:       1,
@@ -1916,9 +1914,9 @@ func (s *ConverterSuite) TestFromSearchResultData_UnsupportedFieldType() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"json_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "json_field"))
 	s.Require().Error(err)
-	s.Contains(err.Error(), "unsupported")
+	s.Contains(err.Error(), "unsupported complete JSON root")
 }
 
 // =============================================================================
@@ -2013,10 +2011,9 @@ func (s *ConverterSuite) TestFromSearchResultData_EmptyFieldName() {
 		},
 	}
 
-	// Empty field name not in filter, so it gets skipped
-	_, err := FromSearchResultData(resultData, s.pool, []string{""})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, ""))
 	s.Error(err)
-	s.Contains(err.Error(), "field_name is empty")
+	s.Contains(err.Error(), "empty logical name")
 }
 
 func (s *ConverterSuite) TestFromSearchResultData_ValidDataTooShort() {
@@ -2047,7 +2044,7 @@ func (s *ConverterSuite) TestFromSearchResultData_ValidDataTooShort() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"col"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "col"))
 	s.Error(err)
 	s.Contains(err.Error(), "validData length")
 	s.Contains(err.Error(), "less than totalRows")
@@ -2080,7 +2077,7 @@ func (s *ConverterSuite) TestFromSearchResultData_FieldDataTooShort() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"col"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "col"))
 	s.Error(err)
 	s.Contains(err.Error(), "data length")
 	s.Contains(err.Error(), "less than totalRows")
@@ -2115,7 +2112,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NilBoolData() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 	s.Error(err)
 	s.Contains(err.Error(), "bool data is nil")
 }
@@ -2145,7 +2142,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NilIntData() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 	s.Error(err)
 	s.Contains(err.Error(), "int data is nil")
 }
@@ -2175,7 +2172,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NilLongData() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 	s.Error(err)
 	s.Contains(err.Error(), "long data is nil")
 }
@@ -2205,7 +2202,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NilFloatData() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 	s.Error(err)
 	s.Contains(err.Error(), "float data is nil")
 }
@@ -2235,7 +2232,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NilDoubleData() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 	s.Error(err)
 	s.Contains(err.Error(), "double data is nil")
 }
@@ -2265,7 +2262,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NilStringData() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"test_field"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "test_field"))
 	s.Error(err)
 	s.Contains(err.Error(), "string data is nil")
 }
@@ -2397,7 +2394,7 @@ func (s *ConverterSuite) TestNullableRoundTrip_WithNulls() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_col"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -2444,7 +2441,7 @@ func (s *ConverterSuite) TestNullableRoundTrip_TimestamptzWithNulls() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"ts"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "ts"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -2486,7 +2483,7 @@ func (s *ConverterSuite) TestNullableRoundTrip_BoolWithNulls() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_bool"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_bool"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -2525,7 +2522,7 @@ func (s *ConverterSuite) TestNullableRoundTrip_StringWithNulls() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"nullable_str"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "nullable_str"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -2696,7 +2693,7 @@ func (s *ConverterSuite) TestFromSearchResultData_NullableInt8() {
 		},
 	}
 
-	df, err := FromSearchResultData(resultData, s.pool, []string{"int8_col"})
+	df, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "int8_col"))
 	s.Require().NoError(err)
 	defer df.Release()
 
@@ -2747,7 +2744,7 @@ func (s *ConverterSuite) TestFromSearchResultData_FloatFieldDataTooShort() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"float_col"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "float_col"))
 	s.Error(err)
 	s.Contains(err.Error(), "data length")
 	s.Contains(err.Error(), "less than totalRows")
@@ -2780,7 +2777,7 @@ func (s *ConverterSuite) TestFromSearchResultData_BoolFieldDataTooShort() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"bool_col"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "bool_col"))
 	s.Error(err)
 	s.Contains(err.Error(), "data length")
 	s.Contains(err.Error(), "less than totalRows")
@@ -2813,7 +2810,7 @@ func (s *ConverterSuite) TestFromSearchResultData_StringFieldDataTooShort() {
 		},
 	}
 
-	_, err := FromSearchResultData(resultData, s.pool, []string{"str_col"})
+	_, err := FromSearchResultData(resultData, s.pool, testDataFrameInputPlan(resultData, "str_col"))
 	s.Error(err)
 	s.Contains(err.Error(), "data length")
 	s.Contains(err.Error(), "less than totalRows")
@@ -2865,7 +2862,7 @@ func BenchmarkFromSearchResultData_ErrorPath(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		df, _ := FromSearchResultData(resultData, pool, []string{"col1", "vector"})
+		df, _ := FromSearchResultData(resultData, pool, testDataFrameInputPlan(resultData, "col1", "vector"))
 		if df != nil {
 			df.Release()
 		}

@@ -23,6 +23,16 @@
 
 namespace milvus::segcore {
 
+inline constexpr const char* kMilvusDataTypeMetadataKey = "milvus.data_type";
+
+// Classify a failed in-memory Arrow conversion/export at the C Data boundary.
+// Unlike storage's mapper, Invalid/Type/Index errors here describe internal
+// result contracts, not corrupt persisted data or invalid client parameters.
+// Helpers below propagate Arrow statuses unchanged; Search/Retrieve C entry
+// points call this mapper and contain exceptions with CGoCatch.h.
+CStatus
+ArrowExportFailure(const arrow::Status& status);
+
 // Build the Arrow field metadata (field id + Milvus data type) attached to
 // every exported Arrow field, so downstream consumers can recover the
 // originating Milvus field without relying on column name/order alone.
@@ -39,14 +49,18 @@ MilvusField(const std::string& name,
 
 // Resolve the Arrow physical type used to build an empty (0-row) Arrow array
 // for this scalar field, without requiring materialized field data.
+// Search function chains preserve INT8/INT16 widths; retrieve consumers use
+// the protobuf-compatible INT32 representation by default.
 arrow::Result<std::shared_ptr<arrow::DataType>>
-EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta);
+EmptyExtraFieldArrowType(const milvus::FieldMeta& field_meta,
+                         bool preserve_integer_width = false);
 
 // Convert a protobuf FieldData (scalar or vector) to an Arrow Array + Field.
 arrow::Result<
     std::pair<std::shared_ptr<arrow::Field>, std::shared_ptr<arrow::Array>>>
 FieldDataToArrow(const std::string& field_name,
                  const milvus::DataArray& field_data,
-                 size_t total_valid);
+                 size_t total_valid,
+                 bool preserve_integer_width = false);
 
 }  // namespace milvus::segcore

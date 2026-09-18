@@ -84,7 +84,7 @@ func (o *SortOp) Execute(ctx *types.FuncContext, input *DataFrame) (*DataFrame, 
 
 	// Validate sort column type is comparable
 	if !isComparableType(sortCol.DataType()) {
-		return nil, merr.WrapErrServiceInternalMsg("sort_op: column %s has non-comparable type %s", column, sortCol.DataType().Name())
+		return nil, merr.WrapErrParameterInvalidMsg("sort_op: column %s has non-comparable type %s", column, sortCol.DataType().Name())
 	}
 
 	// Resolve optional tie-break column
