@@ -43,12 +43,12 @@ import (
 const twoPCRowCount = 100
 
 type TwoPCImportSuite struct {
-	integration.MiniClusterSuite
+	importSuite
 }
 
 func (s *TwoPCImportSuite) SetupSuite() {
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "4")
-	s.MiniClusterSuite.SetupSuite()
+	s.importSuite.SetupSuite()
 }
 
 // WaitForImportState polls GetImportProgress until the job reaches the target state.
@@ -86,7 +86,7 @@ func WaitForImportState(ctx context.Context, c *cluster.MiniClusterV3, jobID str
 			mlog.String("current", currentState.String()),
 			mlog.String("target", targetState.String()),
 			mlog.Int64("progress", resp.GetProgress()))
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
