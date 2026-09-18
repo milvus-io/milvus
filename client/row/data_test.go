@@ -39,6 +39,52 @@ type RowsSuite struct {
 	suite.Suite
 }
 
+func (s *RowsSuite) TestColumnCreatorsRejectInvalidSchemas() {
+	for _, dataType := range []entity.FieldType{
+		entity.FieldTypeFloatVector, entity.FieldTypeBinaryVector,
+		entity.FieldTypeFloat16Vector, entity.FieldTypeBFloat16Vector, entity.FieldTypeInt8Vector,
+	} {
+		for _, dim := range []string{"", "not-a-number"} {
+			s.Run(fmt.Sprintf("%s/dim=%s", dataType, dim), func() {
+				field := entity.NewField().WithName("vector").WithDataType(dataType)
+				if dim != "" {
+					field.TypeParams = map[string]string{entity.TypeParamDim: dim}
+				}
+				creator := getColumnCreators(entity.NewSchema().WithField(field))["vector"]
+				col, err := creator(1)
+				s.Nil(col)
+				s.Error(err)
+			})
+		}
+	}
+	for _, field := range []*entity.Field{
+		entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeJSON),
+		entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeStruct),
+	} {
+		col, err := getColumnCreators(entity.NewSchema().WithField(field))["array"](1)
+		s.Nil(col)
+		s.Error(err)
+	}
+}
+
+func (s *RowsSuite) TestColumnCreatorsStructAndSparseArray() {
+	fields := []*entity.Field{
+		entity.NewField().WithName("json").WithDataType(entity.FieldTypeJSON),
+		entity.NewField().WithName("array").WithDataType(entity.FieldTypeArray).WithElementType(entity.FieldTypeInt64),
+		entity.NewField().WithName("sparse").WithDataType(entity.FieldTypeSparseVector),
+		entity.NewField().WithName("profile").WithDataType(entity.FieldTypeArray).
+			WithElementType(entity.FieldTypeStruct).WithStructSchema(entity.NewStructSchema().WithField(
+			entity.NewField().WithName("age").WithDataType(entity.FieldTypeInt64))),
+	}
+	for _, field := range fields {
+		col, err := getColumnCreators(entity.NewSchema().WithField(field))[field.Name](2)
+		s.Require().NoError(err)
+		s.Equal(field.Name, col.Name())
+		s.Zero(col.Len())
+		s.Equal(field.DataType, col.Type())
+	}
+}
+
 func (s *RowsSuite) TestRowsToColumns() {
 	s.Run("valid_cases", func() {
 		columns, err := AnyToColumns([]any{&ValidStruct{}}, false)

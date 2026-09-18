@@ -2067,6 +2067,24 @@ func subFieldHasData(subField *schemapb.FieldData) bool {
 	}
 }
 
+// vectorArrayElementWidth counts underlying slice entries per vector: float32
+// entries for FloatVector, bytes for the other supported vector types.
+func vectorArrayElementWidth(elementType schemapb.DataType, dim int64) (int, error) {
+	if dim <= 0 {
+		return 0, merr.WrapErrParameterInvalidMsg("invalid dim %d", dim)
+	}
+	switch elementType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
+		return int(dim), nil
+	case schemapb.DataType_BinaryVector:
+		return int((dim + 7) / 8), nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return int(dim * 2), nil
+	default:
+		return 0, merr.WrapErrParameterInvalidMsg("unsupported array-of-vector element type %s", elementType.String())
+	}
+}
+
 // checkAndFlattenStructFieldData verifies the array length of the struct array field data in the insert message
 // and then flattens the data so that data node and query node have not to handle the struct array field data.
 func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
@@ -2188,20 +2206,11 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 			if err != nil {
 				return 0, merr.WrapErrParameterInvalidErr(err, "sub-field '%s' in struct '%s'", subField.GetFieldName(), structName)
 			}
-			if dim <= 0 {
-				return 0, merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s': invalid dim %d", subField.GetFieldName(), structName, dim)
+			width, err := vectorArrayElementWidth(subFieldSchema.GetElementType(), dim)
+			if err != nil {
+				return 0, merr.Wrapf(err, "sub-field '%s' in struct '%s'", subField.GetFieldName(), structName)
 			}
-			switch subFieldSchema.GetElementType() {
-			case schemapb.DataType_FloatVector, schemapb.DataType_Int8Vector:
-				return int(dim), nil
-			case schemapb.DataType_BinaryVector:
-				return int((dim + 7) / 8), nil
-			case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-				return int(dim * 2), nil
-			default:
-				return 0, merr.WrapErrParameterInvalidMsg("sub-field '%s' in struct '%s': unsupported array-of-vector element type %s",
-					subField.GetFieldName(), structName, subFieldSchema.GetElementType().String())
-			}
+			return width, nil
 		}
 
 		// Check the payload row count and, while those rows are in hand, verify the

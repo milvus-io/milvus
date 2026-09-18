@@ -230,9 +230,17 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 				data := make([][]byte, 0, rowsLen)
 				col = column.NewColumnJSONBytes(field.Name, data)
 			case entity.FieldTypeArray:
-				col = NewArrayColumn(field)
-				if col == nil {
-					return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
+				if field.ElementType == entity.FieldTypeStruct {
+					structColumn, err := column.NewColumnStructArrayFromSchema(field.Name, field.StructSchema)
+					if err != nil {
+						return nil, err
+					}
+					col = structColumn
+				} else {
+					col = NewArrayColumn(field)
+					if col == nil {
+						return nil, errors.Newf("unsupported element type %s for Array", field.ElementType.String())
+					}
 				}
 			case entity.FieldTypeFloatVector:
 				data := make([][]float32, 0, rowsLen)

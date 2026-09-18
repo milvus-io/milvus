@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -528,7 +530,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 // index and JSON_CONTAINS build a DOM, so a deeper document is readable by some
 // queries and not others. The request binder allows 9997 levels, so the gap is
 // reachable.
-const maxJSONDepth = 1024
+const maxJSONDepth = fieldvalidator.MaxJSONDepth
 
 // checkEngineCompatible reports the first reason the storage engine would not be
 // able to read a document back, in one pass over it.
@@ -894,9 +896,15 @@ func nullElementIn(value gjson.Result) (int, bool) {
 	return idx, found
 }
 
-func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	jsonPathFields := make(map[string]bool)
+	for _, op := range fieldOps {
+		if op.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			jsonPathFields[op.GetFieldName()] = true
+		}
+	}
 	// Escape hatch for clients that relied on the previous value handling.
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
@@ -961,6 +969,23 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				fieldType := field.DataType
 				fieldName := field.Name
 				fieldValue := data.Get(fieldName)
+
+				// Replacement operands are JSON values, not SQL NULL or an encoded
+				// document string. Preserve their type regardless of compatibility mode.
+				if fieldType == schemapb.DataType_JSON && jsonPathFields[fieldName] {
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("JSON PATH_REPLACE field %s is required in every row", fieldName)
+					}
+					stored, err := jsonDocumentForStorage(fieldName, fieldValue.Raw)
+					if err != nil {
+						return reallyDataArray, validDataMap, err
+					}
+					reallyData[fieldName] = stored
+					if field.Nullable || field.DefaultValue != nil {
+						validDataMap[fieldName] = append(validDataMap[fieldName], true)
+					}
+					continue
+				}
 
 				// For partial update, missing fields mean "do not update this field".
 				// Explicit JSON null is handled below as an update to null for nullable fields.
@@ -1452,6 +1477,109 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		}
 	}
 	return reallyDataArray, validDataMap, nil
+}
+
+// schemaForPathReplaceOperands validates information that would be lost during
+// REST row conversion and returns a request-local schema view. A PATH_REPLACE
+// StructArray operand must contain all children for an element path or exactly
+// the selected child for a child path. The collection schema remains complete.
+func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
+	targets := make(map[string]string)
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			targets[fieldOp.GetFieldName()] = fieldOp.GetPath()
+		}
+	}
+	if len(targets) == 0 {
+		return collSchema, nil
+	}
+
+	rows := gjson.GetBytes(body, HTTPRequestData).Array()
+	if len(rows) == 0 {
+		return collSchema, nil
+	}
+	for _, field := range collSchema.GetFields() {
+		if field.GetDataType() != schemapb.DataType_Array {
+			continue
+		}
+		if _, targeted := targets[field.GetName()]; !targeted {
+			continue
+		}
+		for rowIndex, row := range rows {
+			rawValue := gjson.Get(row.Raw, field.GetName())
+			if !rawValue.Exists() || rawValue.Type == gjson.Null {
+				continue
+			}
+			// A scalar Array has no element-level validity. Inspect the raw
+			// operand before compatibility-mode decoding can turn a null bool
+			// or float into its zero value. String() also unwraps the legacy
+			// quoted-array spelling accepted by REST row conversion.
+			if index, found := nullElementIn(gjson.Parse(rawValue.String())); found {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"row %d PATH_REPLACE array field %q has a null operand element at index %d",
+					rowIndex, field.GetName(), index)
+			}
+		}
+	}
+	requestSchema := proto.Clone(collSchema).(*schemapb.CollectionSchema)
+	for _, structSchema := range requestSchema.GetStructArrayFields() {
+		if _, targeted := targets[structSchema.GetName()]; !targeted {
+			continue
+		}
+		var expectedMask []string
+		for rowIndex, row := range rows {
+			rawValue := gjson.Get(row.Raw, structSchema.GetName())
+			if !rawValue.Exists() || rawValue.Type == gjson.Null {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must not be missing or null", rowIndex, structSchema.GetName())
+			}
+			elements := rawValue.Array()
+			if !rawValue.IsArray() || len(elements) != 1 || !elements[0].IsObject() {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must contain exactly one object", rowIndex, structSchema.GetName())
+			}
+			mask := make([]string, 0)
+			elements[0].ForEach(func(key, _ gjson.Result) bool {
+				mask = append(mask, key.String())
+				return true
+			})
+			sort.Strings(mask)
+			if len(mask) == 0 {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask must not be empty", rowIndex, structSchema.GetName())
+			}
+			if rowIndex == 0 {
+				expectedMask = mask
+			} else if !slices.Equal(expectedMask, mask) {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask %v does not match request mask %v", rowIndex, structSchema.GetName(), mask, expectedMask)
+			}
+		}
+
+		path := targets[structSchema.GetName()]
+		if strings.Count(path, "[") == 1 {
+			if len(expectedMask) != len(structSchema.GetFields()) {
+				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q whole element requires all struct children", structSchema.GetName())
+			}
+		} else if len(expectedMask) != 1 || !strings.HasSuffix(path, "["+expectedMask[0]+"]") {
+			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q path requires exactly the selected child", structSchema.GetName())
+		}
+		selected := make(map[string]struct{}, len(expectedMask))
+		for _, name := range expectedMask {
+			selected[name] = struct{}{}
+		}
+		children := make([]*schemapb.FieldSchema, 0, len(selected))
+		for _, child := range structSchema.GetFields() {
+			name := subShortName(child)
+			if _, ok := selected[name]; ok {
+				children = append(children, child)
+				delete(selected, name)
+			}
+		}
+		if len(selected) > 0 {
+			for name := range selected {
+				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE struct field %q has no child %q", structSchema.GetName(), name)
+			}
+		}
+		structSchema.Fields = children
+	}
+	return requestSchema, nil
 }
 
 func containsString(arr []string, s string) bool {
