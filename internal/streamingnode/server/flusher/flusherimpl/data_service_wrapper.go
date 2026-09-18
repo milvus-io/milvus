@@ -2,6 +2,7 @@ package flusherimpl
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/flushcommon/pipeline"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
@@ -35,6 +36,29 @@ type dataSyncServiceWrapper struct {
 	input                     chan<- *msgstream.MsgPack
 	handler                   *adaptor.BaseMsgPackAdaptorHandler
 	ds                        *pipeline.DataSyncService
+	// ackedCheckpointTimeTick is the largest channel checkpoint time tick
+	// DataCoord has acked for this service. It is written by the
+	// checkpoint-updater callback and read by the dispatch goroutine, which
+	// alone decides to close a drained fenced source.
+	ackedCheckpointTimeTick atomic.Uint64
+}
+
+// ObserveAckedCheckpoint records an acked channel checkpoint. The recorded
+// value only ever grows: acks for different checkpoint rounds may complete
+// out of order.
+func (ds *dataSyncServiceWrapper) ObserveAckedCheckpoint(timestamp uint64) {
+	for {
+		current := ds.ackedCheckpointTimeTick.Load()
+		if timestamp <= current || ds.ackedCheckpointTimeTick.CompareAndSwap(current, timestamp) {
+			return
+		}
+	}
+}
+
+// AckedCheckpoint returns the largest acked channel checkpoint time tick, 0 if
+// none was acked since the service was built.
+func (ds *dataSyncServiceWrapper) AckedCheckpoint() uint64 {
+	return ds.ackedCheckpointTimeTick.Load()
 }
 
 // Start starts the data sync service.
