@@ -20,12 +20,15 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
@@ -82,6 +85,26 @@ func TestFilterNodeSplitShard(t *testing.T) {
 		fNode := newFilterNode(splitTestCollectionID, splitTestSource, nil, mockDelegator, 8)
 		err := fNode.filtrate(nil, buildSplitShardTsMsg(t, splitTestCollectionID, splitTestSource, source, splitTestTarget1))
 		assert.Error(t, err)
+	})
+
+	t.Run("a spawn refusal is logged at warn and still returned", func(t *testing.T) {
+		// The generic filtrate error path logs at Debug, which production
+		// clusters never show: a fence that cannot be fronted has to be visible,
+		// since until it is fronted the split key range is unreadable.
+		var warned []string
+		warnMock := mockey.Mock(mlog.RatedWarn).To(func(_ context.Context, _ rate.Limit, msg string, _ ...mlog.Field) {
+			warned = append(warned, msg)
+		}).Build()
+		defer warnMock.UnPatch()
+
+		refusal := errors.New("spawner is not configured")
+		mockDelegator := delegator.NewMockShardDelegator(t)
+		mockDelegator.EXPECT().ProcessSplitShard(mock.Anything, mock.Anything).Return(refusal).Once()
+
+		fNode := newFilterNode(splitTestCollectionID, splitTestSource, nil, mockDelegator, 8)
+		err := fNode.filtrate(nil, buildSplitShardTsMsg(t, splitTestCollectionID, splitTestSource, source, splitTestTarget1))
+		assert.ErrorIs(t, err, refusal)
+		assert.Len(t, warned, 1, "the refusal must be logged above debug")
 	})
 
 	t.Run("a fence for another collection is rejected", func(t *testing.T) {
