@@ -1,9 +1,15 @@
-package rewriter
+package rules
 
 import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 )
+
+// NormalizeEmptyArrayComparisons lowers whole-array empty comparisons to
+// executable array-length predicates.
+func NormalizeEmptyArrayComparisons(expr *planpb.Expr) *planpb.Expr {
+	return normalizeEmptyArrayComparisons(expr)
+}
 
 // normalizeEmptyArrayComparisons lowers whole ARRAY == [] and ARRAY != [] to
 // array_length(ARRAY) == 0 and array_length(ARRAY) != 0. This is semantic

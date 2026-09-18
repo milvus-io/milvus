@@ -321,6 +321,18 @@ func TestRewrite_Bool_NotIn_SingleFalse_ToNotEqual(t *testing.T) {
 	require.Equal(t, false, ure.GetValue().GetBoolVal())
 }
 
+func TestRewrite_Bool_NotIn_SingleTrue_Nullable_ToNotEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteNullableT(t)
+
+	expr, err := parser.ParseExpr(helper, `NullableBoolField not in [true]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure, "nullable bool singleton should not trigger the full-domain NOT(Term) guard")
+	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
+	require.True(t, ure.GetValue().GetBoolVal())
+}
+
 func TestRewrite_Bool_ArrayIndex_In_TrueFalse_KeepsTerm(t *testing.T) {
 	helper := buildSchemaHelperWithArraysT(t)
 
@@ -342,7 +354,21 @@ func TestRewrite_Bool_ArrayIndex_NotIn_TrueFalse_KeepsNotTerm(t *testing.T) {
 	require.NotNil(t, unary.GetChild().GetTermExpr(), "indexed array bool NOT IN must not become a valid constant")
 }
 
-func TestRewrite_ArrayIndex_NotInSingle_KeepsNotTerm(t *testing.T) {
+func TestRewrite_Bool_ArrayIndex_NotIn_SingleTrue_KeepsNotEqualComplement(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayBool[0] not in [true]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary)
+	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
+	ure := unary.GetChild().GetUnaryRangeExpr()
+	require.NotNil(t, ure, "bool singleton does not use the full-domain NOT(Term) guard")
+	require.Equal(t, planpb.OpType_Equal, ure.GetOp())
+}
+
+func TestRewrite_ArrayIndex_NotInSingle_KeepsNotOfEqual(t *testing.T) {
 	helper := buildSchemaHelperWithArraysT(t)
 
 	expr, err := parser.ParseExpr(helper, `ArrayInt[0] not in [1]`, nil)
@@ -351,7 +377,24 @@ func TestRewrite_ArrayIndex_NotInSingle_KeepsNotTerm(t *testing.T) {
 	unary := expr.GetUnaryExpr()
 	require.NotNil(t, unary)
 	require.Equal(t, planpb.UnaryExpr_Not, unary.GetOp())
-	require.NotNil(t, unary.GetChild().GetTermExpr(), "indexed array NOT(IN) is not equivalent to indexed !=")
+	unaryRange := unary.GetChild().GetUnaryRangeExpr()
+	require.NotNil(t, unaryRange, "the singleton child should use its stable equality form")
+	require.Equal(t, planpb.OpType_Equal, unaryRange.GetOp(), "indexed array NOT(IN) must not become indexed !=")
+	require.Equal(t, int64(1), unaryRange.GetValue().GetInt64Val())
+}
+
+func TestRewrite_ArrayIndex_NotInDuplicateSingleton_KeepsNotOfEqual(t *testing.T) {
+	helper := buildSchemaHelperWithArraysT(t)
+
+	expr, err := parser.ParseExpr(helper, `ArrayInt[0] not in [1,1]`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	unary := expr.GetUnaryExpr()
+	require.NotNil(t, unary)
+	unaryRange := unary.GetChild().GetUnaryRangeExpr()
+	require.NotNil(t, unaryRange, "deduplication should expose the singleton equality form")
+	require.Equal(t, planpb.OpType_Equal, unaryRange.GetOp(), "indexed array NOT(IN) must not become indexed !=")
+	require.Equal(t, int64(1), unaryRange.GetValue().GetInt64Val())
 }
 
 func TestRewrite_ArrayIndex_NotEqualComplement_KeepsNotEqual(t *testing.T) {
@@ -613,6 +656,25 @@ func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
 	require.NotNil(t, ure)
 	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
 	require.Equal(t, int64(20), ure.GetValue().GetInt64Val())
+}
+
+func TestRewrite_Or_DuplicateEqual_ThenNotEqual_ToNotEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `(Int64Field == 1 or Int64Field == 1) or Int64Field != 2`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	ure := expr.GetUnaryRangeExpr()
+	require.NotNil(t, ure)
+	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
+	require.Equal(t, int64(2), ure.GetValue().GetInt64Val())
+}
+
+func TestRewrite_OrDuplicateEqual_UnderAnd_PreservesParentOpportunity(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `(Int64Field == 1 or Int64Field == 1) and Int64Field != 1`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
 // Test contradictory equals: (a == 1) AND (a == 2) → false
