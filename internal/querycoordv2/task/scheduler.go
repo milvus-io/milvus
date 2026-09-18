@@ -694,6 +694,10 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
 		scheduler.segmentTasks.Insert(index, task)
+
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
+		scheduler.segmentTasks.Insert(index, task)
 	}
 
 	scheduler.taskStats.Add(task.ID(), task)
@@ -1338,6 +1342,10 @@ func (scheduler *taskScheduler) remove(task Task) {
 		index := NewReplicaLeaderIndex(task)
 		scheduler.segmentTasks.Remove(index)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
+
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
+		scheduler.segmentTasks.Remove(index)
 	}
 
 	log.Info("task removed")

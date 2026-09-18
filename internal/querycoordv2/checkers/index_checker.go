@@ -135,6 +135,16 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
+		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
+		if len(redundantIndices) > 0 {
+			redundant[segment.GetID()] = redundantIndices
+			redundantSegments[segment.GetID()] = segment
+			// Loading a replacement index can fail until the old index is dropped.
+			// Both tasks use the same scheduler key, so only schedule deletion until
+			// the node reports that the redundant indexes are gone. This also lets
+			// failed drops retry without a load task repeatedly taking their place.
+			continue
+		}
 		missing := c.checkSegment(segment, indexInfos)
 		missingStats := c.checkSegmentStats(segment, schema, collection.LoadFields)
 		if len(missing) > 0 {
@@ -144,12 +154,14 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 			targetsStats[segment.GetID()] = missingStats
 			idSegmentsStats[segment.GetID()] = segment
 		}
+	}
 
-		redundantIndices := c.checkRedundantIndices(segment, indexInfos)
-		if len(redundantIndices) > 0 {
-			redundant[segment.GetID()] = redundantIndices
-			redundantSegments[segment.GetID()] = segment
-		}
+	// A segment may temporarily have multiple copies while being balanced.
+	// They share one scheduler key within the replica, so deletion on any copy
+	// must also take precedence over loading indexes or stats on another copy.
+	for segmentID := range redundantSegments {
+		delete(idSegments, segmentID)
+		delete(idSegmentsStats, segmentID)
 	}
 
 	segmentsToUpdate := typeutil.NewSet[int64]()
