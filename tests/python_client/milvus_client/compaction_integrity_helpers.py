@@ -7,7 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 from milvus_client import test_milvus_client_data_integrity as integrity
-from pymilvus import CompactionTaskState, CompactionType, MilvusException, SegmentState
+from pymilvus import CompactionTaskState, CompactionType, MilvusClient, MilvusException, SegmentState
 from pymilvus.client.types import Plan, SegmentInfo
 
 # Requires the observability SDK; collected only by the explicit unit entry.
@@ -458,6 +458,250 @@ def v2_ddl_checkpoint(stage):
         },
         "storage_versions": {2},
     }
+
+
+@pytest.mark.parametrize("dim", [32, 4096])
+def test_v2_projection_dataset_is_deterministic_exact_and_case_local(dim):
+    rng_state = integrity.np.random.get_state()
+    build = integrity._build_compaction_integrity_v2_projection_row
+    row = build("run", 8193, 2, dim)
+    repeat = build("run", 8193, 2, dim)
+    other = build("run", 8194, 2, dim)
+
+    def canonical(value):
+        return integrity._canonical_compaction_integrity_row(value, list(value), integrity.DataType.VARCHAR)
+
+    assert canonical(row) == canonical(repeat)
+    assert canonical(row)["float16_vector"] != canonical(other)["float16_vector"]
+    assert canonical(row)["float_vector"] != canonical(other)["float_vector"]
+    assert len(row["float16_vector"]) == 16 and len(row["binary_vector"]) == 2
+    assert len(row["float_vector"]) == dim
+    assert row["float_vector"][:3] == [8193.0, 2.0, 7.0]
+    assert integrity.np.isfinite(row["float_vector"]).all()
+    assert integrity.np.array_equal(row["float_vector"], integrity.np.asarray(row["float_vector"], dtype="float32"))
+    after = integrity.np.random.get_state()
+    assert rng_state[0] == after[0] and rng_state[2:] == after[2:]
+    assert integrity.np.array_equal(rng_state[1], after[1])
+    assert integrity.COMPACTION_INTEGRITY_VECTOR_DIM == 16
+    assert integrity.COMPACTION_INTEGRITY_DDL_ROWS_PER_BATCH > 0
+
+
+@pytest.mark.parametrize("pk,dim", [(-1, 32), (2**20, 32), (0, 16), (0, 32769)])
+def test_v2_projection_generator_rejects_ambiguous_fingerprints_or_dimensions(pk, dim):
+    with pytest.raises(AssertionError):
+        integrity._build_compaction_integrity_v2_projection_row("run", pk, 1, dim)
+
+
+@pytest.mark.parametrize("fault", [None, "narrow_replay", "wide_replay", "last_coordinate"])
+def test_v2_projection_verifier_detects_row_preserving_damage_and_scans_every_batch(monkeypatch, fault):
+    rows = [integrity._build_compaction_integrity_v2_projection_row("run", pk, 1, 32) for pk in range(8)]
+    fields = [name for name in rows[0] if name != integrity.COMPACTION_INTEGRITY_V2_PROJECTION_DROP_FIELD]
+    expected = {
+        row["id"]: integrity._canonical_compaction_integrity_row(row, fields, integrity.DataType.VARCHAR)
+        for row in rows
+    }
+    for row in rows:
+        row.pop(integrity.COMPACTION_INTEGRITY_V2_PROJECTION_DROP_FIELD)
+    if fault in {"narrow_replay", "wide_replay"}:
+        field = "float16_vector" if fault == "narrow_replay" else "float_vector"
+        for index in range(4, 8):
+            rows[index][field] = deepcopy(rows[index - 4][field])
+    elif fault == "last_coordinate":
+        field = "float_vector"
+        rows[-1][field][-1] += 1
+    client, iterator, evidence = Mock(), Mock(), Mock()
+    iterator.next.side_effect = [rows[:2], rows[2:4], rows[4:6], rows[6:], []]
+    client.query_iterator.return_value = iterator
+    monkeypatch.setattr(integrity, "_log_compaction_integrity_evidence", evidence)
+
+    def verify():
+        return integrity._assert_compaction_integrity_dataset(client, "c", expected, fields, integrity.DataType.VARCHAR)
+
+    if fault is None:
+        verify()
+    else:
+        with pytest.raises(AssertionError, match="data corruption detected in complete dataset"):
+            verify()
+        summary = next(
+            call.kwargs for call in evidence.call_args_list if call.args[0] == "data_integrity_dataset_corruption"
+        )
+        assert summary["corrupted_row_count"] == (1 if fault == "last_coordinate" else 4)
+        assert summary["field_mismatch_counts"] == {field: summary["corrupted_row_count"]}
+    assert iterator.next.call_count == 5
+    iterator.close.assert_called_once()
+    assert len(expected) == len(rows) == len({row["id"] for row in rows})
+
+
+@pytest.mark.parametrize("original_value", [None, b"true"])
+@pytest.mark.parametrize(
+    "failure_at", [None, "insert", "insert_count", "flush", "baseline", "drop", "mix_wait", "retained_data", "index"]
+)
+def test_v2_projection_workload_orders_verification_and_restores_config(monkeypatch, original_value, failure_at):
+    case, client = integrity.TestMilvusClientCompactionDataIntegrity(), Mock()
+    case._client = Mock(return_value=client)
+    schema = MilvusClient.create_schema(auto_id=False, enable_dynamic_field=False)
+    case.create_schema = Mock(return_value=(schema, True))
+    case.prepare_index_params = Mock(return_value=(MilvusClient.prepare_index_params(), True))
+    case.create_collection, case.create_index, case.load_collection, case.drop_collection = (
+        Mock(),
+        Mock(),
+        Mock(),
+        Mock(),
+    )
+    trace, stored, iterators = [], [], []
+    dropped_field = integrity.COMPACTION_INTEGRITY_V2_PROJECTION_DROP_FIELD
+    dropped = False
+    mix_ready = False
+    config_key = integrity.COMPACTION_INTEGRITY_BUMP_SCHEMA_VERSION_CONFIG
+
+    def fail(where):
+        if failure_at == where:
+            raise RuntimeError(f"injected {where}")
+
+    class ConfigController:
+        value = original_value
+
+        def read_config(self, key):
+            assert key == config_key
+            return SimpleNamespace(value=self.value, mod_revision=2)
+
+        def set_config(self, key, value, *, settle_after_write):
+            assert key == config_key and value == "false" and settle_after_write is True
+            self.value = b"false"
+            return self.read_config(key)
+
+        @contextmanager
+        def preserve_config(self, key):
+            try:
+                yield self
+            finally:
+                self.value = original_value
+
+    controller = ConfigController()
+
+    def insert(_client, _collection, rows):
+        fail("insert")
+        stored.extend(deepcopy(rows))
+        trace.append("insert")
+        return {"insert_count": len(rows) - (failure_at == "insert_count")}, True
+
+    def flush(*args):
+        fail("flush")
+        assert len(stored) == 5
+        trace.append("flush")
+
+    def drop(*args, **kwargs):
+        nonlocal dropped
+        fail("drop")
+        assert trace[-1] == "checkpoint_before"
+        assert trace.count("scan_before") == 1
+        assert kwargs["field_name"] == dropped_field
+        dropped = True
+        trace.append("drop")
+
+    def compact(*args):
+        trace.append("compact")
+        return -1, True  # A later successful automatic Mix is also accepted.
+
+    def mix_wait(*args, **kwargs):
+        nonlocal mix_ready
+        fail("mix_wait")
+        assert dropped and kwargs["required_task_types"] == {"MixCompaction"}
+        assert kwargs["expected_storage_version"] == 2 and kwargs["transition_policy"] == "lineage"
+        mix_ready = True
+        trace.append("mix_ready")
+
+    def checkpoint(*args, **kwargs):
+        assert controller.value == b"false" and kwargs["expected_storage_version"] == 2
+        if dropped:
+            assert mix_ready
+        trace.append("checkpoint_after" if dropped else "checkpoint_before")
+        result = v2_ddl_checkpoint(int(dropped))
+        for segment in [*result["all"].values(), *result["serving"].values()]:
+            segment.update(num_rows=5, partition_id=10, insert_channel="projection-channel")
+        return result
+
+    def query_iterator(*args, **kwargs):
+        fail("retained_data" if dropped else "baseline")
+        assert trace[-1] == ("checkpoint_after" if dropped else "checkpoint_before")
+        trace.append("scan_after" if dropped else "scan_before")
+        assert (dropped_field in kwargs["output_fields"]) is not dropped
+        rows = [{name: row[name] for name in kwargs["output_fields"]} for row in stored]
+        iterator = Mock()
+        iterator.next.side_effect = [rows[:2], rows[2:4], rows[4:], []]
+        iterators.append(iterator)
+        return iterator
+
+    def snapshot(*args):
+        return {
+            "schema_version": int(dropped),
+            "fields": {field.name: {} for field in schema.fields if not dropped or field.name != dropped_field},
+        }
+
+    case.insert, case.flush = Mock(side_effect=insert), Mock(side_effect=flush)
+    case.drop_collection_field, case.compact = Mock(side_effect=drop), Mock(side_effect=compact)
+    case._wait_for_ddl_schema_transition = Mock(side_effect=mix_wait)
+    client.query_iterator.side_effect = query_iterator
+    client.list_indexes.return_value = ["float16_vector", "float_vector"] + (
+        [dropped_field] if failure_at == "index" else []
+    )
+    evidence = Mock()
+    monkeypatch.setattr(integrity, "_wait_for_compaction_integrity_checkpoint", checkpoint)
+    monkeypatch.setattr(integrity, "_compaction_integrity_schema_snapshot", snapshot)
+    monkeypatch.setattr(integrity, "_log_compaction_integrity_evidence", evidence)
+    monkeypatch.setattr(integrity, "_log_compaction_integrity_checkpoint", Mock())
+    monkeypatch.setattr(integrity, "COMPACTION_INTEGRITY_V2_PROJECTION_ROWS", 5)
+    monkeypatch.setattr(integrity, "COMPACTION_INTEGRITY_V2_PROJECTION_DIM", 32)
+    monkeypatch.setattr(integrity, "COMPACTION_INTEGRITY_V2_PROJECTION_INSERT_BATCH", 2)
+    monkeypatch.setattr(integrity, "COMPACTION_INTEGRITY_KEEP_DDL_COLLECTION", False)
+    config = {"controller": controller, "storage_version": 2}
+
+    def run():
+        case.test_v2_drop_vector_mix_compaction_preserves_projected_rows(config)
+
+    if failure_at in {"insert_count", "index"}:
+        with pytest.raises(AssertionError):
+            run()
+    elif failure_at:
+        with pytest.raises(RuntimeError, match=f"injected {failure_at}"):
+            run()
+    else:
+        run()
+        assert trace == [
+            "insert",
+            "insert",
+            "insert",
+            "flush",
+            "checkpoint_before",
+            "scan_before",
+            "checkpoint_before",
+            "drop",
+            "compact",
+            "mix_ready",
+            "checkpoint_after",
+            "scan_after",
+            "checkpoint_after",
+        ]
+        assert [row["explicit_test_ts"] for row in stored] == [1, 1, 2, 2, 3]
+        committed = [
+            call.kwargs["expected_total"]
+            for call in evidence.call_args_list
+            if call.args[0] == "v2_projection_ingress_mutation_committed"
+        ]
+        assert committed == [2, 4, 5]
+        for iterator in iterators:
+            assert iterator.next.call_count == 4
+            iterator.close.assert_called_once()
+    if failure_at in {"insert", "insert_count"}:
+        assert not any(call.args[0] == "v2_projection_ingress_mutation_committed" for call in evidence.call_args_list)
+        case.flush.assert_not_called()
+    fields = {field.name: field for field in schema.fields}
+    assert fields["float_vector"].params["dim"] == 32
+    assert fields["float16_vector"].params["dim"] == 16
+    assert not schema.enable_dynamic_field
+    assert list(fields)[-3:] == [dropped_field, "float16_vector", "float_vector"]
+    assert controller.value == original_value
+    case.drop_collection.assert_called_once()
 
 
 @pytest.mark.parametrize(
