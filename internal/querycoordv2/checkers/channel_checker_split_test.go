@@ -269,3 +269,156 @@ func TestNothingIsWatchedWhileTheShardStatesAreUnknown(t *testing.T) {
 	assert.Empty(t, loaded)
 	assert.Empty(t, released)
 }
+
+// affinityLoads runs one channel checker round over a three-node replica whose
+// retired split source v0 is served by node 2, after the window-end re-pull:
+// the next target lists the adopted targets v1 and v2, unmarked, and the
+// current target still lists only v0. With sourceReadOnly, node 2 is a
+// read-only node of the replica, being moved out of it. It reports the node
+// each loaded channel was placed on.
+func affinityLoads(t *testing.T, sourceReadOnly bool) map[string]int64 {
+	nodes := []int64{1, 2, 3}
+	nodeMgr := session.NewNodeManager()
+	for _, node := range nodes {
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: node, Address: "localhost", Hostname: "localhost"}))
+	}
+	replica := utils.CreateTestReplica(1, 1, nodes)
+	if sourceReadOnly {
+		replica = meta.NewReplica(&querypb.Replica{
+			ID: 1, CollectionID: 1, Nodes: []int64{1, 3}, RoNodes: []int64{2},
+			ResourceGroup: meta.DefaultResourceGroupName,
+		}, typeutil.NewUniqueSet(1, 3))
+	}
+	catalog := catalogmocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	ctx := context.Background()
+	require.NoError(t, m.PutCollection(ctx, utils.CreateTestCollection(1, 1)))
+	require.NoError(t, m.Put(ctx, replica))
+
+	dist := meta.NewDistributionManager(nodeMgr)
+	dist.ChannelDistManager.Update(2, servingChannel("v0", 2))
+
+	targetMgr := meta.NewMockTargetManager(t)
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.NextTarget).Return(map[string]*meta.DmChannel{
+		"v1": servingChannel("v1", 0),
+		"v2": servingChannel("v2", 0),
+	}).Maybe()
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.CurrentTarget).Return(map[string]*meta.DmChannel{
+		"v0": servingChannel("v0", 2),
+	}).Maybe()
+	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), meta.NextTarget).Return(nil).Maybe()
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(delistedSplitResp(), nil).Maybe()
+
+	scheduler := task.NewMockScheduler(t)
+	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
+	assign.InitGlobalAssignPolicyFactory(scheduler, nodeMgr, dist, m, targetMgr)
+	t.Cleanup(assign.ResetGlobalAssignPolicyFactoryForTest)
+	checker := NewChannelChecker(m, dist, targetMgr, nodeMgr, scheduler,
+		meta.NewShardSplitStateCache(broker, time.Minute))
+
+	placed := make(map[string]int64)
+	for _, tk := range checker.checkReplica(ctx, m.Get(ctx, 1)) {
+		for _, action := range tk.Actions() {
+			if ca, ok := action.(*task.ChannelAction); ok && action.Type() == task.ActionTypeGrow {
+				placed[ca.ChannelName()] = action.Node()
+			}
+		}
+	}
+	return placed
+}
+
+// I1: the retired source's delegator on node 2 still fronts the adopted
+// targets' in-process children. Watching a target on node 2 converts that
+// child in place; anywhere else builds a fresh delegator that reloads the
+// target's half of the shard, while the child is never adopted and the source
+// never reaches the handover. So on a multi-node replica both targets go to
+// node 2.
+func TestAnAdoptedTargetIsPlacedOnItsFrontingSourcesNode(t *testing.T) {
+	assert.Equal(t, map[string]int64{"v1": 2, "v2": 2}, affinityLoads(t, false))
+}
+
+// I1: when the source's node cannot take a watch in the replica, the targets
+// fall back to the normal placement rather than wait for it.
+func TestAnAdoptedTargetFallsBackWhenItsSourcesNodeIsUnavailable(t *testing.T) {
+	placed := affinityLoads(t, true)
+	require.Len(t, placed, 2)
+	for channel, node := range placed {
+		assert.Contains(t, []int64{1, 3}, node, "%s must be placed on a read-write node", channel)
+	}
+}
+
+// splitSourceAffinity pins nothing it cannot justify: not a channel the current
+// target already serves, not onto a node that is not Normal, not when retired
+// sources sit on several nodes, and not without the shard states.
+func TestSplitSourceAffinityPinsOnlyWhatItCanJustify(t *testing.T) {
+	ctx := context.Background()
+	build := func(t *testing.T, describe func(*meta.MockBroker), sources map[string]int64) (*ChannelChecker, *meta.Replica) {
+		nodeMgr := session.NewNodeManager()
+		for _, node := range []int64{1, 2, 3} {
+			nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: node, Address: "localhost", Hostname: "localhost"}))
+		}
+		replica := utils.CreateTestReplica(1, 1, []int64{1, 2, 3})
+		dist := meta.NewDistributionManager(nodeMgr)
+		current := make(map[string]*meta.DmChannel)
+		for source, node := range sources {
+			dist.ChannelDistManager.Update(node, servingChannel(source, node))
+			current[source] = servingChannel(source, node)
+		}
+		current["v9"] = servingChannel("v9", 1)
+		targetMgr := meta.NewMockTargetManager(t)
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.CurrentTarget).Return(current).Maybe()
+		broker := meta.NewMockBroker(t)
+		describe(broker)
+		return &ChannelChecker{
+			dist: dist, targetMgr: targetMgr, nodeMgr: nodeMgr,
+			splitState: meta.NewShardSplitStateCache(broker, time.Minute),
+		}, replica
+	}
+	listing := func(names ...string) func(*meta.MockBroker) {
+		return func(broker *meta.MockBroker) {
+			broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+				VirtualChannelNames: names,
+			}, nil).Maybe()
+		}
+	}
+	rw := []int64{1, 2, 3}
+
+	t.Run("one retired source", func(t *testing.T) {
+		checker, replica := build(t, listing("v1", "v2", "v9"), map[string]int64{"v0": 2})
+		affinity := checker.splitSourceAffinity(ctx, replica)
+		node, ok := affinity("v1", rw)
+		assert.True(t, ok)
+		assert.Equal(t, int64(2), node)
+		_, ok = affinity("v9", rw)
+		assert.False(t, ok, "a channel the current target serves is not an adopted target")
+
+		checker.nodeMgr.Stopping(2)
+		_, ok = affinity("v1", rw)
+		assert.False(t, ok, "a stopping node takes no watch")
+	})
+	t.Run("retired sources on several nodes", func(t *testing.T) {
+		checker, replica := build(t, listing("v1", "v2", "v3", "v4", "v9"), map[string]int64{"v0": 2, "v5": 3})
+		_, ok := checker.splitSourceAffinity(ctx, replica)("v1", rw)
+		assert.False(t, ok)
+	})
+	t.Run("no retired source", func(t *testing.T) {
+		checker, replica := build(t, listing("v0", "v9"), map[string]int64{"v0": 2})
+		_, ok := checker.splitSourceAffinity(ctx, replica)("v1", rw)
+		assert.False(t, ok)
+	})
+	t.Run("shard states unknown", func(t *testing.T) {
+		checker, replica := build(t, func(broker *meta.MockBroker) {
+			broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(nil, merr.WrapErrServiceUnavailable("down")).Maybe()
+		}, map[string]int64{"v0": 2})
+		_, ok := checker.splitSourceAffinity(ctx, replica)("v1", rw)
+		assert.False(t, ok)
+	})
+	t.Run("no split state cache", func(t *testing.T) {
+		_, ok := (&ChannelChecker{}).splitSourceAffinity(ctx, utils.CreateTestReplica(1, 1, rw))("v1", rw)
+		assert.False(t, ok)
+	})
+}
