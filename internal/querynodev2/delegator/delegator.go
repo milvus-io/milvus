@@ -243,8 +243,9 @@ type shardDelegator struct {
 	// adopted flips true when querycoord adopts a split child (WatchDmChannel on
 	// the target). Before adoption the child is fronted in-process and must stay
 	// invisible to querycoord (GetDataDistribution skips it); after adoption it is
-	// reported and follows the normal SyncTargetVersion path to serviceable, while
-	// the source keeps fronting it until it actually becomes serviceable.
+	// reported and follows the normal SyncTargetVersion path to serviceable, but
+	// the source keeps fronting it regardless -- until the source itself is
+	// released, not until the child becomes serviceable (see frontingChildren).
 	adopted atomic.Bool
 	// releasing flips true on a SOURCE delegator when its channel is being
 	// released, before releaseSplitChildren snapshots the children. A child spawn
