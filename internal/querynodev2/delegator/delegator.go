@@ -36,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
@@ -619,8 +618,10 @@ func (sd *shardDelegator) searchInternal(ctx context.Context, req *querypb.Searc
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
+	family := scope.readFamily(sd)
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
 		ctx,
+		family,
 		req.Req.GetConsistencyLevel(),
 		req.Req.GetGuaranteeTimestamp(),
 		req.Req.GetMvccTimestamp(),
@@ -638,7 +639,7 @@ func (sd *shardDelegator) searchInternal(ctx context.Context, req *querypb.Searc
 		// a stale channel checkpoint does not hide snapshot rows or deltalog deletes.
 		tSafe = typeutil.MaxTimestamp
 	} else if partialResultRequiredDataRatio >= 1.0 {
-		tSafe, err = sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+		tSafe, err = sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, family)
 	} else {
 		// partial search enabled, could ignore streaming data
 		tSafe = sd.GetTSafe()
@@ -773,8 +774,10 @@ func (sd *shardDelegator) queryStreamInternal(ctx context.Context, req *querypb.
 		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
+	family := scope.readFamily(sd)
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
 		ctx,
+		family,
 		req.Req.GetConsistencyLevel(),
 		req.Req.GetGuaranteeTimestamp(),
 		req.Req.GetMvccTimestamp(),
@@ -783,7 +786,7 @@ func (sd *shardDelegator) queryStreamInternal(ctx context.Context, req *querypb.
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GetGuaranteeTimestamp())
+	tSafe, err := sd.waitFamilyTSafe(ctx, req.Req.GetGuaranteeTimestamp(), family)
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		paramtable.GetStringNodeID(), contextutil.GetQueryLabel(ctx)).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
@@ -862,8 +865,10 @@ func (sd *shardDelegator) queryInternal(ctx context.Context, req *querypb.QueryR
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
+	family := scope.readFamily(sd)
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
 		ctx,
+		family,
 		req.Req.GetConsistencyLevel(),
 		req.Req.GetGuaranteeTimestamp(),
 		req.Req.GetMvccTimestamp(),
@@ -872,7 +877,7 @@ func (sd *shardDelegator) queryInternal(ctx context.Context, req *querypb.QueryR
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	tSafe, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, family)
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		paramtable.GetStringNodeID(), contextutil.GetQueryLabel(ctx)).
@@ -981,7 +986,7 @@ func (sd *shardDelegator) getStatisticsInternal(ctx context.Context, req *queryp
 
 	// wait tsafe
 	sd.updateLatestRequiredMVCCTimestamp(req.Req.GuaranteeTimestamp)
-	_, err := sd.waitTSafe(ctx, req.Req.GuaranteeTimestamp)
+	_, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, scope.readFamily(sd))
 	if err != nil {
 		mlog.Warn(ctx, "delegator GetStatistics failed to wait tsafe", mlog.Err(err))
 		return nil, err
@@ -1207,8 +1212,12 @@ func executeSubTasks[T any, R interface {
 
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
 // TODO: we just make a speedup right now, but in the future, we will make the mvcc and guarantee timestamp same.
+//
+// family is the snapshot of fronted split children the read covers (nil when it
+// fronts none); see familyMVCCTimestamp.
 func (sd *shardDelegator) speedupGuranteeTS(
 	ctx context.Context,
+	family []*shardDelegator,
 	cl commonpb.ConsistencyLevel,
 	guaranteeTS uint64,
 	mvccTS uint64,
@@ -1230,14 +1239,23 @@ func (sd *shardDelegator) speedupGuranteeTS(
 		return guaranteeTS
 	}
 	// use the mvcc timestamp of the wal as the guarantee timestamp to make fast strong consistency search.
-	if mvcc, err := streaming.WAL().Local().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName); err == nil && mvcc < guaranteeTS {
+	// While this delegator fronts a shard split, writes of its shard also land on
+	// the children's vchannels, so the MVCC must cover those too.
+	if mvcc, err := sd.familyMVCCTimestamp(ctx, family); err == nil && mvcc < guaranteeTS {
 		return mvcc
 	}
 	return guaranteeTS
 }
 
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
+// It waits on the split children this delegator fronts at the time of the call.
 func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
+	return sd.waitFamilyTSafe(ctx, ts, sd.frontingChildren())
+}
+
+// waitFamilyTSafe is waitTSafe over a given snapshot of fronted split children,
+// so a read waits on exactly the children it fans out to.
+func (sd *shardDelegator) waitFamilyTSafe(ctx context.Context, ts uint64, children []*shardDelegator) (uint64, error) {
 	if sd.skipStreamingForExternalTable {
 		// External collection data is materialized by refresh/load manifests,
 		// not by this WAL. Use a full snapshot timestamp so low guarantee
@@ -1250,7 +1268,7 @@ func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, err
 	// wait on the children's tsafe (their TimeTick progress), which the source
 	// serves at the min over — it never answers at t before every child has
 	// forwarded all deletes <= t.
-	if children := sd.frontingChildren(); len(children) > 0 {
+	if len(children) > 0 {
 		return sd.waitChildrenTSafe(ctx, children, ts)
 	}
 
