@@ -18,6 +18,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -97,6 +98,46 @@ func (s *EtcdSourceSuite) TestUpdateOptions() {
 	s.Eventually(func() bool {
 		return called.Load()
 	}, time.Second*2, time.Millisecond*100)
+}
+
+// TestRefreshLinearizableSeesWriteBeforeNextPoll pins the read-your-own-write property
+// that a caller relies on when it must act on a value the moment it is written, rather
+// than whenever the periodic poll next happens to run -- the woodpecker WAL opener does
+// exactly that, because the storage mode it resolves once decides the on-disk format of
+// every segment the process will ever write.
+func (s *EtcdSourceSuite) TestRefreshLinearizableSeesWriteBeforeNextPoll() {
+	prefix := fmt.Sprintf("test-linearizable-%d", time.Now().UnixNano())
+	key := "woodpeckerstoragetype"
+
+	etcdCli, err := newEtcdClient(&EtcdInfo{Endpoints: s.endpoints, DialTimeout: 5 * time.Second})
+	s.Require().NoError(err)
+	defer etcdCli.Close()
+
+	// A refresh interval far beyond the lifetime of this test: if the assertion below
+	// passed because the periodic poll happened to fire, the test would prove nothing.
+	source, err := NewEtcdSource(etcdCli, &EtcdInfo{
+		Endpoints:       s.endpoints,
+		KeyPrefix:       prefix,
+		DialTimeout:     5 * time.Second,
+		RefreshInterval: time.Hour,
+	})
+	s.Require().NoError(err)
+	defer source.Close()
+
+	_, err = etcdCli.Put(context.Background(), prefix+"/config/"+key, "service")
+	s.Require().NoError(err)
+	defer etcdCli.Delete(context.Background(), prefix+"/config/"+key)
+
+	// The state a node is in when an action that depends on this key arrives before the
+	// poll that would have delivered it.
+	_, err = source.GetConfigurationByKey(key)
+	s.Require().ErrorIs(err, ErrKeyNotFound)
+
+	s.Require().NoError(source.RefreshConfigurationsLinearizable())
+
+	value, err := source.GetConfigurationByKey(key)
+	s.Require().NoError(err)
+	s.Equal("service", value)
 }
 
 func TestEtcdSource(t *testing.T) {
