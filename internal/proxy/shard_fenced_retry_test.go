@@ -224,7 +224,33 @@ func TestRetryPreparationEndsOnAnAlreadyEndedContext(t *testing.T) {
 	transient := errors.New("transient, unrelated to the context")
 	retryAgain, err := fence.retryPreparation(ctx, cache, 7, transient)
 	assert.False(t, retryAgain, "an already-ended context ends the request instead of backing off")
-	assert.Same(t, transient, err)
+	// Ending the request here must not leak the raw, uncoded err: it is
+	// classified exactly as refresh() classifies an uncoded cause (a retriable
+	// ServiceUnavailable), with the context's own reason folded into the
+	// message rather than silently dropped, and the original cause still
+	// reachable through the chain.
+	assert.NotEqual(t, transient.Error(), err.Error())
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.True(t, merr.IsRetryableErr(err))
+	assert.ErrorIs(t, err, transient, "the original cause is preserved, not stringified")
+	assert.Contains(t, err.Error(), "context canceled", "the context's own reason is visible in the message")
+}
+
+// retryPreparation's already-ended-context exit does not override an already
+// coded cause -- it leaves it exactly as refresh() would -- while still
+// folding the context's own reason into the message.
+func TestRetryPreparationOnAnAlreadyEndedContextLeavesACodedCauseCoded(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cache := NewMockCache(t)
+
+	fence := newSplitFence()
+	coded := merr.WrapErrCollectionNotFound("c")
+	retryAgain, err := fence.retryPreparation(ctx, cache, 7, coded)
+	assert.False(t, retryAgain)
+	assert.Equal(t, merr.Code(coded), merr.Code(err), "an already-coded cause keeps its own code")
+	assert.ErrorIs(t, err, coded)
+	assert.Contains(t, err.Error(), "context canceled")
 }
 
 // A request with no deadline stops re-routing after
