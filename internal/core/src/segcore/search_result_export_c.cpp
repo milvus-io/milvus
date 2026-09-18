@@ -29,6 +29,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/CGoCatch.h"
@@ -39,6 +40,7 @@
 #include "log/Log.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
+#include "futures/Executor.h"
 #include "futures/Future.h"
 #include "monitor/Monitor.h"
 #include "monitor/scope_metric.h"
@@ -50,7 +52,6 @@
 #include "segcore/Utils.h"
 #include "segcore/arrow_field_utils.h"
 #include "segcore/reduce/Reduce.h"
-#include "storage/ThreadPools.h"
 
 using SearchResult = milvus::SearchResult;
 using milvus::segcore::ArrowExportFailure;
@@ -60,6 +61,19 @@ using milvus::segcore::kMilvusDataTypeMetadataKey;
 using milvus::segcore::MilvusField;
 
 namespace {
+
+template <typename F>
+std::future<void>
+SubmitSearchExecutorTask(F&& task) {
+    auto packaged_task =
+        std::make_shared<std::packaged_task<void()>>(std::forward<F>(task));
+    auto future = packaged_task->get_future();
+    milvus::futures::getSearchCPUExecutor()->add(
+        [packaged_task = std::move(packaged_task)]() mutable {
+            (*packaged_task)();
+        });
+    return future;
+}
 
 // GroupByArrowInfo describes one $group_by_<fieldID> Arrow column to emit.
 // Element type is derived from the plan's search_info_, falling back to
@@ -1063,8 +1077,6 @@ MaterializeOrderedFields(
     };
 
     if (segment_fields.size() > 1) {
-        auto& pool = milvus::ThreadPools::GetThreadPool(
-            milvus::ThreadPoolPriority::MIDDLE);
         std::vector<std::future<void>> futures;
         futures.reserve(segment_fields.size());
         auto futures_guard = folly::makeGuard([&futures]() {
@@ -1079,9 +1091,10 @@ MaterializeOrderedFields(
         });
         for (auto& entry : segment_fields) {
             auto* materialized = &entry.second;
-            futures.emplace_back(pool.Submit([&materialize_one, materialized] {
-                materialize_one(*materialized);
-            }));
+            futures.emplace_back(
+                SubmitSearchExecutorTask([&materialize_one, materialized] {
+                    materialize_one(*materialized);
+                }));
         }
         for (auto& future : futures) {
             future.get();
