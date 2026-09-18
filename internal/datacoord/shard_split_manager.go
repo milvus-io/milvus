@@ -130,6 +130,11 @@ type shardSplitManager struct {
 	controlChannel  func() string
 	replicationRole func(ctx context.Context) (replicateutil.Role, error)
 
+	// compactionEnabled is dataCoord.enableCompaction as read at startup. The
+	// switch is not refreshable, and the trigger follows the value the
+	// policy-driven compactions started with (Server.startCompaction).
+	compactionEnabled bool
+
 	lastDetect time.Time
 }
 
@@ -152,6 +157,7 @@ func newShardSplitManager(
 		coordinator:       coordinator,
 		controlChannel:    func() string { return streaming.WAL().ControlChannel() },
 		replicationRole:   balancerReplicationRole,
+		compactionEnabled: paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool(),
 	}
 }
 
@@ -338,17 +344,18 @@ func splitRefusalReason(schema *schemapb.CollectionSchema) string {
 
 // detectOnce inspects every splittable collection and creates a split task for
 // each shard at or over the thresholds, within the concurrency cap. It runs on
-// the primary only, and only while splits may be issued and compaction, which
-// carries the rewrite, is enabled.
+// the primary only, and only while splits may be issued and the policy-driven
+// compactions are enabled (dataCoord.enableCompaction, read at startup).
 func (m *shardSplitManager) detectOnce() {
 	params := &paramtable.Get().DataCoordCfg
 	logger := mlog.With(mlog.FieldComponent("shard-split-manager"))
 	if !params.ShardSplitEnable.GetAsBool() {
 		return
 	}
-	if !params.EnableCompaction.GetAsBool() {
-		// A split redistributes by rewriting, dispatched as compaction plans.
-		// Fenced with compaction off it could never move and never abort.
+	if !m.compactionEnabled {
+		// The trigger is policy-driven, and dataCoord.enableCompaction turns
+		// every policy-driven compaction off. A split already created is still
+		// carried through: its rewrite plans are scheduled whatever the switch.
 		logger.RatedInfo(m.ctx, 60, "shard split trigger suppressed while dataCoord.enableCompaction is off")
 		return
 	}
