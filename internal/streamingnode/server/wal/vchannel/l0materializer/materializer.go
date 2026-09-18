@@ -51,6 +51,10 @@ type MaterializeRequest struct {
 	VChannel       string
 	TargetTimeTick uint64
 	Entries        []*streamingpb.TransformLogEntry
+	// WAL consumers supply complete positions. The retained Summary consumer
+	// has only timestamps and leaves these runtime-only fields empty.
+	StartPositions map[uint64]*msgpb.MsgPosition
+	Checkpoint     *msgpb.MsgPosition
 	MaxRows        uint64
 	MaxBytes       uint64
 }
@@ -91,7 +95,7 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 		return merr.WrapErrServiceInternalMsg("invalid vchannel %q for L0 materialization", req.VChannel)
 	}
 	for _, group := range splitMaterializeGroups(req) {
-		if err := m.materializeGroup(ctx, req.VChannel, collectionID, req.TargetTimeTick, group); err != nil {
+		if err := m.materializeGroup(ctx, req, collectionID, group); err != nil {
 			return err
 		}
 	}
@@ -100,17 +104,23 @@ func (m *SyncMaterializer) Materialize(ctx context.Context, req MaterializeReque
 
 func (m *SyncMaterializer) materializeGroup(
 	ctx context.Context,
-	vchannel string,
+	req MaterializeRequest,
 	collectionID int64,
-	targetTimeTick uint64,
 	group materializeGroup,
 ) error {
 	segmentID, err := m.allocator.AllocOne()
 	if err != nil {
 		return err
 	}
+	vchannel := req.VChannel
 	startPosition := &msgpb.MsgPosition{ChannelName: vchannel, Timestamp: group.fromTimeTick}
-	checkpoint := &msgpb.MsgPosition{ChannelName: vchannel, Timestamp: targetTimeTick}
+	if pos := req.StartPositions[group.fromTimeTick]; pos != nil {
+		startPosition = proto.Clone(pos).(*msgpb.MsgPosition)
+	}
+	checkpoint := &msgpb.MsgPosition{ChannelName: vchannel, Timestamp: req.TargetTimeTick}
+	if req.Checkpoint != nil {
+		checkpoint = proto.Clone(req.Checkpoint).(*msgpb.MsgPosition)
+	}
 	schema := materializeSchema(group.pkType)
 	metaCache := newMaterializeMetaCache(collectionID, vchannel, schema)
 	metaCache.AddSegment(&datapb.SegmentInfo{
@@ -149,12 +159,12 @@ func (m *SyncMaterializer) materializeGroup(
 		WithSyncPack(pack).
 		WithStorageConfig(packed.CreateStorageConfig())
 
-	mlog.Info(ctx, "materialize summary deletes into l0 segment",
+	mlog.Info(ctx, "materialize deletes into l0 segment",
 		mlog.FieldCollectionID(collectionID),
 		mlog.FieldPartitionID(group.partitionID),
 		mlog.FieldSegmentID(segmentID),
 		mlog.String("vchannel", vchannel),
-		mlog.Uint64("targetTimeTick", targetTimeTick),
+		mlog.Uint64("targetTimeTick", req.TargetTimeTick),
 		mlog.Int64("rows", int64(len(group.pks))),
 		mlog.Uint64("bytes", group.bytes),
 	)

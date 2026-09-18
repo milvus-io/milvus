@@ -14,7 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 )
 
 func TestObserveInsertUsesSingleCheckpoint(t *testing.T) {
@@ -145,7 +145,7 @@ func TestSegmentSnapshotContainsOnlyDurableInsertEffects(t *testing.T) {
 
 func TestBuildInsertBatchesAggregatesTxnBySegment(t *testing.T) {
 	txnContext := message.TxnContext{TxnID: 1}
-	messageID := walimplstest.NewTestMessageID(1)
+	messageID := rmq.NewRmqID(1)
 	begin := message.NewBeginTxnMessageBuilderV2().
 		WithVChannel("v1").
 		WithHeader(&message.BeginTxnMessageHeader{}).
@@ -171,7 +171,7 @@ func TestBuildInsertBatchesAggregatesTxnBySegment(t *testing.T) {
 		WithTxnContext(txnContext).
 		WithTimeTick(10).
 		WithLastConfirmed(messageID).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(2))
+		IntoImmutableMessage(rmq.NewRmqID(2))
 	txn, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit))
 	require.NoError(t, err)
 
@@ -225,6 +225,6 @@ func newObserveTestInsert(
 		WithBody(&msgpb.InsertRequest{}).
 		MustBuildMutable()
 	return mutable.WithTimeTick(timetick).
-		WithLastConfirmed(walimplstest.NewTestMessageID(int64(timetick))).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick + 1)))
+		WithLastConfirmed(rmq.NewRmqID(int64(timetick))).
+		IntoImmutableMessage(rmq.NewRmqID(int64(timetick + 1)))
 }

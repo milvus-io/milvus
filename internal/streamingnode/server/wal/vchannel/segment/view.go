@@ -8,8 +8,10 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -393,7 +395,14 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 	// TODO: Remove after enabling queryview. Publish exactly this stable pack
 	// before exposing its recovery snapshot or releasing the Insert handles.
 	appendPersistedStorage(pack.Meta, result.PersistedStorage)
-	if err := s.lifecycle.PersistGrowingSegment(ctx, pack.Meta); err != nil {
+	var start *msgpb.MsgPosition
+	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {
+		// Only the first data pack publishes StartPosition. Once its recovery
+		// snapshot exists, DataCoord already owns the position across restarts.
+		start = utility.NewMessagePosition(pack.Inserts[0], pack.VChannel)
+	}
+	checkpoint := utility.NewMessagePosition(pack.Inserts[len(pack.Inserts)-1], pack.VChannel)
+	if err := s.lifecycle.PersistGrowingSegment(ctx, pack.Meta, start, checkpoint); err != nil {
 		return err
 	}
 

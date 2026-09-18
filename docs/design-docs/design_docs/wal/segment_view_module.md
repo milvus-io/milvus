@@ -88,6 +88,19 @@ and checkpoint. Object output is retained across RPC retries. Registration must
 succeed before installing the durable snapshot or releasing Insert handles.
 This temporary query-recovery bridge is marked `TODO: Remove after enabling queryview.`
 
+The first data pack also publishes `StartPosition` from the first Insert's
+TimeTick and LastConfirmedMessageID, with its VChannel and WAL name. A Txn uses
+the complete outer transaction's position. CreateSegment's timestamp remains
+lifecycle metadata and is not the data start position. Later packs omit
+StartPosition so DataCoord preserves the original value. Each data pack reports
+a complete DmlPosition from its last Insert/Txn boundary.
+
+No StartPosition or MessageID is added to SN recovery metadata. Coordinator
+publication precedes the stable SN snapshot: if the snapshot is lost, replay
+reconstructs the first pack and the same position; if the snapshot survives,
+Coordinator already owns that position and subsequent packs need not report it.
+
+
 After the object chunk and this temporary registration succeed:
 
 1. install the chunk reference into stable state;
@@ -111,6 +124,11 @@ after all preceding segment work and the idempotent commit succeed.
 After DataCoord accepts the idempotent final binlog commit, SegmentView stores
 `l1_commit_done` in its durable snapshot. Recovery retries a flushed segment
 whose marker is absent.
+Final commit, including a recovered retry, omits StartPositions and CheckPoints:
+all data packs were already registered, so sealing preserves DataCoord's complete
+data positions and cumulative row count. It must not replace a usable physical
+position with the SN snapshot's timestamp-only lifecycle checkpoint.
+
 
 ### 3.5 Flush-Style Messages
 

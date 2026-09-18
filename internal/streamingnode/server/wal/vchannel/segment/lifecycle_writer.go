@@ -54,18 +54,28 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 }
 
 func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
-	return w.saveBinlogPaths(ctx, meta, true)
+	// All data packs have already published their positions. Preserve those
+	// positions when sealing, including retries recovered from SN metadata.
+	return w.saveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
 }
 
 // TODO: Remove after enabling queryview. Existing query recovery loads growing
 // binlogs through DataCoord, so publication must precede Insert completion.
-func (w *segmentLifecycleWriter) PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
-	return w.saveBinlogPaths(ctx, meta, false)
+func (w *segmentLifecycleWriter) PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, start, checkpoint *msgpb.MsgPosition) error {
+	req := buildCommitL1SegmentRequest(w.serverID, meta)
+	req.Flushed = false
+	if start != nil {
+		req.StartPositions = []*datapb.SegmentStartPosition{{SegmentID: meta.GetSegmentId(), StartPosition: start}}
+	}
+	req.CheckPoints = []*datapb.CheckPoint{{
+		SegmentID: meta.GetSegmentId(),
+		NumOfRows: int64(meta.GetStat().GetModifiedRows()),
+		Position:  checkpoint,
+	}}
+	return w.saveBinlogPaths(ctx, req)
 }
 
-func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, flushed bool) error {
-	req := buildCommitL1SegmentRequest(w.serverID, meta)
-	req.Flushed = flushed
+func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
 	// Same bounded retry loop for the coordinator client's built-in retries as
 	// in EnsureGrowingSegment; further retries happen at the task layer.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
@@ -78,8 +88,8 @@ func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, meta *stre
 		// segments (returns success), and retrying or failing the segment
 		// here would only surface a lifecycle event as a task failure.
 		mlog.Warn(ctx, "segment no longer exists in DataCoord, ignore the L1 commit",
-			mlog.Int64("segmentID", meta.GetSegmentId()),
-			mlog.String("vchannel", meta.GetVchannel()))
+			mlog.Int64("segmentID", req.GetSegmentID()),
+			mlog.String("vchannel", req.GetChannel()))
 		return nil
 	}
 	if merr.GetErrorType(err) == merr.InputError {
@@ -132,34 +142,12 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 		Field2Bm25LogPaths:  bm25logs,
 		Deltalogs:           storage.GetDeltaBinlog(),
 		Stats:               storage.GetStatistics(),
-		CheckPoints: []*datapb.CheckPoint{
-			{
-				SegmentID: meta.GetSegmentId(),
-				NumOfRows: int64(meta.GetStat().GetModifiedRows()),
-				// Position must be non-nil: DataCoord skips checkpoint updates
-				// with a nil position, which would leave DmlPosition unset and
-				// drop the flushed segment from channel recovery.
-				Position: &msgpb.MsgPosition{
-					ChannelName: meta.GetVchannel(),
-					Timestamp:   meta.GetCheckpointTimeTick(),
-				},
-			},
-		},
-		StartPositions: []*datapb.SegmentStartPosition{
-			{
-				SegmentID: meta.GetSegmentId(),
-				StartPosition: &msgpb.MsgPosition{
-					ChannelName: meta.GetVchannel(),
-					Timestamp:   meta.GetStat().GetCreateSegmentTimeTick(),
-				},
-			},
-		},
-		Flushed:         true,
-		Channel:         meta.GetVchannel(),
-		SegLevel:        meta.GetStat().GetLevel(),
-		StorageVersion:  meta.GetStorageVersion(),
-		WithFullBinlogs: true,
-		ManifestPath:    storage.GetManifestPath(),
+		Flushed:             true,
+		Channel:             meta.GetVchannel(),
+		SegLevel:            meta.GetStat().GetLevel(),
+		StorageVersion:      meta.GetStorageVersion(),
+		WithFullBinlogs:     true,
+		ManifestPath:        storage.GetManifestPath(),
 	}
 }
 
