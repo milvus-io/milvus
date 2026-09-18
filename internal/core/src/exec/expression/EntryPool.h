@@ -34,8 +34,7 @@ namespace exec {
 // Pure in-memory expression result cache with Clock eviction.
 //
 // Stores compressed bitset entries in heap memory (malloc-managed).
-// Uses Clock algorithm for eviction — near-LRU quality with zero
-// Get-path lock overhead (only one atomic store per access).
+// Uses Clock algorithm for eviction — near-LRU quality with concurrent reads.
 //
 // Thread safety:
 //   - Get:  shared_lock(index) + atomic usage_count update (no write lock)
@@ -53,13 +52,11 @@ class EntryPool {
         int64_t segment_id{0};
         uint64_t sig_hash{0};
         std::string signature;
-        int64_t active_count{0};
 
         bool
         operator==(const Key& other) const {
             return segment_id == other.segment_id &&
-                   sig_hash == other.sig_hash && signature == other.signature &&
-                   active_count == other.active_count;
+                   sig_hash == other.sig_hash && signature == other.signature;
         }
     };
 
@@ -68,8 +65,7 @@ class EntryPool {
         operator()(const Key& k) const noexcept {
             return std::hash<int64_t>()(k.segment_id) * 1315423911u ^
                    std::hash<uint64_t>()(k.sig_hash) ^
-                   std::hash<std::string>()(k.signature) ^
-                   std::hash<int64_t>()(k.active_count);
+                   std::hash<std::string>()(k.signature);
         }
     };
 
@@ -100,9 +96,8 @@ class EntryPool {
               bool compression_enabled,
               int64_t min_eval_duration_us);
 
-    // Try to get a cached entry. On hit, fills out_result.
-    // If out_valid_all_ones is set to true, out_valid is NOT filled (caller
-    // should treat valid as all-ones, saving ~30μs of bitmap construction).
+    // Try to get a cached entry. On hit, fills both output bitmaps while
+    // retaining a shared lock so the compressed payload cannot be evicted.
     // Returns false on miss, signature mismatch, or staleness mismatch.
     bool
     Get(int64_t segment_id,
@@ -113,7 +108,8 @@ class EntryPool {
 
     // Insert a compressed entry. Compression is done internally.
     // May trigger Clock eviction if over capacity.
-    // Subject to frequency and latency admission control.
+    // Subject to latency admission here; the manager applies frequency
+    // admission before calling this method.
     void
     Put(int64_t segment_id,
         const std::string& signature,
@@ -125,9 +121,6 @@ class EntryPool {
     // Erase all entries belonging to a segment. Returns number erased.
     size_t
     EraseSegment(int64_t segment_id);
-
-    bool
-    HasSignature(int64_t segment_id, const std::string& signature) const;
 
     // Clear all entries.
     void
