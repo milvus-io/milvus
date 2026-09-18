@@ -33,11 +33,7 @@ func PKResidueInt64(pk int64, modulus uint64) (uint64, error) {
 	if err := checkModulus(modulus); err != nil {
 		return 0, err
 	}
-	h, err := typeutil.Hash32Int64(pk)
-	if err != nil {
-		return 0, err
-	}
-	return uint64(h) % modulus, nil
+	return int64Residue(pk, modulus)
 }
 
 // PKResidueVarChar is the residue of a varchar primary key modulo modulus.
@@ -45,7 +41,21 @@ func PKResidueVarChar(pk string, modulus uint64) (uint64, error) {
 	if err := checkModulus(modulus); err != nil {
 		return 0, err
 	}
-	return uint64(typeutil.HashString2Uint32(pk)) % modulus, nil
+	return varCharResidue(pk, modulus), nil
+}
+
+// int64Residue and varCharResidue are the one copy of each hash; the callers
+// have already checked the modulus.
+func int64Residue(pk int64, modulus uint64) (uint64, error) {
+	h, err := typeutil.Hash32Int64(pk)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(h) % modulus, nil
+}
+
+func varCharResidue(pk string, modulus uint64) uint64 {
+	return uint64(typeutil.HashString2Uint32(pk)) % modulus
 }
 
 // PKResidue is the residue of a primary key, an int64 or a string, modulo
@@ -72,7 +82,7 @@ func PKResidues(pks *schemapb.IDs, modulus uint64) ([]uint64, error) {
 		data := pks.GetIntId().GetData()
 		residues := make([]uint64, len(data))
 		for i, pk := range data {
-			r, err := PKResidueInt64(pk, modulus)
+			r, err := int64Residue(pk, modulus)
 			if err != nil {
 				return nil, err
 			}
@@ -83,7 +93,7 @@ func PKResidues(pks *schemapb.IDs, modulus uint64) ([]uint64, error) {
 		data := pks.GetStrId().GetData()
 		residues := make([]uint64, len(data))
 		for i, pk := range data {
-			residues[i] = uint64(typeutil.HashString2Uint32(pk)) % modulus
+			residues[i] = varCharResidue(pk, modulus)
 		}
 		return residues, nil
 	default:
