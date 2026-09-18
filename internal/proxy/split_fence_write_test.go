@@ -1196,3 +1196,82 @@ func TestDeleteExecuteTakesTheLegacyChannelListFromTheRoutingLookup(t *testing.T
 	require.NoError(t, task.Execute(context.Background()))
 	assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
 }
+
+// transientDescribeFailure makes the describe that follows the first refresh
+// fail once, as a coordinator hiccup would, and recover on the next refresh.
+func (f *splitFenceFixture) transientDescribeFailure(err error) {
+	f.onEvict = func(eviction int) {
+		switch eviction {
+		case 1:
+			f.infoErr = err
+		case 2:
+			f.infoErr = nil
+		}
+	}
+}
+
+// Once rows have landed, a transient failure to read the routing backs off
+// within the deadline like a refusal does, instead of failing a request that is
+// already partly written.
+func TestWritesBackOffOnATransientRoutingReadFailureAfterRowsLanded(t *testing.T) {
+	useSingleMessageRepack(t)
+	transient := []error{merr.WrapErrServiceUnavailable("describe unavailable"), errors.New("connection reset")}
+	for _, cause := range transient {
+		t.Run("insert/"+cause.Error(), func(t *testing.T) {
+			pre, post := twoShardSplit()
+			f := newSplitFenceFixture(t, pre, post)
+			f.transientDescribeFailure(cause)
+			wal := installSplitFenceTestWAL(t, splitSource)
+			pks := seqPKs(32)
+			task := f.insertTask(pks)
+
+			require.NoError(t, task.Execute(context.Background()))
+			require.True(t, merr.Ok(task.result.GetStatus()), task.result.GetStatus().GetReason())
+			assertRowsLandedOnceOnTheirOwner(t, wal, post, pks, 1)
+			assert.Equal(t, 2, f.evictions)
+		})
+		t.Run("delete/"+cause.Error(), func(t *testing.T) {
+			pre, post := twoShardSplit()
+			f := newSplitFenceFixture(t, pre, post)
+			f.transientDescribeFailure(cause)
+			wal := installSplitFenceTestWAL(t, splitSource)
+			pks := seqPKs(32)
+
+			require.NoError(t, f.deleteTask(pks).Execute(context.Background()))
+			assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
+		})
+		t.Run("upsert/"+cause.Error(), func(t *testing.T) {
+			pre, post := twoShardSplit()
+			f := newSplitFenceFixture(t, pre, post)
+			f.transientDescribeFailure(cause)
+			wal := installSplitFenceTestWAL(t, splitSource)
+			pks := seqPKs(32)
+			task := f.upsertTask(t, pks, pks)
+
+			require.NoError(t, task.appendUpsertAttempt(context.Background(), nil))
+			assertRowsLandedOnceOnTheirOwner(t, wal, post, pks, 101)
+			assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
+		})
+	}
+}
+
+// A failure that no retry can cure -- the collection is gone, or its routing
+// is malformed -- still ends the request at once.
+func TestWritesDoNotRetryAPermanentRoutingReadFailure(t *testing.T) {
+	useSingleMessageRepack(t)
+	for _, cause := range []error{merr.WrapErrCollectionNotFound("collection"), merr.WrapErrServiceInternalMsg("malformed routing")} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			pre, post := oneShardSplit()
+			f := newSplitFenceFixture(t, pre, post)
+			f.transientDescribeFailure(cause)
+			installSplitFenceTestWAL(t, splitSource)
+			task := f.insertTask(seqPKs(8))
+
+			// Rows of the first attempt have landed, so the failure is reported
+			// in the result, as an append failure is.
+			assert.NoError(t, task.Execute(context.Background()))
+			assert.Equal(t, merr.Code(cause), task.result.GetStatus().GetCode())
+			assert.Equal(t, 1, f.evictions)
+		})
+	}
+}
