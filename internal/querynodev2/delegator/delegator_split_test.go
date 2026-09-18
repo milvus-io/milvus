@@ -504,3 +504,43 @@ func TestSourceHandsItsPartitionsDownToFrontedChildren(t *testing.T) {
 		child.distribution.Unpin(version)
 	}
 }
+
+// A source the collection no longer lists was retired by an adoption; its
+// children went to their own delegators, and a delegator watched for it now has
+// none to front. It must never answer from its own view alone: that misses the
+// targets' writes and returns rows they deleted. Every public read is refused
+// retriably, so the proxy retries until its shard leaders move to the targets.
+func TestARetiredSourceWithoutItsFamilyRefusesReads(t *testing.T) {
+	sd := &shardDelegator{
+		vchannelName: "v0",
+		children:     make(map[string]ShardDelegator),
+		lifetime:     lifetime.NewLifetime(lifetime.Working),
+	}
+	_, err := sd.frontingFamily()
+	require.NoError(t, err)
+
+	sd.RefuseReadsAsRetiredSource(context.Background())
+	_, err = sd.frontingFamily()
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.True(t, merr.IsRetryableErr(err))
+
+	for name, read := range map[string]func() error{
+		"search": func() error {
+			_, err := sd.Search(context.Background(), &querypb.SearchRequest{DmlChannels: []string{"v0"}})
+			return err
+		},
+		"query": func() error {
+			_, err := sd.Query(context.Background(), &querypb.QueryRequest{DmlChannels: []string{"v0"}})
+			return err
+		},
+		"query stream": func() error {
+			return sd.QueryStream(context.Background(), &querypb.QueryRequest{DmlChannels: []string{"v0"}}, nil)
+		},
+		"statistics": func() error {
+			_, err := sd.GetStatistics(context.Background(), &querypb.GetStatisticsRequest{DmlChannels: []string{"v0"}})
+			return err
+		},
+	} {
+		assert.ErrorIs(t, read(), merr.ErrServiceUnavailable, name)
+	}
+}
