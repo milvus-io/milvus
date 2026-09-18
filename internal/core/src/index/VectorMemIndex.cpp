@@ -382,7 +382,7 @@ VectorMemIndex<T>::Load(milvus::tracer::TraceContext ctx,
     std::unordered_set<std::string> pending_index_files(index_files->begin(),
                                                         index_files->end());
 
-    LOG_INFO("load index files: {}", index_files.value().size());
+    LOG_DEBUG("load index files: {}", index_files.value().size());
     std::map<std::string, IndexDataCodec> index_data_codecs{};
     // try to read slice meta first
     std::string slice_meta_filepath;
@@ -1029,7 +1029,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
         }
     }
 
-    LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
+    LOG_DEBUG("load with slice meta: {}", !slice_meta_filepath.empty());
     std::chrono::duration<double> load_duration_sum;
     std::chrono::duration<double> write_disk_duration_sum;
     std::unique_ptr<storage::DataCodec> valid_data_count_codec;
@@ -1200,7 +1200,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto start_deserialize = std::chrono::system_clock::now();
     std::chrono::duration<double> deserialize_duration{};
     if (wrote_index_data) {
-        LOG_INFO("load index into Knowhere...");
+        LOG_DEBUG("load index into Knowhere...");
         auto stat = index_.DeserializeFromFile(local_filepath.value(), conf);
         deserialize_duration =
             std::chrono::system_clock::now() - start_deserialize;
@@ -1242,7 +1242,7 @@ VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     this->mmap_file_raii_ =
         std::make_unique<MmapFileRAII>(local_filepath.value());
-    LOG_INFO(
+    LOG_DEBUG(
         "load vector index done, mmap_file_path:{}, download_duration:{}, "
         "write_files_duration:{}, deserialize_duration:{}",
         local_filepath.value(),
