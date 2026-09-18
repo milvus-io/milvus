@@ -25,6 +25,7 @@ package packed
 import "C"
 
 import (
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -51,12 +52,13 @@ type TextColumnConfig struct {
 // writer is concerned only with file output; manifest-level concerns
 // (version, retry) live in CommitManifestUpdates.
 type SegmentWriterConfig struct {
-	SegmentPath        string
-	TextColumns        []TextColumnConfig
-	ColumnGroups       []storagecommon.ColumnGroup
-	WriterFormat       string
-	SchemaBasedPattern string
-	SchemaBasedFormats []string
+	SegmentPath         string
+	TextColumns         []TextColumnConfig
+	ColumnGroups        []storagecommon.ColumnGroup
+	WriterFormat        string
+	SchemaBasedPattern  string
+	SchemaBasedFormats  []string
+	MultiPartUploadSize int64
 }
 
 // FFISegmentWriter wraps the C SegmentWriter handle for incremental writes.
@@ -118,6 +120,9 @@ func segmentWriterProperties(schema *arrow.Schema, config *SegmentWriterConfig) 
 	}
 	if config.WriterFormat != "" {
 		extra[PropertyWriterFormat] = config.WriterFormat
+	}
+	if config.MultiPartUploadSize > 0 {
+		extra[PropertyWriterMultiPartUploadSize] = strconv.FormatInt(config.MultiPartUploadSize, 10)
 	}
 	if len(config.SchemaBasedFormats) > 0 {
 		extra[PropertyWriterSchemaBasedFormats] = strings.Join(config.SchemaBasedFormats, ",")
