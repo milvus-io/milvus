@@ -65,13 +65,21 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	idempotency := it.idempotentInsertDecoration()
 	var mergeErr, packErr error
 	attempt := 0
+	// prepareFailed ends the request on a failure met before the first append,
+	// and leaves a later one to retryPreparation.
+	prepareFailed := func(err error) (bool, error) {
+		if attempt > 1 {
+			return fence.retryPreparation(ctx, it.GetMetaCache(), collID, err)
+		}
+		packErr = err
+		return false, err
+	}
 	appendErr := retry.Handle(ctx, func() (bool, error) {
 		route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), collectionName, collID)
 		attempt++
 		if err != nil {
 			mlog.Warn(ctx, "resolve the write route failed", mlog.FieldCollectionID(collID), mlog.Err(err))
-			packErr = err
-			return false, err
+			return prepareFailed(err)
 		}
 
 		mlog.Debug(ctx, "send insert request to virtual channels",
@@ -109,8 +117,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		}
 		if err != nil {
 			mlog.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
-			packErr = err
-			return false, err
+			return prepareFailed(err)
 		}
 		resp := streaming.WAL().AppendMessagesWithOptions(ctx, msgs, streaming.AppendOption{
 			IdempotencyKey: it.idempotencyKey,

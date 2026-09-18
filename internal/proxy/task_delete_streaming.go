@@ -56,11 +56,19 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 	fence := newSplitFence()
 	pending := newPendingRows(typeutil.GetSizeOfIDs(dt.primaryKeys), fence)
 	attempt := 0
+	// prepareFailed ends the request on a failure met before the first append,
+	// and leaves a later one to retryPreparation.
+	prepareFailed := func(err error) (bool, error) {
+		if attempt > 1 {
+			return fence.retryPreparation(ctx, dt.GetMetaCache(), dt.collectionID, err)
+		}
+		return false, err
+	}
 	err = retry.Handle(ctx, func() (bool, error) {
 		route, err := resolveWriteRoute(ctx, dt.GetMetaCache(), dt.req.GetDbName(), dt.req.GetCollectionName(), dt.collectionID)
 		attempt++
 		if err != nil {
-			return false, err
+			return prepareFailed(err)
 		}
 		dt.vChannels = route.vchannels
 
@@ -75,7 +83,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 			collectionSchema,
 		)
 		if err != nil {
-			return false, err
+			return prepareFailed(err)
 		}
 		msgs, msgOffsets, err := dt.buildDeleteMessages(result, offsets, ez)
 		if err != nil {

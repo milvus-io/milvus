@@ -138,21 +138,32 @@ func (ut *upsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 	fence := newSplitFence()
 	pendingInserts := newPendingRows(int(ut.upsertMsg.InsertMsg.NumRows), fence)
 	pendingDeletes := newPendingRows(typeutil.GetSizeOfIDs(ut.deletePrimaryKeys()), fence)
+	attempt := 0
+	// prepareFailed ends the request on a failure met before the first append,
+	// and leaves a later one to retryPreparation. A partial update never
+	// retries, so it never gets here past its first attempt.
+	prepareFailed := func(err error) (bool, error) {
+		if attempt > 1 {
+			return fence.retryPreparation(ctx, ut.GetMetaCache(), ut.collectionID, err)
+		}
+		return false, err
+	}
 	appendErr := retry.Handle(ctx, func() (bool, error) {
+		attempt++
 		route, err := ut.writeRoute(ctx)
 		if err != nil {
 			logger.Warn(ctx, "resolve the write route failed", mlog.Err(err))
-			return false, err
+			return prepareFailed(err)
 		}
 		insertMsgs, insertOffsets, err := ut.packInsertMessage(ctx, ez, route, pendingInserts)
 		if err != nil {
 			logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
-			return false, err
+			return prepareFailed(err)
 		}
 		deleteMsgs, deleteOffsets, err := ut.packDeleteMessage(ctx, ez, route, pendingDeletes)
 		if err != nil {
 			logger.Warn(ctx, "pack delete message failed", mlog.Err(err))
-			return false, err
+			return prepareFailed(err)
 		}
 		deleteMsgs, deleteOffsets = pendingDeletes.dropFenced(deleteMsgs, deleteOffsets)
 

@@ -342,6 +342,22 @@ func duplicateAnsweredOffsets(resp streaming.AppendResponse) ([]int, bool, error
 	return offsets, true, nil
 }
 
+// retryPreparation decides what a write does with an error met before its
+// append -- reading the routing, or repacking -- on a retry, when rows of an
+// earlier attempt have landed. A transient failure (a retriable Milvus error, or
+// one that carries no Milvus code at all, as a transport error does) backs off
+// and refreshes like a refusal, within the same deadline: failing then would
+// fail a request that is already partly written. A failure no retry can cure,
+// and a context that ended, end the request.
+func (f *splitFence) retryPreparation(ctx context.Context, cache Cache, collectionID int64, err error) (bool, error) {
+	if merr.IsCanceledOrTimeout(err) || (merr.IsMilvusError(err) && !merr.IsRetryableErr(err)) {
+		return false, err
+	}
+	mlog.RatedWarn(ctx, 1, "preparing a retry after a shard split fence failed, backing off",
+		mlog.FieldCollectionID(collectionID), mlog.Err(err))
+	return f.refresh(ctx, cache, collectionID, err)
+}
+
 // refresh evicts the collection from the proxy's cache, so the next attempt
 // re-describes it, and asks retry.Handle for that attempt. cause is what the
 // write reports if its deadline ends the retry; it defaults to the latest
