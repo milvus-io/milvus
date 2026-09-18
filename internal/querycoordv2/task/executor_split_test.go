@@ -63,3 +63,18 @@ func TestSubscribeRefusesAChannelTheCollectionNoLongerLists(t *testing.T) {
 	err := subscribeWith(t, adopted, "v0")
 	assert.ErrorIs(t, err, merr.ErrChannelNotFound)
 }
+
+// I2: the channel checker's shard-state view may be seconds old. The executor's
+// fresh describe refuses a split target that is still Creating, which only its
+// source's delegator may serve until adoption.
+func TestSubscribeRefusesASplitTargetNotYetAdopted(t *testing.T) {
+	window := &milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v0", "v1"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardSplitting},
+			{State: schemapb.ShardState_ShardCreating},
+		},
+	}
+	err := subscribeWith(t, window, "v1")
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+}
