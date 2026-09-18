@@ -25,7 +25,13 @@ func (rs *recoveryStorageImpl) isDirty() bool {
 
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil
+	// A drained retirement is dirty even when dirtyCounter is 0: its meta was
+	// typically persisted (clearing dirty) long before the flusher checkpoint
+	// caught up with its fence, and the removal write that finally deletes
+	// the row from the catalog is only emitted by a persist round. Without
+	// this, a graceful shutdown that happens to land on such a round leaves
+	// the retired meta in etcd, to be reloaded on the next start.
+	return rs.dirtyCounter > 0 || rs.pendingSalvageCheckpoint != nil || rs.hasCollectableRetiredVChannelLocked()
 }
 
 // TODO: !!! all recovery persist operation should be a compare-and-swap operation to
@@ -46,6 +52,7 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		rs.Logger().Info(context.TODO(), "recovery storage background task exit")
 	}()
 
+	rs.observeTruncationPinMetrics()
 	for {
 		select {
 		case <-rs.backgroundTaskNotifier.Context().Done():
@@ -57,6 +64,7 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 			return
 		}
 		rs.gcSummary(rs.backgroundTaskNotifier.Context())
+		rs.observeTruncationPinMetrics()
 	}
 }
 
@@ -95,6 +103,9 @@ func (rs *recoveryStorageImpl) persistDritySnapshotWhenClosing() error {
 func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlog.Level) (err error) {
 	if rs.pendingPersistSnapshot == nil {
 		// if there's no dirty snapshot, generate a new one.
+		// A retired SPLITTED vchannel is collected by the snapshot once its own
+		// flusher checkpoint has drained past its fence gate; a source with no
+		// checkpoint yet is never collected (ConsumeDirtyAndGetSnapshot).
 		rs.pendingPersistSnapshot = rs.consumeDirtySnapshot()
 	}
 	if rs.pendingPersistSnapshot == nil {
@@ -189,7 +200,11 @@ func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, che
 	}
 }
 
-// dropAllVirtualChannel drops all virtual channels that are in the dropped state.
+// dropAllVirtualChannel drops all virtual channels that are in the dropped
+// state, except a DROPPED-with-Retired one: that shape is a retired shard
+// split source whose catalog row is only being collected locally (see
+// ConsumeDirtyAndGetSnapshot) — DataCoord already retires the source itself,
+// so it must never be told to drop it here.
 // TODO: DropVirtualChannel will be called twice here,
 // call it in recovery storage is used to promise the drop virtual channel must be called after recovery.
 // In future, the flowgraph will be deprecated, all message operation will be implement here.
@@ -197,9 +212,22 @@ func (rs *recoveryStorageImpl) simpleTruncateCheckpoint(ctx context.Context, che
 func (rs *recoveryStorageImpl) dropAllVirtualChannel(ctx context.Context, vcs map[string]*streamingpb.VChannelMeta) error {
 	channels := make([]string, 0, len(vcs))
 	for channelName, vc := range vcs {
-		if vc.State == streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
-			channels = append(channels, channelName)
+		if vc.State != streamingpb.VChannelState_VCHANNEL_STATE_DROPPED {
+			continue
 		}
+		if vc.Retired {
+			// A DROPPED snapshot with Retired set is not a genuine drop: it
+			// is a shard split's source vchannel, rewritten to DROPPED only
+			// so ConsumeDirtyAndGetSnapshot's caller can tell the catalog to
+			// delete the row once the flusher has drained past the fence
+			// (see ConsumeDirtyAndGetSnapshot). DataCoord already retires
+			// the source itself as part of the split's own routing commit,
+			// so calling DropVirtualChannel here would be redundant at
+			// best, and could race with or duplicate that bookkeeping at
+			// worst. Skip it.
+			continue
+		}
+		channels = append(channels, channelName)
 	}
 	if len(channels) == 0 {
 		return nil

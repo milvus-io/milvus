@@ -21,6 +21,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -165,6 +166,7 @@ func checkMaxDeleteSize(ctx context.Context, size int) error {
 
 func repackDeleteMsgByHash(
 	ctx context.Context,
+	table *routing.ResidueTable,
 	primaryKeys *schemapb.IDs,
 	vChannels []string,
 	idAllocator allocator.Interface,
@@ -177,6 +179,35 @@ func repackDeleteMsgByHash(
 	namespace *string,
 	schema *schemapb.CollectionSchema,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
+	result, _, numRows, err := repackPendingDeleteMsgs(
+		ctx, table, primaryKeys, nil, vChannels, idAllocator, ts, collectionID, collectionName, partitionID, partitionName, dbName, namespace, schema,
+	)
+	return result, numRows, err
+}
+
+// repackPendingDeleteMsgs is repackDeleteMsgByHash restricted to the primary
+// keys whose offsets are in pending (nil packs every key). It also returns, per
+// built message, the offsets of the keys it carries: a retry after a split
+// fence re-sends exactly the tombstones of the refused messages.
+//
+// table is the routing table of a split collection, nil for one that has never
+// been split (see pkChannelIndexes).
+func repackPendingDeleteMsgs(
+	ctx context.Context,
+	table *routing.ResidueTable,
+	primaryKeys *schemapb.IDs,
+	pending rowSet,
+	vChannels []string,
+	idAllocator allocator.Interface,
+	ts uint64,
+	collectionID int64,
+	collectionName string,
+	partitionID int64,
+	partitionName string,
+	dbName string,
+	namespace *string,
+	schema *schemapb.CollectionSchema,
+) (map[uint32][]*msgstream.DeleteMsg, map[*msgstream.DeleteMsg][]int, int64, error) {
 	splitChunkProxy := Params.ProxyCfg.SplitChunkProxy.GetAsBool()
 	maxWALMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
 	var hashValues []uint32
@@ -185,7 +216,7 @@ func repackDeleteMsgByHash(
 	// namespaces in the same collection.
 	channelID, ok, err := namespaceShardingChannelID(schema, namespace, vChannels)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	if ok {
 		size := typeutil.GetSizeOfIDs(primaryKeys)
@@ -194,15 +225,16 @@ func repackDeleteMsgByHash(
 			hashValues[i] = channelID
 		}
 	} else {
-		hashValues, err = typeutil.HashPK2Channels(primaryKeys, vChannels)
+		hashValues, err = pkChannelIndexes(table, primaryKeys, vChannels)
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 	}
 	// Repack delete messages by dmChannel. Proxy keeps the legacy size packing
 	// while splitChunkProxy is enabled; once disabled, one logical tombstone
 	// body is built per hashed channel so StreamingNode can own physical chunking.
 	result := make(map[uint32][]*msgstream.DeleteMsg)
+	offsets := make(map[*msgstream.DeleteMsg][]int)
 	lastMessageSize := make(map[uint32]int)
 
 	numRows := int64(0)
@@ -235,6 +267,11 @@ func repackDeleteMsgByHash(
 	}
 
 	for index, key := range hashValues {
+		if pending != nil {
+			if _, ok := pending[index]; !ok {
+				continue
+			}
+		}
 		vchannel := vChannels[key]
 		msgs, ok := result[key]
 		if !ok {
@@ -247,7 +284,7 @@ func repackDeleteMsgByHash(
 		rowSize := 16 + size
 		if splitChunkProxy {
 			if maxWALMessageSize > 0 && rowSize >= maxWALMessageSize {
-				return nil, 0, merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
+				return nil, nil, 0, merr.WrapErrAsInputError(merr.WrapErrParameterTooLarge(
 					fmt.Sprintf("single delete primary key at offset %d is too large to fit in one WAL message", index)))
 			}
 			if maxWALMessageSize > 0 && curMsg.NumRows > 0 && lastMessageSize[key]+rowSize > maxWALMessageSize {
@@ -259,6 +296,7 @@ func repackDeleteMsgByHash(
 		curMsg.Timestamps = append(curMsg.Timestamps, ts)
 
 		typeutil.AppendID(curMsg.PrimaryKeys, id)
+		offsets[curMsg] = append(offsets[curMsg], index)
 		curMsg.NumRows++
 		lastMessageSize[key] += rowSize
 		numRows++
@@ -267,7 +305,7 @@ func repackDeleteMsgByHash(
 	// alloc messageID
 	start, _, err := idAllocator.Alloc(uint32(numMessage))
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 
 	cnt := int64(0)
@@ -280,9 +318,9 @@ func repackDeleteMsgByHash(
 		}
 	}
 	if err := checkMaxDeleteSize(ctx, maxMessageSize); err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
-	return result, numRows, nil
+	return result, offsets, numRows, nil
 }
 
 type deleteRunner struct {

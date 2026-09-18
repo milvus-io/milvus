@@ -74,7 +74,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 	mockMetaCache := NewMockCache(t)
 	mockMetaCache.EXPECT().GetPartitionID(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(int64(0), nil)
 	// Idempotency disabled: no decoration, so no key property and no insert result.
-	msgs, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, nil)
+	msgs, _, err := repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, nil, insertMsg, result, nil, 0, nil, nil, nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
@@ -89,7 +89,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 	// Idempotency enabled: the proxy decoration single-sources both the idempotency
 	// key (message property) and the per-write-unit insert result (insert header).
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
-	msgs, err = repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration())
+	msgs, _, err = repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, nil, insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(), nil)
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
 
@@ -130,16 +130,18 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
 
-	msgs, err := repackInsertDataForStreamingService(
+	msgs, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		nil,
 		0,
 		nil,
 		it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)
@@ -175,30 +177,34 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 	insertMsg, result := newIdempotentRepackInsertMsgWithPayload(1, strings.Repeat("a", 512*1024))
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
 
-	bodyOnly, err := repackInsertDataForStreamingService(
+	bodyOnly, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		nil,
 		0,
+		nil,
 		nil,
 		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, bodyOnly, 1)
 
-	withIdempotency, err := repackInsertDataForStreamingService(
+	withIdempotency, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		nil,
 		0,
 		nil,
 		it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, withIdempotency, 1)
@@ -210,14 +216,16 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 	// The non-idempotent path must stay under the same limit: the final
 	// streaming-message size guard exists specifically for the extra idempotency
 	// metadata, so a plain insert of the same body must still pass.
-	withoutIdempotency, err := repackInsertDataForStreamingService(
+	withoutIdempotency, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		nil,
 		0,
+		nil,
 		nil,
 		nil,
 	)
@@ -227,16 +235,18 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 
 	// A single row cannot be split further, so this one still fails -- but with an
 	// error that names the real constraint.
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		nil,
 		0,
 		nil,
 		it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.Contains(t, err.Error(), "does not fit in one WAL message")
@@ -261,9 +271,11 @@ func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
 
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "104857600"))
-	whole, err := repackInsertDataForStreamingService(
+	whole, _, err := repackInsertDataForStreamingService(
 		context.Background(), cache, []string{"ch"},
+		nil,
 		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, whole, 1)
@@ -273,9 +285,11 @@ func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(whole[0].EstimateSize()/2)))
 	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
 
-	split, err := repackInsertDataForStreamingService(
+	split, _, err := repackInsertDataForStreamingService(
 		context.Background(), cache, []string{"ch"},
+		nil,
 		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(split), 1)
@@ -316,16 +330,18 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 		},
 	}
 
-	bodyOnly, err := repackInsertDataWithPartitionKeyForStreamingService(
+	bodyOnly, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		partitionKeys,
 		nil,
 		schema,
 		0,
+		nil,
 		nil,
 		nil,
 	)
@@ -334,16 +350,18 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 
 	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
 
-	withoutIdempotency, err := repackInsertDataWithPartitionKeyForStreamingService(
+	withoutIdempotency, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		partitionKeys,
 		nil,
 		schema,
 		0,
+		nil,
 		nil,
 		nil,
 	)
@@ -352,10 +370,11 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
 
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		partitionKeys,
@@ -364,6 +383,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 		0,
 		nil,
 		it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	require.Contains(t, err.Error(), "a single insert row does not fit in one WAL message")
@@ -397,10 +417,11 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessages
 	}
 	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-partition", result: result}
 
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+	msgs, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		cache,
 		[]string{"ch"},
+		nil,
 		insertMsg,
 		result,
 		partitionKeys,
@@ -409,6 +430,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessages
 		0,
 		nil,
 		it.idempotentInsertDecoration(),
+		nil,
 	)
 	require.NoError(t, err)
 	require.Greater(t, len(msgs), 1)

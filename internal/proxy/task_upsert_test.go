@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
 	"github.com/milvus-io/milvus/internal/util/function/models"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -545,11 +546,24 @@ func TestUpsertTaskForSchemaMismatch(t *testing.T) {
 }
 
 // Helper function to create test updateTask
+// neverSplitTestMetaCache is the zero MetaCache createTestUpdateTask's tests
+// patch method by method, answering the write path's routing lookup for a collection
+// that has never been split: an unpatched lookup of a zero MetaCache has no
+// coordinator to describe with.
+type neverSplitTestMetaCache struct {
+	*MetaCache
+	vchannels []string
+}
+
+func (c *neverSplitTestMetaCache) GetCollectionInfo(context.Context, string, string, int64) (*collectionInfo, error) {
+	return &collectionInfo{VChannels: c.vchannels}, nil
+}
+
 func createTestUpdateTask() *upsertTask {
 	mcClient := &grpcmixcoordclient.Client{}
 
 	upsertTask := &upsertTask{
-		baseTask:  baseTask{MetaCache: &MetaCache{}},
+		baseTask:  baseTask{MetaCache: &neverSplitTestMetaCache{MetaCache: &MetaCache{}}},
 		Condition: NewTaskCondition(context.Background()),
 		req: &milvuspb.UpsertRequest{
 			Base: commonpbutil.NewMsgBase(
@@ -812,6 +826,9 @@ var partialUpdateCASTestVChannels = []string{
 }
 
 func setPartialUpdateCASTestChannels(task *upsertTask, vchannels []string) {
+	if cache, ok := task.MetaCache.(*neverSplitTestMetaCache); ok {
+		cache.vchannels = vchannels
+	}
 	task.chMgr = channelmgr.NewChannelsMgr(func(collectionID typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
 		vchans := make([]string, 0, len(vchannels))
 		pchans := make([]string, 0, len(vchannels))
@@ -1113,15 +1130,17 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	}
 
 	task, vchannel, groups := newInput()
-	msgs, err := repackInsertDataForStreamingService(
+	msgs, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -1129,44 +1148,50 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		map[string]*messagespb.PartialUpdateCAS{},
 		nil,
+		nil,
 	)
 	require.Error(t, err)
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
 		nil,
+		nil,
 	)
 	require.Error(t, err)
 
 	task, vchannel, groups = newInput()
 	groups[vchannel].ReadTs = 0
-	_, err = repackInsertDataForStreamingService(
+	_, _, err = repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
@@ -1189,15 +1214,17 @@ func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata
 		},
 	}
 
-	msgs, err := repackInsertDataForStreamingService(
+	msgs, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -1229,15 +1256,17 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 
 	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
-	unsplit, err := repackInsertDataForStreamingService(
+	unsplit, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -1247,15 +1276,17 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 	t.Cleanup(func() { Params.PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
 
 	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("true")
-	proxySplit, err := repackInsertDataForStreamingService(
+	proxySplit, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -1266,15 +1297,17 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 	}
 
 	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	snSplit, err := repackInsertDataForStreamingService(
+	snSplit, _, err := repackInsertDataForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		nil,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -1300,7 +1333,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceRejectsMisalignedSource(t
 		},
 	}
 
-	_, err := repackInsertDataByPartitionForStreamingService(
+	_, _, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(),
 		200,
 		"_default",
@@ -1339,10 +1372,11 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 	}
 
 	task, vchannel, groups := newInput()
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+	msgs, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		task.partitionKeys,
@@ -1351,16 +1385,18 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		1,
 		groups,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		task.partitionKeys,
@@ -1369,14 +1405,16 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		1,
 		map[string]*messagespb.PartialUpdateCAS{},
 		nil,
+		nil,
 	)
 	require.Error(t, err)
 
 	task, vchannel, _ = newInput()
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		task.partitionKeys,
@@ -1385,15 +1423,17 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		1,
 		map[string]*messagespb.PartialUpdateCAS{vchannel: nil},
 		nil,
+		nil,
 	)
 	require.Error(t, err)
 
 	task, vchannel, groups = newInput()
 	groups[vchannel].ReadTs = 0
-	_, err = repackInsertDataWithPartitionKeyForStreamingService(
+	_, _, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		task.partitionKeys,
@@ -1401,6 +1441,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 		task.schema.CollectionSchema,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.ErrorIs(t, err, merr.ErrServiceInternal)
@@ -1430,10 +1471,11 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessag
 		},
 	}
 
-	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
+	msgs, _, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		mockCache,
 		[]string{vchannel},
+		nil,
 		task.upsertMsg.InsertMsg,
 		task.result,
 		task.partitionKeys,
@@ -1441,6 +1483,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessag
 		task.schema.CollectionSchema,
 		1,
 		groups,
+		nil,
 		nil,
 	)
 	require.NoError(t, err)
@@ -1461,12 +1504,15 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
 			defer collectionPatch.UnPatch()
 
+			infoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{VChannels: partialUpdateCASTestVChannels[:1]}, nil).Build()
+			defer infoPatch.UnPatch()
+
 			primaryPatch := mockey.Mock(repackInsertDataForStreamingService).
-				Return([]streamingmessage.MutableMessage{}, nil).
+				Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
 				Build()
 			defer primaryPatch.UnPatch()
 			partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).
-				Return([]streamingmessage.MutableMessage{}, nil).
+				Return([]streamingmessage.MutableMessage{}, [][]int{}, nil).
 				Build()
 			defer partitionPatch.UnPatch()
 
@@ -1508,19 +1554,19 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer collectionPatch.UnPatch()
 	partitionPatch := mockey.Mock(repackInsertDataWithPartitionKeyForStreamingService).To(
-		func(_ context.Context, _ Cache, _ []string, _ *msgstream.InsertMsg,
+		func(_ context.Context, _ Cache, _ []string, _ *routing.ResidueTable, _ *msgstream.InsertMsg,
 			result *milvuspb.MutationResult, _ *schemapb.FieldData, _ *streamingmessage.CipherConfig,
 			_ *schemapb.CollectionSchema, _ int32, _ map[string]*messagespb.PartialUpdateCAS,
-			_ *insertIdempotencyDecoration,
-		) ([]streamingmessage.MutableMessage, error) {
+			_ *insertIdempotencyDecoration, _ *pendingRows,
+		) ([]streamingmessage.MutableMessage, [][]int, error) {
 			require.Same(t, task.result, result)
 			require.Equal(t, []int64{20, 10}, result.GetIDs().GetIntId().GetData())
-			return nil, nil
+			return nil, nil, nil
 		},
 	).Build()
 	defer partitionPatch.UnPatch()
 
-	msgs, err := task.packInsertMessage(context.Background(), nil)
+	msgs, _, err := task.packInsertMessage(context.Background(), nil, legacyWriteRoute(partialUpdateCASTestVChannels), nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 }
@@ -1537,25 +1583,27 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 			_ context.Context,
 			_ Cache,
 			_ []string,
+			_ *routing.ResidueTable,
 			insertMsg *msgstream.InsertMsg,
 			result *milvuspb.MutationResult,
 			_ *streamingmessage.CipherConfig,
 			_ int32,
 			_ map[string]*messagespb.PartialUpdateCAS,
 			_ *insertIdempotencyDecoration,
-		) ([]streamingmessage.MutableMessage, error) {
+			_ *pendingRows,
+		) ([]streamingmessage.MutableMessage, [][]int, error) {
 			routingIDs = result.GetIDs()
 			primaryData, err := typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), task.schema.GetFields()[0])
 			require.NoError(t, err)
 			payloadIDs, err := parsePrimaryFieldData2IDs(primaryData)
 			require.NoError(t, err)
 			require.True(t, proto.Equal(payloadIDs, routingIDs))
-			return nil, nil
+			return nil, nil, nil
 		},
 	).Build()
 	defer repackPatch.UnPatch()
 
-	msgs, err := task.packInsertMessage(context.Background(), nil)
+	msgs, _, err := task.packInsertMessage(context.Background(), nil, legacyWriteRoute(partialUpdateCASTestVChannels), nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 	require.Equal(t, []int64{10, 1001}, routingIDs.GetIntId().GetData())
@@ -1571,7 +1619,7 @@ func TestPackDeleteMessageSkipsEmptyPrimaryKeys(t *testing.T) {
 		},
 	}
 
-	msgs, err := task.packDeleteMessage(context.Background(), nil)
+	msgs, _, err := task.packDeleteMessage(context.Background(), nil, legacyWriteRoute(nil), nil)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
 }
@@ -1590,7 +1638,7 @@ func TestFullAutoIDRoutesExistingInsertAndDeleteTogether(t *testing.T) {
 
 	m := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{Schema: task.schema}, nil).Build()
+	m = mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{Schema: task.schema, VChannels: partialUpdateCASTestVChannels}, nil).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*MetaCache).GetCollectionSchema).Return(task.schema, nil).Build()
 	defer m.UnPatch()
@@ -1685,9 +1733,9 @@ func TestAppendUpsertAttemptMapsSchemaVersionMismatch(t *testing.T) {
 	oldWAL := streaming.WAL()
 	streaming.SetWALForTest(fakeWAL)
 	t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
-	insertPatch := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	insertPatch := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, [][]int(nil), nil).Build()
 	defer insertPatch.UnPatch()
-	deletePatch := mockey.Mock((*upsertTask).packDeleteMessage).Return(nil, nil).Build()
+	deletePatch := mockey.Mock((*upsertTask).packDeleteMessage).Return(nil, [][]int(nil), nil).Build()
 	defer deletePatch.UnPatch()
 
 	err := task.appendUpsertAttempt(context.Background(), nil)
@@ -1754,9 +1802,9 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadata(t *testing.T) {
 		task.partialUpdateCASGroups,
 	)
 
-	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, [][]int(nil), nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
+	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, [][]int(nil), nil).Build()
 	defer m.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -1829,7 +1877,7 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 	firstAttemptReadTS := uint64(1000)
 
 	m := mockey.Mock((*upsertTask).packInsertMessage).To(
-		func(task *upsertTask, ctx context.Context, ez *streamingmessage.CipherConfig) ([]streamingmessage.MutableMessage, error) {
+		func(task *upsertTask, ctx context.Context, ez *streamingmessage.CipherConfig, _ *writeRoute, _ *pendingRows) ([]streamingmessage.MutableMessage, [][]int, error) {
 			insertMsgs, _ := buildPartialUpdateCASTestMessages(
 				t,
 				task.collectionID,
@@ -1838,12 +1886,12 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 				[]int64{20},
 				task.partialUpdateCASGroups,
 			)
-			return insertMsgs, nil
+			return insertMsgs, nil, nil
 		},
 	).Build()
 	defer m.UnPatch()
 	m = mockey.Mock((*upsertTask).packDeleteMessage).To(
-		func(task *upsertTask, ctx context.Context, ez *streamingmessage.CipherConfig) ([]streamingmessage.MutableMessage, error) {
+		func(task *upsertTask, ctx context.Context, ez *streamingmessage.CipherConfig, _ *writeRoute, _ *pendingRows) ([]streamingmessage.MutableMessage, [][]int, error) {
 			_, deleteMsgs := buildPartialUpdateCASTestMessages(
 				t,
 				task.collectionID,
@@ -1852,7 +1900,7 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 				[]int64{20},
 				nil,
 			)
-			return deleteMsgs, nil
+			return deleteMsgs, nil, nil
 		},
 	).Build()
 	defer m.UnPatch()
@@ -2211,9 +2259,9 @@ func TestPartialUpdateAppendAcceptsBuilderCASMetadataForVarCharPK(t *testing.T) 
 		task.partialUpdateCASGroups,
 	)
 
-	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, [][]int(nil), nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
+	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, [][]int(nil), nil).Build()
 	defer m.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -2253,9 +2301,9 @@ func TestNonPartialUpsertDoesNotAttachCASMetadata(t *testing.T) {
 	streaming.SetWALForTest(fakeWAL)
 	defer streaming.SetWALForTest(oldWAL)
 
-	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, nil).Build()
+	m := mockey.Mock((*upsertTask).packInsertMessage).Return(insertMsgs, [][]int(nil), nil).Build()
 	defer m.UnPatch()
-	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, nil).Build()
+	m = mockey.Mock((*upsertTask).packDeleteMessage).Return(deleteMsgs, [][]int(nil), nil).Build()
 	defer m.UnPatch()
 
 	err := task.Execute(context.Background())
@@ -2398,10 +2446,24 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 	})
 }
 
+// checkPartialUpdateProofsCoverRoute must not swallow a failure building the
+// CAS groups it checks: buildPartialUpdateCASGroups refuses an empty primary
+// key selection, and that refusal has to reach the caller as it is, not be
+// misread as a routing change with no proof.
+func TestCheckPartialUpdateProofsCoverRoutePropagatesABuildFailure(t *testing.T) {
+	task, _, _ := partialUpdateCASTestTask(t, true, nil, nil, nil)
+	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels[:1])
+
+	err := task.checkPartialUpdateProofsCoverRoute(context.Background(), legacyWriteRoute(partialUpdateCASTestVChannels[:1]))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "primary keys are empty")
+}
+
 func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
 	smallTask, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	setPartialUpdateCASTestChannels(smallTask, partialUpdateCASTestVChannels[:1])
-	smallGroups, err := smallTask.buildPartialUpdateCASGroups()
+	smallGroups, err := smallTask.buildPartialUpdateCASGroups(legacyWriteRoute(partialUpdateCASTestVChannels[:1]))
 	require.NoError(t, err)
 
 	largePKs := make([]int64, 1000)
@@ -2410,7 +2472,7 @@ func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
 	}
 	largeTask, _, _ := partialUpdateCASTestTask(t, true, largePKs, largePKs, nil)
 	setPartialUpdateCASTestChannels(largeTask, partialUpdateCASTestVChannels[:1])
-	largeGroups, err := largeTask.buildPartialUpdateCASGroups()
+	largeGroups, err := largeTask.buildPartialUpdateCASGroups(legacyWriteRoute(partialUpdateCASTestVChannels[:1]))
 	require.NoError(t, err)
 
 	smallEncoded, err := streamingmessage.EncodeProto(smallGroups[partialUpdateCASTestVChannels[0]])
@@ -3938,7 +4000,7 @@ func partialUpdateAutoIDInsertTestTask(t *testing.T, stringPK bool) *upsertTask 
 		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{IntData: &schemapb.IntArray{Data: []int32{100, 200}}}}},
 	}}
 	task := &upsertTask{
-		baseTask: baseTask{MetaCache: &MetaCache{}},
+		baseTask: baseTask{MetaCache: &neverSplitTestMetaCache{MetaCache: &MetaCache{}}},
 		ctx:      context.Background(), schema: schema, idAllocator: &allocator.IDAllocator{}, collectionID: 100,
 		req: &milvuspb.UpsertRequest{Base: commonpbutil.NewMsgBase(), FieldsData: fields, NumRows: 2, PartialUpdate: true, CollectionName: schema.GetName()},
 		upsertMsg: &msgstream.UpsertMsg{
@@ -7235,6 +7297,8 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 	for _, stage := range []string{"valid_data", "collection_info", "schema", "text_storage", "field_ops", "namespace", "partition_mode", "partition_info", "primary_key", "pk_parse", "duplicate_pk", "functions", "insert", "delete", "implicit_partial_namespace"} {
 		t.Run(stage, func(t *testing.T) {
 			task := createTestUpdateTask()
+			// Every MetaCache read below is patched, the routing read included.
+			task.MetaCache = &MetaCache{}
 			task.req.PartialUpdate = true
 			setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels)
 			expected := merr.WrapErrServiceUnavailable("preparation dependency unavailable")
@@ -7251,7 +7315,7 @@ func TestUpdateTaskPreExecuteStopsRejectedRequestsBeforeWriting(t *testing.T) {
 			}
 			patch(validateAndNormalizeFieldDataValidData, failure("valid_data"))
 			patch((*MetaCache).GetCollectionID, int64(1001), nil)
-			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema}, failure("collection_info"))
+			patch((*MetaCache).GetCollectionInfo, &collectionInfo{Schema: task.schema, VChannels: partialUpdateCASTestVChannels}, failure("collection_info"))
 			patch((*MetaCache).GetCollectionSchema, task.schema, failure("schema"))
 			patch(validateTextStorageV3Enabled, failure("text_storage"))
 			implicit := stage == "implicit_partial_namespace"

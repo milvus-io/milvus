@@ -40,6 +40,7 @@ func RegisterDDLCallbacks(s *Server) {
 	ddlCallback.registerExternalCollectionCallbacks()
 	ddlCallback.registerImportCallbacks()
 	ddlCallback.registerBatchUpdateManifestCallbacks()
+	registry.RegisterAppendFirstReplicaRecordedChecker(s.splitSourceFenceRecorded)
 }
 
 type DDLCallbacks struct {
