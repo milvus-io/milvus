@@ -576,3 +576,42 @@ func TestImportTask_PreExecuteRejectsDuplicateOptionKeys(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Contains(t, err.Error(), "duplicate import option key: backup")
 }
+
+// Import is not supported into a collection a shard split has touched: the
+// datanode places imported rows by the vchannel count, which no longer matches
+// a split collection's residues. Refused before anything is planned, while a
+// never-split collection imports as before.
+func TestImportTaskPreExecuteRefusesASplitCollection(t *testing.T) {
+	for name, info := range map[string]*collectionInfo{
+		"split": splitCollectionInfo(100, 2, []string{"v0", "v1", "v2"},
+			splitShardInfo(schemapb.ShardState_ShardSplitting, "v0"),
+			splitShardInfo(schemapb.ShardState_ShardCreating, "v1", 0),
+			splitShardInfo(schemapb.ShardState_ShardCreating, "v2", 1)),
+		"adopted": splitCollectionInfo(100, 2, []string{"v1", "v2"},
+			splitShardInfo(schemapb.ShardState_ShardNormal, "v1", 0),
+			splitShardInfo(schemapb.ShardState_ShardNormal, "v2", 1)),
+		"splitting shard listed": {CollID: 100, VChannels: []string{"v0"},
+			ShardInfos: []*schemapb.CollectionShardInfo{splitShardInfo(schemapb.ShardState_ShardSplitting, "v0")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "db", "c").Return(int64(100), nil)
+			cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(100)).Return(info, nil)
+			task := &importTask{req: &internalpb.ImportRequest{DbName: "db", CollectionName: "c"}}
+			task.MetaCache = cache
+
+			err := task.PreExecute(context.Background())
+			assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+			assert.False(t, merr.IsRetryableErr(err))
+		})
+	}
+}
+func TestImportTaskPreExecuteReportsARoutingReadFailure(t *testing.T) {
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, "db", "c").Return(int64(100), nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(100)).Return(nil, errors.New("describe failed"))
+	task := &importTask{req: &internalpb.ImportRequest{DbName: "db", CollectionName: "c"}}
+	task.MetaCache = cache
+
+	assert.ErrorContains(t, task.PreExecute(context.Background()), "describe failed")
+}
