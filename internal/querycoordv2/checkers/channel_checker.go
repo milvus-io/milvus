@@ -25,7 +25,9 @@ import (
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -290,23 +292,41 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
-	// not-yet-adopted split targets are fronted in-process by the source
-	// delegator; querycoord must not watch them until they leave the Creating
-	// state at adoption, or it would build a fresh delegator and replay the WAL.
-	creatingTargets := typeutil.NewSet[string]()
-	if c.splitState != nil {
-		creatingTargets.Insert(c.splitState.CreatingTargetChannels(ctx, collectionID)...)
-	}
-
 	// get channels which exists on next target, but not on dist
+	watchable := c.shardSplitWatchable(ctx, collectionID)
 	for name, channel := range nextTargetMap {
 		_, existOnDist := distMap[name]
-		if !existOnDist && !creatingTargets.Contain(name) {
+		if !existOnDist && watchable(name) {
 			toLoad = append(toLoad, channel)
 		}
 	}
 
 	return toLoad, toRelease
+}
+
+// shardSplitWatchable returns which channels of the collection's next target a
+// shard split allows querycoord to watch now.
+//
+//   - A not-yet-adopted split target (ShardCreating) is fronted in-process by
+//     its source's delegator; watching it would build a fresh delegator and
+//     replay the WAL. It is watched once adoption makes it Normal.
+//   - A vchannel the collection no longer lists is a split source retired by an
+//     adoption, which the next target may still list until the window-end
+//     re-pull. It is never watched again (meta.ShardStates.CheckWatchable); the
+//     flip releases it.
+func (c *ChannelChecker) shardSplitWatchable(ctx context.Context, collectionID int64) func(channel string) bool {
+	if c.splitState == nil {
+		return func(string) bool { return true }
+	}
+	states, _ := c.splitState.ChannelStates(ctx, collectionID)
+	return func(channel string) bool {
+		if states.CheckWatchable(channel) != nil {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "skip watching a channel the collection no longer lists",
+				mlog.FieldCollectionID(collectionID), mlog.String("channel", channel))
+			return false
+		}
+		return states[channel] != schemapb.ShardState_ShardCreating
+	}
 }
 
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {

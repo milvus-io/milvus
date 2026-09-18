@@ -434,6 +434,14 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 		return err
 	}
+	// The channel checker chose this channel from a shard-state view that may be
+	// seconds old. This describe is fresh, so it has the last word on whether a
+	// shard split still allows the watch.
+	if err = meta.ShardStatesOf(collectionInfo).CheckWatchable(action.ChannelName()); err != nil {
+		mlog.Warn(ctx, "refuse to watch a channel a shard split does not allow to watch",
+			mlog.String("channel", action.ChannelName()), mlog.Err(err))
+		return err
+	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
 	partitions, err := utils.GetPartitions(ctx, ex.targetMgr, task.CollectionID())
 	if err != nil {
