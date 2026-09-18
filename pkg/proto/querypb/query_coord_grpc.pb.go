@@ -1620,6 +1620,7 @@ const (
 	QueryNode_QueryStreamSegments_FullMethodName    = "/milvus.proto.query.QueryNode/QueryStreamSegments"
 	QueryNode_ShowConfigurations_FullMethodName     = "/milvus.proto.query.QueryNode/ShowConfigurations"
 	QueryNode_GetMetrics_FullMethodName             = "/milvus.proto.query.QueryNode/GetMetrics"
+	QueryNode_GetFeatureUsage_FullMethodName        = "/milvus.proto.query.QueryNode/GetFeatureUsage"
 	QueryNode_GetDataDistribution_FullMethodName    = "/milvus.proto.query.QueryNode/GetDataDistribution"
 	QueryNode_SyncDistribution_FullMethodName       = "/milvus.proto.query.QueryNode/SyncDistribution"
 	QueryNode_Delete_FullMethodName                 = "/milvus.proto.query.QueryNode/Delete"
@@ -1660,6 +1661,7 @@ type QueryNodeClient interface {
 	ShowConfigurations(ctx context.Context, in *internalpb.ShowConfigurationsRequest, opts ...grpc.CallOption) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(ctx context.Context, in *milvuspb.GetMetricsRequest, opts ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error)
+	GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error)
 	GetDataDistribution(ctx context.Context, in *GetDataDistributionRequest, opts ...grpc.CallOption) (*GetDataDistributionResponse, error)
 	SyncDistribution(ctx context.Context, in *SyncDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -1920,6 +1922,15 @@ func (c *queryNodeClient) GetMetrics(ctx context.Context, in *milvuspb.GetMetric
 	return out, nil
 }
 
+func (c *queryNodeClient) GetFeatureUsage(ctx context.Context, in *internalpb.GetFeatureUsageRequest, opts ...grpc.CallOption) (*internalpb.GetFeatureUsageResponse, error) {
+	out := new(internalpb.GetFeatureUsageResponse)
+	err := c.cc.Invoke(ctx, QueryNode_GetFeatureUsage_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryNodeClient) GetDataDistribution(ctx context.Context, in *GetDataDistributionRequest, opts ...grpc.CallOption) (*GetDataDistributionResponse, error) {
 	out := new(GetDataDistributionResponse)
 	err := c.cc.Invoke(ctx, QueryNode_GetDataDistribution_FullMethodName, in, out, opts...)
@@ -2054,6 +2065,7 @@ type QueryNodeServer interface {
 	ShowConfigurations(context.Context, *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
 	// https://wiki.lfaidata.foundation/display/MIL/MEP+8+--+Add+metrics+for+proxy
 	GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
+	GetFeatureUsage(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error)
 	GetDataDistribution(context.Context, *GetDataDistributionRequest) (*GetDataDistributionResponse, error)
 	SyncDistribution(context.Context, *SyncDistributionRequest) (*commonpb.Status, error)
 	Delete(context.Context, *DeleteRequest) (*commonpb.Status, error)
@@ -2137,6 +2149,9 @@ func (UnimplementedQueryNodeServer) ShowConfigurations(context.Context, *interna
 }
 func (UnimplementedQueryNodeServer) GetMetrics(context.Context, *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetMetrics not implemented")
+}
+func (UnimplementedQueryNodeServer) GetFeatureUsage(context.Context, *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetFeatureUsage not implemented")
 }
 func (UnimplementedQueryNodeServer) GetDataDistribution(context.Context, *GetDataDistributionRequest) (*GetDataDistributionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetDataDistribution not implemented")
@@ -2570,6 +2585,24 @@ func _QueryNode_GetMetrics_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _QueryNode_GetFeatureUsage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(internalpb.GetFeatureUsageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryNodeServer).GetFeatureUsage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryNode_GetFeatureUsage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryNodeServer).GetFeatureUsage(ctx, req.(*internalpb.GetFeatureUsageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _QueryNode_GetDataDistribution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetDataDistributionRequest)
 	if err := dec(in); err != nil {
@@ -2868,6 +2901,10 @@ var QueryNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetMetrics",
 			Handler:    _QueryNode_GetMetrics_Handler,
+		},
+		{
+			MethodName: "GetFeatureUsage",
+			Handler:    _QueryNode_GetFeatureUsage_Handler,
 		},
 		{
 			MethodName: "GetDataDistribution",

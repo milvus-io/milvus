@@ -252,6 +252,9 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 		shardclientMgr:     t.node.(*Proxy).shardMgr,
 		chMgr:              t.node.(*Proxy).chMgr,
 		actualChannelsMvcc: channelReadTs,
+		// The user issued an upsert, not a query: this retrieval reads the rows
+		// the upsert replaces and must not move the query feature counters.
+		internalTask: true,
 	}
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {

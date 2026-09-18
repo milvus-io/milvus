@@ -1510,6 +1510,52 @@ func (_c *IMetaTable_CheckIfUpdateCredential_Call) RunAndReturn(run func(context
 	return _c
 }
 
+// CountAliases provides a mock function with given fields: ctx
+func (_m *IMetaTable) CountAliases(ctx context.Context) int {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountAliases")
+	}
+
+	var r0 int
+	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	return r0
+}
+
+// IMetaTable_CountAliases_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CountAliases'
+type IMetaTable_CountAliases_Call struct {
+	*mock.Call
+}
+
+// CountAliases is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *IMetaTable_Expecter) CountAliases(ctx interface{}) *IMetaTable_CountAliases_Call {
+	return &IMetaTable_CountAliases_Call{Call: _e.mock.On("CountAliases", ctx)}
+}
+
+func (_c *IMetaTable_CountAliases_Call) Run(run func(ctx context.Context)) *IMetaTable_CountAliases_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_CountAliases_Call) Return(_a0 int) *IMetaTable_CountAliases_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_CountAliases_Call) RunAndReturn(run func(context.Context) int) *IMetaTable_CountAliases_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateDatabase provides a mock function with given fields: ctx, db, ts
 func (_m *IMetaTable) CreateDatabase(ctx context.Context, db *model.Database, ts uint64) error {
 	ret := _m.Called(ctx, db, ts)

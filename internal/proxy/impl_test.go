@@ -3044,7 +3044,7 @@ func TestProxy_Search_SearchByPKCopiesRequestPerAttempt(t *testing.T) {
 		// The first attempt reports a topk-reduced, insufficient result so
 		// that Proxy.Search runs the non-optimized fallback.
 		var attempts []*milvuspb.SearchRequest
-		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 			attempts = append(attempts, req)
 			// what handleIfSearchByPK does to the request it is handed
 			req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("rewritten")}
@@ -3076,7 +3076,7 @@ func TestProxy_Search_PlainRequestNotCopied(t *testing.T) {
 
 		node := &Proxy{}
 		var attempts []*milvuspb.SearchRequest
-		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
 			attempts = append(attempts, req)
 			insufficient := len(attempts) == 1
 			return &milvuspb.SearchResults{Status: merr.Success()}, insufficient, insufficient, false, nil

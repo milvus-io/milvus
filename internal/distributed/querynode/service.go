@@ -432,6 +432,11 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	return s.querynode.GetMetrics(ctx, req)
 }
 
+// GetFeatureUsage returns the node's feature usage view.
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	return s.querynode.GetFeatureUsage(ctx, req)
+}
+
 // GetDataDistribution gets the distribution information of QueryNode.
 func (s *Server) GetDataDistribution(ctx context.Context, req *querypb.GetDataDistributionRequest) (*querypb.GetDataDistributionResponse, error) {
 	return s.querynode.GetDataDistribution(ctx, req)

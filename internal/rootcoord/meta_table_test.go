@@ -4893,3 +4893,32 @@ func TestMetaTableReloadNormalizesMaxFieldIDProperty(t *testing.T) {
 	props := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	require.Equal(t, "105", props[common.MaxFieldIDKey])
 }
+
+// TestMetaTable_CountAliases pins that the feature usage report's alias total
+// is one pass over the alias index, summed across databases, and agrees with
+// what per-collection ListAliasesByID calls would add up to.
+func TestMetaTable_CountAliases(t *testing.T) {
+	t.Run("empty", func(t *testing.T) {
+		mt := &MetaTable{aliases: newNameDb()}
+		assert.Equal(t, 0, mt.CountAliases(context.TODO()))
+	})
+
+	t.Run("summed across databases", func(t *testing.T) {
+		aliases := newNameDb()
+		aliases.insert("db1", "a1", 100)
+		aliases.insert("db1", "a2", 100)
+		aliases.insert("db1", "a3", 101)
+		aliases.insert("db2", "b1", 200)
+		// A database that exists in the alias index but holds no alias.
+		aliases.createDbIfNotExist("db3")
+		mt := &MetaTable{aliases: aliases}
+
+		assert.Equal(t, 4, mt.CountAliases(context.TODO()))
+
+		perCollection := 0
+		for _, id := range []typeutil.UniqueID{100, 101, 200} {
+			perCollection += len(mt.ListAliasesByID(context.TODO(), id))
+		}
+		assert.Equal(t, perCollection, mt.CountAliases(context.TODO()))
+	})
+}

@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	segcoreutil "github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -49,7 +50,7 @@ func searchSegmentsWithRetry(
 ) ([]*SearchResult, error) {
 	retryCount := 0
 	for {
-		searchResults, err := searchSegmentsAttempt(ctx, mgr, segments, segType, searchReq)
+		searchResults, err := searchSegmentsAttempt(ctx, mgr, segments, segType, searchReq, retryCount == 0)
 		if err == nil {
 			return searchResults, nil
 		}
@@ -75,7 +76,10 @@ func searchSegmentsWithRetry(
 	}
 }
 
-func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
+// firstAttempt is false on a read-gate retry of the same segment group, so the
+// brute_force_search counter is moved once per search rather than once per
+// attempt.
+func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest, firstAttempt bool) ([]*SearchResult, error) {
 	searchLabel := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		searchLabel = metrics.GrowingSegmentLabel
@@ -117,6 +121,21 @@ func searchSegmentsAttempt(ctx context.Context, mgr *Manager, segments []Segment
 		if !seg.ExistIndex(searchReq.SearchFieldID()) {
 			segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 		}
+	}
+	// brute_force_search: this segment group scanned at least one segment with
+	// no index on the queried vector field. Counted from the list just built,
+	// so it costs no extra index lookup, and on the first attempt only, so a
+	// read-gate retry of the same group does not count again.
+	//
+	// The unit is one hit per segment-group search request, not per user
+	// search: a delegator fans a search out to a sealed request and a growing
+	// one, and a search task carries a single DataScope. Read it together with
+	// the config group: a growing segment carries no vector index unless
+	// queryNode.segcore.interimIndex.enableIndex is on, which is off by
+	// default, so on a collection that is being written to this tracks the
+	// search rate rather than a rare fallback. The report emits that switch.
+	if firstAttempt && len(segmentsWithoutIndex) > 0 {
+		featureusage.Hit(featureusage.FeatureBruteForceSearch)
 	}
 
 	var err error

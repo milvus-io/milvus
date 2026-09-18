@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
@@ -72,10 +73,20 @@ type searchTask struct {
 	result  *milvuspb.SearchResults
 	request *milvuspb.SearchRequest
 
-	tr                     *timerecord.TimeRecorder
-	collectionName         string
-	schema                 *schemaInfo
-	needRequery            bool
+	tr             *timerecord.TimeRecorder
+	collectionName string
+	schema         *schemaInfo
+	needRequery    bool
+	// features accumulates this request's counters during PreExecute and is
+	// flushed once when it returns. A hybrid search parses every sub-request,
+	// and Proxy.Search can run the whole task again for the un-optimized retry,
+	// the recall-evaluation ground truth and a retry.Handle re-entry; marking
+	// into a set and flushing once is what keeps "how many requests used X"
+	// equal to the number of user requests rather than the number of task runs.
+	features featureusage.FeatureSet
+	// countFeatures is set only on the first task built for a user request, so
+	// the repeat runs above add nothing.
+	countFeatures          bool
 	partitionKeyMode       bool
 	partitionKeyIsolation  bool
 	largeTopKEnabled       bool
@@ -159,6 +170,18 @@ func (t *searchTask) CanSkipAllocTimestamp() bool {
 }
 
 func (t *searchTask) PreExecute(ctx context.Context) error {
+	// Flushed however PreExecute ends: a request the Proxy rejects still asked
+	// for the feature, which is what the counters record, and the parse that
+	// marks a feature can be the very step that fails. countFeatures is what
+	// keeps a repeat run of the same user request from counting again.
+	if t.countFeatures {
+		defer t.features.HitAll()
+	}
+	collectSearchRequestFeatures(t.request, &t.features)
+	// The request-level key scan, once. On the hybrid path this list is the
+	// rank_params, where group_size, strict_group_size and rank_group_scorer
+	// live; on the plain path it is the search params themselves.
+	collectSearchParamKeyFeatures(t.request.GetSearchParams(), &t.features)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search-PreExecute")
 	defer sp.End()
 
@@ -225,6 +248,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	var aggs []agg.AggregateBase
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, aggs, t.userRequestedPkFieldExplicitly, err = translateOutputFields(t.request.OutputFields, t.schema, true)
+	collectOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema, &t.features)
 	if err != nil {
 		log.Warn(ctx, "translate output fields failed", mlog.Err(err), mlog.FieldSchema(t.schema.CollectionSchema))
 		return err
@@ -500,6 +524,11 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.rerankMeta, err = selectHybridRerankMeta(t.request, t.schema)
 	if err != nil {
 		return err
+	}
+	// Only the legacy branch carries a rank_params strategy; function_chains and
+	// function_score return earlier in selectHybridRerankMeta.
+	if len(t.request.GetFunctionChains()) == 0 && t.request.GetFunctionScore() == nil {
+		collectLegacyRankStrategy(t.request.GetSearchParams(), &t.features)
 	}
 
 	allFields := typeutil.GetAllFieldSchemas(t.schema.CollectionSchema)
@@ -1211,6 +1240,14 @@ func (t *searchTask) tryGeneratePlan(
 	if err != nil {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, err
 	}
+	collectSearchInfoFeatures(searchInfo.isIterator, searchInfo.isRangeSearch,
+		searchInfo.planInfo.GetGroupByFieldId(), searchInfo.planInfo.GetSearchIteratorV2Info() != nil, &t.features)
+	// Only the sub-request's own keys here; PreExecute already scanned the
+	// request-level list. On the plain path params is that same list, so this
+	// would be a second scan of it for nothing.
+	if t.IsAdvanced {
+		collectSearchParamKeyFeatures(params, &t.features)
+	}
 	if searchInfo.collectionID > 0 && searchInfo.collectionID != t.GetCollectionID() {
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, merr.WrapErrParameterInvalidMsg("collection id:%d in the request is not consistent to that in the search context,"+
 			"alias or database may have been changed: %d", searchInfo.collectionID, t.GetCollectionID())
@@ -1249,6 +1286,7 @@ func (t *searchTask) tryGeneratePlan(
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 		return nil, nil, 0, false, nil, internalpb.SearchType_DEFAULT, wrapPlanCreationError(planErr, "failed to create query plan")
 	}
+	collectPlanExprFeatures(plan, exprTemplateValues, &t.features)
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "search", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	mlog.Debug(t.ctx, "create query plan",
 		mlog.Int("dsl_bytes", len(dsl)),
