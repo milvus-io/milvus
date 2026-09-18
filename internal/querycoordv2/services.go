@@ -642,6 +642,23 @@ func (s *Server) isStoppingNode(ctx context.Context, nodeID int64) error {
 	return nil
 }
 
+// checkShardSplitMovable refuses a manual move of the given collections'
+// channels or segments while a shard split forbids it, under the same rule as
+// the balance freeze (meta.CheckShardSplitMovable): a moved split source is
+// rebuilt without the in-process children it fronts. The refusal is a
+// retriable System error; the move can be retried once the split's flip is
+// done.
+func (s *Server) checkShardSplitMovable(ctx context.Context, collectionIDs ...int64) error {
+	for _, collectionID := range collectionIDs {
+		if err := meta.CheckShardSplitMovable(ctx, s.splitState, s.targetMgr, collectionID); err != nil {
+			mlog.Warn(ctx, "refuse a manual move during a shard split",
+				mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "load balance request received",
 		mlog.Int64s("source", req.GetSourceNodeIDs()),
@@ -699,6 +716,10 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		if err := s.isStoppingNode(ctx, dstNode); err != nil {
 			return merr.Status(merr.Wrapf(err, "can't balance, because the destination node[%d] is invalid", dstNode)), nil
 		}
+	}
+
+	if err := s.checkShardSplitMovable(ctx, req.GetCollectionID()); err != nil {
+		return merr.Status(err), nil
 	}
 
 	// check sealed segment list
