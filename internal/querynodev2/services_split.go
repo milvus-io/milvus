@@ -81,6 +81,15 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	// delegator for it while the other is part-way through, then look again: a
 	// delegator registered during the wait is never overwritten (and so never
 	// removed from the node by this spawn's failure cleanup).
+	//
+	// While this claim is held, a concurrent WatchDmChannels for the same
+	// target cannot take it either; it returns merr.Success() having watched
+	// nothing (the "channel subscribing..." branch in services.go), so
+	// querycoord's watch task waits out queryCoord.channelTaskTimeout (120s)
+	// before its channel checker re-watches. By then the claim is gone: the
+	// retry finds the spawned child already registered and adopts it instead of
+	// building it fresh. Reads stay correct throughout that whole window
+	// because the source delegator fronts the child until it is adopted.
 	if !node.subscribingChannels.Insert(targetVChannel) {
 		return nil, merr.WrapErrServiceUnavailable("split target is being watched",
 			fmt.Sprintf("target %s, source %s", targetVChannel, params.SourceVChannel))
@@ -305,9 +314,9 @@ func (node *QueryNode) releaseSplitChildren(ctx context.Context, source delegato
 }
 
 // AbortSplitChild tears down a child the spawner created but could not publish
-// because the source was released mid-spawn. It mirrors the un-adopted teardown
-// in releaseSplitChildren: the child was never fronted, so it cannot have been
-// adopted.
+// because the source was released or had stopped mid-spawn. It mirrors the
+// un-adopted teardown in releaseSplitChildren: the child was never fronted, so
+// it cannot have been adopted.
 func (node *QueryNode) AbortSplitChild(ctx context.Context, child delegator.ShardDelegator, collectionID int64, vchannel string) {
 	node.delegators.GetAndRemove(vchannel)
 	node.pipelineManager.Remove(vchannel)
@@ -315,7 +324,7 @@ func (node *QueryNode) AbortSplitChild(ctx context.Context, child delegator.Shar
 	node.manager.Segment.RemoveBy(ctx, segments.WithChannel(vchannel), segments.WithType(segments.SegmentTypeGrowing))
 	node.manager.Collection.Unref(collectionID, 1)
 	metrics.QueryNodeSplitChildNum.WithLabelValues(fmt.Sprint(node.GetNodeID())).Dec()
-	mlog.Info(ctx, "aborted an unpublished shard-split child after source release",
+	mlog.Info(ctx, "aborted an unpublished shard-split child after source release or stop",
 		mlog.String("childVChannel", vchannel))
 }
 

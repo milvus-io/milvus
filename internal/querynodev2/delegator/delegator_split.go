@@ -853,7 +853,7 @@ func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel stri
 		// not-yet-published child — hence we, not it, must tear the child down.
 		sd.childMut.Unlock()
 		sd.childSpawner.AbortSplitChild(ctx, child, sd.collectionID, vchannel)
-		sd.getLogger(ctx).Info(ctx, "aborted a split child spawned after source release",
+		sd.getLogger(ctx).Info(ctx, "aborted a split child spawned after source release or stop",
 			mlog.String("targetVChannel", vchannel))
 		return
 	}
