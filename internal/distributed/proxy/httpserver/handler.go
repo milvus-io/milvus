@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Handlers handles http requests
@@ -112,6 +113,31 @@ func (h *Handlers) handleGetHealth(c *gin.Context) (interface{}, error) {
 	return gin.H{"status": "ok"}, nil
 }
 
+// checkAuthorization enforces the same RBAC rules on the low-level REST API
+// that the gRPC chain applies through PrivilegeInterceptor: the handlers below
+// invoke the proxy implementation directly, which performs no privilege check
+// of its own. The check is a no-op while authorization is disabled, matching
+// the gRPC path, and skips the liveness and debug endpoints that carry no
+// privilege annotation in the proto definition.
+func (h *Handlers) checkAuthorization(c *gin.Context, req interface{}) error {
+	if !paramtable.Get().CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	username, ok := c.Get(ContextUsername)
+	if !ok || username.(string) == "" {
+		return merr.Mark(merr.ErrNeedAuthenticate, errUnauthorized)
+	}
+	// The database a request targets is taken from the request body by the
+	// privilege interceptor itself, so no db metadata is injected here.
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), username.(string), "")
+	ctx, authErr := proxy.PrivilegeInterceptorWithMetaCache(h.metaCache)(ctx, req)
+	if authErr != nil {
+		return merr.Mark(authErr, errForbidden)
+	}
+	c.Request = c.Request.WithContext(ctx)
+	return nil
+}
+
 func (h *Handlers) handleDummy(c *gin.Context) (interface{}, error) {
 	req := milvuspb.DummyRequest{}
 	// use ShouldBind to supports binding JSON, XML, YAML, and protobuf.
@@ -141,6 +167,9 @@ func (h *Handlers) handleCreateCollection(c *gin.Context) (interface{}, error) {
 		ConsistencyLevel: wrappedReq.ConsistencyLevel,
 		Properties:       wrappedReq.Properties,
 	}
+	if err := h.checkAuthorization(c, req); err != nil {
+		return nil, err
+	}
 	return h.proxy.CreateCollection(c, req)
 }
 
@@ -149,6 +178,9 @@ func (h *Handlers) handleDropCollection(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.DropCollection(c, &req)
 }
@@ -159,6 +191,9 @@ func (h *Handlers) handleHasCollection(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.HasCollection(c, &req)
 }
 
@@ -167,6 +202,9 @@ func (h *Handlers) handleDescribeCollection(c *gin.Context) (interface{}, error)
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.DescribeCollection(c, &req)
 }
@@ -177,6 +215,9 @@ func (h *Handlers) handleLoadCollection(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.LoadCollection(c, &req)
 }
 
@@ -185,6 +226,9 @@ func (h *Handlers) handleReleaseCollection(c *gin.Context) (interface{}, error) 
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.ReleaseCollection(c, &req)
 }
@@ -195,6 +239,9 @@ func (h *Handlers) handleGetCollectionStatistics(c *gin.Context) (interface{}, e
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.GetCollectionStatistics(c, &req)
 }
 
@@ -203,6 +250,9 @@ func (h *Handlers) handleShowCollections(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.ShowCollections(c, &req)
 }
@@ -213,6 +263,9 @@ func (h *Handlers) handleCreatePartition(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.CreatePartition(c, &req)
 }
 
@@ -221,6 +274,9 @@ func (h *Handlers) handleDropPartition(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.DropPartition(c, &req)
 }
@@ -231,6 +287,9 @@ func (h *Handlers) handleHasPartition(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.HasPartition(c, &req)
 }
 
@@ -239,6 +298,9 @@ func (h *Handlers) handleLoadPartitions(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.LoadPartitions(c, &req)
 }
@@ -249,6 +311,9 @@ func (h *Handlers) handleReleasePartitions(c *gin.Context) (interface{}, error) 
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.ReleasePartitions(c, &req)
 }
 
@@ -257,6 +322,9 @@ func (h *Handlers) handleGetPartitionStatistics(c *gin.Context) (interface{}, er
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.GetPartitionStatistics(c, &req)
 }
@@ -267,6 +335,9 @@ func (h *Handlers) handleShowPartitions(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.ShowPartitions(c, &req)
 }
 
@@ -275,6 +346,9 @@ func (h *Handlers) handleCreateAlias(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.CreateAlias(c, &req)
 }
@@ -285,6 +359,9 @@ func (h *Handlers) handleDropAlias(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.DropAlias(c, &req)
 }
 
@@ -293,6 +370,9 @@ func (h *Handlers) handleAlterAlias(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.AlterAlias(c, &req)
 }
@@ -303,6 +383,9 @@ func (h *Handlers) handleCreateIndex(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.CreateIndex(c, &req)
 }
 
@@ -311,6 +394,9 @@ func (h *Handlers) handleDescribeIndex(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.DescribeIndex(c, &req)
 }
@@ -321,6 +407,9 @@ func (h *Handlers) handleGetIndexState(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.GetIndexState(c, &req)
 }
 
@@ -330,6 +419,9 @@ func (h *Handlers) handleGetIndexBuildProgress(c *gin.Context) (interface{}, err
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.GetIndexBuildProgress(c, &req)
 }
 
@@ -338,6 +430,9 @@ func (h *Handlers) handleDropIndex(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.DropIndex(c, &req)
 }
@@ -352,6 +447,9 @@ func (h *Handlers) handleInsert(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "convert body to pb failed")
 	}
+	if err := h.checkAuthorization(c, req); err != nil {
+		return nil, err
+	}
 	return h.proxy.Insert(c, req)
 }
 
@@ -360,6 +458,9 @@ func (h *Handlers) handleDelete(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.Delete(c, &req)
 }
@@ -395,6 +496,9 @@ func (h *Handlers) handleSearch(c *gin.Context) (interface{}, error) {
 			PlaceholderGroup: vector2Bytes(wrappedReq.Vectors),
 		}
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.Search(c, &req)
 }
 
@@ -404,6 +508,9 @@ func (h *Handlers) handleQuery(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.Query(c, &req)
 }
 
@@ -412,6 +519,9 @@ func (h *Handlers) handleFlush(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.Flush(c, &req)
 }
@@ -429,6 +539,9 @@ func (h *Handlers) handleCalcDistance(c *gin.Context) (interface{}, error) {
 		OpLeft:  wrappedReq.OpLeft.AsPbVectorArray(),
 		OpRight: wrappedReq.OpRight.AsPbVectorArray(),
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.CalcDistance(c, &req)
 }
 
@@ -437,6 +550,9 @@ func (h *Handlers) handleGetFlushState(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.GetFlushState(c, &req)
 }
@@ -447,6 +563,9 @@ func (h *Handlers) handleGetPersistentSegmentInfo(c *gin.Context) (interface{}, 
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.GetPersistentSegmentInfo(c, &req)
 }
 
@@ -455,6 +574,9 @@ func (h *Handlers) handleGetQuerySegmentInfo(c *gin.Context) (interface{}, error
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.GetQuerySegmentInfo(c, &req)
 }
@@ -465,6 +587,9 @@ func (h *Handlers) handleGetReplicas(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.GetReplicas(c, &req)
 }
 
@@ -473,6 +598,9 @@ func (h *Handlers) handleGetMetrics(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.GetMetrics(c, &req)
 }
@@ -483,6 +611,9 @@ func (h *Handlers) handleLoadBalance(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.LoadBalance(c, &req)
 }
 
@@ -491,6 +622,9 @@ func (h *Handlers) handleGetCompactionState(c *gin.Context) (interface{}, error)
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.GetCompactionState(c, &req)
 }
@@ -501,6 +635,9 @@ func (h *Handlers) handleGetCompactionStateWithPlans(c *gin.Context) (interface{
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.GetCompactionStateWithPlans(c, &req)
 }
 
@@ -509,6 +646,9 @@ func (h *Handlers) handleManualCompaction(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.ManualCompaction(c, &req)
 }
@@ -519,6 +659,9 @@ func (h *Handlers) handleImport(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.Import(c, &req)
 }
 
@@ -527,6 +670,9 @@ func (h *Handlers) handleGetImportState(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.GetImportState(c, &req)
 }
@@ -537,6 +683,9 @@ func (h *Handlers) handleListImportTasks(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.ListImportTasks(c, &req)
 }
 
@@ -545,6 +694,9 @@ func (h *Handlers) handleCreateCredential(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.CreateCredential(c, &req)
 }
@@ -555,6 +707,9 @@ func (h *Handlers) handleUpdateCredential(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.UpdateCredential(c, &req)
 }
 
@@ -564,6 +719,9 @@ func (h *Handlers) handleDeleteCredential(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
+	}
 	return h.proxy.DeleteCredential(c, &req)
 }
 
@@ -572,6 +730,9 @@ func (h *Handlers) handleListCredUsers(c *gin.Context) (interface{}, error) {
 	err := shouldBind(c, &req)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
+	}
+	if err := h.checkAuthorization(c, &req); err != nil {
+		return nil, err
 	}
 	return h.proxy.ListCredUsers(c, &req)
 }
