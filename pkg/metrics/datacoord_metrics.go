@@ -467,6 +467,39 @@ var (
 			Help:      "total latency of snapshot export jobs in milliseconds",
 			Buckets:   longTaskBuckets,
 		}, []string{statusLabelName})
+
+	// DataCoordShardSplitTaskNum is the number of shard split tasks in each
+	// state that is not terminal (preparing/fencing/redistributing/adopting):
+	// how many splits are in flight and where they wait.
+	DataCoordShardSplitTaskNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_num",
+			Help:      "number of active shard split tasks per state",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitTaskTotal counts the shard split tasks that reached a
+	// terminal state, by outcome (done/aborted).
+	DataCoordShardSplitTaskTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_task_total",
+			Help:      "total number of finished shard split tasks per outcome",
+		}, []string{statusLabelName})
+
+	// DataCoordShardSplitDuration is the wall-clock duration of a finished
+	// shard split, from its task's creation to its terminal state, in
+	// milliseconds.
+	DataCoordShardSplitDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "shard_split_duration",
+			Help:      "duration of a finished shard split in milliseconds",
+			Buckets:   longTaskBuckets,
+		}, []string{statusLabelName})
 )
 
 // RegisterDataCoord registers DataCoord metrics
@@ -510,6 +543,9 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSnapshotExportActiveJobs)
 	registry.MustRegister(DataCoordSnapshotExportTerminalJobs)
 	registry.MustRegister(DataCoordSnapshotExportJobLatency)
+	registry.MustRegister(DataCoordShardSplitTaskNum)
+	registry.MustRegister(DataCoordShardSplitTaskTotal)
+	registry.MustRegister(DataCoordShardSplitDuration)
 	registerStreamingCoord(registry)
 }
 
