@@ -1068,10 +1068,28 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
+	// The lineage window of a shard split: while a split source is listed, its
+	// targets' flushed data is served by the source delegator
+	// (shard_split_lineage.go). The family is resolved once for the whole call,
+	// so the sources' views are built from the same lineage the targets are
+	// attributed and skipped by.
+	viewer, resolvesFamily := s.handler.(splitFamilyQueryViewer)
+	var lineage map[string]string
+	if resolvesFamily && s.shardSplitManager != nil {
+		lineage = s.shardSplitManager.SplitLineageOfListedSources(
+			typeutil.NewSet(lo.Map(channels, func(ch RWChannel, _ int) string { return ch.GetName() })...))
+	}
+	families := splitFamiliesOf(lineage)
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, ch := range channels {
-		channelInfo := s.handler.GetQueryVChanPositions(ch, partitionIDs...)
+		var channelInfo *datapb.VchannelInfo
+		if resolvesFamily {
+			channelInfo = viewer.GetQueryVChanPositionsOfSplitFamily(ch, families[ch.GetName()], partitionIDs...)
+		} else {
+			// A handler that cannot take a resolved family opens no window.
+			channelInfo = s.handler.GetQueryVChanPositions(ch, partitionIDs...)
+		}
 		channelInfos = append(channelInfos, channelInfo)
 		mlog.Info(context.TODO(), "datacoord append channelInfo in GetRecoveryInfo",
 			mlog.String("channel", channelInfo.GetChannelName()),
@@ -1084,6 +1102,13 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			mlog.Time("# of check point", tsoutil.PhysicalTime(channelInfo.GetSeekPosition().GetTimestamp())),
 			mlog.Time("# of delete check point", tsoutil.PhysicalTime(channelInfo.GetDeleteCheckpoint().GetTimestamp())),
 		)
+		if _, attributed := lineage[ch.GetName()]; attributed {
+			// The source's merged view already holds this target's flushed
+			// segments, normalized against the source's own: taking the
+			// target's own list too would report a rewrite's input and its
+			// outputs together.
+			continue
+		}
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
 
@@ -1124,7 +1149,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			ID:                  segment.ID,
 			PartitionID:         segment.PartitionID,
 			CollectionID:        segment.CollectionID,
-			InsertChannel:       segment.InsertChannel,
+			InsertChannel:       splitAttributedInsertChannel(segment, lineage),
 			NumOfRows:           rowCount,
 			Level:               segment.GetLevel(),
 			IsSorted:            segment.GetIsSorted(),
@@ -1137,6 +1162,12 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 	resp.Channels = channelInfos
 	resp.Segments = segmentInfos
 	return resp, nil
+}
+
+// splitFamilyQueryViewer builds a channel's query recovery view over a split
+// family resolved by the caller; implemented by *ServerHandler.
+type splitFamilyQueryViewer interface {
+	GetQueryVChanPositionsOfSplitFamily(ch RWChannel, splitTargets []string, partitionIDs ...UniqueID) *datapb.VchannelInfo
 }
 
 // GetChannelRecoveryInfo get recovery channel info.
