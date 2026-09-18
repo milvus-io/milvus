@@ -18,6 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"slices"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -101,6 +104,11 @@ func (s *Server) startSplitCollectionBroadcast(ctx context.Context, collectionID
 // The broadcast is deduplicated by the task id, so a retry of one that landed
 // is the same broadcast. Every error is returned for the next tick to retry;
 // merr.ErrCollectionNotFound says the collection is gone.
+//
+// A refusal made under the keys before anything is broadcast, while neither
+// the store nor the meta shows the switch applied, is marked
+// errSplitRefusedBeforeBroadcast: the source is fenced nowhere, so a task whose
+// refusal is not retriable may still abort (advancePreparing).
 func (s *Server) issueShardSplit(ctx context.Context, task *datapb.SplitShardTask, controlChannel string) error {
 	api, coll, err := s.startSplitCollectionBroadcast(ctx, task.GetCollectionId())
 	if err != nil {
@@ -115,22 +123,31 @@ func (s *Server) issueShardSplit(ctx context.Context, task *datapb.SplitShardTas
 	if fenced {
 		return nil
 	}
+	refused := func(err error) error {
+		// The broadcast holds the keys until its ack callback returns, so under
+		// them a switch that landed shows in the meta (its targets listed) and
+		// in the store (fenced, checked above). Neither: nothing of it landed.
+		if splitSwitchListed(task, coll) {
+			return err
+		}
+		return markRefusedBeforeBroadcast(err)
+	}
 	if reason := splitRefusalReason(coll.schema); reason != "" {
 		// Checked again under the collection's keys: a schema change raced the
-		// target allocation. The task is past its abort point, so it waits.
-		return merr.WrapErrOperationNotSupportedMsg("refuse to issue shard split task %d: %s", task.GetTaskId(), reason)
+		// target allocation.
+		return refused(merr.WrapErrOperationNotSupportedMsg("refuse to issue shard split task %d: %s", task.GetTaskId(), reason))
 	}
 	param, err := buildSplitShardParam(task, coll, controlChannel)
 	if err != nil {
-		return err
+		return refused(err)
 	}
 	msg, err := streaming.NewSplitShardBroadcastMessage(param)
 	if err != nil {
-		return err
+		return refused(err)
 	}
 	typed := message.MustAsSpecializedBroadcastMessage[*message.SplitShardMessageHeader, *message.SplitShardMessageBody](msg)
 	if err := streaming.CheckSplitShardAgainstCollection(coll.Collection, typed.Header(), typed.MustBody()); err != nil {
-		return err
+		return refused(err)
 	}
 	if _, err := api.Broadcast(ctx, msg); err != nil {
 		return merr.Wrapf(err, "broadcast the write switch of shard split task %d", task.GetTaskId())
@@ -142,6 +159,27 @@ func (s *Server) issueShardSplit(ctx context.Context, task *datapb.SplitShardTas
 		mlog.Strings("targets", param.TargetVChannels),
 		mlog.Uint64("routingModulus", param.Routing.GetRoutingModulus()))
 	return nil
+}
+
+// errSplitRefusedBeforeBroadcast marks a write-switch refusal made under the
+// collection's keys before anything was broadcast, while neither the task store
+// nor the collection meta showed the switch applied.
+var errSplitRefusedBeforeBroadcast = errors.New("shard split write switch refused before its broadcast")
+
+// markRefusedBeforeBroadcast marks err, keeping its code and retriability.
+func markRefusedBeforeBroadcast(err error) error {
+	return errors.Mark(err, errSplitRefusedBeforeBroadcast)
+}
+
+// splitSwitchListed reports whether the collection meta lists any of the
+// task's targets, i.e. its write switch has been applied.
+func splitSwitchListed(task *datapb.SplitShardTask, coll *splitCollection) bool {
+	for _, target := range splitTaskTargetVChannels(task) {
+		if target != "" && slices.Contains(coll.VirtualChannelNames, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // checkSplitTaskRecord compares the task about to be broadcast with what the

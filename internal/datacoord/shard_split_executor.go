@@ -57,8 +57,10 @@ func (m *shardSplitManager) advanceTask(task *datapb.SplitShardTask) {
 
 // splitTargetsAllocated reports whether a task's target vchannels have been
 // allocated and persisted. From then on a write switch of the task may be in
-// the WAL -- it is issued right after -- so the task is never aborted and
-// never re-planned: a re-issue must present the same id and topology.
+// the WAL -- it is issued right after -- so the task is never re-planned: a
+// re-issue must present the same id and topology. It is aborted only on a
+// refusal made under the collection's keys before any broadcast
+// (abortUnfencedTask).
 func splitTargetsAllocated(task *datapb.SplitShardTask) bool {
 	if len(task.GetTargets()) != 2 {
 		return false
@@ -95,6 +97,13 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 	m.preemptSourceCompactions(task)
 	if err := m.coordinator.issueShardSplit(m.ctx, task, m.controlChannel()); err != nil {
 		if m.finishOnDroppedCollection(task, err, "collection dropped before the write switch") {
+			return
+		}
+		if errors.Is(err, errSplitRefusedBeforeBroadcast) && !merr.IsRetryableErr(err) {
+			// Refused under the keys before any broadcast, and nothing a retry
+			// can change: the source is fenced nowhere, so the task aborts and
+			// frees its slot instead of retrying forever.
+			m.abortUnfencedTask(task, "the write switch was refused: "+err.Error())
 			return
 		}
 		logger.RatedWarn(m.ctx, 30, "issue the shard split write switch failed, retrying", mlog.Err(err))
@@ -321,8 +330,36 @@ func (m *shardSplitManager) finishTask(task *datapb.SplitShardTask, reason strin
 // abortTask aborts a task that is still Preparing with no target vchannel
 // persisted: nothing of it can be in any WAL. Anything later is refused.
 func (m *shardSplitManager) abortTask(task *datapb.SplitShardTask, reason string) {
+	m.abortIf(task, reason, func(t *datapb.SplitShardTask) bool { return !splitTargetsAllocated(t) })
+}
+
+// abortUnfencedTask aborts a task still Preparing whose targets are allocated
+// but whose write switch was refused before any broadcast. The record is
+// re-checked under the task's lock: a source fenced (a T_switch recorded, or
+// the task Fenced or past Preparing) is never aborted.
+//
+// The abandoned target names are harmless: the vchannel allocator persists
+// nothing (it derives names from the collection's known vchannels), the names
+// were never listed in the collection meta, so no querycoord has seen them,
+// and an Aborted task no longer reserves them (knownVChannels), so a later
+// split may reuse them. Their checkpoints and channel marks are written only
+// by the ack callback, which never ran.
+func (m *shardSplitManager) abortUnfencedTask(task *datapb.SplitShardTask, reason string) {
+	m.abortIf(task, reason, func(t *datapb.SplitShardTask) bool {
+		for _, source := range t.GetSources() {
+			if source.GetSwitchTimeTick() != 0 {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+// abortIf aborts a task still Preparing and not fenced, when allowed also
+// holds for its latest record.
+func (m *shardSplitManager) abortIf(task *datapb.SplitShardTask, reason string, allowed func(t *datapb.SplitShardTask) bool) {
 	aborted, err := m.store.modify(m.ctx, m.catalog, task.GetTaskId(), func(t *datapb.SplitShardTask) bool {
-		if t.GetState() != datapb.SplitShardTaskState_SplitShardTaskPreparing || t.GetFenced() || splitTargetsAllocated(t) {
+		if t.GetState() != datapb.SplitShardTaskState_SplitShardTaskPreparing || t.GetFenced() || !allowed(t) {
 			return false
 		}
 		t.State = datapb.SplitShardTaskState_SplitShardTaskAborted
