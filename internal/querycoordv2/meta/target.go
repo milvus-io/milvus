@@ -45,6 +45,22 @@ type CollectionTarget struct {
 
 	// cache collection total row count
 	totalRowCount int64
+
+	// windowTargets are the channels this target's pull listed that may be
+	// shard-split targets not yet adopted at pull time: every listed channel the
+	// shard-state read taken just before the pull did not see Normal, Splitting
+	// or Dropped (see ShardStateSnapshot.SplitWindowTargets). It never misses a
+	// target still Creating in the pull, and may over-mark one adopted between
+	// the read and the pull, which the window-end refresh re-pulls. Such a pull is
+	// a window snapshot: datacoord attributes the targets' flushed data to their
+	// source while the source is listed, so these channels carry no sealed
+	// segment of their own here and look trivially data-ready. A delegator of a
+	// window target must never be synced to, nor promoted through, this target.
+	//
+	// It is set by the next-target pull only and is not persisted: a current
+	// target is never built from a snapshot that still had window targets
+	// (the promotion is refused), and a recovered next target is re-pulled.
+	windowTargets typeutil.Set[string]
 }
 
 func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
@@ -233,6 +249,12 @@ func (p *CollectionTarget) Ready() bool {
 
 func (p *CollectionTarget) GetRowCount() int64 {
 	return p.totalRowCount
+}
+
+// SplitWindowTargets returns the channels marked as split window targets when
+// this target was pulled; see windowTargets.
+func (p *CollectionTarget) SplitWindowTargets() typeutil.Set[string] {
+	return p.windowTargets
 }
 
 type target struct {
