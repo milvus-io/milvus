@@ -1285,8 +1285,9 @@ func TestCommitShardSplitRedeliveryKeepsTheRecordedSourceFields(t *testing.T) {
 	withUnknown.GetSources()[0].ProtoReflect().SetUnknown(unknown)
 	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, withUnknown))
 
-	// The redelivery also carries the tick the fence landed on; it stays the
-	// authority for that one field.
+	// A redelivery that reports another tick does not move the recorded one:
+	// T_switch is the tick of the task's FIRST fence (design doc §6.1 step 3),
+	// and the drain may already have been judged against it.
 	req := splitTestCommitRequest()
 	req.Sources[0].SwitchTimeTick = 2500
 	status, err = svr.CommitShardSplit(context.Background(), req)
@@ -1296,7 +1297,7 @@ func TestCommitShardSplitRedeliveryKeepsTheRecordedSourceFields(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, merged.GetSources(), 1)
 	assert.Equal(t, splitTestSource, merged.GetSources()[0].GetVchannel())
-	assert.Equal(t, uint64(2500), merged.GetSources()[0].GetSwitchTimeTick())
+	assert.Equal(t, uint64(2000), merged.GetSources()[0].GetSwitchTimeTick(), "the first recorded T_switch is kept")
 	assert.Equal(t, unknown, []byte(merged.GetSources()[0].ProtoReflect().GetUnknown()),
 		"the redelivery erased a field of the recorded source it does not carry")
 }
