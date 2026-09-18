@@ -192,6 +192,59 @@ func (d *distribution) PinReadableSegmentsAsChild(requiredLoadRatio float64, par
 	return d.pinReadableSegments(requiredLoadRatio, true, partitions...)
 }
 
+// PinGrowingSegmentsAsChild pins only the growing segments this delegator
+// contributes to the fronting phase of its source's read, while the source
+// still serves the split shard's sealed data itself.
+//
+// It differs from PinReadableSegmentsAsChild in two ways, both required in that
+// phase:
+//   - No sealed segment is returned. The source reads its own sealed view,
+//     which through the datacoord attribution already covers the flushed data of
+//     every split target; this delegator's own sealed view would either repeat
+//     those rows under the rewrite's new segment IDs, which no ID exclusion can
+//     deduplicate, or not be readable at all.
+//   - Every growing segment present is returned, whatever its target version,
+//     redundant ones included. A delegator querycoord has synced marks a growing
+//     segment redundant as soon as its flushed twin is in the target, but the
+//     twin is only physically released after the current-target flip; until the
+//     source loads that twin, a redundant growing segment is the only copy of
+//     those rows the family holds. The source's pins are excluded by ID
+//     afterwards (splitReadScope), which is what keeps a twin the source does
+//     hold from being counted twice.
+//
+// The partition gate still applies: a request naming a partition this view does
+// not hold is refused, and genSnapshot has already stamped every entry outside
+// the view's partitions unreadable.
+//
+// requiredLoadRatio is ignored — a fronted delegator is read through the
+// serviceability bypass, so no load ratio gates it — and is taken only so that
+// the three pin methods share one signature.
+func (d *distribution) PinGrowingSegmentsAsChild(_ float64, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	current := d.current.Load()
+	for _, partition := range partitions {
+		if !current.partitions.Contain(partition) {
+			return nil, nil, nil, -1, merr.WrapErrPartitionNotLoaded(partition)
+		}
+	}
+	_, growing = current.Get(partitions...)
+	growing = lo.Filter(growing, frontedGrowingFilter)
+	// No sealed segment is read, so no sealed row count is reported either: a
+	// partial-result evaluator counting this delegator's sealed rows against
+	// segments it was never asked to read would reject an exact result.
+	return nil, growing, nil, current.version, nil
+}
+
+// frontedGrowingFilter admits every growing segment a fronted delegator
+// contributes to its source's read. L0 is never readable, and
+// unreadableTargetVersion on a growing entry is how genSnapshot marks an entry
+// outside the query view's partitions — the partition gate, which still applies.
+func frontedGrowingFilter(entry SegmentEntry, _ int) bool {
+	return entry.Level != datapb.SegmentLevel_L0 && entry.TargetVersion != unreadableTargetVersion
+}
+
 func (d *distribution) pinReadableSegments(requiredLoadRatio float64, skipServiceableCheck bool, partitions ...int64) (sealed []SnapshotItem, growing []SegmentEntry, sealedRowCount map[int64]int64, version int64, err error) {
 	d.mut.RLock()
 	defer d.mut.RUnlock()
@@ -334,6 +387,22 @@ func (d *distribution) getTargetVersion() int64 {
 // Serviceable returns wether current snapshot is serviceable.
 func (d *distribution) Serviceable() bool {
 	return d.queryView.Serviceable()
+}
+
+// SyncedAndServiceable reports, in one read of the query view, whether
+// querycoord has synced a target version into this delegator and the delegator
+// is fully loaded against it.
+//
+// A shard-split read uses it to tell a delegator that has taken its own
+// vchannel over from one whose data its source is still fronting: only a
+// delegator querycoord has synced holds a complete view of its own shard, and
+// (with QC2's window gating) that sync is built from a target pulled after the
+// split drained, so it misses nothing the source holds.
+func (d *distribution) SyncedAndServiceable() bool {
+	d.mut.RLock()
+	defer d.mut.RUnlock()
+
+	return d.queryView.syncedByCoord && d.queryView.Serviceable()
 }
 
 // for now, delegator become serviceable only when watchDmChannel is done
