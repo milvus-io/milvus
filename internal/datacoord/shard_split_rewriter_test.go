@@ -604,15 +604,6 @@ func TestRewriteDoesNotRequeueAnAlreadyRewrittenSegment(t *testing.T) {
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
 }
 
-func TestAllRewritten(t *testing.T) {
-	rewritten := typeutil.NewSet[int64](101, 102)
-	assert.True(t, allRewritten([]int64{101}, rewritten))
-	assert.True(t, allRewritten([]int64{101, 102}, rewritten))
-	assert.False(t, allRewritten([]int64{103}, rewritten))
-	assert.False(t, allRewritten([]int64{101, 103}, rewritten))
-	assert.False(t, allRewritten(nil, rewritten), "nothing to confirm against is never already rewritten")
-}
-
 // A plan must cover every L0 that will ever exist on its source. Past its
 // T_switch the source's WAL is closed, so its L0 set is final; before that, a
 // delete can still flush in after a plan was built. The manager calls no round
@@ -852,4 +843,25 @@ func TestRewriteSkipsSnapshotProtectedSegments(t *testing.T) {
 
 		assert.ElementsMatch(t, []int64{101}, c.tick().dispatched, "dispatched once the block lifts")
 	})
+}
+
+// A plan neither done nor running is committed-and-cleaned when its inputs
+// are rewritten (their outputs name them) or no longer inputs at all (a
+// zero-output commit dropped them). Only a plan whose input is still there
+// to rewrite, or whose record is gone, is lost.
+func TestRewritePlanAlreadyCommitted(t *testing.T) {
+	m := newHashRewriteMeta(t, []int64{101, 102})
+	setSourceSegment(m, 103, commonpb.SegmentState_Dropped, datapb.SegmentLevel_L1)
+	c := newRewriteCase(t, m, newHashTask(nil))
+	rewritten := typeutil.NewSet[int64](102)
+	committed := func(inputs ...int64) bool {
+		return c.manager.planAlreadyCommitted(context.Background(), inputs, rewritten)
+	}
+
+	assert.True(t, committed(102), "its outputs name it")
+	assert.True(t, committed(103), "a zero-output commit dropped it")
+	assert.True(t, committed(102, 103))
+	assert.False(t, committed(101), "still Flushed: the plan failed")
+	assert.False(t, committed(101, 103))
+	assert.False(t, committed(), "no record to confirm against")
 }

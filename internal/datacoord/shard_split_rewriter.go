@@ -151,7 +151,7 @@ func (m *shardSplitManager) rewriteRound(
 			result.completed = append(result.completed, planID)
 		case running:
 			stillDispatched = append(stillDispatched, planID)
-		case allRewritten(inputSegments, rewritten):
+		case m.planAlreadyCommitted(ctx, inputSegments, rewritten):
 			// Committed, and since cleaned up from compaction meta: not lost.
 			logger.Debug(ctx, "shard split rewrite plan already committed, dropping the stale reference",
 				mlog.Int64("planID", planID))
@@ -364,16 +364,19 @@ func totalPendingRewrites(pending map[string]typeutil.Set[int64]) int {
 	return total
 }
 
-// allRewritten reports whether every one of a plan's own input segments already
-// has committed rewrite outputs. Empty -- a plan record not found at all -- is
-// never already rewritten: there is nothing to confirm the commit against, so
-// such a plan counts as lost.
-func allRewritten(inputSegments []int64, rewritten typeutil.Set[int64]) bool {
+// planAlreadyCommitted reports whether a plan that is neither done nor running
+// committed before compaction meta cleaned it up: each of its own inputs has
+// committed outputs naming it, or is no longer a rewrite input at all -- a
+// zero-output commit drops its input with no output to name it. An input
+// still there to rewrite means the plan failed. Empty -- a plan record not
+// found at all -- is never committed: there is nothing to confirm it against,
+// so such a plan counts as lost.
+func (m *shardSplitManager) planAlreadyCommitted(ctx context.Context, inputSegments []int64, rewritten typeutil.Set[int64]) bool {
 	if len(inputSegments) == 0 {
 		return false
 	}
 	for _, segmentID := range inputSegments {
-		if !rewritten.Contain(segmentID) {
+		if !rewritten.Contain(segmentID) && isRewriteInput(m.meta.GetSegment(ctx, segmentID)) {
 			return false
 		}
 	}
