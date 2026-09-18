@@ -246,8 +246,14 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 	// With one splitting source the choice is forced -- every Creating target is
 	// fronted by it -- and the rebuild is exact. With several (a rehash, where
 	// every target draws from every source) it is not derivable here, and
-	// guessing would double-count rows. Skipping the respawn instead (I-2;
-	// reachable only with proxy.shardSplit.maxConcurrentTasks > 1, default 1)
+	// guessing would double-count rows. Today the trigger (DataCoord
+	// shard_split_manager.go's detectOnce, "one split per collection at a
+	// time") never plans a second active task for a collection that already has
+	// one, so two of ITS shards being simultaneously Splitting cannot happen
+	// regardless of dataCoord.shardSplit.maxConcurrentTasks (which only bounds
+	// how many collections split concurrently, not shards within one) -- this
+	// branch is unreached in practice and kept only as a defensive fallback
+	// should that invariant ever change. Skipping the respawn instead (I-2)
 	// does not refuse reads and is not visible as the vchannel "not serving": the
 	// source is up and answers every read on its own, from its own (pre-fence)
 	// view alone, exactly like frontingChildren() with an empty snapshot. What is
