@@ -27,7 +27,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/time/rate"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -307,25 +306,43 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 // shardSplitWatchable returns which channels of the collection's next target a
 // shard split allows querycoord to watch now.
 //
-//   - A not-yet-adopted split target (ShardCreating) is fronted in-process by
-//     its source's delegator; watching it would build a fresh delegator and
-//     replay the WAL. It is watched once adoption makes it Normal.
+//   - A not-yet-adopted split target is fronted in-process by its source's
+//     delegator; watching it would build a fresh delegator and replay the WAL,
+//     or adopt the child before its split was adopted. It is held back while
+//     the shard states call it Creating, AND while the next target marks it as
+//     a split window target. The mark comes from a fresh read taken before the
+//     pull and never misses a target still Creating in it, whereas the cached
+//     states can be up to their TTL old. It also keeps an adopted target from
+//     being watched off the window snapshot, which attributes the target's
+//     data to its source: the window-end re-pull lists it unmarked.
 //   - A vchannel the collection no longer lists is a split source retired by an
 //     adoption, which the next target may still list until the window-end
 //     re-pull. It is never watched again (meta.ShardStates.CheckWatchable); the
 //     flip releases it.
+//
+// Without a read of the shard states a Creating target cannot be told from any
+// other channel, so nothing of the collection is watched until one succeeds.
+// That only happens before the first read of a collection succeeds (the cache
+// keeps its last read on a failed refresh), and the watch describes the
+// collection first anyway, so it could not have succeeded either.
 func (c *ChannelChecker) shardSplitWatchable(ctx context.Context, collectionID int64) func(channel string) bool {
 	if c.splitState == nil {
 		return func(string) bool { return true }
 	}
-	states, _ := c.splitState.ChannelStates(ctx, collectionID)
+	states, ok := c.splitState.ChannelStates(ctx, collectionID)
+	if !ok {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "skip watching channels: the collection's shard states are unknown",
+			mlog.FieldCollectionID(collectionID))
+		return func(string) bool { return false }
+	}
+	window := c.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
 	return func(channel string) bool {
-		if states.CheckWatchable(channel) != nil {
-			mlog.RatedInfo(ctx, rate.Limit(0.1), "skip watching a channel the collection no longer lists",
-				mlog.FieldCollectionID(collectionID), mlog.String("channel", channel))
+		if err := states.CheckWatchable(channel); err != nil {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "skip watching a channel a shard split does not allow to watch yet",
+				mlog.FieldCollectionID(collectionID), mlog.String("channel", channel), mlog.Err(err))
 			return false
 		}
-		return states[channel] != schemapb.ShardState_ShardCreating
+		return !window.Contain(channel)
 	}
 }
 
