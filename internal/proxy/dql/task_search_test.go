@@ -4382,13 +4382,13 @@ func getSearchResultData(nq, topk int64) *schemapb.SearchResultData {
 	return &result
 }
 
-// TestSearchShardCancelledContextKeepsShardLeaderCache: a QueryNode error
+// TestSearchShardCanceledContextKeepsShardLeaderCache: a QueryNode error
 // observed after the request's own ctx is done is a consequence of the
 // cancellation, so the shard leader cache must stay intact. The mock manager
 // has no expectation for InvalidateShardLeaderCache; a call would fail the test.
-func TestSearchShardCancelledContextKeepsShardLeaderCache(t *testing.T) {
+func TestSearchShardCanceledContextKeepsShardLeaderCache(t *testing.T) {
 	const nodeID int64 = 101
-	channel := "ch-cancelled"
+	channel := "ch-canceled"
 
 	ctx, cancel := context.WithCancel(context.Background())
 	qn := mocks.NewMockQueryNodeClient(t)

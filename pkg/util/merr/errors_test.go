@@ -201,13 +201,13 @@ func (s *ErrSuite) TestOldCode() {
 	s.Equal(commonpb.ErrorCode_IllegalArgument, Status(WrapErrRequestNotFound(42)).GetErrorCode())
 }
 
-// TestRequestCancelled locks in the wire contract of an operator cancellation:
+// TestRequestCanceled locks in the wire contract of an operator cancellation:
 // its own code (not the synthesized CanceledCode of context.Canceled, not the
 // segcore FollyCancel), non-retriable, and distinguishable from a not-found.
-func (s *ErrSuite) TestRequestCancelled() {
-	err := WrapErrRequestCancelled("root", "heavy query")
-	s.ErrorIs(err, ErrRequestCancelled)
-	s.Equal(Code(ErrRequestCancelled), Code(err))
+func (s *ErrSuite) TestRequestCanceled() {
+	err := WrapErrRequestCanceled("root", "heavy query")
+	s.ErrorIs(err, ErrRequestCanceled)
+	s.Equal(Code(ErrRequestCanceled), Code(err))
 	s.NotEqual(CanceledCode, Code(err))
 	s.NotEqual(Code(ErrSegcoreFollyCancel), Code(err))
 	s.False(IsRetryableErr(err))
@@ -216,9 +216,9 @@ func (s *ErrSuite) TestRequestCancelled() {
 	s.Contains(err.Error(), "heavy query")
 
 	status := Status(err)
-	s.Equal(Code(ErrRequestCancelled), status.GetCode())
+	s.Equal(Code(ErrRequestCanceled), status.GetCode())
 	s.False(status.GetRetriable())
-	s.ErrorIs(Error(status), ErrRequestCancelled)
+	s.ErrorIs(Error(status), ErrRequestCanceled)
 
 	notFound := WrapErrRequestNotFound(42)
 	s.ErrorIs(notFound, ErrRequestNotFound)

@@ -4585,7 +4585,7 @@ func (h *HandlersV2) cancelRequests(ctx context.Context, c *gin.Context, anyReq 
 	if err == nil {
 		response := resp.(*milvuspb.CancelRequestsResponse)
 		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
-			"cancelled":   response.GetCancelled(),
+			"canceled":    response.GetCanceled(),
 			"notFound":    response.GetNotFound(),
 			"nodeResults": response.GetNodeResults(),
 		}})

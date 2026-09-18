@@ -488,16 +488,16 @@ var (
 			Help:      "counter of recall search",
 		}, []string{nodeIDLabelName, queryTypeLabelName, databaseLabelName, collectionName})
 
-	// ProxyRequestCancelledTotal counts requests actually cancelled by an
+	// ProxyRequestCanceledTotal counts requests actually canceled by an
 	// operator through CancelRequests, by request type. This is not the number
 	// of CancelRequests calls: one call may name several ids, or none that
 	// this proxy holds.
-	ProxyRequestCancelledTotal = prometheus.NewCounterVec(
+	ProxyRequestCanceledTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.ProxyRole,
-			Name:      "request_cancelled_total",
-			Help:      "count of requests cancelled by an operator",
+			Name:      "request_canceled_total",
+			Help:      "count of requests canceled by an operator",
 		}, []string{nodeIDLabelName, queryTypeLabelName})
 
 	// ProxySearchSparseNumNonZeros records the estimated number of non-zeros in each sparse search task
@@ -618,7 +618,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRetrySearchCount)
 	registry.MustRegister(ProxyRetrySearchResultInsufficientCount)
 	registry.MustRegister(ProxyRecallSearchCount)
-	registry.MustRegister(ProxyRequestCancelledTotal)
+	registry.MustRegister(ProxyRequestCanceledTotal)
 
 	registry.MustRegister(ProxySearchSparseNumNonZeros)
 	registry.MustRegister(ProxyQueueTaskNum)

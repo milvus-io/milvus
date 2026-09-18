@@ -553,10 +553,10 @@ func TestBaseTaskQueue_EnqueueFastFailBeforeAlloc(t *testing.T) {
 		"Enqueue must not reach the TSO allocator when the queue is already full")
 }
 
-// TestBaseTaskQueue_EnqueueCancelledContextBeforeAlloc verifies that a task
-// whose request ctx is already cancelled is rejected with the ctx error before
+// TestBaseTaskQueue_EnqueueCanceledContextBeforeAlloc verifies that a task
+// whose request ctx is already canceled is rejected with the ctx error before
 // any timestamp or id allocation, and never occupies a queue slot.
-func TestBaseTaskQueue_EnqueueCancelledContextBeforeAlloc(t *testing.T) {
+func TestBaseTaskQueue_EnqueueCanceledContextBeforeAlloc(t *testing.T) {
 	blocking := &blockingTsoAllocator{}
 	queue := newBaseTaskQueue(blocking)
 
@@ -572,10 +572,10 @@ func TestBaseTaskQueue_EnqueueCancelledContextBeforeAlloc(t *testing.T) {
 	case err := <-done:
 		assert.ErrorIs(t, err, context.Canceled)
 	case <-time.After(2 * time.Second):
-		t.Fatalf("Enqueue did not reject the cancelled task; reached blocking TSO allocator")
+		t.Fatalf("Enqueue did not reject the canceled task; reached blocking TSO allocator")
 	}
 	assert.Equal(t, int64(0), blocking.calls.Load(),
-		"Enqueue must not allocate a timestamp for a cancelled task")
+		"Enqueue must not allocate a timestamp for a canceled task")
 	assert.Equal(t, 0, queue.unissuedTasks.Len())
 }
 
