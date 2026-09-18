@@ -18,8 +18,6 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/util/streamingutil/service/mock_resolver"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/consumer"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/producer"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/service/contextutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mocks/proto/mock_streamingpb"
@@ -31,16 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-type shutdownWALManager struct{}
-
-func (m shutdownWALManager) GetAvailableWAL(channel types.PChannelInfo) (wal.WAL, error) {
-	return nil, status.NewOnShutdownError("wal manager is closed")
-}
-
-func (m shutdownWALManager) Metrics() (*types.StreamingNodeMetrics, error) {
-	return nil, status.NewOnShutdownError("wal manager is closed")
-}
 
 func TestHandlerClient(t *testing.T) {
 	assignment := &types.PChannelInfoAssigned{
@@ -257,85 +245,6 @@ func TestHandlerClientReadOnlyAssignmentWaitsForNextAssignment(t *testing.T) {
 			assert.ErrorIs(t, err, context.Canceled)
 		})
 	}
-}
-
-func TestHandlerClient_PrepareReleaseManualFlushIfLocal(t *testing.T) {
-	assignment := &types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRO},
-		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
-	}
-	vchannel := "pchannel_100v0"
-	releaseSegmentIDs := []int64{1001}
-
-	service := mock_lazygrpc.NewMockService[streamingpb.StreamingNodeHandlerServiceClient](t)
-	service.EXPECT().Close().Return()
-
-	rb := mock_resolver.NewMockBuilder(t)
-	rb.EXPECT().Close().Run(func() {})
-	w := mock_assignment.NewMockWatcher(t)
-	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
-	w.EXPECT().Close().Run(func() {})
-
-	handler := &handlerClientImpl{
-		lifetime: typeutil.NewLifetime(),
-		service:  service,
-		rb:       rb,
-		watcher:  w,
-	}
-
-	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
-	assert.Error(t, err)
-	assert.False(t, prepared)
-
-	handler.Close()
-	prepared, err = handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
-	assert.ErrorIs(t, err, ErrClientClosed)
-	assert.False(t, prepared)
-}
-
-func TestHandlerClient_PrepareReleaseManualFlushIfLocalReturnsLocalWALShutdown(t *testing.T) {
-	paramtable.Init()
-	paramtable.SetLocalComponentEnabled(typeutil.StreamingNodeRole)
-	registry.RegisterLocalWALManager(shutdownWALManager{})
-
-	assignment := &types.PChannelInfoAssigned{
-		Channel: types.PChannelInfo{Name: "pchannel", Term: 1, AccessMode: types.AccessModeRW},
-		Node:    types.StreamingNodeInfo{ServerID: 1, Address: "localhost"},
-	}
-	vchannel := "pchannel_100v0"
-	releaseSegmentIDs := []int64{1001}
-
-	w := mock_assignment.NewMockWatcher(t)
-	w.EXPECT().Get(mock.Anything, "pchannel").Return(assignment)
-	// Watch is intentionally not expected: local WAL shutdown is returned to
-	// the caller like GetLatestMVCCTimestampIfLocal, not retried on assignment.
-
-	handler := &handlerClientImpl{
-		lifetime: typeutil.NewLifetime(),
-		watcher:  w,
-	}
-
-	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
-	assert.True(t, status.AsStreamingError(err).IsOnShutdown())
-	assert.False(t, prepared)
-}
-
-func TestHandlerClient_PrepareReleaseManualFlushIfLocalWaitsForAssignmentReady(t *testing.T) {
-	vchannel := "pchannel_100v0"
-	releaseSegmentIDs := []int64{1001}
-
-	w := mock_assignment.NewMockWatcher(t)
-	w.EXPECT().Get(mock.Anything, "pchannel").Return(nil)
-	w.EXPECT().Watch(mock.Anything, "pchannel", (*types.PChannelInfoAssigned)(nil)).Return(context.Canceled)
-
-	handler := &handlerClientImpl{
-		lifetime: typeutil.NewLifetime(),
-		watcher:  w,
-	}
-
-	prepared, err := handler.PrepareReleaseManualFlushIfLocal(context.Background(), 100, vchannel, releaseSegmentIDs)
-	assert.ErrorIs(t, err, context.Canceled)
-	assert.False(t, prepared)
 }
 
 func TestHandlerClient_GetReplicateCheckpointReplicateViolation(t *testing.T) {

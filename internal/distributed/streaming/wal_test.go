@@ -194,20 +194,6 @@ func TestReleaseTimeout(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestWALAccesserPrepareReleaseManualFlushIfLocal(t *testing.T) {
-	ctx := context.Background()
-	w, _, _, handler := createMockWAL(t)
-	defer w.Close()
-
-	handler.EXPECT().
-		PrepareReleaseManualFlushIfLocal(mock.Anything, int64(100), vChannel1, []int64{1001}).
-		Return(true, nil)
-
-	prepared, err := w.Local().PrepareReleaseManualFlushIfLocal(ctx, 100, vChannel1, []int64{1001})
-	assert.NoError(t, err)
-	assert.True(t, prepared)
-}
-
 type resolvePChannelInfoTestClient struct {
 	streamingcoordclient.Client
 }

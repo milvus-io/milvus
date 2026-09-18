@@ -12,7 +12,6 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/mock_wal"
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestShardManager(t *testing.T) {
@@ -496,7 +494,6 @@ func TestShardManagerSchemaVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(4), ver)
 	assert.True(t, m.collections[104].HasTextField())
 	assert.True(t, m.collections[104].RequiresStorageV3())
-	assert.False(t, m.collections[104].AllowGrowingSourceFlush())
 
 	legacySchema := proto.Clone(textSchema).(*schemapb.CollectionSchema)
 	legacySchema.Version = 5
@@ -999,225 +996,18 @@ func TestCollectionInfoSchemaVersion(t *testing.T) {
 	assert.Equal(t, int32(3), ci.SchemaVersion())
 }
 
-func TestCollectionInfoAllowGrowingSourceFlush(t *testing.T) {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	assert.False(t, (*CollectionInfo)(nil).AllowGrowingSourceFlush())
+// RuntimeFlushSize is a passthrough now that the growing-source interim-index
+// estimate is gone. Keep a thin assertion so a re-introduced estimate cannot
+// slip in unnoticed on a path that feeds the flush-pressure watermarks.
+func TestCollectionInfoRuntimeFlushSizeIsPassthrough(t *testing.T) {
 	ci := &CollectionInfo{}
-	assert.False(t, ci.AllowGrowingSourceFlush())
-	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{}
-	assert.False(t, ci.AllowGrowingSourceFlush())
-	ci.Schema = &streamingpb.CollectionSchemaOfVChannel{
-		Schema: &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{FieldID: 100, DataType: schemapb.DataType_Int64},
-			},
-		},
+	for _, m := range []stats.ModifiedMetrics{
+		{Rows: 0, BinarySize: 0},
+		{Rows: 0, BinarySize: 100},
+		{Rows: 10, BinarySize: 0},
+		{Rows: 10, BinarySize: 1234},
+		{Rows: math.MaxUint64, BinarySize: math.MaxUint64},
+	} {
+		assert.Equal(t, m.BinarySize, ci.RuntimeFlushSize(m))
 	}
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	assert.False(t, ci.AllowGrowingSourceFlush())
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.True(t, ci.AllowGrowingSourceFlush())
-}
-
-func TestCollectionInfoAllowGrowingSourceFlush_TextField(t *testing.T) {
-	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "false")
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key)
-	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-
-	ci := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{FieldID: 101, DataType: schemapb.DataType_Text},
-				},
-			},
-		},
-	}
-	assert.True(t, ci.HasTextField())
-	assert.False(t, ci.AllowGrowingSourceFlush())
-	assert.True(t, ci.RequiresStorageV3())
-	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
-	assert.False(t, ci.AllowGrowingSourceFlush())
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	assert.True(t, ci.AllowGrowingSourceFlush())
-}
-
-func TestCollectionInfoRuntimeFlushSize(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
-	params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "true")
-	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "false")
-	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "IVF_FLAT_CC")
-	params.Save(params.QueryNodeCfg.InterimIndexMemExpandRate.Key, "1.25")
-	params.Save(params.QueryNodeCfg.InterimIndexSubDim.Key, "16")
-	params.Save(params.QueryNodeCfg.InterimIndexRefineQuantType.Key, "NONE")
-	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
-	defer params.Reset(params.CommonCfg.EnableGrowingSourceFlush.Key)
-	defer params.Reset(params.QueryNodeCfg.EnableInterminSegmentIndex.Key)
-	defer params.Reset(params.QueryNodeCfg.GrowingMmapEnabled.Key)
-	defer params.Reset(params.QueryNodeCfg.DenseVectorInterminIndexType.Key)
-	defer params.Reset(params.QueryNodeCfg.InterimIndexMemExpandRate.Key)
-	defer params.Reset(params.QueryNodeCfg.InterimIndexSubDim.Key)
-	defer params.Reset(params.QueryNodeCfg.InterimIndexRefineQuantType.Key)
-
-	metrics := stats.ModifiedMetrics{Rows: 10, BinarySize: 100}
-	vectorInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{
-						FieldID:  101,
-						DataType: schemapb.DataType_FloatVector,
-						TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.DimKey, Value: "128"},
-						},
-					},
-				},
-			},
-		},
-	}
-	assert.Equal(t, uint64(6500), vectorInfo.RuntimeFlushSize(metrics))
-
-	scalarInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-				},
-			},
-		},
-	}
-	assert.Equal(t, metrics.BinarySize, scalarInfo.RuntimeFlushSize(metrics))
-
-	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "SCANN_DVR")
-	assert.Equal(t, uint64(2660), vectorInfo.RuntimeFlushSize(metrics))
-	params.Save(params.QueryNodeCfg.InterimIndexRefineQuantType.Key, "FLOAT16")
-	assert.Equal(t, uint64(5220), vectorInfo.RuntimeFlushSize(metrics))
-	params.Save(params.QueryNodeCfg.InterimIndexRefineQuantType.Key, "NONE")
-	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "IVF_FLAT_CC")
-
-	sparseInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{FieldID: 101, DataType: schemapb.DataType_SparseFloatVector},
-				},
-			},
-		},
-	}
-	assert.Equal(t, metrics.BinarySize+metrics.Rows*uint64(typeutil.GetSparseFloatVectorEstimateLength()), sparseInfo.RuntimeFlushSize(metrics))
-
-	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "true")
-	assert.Equal(t, metrics.BinarySize, vectorInfo.RuntimeFlushSize(metrics))
-	assert.Equal(t, metrics.BinarySize, sparseInfo.RuntimeFlushSize(metrics))
-	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "false")
-
-	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "false")
-	assert.Equal(t, metrics.BinarySize, vectorInfo.RuntimeFlushSize(metrics))
-	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "true")
-
-	params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	assert.Equal(t, metrics.BinarySize, vectorInfo.RuntimeFlushSize(metrics))
-}
-
-func TestCollectionInfoRuntimeFlushSizeEdgeCases(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	params.Save(params.CommonCfg.UseLoonFFI.Key, "true")
-	params.Save(params.CommonCfg.EnableGrowingSourceFlush.Key, "true")
-	params.Save(params.QueryNodeCfg.EnableInterminSegmentIndex.Key, "true")
-	params.Save(params.QueryNodeCfg.GrowingMmapEnabled.Key, "false")
-	params.Save(params.QueryNodeCfg.DenseVectorInterminIndexType.Key, "IVF_FLAT_CC")
-	params.Save(params.QueryNodeCfg.InterimIndexMemExpandRate.Key, "2")
-	defer params.Reset(params.CommonCfg.UseLoonFFI.Key)
-	defer params.Reset(params.CommonCfg.EnableGrowingSourceFlush.Key)
-	defer params.Reset(params.QueryNodeCfg.EnableInterminSegmentIndex.Key)
-	defer params.Reset(params.QueryNodeCfg.GrowingMmapEnabled.Key)
-	defer params.Reset(params.QueryNodeCfg.DenseVectorInterminIndexType.Key)
-	defer params.Reset(params.QueryNodeCfg.InterimIndexMemExpandRate.Key)
-
-	vectorInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{
-						FieldID:  101,
-						DataType: schemapb.DataType_FloatVector,
-						TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.DimKey, Value: "128"},
-						},
-					},
-				},
-			},
-		},
-	}
-	assert.Equal(t, uint64(100), vectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 0, BinarySize: 100}))
-	assert.Equal(t, uint64(0), vectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 0}))
-	assert.Equal(t, uint64(math.MaxUint64), vectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: math.MaxUint64, BinarySize: math.MaxUint64 - 1}))
-
-	binaryVectorInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{
-						FieldID:  101,
-						DataType: schemapb.DataType_BinaryVector,
-						TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.DimKey, Value: "128"},
-						},
-					},
-				},
-			},
-		},
-	}
-	assert.Equal(t, uint64(100), binaryVectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 100}))
-
-	int8VectorInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{
-						FieldID:  101,
-						DataType: schemapb.DataType_Int8Vector,
-						TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.DimKey, Value: "128"},
-						},
-					},
-				},
-			},
-		},
-	}
-	assert.Equal(t, uint64(100), int8VectorInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 100}))
-
-	invalidDimInfo := &CollectionInfo{
-		Schema: &streamingpb.CollectionSchemaOfVChannel{
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, DataType: schemapb.DataType_Int64},
-					{
-						FieldID:  101,
-						DataType: schemapb.DataType_FloatVector,
-						TypeParams: []*commonpb.KeyValuePair{
-							{Key: common.DimKey, Value: "bad"},
-						},
-					},
-				},
-			},
-		},
-	}
-	assert.Equal(t, uint64(100), invalidDimInfo.RuntimeFlushSize(stats.ModifiedMetrics{Rows: 10, BinarySize: 100}))
 }

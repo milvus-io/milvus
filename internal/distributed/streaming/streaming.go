@@ -218,10 +218,6 @@ type Local interface {
 	// If the wal is located at remote, it will return 0, error.
 	GetLatestMVCCTimestampIfLocal(ctx context.Context, vchannel string) (uint64, error)
 
-	// PrepareReleaseManualFlushIfLocal prepares process-local release handoff.
-	// If the wal is located at remote, it will return false, error.
-	PrepareReleaseManualFlushIfLocal(ctx context.Context, collectionID int64, vchannel string, releaseSegmentIDs []int64) (bool, error)
-
 	// GetMetricsIfLocal gets the metrics of the local wal.
 	// It will only return the metrics of the local wal but not the remote wal.
 	GetMetricsIfLocal(ctx context.Context) (*types.StreamingNodeMetrics, error)
