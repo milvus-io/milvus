@@ -290,8 +290,11 @@ func (sd *shardDelegator) ProcessDeleteBatches(batches []DeleteBatch) {
 	// child's deleteMut across that would couple the child's ingest (and the
 	// merged shard's serviceable timestamp) to the parent's worker-delete latency.
 	// This defer is registered before the unlock defer, so LIFO runs it after the
-	// unlock. Forwarding is one-directional (the parent has no frontingParent), so
-	// there is no lock cycle.
+	// unlock. In a cascaded split the parent is itself fronted and forwards the
+	// same batches on (v3 -> v1 -> v0); forwarding only ever goes up the family
+	// tree, and every hop starts after the forwarding delegator has released its
+	// own deleteMut, so no delete lock is held across a hop and there is no lock
+	// cycle.
 	var forwardParent ShardDelegator
 	defer func() {
 		if forwardParent != nil {
