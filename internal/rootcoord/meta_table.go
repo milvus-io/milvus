@@ -30,6 +30,7 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -41,11 +42,13 @@ import (
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	pb "github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -69,6 +72,10 @@ var (
 	errIgnoredDropPartition    = errors.New("ignored drop partition")    // drop partition not found, so it can be ignored.
 
 	errAlterCollectionNotFound = errors.New("alter collection not found") // alter collection not found, so it can be ignored.
+	// errShardSplitRoutingCollectionUnavailable: the collection of a shard split
+	// routing commit is no longer Available (it is being dropped), so the commit
+	// is ignored rather than applied onto it.
+	errShardSplitRoutingCollectionUnavailable = errors.New("shard split routing collection is not available")
 )
 
 const rlsRecoveryConcurrency = 32
@@ -125,6 +132,11 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 
 	AlterCollection(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error
+	// ApplyShardSplitRouting commits a shard split's routing post-image to the
+	// collection meta. creates names the vchannels the commit brings into the
+	// collection (a SplitShard's targets; none for an adoption). See the
+	// implementation for what it applies and why it takes the post-image whole.
+	ApplyShardSplitRouting(ctx context.Context, collectionID UniqueID, updates *messagespb.AlterCollectionMessageUpdates, delta routing.CommitDelta, timetick Timestamp) error
 	// Deprecated: will be removed in the 3.0 after implementing ack sync up semantic.
 	// It will be used to forbid the compaction of current collection when truncate collection operation is in progress.
 	BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error
@@ -1179,6 +1191,7 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 	if dbChanged && oldColl.Available() && newColl.Available() {
 		mt.moveAvailableCollectionCountLocked(oldColl.DBID, newColl.DBID)
 	}
+	mt.applyAlterCollectionTopologyLocked(oldColl, newColl)
 	mt.collID2Meta[header.CollectionId] = newColl
 	mlog.Info(ctx, "alter collection finished",
 		mlog.String("oldDBName", oldColl.DBName),
@@ -1193,6 +1206,128 @@ func (mt *MetaTable) AlterCollection(ctx context.Context, result message.Broadca
 		mlog.Int32("schemaVersion", newColl.SchemaVersion),
 	)
 	return nil
+}
+
+// ApplyShardSplitRouting commits a shard split's routing post-image to the
+// collection: the grown vchannel list, every shard's state and residues, the
+// modulus and shard_by. It is the meta half of the SplitShard ack callback and
+// applies exactly what AlterCollection applies for the shard_split_routing
+// field mask -- the same Collection.ApplyUpdates branch, the same catalog
+// write, the same topology-counter maintenance.
+//
+// It exists as its own method rather than as a synthetic AlterCollection
+// message because the post-image arrives inside a SplitShard message, not an
+// AlterCollection one. Nothing else of AlterCollection's tail applies here: a
+// routing commit never changes the collection's name, DB or schema, so the
+// rename/migrate/file-resource branches are all skipped, and the name index is
+// left alone.
+//
+// Idempotent, and it decides for itself whether there is anything to write. The
+// two no-write outcomes are reported as sentinels rather than as failures:
+//
+//   - errAlterCollectionNotFound: the collection is gone;
+//   - errShardSplitRoutingCollectionUnavailable: the collection is not
+//     Available -- DropCollection has already marked it Dropping. Applying
+//     would move the topology counters DropCollection has already settled for
+//     it (generalCnt, and the pchannel stats of vchannels the drop has already
+//     removed) and nothing would ever undo that; checked before the judge, so
+//     "already applied" is not reported for a collection that is going away;
+//   - routing.ErrCommitAlreadyApplied: the meta already IS this post-image.
+//
+// creates names the vchannels this commit brings into the collection: the
+// SplitShard's two targets, nothing for an adoption. A post-image naming any
+// other vchannel the collection does not carry is refused as
+// routing.ErrCommitAheadOfCollection (retriable): the split that creates it has
+// not been applied here yet.
+//
+// The decision is made here, under ddLock, rather than by the caller on a
+// snapshot it read earlier: the caller cannot hold the lock across its own
+// datacoord call, so a check it ran outside the lock could be stale by the time
+// the write lands. The check and the write must see the same meta. The decision
+// itself is routing.JudgeCommit.
+func (mt *MetaTable) ApplyShardSplitRouting(ctx context.Context, collectionID UniqueID, updates *messagespb.AlterCollectionMessageUpdates, delta routing.CommitDelta, timetick Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	coll, ok := mt.collID2Meta[collectionID]
+	if !ok {
+		// The collection was dropped while the split was in flight. Reported
+		// rather than created: a split cannot resurrect a dropped collection,
+		// and the caller turns this into a warn-and-stop.
+		return errAlterCollectionNotFound
+	}
+	if !coll.Available() {
+		return errShardSplitRoutingCollectionUnavailable
+	}
+	if err := routing.JudgeCommit(coll, updates, delta); err != nil {
+		return err
+	}
+	oldColl := coll.Clone()
+	newColl := coll.Clone()
+	newColl.ApplyUpdates(
+		&messagespb.AlterCollectionMessageHeader{
+			CollectionId: collectionID,
+			UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+		},
+		&messagespb.AlterCollectionMessageBody{Updates: updates},
+	)
+	newColl.UpdateTimestamp = timetick
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {
+		return err
+	}
+	// Only after the catalog write: generalCnt and the pchannel stats are
+	// maintained incrementally, so moving them for a change that did not persist
+	// would leave them permanently wrong.
+	mt.applyAlterCollectionTopologyLocked(oldColl, newColl)
+	mt.collID2Meta[collectionID] = newColl
+	mlog.Info(ctx, "applied a shard split routing post-image",
+		mlog.FieldCollectionID(collectionID),
+		mlog.Strings("vchannels", newColl.VirtualChannelNames),
+		mlog.Uint64("routingModulus", newColl.RoutingModulus),
+		mlog.Int32("shardsNum", newColl.ShardsNum),
+		mlog.Uint64("ts", newColl.UpdateTimestamp))
+	return nil
+}
+
+// applyAlterCollectionTopologyLocked keeps the two counters that are maintained
+// INCREMENTALLY, rather than recomputed, in step with a collection whose shard
+// topology an alter has changed.
+//
+// Both were written when a collection's shard count and vchannel list were fixed
+// from creation to drop, so adding at creation and subtracting at drop was exact.
+// A shard split moves both while the collection lives, and neither counter is
+// derived from the meta on read, so an alter that does not adjust them leaves
+// them permanently wrong:
+//
+//   - generalCnt is the cluster capacity check's running total of
+//     partitions x shards. Drop subtracts the CURRENT shard count, so a
+//     collection created with 2 shards, split to 4 and then dropped subtracts
+//     more than it ever added and drives the total below zero -- after which the
+//     capacity limit silently stops rejecting anything.
+//   - the pchannel stats manager tracks which vchannels sit on each pchannel and
+//     the balancer places new collections by those counts. A split's target
+//     vchannels would never be registered at all.
+//
+// A no-op for every alter that leaves the topology alone, which is all of them
+// today except the shard-split routing commit.
+func (mt *MetaTable) applyAlterCollectionTopologyLocked(oldColl *model.Collection, newColl *model.Collection) {
+	if oldColl.ShardsNum != newColl.ShardsNum {
+		// Use the OLD partition count for the subtraction and the NEW one for the
+		// addition, exactly as create/drop do, so the two are symmetric even if a
+		// single alter were ever to move both numbers.
+		mt.generalCnt -= oldColl.GetPartitionNum(true) * int(oldColl.ShardsNum)
+		mt.generalCnt += newColl.GetPartitionNum(true) * int(newColl.ShardsNum)
+	}
+
+	added, removed := lo.Difference(newColl.VirtualChannelNames, oldColl.VirtualChannelNames)
+	if len(added) > 0 {
+		channel.StaticPChannelStatsManager.MustGet().AddVChannel(added...)
+	}
+	if len(removed) > 0 {
+		channel.StaticPChannelStatsManager.MustGet().RemoveVChannel(removed...)
+	}
 }
 
 func (mt *MetaTable) BeginTruncateCollection(ctx context.Context, collectionID UniqueID) error {
@@ -1243,8 +1378,23 @@ func (mt *MetaTable) TruncateCollection(ctx context.Context, result message.Broa
 	newProperties := common.CloneKeyValuePairs(coll.Properties).ToMap()
 	delete(newProperties, common.CollectionOnTruncatingKey)
 	newColl.Properties = common.NewKeyValuePairs(newProperties)
-	for vchannel := range newColl.ShardInfos {
-		newColl.ShardInfos[vchannel].LastTruncateTimeTick = result.Results[vchannel].TimeTick
+	// The truncate was broadcast to the vchannels the issuing cluster listed
+	// when it issued it, which a shard split lets differ from the ones listed
+	// here: a secondary whose adoption still waits for its drain lists a source
+	// the primary has already delisted. A listed shard the broadcast did not
+	// reach was not truncated, so it keeps its tick; an acked vchannel that is
+	// not listed here has no shard info to stamp.
+	for vchannel, shardInfo := range newColl.ShardInfos {
+		appendResult := result.Results[vchannel]
+		if appendResult == nil {
+			mlog.Warn(ctx, "truncate collection was not broadcast to a listed vchannel, keep its last truncate time tick",
+				mlog.Int64("collectionID", coll.CollectionID),
+				mlog.String("vchannel", vchannel),
+				mlog.Uint64("lastTruncateTimeTick", shardInfo.LastTruncateTimeTick),
+			)
+			continue
+		}
+		shardInfo.LastTruncateTimeTick = appendResult.TimeTick
 	}
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, oldColl, newColl, metastore.MODIFY, newColl.UpdateTimestamp, false); err != nil {

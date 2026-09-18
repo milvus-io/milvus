@@ -118,9 +118,12 @@ type Server struct {
 	gcOpt            GcOption
 	handler          Handler
 	importMeta       ImportMeta
-	importInspector  ImportInspector
-	importChecker    ImportChecker
-	importJobLock    *lock.KeyLock[int64]
+	// shardSplitTasks is datacoord's record of the shard splits it has been
+	// told about, recovered from the catalog at start (shard_split_task.go).
+	shardSplitTasks *shardSplitTasks
+	importInspector ImportInspector
+	importChecker   ImportChecker
+	importJobLock   *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
 	copySegmentInspector CopySegmentInspector
@@ -319,6 +322,15 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+
+	// The split task records come back before anything can consult them: a
+	// restart mid-split must not report its sources drained on an empty store.
+	s.shardSplitTasks = newShardSplitTasks()
+	if err = s.shardSplitTasks.load(s.ctx, s.meta.catalog); err != nil {
+		return err
+	}
+	mlog.Info(s.ctx, "load shard split tasks done")
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 

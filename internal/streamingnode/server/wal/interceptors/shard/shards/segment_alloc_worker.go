@@ -26,7 +26,7 @@ func (m *partitionManager) asyncAllocSegment(schemaVersion int32, requiresStorag
 	// Create a notifier to notify the waiter when the allocation is done.
 	m.onAllocating = make(chan struct{})
 	w := &segmentAllocWorker{
-		ctx:               m.ctx,
+		ctx:               m.allocCtx,
 		collectionID:      m.collectionID,
 		partitionID:       m.partitionID,
 		vchannel:          m.vchannel,

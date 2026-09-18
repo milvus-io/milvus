@@ -2,6 +2,7 @@ package rootcoord
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -469,6 +470,13 @@ func (c *Core) getAlterLoadConfigOfAlterCollection(oldProps []*commonpb.KeyValue
 func (c *DDLCallback) alterCollectionV2AckCallback(ctx context.Context, result message.BroadcastResultAlterCollectionMessageV2) error {
 	header := result.Message.Header()
 	body := result.Message.MustBody()
+	// A shard split's routing commit rides in as an ordinary AlterCollection but
+	// has its own, single apply path: judged against the meta, gated on this
+	// cluster's drain, and written through MetaTable.ApplyShardSplitRouting.
+	// It never reaches the generic apply below.
+	if slices.Contains(header.GetUpdateMask().GetPaths(), message.FieldMaskCollectionShardSplitRouting) {
+		return c.shardSplitRoutingAlterV2AckCallback(ctx, result)
+	}
 	if err := c.meta.AlterCollection(ctx, result); err != nil {
 		if errors.Is(err, errAlterCollectionNotFound) {
 			mlog.Warn(ctx, "alter a non-existent collection, ignore it", mlog.FieldMessage(result.Message))

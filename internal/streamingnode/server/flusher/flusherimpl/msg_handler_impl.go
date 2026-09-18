@@ -134,6 +134,41 @@ func (impl *msgHandlerImpl) HandleSchemaChange(ctx context.Context, msg message.
 	return impl.wbMgr.SealSegments(context.Background(), msg.VChannel(), msg.Header().FlushedSegmentIds)
 }
 
+// HandleSplitShard seals every growing segment of the source vchannel, so the
+// source shard's data up to T_switch is flushed and reported to datacoord; the
+// redistribution drain waits for that before declaring the source shard
+// drained.
+//
+// It seals ALL of them rather than only the ids the header carries. A fence
+// seals the whole vchannel -- nothing grows on it afterwards -- and the header
+// is not always a complete list: a CreateSegment whose append persisted but
+// reported an error before the fence was never applied by the shard manager,
+// so its segment is growing here but missing from the header, and a re-driven
+// fence record (the seal record whenever the first one never persisted) carries
+// no ids at all. Sealing by id would leave either segment growing, and the drain
+// would wait for it forever. Sealing is idempotent, so a second fence record of
+// the same task costs nothing.
+//
+// The flush timestamp is set as well, exactly as HandleManualFlush does. The
+// L0 delete buffer is what it is for: GetCheckpoint takes the EARLIEST position
+// across all buffers, so an un-synced L0 buffer pins the source channel
+// checkpoint before the fence, and the drain gate --
+// channelCheckpoint(source) >= T_switch -- would stall for the stale period
+// (syncPeriod, 600s by default) on a source that had deletes and no DML after
+// the fence. The flush-ts policy pushes every buffer out, whatever segment it
+// sits under; the source keeps receiving pchannel-level time ticks after the
+// fence, so the policy does fire.
+func (impl *msgHandlerImpl) HandleSplitShard(ctx context.Context, msg message.ImmutableSplitShardMessageV2) error {
+	vchannel := msg.VChannel()
+	if err := impl.wbMgr.SealAllSegments(ctx, vchannel); err != nil {
+		return errors.Wrap(err, "failed to seal segments")
+	}
+	if err := impl.wbMgr.FlushChannel(ctx, vchannel, msg.TimeTick()); err != nil {
+		return errors.Wrap(err, "failed to flush channel")
+	}
+	return nil
+}
+
 func (impl *msgHandlerImpl) HandleAlterCollection(ctx context.Context, putCollectionMsg message.ImmutableAlterCollectionMessageV2) error {
 	return impl.wbMgr.SealSegments(context.Background(), putCollectionMsg.VChannel(), putCollectionMsg.Header().FlushedSegmentIds)
 }

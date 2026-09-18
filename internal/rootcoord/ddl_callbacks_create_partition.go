@@ -61,11 +61,7 @@ func (c *Core) broadcastCreatePartition(ctx context.Context, in *milvuspb.Create
 		return 0, merr.Wrap(err, "failed to allocate partition ID")
 	}
 
-	channels := make([]string, 0, collMeta.ShardsNum+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	for i := 0; i < int(collMeta.ShardsNum); i++ {
-		channels = append(channels, collMeta.VirtualChannelNames[i])
-	}
+	channels := partitionDDLBroadcastChannels(collMeta.VirtualChannelNames)
 	msg := message.NewCreatePartitionMessageBuilderV1().
 		WithHeader(&message.CreatePartitionMessageHeader{
 			CollectionId: collMeta.CollectionID,
@@ -107,4 +103,28 @@ func (c *DDLCallback) createPartitionV1AckCallback(ctx context.Context, result m
 			ce.OptLPCMPartitionName(body.PartitionName),
 			ce.OptLPCMMsgType(commonpb.MsgType_CreatePartition),
 		))
+}
+
+// partitionDDLBroadcastChannels lists the channels a partition DDL must reach:
+// the control channel plus EVERY vchannel the collection has.
+//
+// Not VirtualChannelNames[0:ShardsNum]. That indexing assumes the live shards
+// are the first ShardsNum entries of the list, which a shard split breaks in
+// both directions at once: the list grows with the split's targets while the
+// retired sources stay in it, and ShardsNum counts only the routable shards. A
+// 2-shard collection whose two shards have each been split once has six
+// vchannels and ShardsNum 4, so the slice is the two dead sources plus two of
+// the four live shards -- the other two never learn the partition was created
+// or dropped.
+//
+// A fenced source is included deliberately. It stays in the collection's
+// vchannel list until adoption, and the shard interceptor's name gate (design
+// doc §8.11) appends a partition DDL replica addressed to a vchannel this
+// pchannel no longer holds with no shard effect instead of refusing it, so the
+// broadcast completes; a refused replica would be retried forever under the
+// collection's exclusive key.
+func partitionDDLBroadcastChannels(vchannels []string) []string {
+	channels := make([]string, 0, len(vchannels)+1)
+	channels = append(channels, streaming.WAL().ControlChannel())
+	return append(channels, vchannels...)
 }

@@ -2,7 +2,9 @@ package streaming
 
 import (
 	"context"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/cockroachdb/errors"
 
@@ -11,9 +13,12 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -53,7 +58,207 @@ func (s replicateService) Append(ctx context.Context, rmsg message.ReplicateMuta
 	if err != nil {
 		return nil, err
 	}
+	if err := s.waitAppendFirstReplicas(ctx, msg); err != nil {
+		return nil, err
+	}
 	return s.appendReplicateMessageToWAL(ctx, msg)
+}
+
+// waitAppendFirstReplicas is the secondary cluster's append gate.
+//
+// A broadcast whose header names append-first vchannels is ordered on the
+// primary by the broadcaster: it appends and persists that group before any
+// other replica. Replication carries the replicas to a secondary as independent
+// per-pchannel streams, which restores no order between them at all, so a
+// SplitShard target's genesis could otherwise be appended here before the
+// source's fence -- inverting the one invariant the split rests on (nothing on a
+// target precedes T_switch, nothing on a source follows it) and, with it, the
+// order of a delete against an insert of the same primary key.
+//
+// The gate closes that gap on the receiving side, because only the receiving
+// side knows: the sender sees one replica at a time and has no way to observe
+// another cluster's ticks. The streamingcoord ack state is the fact it waits on.
+//
+// # Why this cannot wedge replication
+//
+// "A source never waits, so the wait graph is acyclic" is NOT the argument, and
+// believing it is a trap: a gated replica blocks its whole stream, so a target
+// parked here also blocks every append-first replica queued behind it on the
+// same pchannel. The edges that matter are stream edges, not just wait edges.
+//
+// Progress rests on three facts:
+//
+//	(a) For each broadcast, every append-first replica's time tick is strictly
+//	    below every other replica's. The primary's broadcaster appends the
+//	    append-first group AND persists it with AckPartial before it even starts
+//	    appending the rest -- see splitAppendFirst in
+//	    internal/streamingcoord/server/broadcaster/pending_broadcast_task.go.
+//	(b) Time ticks are totally ordered across pchannels (they come from one TSO).
+//	(c) Each replicate stream delivers its pchannel in tick order.
+//
+// Take the message with the minimum tick among all stream heads on this cluster.
+// If it is append-first, or the control-channel replica (never gated, see
+// below), it is not gated and proceeds. If it is gated, then by
+// (a) each of its append-first replicas has a strictly smaller tick, so by (b)
+// and (c) each is either already appended here -- its ack merely in flight -- or
+// still queued behind a head with a smaller tick, contradicting minimality.
+// Either way something moves.
+//
+// Fact (a) is the load-bearing one and it lives in ANOTHER package. An
+// "optimization" that appended the rest concurrently with the append-first group
+// would leave every primary-side test green and break secondary liveness: a
+// target could then carry a tick below its source's, and the minimum-tick
+// message could be a gated one whose sources are queued behind IT.
+//
+// Called AFTER the remap, so the names it compares and the names it waits on are
+// both this cluster's.
+func (s replicateService) waitAppendFirstReplicas(ctx context.Context, msg message.MutableMessage) error {
+	bh := msg.BroadcastHeader()
+	if bh == nil || len(bh.AppendFirstVChannels) == 0 {
+		return nil
+	}
+	if slices.Contains(bh.AppendFirstVChannels, msg.VChannel()) {
+		// This replica IS one of the append-first ones; it is what the others
+		// are waiting for.
+		return nil
+	}
+	if funcutil.IsControlChannel(msg.VChannel()) {
+		// The control-channel replica never waits. It has no shard, flusher or
+		// recovery effect (all three return early on a control-channel message
+		// that is not pchannel-level); it exists to order the broadcast's ack
+		// callback. Its stream is the control channel's, which carries the
+		// control-channel replica of EVERY collection's DDL, so a wait here
+		// would park all replicated DDL on this cluster behind one split's
+		// source pchannel -- for as long as that pchannel's replication lags.
+		//
+		// Nothing the callback does with this replica depends on the source
+		// having landed first. The SplitShard callback stamps the routing
+		// commit (MetaTable.ApplyShardSplitRouting -> UpdateTimestamp) with this
+		// replica's tick; on this cluster that tick is local to the control
+		// pchannel and may be BELOW the source's local T_switch. That is the
+		// same kind of value CreateCollection, CreatePartition and DropPartition
+		// already stamp on a secondary, and no reader compares it against a
+		// data pchannel's tick: T_switch and the drain gate are taken from the
+		// source replica's own result, the proxy cache expiry from a fresh TSO,
+		// and the proxy's guarantee-ts floor and QueryCoord's schema barrier
+		// only need it to be past the last schema change, which a split is not.
+		// The routing commit is not visible before the fence exists here
+		// either: the ack callback runs only once every replica, the source
+		// included, has been appended in this cluster.
+		//
+		// This cannot skip a legitimate wait: a control channel is never
+		// append-first (the builder panics on it, and overwriteReplicateMessage
+		// refuses one as a ReplicateViolation), so it is never what another
+		// replica waits for, and nothing waits on its behalf.
+		return nil
+	}
+
+	// A replica this cluster has already appended must not wait. The replicate
+	// stream redelivers from the primary's view of our checkpoint, so a replica
+	// whose append landed here but whose result was lost comes back -- possibly
+	// after its broadcast task has been tombstoned and collected here, at which
+	// point WaitVChannelsAcked waits for a task that is never recreated and the
+	// whole pchannel stream stops behind it.
+	covered, err := s.coveredByReplicateCheckpoint(ctx, msg)
+	if err != nil {
+		return err
+	}
+	if covered {
+		mlog.Info(ctx, "replicated append skips the gate, this cluster already appended it",
+			mlog.Uint64("broadcastID", bh.BroadcastID),
+			mlog.String("vchannel", msg.VChannel()),
+			mlog.Uint64("replicateTimeTick", msg.ReplicateHeader().TimeTick))
+		return nil
+	}
+
+	// Head-of-line blocking makes this wait indistinguishable from wedged
+	// replication unless it says so: name the broadcast and the vchannels, so an
+	// operator staring at a frozen pchannel learns which OTHER pchannel to look
+	// at. The gauge is what an alert can watch; it is decremented on every exit.
+	pchannel := funcutil.ToPhysicalChannel(msg.VChannel())
+	logger := mlog.With(
+		mlog.Uint64("broadcastID", bh.BroadcastID),
+		mlog.String("vchannel", msg.VChannel()),
+		mlog.Strings("appendFirstVChannels", bh.AppendFirstVChannels),
+		mlog.String("messageType", msg.MessageType().String()))
+	logger.Info(ctx, "replicated append is gated on its broadcast's append-first replicas")
+	gated := metrics.StreamingServiceClientReplicateGatedAppends.WithLabelValues(
+		paramtable.GetStringNodeID(), pchannel)
+	gated.Inc()
+	// Deferred, so the gauge comes back down on every exit -- including a panic
+	// unwinding through here. A gauge that only ever climbs is worse than none:
+	// it would raise the alert it exists for, forever.
+	defer gated.Dec()
+	start := time.Now()
+
+	// The error is returned as it stands. Nearly everything that can fail here
+	// is transient -- the replicate stream's context ending, the coord being
+	// unreachable, the broadcaster shutting down -- and the replicate stream
+	// retries from its checkpoint, re-entering the wait. The one exception is
+	// a ReplicateViolation: the coord's task for this broadcast does not carry
+	// an append-first vchannel this header names, so the primary's replicas
+	// disagree about the broadcast's topology. The stream still retries -- it
+	// has no terminal state -- but the retry cannot clear it, so it is logged
+	// as an error naming the disagreement rather than as one more retry.
+	err = s.streamingCoordClient.Broadcast().WaitVChannelsAcked(ctx, bh.BroadcastID, bh.AppendFirstVChannels)
+	if err != nil {
+		if status.AsStreamingError(err).IsReplicateViolation() {
+			logger.Error(ctx, "replicated append gate refused: the append-first vchannels this header names are not "+
+				"vchannels of this cluster's broadcast task; the stream retries from its checkpoint but the refusal will not clear",
+				mlog.Duration("gatedFor", time.Since(start)), mlog.Err(err))
+			return err
+		}
+		logger.Warn(ctx, "replicated append gate failed, the stream will retry from its checkpoint",
+			mlog.Duration("gatedFor", time.Since(start)), mlog.Err(err))
+		return err
+	}
+	logger.Info(ctx, "replicated append gate opened, the append-first replicas landed",
+		mlog.Duration("gatedFor", time.Since(start)))
+	return nil
+}
+
+// coveredByReplicateCheckpoint reports whether this cluster's WAL has already
+// appended the replica, judged by the replicate checkpoint of its pchannel.
+//
+// It asks the same question, of the same state, as the WAL replicate
+// interceptor's dedup (replicatesManagerImpl.beginReplicateMessage ignores a
+// non-txn replica whose replicate time tick is <= the checkpoint's), so the gate
+// is skipped exactly for the replicas that interceptor will drop instead of
+// append. The append still goes to the WAL afterwards: the interceptor stays the
+// one authority on dedup, and this check only decides whether to wait first.
+//
+// Skipping on a stale read is impossible: the checkpoint only moves forward, so
+// a replica covered now is still covered when it reaches the interceptor.
+// Recovery preserves this: a reopened WAL rebuilds the checkpoint by replaying
+// the replicate headers past its persisted one.
+//
+// A replica that is not covered is gated, and it CAN be one whose task was
+// already collected here: a second copy of a target replica, written by the
+// primary's broadcaster retrying an append that had landed but answered an
+// error, carries a later replicate time tick than the copy this cluster
+// appended, and it may arrive after that broadcast was tombstoned and
+// collected. The coord's wait opens for it on DataCoord's record of the fence
+// (broadcastTaskManager.WaitVChannelsAcked), not here.
+//
+// A broadcast replica never carries a transaction, so the interceptor's
+// equality case for in-flight txn bodies does not apply.
+func (s replicateService) coveredByReplicateCheckpoint(ctx context.Context, msg message.MutableMessage) (bool, error) {
+	rh := msg.ReplicateHeader()
+	if rh == nil {
+		return false, nil
+	}
+	checkpoint, err := s.handlerClient.GetReplicateCheckpoint(ctx, funcutil.ToPhysicalChannel(msg.VChannel()))
+	if err != nil {
+		// Transient like the gate's own failures: the stream retries from its
+		// checkpoint and asks again.
+		return false, err
+	}
+	if checkpoint == nil || checkpoint.ClusterID != rh.ClusterID {
+		// Not replicating from this source (yet): the interceptor would refuse
+		// or append it, never drop it as a duplicate, so the gate applies.
+		return false, nil
+	}
+	return rh.TimeTick <= checkpoint.TimeTick, nil
 }
 
 func (s replicateService) UpdateReplicateConfiguration(ctx context.Context, req *milvuspb.UpdateReplicateConfigurationRequest) error {
@@ -165,9 +370,51 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 			}
 			targetBroadcastVChannels = append(targetBroadcastVChannels, targetBroadcastVChannel)
 		}
-		msg.OverwriteReplicateVChannel(targetVChannel, targetBroadcastVChannels)
-	} else {
-		msg.OverwriteReplicateVChannel(targetVChannel)
+		// A broadcast header that arrives self-inconsistent fails the message,
+		// not the process: the stream re-delivers the same bytes on every
+		// reconnect, so a panic would be a crash loop rather than a diagnosis.
+		// The primary wrote the header, so it is refused here, once, as the
+		// replication contract violation it is.
+		//
+		// Every invariant the builder enforces by panicking is re-checked here,
+		// because a replicated header did not come through this cluster's
+		// builder and a force-promote re-drives the task it creates through
+		// the broadcaster's own append path, where the same invariants are
+		// asserted with panics again (pendingBroadcastTask.splitAppendFirst on
+		// more than one append-first vchannel, broadcastTask.AckPartial on an
+		// AckSyncUp broadcast with one):
+		//   - ack-sync-up and append-first are mutually exclusive
+		//     (OptBuildBroadcastAckSyncUp / OptBuildBroadcastAppendFirst);
+		//   - at most one vchannel is append-first;
+		//   - the control channel is never append-first;
+		//   - each append-first vchannel is one of the broadcast's own.
+		if bh.AckSyncUp && len(bh.AppendFirstVChannels) > 0 {
+			return nil, status.NewReplicateViolation(
+				"malformed broadcast header of replicated %s message %d: ack sync up cannot be combined with append-first vchannels %v",
+				msg.MessageType(), bh.BroadcastID, bh.AppendFirstVChannels)
+		}
+		if len(bh.AppendFirstVChannels) > 1 {
+			return nil, status.NewReplicateViolation(
+				"malformed broadcast header of replicated %s message %d: a broadcast names at most one append-first vchannel, got %v",
+				msg.MessageType(), bh.BroadcastID, bh.AppendFirstVChannels)
+		}
+		for _, vchannel := range bh.AppendFirstVChannels {
+			if funcutil.IsControlChannel(vchannel) {
+				return nil, status.NewReplicateViolation(
+					"malformed broadcast header of replicated %s message %d: the control channel %s cannot be appended first",
+					msg.MessageType(), bh.BroadcastID, vchannel)
+			}
+			if !slices.Contains(bh.VChannels, vchannel) {
+				return nil, status.NewReplicateViolation(
+					"malformed broadcast header of replicated %s message %d: append-first vchannel %s is not one of its broadcast vchannels %v",
+					msg.MessageType(), bh.BroadcastID, vchannel, bh.VChannels)
+			}
+		}
+		if err := msg.OverwriteReplicateVChannel(targetVChannel, targetBroadcastVChannels); err != nil {
+			return nil, merr.Wrap(err, "overwrite the replicate vchannels")
+		}
+	} else if err := msg.OverwriteReplicateVChannel(targetVChannel); err != nil {
+		return nil, merr.Wrap(err, "overwrite the replicate vchannel")
 	}
 
 	// create collection message will set the vchannel in its body, so we need to overwrite it.
@@ -182,6 +429,14 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 		}
 	case message.MessageTypeAlterLoadConfig:
 		s.overwriteAlterLoadConfigMessage(msg)
+	case message.MessageTypeSplitShard:
+		if err := s.overwriteSplitShardMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
+	case message.MessageTypeAlterCollection:
+		if err := s.overwriteShardSplitRoutingMessage(sourceCluster, msg); err != nil {
+			return nil, err
+		}
 	}
 
 	if funcutil.IsControlChannel(msg.VChannel()) {
@@ -266,4 +521,129 @@ func (s replicateService) overwriteAlterLoadConfigMessage(msg message.ReplicateM
 	header := alterLoadConfigMsg.Header()
 	header.UseLocalReplicaConfig = true
 	alterLoadConfigMsg.OverwriteHeader(header)
+}
+
+// overwriteSplitShardMessage rewrites every channel name a SplitShard carries
+// into this cluster's namespace: the source it fences and the targets it
+// creates, in the header, and the routing post-image (plus the target genesis,
+// should it ever carry a channel list) in the body.
+//
+// Everything else in the message is deliberately left alone. Collection id,
+// partition ids, the split task id, and the residues and modulus in the
+// post-image are the same facts in both clusters -- ids are replicated, and
+// routing is a property of the data, not of where it is stored -- so remapping
+// them would break the very correspondence replication exists to keep.
+func (s replicateService) overwriteSplitShardMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+	splitShardMsg := message.MustAsMutableSplitShardMessageV2(msg)
+	header := splitShardMsg.Header()
+	sourceVChannel, err := s.getTargetVChannel(sourceCluster, header.GetSourceVchannel())
+	if err != nil {
+		return err
+	}
+	header.SourceVchannel = sourceVChannel
+	if err := s.overwriteVChannelNames(sourceCluster, header.TargetVchannels); err != nil {
+		return err
+	}
+	// The flushed segment ids are the primary's: its source StreamingNode
+	// embedded the growing segments IT sealed at ITS fence. This cluster's
+	// source handler fills the field with its own ids on a first fence, and a
+	// same-task re-fence appends the header as received -- so without this a
+	// replicated re-fence record would name segments that exist only in the
+	// primary. Nothing reads the ids off a SplitShard record here (the flusher
+	// seals every growing segment of the vchannel instead), so the only effect
+	// was a misleading log line; cleared so the record never claims them.
+	header.FlushedSegmentIds = nil
+	splitShardMsg.OverwriteHeader(header)
+
+	body := splitShardMsg.MustBody()
+	if err := s.overwriteRoutingChannelNames(sourceCluster, body.GetRouting()); err != nil {
+		return err
+	}
+	if genesis := body.GetGenesis(); genesis != nil {
+		if err := s.overwriteVChannelNames(sourceCluster, genesis.VirtualChannelNames); err != nil {
+			return err
+		}
+		if err := s.overwritePChannelNames(sourceCluster, genesis.PhysicalChannelNames); err != nil {
+			return err
+		}
+	}
+	splitShardMsg.OverwriteBody(body)
+	return nil
+}
+
+// overwriteShardSplitRoutingMessage rewrites the channel names of an
+// AlterCollection that commits a shard-split routing post-image -- the split's
+// adoption message, replicated like any other AlterCollection.
+//
+// Every other AlterCollection is left untouched: the routing mask is the only
+// one whose updates carry channel names at all.
+func (s replicateService) overwriteShardSplitRoutingMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+	alterCollectionMsg := message.MustAsMutableAlterCollectionMessageV2(msg)
+	if !slices.Contains(alterCollectionMsg.Header().GetUpdateMask().GetPaths(), message.FieldMaskCollectionShardSplitRouting) {
+		return nil
+	}
+	body := alterCollectionMsg.MustBody()
+	if err := s.overwriteRoutingChannelNames(sourceCluster, body.GetUpdates()); err != nil {
+		return err
+	}
+	alterCollectionMsg.OverwriteBody(body)
+	return nil
+}
+
+// overwriteRoutingChannelNames rewrites the channel names of a routing
+// post-image in place.
+//
+// The shard infos are rewritten too, not only the two name lists: a shard info
+// names its own vchannel so that a consumer can key by it instead of by position
+// (internal/util/routing/table.go REFUSES a shard info whose name disagrees with
+// the vchannel at its position), so a name left in the source cluster's
+// namespace would make the whole routing table unreadable here rather than
+// merely stale.
+func (s replicateService) overwriteRoutingChannelNames(sourceCluster *replicateutil.MilvusCluster, updates *message.AlterCollectionMessageUpdates) error {
+	if updates == nil {
+		return nil
+	}
+	if err := s.overwriteVChannelNames(sourceCluster, updates.VirtualChannelNames); err != nil {
+		return err
+	}
+	if err := s.overwritePChannelNames(sourceCluster, updates.PhysicalChannelNames); err != nil {
+		return err
+	}
+	for _, shardInfo := range updates.GetShardInfos() {
+		// An empty name is the persisted shape of a collection older than the
+		// field, and means "key me by position"; there is nothing to map.
+		if shardInfo.GetVchannelName() == "" {
+			continue
+		}
+		vchannel, err := s.getTargetVChannel(sourceCluster, shardInfo.GetVchannelName())
+		if err != nil {
+			return err
+		}
+		shardInfo.VchannelName = vchannel
+	}
+	return nil
+}
+
+// overwriteVChannelNames rewrites a list of vchannel names in place.
+func (s replicateService) overwriteVChannelNames(sourceCluster *replicateutil.MilvusCluster, vchannels []string) error {
+	for idx, vchannel := range vchannels {
+		targetVChannel, err := s.getTargetVChannel(sourceCluster, vchannel)
+		if err != nil {
+			return err
+		}
+		vchannels[idx] = targetVChannel
+	}
+	return nil
+}
+
+// overwritePChannelNames rewrites a list of pchannel names in place.
+func (s replicateService) overwritePChannelNames(sourceCluster *replicateutil.MilvusCluster, pchannels []string) error {
+	for idx, pchannel := range pchannels {
+		targetPChannel, err := sourceCluster.GetTargetChannel(pchannel, s.clusterID)
+		if err != nil {
+			return status.NewReplicateViolation("failed to get target channel, %s", err.Error())
+		}
+		pchannels[idx] = targetPChannel
+	}
+	return nil
 }

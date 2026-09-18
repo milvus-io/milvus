@@ -4034,13 +4034,23 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 }
 
 // WatchChannelCheckpoint waits until the checkpoint of the specified channel
-// reaches or exceeds the target timestamp. Used for TruncateCollection.
+// reaches or exceeds the target timestamp.
 func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {
+	return m.WatchChannelCheckpointUntil(ctx, vChannel, func(cp *msgpb.MsgPosition) bool {
+		return cp != nil && cp.GetTimestamp() >= targetTs
+	})
+}
+
+// WatchChannelCheckpointUntil waits until covered accepts the checkpoint of the
+// specified channel, nil while the channel has none. covered runs under the
+// checkpoint lock on every checkpoint change and on
+// NotifyChannelCheckpointWatchers, so it must not take that lock. Used for
+// TruncateCollection.
+func (m *meta) WatchChannelCheckpointUntil(ctx context.Context, vChannel string, covered func(cp *msgpb.MsgPosition) bool) error {
 	m.channelCPs.cond.L.Lock()
 
 	for {
-		cp, ok := m.channelCPs.checkpoints[vChannel]
-		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
+		if covered(m.channelCPs.checkpoints[vChannel]) {
 			m.channelCPs.cond.L.Unlock()
 			return nil
 		}
@@ -4049,4 +4059,12 @@ func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targ
 			return err
 		}
 	}
+}
+
+// NotifyChannelCheckpointWatchers makes every WatchChannelCheckpointUntil
+// waiter judge its channel again, for a predicate that depends on more than the
+// checkpoint: a shard split source's recorded T_switch.
+func (m *meta) NotifyChannelCheckpointWatchers() {
+	m.channelCPs.cond.LockAndBroadcast()
+	m.channelCPs.cond.L.Unlock()
 }
