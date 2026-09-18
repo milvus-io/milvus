@@ -362,6 +362,8 @@ func ValidateSplitShardMessage(header *message.SplitShardMessageHeader, body *me
 // refusal can only be retried forever:
 //
 //   - every message-only check (ValidateSplitShardMessage);
+//   - the namespace deferral (§1.3) against the meta too: a collection whose
+//     meta has enable_namespace set is refused whatever the genesis says;
 //   - the genesis properties agree with the meta's on namespace admission
 //     (routing.CheckAdmissionPropertiesAgree), so both sides of the fence
 //     answer admission the same way;
@@ -399,6 +401,14 @@ func CheckSplitShardAgainstCollection(coll *model.Collection, header *message.Sp
 	}
 	if err := ValidateSplitShardMessage(header, body); err != nil {
 		return err
+	}
+	// The message check above reads the genesis schema only. A genesis that
+	// says false for a collection whose meta says true is a planning bug, and
+	// it must not slip a namespace collection past the deferral (§1.3).
+	if coll.EnableNamespace {
+		return merr.WrapErrServiceInternalMsg(
+			"split shard of collection %d: namespace collections are not split until the namespace layout supports relabel (design §1.3); the collection meta has enable_namespace set",
+			coll.CollectionID)
 	}
 	if err := routing.CheckAdmissionPropertiesAgree(body.GetGenesis().GetCollectionSchema().GetProperties(), coll.Properties); err != nil {
 		return merr.Wrapf(err, "split shard of collection %d", coll.CollectionID)
