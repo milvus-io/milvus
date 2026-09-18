@@ -532,12 +532,18 @@ func (sd *shardDelegator) SplitChildVChannels() []string {
 // until it is detached at source release — NOT until the child first becomes
 // serviceable. A child becomes serviceable the moment querycoord syncs it the
 // NEXT-target version (delegator.SyncTargetVersion), which happens strictly
-// before querycoord promotes the target into the CURRENT target: the source
-// keeps being synced through every next target, so the current target -- and
-// with it GetShardLeaders' fan-out -- stays exactly the source until every
-// target has synced, then flips to the targets in one step (design doc QC2).
-// Dropping the child from fronting at the earlier serviceable flip would leave
-// the source's still-current reads unable to see that target's rows for the
+// before querycoord promotes the target into the CURRENT target: a target is
+// one of the split's window targets for as long as its window is open, and no
+// current-target snapshot taken during that window ever includes one --
+// whether it is the pre-fence current target simply never advancing (a
+// collection loaded before the fence: QC2 never syncs, so never promotes, a
+// window target from the next target), or a fresh snapshot for a collection
+// loaded mid-window, which is the window snapshot with its window targets
+// held back (O1). Either way GetShardLeaders' fan-out for this shard stays
+// exactly the source until every target has synced and the window ends, then
+// flips to the targets in one step (design doc QC1-QC3, O1). Dropping the
+// child from fronting at the earlier serviceable flip would leave the
+// source's still-current reads unable to see that target's rows for the
 // window between the two flips — lost rows. Fronting until release closes
 // that window; because the current target is one membership list the fan-out
 // reads as a whole, never source-and-targets at once, there is no double-serve
