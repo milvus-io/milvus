@@ -161,7 +161,8 @@ func (s *SegmentInfo) Clone() *SegmentInfo {
 		deltalogs:        s.deltalogs,
 		bm25logs:         s.bm25logs,
 		currentSplit:     s.currentSplit,
-		manifestPath:     s.manifestPath}
+		manifestPath:     s.manifestPath,
+	}
 }
 
 func NewSegmentInfo(info *datapb.SegmentInfo, bfs pkoracle.PkStat, bm25Stats *SegmentBM25Stats, stats *SegmentStats) *SegmentInfo {

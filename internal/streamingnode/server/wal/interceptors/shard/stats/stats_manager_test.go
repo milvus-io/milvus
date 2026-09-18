@@ -272,7 +272,6 @@ func TestStatsManagerRuntimeFlushSizeForMemoryPressure(t *testing.T) {
 	assert.Equal(t, uint64(300), m.totalStats.Total().BinarySize)
 	assert.Equal(t, uint64(550), m.totalFlushSize)
 	assert.Equal(t, []int64{1}, m.selectSegmentsUntilLessThanLWM())
-
 }
 
 func TestStatsManagerRuntimeFlushSizeUnregister(t *testing.T) {
