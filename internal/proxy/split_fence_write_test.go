@@ -1275,3 +1275,24 @@ func TestWritesDoNotRetryAPermanentRoutingReadFailure(t *testing.T) {
 		})
 	}
 }
+
+// A partial update whose CAS proof was taken before a routing change -- its
+// rows now route to shards it holds no proof for -- is a transient race, not a
+// Milvus bug: it fails retriably, evicts the collection, and appends nothing.
+func TestPartialUpdateWhoseProofPredatesARoutingChangeFailsRetriably(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := oneShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := installSplitFenceTestWAL(t)
+	pks := seqPKs(4)
+	task := f.upsertTask(t, pks, pks)
+	task.req.PartialUpdate = true
+	task.partialUpdateCASGroups = map[string]*messagespb.PartialUpdateCAS{splitSource: {ReadTs: 10, ObservedPchannelTerm: 1}}
+	f.committed = true
+
+	err := task.appendUpsertAttempt(context.Background(), nil)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.True(t, merr.IsRetryableErr(err))
+	assert.Empty(t, wal.batches)
+	assert.Equal(t, 1, f.evictions)
+}

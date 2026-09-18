@@ -155,6 +155,11 @@ func (ut *upsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 			logger.Warn(ctx, "resolve the write route failed", mlog.Err(err))
 			return prepareFailed(err)
 		}
+		if partialUpdate {
+			if err := ut.checkPartialUpdateProofsCoverRoute(ctx, route); err != nil {
+				return false, err
+			}
+		}
 		insertMsgs, insertOffsets, err := ut.packInsertMessage(ctx, ez, route, pendingInserts)
 		if err != nil {
 			logger.Warn(ctx, "pack insert message failed", mlog.Err(err))
@@ -227,6 +232,28 @@ func (ut *upsertTask) partialUpdateFenceRefusal(ctx context.Context, resp stream
 			"partial update reached a vchannel fenced by a shard split; retry against the refreshed routing")
 	}
 	return unwrapPartialUpdateAppendError(resp)
+}
+
+// checkPartialUpdateProofsCoverRoute refuses a partial update whose CAS proofs
+// were taken against a routing that has changed since: a row routing to a
+// vchannel it holds no proof for can only mean a split's routing commit landed
+// between the proof and the append. That is a transient race, not a Milvus
+// bug, so it evicts the collection and fails retriably; the client's retry
+// reads and proves against the new shards.
+func (ut *upsertTask) checkPartialUpdateProofsCoverRoute(ctx context.Context, route *writeRoute) error {
+	needed, err := ut.buildPartialUpdateCASGroups(route)
+	if err != nil {
+		return err
+	}
+	for vchannel := range needed {
+		if ut.partialUpdateCASGroups[vchannel] != nil {
+			continue
+		}
+		ut.GetMetaCache().RemoveCollectionsByID(ctx, ut.collectionID)
+		return merr.WrapErrServiceUnavailableMsg(
+			"partial update: the collection's routing changed after its CAS proof was taken; vchannel %s has no proof", vchannel)
+	}
+	return nil
 }
 
 // writeRoute reads the route of one upsert attempt.
