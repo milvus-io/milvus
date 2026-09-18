@@ -267,3 +267,26 @@ func hashSplitDeleteSourceSegments(ctx context.Context, m CompactionMeta, channe
 	slices.SortFunc(segments, func(a, b *SegmentInfo) int { return cmp.Compare(a.GetID(), b.GetID()) })
 	return segments
 }
+
+// hashSplitDeleteSourceRows counts the delete entries a rewrite plan on this
+// channel and partition folds.
+func hashSplitDeleteSourceRows(ctx context.Context, m CompactionMeta, channel string, partitionID int64) int64 {
+	return lo.SumBy(hashSplitDeleteSourceSegments(ctx, m, channel, partitionID),
+		func(info *SegmentInfo) int64 { return info.getDeltaCount() })
+}
+
+// hashSplitDeleteSourceSlot prices the delete set a rewrite folds, on top of
+// the flat cost of rewriting one segment.
+//
+// The datanode builds one pk -> ts map over the folded deletes per plan and
+// probes it per row, the work an L0 compaction does, priced the same way
+// (l0CompactionTask.GetTaskSlot): the L0 slot factor over the delete rows, per
+// bloom-filter apply batch. No minimum of one, unlike the L0 task: this is an
+// addend, and the flat mix cost is already the floor. Pure in its inputs, so
+// the caller reads the configuration once.
+func hashSplitDeleteSourceSlot(deleteRows, applyBatchSize, slotFactor int64) int64 {
+	if deleteRows <= 0 || applyBatchSize <= 0 {
+		return 0
+	}
+	return slotFactor * deleteRows / applyBatchSize
+}
