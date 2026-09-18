@@ -54,7 +54,8 @@ func (t *mixCompactionTask) GetTaskSlot() int64 {
 	slotUsage := t.slotUsage.Load()
 	if slotUsage == 0 {
 		slotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
-		if t.GetTaskProto().GetType() == datapb.CompactionType_SortCompaction {
+		switch t.GetTaskProto().GetType() {
+		case datapb.CompactionType_SortCompaction:
 			segment := t.meta.GetHealthySegment(context.Background(), t.GetTaskProto().GetInputSegments()[0])
 			if segment != nil {
 				segSize := segment.getSegmentSize()
@@ -62,6 +63,21 @@ func (t *mixCompactionTask) GetTaskSlot() int64 {
 				mlog.Info(context.TODO(), "mixCompactionTask get task slot",
 					mlog.Int64("segment size", segSize), mlog.Int64("task slot", slotUsage))
 			}
+		case datapb.CompactionType_HashSplitCompaction:
+			// A rewrite plan also carries its source channel's L0 delete set
+			// (hashSplitDeleteSources), which the datanode folds per plan. It is
+			// priced on top of the flat rewrite cost, the way an L0 compaction
+			// prices the deletes it applies, so concurrent rewrites of a large
+			// backlog are admission-controlled instead of all looking like one
+			// ordinary mix compaction.
+			deleteRows := hashSplitDeleteSourceRows(context.TODO(), t.meta,
+				t.GetTaskProto().GetChannel(), t.GetTaskProto().GetPartitionID())
+			slotUsage += hashSplitDeleteSourceSlot(deleteRows,
+				int64(paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()),
+				paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64())
+			mlog.Info(context.TODO(), "shard split rewrite task slot",
+				mlog.Int64("planID", t.GetTaskProto().GetPlanID()),
+				mlog.Int64("deleteRows", deleteRows), mlog.Int64("task slot", slotUsage))
 		}
 		t.slotUsage.Store(slotUsage)
 	}
