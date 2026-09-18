@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -1312,6 +1312,16 @@ func TestSnapshotManager_BuildChannelMapping_GetChannelsError(t *testing.T) {
 
 // --- Test RestoreSnapshot ---
 
+// newRestoreAbsentTargetBroker supplies admission metadata for tests focused on
+// later restore phases. Concurrency tests exercise the changing target state.
+func newRestoreAbsentTargetBroker(t *testing.T) broker.Broker {
+	t.Helper()
+	m := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).
+		Return(nil, merr.WrapErrCollectionNotFound("target")).Build()
+	t.Cleanup(func() { m.UnPatch() })
+	return &restoreBrokerTarget{}
+}
+
 func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testing.T) {
 	ctx := context.Background()
 
@@ -1344,10 +1354,12 @@ func TestRestoreSnapshot_ValidationFailsCloseBroadcasterBeforeRollback(t *testin
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+	mockAlloc := &restoreAllocatorTarget{}
+	mAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(999), nil).Build()
+	defer mAlloc.UnPatch()
 
 	sm := &snapshotManager{
+		broker:          newRestoreAbsentTargetBroker(t),
 		allocator:       mockAlloc,
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
@@ -1429,10 +1441,12 @@ func TestRestoreSnapshot_ValidationFailsRollbackAlsoFails(t *testing.T) {
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+	mockAlloc := &restoreAllocatorTarget{}
+	mAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(999), nil).Build()
+	defer mAlloc.UnPatch()
 
 	sm := &snapshotManager{
+		broker:          newRestoreAbsentTargetBroker(t),
 		allocator:       mockAlloc,
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
@@ -1495,10 +1509,12 @@ func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(999), nil)
+	mockAlloc := &restoreAllocatorTarget{}
+	mAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(999), nil).Build()
+	defer mAlloc.UnPatch()
 
 	sm := &snapshotManager{
+		broker:          newRestoreAbsentTargetBroker(t),
 		allocator:       mockAlloc,
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
@@ -1528,9 +1544,12 @@ func TestRestoreSnapshot_ValidationPassesThenBroadcastSucceeds(t *testing.T) {
 	}
 
 	// Mock streaming.WAL().ControlChannel() since Broadcast builds a message using it
-	mockWAL := mock_streaming.NewMockWALAccesser(t)
-	mockWAL.EXPECT().ControlChannel().Return("control_channel")
+	oldWAL := streaming.WAL()
+	mockWAL := &restoreWALAccesserTarget{}
+	mControl := mockey.Mock((*restoreWALAccesserTarget).ControlChannel).Return("control_channel").Build()
+	defer mControl.UnPatch()
 	streaming.SetWALForTest(mockWAL)
+	defer streaming.SetWALForTest(oldWAL)
 
 	jobID, err := sm.RestoreSnapshot(ctx, int64(100), "snap1", "target", "default",
 		startRestoreLock, startBroadcaster, rollback, validateResources)
@@ -1568,7 +1587,8 @@ func TestRestoreSnapshot_PinTTLReadFromParamtable(t *testing.T) {
 	defer mRead.UnPatch()
 
 	sm := &snapshotManager{
-		allocator:       allocator.NewMockAllocator(t),
+		broker:          newRestoreAbsentTargetBroker(t),
+		allocator:       &restoreAllocatorTarget{},
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
 	}
@@ -1616,7 +1636,8 @@ func TestRestoreSnapshot_FailurePathUnpinsWithCorrectPinID(t *testing.T) {
 	defer m1.UnPatch()
 
 	sm := &snapshotManager{
-		allocator:       allocator.NewMockAllocator(t),
+		broker:          newRestoreAbsentTargetBroker(t),
+		allocator:       &restoreAllocatorTarget{},
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
 	}
@@ -1709,7 +1730,8 @@ func TestRestoreSnapshot_PostPhase2FailurePathsUnpinAndRollback(t *testing.T) {
 			}()
 
 			sm := &snapshotManager{
-				allocator:       allocator.NewMockAllocator(t),
+				broker:          newRestoreAbsentTargetBroker(t),
+				allocator:       &restoreAllocatorTarget{},
 				snapshotMeta:    &snapshotMeta{},
 				copySegmentMeta: &copySegmentMeta{},
 			}
@@ -1770,10 +1792,12 @@ func TestRestoreSnapshot_AllocIDFailureUnpinsAndRollsBack(t *testing.T) {
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(0), errors.New("alloc fail"))
+	mockAlloc := &restoreAllocatorTarget{}
+	mAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(0), errors.New("alloc fail")).Build()
+	defer mAlloc.UnPatch()
 
 	sm := &snapshotManager{
+		broker:          newRestoreAbsentTargetBroker(t),
 		allocator:       mockAlloc,
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
@@ -2047,10 +2071,12 @@ func TestRestoreSnapshot_StartBroadcasterFailureUnpinsAndRollsBack(t *testing.T)
 	m4 := mockey.Mock((*snapshotManager).RestoreIndexes).Return(nil).Build()
 	defer m4.UnPatch()
 
-	mockAlloc := allocator.NewMockAllocator(t)
-	mockAlloc.EXPECT().AllocID(mock.Anything).Return(int64(77), nil)
+	mockAlloc := &restoreAllocatorTarget{}
+	mAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(77), nil).Build()
+	defer mAlloc.UnPatch()
 
 	sm := &snapshotManager{
+		broker:          newRestoreAbsentTargetBroker(t),
 		allocator:       mockAlloc,
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
@@ -5731,6 +5757,299 @@ func TestRestoreExternalSnapshot_RejectsExistingTargetUnderNameLock(t *testing.T
 	assert.True(t, phase0Lock.closeCalled.Load())
 }
 
+func TestRestoreTargetLock_KeyScope(t *testing.T) {
+	sm := &snapshotManager{}
+	unlock := sm.lockRestoreTarget("", "target")
+	defer unlock()
+	assert.False(t, sm.restoreTargetLock.TryLock(restoreTarget{dbName: util.DefaultDBName, collectionName: "target"}))
+	for _, key := range []restoreTarget{
+		{dbName: "other_db", collectionName: "target"},
+		{dbName: util.DefaultDBName, collectionName: "other_target"},
+	} {
+		require.True(t, sm.restoreTargetLock.TryLock(key))
+		sm.restoreTargetLock.Unlock(key)
+	}
+}
+
+func TestRestoreSnapshot_AdmissionFailureReleasesLocks(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		lookupErr error
+		lockErr   error
+		pinErr    error
+		want      error
+	}{
+		{name: "existing target", want: merr.ErrParameterInvalid},
+		{name: "lookup failure", lookupErr: merr.ErrServiceUnavailable, want: merr.ErrServiceUnavailable},
+		{name: "database missing", lookupErr: merr.ErrDatabaseNotFound, want: merr.ErrDatabaseNotFound},
+		{name: "phase zero lock failure", lockErr: merr.ErrServiceUnavailable, want: merr.ErrServiceUnavailable},
+		{name: "pin failure", lookupErr: merr.ErrCollectionNotFound, pinErr: merr.ErrSnapshotNotFound, want: merr.ErrSnapshotNotFound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			closed := 0
+			mDescribe := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).To(
+				func(*restoreBrokerTarget, context.Context, string, string) (*milvuspb.DescribeCollectionResponse, error) {
+					assert.Zero(t, closed, "admission must hold the phase zero lock")
+					return &milvuspb.DescribeCollectionResponse{CollectionID: 200}, tc.lookupErr
+				}).Build()
+			defer mDescribe.UnPatch()
+			mPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(0), 0, tc.pinErr).Build()
+			defer mPin.UnPatch()
+			sm := &snapshotManager{broker: &restoreBrokerTarget{}, snapshotMeta: &snapshotMeta{}}
+			jobID, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default",
+				func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
+					if tc.lockErr != nil {
+						return nil, tc.lockErr
+					}
+					return &mockBroadcastAPI{closeFn: func() { closed++ }}, nil
+				}, nil, nil, nil)
+			require.ErrorIs(t, err, tc.want)
+			assert.Zero(t, jobID)
+			if tc.lockErr == nil {
+				assert.Equal(t, 1, closed)
+			}
+			if tc.pinErr == nil {
+				assert.Zero(t, mPin.Times())
+			}
+			key := restoreTarget{dbName: "default", collectionName: "target"}
+			require.True(t, sm.restoreTargetLock.TryLock(key), "failure must release the target lock")
+			sm.restoreTargetLock.Unlock(key)
+		})
+	}
+}
+
+// Exercise the real admission and submission path, including both entry points.
+// The first submission (or rollback) is held open while the second request runs.
+func TestRestoreSnapshot_ConcurrentTargetAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		firstExternal    bool
+		secondExternal   bool
+		secondDB         string
+		secondCollection string
+		rollback         bool
+		ackTimeout       bool
+	}{
+		{name: "internal internal"},
+		{name: "internal external", secondExternal: true},
+		{name: "external internal", firstExternal: true},
+		{name: "external external", firstExternal: true, secondExternal: true},
+		{name: "different database", secondDB: "other_db"},
+		{name: "different collection", secondCollection: "other_target"},
+		{name: "retry after rollback", rollback: true},
+		{name: "registered broadcast survives ack timeout", ackTimeout: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			var mu sync.Mutex
+			targets := make(map[restoreTarget]int64)
+			var creates, jobs, broadcasts, pins, unpins atomic.Int32
+			var phase0Calls atomic.Int32
+			snapshotData := createTestSnapshotDataForMeta()
+			firstBlocked := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(releaseFirst) }) }
+			defer release()
+			blockFirst := func() {
+				close(firstBlocked)
+				select {
+				case <-releaseFirst:
+				case <-ctx.Done():
+				}
+			}
+			mDescribe := mockey.Mock((*restoreBrokerTarget).DescribeCollectionByName).To(
+				func(_ *restoreBrokerTarget, _ context.Context, db, coll string) (*milvuspb.DescribeCollectionResponse, error) {
+					mu.Lock()
+					defer mu.Unlock()
+					if id, ok := targets[restoreTarget{dbName: db, collectionName: coll}]; ok {
+						return &milvuspb.DescribeCollectionResponse{CollectionID: id}, nil
+					}
+					return nil, merr.WrapErrCollectionNotFound(coll)
+				}).Build()
+			defer mDescribe.UnPatch()
+			mCreate := mockey.Mock((*snapshotManager).RestoreCollection).To(
+				func(_ *snapshotManager, _ context.Context, _ *snapshotstorage.SnapshotData, coll, db string) (int64, error) {
+					id := int64(creates.Add(1))
+					mu.Lock()
+					targets[restoreTarget{dbName: db, collectionName: coll}] = id
+					mu.Unlock()
+					return id, nil
+				}).Build()
+			defer mCreate.UnPatch()
+			mIndexes := mockey.Mock((*snapshotManager).RestoreIndexes).To(
+				func(_ *snapshotManager, _ context.Context, _ *snapshotstorage.SnapshotData, id int64, _ StartBroadcasterFunc, _ string) error {
+					if tc.rollback && id == 1 {
+						return merr.ErrServiceUnavailable
+					}
+					return nil
+				}).Build()
+			defer mIndexes.UnPatch()
+			mPin := mockey.Mock((*snapshotMeta).PinSnapshot).To(
+				func(*snapshotMeta, context.Context, int64, string, int64) (int64, int, error) {
+					return int64(pins.Add(1)), 1, nil
+				}).Build()
+			defer mPin.UnPatch()
+			mUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).To(
+				func(*snapshotMeta, context.Context, int64) (int64, string, int, error) {
+					unpins.Add(1)
+					return 0, "", 0, nil
+				}).Build()
+			defer mUnpin.UnPatch()
+			mRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(snapshotData, nil).Build()
+			defer mRead.UnPatch()
+			mCMEK := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(nil).Build()
+			defer mCMEK.UnPatch()
+			mResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{}, nil).Build()
+			defer mResolve.UnPatch()
+			mReadExternal := mockey.Mock((*snapshotMeta).ReadAndValidateExternalSnapshotDataWithChunkManager).Return(snapshotData, nil).Build()
+			defer mReadExternal.UnPatch()
+			mAlloc := mockey.Mock((*restoreAllocatorTarget).AllocID).To(
+				func(*restoreAllocatorTarget, context.Context) (int64, error) { return int64(jobs.Add(1)), nil }).Build()
+			defer mAlloc.UnPatch()
+			oldWAL := streaming.WAL()
+			mControl := mockey.Mock((*restoreWALAccesserTarget).ControlChannel).Return("control_channel").Build()
+			defer mControl.UnPatch()
+			streaming.SetWALForTest(&restoreWALAccesserTarget{})
+			defer streaming.SetWALForTest(oldWAL)
+			sm := &snapshotManager{broker: &restoreBrokerTarget{}, allocator: &restoreAllocatorTarget{}, snapshotMeta: &snapshotMeta{}}
+			startPhase0 := func() (broadcaster.BroadcastAPI, error) {
+				phase0Calls.Add(1)
+				return &mockBroadcastAPI{closeFn: func() {}}, nil
+			}
+			startBroadcast := func(_ context.Context, id int64, _ string) (broadcaster.BroadcastAPI, error) {
+				api := &mockBroadcastAPI{closeFn: func() {}, broadcastFn: func() {
+					broadcasts.Add(1)
+					if id == 1 {
+						blockFirst()
+					}
+				}}
+				if tc.ackTimeout && id == 1 {
+					api.broadcastErr = context.DeadlineExceeded
+				}
+				return api, nil
+			}
+			rollback := func(_ context.Context, db, coll string) error {
+				blockFirst()
+				mu.Lock()
+				delete(targets, restoreTarget{dbName: db, collectionName: coll})
+				mu.Unlock()
+				return nil
+			}
+			validate := func(context.Context, int64, *snapshotstorage.SnapshotData) error { return nil }
+			type result struct {
+				id  int64
+				err error
+			}
+			call := func(external bool, db, coll string) result {
+				if external {
+					id, err := sm.RestoreExternalSnapshot(ctx, "s3://bucket/snapshot.json", coll, db, "",
+						func(context.Context, string, string) (broadcaster.BroadcastAPI, error) { return startPhase0() }, startBroadcast, rollback, validate)
+					return result{id, err}
+				}
+				id, err := sm.RestoreSnapshot(ctx, 100, "snap", coll, db,
+					func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
+						return startPhase0()
+					}, startBroadcast, rollback, validate)
+				return result{id, err}
+			}
+			await := func(ch <-chan result) result {
+				select {
+				case r := <-ch:
+					return r
+				case <-ctx.Done():
+					t.Fatal("restore did not finish")
+					return result{}
+				}
+			}
+			var workers sync.WaitGroup
+			defer func() {
+				cancel()
+				release()
+				workers.Wait()
+			}()
+			first := make(chan result, 1)
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				first <- call(tc.firstExternal, "default", "target")
+			}()
+			select {
+			case <-firstBlocked:
+			case <-ctx.Done():
+				t.Fatal("first restore did not reach submission or rollback")
+			}
+			db, coll := "default", "target"
+			if tc.secondDB != "" {
+				db = tc.secondDB
+			}
+			if tc.secondCollection != "" {
+				coll = tc.secondCollection
+			}
+			independent := db != "default" || coll != "target"
+			second := make(chan result, 1)
+			started := make(chan struct{})
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				close(started)
+				second <- call(tc.secondExternal, db, coll)
+			}()
+			<-started
+			var secondResult result
+			if independent {
+				secondResult = await(second)
+				require.NoError(t, secondResult.err, "different targets must progress while the first is blocked")
+			} else {
+				select {
+				case <-second:
+					t.Fatal("same-target restore returned before the first released its lock")
+				case <-time.After(100 * time.Millisecond):
+				}
+				assert.Equal(t, int32(1), phase0Calls.Load(), "second request must wait outside Phase 0")
+			}
+			release()
+			firstResult := await(first)
+			if !independent {
+				secondResult = await(second)
+			}
+			if tc.rollback {
+				require.ErrorIs(t, firstResult.err, merr.ErrServiceUnavailable)
+				require.NoError(t, secondResult.err)
+				assert.Equal(t, int32(1), unpins.Load())
+			} else {
+				require.NoError(t, firstResult.err)
+				assert.NotZero(t, firstResult.id)
+				assert.Zero(t, unpins.Load())
+				if !independent {
+					require.ErrorIs(t, secondResult.err, merr.ErrParameterInvalid)
+					assert.Zero(t, secondResult.id)
+				}
+			}
+			wantJobs := int32(1)
+			if independent {
+				wantJobs = 2
+			}
+			assert.Equal(t, wantJobs, jobs.Load())
+			assert.Equal(t, wantJobs, broadcasts.Load())
+			wantCreates := wantJobs
+			if tc.rollback {
+				wantCreates++
+			}
+			assert.Equal(t, wantCreates, creates.Load())
+			wantPins := int32(0)
+			if !tc.firstExternal {
+				wantPins++
+			}
+			if (independent || tc.rollback) && !tc.secondExternal {
+				wantPins++
+			}
+			assert.Equal(t, wantPins, pins.Load(), "rejected requests must not pin the source")
+		})
+	}
+}
+
 func TestRestoreExternalSnapshot_SerializesSameTarget(t *testing.T) {
 	ctx := context.Background()
 	snapshotURI := "s3://foreign-bucket/root/snapshots/s1/metadata/1.json"
@@ -5923,4 +6242,118 @@ func TestSnapshotManager_UnpinSnapshotData_Error(t *testing.T) {
 
 	err := sm.UnpinSnapshotData(ctx, 99999)
 	assert.Error(t, err)
+}
+
+func TestRestoreSnapshot_PinOwnershipOnFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		cmekErr  error
+		unpinErr error
+		jobID    int64
+	}{
+		{name: "cleanup updates source pin gauge"},
+		{name: "cleanup error preserves original error", unpinErr: merr.ErrServiceUnavailable},
+		{name: "CMEK failure releases source pin", cmekErr: merr.ErrParameterInvalid},
+		{name: "registered job retains source pin", jobID: 77},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(42), 1, nil).Build()
+			defer mPin.UnPatch()
+			mUnpin := mockey.Mock((*snapshotMeta).UnpinSnapshot).Return(int64(100), "snap", 0, tc.unpinErr).Build()
+			defer mUnpin.UnPatch()
+			mRead := mockey.Mock((*snapshotMeta).ReadSnapshotData).Return(createTestSnapshotDataForMeta(), nil).Build()
+			defer mRead.UnPatch()
+			mCMEK := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(tc.cmekErr).Build()
+			defer mCMEK.UnPatch()
+			// Exercise the orchestrator's ownership contract when its submission
+			// dependency reports a job ID alongside an error.
+			mFinish := mockey.Mock((*snapshotManager).finishRestoreSnapshot).Return(tc.jobID, merr.ErrServiceInternal).Build()
+			defer mFinish.UnPatch()
+			sm := &snapshotManager{broker: newRestoreAbsentTargetBroker(t), snapshotMeta: &snapshotMeta{}}
+			_, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default",
+				func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
+					return &mockBroadcastAPI{closeFn: func() {}}, nil
+				}, nil, nil, nil)
+			if tc.cmekErr != nil {
+				require.ErrorIs(t, err, tc.cmekErr)
+				assert.Zero(t, mFinish.Times())
+			} else {
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+			}
+			if tc.jobID != 0 {
+				assert.Zero(t, mUnpin.Times())
+			} else {
+				assert.Equal(t, 1, mUnpin.Times())
+			}
+			key := restoreTarget{dbName: "default", collectionName: "target"}
+			require.True(t, sm.restoreTargetLock.TryLock(key))
+			sm.restoreTargetLock.Unlock(key)
+		})
+	}
+}
+
+func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
+	for _, stage := range []string{"empty URI", "phase zero lock", "snapshot read", "CMEK", "nameless snapshot"} {
+		t.Run(stage, func(t *testing.T) {
+			uri := "s3://bucket/snapshot.json"
+			if stage == "empty URI" {
+				uri = ""
+			}
+			data := createTestSnapshotDataForMeta()
+			if stage == "nameless snapshot" {
+				data.SnapshotInfo.Name = ""
+			}
+			mResolve := mockey.Mock(snapshotstorage.ResolveForeignStorage).Return(&snapshotstorage.ResolvedForeignStorage{}, nil).Build()
+			defer mResolve.UnPatch()
+			var readErr, cmekErr error
+			if stage == "snapshot read" {
+				readErr = merr.ErrDataIntegrity
+			}
+			if stage == "CMEK" {
+				cmekErr = merr.ErrParameterInvalid
+			}
+			mRead := mockey.Mock((*snapshotMeta).ReadAndValidateExternalSnapshotDataWithChunkManager).Return(data, readErr).Build()
+			defer mRead.UnPatch()
+			mCMEK := mockey.Mock((*snapshotManager).validateCMEKCompatibility).Return(cmekErr).Build()
+			defer mCMEK.UnPatch()
+			closed := 0
+			mFinish := mockey.Mock((*snapshotManager).finishRestoreSnapshot).To(
+				func(_ *snapshotManager, _ context.Context, _ *mlog.Logger, _ *snapshotstorage.SnapshotData,
+					name string, _ int64, _, _ string, _ int64, _ bool, _, _ string,
+					_ StartBroadcasterFunc, _ RollbackFunc, _ ValidateResourcesFunc,
+				) (int64, error) {
+					assert.Equal(t, uri, name)
+					assert.Equal(t, 1, closed, "DDL lock must be released before collection creation")
+					return 77, nil
+				}).Build()
+			defer mFinish.UnPatch()
+			sm := &snapshotManager{broker: newRestoreAbsentTargetBroker(t), snapshotMeta: &snapshotMeta{}}
+			id, err := sm.RestoreExternalSnapshot(context.Background(), uri, "target", "default", "",
+				func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
+					if stage == "phase zero lock" {
+						return nil, merr.ErrServiceUnavailable
+					}
+					return &mockBroadcastAPI{closeFn: func() { closed++ }}, nil
+				}, nil, nil, nil)
+			switch stage {
+			case "nameless snapshot":
+				require.NoError(t, err)
+				assert.Equal(t, int64(77), id)
+			case "empty URI", "CMEK":
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			case "phase zero lock":
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			case "snapshot read":
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			}
+			if stage != "empty URI" {
+				key := restoreTarget{dbName: "default", collectionName: "target"}
+				require.True(t, sm.restoreTargetLock.TryLock(key))
+				sm.restoreTargetLock.Unlock(key)
+			}
+			if stage != "empty URI" && stage != "phase zero lock" {
+				assert.Equal(t, 1, closed)
+			}
+		})
+	}
 }
