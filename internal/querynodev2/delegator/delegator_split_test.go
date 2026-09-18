@@ -46,6 +46,9 @@ type fakeChildSpawner struct {
 	err        error
 	// failures makes the first failures spawn attempts fail, then succeed.
 	failures int
+	// foreign makes a successful spawn return a delegator fronted by nobody,
+	// like one querycoord watched for the target on its own.
+	foreign bool
 }
 
 func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildParams) (ShardDelegator, error) {
@@ -59,7 +62,12 @@ func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildP
 	if len(f.spawned) <= f.failures {
 		return nil, errors.New("transient spawn failure")
 	}
-	return &MockShardDelegator{}, nil
+	// like the querynode, wire the source as the child's fronting parent.
+	child := &shardDelegator{vchannelName: params.TargetVChannel}
+	if !f.foreign {
+		child.SetFrontingParent(params.Parent)
+	}
+	return child, nil
 }
 
 // attempts is how many spawns were attempted, failed ones included.
@@ -202,7 +210,7 @@ func TestSourceServesAtMinChildTSafe(t *testing.T) {
 // spawner.
 func TestWithChildSpawnerWiresTheSpawner(t *testing.T) {
 	spawner := &fakeChildSpawner{}
-	sd := &shardDelegator{vchannelName: "v1", children: make(map[string]ShardDelegator)}
+	sd := &shardDelegator{vchannelName: "v1", children: make(map[string]ShardDelegator), lifetime: lifetime.NewLifetime(lifetime.Working)}
 	WithChildSpawner(spawner)(sd)
 
 	assert.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v3")))
@@ -217,6 +225,7 @@ func TestProcessSplitShard(t *testing.T) {
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
 			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
 		}
 
 		err := sd.ProcessSplitShard(context.Background(), newSplitTargets("v1", "v2"))
@@ -233,6 +242,7 @@ func TestProcessSplitShard(t *testing.T) {
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
 			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
 		}
 
 		err := sd.ProcessSplitShard(context.Background(), newSplitTargets("v1"))
@@ -248,6 +258,7 @@ func TestProcessSplitShard(t *testing.T) {
 			vchannelName: "v0",
 			children:     map[string]ShardDelegator{"v1": &MockShardDelegator{}},
 			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
 		}
 
 		err := sd.ProcessSplitShard(context.Background(), newSplitTargets("v1", "v2"))
@@ -333,6 +344,59 @@ func TestProcessSplitShard(t *testing.T) {
 		assert.Empty(t, childVChannels(sd))
 	})
 
+	t.Run("a spawn that returns a delegator this source does not front is never published", func(t *testing.T) {
+		// e.g. querycoord adopted the target and watched a delegator of its own
+		// while this spawn was retrying: that delegator forwards no delete to
+		// this source, so fronting it would serve rows it has deleted.
+		spawner := &fakeChildSpawner{foreign: true}
+		sd := &shardDelegator{
+			vchannelName: "v0",
+			children:     make(map[string]ShardDelegator),
+			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
+		}
+
+		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+		require.Eventually(t, func() bool { return spawner.attempts() == 1 }, time.Second, time.Millisecond)
+		assert.Never(t, func() bool { return len(childVChannels(sd)) > 0 }, 300*time.Millisecond, 5*time.Millisecond,
+			"a delegator that does not forward its deletes to this source was fronted")
+		_, err := sd.frontingFamily()
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable, "the target stays pending, so reads through the source stay refused")
+		assert.Empty(t, spawner.abortedVChannels(), "the source must not tear down a delegator it does not own")
+	})
+
+	t.Run("a spawn refused because another delegator serves the target is not retried", func(t *testing.T) {
+		spawner := &fakeChildSpawner{err: merr.WrapErrChannelReduplicate("v1", "served by a delegator this source does not front")}
+		sd := &shardDelegator{
+			vchannelName: "v0",
+			children:     make(map[string]ShardDelegator),
+			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
+		}
+
+		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+		require.Eventually(t, func() bool { return spawner.attempts() == 1 }, time.Second, time.Millisecond)
+		// the first retry would come after one second of backoff.
+		assert.Never(t, func() bool { return spawner.attempts() > 1 }, 1500*time.Millisecond, 10*time.Millisecond)
+		_, err := sd.frontingFamily()
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	})
+
+	t.Run("a child spawned after the delegator stopped is aborted, not fronted", func(t *testing.T) {
+		spawner := &fakeChildSpawner{}
+		sd := &shardDelegator{
+			vchannelName: "v0",
+			children:     make(map[string]ShardDelegator),
+			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
+		}
+		sd.lifetime.SetState(lifetime.Stopped)
+
+		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+		assert.Eventually(t, func() bool { return len(spawner.abortedVChannels()) == 1 }, time.Second, 5*time.Millisecond)
+		assert.Empty(t, childVChannels(sd))
+	})
+
 	t.Run("an empty target vchannel is rejected", func(t *testing.T) {
 		sd := &shardDelegator{
 			vchannelName: "v0",
@@ -364,6 +428,7 @@ func TestProcessSplitShard(t *testing.T) {
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
 			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
 		}
 		// the source is being released while a spawn is launched.
 		sd.MarkReleasing()
