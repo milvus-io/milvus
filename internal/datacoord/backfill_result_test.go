@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -320,5 +321,91 @@ func TestBuildV2Groups(t *testing.T) {
 		_, err := buildV2Groups("expected", seg)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "differs from datacoord bucket")
+	})
+}
+
+func TestOpsToManifestUpdates(t *testing.T) {
+	t.Run("add builds one column group and no drops", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, Format: "parquet", RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "_data/100_a.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		u, err := opsToManifestUpdates(entry)
+		assert.NoError(t, err)
+		require.Len(t, u.ColumnGroups, 1)
+		assert.Equal(t, []string{"100"}, u.ColumnGroups[0].Columns)
+		assert.Equal(t, "parquet", u.ColumnGroups[0].Format)
+		require.Len(t, u.ColumnGroups[0].Files, 1)
+		assert.Equal(t, "_data/100_a.parquet", u.ColumnGroups[0].Files[0].Path)
+		assert.Len(t, u.DropColumns, 0)
+	})
+
+	t.Run("replace drops the target columns and re-adds", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "replace", Columns: []string{"100"}, Format: "parquet", RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "_data/100_b.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		u, err := opsToManifestUpdates(entry)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"100"}, u.DropColumns)
+		require.Len(t, u.ColumnGroups, 1)
+		assert.Equal(t, []string{"100"}, u.ColumnGroups[0].Columns)
+	})
+
+	t.Run("empty format defaults to parquet", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, RowCount: 5,
+			Files: []BackfillManifestFile{{Path: "_data/100_c.parquet", StartIndex: 0, EndIndex: 5}},
+		}}}
+		u, err := opsToManifestUpdates(entry)
+		assert.NoError(t, err)
+		assert.Equal(t, "parquet", u.ColumnGroups[0].Format)
+	})
+
+	t.Run("unsupported op rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "upsert", Columns: []string{"100"},
+			Files: []BackfillManifestFile{{Path: "x", StartIndex: 0, EndIndex: 1}},
+		}}}
+		_, err := opsToManifestUpdates(entry)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported backfill manifest op")
+	})
+
+	t.Run("row count mismatch rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{
+			Type: "add", Columns: []string{"100"}, RowCount: 9,
+			Files: []BackfillManifestFile{{Path: "x", StartIndex: 0, EndIndex: 5}},
+		}}}
+		_, err := opsToManifestUpdates(entry)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "rowCount")
+	})
+
+	t.Run("empty files rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{{Type: "add", Columns: []string{"100"}}}}
+		_, err := opsToManifestUpdates(entry)
+		assert.Error(t, err)
+	})
+
+	t.Run("duplicate column across ops rejected", func(t *testing.T) {
+		entry := &BackfillSegment{Ops: []BackfillManifestOp{
+			{
+				Type: "add", Columns: []string{"100"}, RowCount: 5,
+				Files: []BackfillManifestFile{{Path: "_data/100_a.parquet", StartIndex: 0, EndIndex: 5}},
+			},
+			{
+				Type: "add", Columns: []string{"100"}, RowCount: 5,
+				Files: []BackfillManifestFile{{Path: "_data/100_b.parquet", StartIndex: 0, EndIndex: 5}},
+			},
+		}}
+		_, err := opsToManifestUpdates(entry)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "more than one op")
+	})
+
+	t.Run("no ops rejected", func(t *testing.T) {
+		_, err := opsToManifestUpdates(&BackfillSegment{})
+		assert.Error(t, err)
 	})
 }
