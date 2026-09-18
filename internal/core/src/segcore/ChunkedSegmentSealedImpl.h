@@ -1411,9 +1411,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<milvus_storage::api::Reader>
     CaptureReaderSnapshot() const;
 
-    std::shared_ptr<const TimestampData>
-    CaptureTimestampSnapshot() const;
-
     static bool
     RuntimeVectorIndexReady(const RuntimeResourceState* runtime,
                             FieldId field_id);

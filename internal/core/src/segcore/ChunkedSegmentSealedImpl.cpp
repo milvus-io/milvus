@@ -1388,12 +1388,6 @@ ChunkedSegmentSealedImpl::CaptureReaderSnapshot() const {
     return runtime != nullptr ? runtime->reader : nullptr;
 }
 
-std::shared_ptr<const TimestampData>
-ChunkedSegmentSealedImpl::CaptureTimestampSnapshot() const {
-    auto runtime = CaptureRuntimeResourceState();
-    return runtime != nullptr ? runtime->timestamps : nullptr;
-}
-
 bool
 ChunkedSegmentSealedImpl::RuntimeVectorIndexReady(
     const RuntimeResourceState* runtime, FieldId field_id) {

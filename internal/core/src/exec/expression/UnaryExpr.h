@@ -1042,12 +1042,6 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecTextMatch();
 
-    // Check if ngram index exists
-    bool
-    HasNgramIndex() const {
-        return ngram_reader_ != nullptr;
-    }
-
     std::optional<VectorPtr>
     ExecNgramMatch(EvalCtx& context);
 

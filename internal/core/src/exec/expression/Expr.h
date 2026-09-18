@@ -3127,19 +3127,6 @@ class SegmentExpr : public Expr {
         return valid_result;
     }
 
-    template <typename T, typename FUNC, typename... ValTypes>
-    void
-    ProcessIndexChunksV2(FUNC func, const ValTypes&... values) {
-        // For scalar index, num_index_chunk_ can only be 1
-        AssertInfo(num_index_chunk_ == 1,
-                   "scalar index should have exactly 1 chunk, got {}",
-                   num_index_chunk_);
-        const auto* predicate = PredicateReader<T>();
-        AssertInfo(predicate != nullptr,
-                   "selected index does not expose typed predicate reader");
-        func(predicate, values...);
-    }
-
  protected:
     int64_t
     GetDataChunkRemainingRows(size_t chunk_id, int64_t data_pos) const {

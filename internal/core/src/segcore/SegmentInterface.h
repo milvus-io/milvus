@@ -59,7 +59,6 @@
 #include "index/contracts/growing/IGrowingIndex.h"
 #include "index/contracts/query/IIndexReaderBase.h"
 #include "index/SkipIndex.h"
-#include "segcore/json_stats/JsonKeyStats.h"
 #include "segcore/indexing/FieldIndexCapability.h"
 #include "segcore/indexing/IndexPin.h"
 #include "mmap/ChunkedColumnInterface.h"

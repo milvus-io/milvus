@@ -26,6 +26,7 @@
 #include "segcore/Types.h"
 #include "common/Consts.h"
 #include "index/contracts/query/IIndexReaderBase.h"
+#include "index/Meta.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus::segcore {
