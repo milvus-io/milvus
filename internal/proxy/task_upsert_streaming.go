@@ -192,7 +192,12 @@ func (ut *upsertTask) appendUpsertAttempt(ctx context.Context, ez *message.Ciphe
 
 		insertDurable, err := fence.settle(resp, insertMsgs, insertOffsets)
 		pendingInserts.settle(insertDurable)
-		deleteResp := streaming.AppendResponses{Responses: resp.Responses[len(insertMsgs):]}
+		// A short response proves nothing durable for the messages it does not
+		// answer; settle reads a missing response as not landed.
+		var deleteResp streaming.AppendResponses
+		if len(resp.Responses) > len(insertMsgs) {
+			deleteResp.Responses = resp.Responses[len(insertMsgs):]
+		}
 		deleteDurable, deleteErr := fence.settle(deleteResp, deleteMsgs, deleteOffsets)
 		pendingDeletes.settle(deleteDurable)
 		if err == nil {

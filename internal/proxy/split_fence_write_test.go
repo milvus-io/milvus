@@ -1296,3 +1296,34 @@ func TestPartialUpdateWhoseProofPredatesARoutingChangeFailsRetriably(t *testing.
 	assert.Empty(t, wal.batches)
 	assert.Equal(t, 1, f.evictions)
 }
+
+// shortResponseWAL answers every append with no response at all.
+type shortResponseWAL struct {
+	streaming.WALAccesser
+	appends int
+}
+
+func (w *shortResponseWAL) AppendMessages(context.Context, ...streamingmessage.MutableMessage) streaming.AppendResponses {
+	w.appends++
+	return streaming.AppendResponses{}
+}
+
+// An append answered with fewer responses than messages proves nothing
+// durable: the upsert keeps every row and tombstone pending, and does not
+// index past the responses it got.
+func TestUpsertAppendToleratesAShortResponse(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := oneShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := &shortResponseWAL{}
+	old := streaming.WAL()
+	streaming.SetWALForTest(wal)
+	t.Cleanup(func() { streaming.SetWALForTest(old) })
+	task := f.upsertTask(t, seqPKs(4), seqPKs(4))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancel()
+	err := task.appendUpsertAttempt(ctx, nil)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.GreaterOrEqual(t, wal.appends, 2)
+}
