@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -27,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 type WriteBufferSuite struct {
@@ -84,7 +82,6 @@ func (s *WriteBufferSuite) SetupTest() {
 func (s *WriteBufferSuite) TestHasSegment() {
 	segmentID := int64(1001)
 
-	s.wb.allowGrowingSourceFlush = false
 	s.False(s.wb.HasSegment(segmentID))
 
 	s.wb.getOrCreateBuffer(segmentID, 0)
@@ -92,62 +89,11 @@ func (s *WriteBufferSuite) TestHasSegment() {
 	s.True(s.wb.HasSegment(segmentID))
 }
 
-func (s *WriteBufferSuite) TestFlushSourceModeNotifier() {
-	segmentID := int64(1001)
-	var notifiedSegmentID int64
-	var notifiedMode metacache.FlushSourceMode
-	s.wb.flushSourceModeNotifier = func(segmentID int64, mode metacache.FlushSourceMode) {
-		notifiedSegmentID = segmentID
-		notifiedMode = mode
-	}
-
-	s.Run("write_buffer_mode", func() {
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID}, nil, nil, nil)
-		metacache.SetFlushSourceMode(metacache.FlushSourceWriteBuffer)(segment)
-		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
-			action(segment)
-		}).Return().Once()
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
-
-		s.wb.allowGrowingSourceFlush = true
-		s.wb.getOrCreateBuffer(segmentID, 0)
-		s.Equal(segmentID, notifiedSegmentID)
-		s.Equal(metacache.FlushSourceWriteBuffer, notifiedMode)
-	})
-
-	s.Run("growing_mode", func() {
-		segmentID := int64(1002)
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: segmentID, StorageVersion: storage.StorageV3}, nil, nil, nil)
-		notifiedSegmentID = 0
-		notifiedMode = metacache.FlushSourceUnknown
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
-		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Run(func(action metacache.SegmentAction, _ ...metacache.SegmentFilter) {
-			action(segment)
-		}).Return().Once()
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
-
-		err := s.wb.recordGrowingSourceProgress(&InsertData{
-			segmentID:   segmentID,
-			partitionID: 10,
-			rowNum:      3,
-		}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200}, 1, 3)
-		s.NoError(err)
-		s.Equal(segmentID, notifiedSegmentID)
-		s.Equal(metacache.FlushSourceGrowing, notifiedMode)
-	})
-}
-
 func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 	param := paramtable.Get()
 	param.Save(param.CommonCfg.UseLoonFFI.Key, "false")
 	defer param.Reset(param.CommonCfg.UseLoonFFI.Key)
-	param.Save(param.CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	defer param.Reset(param.CommonCfg.EnableGrowingSourceFlush.Key)
-
 	s.Run("non_text_uses_v2_when_ffi_disabled", func() {
-		s.wb.allowGrowingSourceFlush = false
-		s.False(s.wb.AllowGrowingSourceFlush())
 		s.metacache.EXPECT().GetSegmentByID(int64(2001)).Return(nil, false).Once()
 		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
 			return info.GetStorageVersion() == storage.StorageV2 &&
@@ -159,24 +105,6 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 			PartitionID:    10,
 			SegmentID:      2001,
 			SchemaVersion:  11,
-			StorageVersion: storage.StorageV2,
-		})
-		s.NoError(err)
-	})
-
-	s.Run("growing_source_does_not_force_v3_manifest_when_ffi_disabled", func() {
-		s.wb.allowGrowingSourceFlush = true
-		s.metacache.EXPECT().GetSegmentByID(int64(2002)).Return(nil, false).Once()
-		s.metacache.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
-			return info.GetStorageVersion() == storage.StorageV2 &&
-				info.GetManifestPath() == "" &&
-				info.GetSchemaVersion() == 12
-		}), mock.Anything, mock.Anything, mock.Anything).Return().Once()
-
-		err := s.wb.CreateNewGrowingSegment(CreateGrowingSegmentInfo{
-			PartitionID:    10,
-			SegmentID:      2002,
-			SchemaVersion:  12,
 			StorageVersion: storage.StorageV2,
 		})
 		s.NoError(err)
@@ -199,7 +127,6 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 
 		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
 		s.Require().NoError(err)
-		s.False(wb.AllowGrowingSourceFlush())
 
 		mc.EXPECT().GetSegmentByID(int64(2003)).Return(nil, false).Once()
 		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
@@ -236,7 +163,6 @@ func (s *WriteBufferSuite) TestCreateNewGrowingSegmentStorageVersion() {
 
 		wb, err := newWriteBufferBase(s.channelName, mc, s.syncMgr, &writeBufferOption{})
 		s.Require().NoError(err)
-		s.False(wb.AllowGrowingSourceFlush())
 
 		mc.EXPECT().GetSegmentByID(int64(2004)).Return(nil, false).Once()
 		mc.EXPECT().AddSegment(mock.MatchedBy(func(info *datapb.SegmentInfo) bool {
@@ -283,24 +209,12 @@ func (s *WriteBufferSuite) TestFlushSegments() {
 func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	segmentID := int64(1001)
 
-	s.Run("non_text_returns_error", func() {
-		s.wb.allowGrowingSourceFlush = false
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
+	// A segment absent from the metacache is now an error unconditionally; the
+	// lenient path existed only for growing-source flush.
+	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
 
-		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
-		s.ErrorIs(err, merr.ErrSegmentNotFound)
-	})
-
-	s.Run("text_skips_missing_segment", func() {
-		s.wb.allowGrowingSourceFlush = true
-		defer func() {
-			s.wb.allowGrowingSourceFlush = false
-		}()
-		s.metacache.EXPECT().GetSegmentByID(segmentID).Return(nil, false).Once()
-
-		err := s.wb.SealSegments(context.Background(), []int64{segmentID})
-		s.NoError(err)
-	})
+	err := s.wb.SealSegments(context.Background(), []int64{segmentID})
+	s.ErrorIs(err, merr.ErrSegmentNotFound)
 }
 
 func (s *WriteBufferSuite) TestSealAllSegments() {
@@ -769,139 +683,6 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 			s.FailNow("EvictBuffer should finish after sync is released")
 		}
 	})
-}
-
-func (s *WriteBufferSuite) TestGrowingSourceProgressSelectedByPolicy() {
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.SyncPeriod.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.SyncPeriod.Key)
-	paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key, "100")
-	defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushInsertBufferSize.Key)
-	originalEstSize := s.wb.estSizePerRecord
-	s.wb.estSizePerRecord = 10
-	defer func() {
-		s.wb.estSizePerRecord = originalEstSize
-	}()
-
-	now := time.Now()
-	recentTs := tsoutil.ComposeTSByTime(now.Add(500 * time.Millisecond))
-	staleTs := tsoutil.ComposeTSByTime(now.Add(2 * time.Second))
-	startTs := tsoutil.ComposeTSByTime(now)
-
-	s.Run("pending_flush", func() {
-		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1001, &growingSourceProgress{
-			segmentID:    1001,
-			pendingFlush: true,
-		})
-		s.True(selected)
-	})
-
-	s.Run("non_retryable_failure", func() {
-		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1007, &growingSourceProgress{
-			segmentID:           1007,
-			pendingFlush:        true,
-			nonRetryableFailure: true,
-		})
-		s.False(selected)
-	})
-
-	s.Run("sealed_segment", func() {
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			ID:    1002,
-			State: commonpb.SegmentState_Sealed,
-		}, nil, nil, nil)
-		s.metacache.EXPECT().GetSegmentByID(int64(1002)).Return(segment, true).Once()
-
-		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1002, &growingSourceProgress{
-			segmentID: 1002,
-		})
-		s.True(selected)
-	})
-
-	s.Run("recent_progress", func() {
-		s.metacache.EXPECT().GetSegmentByID(int64(1003)).Return(nil, false).Once()
-
-		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1003, &growingSourceProgress{
-			segmentID: 1003,
-			batches: []growingSourceProgressBatch{
-				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
-			},
-		})
-		s.False(selected)
-	})
-
-	s.Run("below_row_threshold", func() {
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 1004,
-		}, nil, nil, nil)
-		s.metacache.EXPECT().GetSegmentByID(int64(1004)).Return(segment, true).Once()
-
-		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1004, &growingSourceProgress{
-			segmentID:    1004,
-			targetOffset: 9,
-			batches: []growingSourceProgressBatch{
-				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
-			},
-		})
-		s.False(selected)
-	})
-
-	s.Run("row_threshold", func() {
-		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			ID: 1005,
-		}, nil, nil, nil)
-		s.metacache.EXPECT().GetSegmentByID(int64(1005)).Return(segment, true).Once()
-
-		selected := s.wb.growingSourceProgressSelectedByPolicy(recentTs, 1005, &growingSourceProgress{
-			segmentID:    1005,
-			targetOffset: 10,
-		})
-		s.True(selected)
-	})
-
-	s.Run("stale_progress", func() {
-		s.metacache.EXPECT().GetSegmentByID(int64(1006)).Return(nil, false).Once()
-
-		selected := s.wb.growingSourceProgressSelectedByPolicy(staleTs, 1006, &growingSourceProgress{
-			segmentID: 1006,
-			batches: []growingSourceProgressBatch{
-				{startPosition: &msgpb.MsgPosition{Timestamp: startTs}},
-			},
-		})
-		s.True(selected)
-	})
-}
-
-func (s *WriteBufferSuite) TestGrowingSourceLayoutMismatch() {
-	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column count mismatch at index 0: existing has 21 columns, but appended has 44 columns: segcore error[segcoreCode=2001]")))
-	s.True(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: Invalid: Column group size mismatch: existing has 10 groups, but appended has 1 groups: segcore error[segcoreCode=2001]")))
-	s.False(isGrowingSourceLayoutMismatch(errors.New("flush growing source data: mock transient error")))
-	s.False(isGrowingSourceLayoutMismatch(nil))
-}
-
-func (s *WriteBufferSuite) TestGrowingSourceProgressSyncableSkipsNonRetryableFailure() {
-	syncable, retry := s.wb.growingSourceProgressSyncable(1001, &growingSourceProgress{
-		segmentID:           1001,
-		nonRetryableFailure: true,
-		batches: []growingSourceProgressBatch{
-			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
-		},
-	}, false, true)
-	s.False(syncable)
-	s.False(retry)
-}
-
-func (s *WriteBufferSuite) TestGrowingSourceProgressRetrySkipsNonRetryableFailure() {
-	s.wb.growingSourceProgress[1001] = &growingSourceProgress{
-		segmentID:           1001,
-		nonRetryableFailure: true,
-		batches: []growingSourceProgressBatch{
-			{endPosition: &msgpb.MsgPosition{Timestamp: 100}, endOffset: 10},
-		},
-	}
-
-	segments, retry := s.wb.getGrowingSourceSegmentsToRetry()
-	s.Empty(segments)
-	s.False(retry)
 }
 
 func (s *WriteBufferSuite) TestDropPartitions() {
