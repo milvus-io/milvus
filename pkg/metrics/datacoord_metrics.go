@@ -459,6 +459,60 @@ var (
 			Help:      "number of snapshot export jobs that reached a terminal state",
 		}, []string{statusLabelName})
 
+	// DataCoordManifestIndexBackfillPending is the number of historical
+	// finished StorageV3 SegmentIndex catalog rows still eligible to move into
+	// segment manifests. The scan recomputes it from in-memory durable-placement
+	// state on every tick.
+	DataCoordManifestIndexBackfillPending = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "manifest_index_backfill_pending_records",
+			Help:      "number of finished StorageV3 segment index catalog records waiting to move into segment manifests",
+		})
+
+	// DataCoordManifestIndexBackfillRecords counts individual record migration
+	// attempts. A persistently increasing failed label means the optional
+	// migration is not converging; stale and skipped are self-healing races.
+	DataCoordManifestIndexBackfillRecords = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "manifest_index_backfill_records_total",
+			Help:      "number of segment index catalog records handled by manifest backfill, by outcome",
+		}, []string{statusLabelName})
+
+	DataCoordManifestIndexRollbackPending = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
+		Name: "manifest_index_rollback_pending_segments",
+		Help: "number of segments with a manifest index marker or catalog-absent index records before rollback batch limiting",
+	})
+	DataCoordManifestIndexRollbackPendingCopies = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
+		Name: "manifest_index_rollback_pending_copy_tasks",
+		Help: "number of unfinished copy tasks blocking manifest index rollback readiness",
+	})
+	DataCoordManifestIndexRollbackPendingRecords = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
+		Name: "manifest_index_rollback_pending_records",
+		Help: "number of in-memory segment index records still known to lack a catalog row",
+	})
+	DataCoordManifestIndexRollbackReady = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
+		Name: "manifest_index_rollback_ready",
+		Help: "one after an active complete scan finds no manifest indexes, catalog-absent records or unfinished copy tasks; zero otherwise",
+	})
+	DataCoordManifestIndexRollbackRecords = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
+		Name: "manifest_index_rollback_records_total",
+		Help: "number of segment index records successfully restored to etcd by rollback",
+	})
+	DataCoordManifestIndexRollbackAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: milvusNamespace, Subsystem: typeutil.DataCoordRole,
+		Name: "manifest_index_rollback_segments_total",
+		Help: "number of segment rollback attempts by outcome",
+	}, []string{statusLabelName})
+
 	DataCoordSnapshotExportJobLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -510,6 +564,14 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordSnapshotExportActiveJobs)
 	registry.MustRegister(DataCoordSnapshotExportTerminalJobs)
 	registry.MustRegister(DataCoordSnapshotExportJobLatency)
+	registry.MustRegister(DataCoordManifestIndexBackfillPending)
+	registry.MustRegister(DataCoordManifestIndexBackfillRecords)
+	registry.MustRegister(DataCoordManifestIndexRollbackPending)
+	registry.MustRegister(DataCoordManifestIndexRollbackPendingCopies)
+	registry.MustRegister(DataCoordManifestIndexRollbackPendingRecords)
+	registry.MustRegister(DataCoordManifestIndexRollbackReady)
+	registry.MustRegister(DataCoordManifestIndexRollbackRecords)
+	registry.MustRegister(DataCoordManifestIndexRollbackAttempts)
 	registerStreamingCoord(registry)
 }
 
