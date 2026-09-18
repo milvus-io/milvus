@@ -51,7 +51,7 @@ func TestRetainedMVCCConsistencyFallbacks(t *testing.T) {
 				calls = 0
 				unavailable = tc.unavailable
 				sd := &shardDelegator{vchannelName: "v1", latestRequiredMVCCTimeTick: atomic.NewUint64(90)}
-				require.Equal(t, tc.target, sd.speedupGuranteeTS(context.Background(), tc.consistency, 1000, tc.snapshot, tc.iterator))
+				require.Equal(t, tc.target, sd.speedupGuranteeTS(context.Background(), nil, tc.consistency, 1000, tc.snapshot, tc.iterator))
 				require.Equal(t, uint64(1000), sd.latestRequiredMVCCTimeTick.Load(), "periodic fallback must still see the original guarantee")
 				require.Equal(t, tc.calls, calls)
 			})
