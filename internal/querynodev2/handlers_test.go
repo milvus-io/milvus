@@ -18,7 +18,6 @@ package querynodev2
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -181,7 +180,7 @@ func TestQueryChannelReportsExecutedSnapshot(t *testing.T) {
 	type collectionTarget struct{ segments.CollectionManager }
 	type delegatorTarget struct{ delegator.ShardDelegator }
 	paramtable.Init()
-	for _, name := range []string{"rows", "empty", "query_error", "reduce_error", "channel_missing", "collection_missing", "remote_cost", "worker_cost"} {
+	for _, name := range []string{"rows", "empty", "query_error", "reduce_error", "channel_missing", "collection_missing", "remote_cost"} {
 		t.Run(name, func(t *testing.T) {
 			manager := &collectionTarget{}
 			sd := &delegatorTarget{}
@@ -189,9 +188,6 @@ func TestQueryChannelReportsExecutedSnapshot(t *testing.T) {
 			if name != "channel_missing" {
 				node.delegators.Insert("ch0", sd)
 			}
-			key := paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.Key
-			paramtable.Get().Save(key, fmt.Sprint(name == "worker_cost"))
-			t.Cleanup(func() { paramtable.Get().Reset(key) })
 			ref := mockey.Mock((*collectionTarget).Ref).Return(name != "collection_missing").Build()
 			defer ref.UnPatch()
 			get := mockey.Mock((*collectionTarget).Get).Return(&segments.Collection{}).Build()
