@@ -29,14 +29,34 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// newImportTaskForFields builds an import task whose log id range is [0, logIDEnd), the
+// fallback source for a file that carries no per-file ID range.
+func newImportTaskForFields(schema *schemapb.CollectionSchema, logIDEnd int64) *ImportTask {
+	idRange := &datapb.IDRange{Begin: 0, End: logIDEnd}
+	return &ImportTask{
+		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema, IDRange: idRange},
+		allocator: allocator.NewLocalAllocator(idRange.GetBegin(), idRange.GetEnd()),
+	}
+}
+
+// newFileIDRange builds the per-file ID range [begin, end) of a file.
+func newFileIDRange(begin, end int64) *importid.FileIDRange {
+	return importid.NewFileIDRange(&internalpb.ImportFile{
+		Id:      1,
+		IdRange: &commonpb.IDRange{Begin: begin, End: end},
+	})
+}
 
 func Test_AppendSystemFieldsData(t *testing.T) {
 	const count = 100
@@ -65,13 +85,8 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	}
 
 	schema := &schemapb.CollectionSchema{}
-	task := &ImportTask{
-		req: &datapb.ImportRequest{
-			Ts:     1000,
-			Schema: schema,
-		},
-		allocator: allocator.NewLocalAllocator(0, count*2),
-	}
+	// No per-file range: the legacy fallback takes row ids from the log id range.
+	task := newImportTaskForFields(schema, count*2)
 
 	pkField.DataType = schemapb.DataType_Int64
 	schema.Fields = []*schemapb.FieldSchema{pkField, vecField, int64Field}
@@ -81,7 +96,7 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Nil(t, insertData.Data[common.RowIDField])
 	assert.Nil(t, insertData.Data[common.TimeStampField])
 	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
-	err = AppendSystemFieldsData(task, insertData, rowNum)
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[pkField.GetFieldID()].RowNum())
 	assert.Equal(t, count, insertData.Data[common.RowIDField].RowNum())
@@ -95,7 +110,7 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Nil(t, insertData.Data[common.RowIDField])
 	assert.Nil(t, insertData.Data[common.TimeStampField])
 	rowNum, _ = GetInsertDataRowCount(insertData, task.GetSchema())
-	err = AppendSystemFieldsData(task, insertData, rowNum)
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, nil)
 	assert.NoError(t, err)
 	assert.Equal(t, count, insertData.Data[pkField.GetFieldID()].RowNum())
 	assert.Equal(t, count, insertData.Data[common.RowIDField].RowNum())
@@ -125,10 +140,7 @@ func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
 	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
 	schema.Properties = []*commonpb.KeyValuePair{{Key: common.AllowInsertAutoIDKey, Value: "true"}}
 
-	task := &ImportTask{
-		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema},
-		allocator: allocator.NewLocalAllocator(0, count*2),
-	}
+	task := newImportTaskForFields(schema, count*2)
 
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
@@ -140,7 +152,7 @@ func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
 	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: userPK}
 
 	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
-	err = AppendSystemFieldsData(task, insertData, rowNum)
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, nil)
 	assert.NoError(t, err)
 
 	got := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData)
@@ -148,6 +160,170 @@ func Test_AppendSystemFieldsData_AllowInsertAutoID_KeepUserPK(t *testing.T) {
 	for i := 0; i < count; i++ {
 		assert.Equal(t, userPK[i], got.Data[i])
 	}
+}
+
+func Test_AppendSystemFieldsData_BackupKeepsRowIDAndSkipsPerRowAlloc(t *testing.T) {
+	const count = 10
+
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+
+	// Backup/binlog restore keeps its source PK/RowID/timestamp, so no row id is taken
+	// even though the request's log id range holds a single id.
+	task := newImportTaskForFields(schema, 1)
+
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	userPK := make([]int64, count)
+	for i := 0; i < count; i++ {
+		userPK[i] = 1000 + int64(i)
+	}
+	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: userPK}
+	insertData.Data[common.RowIDField] = &storage.Int64FieldData{Data: userPK}
+	insertData.Data[common.TimeStampField] = &storage.Int64FieldData{Data: userPK}
+
+	// Mirror NewImportTask: restore unsets autoID so the primary key keeps the
+	// binlog value instead of being regenerated.
+	UnsetAutoID(schema)
+
+	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, nil)
+	assert.NoError(t, err)
+
+	// PK must stay the user-provided (binlog) values, not regenerated IDs.
+	gotPK := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotPK.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], gotPK.Data[i])
+	}
+	// RowID and timestamp must also be preserved untouched.
+	gotRowID := insertData.Data[common.RowIDField].(*storage.Int64FieldData)
+	gotTS := insertData.Data[common.TimeStampField].(*storage.Int64FieldData)
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], gotRowID.Data[i])
+		assert.Equal(t, userPK[i], gotTS.Data[i])
+	}
+}
+
+func Test_AppendSystemFieldsData_ExplicitPKRowIDFromRange(t *testing.T) {
+	const count = 10
+
+	// Explicit-PK collection: the PK comes from the file, and the per-file
+	// IdRange range supplies the RowID. The task-level allocator must
+	// NOT be consumed per row (it only feeds logIDs after the per-file range
+	// mechanism is in place). Use a one-ID allocator: if the old per-row fallback
+	// were taken the call would fail with ID exhausted.
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       false,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+
+	// Per-file range replicated from the primary: [100, 100+count). The request's log id
+	// range holds a single id, so the fallback would blow up if it were taken.
+	task := newImportTaskForFields(schema, 1)
+	cur := newFileIDRange(100, 100+count)
+
+	insertData, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+
+	// PK comes from the file (explicit), RowID is absent (ordinary import has no
+	// system fields) -> the datanode must derive RowID from the per-file range.
+	userPK := make([]int64, count)
+	for i := 0; i < count; i++ {
+		userPK[i] = 1000 + int64(i)
+	}
+	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: userPK}
+
+	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
+	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, cur)
+	assert.NoError(t, err)
+
+	// PK preserved from the file.
+	gotPK := insertData.Data[pkField.GetFieldID()].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotPK.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, userPK[i], gotPK.Data[i])
+	}
+	// RowID derived from the per-file range, not from the task allocator.
+	gotRowID := insertData.Data[common.RowIDField].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotRowID.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, int64(100+i), gotRowID.Data[i])
+	}
+	// Timestamp filled from the task.
+	gotTS := insertData.Data[common.TimeStampField].(*storage.Int64FieldData)
+	assert.Equal(t, count, gotTS.RowNum())
+	for i := 0; i < count; i++ {
+		assert.Equal(t, int64(1000), gotTS.Data[i])
+	}
+}
+
+// A zero-width range is an explicit reservation (the zero-row file case), not an absent
+// one: if the file yields rows when it is read, the cursor must fail loudly instead of
+// falling back to the task-level local allocator, which would give each cluster its own
+// RowIDs.
+func Test_AppendSystemFieldsData_ZeroWidthRangeFailsOnRows(t *testing.T) {
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       false,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{Key: common.DimKey, Value: "4"},
+		},
+	}
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+
+	// Zero-width per-file range: reserved no ids. The single-id log id range would let a
+	// fallback succeed, so the failure proves the range is the authority.
+	task := newImportTaskForFields(schema, 1)
+	cur := newFileIDRange(100, 100)
+
+	insertData, err := testutil.CreateInsertData(schema, 1)
+	assert.NoError(t, err)
+	insertData.Data[pkField.GetFieldID()] = &storage.Int64FieldData{Data: []int64{1000}}
+
+	err = appendSystemFieldsDataWithCursor(task, insertData, 1, cur)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "more rows than its reserved ID range")
 }
 
 func Test_UnsetAutoID(t *testing.T) {
@@ -1091,6 +1267,29 @@ func TestNewWriteRetryOptions(t *testing.T) {
 	assert.LessOrEqual(t, runUntilCancel(), 2)
 }
 
+func TestNewWriteRetryOptions_StopsOnIDExhausted(t *testing.T) {
+	paramtable.Init()
+	calls := 0
+	err := retry.Do(context.Background(), func() error {
+		calls++
+		return allocator.NewIDExhaustedError(1, 1, 1)
+	}, newWriteRetryOptions()...)
+	assert.Error(t, err)
+	assert.Equal(t, 1, calls, "ID exhaustion must be terminal, not retried")
+	assert.True(t, allocator.IsIDExhausted(err))
+}
+
+func TestNewWriteRetryOptions_InputErrorStillTerminal(t *testing.T) {
+	paramtable.Init()
+	calls := 0
+	err := retry.Do(context.Background(), func() error {
+		calls++
+		return merr.WrapErrParameterInvalidMsg("bad write parameter")
+	}, newWriteRetryOptions()...)
+	assert.Error(t, err)
+	assert.Equal(t, 1, calls, "the RetryErr predicate must preserve the default InputError abort")
+}
+
 func Test_appendSystemFieldsDataWithCursor(t *testing.T) {
 	const count = 10
 	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "pk", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64}
@@ -1099,15 +1298,13 @@ func Test_appendSystemFieldsDataWithCursor(t *testing.T) {
 		TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}},
 	}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField, vecField}}
-	task := &ImportTask{
-		req:       &datapb.ImportRequest{Ts: 1000, Schema: schema},
-		allocator: allocator.NewLocalAllocator(0, 1), // must NOT be used on the cursor path
-	}
+	// Per-file range [7000, 7100); the single-id log id range must never be touched.
+	task := newImportTaskForFields(schema, 1)
+	cur := newFileIDRange(7000, 7100)
 
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
 	rowNum, _ := GetInsertDataRowCount(insertData, task.GetSchema())
-	cur := &pkCursor{begin: 7000, end: 7100, next: 7000}
 	err = appendSystemFieldsDataWithCursor(task, insertData, rowNum, cur)
 	assert.NoError(t, err)
 
@@ -1117,14 +1314,20 @@ func Test_appendSystemFieldsDataWithCursor(t *testing.T) {
 	// RowID mirrors the PK deterministically.
 	rowIDs := insertData.Data[common.RowIDField].(*storage.Int64FieldData).Data
 	assert.Equal(t, pks, rowIDs)
-	// cursor advanced by rowNum.
-	assert.Equal(t, int64(7000+count), cur.next)
 
-	// Overflow: a range smaller than the batch fails loudly (no silent divergence).
+	// The next batch of the same file continues where the previous one stopped.
 	insertData2, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
-	small := &pkCursor{begin: 0, end: 5, next: 0}
-	err = appendSystemFieldsDataWithCursor(task, insertData2, count, small)
+	err = appendSystemFieldsDataWithCursor(task, insertData2, count, cur)
+	assert.NoError(t, err)
+	next := insertData2.Data[pkField.GetFieldID()].(*storage.Int64FieldData).Data
+	assert.Equal(t, int64(7000+count), next[0])
+
+	// Overflow: a range smaller than the batch fails loudly (no silent divergence).
+	small := newFileIDRange(0, 5)
+	insertData3, err := testutil.CreateInsertData(schema, count)
+	assert.NoError(t, err)
+	err = appendSystemFieldsDataWithCursor(task, insertData3, count, small)
 	assert.Error(t, err)
 }
 
@@ -1149,19 +1352,16 @@ func Test_Import_CrossClusterDeterminism(t *testing.T) {
 	f0 := fileRange{"file0", 1000, 1100, 40}
 	f1 := fileRange{"file1", 5000, 5100, 30}
 
-	// run simulates one cluster: a fresh task with a deliberately tiny local
-	// allocator (would error if the cursor path used it), processing files in the
-	// given order. Returns file name -> derived PK slice.
+	// run simulates one cluster: a fresh task whose log id range holds a single id (any
+	// fallback use blows up), processing files in the given order. Returns file name ->
+	// derived PK slice.
 	run := func(order []fileRange) map[string][]int64 {
-		task := &ImportTask{
-			req:       &datapb.ImportRequest{Ts: 1, Schema: schema},
-			allocator: allocator.NewLocalAllocator(0, 1), // 1 id only: any use blows up
-		}
+		task := newImportTaskForFields(schema, 1)
 		out := make(map[string][]int64)
 		for _, f := range order {
 			data, err := testutil.CreateInsertData(schema, f.rows)
 			assert.NoError(t, err)
-			cur := &pkCursor{begin: f.begin, end: f.end, next: f.begin}
+			cur := newFileIDRange(f.begin, f.end)
 			err = appendSystemFieldsDataWithCursor(task, data, f.rows, cur)
 			assert.NoError(t, err)
 			out[f.name] = append([]int64(nil), data.Data[pkField.GetFieldID()].(*storage.Int64FieldData).Data...)

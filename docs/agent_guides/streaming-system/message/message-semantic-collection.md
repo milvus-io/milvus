@@ -19,7 +19,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| Import | Broadcast: VChannels (no CChannel) | No | SharedDBName + ExclusiveCollectionName |
+| Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| ImportIDRange | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
 | CreateSegment *(SelfControlled)* | Single VChannel | No | — |
@@ -42,6 +43,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
 - **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection.
+- **ImportIDRange**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (flusher no-op).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
@@ -83,6 +85,14 @@ CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollect
 
 - **CreateSegment** must precede any Insert referencing that segment.
 - Any message with flush semantics (Flush, ManualFlush, DropPartition, DropCollection, TruncateCollection, FlushAll) seals the segment. No Insert may reference it afterward.
+
+### Import Lifecycle
+
+```
+Import → ImportIDRange → (CommitImport | RollbackImport)
+```
+
+- For the same job, **Import** must precede **ImportIDRange**, which must precede **CommitImport** or **RollbackImport**. All are broadcast to the job's data VChannels plus the CChannel, so per-PChannel WAL order enforces the sequence and the CChannel copy gives their ack callbacks a single cluster-wide order.
 
 ### Exclusive Lock Rule
 
