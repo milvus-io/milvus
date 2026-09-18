@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -405,26 +406,65 @@ func (s *Server) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckSh
 	}, nil
 }
 
+// splitSourcesDrained is the drain predicate CheckShardSplitDrained answers
+// with, and the one the split manager moves a task to Adopting on and issues
+// the adoption after.
 func (s *Server) splitSourcesDrained(ctx context.Context, task *datapb.SplitShardTask) bool {
+	return s.splitDrainBlockReason(ctx, task) == ""
+}
+
+// splitDrainBlockReason names the first drain conjunct the task's sources do
+// not satisfy yet, in the order splitSourcesDrained checks them, or "" once
+// they are drained. The predicate IS this function: splitSourcesDrained, the
+// split manager's stall logs and every caller of either are defined by it and
+// its two halves (liveSegmentBlockReason, fenceFlushBlockReason), so there is
+// one drain predicate and one set of reason strings, and nothing that logs why
+// a split is waiting can disagree with what CheckShardSplitDrained answers.
+func (s *Server) splitDrainBlockReason(ctx context.Context, task *datapb.SplitShardTask) string {
 	for _, source := range task.GetSources() {
-		vchannel := source.GetVchannel()
-		if s.hasLiveSegmentOnVChannel(vchannel) {
-			return false
-		}
-		if source.GetSwitchTimeTick() == 0 {
-			// The fence has not been recorded for this source, so there is no
-			// tick to have caught up to and conjunct (b) below would compare
-			// against zero and pass vacuously --- collapsing the predicate to
-			// the empty scan it exists to close. A source that still accepts
-			// writes is never drained.
-			return false
-		}
-		cp := s.meta.GetChannelCheckpoint(vchannel)
-		if cp == nil || cp.GetTimestamp() < source.GetSwitchTimeTick() {
-			return false
+		if reason := s.liveSegmentBlockReason(source.GetVchannel()); reason != "" {
+			return reason
 		}
 	}
-	return !s.hasActiveImportOnAnyVChannel(ctx, splitSourceVChannels(task))
+	if reason := s.fenceFlushBlockReason(task); reason != "" {
+		return reason
+	}
+	if s.hasActiveImportOnAnyVChannel(ctx, splitSourceVChannels(task)) {
+		return "an import is still in progress on a source"
+	}
+	return ""
+}
+
+// fenceFlushBlockReason names the first source whose fence has not been
+// recorded or whose channel checkpoint has not reached it, or "" once every
+// source is past its own T_switch.
+//
+// A zero T_switch is a source whose fence has not been recorded, i.e. one that
+// may still be accepting writes: there is no tick to have caught up to, and
+// comparing the checkpoint against zero would pass vacuously and collapse the
+// predicate to the empty segment scan it exists to close. A source with no
+// checkpoint at all has not caught up either.
+//
+// It is the drain without the segment scan and the import check, split out
+// because a redistribution must start only once every source is past its
+// T_switch (design doc §6.3 step 2.1): from then on the source's WAL is closed
+// and every segment the fence sealed is in meta.
+func (s *Server) fenceFlushBlockReason(task *datapb.SplitShardTask) string {
+	for _, source := range task.GetSources() {
+		vchannel := source.GetVchannel()
+		if source.GetSwitchTimeTick() == 0 {
+			return fmt.Sprintf("source %s fence not recorded yet (switch time tick is zero)", vchannel)
+		}
+		cp := s.meta.GetChannelCheckpoint(vchannel)
+		if cp == nil {
+			return fmt.Sprintf("source %s has no channel checkpoint yet", vchannel)
+		}
+		if cp.GetTimestamp() < source.GetSwitchTimeTick() {
+			return fmt.Sprintf("source %s checkpoint %d has not reached its switch time tick %d",
+				vchannel, cp.GetTimestamp(), source.GetSwitchTimeTick())
+		}
+	}
+	return ""
 }
 
 // splitSourceFenceRecorded is the shard split's
@@ -477,15 +517,18 @@ func (s *Server) channelCheckpointCovers(vchannel string, cp *msgpb.MsgPosition,
 	return ok && cp.GetTimestamp() >= switchTimeTick
 }
 
-// hasLiveSegmentOnVChannel reports whether the channel still carries a segment
-// in a non-Dropped state, i.e. data a reader could still be routed to.
-func (s *Server) hasLiveSegmentOnVChannel(vchannel string) bool {
+// liveSegmentBlockReason names the first segment still on vchannel in a
+// non-Dropped state -- data a reader could still be routed to -- by id, level
+// and state, so a stall log says exactly what is still there. "" once none is
+// left.
+func (s *Server) liveSegmentBlockReason(vchannel string) string {
 	for _, segment := range s.meta.GetRealSegmentsForChannel(vchannel) {
 		if segment.GetState() != commonpb.SegmentState_Dropped {
-			return true
+			return fmt.Sprintf("source %s still has a live segment %d (level %s, state %s)",
+				vchannel, segment.GetID(), segment.GetLevel(), segment.GetState())
 		}
 	}
-	return false
+	return ""
 }
 
 // hasActiveImportOnAnyVChannel reports whether an unfinished import job targets
