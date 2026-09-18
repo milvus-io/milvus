@@ -40,9 +40,13 @@ For a before/after comparison, run this same example on the parent revision with
 the same feature flags and dictionary files. Set an external memory limit for
 unfixed runs: 1000 runtime dictionaries can require tens of GiB.
 
-Cached dictionaries remain resident only while consumers hold strong references.
-Both cache layers retain weak references, so releasing the last consumer drops
-the dictionary. Per-key initialization locks remain cached to coordinate reloads.
+Dictionary lifetime follows its consumers, not the process lifetime. Both cache
+layers retain only weak references: releasing the last strong reference drops
+the dictionary immediately, without waiting for process exit. Cache keys, weak
+references, and per-key initialization locks remain cached to coordinate reloads;
+they do not keep the dictionary's owned buffers alive. Releasing those allocations
+does not guarantee an immediate decrease in process RSS.
+
 While a dictionary is live, previously loaded paths reuse it without accessing
 the dictionary directory, including after file replacement or symlink retargeting.
 After it is released, the next request resolves the path and loads it again.
