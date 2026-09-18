@@ -345,7 +345,7 @@ func (s *Server) initQueryCoord() error {
 
 	// Init checker controller
 	mlog.Info(s.ctx, "init checker controller")
-	s.splitState = checkers.NewSplitStateCache(s.broker)
+	// s.splitState is built in initMeta, next to the target manager that shares it.
 	s.checkerController = checkers.NewCheckerControllerWithSplitState(
 		s.meta,
 		s.dist,
@@ -415,7 +415,11 @@ func (s *Server) initMeta() error {
 	}
 
 	s.dist = meta.NewDistributionManager(s.nodeMgr)
-	s.targetMgr = meta.NewTargetManager(s.broker, s.meta)
+	// One split state view for the target manager (window marks on each
+	// next-target pull) and the checkers, so they never disagree about when a
+	// window ended.
+	s.splitState = checkers.NewSplitStateCache(s.broker)
+	s.targetMgr = meta.NewTargetManagerWithSplitState(s.broker, s.meta, s.splitState)
 	err = s.targetMgr.Recover(s.ctx, s.store)
 	if err != nil {
 		mlog.Warn(s.ctx, "failed to recover collection targets", mlog.Err(err))
