@@ -552,7 +552,11 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			}
 		}
 		// Select the final write channels from the proofs captured by this read.
-		groups, err := it.buildPartialUpdateCASGroups()
+		route, err := it.writeRoute(ctx)
+		if err != nil {
+			return nil, err
+		}
+		groups, err := it.buildPartialUpdateCASGroups(route)
 		if err != nil {
 			return nil, err
 		}

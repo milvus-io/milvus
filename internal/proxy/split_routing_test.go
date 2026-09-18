@@ -1,0 +1,329 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package proxy
+
+import (
+	"context"
+	"fmt"
+	"math/rand"
+	"testing"
+
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/util/routing"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func int64IDs(pks ...int64) *schemapb.IDs {
+	return &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: pks}}}
+}
+
+func strIDs(pks ...string) *schemapb.IDs {
+	return &schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: pks}}}
+}
+
+func insertMsgOf(numRows int) *msgstream.InsertMsg {
+	return &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{NumRows: uint64(numRows)}}
+}
+
+func splitShardInfo(state schemapb.ShardState, vchannel string, buckets ...uint64) *schemapb.CollectionShardInfo {
+	info := &schemapb.CollectionShardInfo{State: state, VchannelName: vchannel}
+	if len(buckets) > 0 {
+		info.Routing = &schemapb.CollectionShardInfo_HashRouting{
+			HashRouting: &schemapb.HashRouting{Buckets: buckets},
+		}
+	}
+	return info
+}
+
+// splitCollectionInfo is the proxy's cache entry of a collection as a describe
+// returns it: never split when modulus is 0, split otherwise.
+func splitCollectionInfo(collectionID int64, modulus uint64, vchannels []string, infos ...*schemapb.CollectionShardInfo) *collectionInfo {
+	resp := &milvuspb.DescribeCollectionResponse{
+		CollectionID:        collectionID,
+		VirtualChannelNames: vchannels,
+		RoutingModulus:      modulus,
+		ShardInfos:          infos,
+	}
+	pchannels := make([]string, len(vchannels))
+	for i, vchannel := range vchannels {
+		pchannels[i] = vchannel + "-p"
+	}
+	return &collectionInfo{
+		CollID:         collectionID,
+		VChannels:      vchannels,
+		PChannels:      pchannels,
+		ShardInfos:     infos,
+		RoutingModulus: modulus,
+		SplitRouting:   metacache.NewSplitRouting(resp),
+	}
+}
+
+// neverSplitRoutingCache is a cache whose collections have never been split,
+// for write-path tests that are not about routing: the write path reads the
+// collection's routing on every attempt.
+func neverSplitRoutingCache(t *testing.T) *MockCache {
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	return cache
+}
+
+// A split of v0 of a two-shard collection: v0 owned residue 0 of 2, and its
+// targets own 0 and 2 of 4 while the untouched v1 is re-expressed as {1, 3}.
+func twoShardSplitInfo() *collectionInfo {
+	return splitCollectionInfo(1, 4, []string{"v0", "v1", "v2", "v3"},
+		splitShardInfo(schemapb.ShardState_ShardSplitting, "v0"),
+		splitShardInfo(schemapb.ShardState_ShardNormal, "v1", 1, 3),
+		splitShardInfo(schemapb.ShardState_ShardCreating, "v2", 0),
+		splitShardInfo(schemapb.ShardState_ShardCreating, "v3", 2),
+	)
+}
+
+func TestAssignChannelsByPKFollowsResiduesNotPosition(t *testing.T) {
+	info := twoShardSplitInfo()
+	table := info.SplitRouting.Table
+	pks := make([]int64, 256)
+	for i := range pks {
+		pks[i] = int64(i*7919 + 1)
+	}
+	insertMsg := insertMsgOf(len(pks))
+
+	got, err := assignChannelsByPK(table, int64IDs(pks...), info.VChannels, insertMsg)
+	require.NoError(t, err)
+
+	assert.NotContains(t, got, "v0", "the fenced source owns no residue")
+	seen := 0
+	for vchannel, offsets := range got {
+		for _, offset := range offsets {
+			owner, err := table.VChannelOfPK(pks[offset])
+			require.NoError(t, err)
+			assert.Equal(t, owner, vchannel, "pk %d", pks[offset])
+			assert.Equal(t, vchannel, info.VChannels[insertMsg.HashValues[offset]])
+			seen++
+		}
+	}
+	assert.Equal(t, len(pks), seen)
+}
+
+// A never-split collection places every key exactly where the legacy modulo
+// does, whether the write path takes the legacy branch (nil table) or routes
+// through the residue table derived for it.
+func TestAssignChannelsByPKKeepsTheLegacyPlacementOfANeverSplitCollection(t *testing.T) {
+	rng := rand.New(rand.NewSource(20260918))
+	for _, n := range []int{1, 2, 3, 16} {
+		channels := make([]string, n)
+		for i := range channels {
+			channels[i] = fmt.Sprintf("by-dev-rootcoord-dml_%d_1v%d", i, i)
+		}
+		legacyTable, err := routing.TableFromMeta(channels, nil, 0)
+		require.NoError(t, err)
+
+		ints := make([]int64, 2000)
+		strs := make([]string, 2000)
+		for i := range ints {
+			ints[i] = rng.Int63() - rng.Int63()
+			strs[i] = fmt.Sprintf("key-%d", rng.Int63())
+		}
+		for _, ids := range []*schemapb.IDs{int64IDs(ints...), strIDs(strs...)} {
+			want, err := typeutil.HashPK2Channels(ids, channels)
+			require.NoError(t, err)
+
+			viaNil, err := pkChannelIndexes(nil, ids, channels)
+			require.NoError(t, err)
+			assert.Equal(t, want, viaNil)
+
+			viaTable, err := pkChannelIndexes(legacyTable, ids, channels)
+			require.NoError(t, err)
+			assert.Equal(t, want, viaTable, "n=%d", n)
+
+			legacyMsg, tableMsg := insertMsgOf(len(want)), insertMsgOf(len(want))
+			legacyOffsets, err := assignChannelsByPK(nil, ids, channels, legacyMsg)
+			require.NoError(t, err)
+			tableOffsets, err := assignChannelsByPK(legacyTable, ids, channels, tableMsg)
+			require.NoError(t, err)
+			assert.Equal(t, legacyOffsets, tableOffsets)
+			assert.Equal(t, legacyMsg.HashValues, tableMsg.HashValues)
+		}
+	}
+}
+
+// Tombstones follow the same placement as the rows they delete, for a split
+// collection and, bit for bit with the legacy modulo, for a never-split one.
+func TestRepackDeleteMsgByHashFollowsTheInsertPlacement(t *testing.T) {
+	info := twoShardSplitInfo()
+	pks := []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+
+	insertOffsets, err := assignChannelsByPK(info.SplitRouting.Table, int64IDs(pks...), info.VChannels, insertMsgOf(len(pks)))
+	require.NoError(t, err)
+	result, rows, err := repackDeleteMsgByHash(context.Background(), info.SplitRouting.Table, int64IDs(pks...), info.VChannels,
+		allocator.NewLocalAllocator(100, 200), 1000, 1, "collection", 2, "partition", "default", nil, nil)
+	require.NoError(t, err)
+	assert.EqualValues(t, len(pks), rows)
+	for key, msgs := range result {
+		vchannel := info.VChannels[key]
+		for _, msg := range msgs {
+			for _, pk := range msg.PrimaryKeys.GetIntId().GetData() {
+				var owner string
+				for channel, offsets := range insertOffsets {
+					for _, offset := range offsets {
+						if pks[offset] == pk {
+							owner = channel
+						}
+					}
+				}
+				assert.Equal(t, owner, vchannel, "tombstone of pk %d", pk)
+			}
+		}
+	}
+
+	channels := []string{"a", "b", "c"}
+	legacyTable, err := routing.TableFromMeta(channels, nil, 0)
+	require.NoError(t, err)
+	viaNil, _, err := repackDeleteMsgByHash(context.Background(), nil, int64IDs(pks...), channels,
+		allocator.NewLocalAllocator(100, 200), 1000, 1, "collection", 2, "partition", "default", nil, nil)
+	require.NoError(t, err)
+	viaTable, _, err := repackDeleteMsgByHash(context.Background(), legacyTable, int64IDs(pks...), channels,
+		allocator.NewLocalAllocator(100, 200), 1000, 1, "collection", 2, "partition", "default", nil, nil)
+	require.NoError(t, err)
+	require.Len(t, viaTable, len(viaNil))
+	for key, msgs := range viaNil {
+		require.Len(t, viaTable[key], len(msgs))
+		for i := range msgs {
+			assert.Equal(t, msgs[i].PrimaryKeys.GetIntId().GetData(), viaTable[key][i].PrimaryKeys.GetIntId().GetData())
+		}
+	}
+}
+
+func TestRepackPendingDeleteMsgsReportsTheKeysOfEachMessage(t *testing.T) {
+	info := twoShardSplitInfo()
+	pks := []int64{1, 2, 3, 4, 5, 6, 7, 8}
+	pending := newRowSet([]int{0, 2, 4, 6})
+	result, offsets, rows, err := repackPendingDeleteMsgs(context.Background(), info.SplitRouting.Table, int64IDs(pks...), pending,
+		info.VChannels, allocator.NewLocalAllocator(100, 200), 1000, 1, "collection", 2, "partition", "default", nil, nil)
+	require.NoError(t, err)
+	assert.EqualValues(t, 4, rows)
+	var packed []int
+	for _, msgs := range result {
+		for _, msg := range msgs {
+			carried := offsets[msg]
+			require.Len(t, carried, int(msg.NumRows))
+			for i, offset := range carried {
+				assert.Equal(t, pks[offset], msg.PrimaryKeys.GetIntId().GetData()[i])
+			}
+			packed = append(packed, carried...)
+		}
+	}
+	assert.ElementsMatch(t, []int{0, 2, 4, 6}, packed)
+}
+
+func TestPKChannelIndexesRefusesWhatItCannotPlace(t *testing.T) {
+	info := twoShardSplitInfo()
+	_, err := pkChannelIndexes(info.SplitRouting.Table, int64IDs(1), nil)
+	assert.ErrorIs(t, err, common.ErrRoutingTableNoValues)
+
+	// The table names a vchannel the list does not carry: a Milvus bug, since
+	// both come from one describe.
+	_, err = pkChannelIndexes(info.SplitRouting.Table, int64IDs(1, 2, 3, 4, 5, 6, 7, 8), []string{"v0", "v1"})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	_, err = pkChannelIndexes(splitCollectionInfo(1, 2, []string{"v0", "v1"},
+		splitShardInfo(schemapb.ShardState_ShardNormal, "v0", 0),
+		splitShardInfo(schemapb.ShardState_ShardNormal, "v1", 1),
+	).SplitRouting.Table, &schemapb.IDs{}, []string{"v0", "v1"})
+	assert.NoError(t, err, "a batch with no key field set places nothing")
+}
+
+func TestSplitRoutingOf(t *testing.T) {
+	split, err := splitRoutingOf(nil)
+	assert.NoError(t, err)
+	assert.Nil(t, split)
+
+	split, err = splitRoutingOf(splitCollectionInfo(1, 0, []string{"v0"}))
+	assert.NoError(t, err)
+	assert.Nil(t, split, "a never-split collection has no split routing")
+
+	split, err = splitRoutingOf(twoShardSplitInfo())
+	assert.NoError(t, err)
+	require.NotNil(t, split)
+	assert.Equal(t, []string{"v0"}, split.Fenced)
+
+	malformed := splitCollectionInfo(1, 4, []string{"v0", "v1"},
+		splitShardInfo(schemapb.ShardState_ShardNormal, "v0", 0),
+		splitShardInfo(schemapb.ShardState_ShardNormal, "v1", 1))
+	_, err = splitRoutingOf(malformed)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.False(t, merr.IsRetryableErr(err))
+
+	noCause := &collectionInfo{CollID: 1, RoutingModulus: 2, SplitRouting: &metacache.SplitRouting{}}
+	_, err = splitRoutingOf(noCause)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestResolveWriteRoute(t *testing.T) {
+	ctx := context.Background()
+	legacyInfo := splitCollectionInfo(1, 0, []string{"v0", "v1"})
+	cache := NewMockCache(t)
+
+	t.Run("never split keeps the legacy channel list", func(t *testing.T) {
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(legacyInfo, nil).Once()
+		route, err := resolveWriteRoute(ctx, cache, "db", "c", 1, func() ([]string, error) { return []string{"x", "y"}, nil })
+		require.NoError(t, err)
+		assert.False(t, route.split())
+		assert.Equal(t, []string{"x", "y"}, route.vchannels)
+		assert.Equal(t, []string{"x", "y"}, route.writable)
+		assert.Empty(t, route.fenced)
+	})
+
+	t.Run("a split collection routes by the list its table was derived from", func(t *testing.T) {
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(twoShardSplitInfo(), nil).Once()
+		route, err := resolveWriteRoute(ctx, cache, "db", "c", 1, func() ([]string, error) {
+			t.Fatal("the legacy channel list is not read for a split collection")
+			return nil, nil
+		})
+		require.NoError(t, err)
+		assert.True(t, route.split())
+		assert.Equal(t, []string{"v0", "v1", "v2", "v3"}, route.vchannels)
+		assert.Equal(t, []string{"v1", "v2", "v3"}, route.writable)
+		assert.Equal(t, []string{"v0"}, route.fenced)
+	})
+
+	t.Run("errors", func(t *testing.T) {
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(nil, errors.New("describe failed")).Once()
+		_, err := resolveWriteRoute(ctx, cache, "db", "c", 1, nil)
+		assert.ErrorContains(t, err, "describe failed")
+
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(legacyInfo, nil).Once()
+		_, err = resolveWriteRoute(ctx, cache, "db", "c", 1, func() ([]string, error) { return nil, errors.New("channels failed") })
+		assert.ErrorContains(t, err, "channels failed")
+
+		cache.EXPECT().GetCollectionInfo(mock.Anything, "db", "c", int64(1)).Return(
+			splitCollectionInfo(1, 4, []string{"v0"}, splitShardInfo(schemapb.ShardState_ShardNormal, "v0", 0)), nil).Once()
+		_, err = resolveWriteRoute(ctx, cache, "db", "c", 1, nil)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	})
+}

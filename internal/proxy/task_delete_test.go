@@ -176,6 +176,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		allocator.Close()
 
 		dt := deleteTask{
+			baseTask:     baseTask{MetaCache: neverSplitRoutingCache(t)},
 			chMgr:        mockMgr,
 			collectionID: collectionID,
 			partitionID:  partitionID,
@@ -209,6 +210,7 @@ func TestDeleteTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 
 		dt := deleteTask{
+			baseTask:     baseTask{MetaCache: neverSplitRoutingCache(t)},
 			chMgr:        mockMgr,
 			collectionID: collectionID,
 			partitionID:  partitionID,
@@ -807,6 +809,9 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 	metaCache := NewMockCache(t)
 	metaCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
+	// Every produced delete task reads the collection's routing before it
+	// repacks; an empty info is a collection that has never been split.
+	metaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 
 	t.Run("simple delete task failed", func(t *testing.T) {
 		mockMgr := channelmgr.NewMockChannelsMgr(t)
@@ -1191,6 +1196,7 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
+		mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
 		expr := "non_pk in [2, 3]"
 		plan, err := planparserv2.CreateRetrievePlan(schema.SchemaHelper, expr, nil)
 		require.NoError(t, err)

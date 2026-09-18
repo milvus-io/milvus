@@ -119,15 +119,17 @@ func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, 
 	}
 
 	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
-	channelNames, err := it.chMgr.GetVChannels(it.collectionID)
+	route, err := resolveWriteRoute(ctx, it.GetMetaCache(), it.insertMsg.GetDbName(), it.insertMsg.GetCollectionName(), it.collectionID,
+		func() ([]string, error) { return it.chMgr.GetVChannels(it.collectionID) })
 	if err != nil {
 		log.Warn(ctx, "get vChannels for idempotent autoID assignment failed",
 			mlog.Int64("collectionID", it.collectionID),
 			mlog.Err(err))
 		return err
 	}
-	it.vChannels = channelNames
-	if err := it.reassignAutoIDForStableIdempotency(primaryFieldSchema, channelNames); err != nil {
+	// A split collection buckets over the shards that own a residue: a fenced
+	// source owns none, so no candidate id would ever fill its bucket.
+	if err := it.reassignAutoIDForStableIdempotency(primaryFieldSchema, route.writable, route.table); err != nil {
 		log.Warn(ctx, "stabilize idempotent autoID assignment failed", mlog.Err(err))
 		return err
 	}

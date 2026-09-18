@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -124,11 +125,51 @@ type CollectionInfo struct {
 	ShardsNum             int32
 	Aliases               []string
 	Properties            []*commonpb.KeyValuePair
-	// Shard routing facts as the coordinator reported them. Carried only so
-	// DescribeCollection can return them; nothing in the proxy routes by them.
+	// Shard routing facts as the coordinator reported them. DescribeCollection
+	// returns them as they are; the write path routes by SplitRouting, which is
+	// derived from them.
 	ShardInfos     []*schemapb.CollectionShardInfo
 	RoutingModulus uint64
 	ShardBy        string
+	// SplitRouting is the routing of a collection that has been split (a
+	// non-zero RoutingModulus), derived once per describe so the write path does
+	// no per-request derivation. Nil for a collection that has never been split,
+	// which keeps the legacy hash % shardNum placement.
+	SplitRouting *SplitRouting
+}
+
+// SplitRouting is how the writes of a split collection are placed.
+type SplitRouting struct {
+	// Table maps a primary key's residue to the vchannel owning it. Nil when the
+	// routing meta is malformed; Err then says why, and the write path refuses
+	// the collection rather than place its rows by position.
+	Table *routing.ResidueTable
+	Err   error
+	// Fenced lists the shards a split has fenced and not yet retired (state
+	// Splitting). They own no residue and refuse every write, but their
+	// idempotency windows still answer for the keyed inserts they took before
+	// the fence.
+	Fenced []string
+}
+
+// NewSplitRouting derives the routing of a split collection from its describe
+// response, or returns nil for one that has never been split.
+func NewSplitRouting(collection *milvuspb.DescribeCollectionResponse) *SplitRouting {
+	if collection.GetRoutingModulus() == 0 {
+		return nil
+	}
+	vchannels := collection.GetVirtualChannelNames()
+	table, err := routing.TableFromMeta(vchannels, collection.GetShardInfos(), collection.GetRoutingModulus())
+	if err != nil {
+		return &SplitRouting{Err: err}
+	}
+	var fenced []string
+	for i, info := range collection.GetShardInfos() {
+		if info.GetState() == schemapb.ShardState_ShardSplitting && i < len(vchannels) {
+			fenced = append(fenced, vchannels[i])
+		}
+	}
+	return &SplitRouting{Table: table, Fenced: fenced}
 }
 
 type DatabaseInfo struct {
@@ -665,6 +706,7 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		ShardInfos:            collection.GetShardInfos(),
 		RoutingModulus:        collection.GetRoutingModulus(),
 		ShardBy:               collection.GetShardBy(),
+		SplitRouting:          NewSplitRouting(collection),
 	}
 }
 
