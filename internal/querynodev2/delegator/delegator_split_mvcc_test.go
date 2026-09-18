@@ -379,17 +379,17 @@ func TestStrongReadCoversChildrenDetachedAfterTheFanOutSnapshot(t *testing.T) {
 			source.children["v1"] = child1
 			source.children["v2"] = child2
 
-			// detach both children right after the source's first snapshot, as a
-			// concurrent release would.
-			var origin func(*shardDelegator) []*shardDelegator
+			// detach both children right after the public read takes its fan-out
+			// snapshot, as a concurrent release would.
+			var origin func(*shardDelegator) ([]*shardDelegator, error)
 			detached := atomic.NewBool(false)
-			snapshotMock := mockey.Mock((*shardDelegator).frontingChildren).To(func(sd *shardDelegator) []*shardDelegator {
-				children := origin(sd)
+			snapshotMock := mockey.Mock((*shardDelegator).frontingFamily).To(func(sd *shardDelegator) ([]*shardDelegator, error) {
+				children, err := origin(sd)
 				if sd == source && detached.CompareAndSwap(false, true) {
 					source.DetachSplitChild("v1")
 					source.DetachSplitChild("v2")
 				}
-				return children
+				return children, err
 			}).Origin(&origin).Build()
 			defer snapshotMock.UnPatch()
 

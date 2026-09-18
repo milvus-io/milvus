@@ -653,6 +653,10 @@ func (sd *shardDelegator) searchInternal(ctx context.Context, req *querypb.Searc
 		mlog.Warn(ctx, "delegator search failed to wait tsafe", mlog.Err(err))
 		return nil, err
 	}
+	if err := sd.checkReadFamily(scope); err != nil {
+		mlog.Warn(ctx, "delegator search refused, split family changed during the wait", mlog.Err(err))
+		return nil, err
+	}
 
 	// External reads always use the full snapshot MVCC timestamp. Normal reads
 	// use tSafe only when the request does not provide an MVCC timestamp.
@@ -794,6 +798,10 @@ func (sd *shardDelegator) queryStreamInternal(ctx context.Context, req *querypb.
 		mlog.Warn(ctx, "delegator query failed to wait tsafe", mlog.Err(err))
 		return err
 	}
+	if err := sd.checkReadFamily(scope); err != nil {
+		mlog.Warn(ctx, "delegator query stream refused, split family changed during the wait", mlog.Err(err))
+		return err
+	}
 
 	// External reads always use the full snapshot MVCC timestamp. Normal reads
 	// use tSafe only when the request does not provide an MVCC timestamp.
@@ -885,6 +893,10 @@ func (sd *shardDelegator) queryInternal(ctx context.Context, req *querypb.QueryR
 
 	if err != nil {
 		mlog.Warn(ctx, "delegator query failed to wait tsafe", mlog.Err(err))
+		return nil, err
+	}
+	if err := sd.checkReadFamily(scope); err != nil {
+		mlog.Warn(ctx, "delegator query refused, split family changed during the wait", mlog.Err(err))
 		return nil, err
 	}
 
@@ -989,6 +1001,10 @@ func (sd *shardDelegator) getStatisticsInternal(ctx context.Context, req *queryp
 	_, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, scope.readFamily(sd))
 	if err != nil {
 		mlog.Warn(ctx, "delegator GetStatistics failed to wait tsafe", mlog.Err(err))
+		return nil, err
+	}
+	if err := sd.checkReadFamily(scope); err != nil {
+		mlog.Warn(ctx, "delegator GetStatistics refused, split family changed during the wait", mlog.Err(err))
 		return nil, err
 	}
 
