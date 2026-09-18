@@ -923,7 +923,7 @@ func TestParsePathReplace(t *testing.T) {
 	}
 
 	overflowingIndex := "[" + strconv.FormatUint(uint64(^uint(0)>>1)+1, 10) + "]"
-	for _, path := range []string{"", "profile[1]", "[-1]", "[01]", "[ 1]", "[1] ", "[1][]", "[1][age][x]", "[*]", overflowingIndex} {
+	for _, path := range []string{"", "profile[1]", "[", "[]", "[-1]", "[01]", "[ 1]", "[1] ", "[1][]", "[1][age][x]", "[*]", overflowingIndex} {
 		_, _, _, err := parsePathReplace(path)
 		assert.Error(t, err, path)
 	}
@@ -1560,6 +1560,108 @@ func TestValidateExistingPathRowsRejectsInvalidTargets(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	assert.ErrorContains(t, err, "does not support Array element valid_data")
+}
+
+func TestValidateExistingArrayPathRowsMalformedRetrievedData(t *testing.T) {
+	plan := &fieldPartialUpdatePlan{op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, arrayParent: arrayIntFieldSchema("scores", false, 8)}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*schemapb.FieldData)
+		data   []int64
+		rows   []int64
+		want   string
+	}{
+		{"wrong type", func(f *schemapb.FieldData) { f.Type = schemapb.DataType_Int64 }, []int64{0}, []int64{0}, "not valid Array"},
+		{"missing payload", func(f *schemapb.FieldData) { f.Field = nil }, []int64{0}, []int64{0}, "not valid Array"},
+		{"mismatched mappings", func(*schemapb.FieldData) {}, []int64{0}, nil, "inconsistent row mappings"},
+		{"wrong element type", func(f *schemapb.FieldData) { f.GetScalars().GetArrayData().ElementType = schemapb.DataType_Bool }, []int64{0}, []int64{0}, "element type"},
+		{"invalid validity index", func(f *schemapb.FieldData) { typeutil.SetFieldDataValidData(f, []bool{true}) }, []int64{0}, []int64{1}, "malformed parent valid_data"},
+		{"missing row", func(*schemapb.FieldData) {}, []int64{1}, []int64{0}, "missing row data"},
+		{"nil row", func(f *schemapb.FieldData) { f.GetScalars().GetArrayData().Data[0] = nil }, []int64{0}, []int64{0}, "nil Array row"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := arrayLongFieldData("scores", [][]int64{{1}})
+			tc.mutate(field)
+			before := proto.Clone(field)
+			err := validateExistingArrayPathRows(field, tc.data, tc.rows, plan)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.Equal(t, merr.SystemError, merr.GetErrorType(err))
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, field))
+		})
+	}
+	field := arrayLongFieldData("scores", [][]int64{{1}})
+	typeutil.SetFieldDataValidData(field, []bool{true})
+	require.NoError(t, validateExistingArrayPathRows(field, []int64{0}, []int64{0}, plan))
+}
+
+func TestValidatePathReplaceArrayOperandMalformedPayload(t *testing.T) {
+	schema := arrayIntFieldSchema("scores", false, 8)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*schemapb.FieldData)
+		want   string
+	}{
+		{"wrong type", func(f *schemapb.FieldData) { f.Type = schemapb.DataType_Int64 }, "expects Array FieldData"},
+		{"missing payload", func(f *schemapb.FieldData) { f.Field = nil }, "expects Array FieldData"},
+		{"validity length", func(f *schemapb.FieldData) { typeutil.SetFieldDataValidData(f, []bool{true, true}) }, "valid_data has length"},
+		{"null operand", func(f *schemapb.FieldData) { typeutil.SetFieldDataValidData(f, []bool{false}) }, "must not be null"},
+		{"missing row", func(f *schemapb.FieldData) { f.GetScalars().GetArrayData().Data = nil }, "operand rows"},
+		{"nil row", func(f *schemapb.FieldData) { f.GetScalars().GetArrayData().Data[0] = nil }, "non-nil Array row"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := arrayLongFieldData("scores", [][]int64{{1}})
+			tc.mutate(field)
+			before := proto.Clone(field)
+			err := validatePathReplaceArrayOperand(field, schema, 1)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, field))
+		})
+	}
+}
+
+func TestValidatePathReplaceStructOperandMalformedPayload(t *testing.T) {
+	schema := pathReplaceStructSchema()
+	plan := &fieldPartialUpdatePlan{structParent: schema, explicitChild: schema.Fields[0]}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*schemapb.FieldData)
+		want   string
+	}{
+		{"wrong type", func(f *schemapb.FieldData) { f.Type = schemapb.DataType_Array }, "expects ArrayOfStruct"},
+		{"no children", func(f *schemapb.FieldData) { f.GetStructArrays().Fields = nil }, "at least one child"},
+		{"duplicate children", func(f *schemapb.FieldData) {
+			f.GetStructArrays().Fields = append(f.GetStructArrays().Fields, f.GetStructArrays().Fields[0])
+		}, "duplicate child"},
+		{"wrong child type", func(f *schemapb.FieldData) { f.GetStructArrays().Fields[0].Type = schemapb.DataType_Int64 }, "expects type"},
+		{"null child row", func(f *schemapb.FieldData) {
+			typeutil.SetFieldDataValidData(f.GetStructArrays().Fields[0], []bool{false})
+		}, "must not be null"},
+		{"wrong child payload", func(f *schemapb.FieldData) { f.GetStructArrays().Fields[0].Field = nil }, "incompatible Array payload"},
+		{"missing child row", func(f *schemapb.FieldData) { f.GetStructArrays().Fields[0].GetScalars().GetArrayData().Data = nil }, "operand rows"},
+		{"too many elements", func(f *schemapb.FieldData) {
+			f.GetStructArrays().Fields[0].GetScalars().GetArrayData().Data[0] = pathReplaceScalarRow([]int64{1, 2})
+		}, "exactly one element"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := &schemapb.FieldData{
+				FieldName: "profile", Type: schemapb.DataType_ArrayOfStruct,
+				Field: &schemapb.FieldData_StructArrays{StructArrays: &schemapb.StructArrayField{
+					Fields: []*schemapb.FieldData{structScalarChildFieldData("age", pathReplaceScalarRow([]int64{18}))},
+				}},
+			}
+			tc.mutate(field)
+			before := proto.Clone(field)
+			children, err := validatePathReplaceStructOperand(field, plan, 1)
+			require.Nil(t, children)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.Equal(t, merr.InputError, merr.GetErrorType(err))
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, field))
+		})
+	}
 }
 
 func TestValidateExistingStructPathRowsRejectsMalformedAlignment(t *testing.T) {

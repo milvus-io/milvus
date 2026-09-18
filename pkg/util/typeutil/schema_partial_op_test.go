@@ -581,10 +581,14 @@ func TestUpdateArrayFieldByColumnWithOp_ReplaceFallback(t *testing.T) {
 func TestUpdateArrayFieldByColumnWithOp_ReplaceNonArray(t *testing.T) {
 	// The unified Proxy entry also receives ordinary scalar REPLACE operations;
 	// delegate before applying any Array-only validation or capacity checks.
-	base := &schemapb.FieldData{Type: schemapb.DataType_Int64,
-		Field: &schemapb.FieldData_Scalars{Scalars: longRow(1, 2)}}
-	update := &schemapb.FieldData{Type: schemapb.DataType_Int64,
-		Field: &schemapb.FieldData_Scalars{Scalars: longRow(9, 8)}}
+	base := &schemapb.FieldData{
+		Type:  schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: longRow(1, 2)},
+	}
+	update := &schemapb.FieldData{
+		Type:  schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: longRow(9, 8)},
+	}
 	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{1, 0}, []int64{0, 1},
 		schemapb.FieldPartialUpdateOp_REPLACE, 0)
 	require.NoError(t, err)
