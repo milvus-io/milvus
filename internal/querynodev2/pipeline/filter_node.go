@@ -203,7 +203,7 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			mlog.String("vchannel", fNode.channel),
 			mlog.Int64("splitTaskID", header.GetSplitTaskId()),
 			mlog.Strings("targetVChannels", header.GetTargetVchannels()))
-		if err := fNode.delegator.ProcessSplitShard(context.Background(), header.GetTargetVchannels()); err != nil {
+		if err := fNode.delegator.ProcessSplitShard(msg.TraceCtx(), header.GetTargetVchannels()); err != nil {
 			// Logged here, above Debug: Operate logs every filtrate error at Debug,
 			// which hides a fence that cannot be fronted. The targets stay pending
 			// on the delegator, so reads through this vchannel are refused until a
