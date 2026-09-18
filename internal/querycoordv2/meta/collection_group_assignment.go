@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"math"
 	"slices"
 	"time"
 
@@ -24,11 +25,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func groupPlanKey(replicas []*Replica, nodes []int64, rows map[int64]int64) string {
-	type member struct{ ID, Collection, Rows int64 }
+const collectionGroupNodeShareDeadband = 0.1
+
+func groupPlanKey(replicas []*Replica, nodes []int64) string {
+	type member struct{ ID, Collection int64 }
 	members := make([]member, 0, len(replicas))
 	for _, r := range replicas {
-		members = append(members, member{r.GetID(), r.GetCollectionID(), rows[r.GetCollectionID()]})
+		members = append(members, member{r.GetID(), r.GetCollectionID()})
 	}
 	// Fixed structs and sorted slices make the key independent of map iteration or trigger order.
 	key, _ := json.Marshal(struct {
@@ -36,6 +39,26 @@ func groupPlanKey(replicas []*Replica, nodes []int64, rows map[int64]int64) stri
 		Nodes   []int64
 	}{members, nodes})
 	return string(key)
+}
+
+// Keep small row fluctuations from exchanging the last remainder node. Compare
+// against the accepted plan, not the last sample, so gradual growth accumulates.
+// Uniform growth does not change shares. Topology changes bypass this deadband.
+func groupRowSharesChanged(replicas []*Replica, nodes int, before, after map[int64]int64) bool {
+	var oldTotal, newTotal float64
+	for _, r := range replicas {
+		oldTotal += float64(max(before[r.GetCollectionID()], 1))
+		newTotal += float64(max(after[r.GetCollectionID()], 1))
+	}
+	for _, r := range replicas {
+		id := r.GetCollectionID()
+		oldShare := float64(max(before[id], 1)) / oldTotal
+		newShare := float64(max(after[id], 1)) / newTotal
+		if float64(nodes)*math.Abs(newShare-oldShare) >= collectionGroupNodeShareDeadband {
+			return true
+		}
+	}
+	return false
 }
 
 // groupNodeCounts apportions a node budget proportional to each replica's data.
@@ -55,8 +78,9 @@ func groupNodeCounts(replicas []*Replica, nodeCount int, rows map[int64]int64) m
 		perCollection[r.GetCollectionID()] += count
 		budget -= count
 	}
-	// Largest deficit against the proportional ideal, with replica ID tie-breaking.
-	// Sorted input makes every rounding decision deterministic.
+	// Largest deficit against the proportional ideal. Near a rounding boundary,
+	// prefer an existing remainder seat, including after a coordinator restart.
+	// Sorted input gives replica ID tie-breaking when retention is equal.
 	for budget > 0 {
 		var best *Replica
 		deficit := float64(-1e300)
@@ -66,7 +90,10 @@ func groupNodeCounts(replicas []*Replica, nodeCount int, rows map[int64]int64) m
 			}
 			ideal := float64(nodeCount) * float64(max(rows[r.GetCollectionID()], 1)) / total
 			d := ideal - float64(counts[r.GetID()])
-			if best == nil || d > deficit {
+			retain := r.RWNodesCount() > counts[r.GetID()]
+			bestRetains := best != nil && best.RWNodesCount() > counts[best.GetID()]
+			if best == nil || d > deficit+collectionGroupNodeShareDeadband || (retain == bestRetains && d > deficit) ||
+				(math.Abs(d-deficit) <= collectionGroupNodeShareDeadband && retain && !bestRetains) {
 				best, deficit = r, d
 			}
 		}
@@ -146,15 +173,27 @@ func applyCollectionGroupPlan(replica *Replica, siblings []*Replica, nodes []int
 			rw.Insert(node)
 		}
 	}
-	if rw.Len() == 0 {
-		// Never proactively drain a serving replica to zero while its destination
-		// remains occupied. A failed/out-of-RG node is not a serving fallback.
+	if rw.Len() < max(1, len(plan[replica.GetID()])) {
+		// Retain temporary capacity until the preferred nodes have drained. Do
+		// not retain nodes reserved for siblings: that can deadlock a node swap.
 		current := slices.Clone(replica.GetRWNodes())
 		slices.Sort(current)
 		for _, node := range current {
-			if available.Contain(node) {
-				rw.Insert(node)
+			if rw.Len() >= max(1, len(plan[replica.GetID()])) {
 				break
+			}
+			if available.Contain(node) && !blocked.Contain(node) && !reserved.Contain(node) {
+				rw.Insert(node)
+			}
+		}
+		// Never proactively drain a serving replica to zero while its destination
+		// remains occupied. A failed/out-of-RG node is not a serving fallback.
+		if rw.Len() == 0 {
+			for _, node := range current {
+				if available.Contain(node) && !blocked.Contain(node) {
+					rw.Insert(node)
+					break
+				}
 			}
 		}
 		// Fault recovery must not wait forever for a blocked preferred destination.

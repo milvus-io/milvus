@@ -59,11 +59,12 @@ func (g *collectionGroup) refreshRows(ctx context.Context, broker Broker, scope 
 			}
 			partitions := typeutil.NewSet(parts...)
 			for _, segment := range segments {
-				// Legacy segments are L1 by the SegmentInfo compatibility contract.
-				if segment.GetLevel() != datapb.SegmentLevel_L1 && segment.GetLevel() != datapb.SegmentLevel_Legacy {
+				// L0 contains deletes, not data rows. Count the other levels selected
+				// by DC, including Legacy/L1 and clustering-compacted L2 segments.
+				if segment.GetLevel() == datapb.SegmentLevel_L0 {
 					continue
 				}
-				// DC owns recovery frontier selection; retain selected Dropped L1
+				// DC owns recovery frontier selection; retain selected Dropped
 				// compaction parents and match the loaded partition scope.
 				if partitions.Contain(segment.GetPartitionID()) || segment.GetPartitionID() == common.AllPartitionsID {
 					rows[id] += segment.GetNumOfRows()

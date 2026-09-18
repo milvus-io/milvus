@@ -148,11 +148,13 @@ func TestCollectionGroupTransitions(t *testing.T) {
 type groupTestState struct {
 	failAfterSave bool
 	duringRows    func()
+	duringSave    func()
 	m             *Meta
 	writes, calls int
 	failWrite     int
 	failRows      bool
 	rows          map[int64]int64
+	level         datapb.SegmentLevel
 	persisted     map[int64]*querypb.Replica
 }
 
@@ -160,7 +162,7 @@ type groupTestState struct {
 func newGroupTestState(t *testing.T, allow []string) *groupTestState {
 	paramtable.Init()
 	catalog := querycoord.NewCatalog(nil)
-	s := &groupTestState{m: NewMeta(nil, catalog, nil), rows: map[int64]int64{10: 300, 20: 100}, persisted: make(map[int64]*querypb.Replica)}
+	s := &groupTestState{m: NewMeta(nil, catalog, nil), rows: map[int64]int64{10: 300, 20: 100}, level: datapb.SegmentLevel_L1, persisted: make(map[int64]*querypb.Replica)}
 	cfg := &paramtable.Get().QueryCoordCfg
 	for _, key := range []string{cfg.ReplicaPlacementCollectionGroups.Key, cfg.ReplicaPlacementResourceGroupAllowlist.Key} {
 		t.Cleanup(func() { paramtable.Get().Reset(key) })
@@ -185,6 +187,11 @@ func newGroupTestState(t *testing.T, allow []string) *groupTestState {
 		for _, r := range rs {
 			s.persisted[r.GetID()] = proto.Clone(r).(*querypb.Replica)
 		}
+		if s.duringSave != nil {
+			f := s.duringSave
+			s.duringSave = nil
+			f()
+		}
 		if s.writes == s.failWrite {
 			return merr.WrapErrServiceUnavailable("injected lost save response")
 		}
@@ -202,11 +209,11 @@ func newGroupTestState(t *testing.T, allow []string) *groupTestState {
 		}
 		require.Equal(t, []int64{id + 1}, parts)
 		return nil, []*datapb.SegmentInfo{
-			{ID: id, PartitionID: id + 1, NumOfRows: s.rows[id] - 1, State: commonpb.SegmentState_Dropped, Level: datapb.SegmentLevel_L1},
+			{ID: id, PartitionID: id + 1, NumOfRows: s.rows[id] - 1, State: commonpb.SegmentState_Dropped, Level: s.level},
 			{ID: id + 100, PartitionID: common.AllPartitionsID, NumOfRows: 1},
 			{ID: id + 200, PartitionID: 999, NumOfRows: 1000000, Level: datapb.SegmentLevel_L1},
 			{ID: id + 300, PartitionID: common.AllPartitionsID, NumOfRows: 1000000, Level: datapb.SegmentLevel_L0},
-			{ID: id + 400, PartitionID: id + 1, NumOfRows: 2000000, Level: datapb.SegmentLevel_L2},
+			{ID: id + 400, PartitionID: 999, NumOfRows: 2000000, Level: datapb.SegmentLevel_L2},
 		}, nil
 	}).Build()
 	return s
@@ -263,11 +270,11 @@ func TestCollectionGroupRowLevels(t *testing.T) {
 		{"L1", datapb.SegmentLevel_L1, 17},
 		{"legacy L1", datapb.SegmentLevel_Legacy, 17},
 		{"L0", datapb.SegmentLevel_L0, 0},
-		{"L2", datapb.SegmentLevel_L2, 0},
-		{"unknown", datapb.SegmentLevel(99), 0},
+		{"L2", datapb.SegmentLevel_L2, 17},
+		{"future data level", datapb.SegmentLevel(99), 17},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mockey.PatchConvey("count only L1 recovery rows in loaded partitions", t, func() {
+			mockey.PatchConvey("count non-L0 recovery rows in loaded partitions", t, func() {
 				g := &collectionGroup{members: []int64{10}}
 				mockey.Mock((*CoordinatorBroker).GetRecoveryInfoV2).To(func(_ *CoordinatorBroker, _ context.Context, id int64, parts ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
 					require.Equal(t, int64(10), id)
@@ -281,6 +288,33 @@ func TestCollectionGroupRowLevels(t *testing.T) {
 				require.NoError(t, g.refreshRows(context.Background(), &CoordinatorBroker{}, map[int64][]int64{10: {11}}))
 				require.Equal(t, tc.rows, g.rows[10])
 			})
+		})
+	}
+}
+
+func TestCollectionGroupClusteringCompactedRows(t *testing.T) {
+	for _, initialLevel := range []datapb.SegmentLevel{datapb.SegmentLevel_L1, datapb.SegmentLevel_L2} {
+		mockey.PatchConvey("L2 data retains proportional capacity through recovery", t, func() {
+			s := newGroupTestState(t, []string{"rg"})
+			s.level = initialLevel
+			require.NoError(t, s.recover(10))
+			require.Len(t, s.m.Get(context.Background(), 10).GetRWNodes(), 3)
+			require.Len(t, s.m.Get(context.Background(), 20).GetRWNodes(), 1)
+			before := s.m.Get(context.Background(), 10).GetRWNodes()
+			writes := s.writes
+			g := s.m.placementPolicy.groups[10]
+			s.level = datapb.SegmentLevel_L2
+			g.refreshed = time.Time{}
+			require.NoError(t, s.recover(20))
+			require.Equal(t, s.rows, g.rows)
+			require.Equal(t, writes, s.writes)
+			require.Equal(t, before, s.m.Get(context.Background(), 10).GetRWNodes())
+			// A new L2 row snapshot must still drive a changed placement plan.
+			s.rows[10], s.rows[20] = 100, 300
+			g.refreshed = time.Time{}
+			require.NoError(t, s.recover(10))
+			require.Len(t, s.m.Get(context.Background(), 10).GetRWNodes(), 1)
+			require.Len(t, s.m.Get(context.Background(), 20).GetRWNodes(), 3)
 		})
 	}
 }
@@ -425,11 +459,11 @@ func TestCollectionGroupConfigurationDuringRecovery(t *testing.T) {
 			require.True(t, proto.Equal(s.persisted[id], s.m.Get(context.Background(), id).replicaPB))
 		}
 	})
-	mockey.PatchConvey("invalid active config fails recovery and can be corrected without restart", t, func() {
+	mockey.PatchConvey("invalid active config preserves ordinary recovery and can be corrected", t, func() {
 		s := newGroupTestState(t, []string{"rg"})
 		cfg := &paramtable.Get().QueryCoordCfg
 		require.NoError(t, paramtable.Get().Save(cfg.ReplicaPlacementCollectionGroups.Key, `invalid`))
-		require.Error(t, s.recover(10))
+		require.NoError(t, s.recover(10))
 		require.Zero(t, s.calls)
 		require.Zero(t, s.writes)
 		require.NoError(t, paramtable.Get().Save(cfg.ReplicaPlacementCollectionGroups.Key, `{"g":[10,20]}`))
@@ -458,7 +492,7 @@ func TestCollectionGroupScopeValidation(t *testing.T) {
 			s.m.collLock.Unlock(20)
 		}
 		require.ErrorIs(t, s.recover(10), merr.ErrServiceUnavailable)
-		require.Zero(t, s.writes)
+		require.ElementsMatch(t, []int64{1, 2, 3, 4}, s.m.Get(context.Background(), 21).GetRWNodes())
 	})
 	mockey.PatchConvey("unknown load scope does not request DC or shrink survivors", t, func() {
 		s := newGroupTestState(t, []string{"rg"})
@@ -479,7 +513,7 @@ func TestCollectionGroupScopeValidation(t *testing.T) {
 		require.NoError(t, s.recover(20))
 		require.False(t, s.m.Get(context.Background(), 10).NeedWaitRGReady())
 		delete(s.m.groups, "rg")
-		require.ErrorIs(t, s.recover(10), merr.ErrServiceUnavailable)
+		require.ErrorIs(t, s.recover(10), merr.ErrResourceGroupNotFound)
 	})
 }
 
@@ -555,4 +589,176 @@ func TestCollectionGroupSmallCollectionMinimumsPreserveWeightedQuota(t *testing.
 	for _, r := range replicas[1:] {
 		require.Len(t, plan[r.GetID()], 1)
 	}
+}
+
+func TestCollectionGroupInvalidConfigRecovery(t *testing.T) {
+	for _, invalid := range []string{`invalid`, `{"g":[]}`, `{"g":[10,10]}`} {
+		mockey.PatchConvey("invalid config does not stop any collection's recovery: "+invalid, t, func() {
+			s := newGroupTestState(t, []string{"rg"})
+			require.NoError(t, s.recover(10))
+			s.m.putReplicasInMemory(30, groupReplica(30, 30, "other", 5))
+			s.m.putReplicasInMemory(40, groupReplica(40, 40, "rg", 1))
+			calls := s.calls
+			cfg := &paramtable.Get().QueryCoordCfg
+			require.NoError(t, paramtable.Get().Save(cfg.ReplicaPlacementCollectionGroups.Key, invalid))
+			s.m.groups["rg"].nodes = typeutil.NewSet[int64](2, 3, 4, 7)
+			for _, id := range []int64{30, 40, 10, 20} {
+				require.NoError(t, s.recover(id))
+			}
+			require.Equal(t, calls, s.calls)
+			require.ElementsMatch(t, []int64{5, 6}, s.m.Get(context.Background(), 30).GetRWNodes())
+			for _, id := range []int64{10, 20, 40} {
+				r := s.m.Get(context.Background(), id)
+				require.ElementsMatch(t, []int64{2, 3, 4, 7}, r.GetRWNodes())
+				require.Contains(t, r.GetRONodes(), int64(1))
+			}
+			policy := s.m.placementPolicy
+			require.NoError(t, s.recover(10))
+			require.Same(t, policy, s.m.placementPolicy)
+			require.NoError(t, paramtable.Get().Save(cfg.ReplicaPlacementCollectionGroups.Key, `{"g":[10,20]}`))
+			require.NoError(t, s.recover(10))
+			require.Len(t, s.m.Get(context.Background(), 10).GetRWNodes(), 3)
+		})
+	}
+	mockey.PatchConvey("invalid config cannot bypass an uncertain write", t, func() {
+		s := newGroupTestState(t, []string{"rg"})
+		s.failWrite, s.failAfterSave = 1, true
+		require.Error(t, s.recover(10))
+		old := s.m.placementPolicy
+		require.NoError(t, paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ReplicaPlacementCollectionGroups.Key, `invalid`))
+		s.failWrite = 2
+		require.Error(t, s.recover(20))
+		require.Same(t, old, s.m.placementPolicy)
+		require.NotNil(t, old.groups[10].pending)
+		require.NoError(t, s.recover(20))
+		require.Nil(t, old.groups[10].pending)
+		require.Empty(t, s.m.placementPolicy.groups)
+	})
+}
+
+func TestCollectionGroupFirstLoadCapacity(t *testing.T) {
+	for _, count := range []int{1, 2} {
+		mockey.PatchConvey("unknown scope uses ordinary per-collection capacity", t, func() {
+			s := newGroupTestState(t, []string{"rg"})
+			s.m.coll2Replicas.Remove(10)
+			delete(s.m.collectionPartitions, 10)
+			for i := 0; i < count; i++ {
+				s.m.putReplicasInMemory(10, groupReplica(int64(10+i), 10, "rg"))
+			}
+			require.Error(t, s.recover(10)) // unknown rows do not prevent node assignment
+			require.Zero(t, s.calls)
+			used := typeutil.NewSet[int64]()
+			for _, r := range s.m.GetByCollection(context.Background(), 10) {
+				require.Len(t, r.GetRWNodes(), 4/count)
+				for _, n := range r.GetRWNodes() {
+					require.False(t, used.Contain(n))
+					used.Insert(n)
+				}
+			}
+			s.m.collectionPartitions[10] = typeutil.NewSet[int64](11)
+			require.NoError(t, s.recover(10))
+			require.Equal(t, 2, s.calls)
+		})
+	}
+	mockey.PatchConvey("scope change during rows still repairs a failed node", t, func() {
+		s := newGroupTestState(t, []string{"rg"})
+		s.duringRows = func() {
+			s.m.collectionPartitions[10].Insert(12)
+			s.m.groups["rg"].nodes = typeutil.NewSet[int64](5, 6, 7, 8)
+		}
+		require.ErrorIs(t, s.recover(10), merr.ErrServiceUnavailable)
+		for _, id := range []int64{10, 20} {
+			require.ElementsMatch(t, []int64{5, 6, 7, 8}, s.m.Get(context.Background(), id).GetRWNodes())
+		}
+	})
+}
+
+func TestCollectionGroupRowHysteresis(t *testing.T) {
+	mockey.PatchConvey("near equal rows retain a remainder seat through refresh and restart", t, func() {
+		s := newGroupTestState(t, []string{"rg"})
+		s.m.groups["rg"].nodes = typeutil.NewSet[int64](1, 2, 3)
+		s.rows[10], s.rows[20] = 1001, 1000
+		require.NoError(t, s.recover(10))
+		require.Len(t, s.m.Get(context.Background(), 10).GetRWNodes(), 2)
+		writes := s.writes
+		for i := 0; i < 10; i++ {
+			s.rows[10], s.rows[20] = int64(1000+i%2), int64(1001-i%2)
+			s.m.placementPolicy.groups[10].refreshed = time.Time{}
+			require.NoError(t, s.recover(20))
+		}
+		require.Equal(t, writes, s.writes)
+		s.rows[10], s.rows[20] = 1000, 1001
+		s.m.placementPolicy = nil // restart: no cache, current durable replica counts remain
+		require.NoError(t, s.recover(20))
+		require.Equal(t, writes, s.writes)
+		// Gradual growth is compared with the accepted plan, not the last poll.
+		for n := int64(1010); n <= 1500; n += 10 {
+			s.rows[20] = n
+			s.m.placementPolicy.groups[10].refreshed = time.Time{}
+			require.NoError(t, s.recover(20))
+		}
+		require.Len(t, s.m.Get(context.Background(), 10).GetRWNodes(), 1)
+		require.Len(t, s.m.Get(context.Background(), 20).GetRWNodes(), 2)
+		// Node changes bypass the row deadband.
+		s.m.groups["rg"].nodes.Insert(4)
+		require.NoError(t, s.recover(10))
+		require.Len(t, s.m.Get(context.Background(), 10).GetRWNodes(), 2)
+		require.Len(t, s.m.Get(context.Background(), 20).GetRWNodes(), 2)
+	})
+}
+
+func TestCollectionGroupPersistenceDoesNotLockMetadata(t *testing.T) {
+	for _, change := range []string{"none", "nodes", "scope", "config", "rg config", "drop rg"} {
+		mockey.PatchConvey("metadata may progress during a catalog write: "+change, t, func() {
+			s := newGroupTestState(t, []string{"rg"})
+			s.duringSave = func() {
+				require.True(t, s.m.CollectionManager.rwmutex.TryLock(), "catalog write must not hold collection metadata lock")
+				if change == "scope" {
+					s.m.collectionPartitions[10].Insert(12)
+				}
+				s.m.CollectionManager.rwmutex.Unlock()
+				require.True(t, s.m.ResourceManager.rwmutex.TryLock(), "catalog write must not hold resource metadata lock")
+				switch change {
+				case "nodes":
+					s.m.groups["rg"].nodes.Remove(1)
+				case "rg config":
+					s.m.groups["rg"].cfg.Requests.NodeNum++
+				case "drop rg":
+					delete(s.m.groups, "rg")
+				}
+				s.m.ResourceManager.rwmutex.Unlock()
+				if change == "config" {
+					require.NoError(t, paramtable.Get().Save(paramtable.Get().QueryCoordCfg.ReplicaPlacementResourceGroupAllowlist.Key, ""))
+				}
+			}
+			err := s.recover(10)
+			if change == "none" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			require.Equal(t, 1, s.writes, "abort before another write from the stale snapshot")
+			if change == "nodes" {
+				require.NoError(t, s.recover(20))
+				for _, r := range s.m.GetByResourceGroup(context.Background(), "rg") {
+					require.NotContains(t, r.GetRWNodes(), int64(1))
+				}
+			}
+		})
+	}
+}
+
+func TestCollectionGroupBlockedTargetsRetainCapacity(t *testing.T) {
+	a := groupReplica(1, 10, "rg", 1, 2, 3, 4)
+	b := groupReplica(2, 10, "rg", 5, 6, 7, 8)
+	plan := map[int64][]int64{1: {5, 6}, 2: {7, 8}}
+	a = applyCollectionGroupPlan(a, []*Replica{a, b}, []int64{1, 2, 3, 4, 5, 6, 7, 8}, plan)
+	require.ElementsMatch(t, []int64{1, 2}, a.GetRWNodes())
+	b = applyCollectionGroupPlan(b, []*Replica{a, b}, []int64{1, 2, 3, 4, 5, 6, 7, 8}, plan)
+	require.ElementsMatch(t, []int64{5, 6}, b.GetRONodes())
+	mutable := b.CopyForWrite()
+	mutable.RemoveNode(5, 6)
+	b = mutable.IntoReplica()
+	a = applyCollectionGroupPlan(a, []*Replica{a, b}, []int64{1, 2, 3, 4, 5, 6, 7, 8}, plan)
+	require.ElementsMatch(t, []int64{5, 6}, a.GetRWNodes())
 }

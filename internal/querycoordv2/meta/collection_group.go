@@ -60,6 +60,7 @@ type collectionGroupWrite struct {
 
 type collectionGroupPlan struct {
 	key   string
+	rows  map[int64]int64   // immutable row snapshot accepted when this plan was created
 	nodes map[int64][]int64 // replica ID -> desired RW nodes, stable during RO draining
 }
 
@@ -131,7 +132,12 @@ func (m *Meta) refreshPlacementPolicy(ctx context.Context) error {
 	}
 	a, err := newReplicaPlacementPolicy(groupConfig, strings.Split(allowed, ","))
 	if err != nil {
-		return err
+		// Invalid optimization settings must not disable ordinary node recovery,
+		// including collections and RGs outside the configured policy. Pending
+		// writes have already been settled above; persistence failures never take
+		// this fallback. Cache the rejected raw values to avoid parsing every trigger.
+		mlog.Warn(ctx, "invalid replica placement configuration; use ordinary replica recovery", mlog.Err(err))
+		a = &replicaPlacementPolicy{}
 	}
 	a.rawGroups, a.rawAllowed = raw, allowed
 	if old := m.placementPolicy; old != nil {
@@ -221,6 +227,10 @@ func (m *Meta) groupScopeLocked(g *collectionGroup, a *replicaPlacementPolicy) m
 }
 
 func (m *Meta) recoverCollectionGroup(ctx context.Context, g *collectionGroup, a *replicaPlacementPolicy) error {
+	// Lock order: placement lease -> group -> ascending collection replica locks.
+	// CollectionManager/ResourceManager locks only protect short snapshots and
+	// validations, never RPC or catalog IO. Replica locks span persistence so
+	// RW/RO ownership cannot change underneath an independently safe write.
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	unlock := m.lockGroup(g)
@@ -238,16 +248,17 @@ func (m *Meta) recoverCollectionGroup(ctx context.Context, g *collectionGroup, a
 	unlock = m.lockGroup(g)
 	defer unlock()
 	m.CollectionManager.rwmutex.RLock()
-	defer m.CollectionManager.rwmutex.RUnlock()
-	if !reflect.DeepEqual(scope, m.groupScopeLocked(g, a)) {
-		return merr.WrapErrServiceUnavailable("collection group load scope changed during row refresh")
+	currentScope := m.groupScopeLocked(g, a)
+	m.CollectionManager.rwmutex.RUnlock()
+	if !reflect.DeepEqual(scope, currentScope) {
+		// Discard stale row estimates, but still repair failed nodes and bootstrap
+		// new replicas using the latest scope and ordinary per-collection capacity.
+		refreshErr = merr.WrapErrServiceUnavailable("collection group load scope changed during row refresh")
+		scope = currentScope
 	}
 	if !a.current() {
 		return merr.WrapErrServiceUnavailable("replica placement configuration changed during row refresh")
 	}
-	// Keep the RG snapshot valid through persistence, avoiding a stale node-plan commit.
-	m.ResourceManager.rwmutex.RLock()
-	defer m.ResourceManager.rwmutex.RUnlock()
 	byRG := make(map[string][]*Replica)
 	all := make(map[int64][]*Replica)
 	for _, id := range g.members {
@@ -264,13 +275,23 @@ func (m *Meta) recoverCollectionGroup(ctx context.Context, g *collectionGroup, a
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	for _, name := range names {
-		rg := m.groups[name]
-		if rg == nil {
-			return merr.WrapErrServiceUnavailable("collection group resource group is unavailable")
+	rgs, err := m.GetResourceGroups(ctx, names)
+	if err != nil {
+		return merr.Wrap(err, "snapshot collection group resource groups")
+	}
+	nodesByRG := make(map[string][]int64, len(rgs))
+	for name, rg := range rgs {
+		nodesByRG[name] = rg.GetNodes()
+		slices.Sort(nodesByRG[name])
+	}
+	for name := range g.plans {
+		if byRG[name] == nil {
+			delete(g.plans, name)
 		}
-		nodes := rg.GetNodes()
-		slices.Sort(nodes)
+	}
+	for _, name := range names {
+		rg := rgs[name]
+		nodes := nodesByRG[name]
 		replicas := byRG[name]
 		slices.SortFunc(replicas, func(a, b *Replica) int {
 			if a.GetID() < b.GetID() {
@@ -283,17 +304,24 @@ func (m *Meta) recoverCollectionGroup(ctx context.Context, g *collectionGroup, a
 		})
 		plan := &collectionGroupPlan{nodes: make(map[int64][]int64)}
 		if g.rows != nil && reflect.DeepEqual(scope, g.scope) {
-			key := groupPlanKey(replicas, nodes, g.rows)
+			key := groupPlanKey(replicas, nodes)
 			plan = g.plans[name]
-			if plan == nil || plan.key != key {
-				plan = &collectionGroupPlan{key: key, nodes: assignCollectionGroup(replicas, nodes, g.rows)}
+			if plan == nil || plan.key != key || groupRowSharesChanged(replicas, len(nodes), plan.rows, g.rows) {
+				plan = &collectionGroupPlan{key: key, rows: g.rows, nodes: assignCollectionGroup(replicas, nodes, g.rows)}
 				g.plans[name] = plan
 			}
 		} else {
-			// Without a usable row snapshot recover failures, preserving all
-			// surviving RW nodes. Optimize after a successful refresh.
+			// Unknown rows must not mean a one-node capacity limit during first
+			// load. Share the RG fairly within each collection, just as ordinary
+			// recovery does, until group weights are available.
+			byCollection := make(map[int64][]*Replica)
 			for _, r := range replicas {
-				plan.nodes[r.GetID()] = r.GetRWNodes()
+				byCollection[r.GetCollectionID()] = append(byCollection[r.GetCollectionID()], r)
+			}
+			for _, rs := range byCollection {
+				for id, nodes := range assignCollectionGroup(rs, nodes, nil) {
+					plan.nodes[id] = nodes
+				}
 			}
 		}
 		for _, r := range replicas {
@@ -303,6 +331,9 @@ func (m *Meta) recoverCollectionGroup(ctx context.Context, g *collectionGroup, a
 			updated := applyCollectionGroupPlan(r, all[r.GetCollectionID()], nodes, plan.nodes)
 			if updated == nil {
 				continue
+			}
+			if err := m.validateCollectionGroupSnapshot(g, a, scope, rgs, nodesByRG); err != nil {
+				return err
 			}
 			// Each write is independently safe: no node can enter a different replica
 			// of the collection until its old owner has persisted RO removal.
@@ -314,7 +345,40 @@ func (m *Meta) recoverCollectionGroup(ctx context.Context, g *collectionGroup, a
 			mlog.Info(ctx, "collection group replica nodes updated", mlog.String("group", g.name), mlog.String("resourceGroup", name), mlog.Int64("replicaID", r.GetID()), mlog.Int64s("rwNodes", updated.GetRWNodes()), mlog.Int64s("roNodes", updated.GetRONodes()))
 		}
 	}
+	if err := m.validateCollectionGroupSnapshot(g, a, scope, rgs, nodesByRG); err != nil {
+		return err
+	}
 	return refreshErr
+}
+
+// The caller holds all group replica locks. RG/load metadata may change during
+// catalog IO, as in ordinary recovery. Detect that before the next write and at
+// the end, then retry from a fresh snapshot; never roll back an uncertain write.
+// Same-collection isolation remains protected by the replica locks throughout.
+func (m *Meta) validateCollectionGroupSnapshot(g *collectionGroup, a *replicaPlacementPolicy, scope map[int64][]int64, rgs map[string]*ResourceGroup, nodes map[string][]int64) error {
+	if !a.current() {
+		return merr.WrapErrServiceUnavailable("replica placement configuration changed during recovery")
+	}
+	m.CollectionManager.rwmutex.RLock()
+	sameScope := reflect.DeepEqual(scope, m.groupScopeLocked(g, a))
+	m.CollectionManager.rwmutex.RUnlock()
+	if !sameScope {
+		return merr.WrapErrServiceUnavailable("collection group load scope changed during recovery")
+	}
+	m.ResourceManager.rwmutex.RLock()
+	defer m.ResourceManager.rwmutex.RUnlock()
+	for name, snapshot := range rgs {
+		current := m.groups[name]
+		if current == nil || !proto.Equal(current.cfg, snapshot.cfg) {
+			return merr.WrapErrServiceUnavailable("collection group resource group changed during recovery")
+		}
+		currentNodes := current.GetNodes()
+		slices.Sort(currentNodes)
+		if !slices.Equal(currentNodes, nodes[name]) {
+			return merr.WrapErrServiceUnavailable("collection group resource group nodes changed during recovery")
+		}
+	}
+	return nil
 }
 
 // Caller holds the group lock and every member's replica lock. All durable
