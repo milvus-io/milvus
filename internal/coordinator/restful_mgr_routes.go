@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	paramconfig "github.com/milvus-io/milvus/pkg/v2/config"
 	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -1368,6 +1369,14 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			logger.Info("HandleAlterConfig attempted to modify immutable config",
 				zap.String("key", config.Key))
 			writeJSONError(writer, fmt.Sprintf("immutable configuration cannot be modified through this endpoint. Invalid key: %s", config.Key), http.StatusBadRequest)
+			return
+		}
+
+		// Reject even while the mode is off: an anonymous caller must not
+		// plant an etcd override that defeats a later opt-in after restart.
+		// Use the same key identity as config storage, including its aliases.
+		if paramconfig.FormatKey(config.Key) == paramconfig.FormatKey(paramtable.Get().CommonCfg.ManagementMetricsOnly.Key) {
+			writeJSONError(writer, "managementMetricsOnly cannot be modified through this endpoint; set it in the configuration file and restart", http.StatusBadRequest)
 			return
 		}
 

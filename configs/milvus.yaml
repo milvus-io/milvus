@@ -1035,6 +1035,15 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Restrict the management port (default 9091) to GET/HEAD on /metrics,
+    # /metrics_default, /healthz, /livez and /management/check/ready. Probes return
+    # only their HTTP status and a generic message. All other management, WebUI,
+    # profiling, eventlog and legacy /api/v1 endpoints return 404, regardless of
+    # enableWebUI or enablePprof. Metrics and probes remain unauthenticated: restrict
+    # network access to trusted monitoring and probe clients. Independent of
+    # authorizationEnabled; does not affect the main service port. Set on every
+    # process and restart to apply. Cannot be changed through /management/config/alter.
+    managementMetricsOnly: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
