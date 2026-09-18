@@ -50,10 +50,10 @@
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
-#include "segcore/segment_c.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "storage/MmapManager.h"
 #include "storage/Util.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/cachinglayer_test_utils.h"
 
 namespace milvus {
@@ -207,15 +207,6 @@ class ScopedDirectoryCleanup {
     std::string path_;
 };
 
-class ScopedFlushResult {
- public:
-    ~ScopedFlushResult() {
-        FreeFlushResult(&result);
-    }
-
-    CFlushResult result{};
-};
-
 SchemaPtr
 StorageV3NestedArraySchema(bool enable_mmap) {
     proto::schema::CollectionSchema schema_proto;
@@ -294,23 +285,18 @@ void
 RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     const auto unique =
         std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root_path = std::filesystem::temp_directory_path().string();
+    const auto leaf_path = "milvus_nested_array_v3_" + std::to_string(unique) +
+                           "_" + (enable_mmap ? "mmap" : "memory") + "_" +
+                           (use_take ? "take" : "chunk");
     const auto segment_path =
-        (std::filesystem::temp_directory_path() /
-         ("milvus_nested_array_v3_" + std::to_string(unique) + "_" +
-          (enable_mmap ? "mmap" : "memory") + "_" +
-          (use_take ? "take" : "chunk")))
-            .string();
+        (std::filesystem::path(root_path) / leaf_path).string();
     ScopedDirectoryCleanup cleanup(segment_path);
 
     auto schema = StorageV3NestedArraySchema(enable_mmap);
     const auto nested_field = FieldId(101);
     auto rows = StorageV3NestedArrayRows();
     const auto row_count = static_cast<int64_t>(rows.size());
-
-    auto& segcore_config = segcore::SegcoreConfig::default_config();
-    const auto original_chunk_rows = segcore_config.get_chunk_rows();
-    DeferLambda([&]() { segcore_config.set_chunk_rows(original_chunk_rows); });
-    segcore_config.set_chunk_rows(2);
 
     const auto original_cell_target_size =
         segcore::storagev2translator::GetCellTargetSizeBytes();
@@ -321,12 +307,8 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
     // The default 4 MiB target may merge the row groups back into one cell.
     segcore::storagev2translator::SetCellTargetSizeBytes(1);
 
-    auto growing = segcore::CreateGrowingSegment(
-        schema, empty_index_meta, 0, segcore_config);
-    ASSERT_NE(growing, nullptr);
-
     std::vector<int64_t> row_ids(row_count);
-    std::vector<Timestamp> timestamps(row_count);
+    std::vector<int64_t> timestamps(row_count);
     std::vector<int64_t> pks(row_count);
     for (int64_t i = 0; i < row_count; ++i) {
         row_ids[i] = 1000 + i;
@@ -334,46 +316,32 @@ RunStorageV3SealedRetrieve(bool enable_mmap, bool use_take) {
         pks[i] = 3000 + i;
     }
 
-    InsertRecordProto insert;
-    insert.set_num_rows(row_count);
-    insert.mutable_fields_data()->AddAllocated(
-        segcore::CreateDataArrayFrom(
-            pks.data(), nullptr, row_count, (*schema)[FieldId(100)])
-            .release());
-    auto* nested_data = insert.add_fields_data();
-    nested_data->set_field_id(nested_field.get());
-    nested_data->set_type(proto::schema::DataType::Array);
-    auto* array_data = nested_data->mutable_scalars()->mutable_array_data();
-    array_data->set_element_type(proto::schema::DataType::Array);
-    for (const auto& row : rows) {
-        *array_data->add_data() = row;
-    }
+    // Write the four StorageV3 columns directly, in the order
+    // ConvertToLoonArrowSchema defines them: RowID, Timestamp, pk, nested
+    // array. The nested-array column is arrow::binary() holding one serialized
+    // ScalarFieldProto per row, which is the encoding the storage layer reads
+    // back, so a retrieved row is proto-identical to rows[i].
+    std::vector<std::shared_ptr<arrow::Array>> columns{
+        milvus::test::Int64ColumnFromValues(row_ids),
+        milvus::test::Int64ColumnFromValues(timestamps),
+        milvus::test::Int64ColumnFromValues(pks),
+        milvus::test::ArrayFromScalarFieldProtos(rows),
+    };
 
-    const auto insert_offset = growing->PreInsert(row_count);
-    ASSERT_EQ(insert_offset, 0);
-    ASSERT_NO_THROW(growing->Insert(
-        insert_offset, row_count, row_ids.data(), timestamps.data(), &insert));
+    // rows_per_batch mirrors the chunk_rows the growing segment used to be
+    // given; the extra row group actually comes from row 0 exceeding
+    // DEFAULT_MAX_ROW_GROUP_SIZE, which the num_chunk assertion below relies on.
+    milvus::test::V3SegmentTestData v3(schema,
+                                       columns,
+                                       row_count,
+                                       root_path,
+                                       leaf_path,
+                                       "0|1|100,101",
+                                       /*rows_per_batch=*/2);
+    ASSERT_EQ(v3.TotalRows(), row_count);
+    ASSERT_GT(v3.Version(), 0);
 
-    auto schema_blob = schema->ToProto().SerializeAsString();
-    std::string column_group_pattern = "0|1|100,101";
-    CFlushConfig config{};
-    config.segment_path = segment_path.c_str();
-    config.read_version = -1;
-    config.retry_limit = 3;
-    config.schema_blob = schema_blob.data();
-    config.schema_length = static_cast<int64_t>(schema_blob.size());
-    config.schema_based_pattern = column_group_pattern.c_str();
-
-    ScopedFlushResult flush;
-    auto status = FlushGrowingSegmentData(
-        growing.get(), 0, row_count, &config, &flush.result);
-    ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(flush.result.num_rows, row_count);
-    ASSERT_GT(flush.result.committed_version, 0);
-
-    const auto manifest_path =
-        "{\"base_path\":\"" + segment_path +
-        "\",\"ver\":" + std::to_string(flush.result.committed_version) + "}";
+    const auto manifest_path = v3.ManifestPathJson();
     proto::segcore::SegmentLoadInfo load_info;
     load_info.set_collectionid(1);
     load_info.set_partitionid(2);
