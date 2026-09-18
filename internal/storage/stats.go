@@ -306,6 +306,14 @@ type BM25Stats struct {
 
 const BM25VERSION int32 = 0
 
+// Wire format written by Serialize/SerializeToWriter: a fixed header of
+// version(int32) + numRow(int64) + numToken(int64), then whole
+// key(uint32) + value(int32) entries.
+const (
+	bm25StatsHeaderSize = 4 + 8 + 8
+	bm25StatsEntrySize  = 4 + 4
+)
+
 func NewBM25Stats() *BM25Stats {
 	return &BM25Stats{
 		rowsWithToken: map[uint32]int32{},
@@ -440,8 +448,18 @@ func (m *BM25Stats) SerializeToWriter(w io.Writer) error {
 }
 
 func (m *BM25Stats) Deserialize(bs []byte) error {
+	// A trailing entry shorter than bm25StatsEntrySize would otherwise be
+	// dropped by the integer division below, leaving numRow/numToken counting
+	// tokens that are missing from rowsWithToken. DeserializeFromReader
+	// already rejects such a payload.
+	if len(bs) < bm25StatsHeaderSize || (len(bs)-bm25StatsHeaderSize)%bm25StatsEntrySize != 0 {
+		return merr.WrapErrDataIntegrityMsg(
+			"malformed BM25 stats payload: %d bytes is not a %d-byte header plus whole %d-byte entries",
+			len(bs), bm25StatsHeaderSize, bm25StatsEntrySize)
+	}
+
 	buffer := bytes.NewBuffer(bs)
-	dim := (len(bs) - 20) / 8
+	dim := (len(bs) - bm25StatsHeaderSize) / bm25StatsEntrySize
 	var numRow, tokenNum int64
 	var version int32
 	if err := binary.Read(buffer, common.Endian, &version); err != nil {
