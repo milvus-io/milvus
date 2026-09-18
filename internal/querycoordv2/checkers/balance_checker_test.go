@@ -23,8 +23,11 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -61,7 +64,7 @@ func createTestBalanceChecker() *BalanceChecker {
 	balance.ResetGlobalBalancerFactoryForTest()
 	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, targetMgr)
 
-	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler)
+	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler, nil)
 }
 
 // =============================================================================
@@ -221,6 +224,28 @@ func TestBalanceChecker_ReadyToCheck_NoTarget(t *testing.T) {
 
 	result := checker.readyToCheck(ctx, collectionID)
 	assert.False(t, result)
+}
+
+func TestBalanceChecker_ReadyToCheck_FrozenWhileSplitting(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	collectionID := int64(1)
+
+	// the collection is otherwise ready for balance.
+	mockGetCollection := mockey.Mock((*meta.Meta).GetCollection).Return(&meta.Collection{}).Build()
+	defer mockGetCollection.UnPatch()
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+	defer mockIsNextTargetExist.UnPatch()
+
+	// but one of its shards is a fenced split source, so balance is frozen.
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v0"},
+		ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardSplitting}},
+	}, nil)
+	checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
+
+	assert.False(t, checker.readyToCheck(ctx, collectionID))
 }
 
 func TestBalanceChecker_FilterCollectionForBalance_Success(t *testing.T) {
