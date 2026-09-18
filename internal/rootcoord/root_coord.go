@@ -3025,18 +3025,18 @@ func (c *Core) CancelRequests(ctx context.Context, req *milvuspb.CancelRequestsR
 		return resp, nil
 	}
 
-	cancelled, notFound, nodeResults, err := c.proxyClientManager.CancelRequests(ctx, req)
-	resp.Cancelled = cancelled
+	canceled, notFound, nodeResults, err := c.proxyClientManager.CancelRequests(ctx, req)
+	resp.Canceled = canceled
 	resp.NotFound = notFound
 	resp.NodeResults = nodeResults
 	if err != nil {
 		resp.Status = merr.Status(err)
 	}
 
-	mlog.Info(ctx, "cancelled running requests",
+	mlog.Info(ctx, "canceled running requests",
 		mlog.Int64s("requestIDs", req.GetRequestIds()),
 		mlog.String("reason", req.GetReason()),
-		mlog.Int("cancelled", len(cancelled)),
+		mlog.Int("canceled", len(canceled)),
 		mlog.Int("notFound", len(notFound)),
 		mlog.Int("nodes", len(nodeResults)),
 		mlog.Err(err))

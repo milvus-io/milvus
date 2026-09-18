@@ -1961,7 +1961,7 @@ func (c *Client) ListRunningRequests(ctx context.Context, req *milvuspb.ListRunn
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.ListRunningRequestsResponse, error) {
-		return client.RootCoordClient.ListRunningRequests(ctx, req)
+		return client.ListRunningRequests(ctx, req)
 	})
 }
 
@@ -1972,7 +1972,7 @@ func (c *Client) CancelRequests(ctx context.Context, req *milvuspb.CancelRequest
 		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
 	)
 	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*milvuspb.CancelRequestsResponse, error) {
-		return client.RootCoordClient.CancelRequests(ctx, req)
+		return client.CancelRequests(ctx, req)
 	})
 }
 

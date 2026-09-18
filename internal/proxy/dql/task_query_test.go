@@ -134,11 +134,11 @@ func TestQueryTaskPreExecuteSnapshotFences(t *testing.T) {
 	}
 }
 
-// TestQueryShardCancelledContextKeepsShardLeaderCache: a QueryNode error
+// TestQueryShardCanceledContextKeepsShardLeaderCache: a QueryNode error
 // observed after the request's own ctx is done is a consequence of the
 // cancellation, so the shard leader cache must stay intact. The mock manager
 // has no expectation for InvalidateShardLeaderCache; a call would fail the test.
-func TestQueryShardCancelledContextKeepsShardLeaderCache(t *testing.T) {
+func TestQueryShardCanceledContextKeepsShardLeaderCache(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	qn := mocks.NewMockQueryNodeClient(t)
 	qn.EXPECT().Query(mock.Anything, mock.Anything).RunAndReturn(
@@ -154,7 +154,7 @@ func TestQueryShardCancelledContextKeepsShardLeaderCache(t *testing.T) {
 		actualChannelsMvcc: typeutil.NewConcurrentMap[string, uint64](),
 	}
 
-	err := task.queryShard(ctx, 1, qn, "ch-cancelled")
+	err := task.queryShard(ctx, 1, qn, "ch-canceled")
 	require.ErrorIs(t, err, context.Canceled)
 }
 

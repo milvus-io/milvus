@@ -462,7 +462,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				mlog.Int64("nodeID", targetNode.NodeID),
 				mlog.Err(err))
 			// Once the request's own ctx is done -- client deadline, client
-			// disconnect, or an operator cancelling it -- whatever the node
+			// disconnect, or an operator canceling it -- whatever the node
 			// returned (context.Canceled, a segcore FollyCancel, or an inner
 			// error raised while unwinding) is a consequence of the
 			// cancellation, not evidence about node health. Abort without
