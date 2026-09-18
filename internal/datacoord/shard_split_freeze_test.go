@@ -19,12 +19,15 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -32,13 +35,18 @@ import (
 )
 
 func newFreezeTestInspector(t *testing.T) (*compactionInspector, *MockCompactionMeta) {
+	inspector, mockMeta, _ := newFreezeTestInspectorWithScheduler(t)
+	return inspector, mockMeta
+}
+
+func newFreezeTestInspectorWithScheduler(t *testing.T) (*compactionInspector, *MockCompactionMeta, *task.MockGlobalScheduler) {
 	paramtable.Init()
 	mockMeta := NewMockCompactionMeta(t)
 	mockAlloc := allocator.NewMockAllocator(t)
 	mockScheduler := task.NewMockGlobalScheduler(t)
 	mockScheduler.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
-	return newCompactionInspector(mockMeta, mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager()), mockMeta
+	return newCompactionInspector(mockMeta, mockAlloc, nil, mockScheduler, mockScheduler, newMockVersionManager()), mockMeta, mockScheduler
 }
 
 func TestCompactionFrozenBySplit(t *testing.T) {
@@ -90,7 +98,7 @@ func TestEnqueueCompactionRejectedOnSplittingChannel(t *testing.T) {
 }
 
 func TestPreemptTasksByChannel(t *testing.T) {
-	inspector, mockMeta := newFreezeTestInspector(t)
+	inspector, mockMeta, scheduler := newFreezeTestInspectorWithScheduler(t)
 	mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Times(3)
 	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
 	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -117,6 +125,7 @@ func TestPreemptTasksByChannel(t *testing.T) {
 	// persisted and its inputs are released -- and leaves the other channel's
 	// task and the import's own sort step alone.
 	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{100}, false).Return().Once()
+	scheduler.EXPECT().AbortAndRemoveTask(int64(1)).Return().Once()
 	inspector.preemptTasksByChannel(splitMgrV0)
 
 	assert.Nil(t, inspector.getCompactionTask(1))
@@ -178,4 +187,52 @@ func TestShardSplitPreemptsTheSourcesCompactions(t *testing.T) {
 	preempter.channels = nil
 	manager.preemptSourceCompactions(&datapb.SplitShardTask{})
 	assert.Empty(t, preempter.channels)
+}
+
+// A preempted compaction that is already executing on a worker must never
+// commit: removed from the inspector alone, the global scheduler would keep
+// polling the worker and, once it finished, commit a mix -- or an L0 that
+// retires the source's L0s -- on a source past its fence.
+func TestPreemptedExecutingCompactionNeverCommits(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.TaskScheduleInterval.Key, "10")
+	defer params.Reset(params.DataCoordCfg.TaskScheduleInterval.Key)
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{}).Maybe()
+	cluster.EXPECT().QueryCompaction(mock.Anything, mock.Anything).Return(&datapb.CompactionPlanResult{
+		PlanID:   1,
+		State:    datapb.CompactionTaskState_completed,
+		Segments: []*datapb.CompactionSegment{{SegmentID: 101}},
+	}, nil).Maybe()
+	cluster.EXPECT().DropCompaction(mock.Anything, mock.Anything).Return(nil).Maybe()
+	scheduler := task.NewGlobalTaskScheduler(context.Background(), cluster)
+
+	mockMeta := NewMockCompactionMeta(t)
+	mockAlloc := allocator.NewMockAllocator(t)
+	inspector := newCompactionInspector(mockMeta, mockAlloc, nil, scheduler, scheduler, newMockVersionManager())
+	committed := atomic.NewBool(false)
+	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, *datapb.CompactionTask, *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
+			committed.Store(true)
+			return nil, nil, merr.WrapErrServiceInternal("must not commit")
+		}).Maybe()
+	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, mock.Anything).Return().Maybe()
+
+	executing := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID: 1, TriggerID: 1, Channel: splitMgrV0, NodeID: 7,
+		Type: datapb.CompactionType_MixCompaction, State: datapb.CompactionTaskState_executing,
+		InputSegments: []int64{100},
+	}, mockAlloc, mockMeta, newMockVersionManager())
+	inspector.restoreTask(executing)
+
+	inspector.preemptTasksByChannel(splitMgrV0)
+	scheduler.Start()
+	time.Sleep(200 * time.Millisecond)
+	scheduler.Stop()
+	assert.False(t, committed.Load(), "a preempted compaction committed on the source")
+	assert.Equal(t, datapb.CompactionTaskState_cleaned, executing.GetTaskProto().GetState())
 }
