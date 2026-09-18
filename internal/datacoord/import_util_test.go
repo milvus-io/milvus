@@ -1237,6 +1237,36 @@ func TestImportUtil_ListBinlogImportRequestFiles(t *testing.T) {
 		assert.Nil(t, files)
 	})
 
+	t.Run("backup files - invalid paths take precedence over storage errors", func(t *testing.T) {
+		for _, invalidPaths := range [][]string{nil, {"insert", "delta", "extra"}} {
+			for _, invalidFirst := range []bool{false, true} {
+				t.Run(fmt.Sprintf("paths_%d/invalid_first_%t", len(invalidPaths), invalidFirst), func(t *testing.T) {
+					mockCM := mocks2.NewChunkManager(t)
+					mockCM.EXPECT().WalkWithPrefix(mock.Anything, "valid", false, mock.Anything).
+						Return(merr.WrapErrIoTooManyRequests("valid", errors.New("SlowDown"))).Maybe()
+					reqFiles := []*internalpb.ImportFile{
+						{Paths: []string{"valid"}},
+						{Paths: invalidPaths},
+					}
+					if invalidFirst {
+						reqFiles[0], reqFiles[1] = reqFiles[1], reqFiles[0]
+					}
+
+					files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles,
+						[]*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}})
+					require.Error(t, err)
+					assert.Nil(t, files)
+					assert.ErrorIs(t, err, merr.ErrImportFailed)
+					status := merr.Status(err)
+					assert.Equal(t, merr.Code(merr.ErrImportFailed), status.GetCode())
+					assert.False(t, status.GetRetriable())
+					assert.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(status)))
+					mockCM.AssertNotCalled(t, "WalkWithPrefix", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+				})
+			}
+		}
+	})
+
 	t.Run("backup files - storage errors remain retryable", func(t *testing.T) {
 		for _, test := range []struct {
 			name string

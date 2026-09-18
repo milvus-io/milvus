@@ -699,15 +699,22 @@ func DropImportTask(task ImportTask, cluster session.Cluster, tm ImportMeta) err
 	return tm.UpdateTask(context.TODO(), task.GetTaskID(), UpdateNodeID(NullNodeID))
 }
 
+func validateBinlogImportPaths(paths []string) error {
+	if len(paths) == 0 {
+		return merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(paths) > 2 {
+		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths)
+	}
+	return nil
+}
+
 func ListBinlogsAndGroupBySegment(ctx context.Context,
 	cm storage.ChunkManager, importFile *internalpb.ImportFile,
 ) ([]*internalpb.ImportFile, error) {
-	if len(importFile.GetPaths()) == 0 {
-		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
-	}
-	if len(importFile.GetPaths()) > 2 {
-		return nil, merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
-			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths())
+	if err := validateBinlogImportPaths(importFile.GetPaths()); err != nil {
+		return nil, err
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
@@ -805,6 +812,13 @@ func ListBinlogImportRequestFiles(ctx context.Context, cm storage.ChunkManager,
 	isBackup := importutilv2.IsBackup(options)
 	if !isBackup {
 		return reqFiles, nil
+	}
+	// Validate the whole request before listing so storage failures cannot
+	// mask invalid path counts in later files.
+	for _, importFile := range reqFiles {
+		if err := validateBinlogImportPaths(importFile.GetPaths()); err != nil {
+			return nil, err
+		}
 	}
 	resFiles := make([]*internalpb.ImportFile, 0)
 	pool := conc.NewPool[struct{}](hardware.GetCPUNum() * 2)
