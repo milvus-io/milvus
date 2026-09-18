@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -156,6 +157,39 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
 		}
 		return nil
+	case commonpb.MsgType_SplitShard:
+		// The SplitShard fence on the source vchannel: the source delegator spawns
+		// an in-process child delegator per target so it can front their growing
+		// data during the split window. ProcessSplitShard is idempotent, so a
+		// pipeline replay of the fence does not double-spawn.
+		splitShardMsg := msg.(*adaptor.SplitShardMessageBody)
+		header := splitShardMsg.SplitShardMessage.Header()
+		if header.GetCollectionId() != fNode.collectionID {
+			return merr.WrapErrCollectionNotFound(header.GetCollectionId())
+		}
+		// One broadcast reaches every vchannel of the collection, and only the
+		// source's replica is a fence. A target's replica is its genesis: its
+		// child would front itself. A bystander's replica concerns it not at all:
+		// fronting the targets from there would return their rows through a
+		// second parent. Both pass through as no-ops.
+		if role := message.SplitShardRoleOf(header, fNode.channel); role != message.SplitShardRoleSource {
+			mlog.Debug(context.TODO(), "shard-split replica is not a fence on this vchannel, nothing to spawn",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.String("vchannel", fNode.channel),
+				mlog.Int64("splitTaskID", header.GetSplitTaskId()),
+				mlog.Int("role", int(role)))
+			return nil
+		}
+		// The one point where the read path learns a split happened. Logged
+		// because its absence is indistinguishable, in every other log, from a
+		// split whose targets simply have no traffic — and the whole fronting
+		// window depends on this line being reached.
+		mlog.Info(context.TODO(), "source vchannel consumed its shard-split fence",
+			mlog.Int64("collectionID", header.GetCollectionId()),
+			mlog.String("vchannel", fNode.channel),
+			mlog.Int64("splitTaskID", header.GetSplitTaskId()),
+			mlog.Int("targets", len(header.GetTargetVchannels())))
+		return fNode.delegator.ProcessSplitShard(context.Background(), header.GetTargetVchannels())
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}
