@@ -250,6 +250,21 @@ func TestRowBasedUpsertEmitsFieldOps(t *testing.T) {
 	assert.Equal(t, schemapb.FieldPartialUpdateOp_ARRAY_APPEND, tagsOp.GetOp())
 }
 
+func TestJSONPathReplaceEmitsRawOperand(t *testing.T) {
+	coll := &entity.Collection{Name: "json_path", Schema: entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("metadata").WithDataType(entity.FieldTypeJSON))}
+	for _, value := range []string{`null`, `18`, `true`, `"123"`, `{"age":18}`, `[1,2]`} {
+		request, err := NewRowBasedInsertOption(coll.Name, map[string]any{"id": int64(1), "metadata": []byte(value)}).
+			WithPathReplace("metadata", `["profile"][0]`).UpsertRequest(coll)
+		require.NoError(t, err)
+		require.Equal(t, `["profile"][0]`, request.GetFieldOps()[0].GetPath())
+		field := lo.FindOrElse(request.GetFieldsData(), nil, func(f *schemapb.FieldData) bool { return f.GetFieldName() == "metadata" })
+		require.NotNil(t, field)
+		require.Equal(t, value, string(field.GetScalars().GetJsonData().GetData()[0]))
+	}
+}
+
 func TestRowBasedPathReplaceEmitsPath(t *testing.T) {
 	coll := buildPartialOpTestCollection()
 	rows := []any{

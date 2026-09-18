@@ -36,6 +36,7 @@ import (
 const (
 	pathReplaceParentArray       = "array"
 	pathReplaceParentStructArray = "struct_array"
+	pathReplaceParentJSON        = "json"
 )
 
 func observePathReplaceParentOperations(req *milvuspb.UpsertRequest, plans map[string]*fieldPartialUpdatePlan) {
@@ -46,6 +47,8 @@ func observePathReplaceParentOperations(req *milvuspb.UpsertRequest, plans map[s
 		parentType := pathReplaceParentArray
 		if plan.structParent != nil {
 			parentType = pathReplaceParentStructArray
+		} else if len(plan.jsonPath) != 0 {
+			parentType = pathReplaceParentJSON
 		}
 		metrics.ProxyPathReplaceParentOperations.WithLabelValues(
 			paramtable.GetStringNodeID(),
@@ -63,6 +66,7 @@ type fieldPartialUpdatePlan struct {
 	index           int
 	explicitChild   *schemapb.FieldSchema
 	operandChildren []*schemapb.FieldSchema
+	jsonPath        []jsonPathSegment
 }
 
 func (p *fieldPartialUpdatePlan) isPathReplace() bool {
@@ -141,6 +145,20 @@ func resolveFieldPartialUpdateOps(req *milvuspb.UpsertRequest, schema *schemapb.
 			if !ok {
 				return nil, false, merr.WrapErrParameterInvalidMsg(
 					fmt.Sprintf("partial-update op targets field %q not present in fields_data", name))
+			}
+			if field, err := findFieldSchemaByName(schema, name); err == nil && field.GetDataType() == schemapb.DataType_JSON {
+				if field.GetIsDynamic() || fd.GetIsDynamic() {
+					return nil, false, merr.WrapErrParameterInvalidMsg("PATH_REPLACE does not support dynamic JSON fields")
+				}
+				path, err := parseJSONReplacePath(opMsg.GetPath())
+				if err != nil {
+					return nil, false, err
+				}
+				if err := validateJSONReplaceOperand(fd, int(req.GetNumRows())); err != nil {
+					return nil, false, err
+				}
+				plans[name] = &fieldPartialUpdatePlan{op: op, jsonPath: path}
+				continue
 			}
 			index, childName, hasChild, err := parsePathReplace(opMsg.GetPath())
 			if err != nil {

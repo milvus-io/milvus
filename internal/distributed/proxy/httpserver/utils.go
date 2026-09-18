@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -529,7 +530,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 // index and JSON_CONTAINS build a DOM, so a deeper document is readable by some
 // queries and not others. The request binder allows 9997 levels, so the gap is
 // reachable.
-const maxJSONDepth = 1024
+const maxJSONDepth = fieldvalidator.MaxJSONDepth
 
 // checkEngineCompatible reports the first reason the storage engine would not be
 // able to read a document back, in one pass over it.
@@ -895,9 +896,15 @@ func nullElementIn(value gjson.Result) (int, bool) {
 	return idx, found
 }
 
-func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	jsonPathFields := make(map[string]bool)
+	for _, op := range fieldOps {
+		if op.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			jsonPathFields[op.GetFieldName()] = true
+		}
+	}
 	// Escape hatch for clients that relied on the previous value handling.
 	// Read once per request rather than per field.
 	compatibilityMode := paramtable.Get().HTTPCfg.CompatibilityMode.GetAsBool()
@@ -962,6 +969,23 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				fieldType := field.DataType
 				fieldName := field.Name
 				fieldValue := data.Get(fieldName)
+
+				// Replacement operands are JSON values, not SQL NULL or an encoded
+				// document string. Preserve their type regardless of compatibility mode.
+				if fieldType == schemapb.DataType_JSON && jsonPathFields[fieldName] {
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("JSON PATH_REPLACE field %s is required in every row", fieldName)
+					}
+					stored, err := jsonDocumentForStorage(fieldName, fieldValue.Raw)
+					if err != nil {
+						return reallyDataArray, validDataMap, err
+					}
+					reallyData[fieldName] = stored
+					if field.Nullable || field.DefaultValue != nil {
+						validDataMap[fieldName] = append(validDataMap[fieldName], true)
+					}
+					continue
+				}
 
 				// For partial update, missing fields mean "do not update this field".
 				// Explicit JSON null is handled below as an update to null for nullable fields.

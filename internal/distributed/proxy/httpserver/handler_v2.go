@@ -1866,7 +1866,7 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	var validDataMap map[string][]bool
-	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate())
+	httpReq.Data, validDataMap, err = checkAndSetData(body.([]byte), requestSchema, req.GetPartialUpdate(), fieldOps...)
 	if err != nil {
 		mlog.Warn(ctx, "high level restful api, fail to deal with upsert data", mlog.Any("body", body), mlog.Err(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

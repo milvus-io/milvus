@@ -720,7 +720,11 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				for i, upsertIdx := range updateIdxInUpsert {
 					upsertSrcIndices[i] = upsertComputer.Compute(int64(upsertIdx))[0]
 				}
-				if isNullableVector {
+				if plan != nil && len(plan.jsonPath) != 0 {
+					if err := materializeJSONPathReplace(dstField, existField, upsertField, plan.jsonPath, existSrcIndices, existIndices, upsertSrcIndices); err != nil {
+						return nil, err
+					}
+				} else if isNullableVector {
 					// For nullable vector: only copy data for non-null rows
 					upsertValidData := typeutil.GetFieldDataValidData(upsertField)
 					upsertRowIndices := make([]int64, len(updateIdxInUpsert))

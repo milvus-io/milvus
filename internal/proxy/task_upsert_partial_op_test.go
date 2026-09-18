@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -110,6 +112,291 @@ func pathReplaceScalarRow(data any) *schemapb.ScalarField {
 		panic("unsupported test scalar row")
 	}
 	return row
+}
+
+func jsonPathTestField(values ...string) *schemapb.FieldData {
+	data := make([][]byte, len(values))
+	for i, value := range values {
+		data[i] = []byte(value)
+	}
+	return &schemapb.FieldData{
+		FieldName: "metadata", FieldId: 101, Type: schemapb.DataType_JSON,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: data}}}},
+	}
+}
+
+func TestJSONPathReplace(t *testing.T) {
+	for _, tc := range []struct{ name, old, path, replacement, want, wantErr string }{
+		{"leaf", `{"profile":[{"age":1,"city":"A"}]}`, `["profile"][0]["age"]`, `18`, `{"profile":[{"age":18,"city":"A"}]}`, ""},
+		{"whole_object", `{"profile":{"age":1,"city":"A"}}`, `["profile"]`, `{"age":18}`, `{"profile":{"age":18}}`, ""},
+		{"new_key", `{"profile":{}}`, `["profile"]["age"]`, `18`, `{"profile":{"age":18}}`, ""},
+		{"new_null", `{}`, `["age"]`, `null`, `{"age":null}`, ""},
+		{"old_null", `{"age":null}`, `["age"]`, `true`, `{"age":true}`, ""},
+		{"array", `{"x":[1,2]}`, `["x"]`, `[3]`, `{"x":[3]}`, ""},
+		{"numeric_key", `{"1":0}`, `["1"]`, `"true"`, `{"1":"true"}`, ""},
+		{"literal_key", `{"a[1].b":1}`, `["a[1].b"]`, `2`, `{"a[1].b":2}`, ""},
+		{"escaped_key", `{"a\"b":1}`, `["a\"b"]`, `2`, `{"a\"b":2}`, ""},
+		{"empty_key", `{"":1}`, `[""]`, `2`, `{"":2}`, ""},
+		{"unicode_key", `{"😀":1}`, `["\ud83d\ude00"]`, `2`, `{"😀":2}`, ""},
+		{"backslash_key", `{"\\u1234":1}`, `["\\u1234"]`, `2`, `{"\\u1234":2}`, ""},
+		{"root_array", `[1,2]`, `[0]`, `null`, `[null,2]`, ""},
+		{"missing_intermediate", `{}`, `["profile"]["age"]`, `18`, "", "intermediate"},
+		{"null_intermediate", `{"profile":null}`, `["profile"]["age"]`, `18`, "", "object parent"},
+		{"scalar_intermediate", `{"profile":1}`, `["profile"]["age"]`, `18`, "", "object parent"},
+		{"array_oob", `[1]`, `[1]`, `2`, "", "out of range"},
+		{"array_empty", `[]`, `[0]`, `2`, "", "out of range"},
+		{"key_on_array", `[]`, `["0"]`, `2`, "", "object parent"},
+		{"index_on_object", `{}`, `[0]`, `2`, "", "array parent"},
+		{"null_inside_array", `[null]`, `[0]["x"]`, `2`, "", "object parent"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := parseJSONReplacePath(tc.path)
+			require.NoError(t, err)
+			got, err := replaceJSONPath([]byte(tc.old), path, []byte(tc.replacement))
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				return
+			}
+			require.NoError(t, err)
+			assert.JSONEq(t, tc.want, string(got))
+		})
+	}
+	for _, path := range []string{"", "age", "[age]", "[-1]", "[01]", "[ 1]", "[1 ]", "[1.0]", "[123", "[]x", "[999999999999999999999]", `["x"`, `["x"]junk`, `["x"] [0]`, `["x" ]`, "[*]", strings.Repeat("[0]", 65)} {
+		_, err := parseJSONReplacePath(path)
+		require.Error(t, err, path)
+	}
+	for _, path := range []string{`["\q"]`, `["\ud800"]`, `["\udc00"]`, `["\ud800\u0041"]`, `["\ud800abc"]`, `["\u0041"]x`, `["` + string([]byte{0xff}) + `"]`, "[", "[0"} {
+		_, err := parseJSONReplacePath(path)
+		require.Error(t, err, path)
+	}
+	path, err := parseJSONReplacePath(`["\u0041"]`)
+	require.NoError(t, err)
+	require.Equal(t, "A", path[0].key)
+	for _, tc := range []struct{ old, path, operand string }{
+		{`{`, `["x"]`, `1`},
+		{`[`, `[0]`, `1`},
+		{`{}`, `["x"]`, `invalid`},
+		{`[0]`, `[0]`, `invalid`},
+	} {
+		path, err := parseJSONReplacePath(tc.path)
+		require.NoError(t, err)
+		_, err = replaceJSONPath([]byte(tc.old), path, []byte(tc.operand))
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+	}
+}
+
+func TestJSONPathReplaceDuplicateKeys(t *testing.T) {
+	for _, tc := range []struct{ name, old, path, replacement, want string }{
+		{"leaf", `{"a":1,"a":2,"x":10,"x":20}`, `["a"]`, `3`, `{"a":3,"a":3,"x":10,"x":20}`},
+		{"ancestors", `{"a":{"b":1,"x":10},"a":{"b":2,"y":20}}`, `["a"]["b"]`, `3`, `{"a":{"b":3,"x":10},"a":{"b":3,"y":20}}`},
+		{"missing_leaf", `{"a":{},"a":{"b":1,"b":2}}`, `["a"]["b"]`, `null`, `{"a":{"b":null},"a":{"b":null,"b":null}}`},
+		{"arrays", `{"a":[1,2],"a":[3,4]}`, `["a"][1]`, `{"x":1,"x":2}`, `{"a":[1,{"x":1,"x":2}],"a":[3,{"x":1,"x":2}]}`},
+		{"escaped_duplicate", `{"a":1,"\u0061":2}`, `["a"]`, `3`, `{"a":3,"\u0061":3}`},
+		{"many_duplicates", `{` + strings.Repeat(`"a":1,`, 40) + `"a":2}`, `["a"]`, `3`, `{` + strings.Repeat(`"a":3,`, 40) + `"a":3}`},
+		{"raw_values", `{"n":9007199254740993,"e":1e+100,"s":"<>&","a":0}`, `["a"]`, `"<>&"`, `{"n":9007199254740993,"e":1e+100,"s":"<>&","a":"<>&"}`},
+		{"new_escaped_key", `{"x":1}`, `["<\"\\>"]`, `null`, `{"x":1,"<\"\\>":null}`},
+		{"existing_html_key", `{"<>&":1,"a":0}`, `["a"]`, `2`, `{"<>&":1,"a":2}`},
+		{"whitespace", " \n { \"a\" : [ 1, 2 ], \"x\" : { \"x\":1, \"x\":2 } } \t", `["a"][1]`, `3`, `{"a":[1,3],"x":{ "x":1, "x":2 }}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := parseJSONReplacePath(tc.path)
+			require.NoError(t, err)
+			old, operand := []byte(tc.old), []byte(tc.replacement)
+			got, err := replaceJSONPath(old, path, operand)
+			require.NoError(t, err)
+			// JSONEq decodes into maps and would hide lost duplicate members.
+			require.Equal(t, tc.want, string(got))
+			require.Equal(t, tc.old, string(old))
+			require.Equal(t, tc.replacement, string(operand))
+		})
+	}
+	for _, tc := range []struct{ old, path string }{
+		{`{"a":{"b":1},"a":null}`, `["a"]["b"]`},
+		{`{"a":[1],"a":[]}`, `["a"][0]`},
+		{`{"a":{"b":{"c":1}},"a":{}}`, `["a"]["b"]["c"]`},
+	} {
+		path, err := parseJSONReplacePath(tc.path)
+		require.NoError(t, err)
+		old := jsonPathTestField(tc.old)
+		before := proto.Clone(old)
+		dst := jsonPathTestField()
+		err = materializeJSONPathReplace(dst, old, jsonPathTestField(`3`), path, []int64{0}, []int64{0}, []int64{0})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.Empty(t, dst.GetScalars().GetJsonData().GetData())
+		require.True(t, proto.Equal(before, old))
+	}
+}
+
+func TestJSONPathReplacePreservesKeyBytes(t *testing.T) {
+	for _, tc := range []struct{ name, old, path, replacement, want string }{
+		{"unicode_separators", "{\"\u2028\u2029\":0,\"age\":18}", `["age"]`, `19`, "{\"\u2028\u2029\":0,\"age\":19}"},
+		{"matched_unicode_separators", "{\"\u2028\u2029\":0}", `["\u2028\u2029"]`, `1`, "{\"\u2028\u2029\":1}"},
+		{"escaped_unicode", `{"\u2028":0,"\u2029":1,"\ud83d\ude00":2,"age":18}`, `["age"]`, `19`, `{"\u2028":0,"\u2029":1,"\ud83d\ude00":2,"age":19}`},
+		{"literal_escape", `{"\\u2028":0,"age":18}`, `["age"]`, `19`, `{"\\u2028":0,"age":19}`},
+		{"nested_keys", `[{"\u0061":{"\u0062":1},"a":{"b":2}}]`, `[0]["a"]["b"]`, `3`, `[{"\u0061":{"\u0062":3},"a":{"b":3}}]`},
+		{"whitespace_and_punctuation", " \n { \t\"\\u0061\" : 1 \r\n , \t\" ,\\\"\\\\\" : 2 } ", `["a"]`, `3`, `{"\u0061":3," ,\"\\":2}`},
+		{"new_key", `{"\u0061":1}`, `["<\"\\>"]`, `null`, `{"\u0061":1,"<\"\\>":null}`},
+		{"decoder_refill", `{"padding":"` + strings.Repeat("x", 4096) + `","\u0061":1}`, `["a"]`, `2`, `{"padding":"` + strings.Repeat("x", 4096) + `","\u0061":2}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := parseJSONReplacePath(tc.path)
+			require.NoError(t, err)
+			old, operand := []byte(tc.old), []byte(tc.replacement)
+			got, err := replaceJSONPath(old, path, operand)
+			require.NoError(t, err)
+			// Compare bytes: semantic JSON equality hides changed key spellings.
+			require.Equal(t, tc.want, string(got))
+			require.Equal(t, tc.old, string(old))
+			require.Equal(t, tc.replacement, string(operand))
+		})
+	}
+}
+
+func TestJSONPathReplaceTraversalDecodeErrors(t *testing.T) {
+	path, err := parseJSONReplacePath(`["a"]`)
+	require.NoError(t, err)
+	for _, tc := range []struct{ name, value, message string }{
+		{"key", `{1:0}`, "decode JSON member key"},
+		{"value", `{"a":}`, "decode JSON member value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Bypass the validated entry point to exercise defensive decode errors.
+			got, err := replaceJSONValue([]byte(tc.value), path, []byte(`1`))
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.ErrorContains(t, err, tc.message)
+			require.Nil(t, got)
+		})
+	}
+}
+
+func TestJSONPathReplacePreservesKeySize(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "metadata", FieldID: 101, DataType: schemapb.DataType_JSON},
+	}})
+	require.NoError(t, err)
+	validator := fieldvalidator.NewValidateUtil(fieldvalidator.WithMaxLenCheck())
+	maxLength := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt()
+	path, err := parseJSONReplacePath(`["age"]`)
+	require.NoError(t, err)
+	for _, tc := range []struct{ name, separator string }{
+		{"line_separator", "\u2028"},
+		{"paragraph_separator", "\u2029"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Fill the document to the write limit with a key whose characters
+			// encoding/json escapes even when SetEscapeHTML(false) is used.
+			keyLength := maxLength - len(`{"":0,"age":18}`)
+			key := strings.Repeat(tc.separator, keyLength/len(tc.separator)) + strings.Repeat("x", keyLength%len(tc.separator))
+			old := jsonPathTestField(`{"` + key + `":0,"age":18}`)
+			operand := jsonPathTestField(`19`)
+			oldBefore, operandBefore := proto.Clone(old), proto.Clone(operand)
+			require.Len(t, old.GetScalars().GetJsonData().GetData()[0], maxLength)
+			require.NoError(t, validator.Validate([]*schemapb.FieldData{proto.Clone(old).(*schemapb.FieldData)}, helper, 1))
+			require.NoError(t, validateJSONReplaceOperand(operand, 1))
+
+			dst := jsonPathTestField()
+			require.NoError(t, materializeJSONPathReplace(dst, old, operand, path, []int64{0}, []int64{0}, []int64{0}))
+			// Exercise the ordinary post-merge write validation, not just the helper.
+			require.NoError(t, validator.Validate([]*schemapb.FieldData{dst}, helper, 1))
+			require.Len(t, dst.GetScalars().GetJsonData().GetData()[0], maxLength)
+			require.Equal(t, `{"`+key+`":0,"age":19}`, string(dst.GetScalars().GetJsonData().GetData()[0]))
+			require.True(t, proto.Equal(oldBefore, old))
+			require.True(t, proto.Equal(operandBefore, operand))
+		})
+	}
+}
+
+func TestJSONPathReplaceRejectsMergedDepthOverflow(t *testing.T) {
+	path, err := parseJSONReplacePath(`["x"]`)
+	require.NoError(t, err)
+	for _, depth := range []int{fieldvalidator.MaxJSONDepth - 1, fieldvalidator.MaxJSONDepth} {
+		t.Run(fmt.Sprint(depth), func(t *testing.T) {
+			value := strings.Repeat("[", depth) + strings.Repeat("]", depth)
+			// Both operands pass independently; only the second merged row can exceed the limit.
+			require.NoError(t, fieldvalidator.CheckJSONDepth("metadata", []byte(value)))
+			operand := jsonPathTestField(`1`, value)
+			require.NoError(t, validateJSONReplaceOperand(operand, 2))
+			old := jsonPathTestField(`{"x":null}`, `{"x":null}`)
+			oldBefore, operandBefore := proto.Clone(old), proto.Clone(operand)
+			dst := jsonPathTestField()
+			err := materializeJSONPathReplace(dst, old, operand, path, []int64{0, 1}, []int64{0, 1}, []int64{0, 1})
+			if depth == fieldvalidator.MaxJSONDepth {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.ErrorContains(t, err, "row 1")
+				require.Empty(t, dst.GetScalars().GetJsonData().GetData())
+			} else {
+				require.NoError(t, err)
+				require.Len(t, dst.GetScalars().GetJsonData().GetData(), 2)
+				require.Equal(t, `{"x":`+value+`}`, string(dst.GetScalars().GetJsonData().GetData()[1]))
+			}
+			require.True(t, proto.Equal(oldBefore, old))
+			require.True(t, proto.Equal(operandBefore, operand))
+		})
+	}
+}
+
+func TestJSONPathReplaceValidationAndMaterialization(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{Name: "metadata", FieldID: 101, DataType: schemapb.DataType_JSON}}}
+	operand := jsonPathTestField(`null`, `18`)
+	req := &milvuspb.UpsertRequest{NumRows: 2, FieldsData: []*schemapb.FieldData{operand}, FieldOps: []*schemapb.FieldPartialUpdateOp{pathOp("metadata", `["age"]`)}}
+	plans, _, err := resolveFieldPartialUpdateOps(req, schema)
+	require.NoError(t, err)
+	old := jsonPathTestField(`{"age":1,"large":9007199254740993}`, `{}`)
+	oldBefore, operandBefore := proto.Clone(old), proto.Clone(operand)
+	dst := jsonPathTestField()
+	require.NoError(t, materializeJSONPathReplace(dst, old, operand, plans["metadata"].jsonPath, []int64{1, 0}, []int64{1, 0}, []int64{0, 1}))
+	assert.Equal(t, `{"age":null}`, string(dst.GetScalars().GetJsonData().GetData()[0]))
+	assert.Contains(t, string(dst.GetScalars().GetJsonData().GetData()[1]), `9007199254740993`)
+	assert.True(t, proto.Equal(oldBefore, old))
+	assert.True(t, proto.Equal(operandBefore, operand))
+	for _, invalid := range []*schemapb.FieldData{jsonPathTestField(`{`), jsonPathTestField(`18`), arrayLongFieldData("metadata", [][]int64{{1}, {2}})} {
+		require.Error(t, validateJSONReplaceOperand(invalid, 2))
+	}
+	require.Error(t, validateJSONReplaceOperand(jsonPathTestField(`{`, `1`), 2))
+	typeutil.SetFieldDataValidData(operand, []bool{false, true})
+	require.Error(t, validateJSONReplaceOperand(operand, 2))
+	schema.Fields[0].IsDynamic = true
+	_, _, err = resolveFieldPartialUpdateOps(req, schema)
+	require.ErrorContains(t, err, "dynamic JSON")
+	for _, stored := range []string{`null`, `[]`, `{"other":{}}`, `invalid`} {
+		path, err := parseJSONReplacePath(`["age"]["x"]`)
+		require.NoError(t, err)
+		dst := jsonPathTestField()
+		err = materializeJSONPathReplace(dst, jsonPathTestField(`{"age":{}}`, stored), jsonPathTestField(`1`, `2`), path, []int64{0, 1}, []int64{0, 1}, []int64{0, 1})
+		require.Error(t, err)
+		require.Empty(t, dst.GetScalars().GetJsonData().GetData(), "later-row failure must not publish partial data")
+	}
+	path, err := parseJSONReplacePath(`["age"]`)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name                 string
+		old                  *schemapb.FieldData
+		data, rows, operands []int64
+		input                bool
+	}{
+		{"wrong_type", arrayLongFieldData("metadata", nil), []int64{0}, []int64{0}, []int64{0}, false},
+		{"mapping_length", old, []int64{0}, nil, []int64{0}, false},
+		{"bad_data_index", old, []int64{-1}, []int64{0}, []int64{0}, false},
+		{"bad_operand_index", old, []int64{0}, []int64{0}, []int64{2}, false},
+		{"null_parent", old, []int64{0}, []int64{0}, []int64{0}, true},
+		{"bad_validity_index", old, []int64{0}, []int64{2}, []int64{0}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stored := proto.Clone(tc.old).(*schemapb.FieldData)
+			typeutil.SetFieldDataValidData(stored, []bool{false, true})
+			err := materializeJSONPathReplace(jsonPathTestField(), stored, jsonPathTestField(`1`), path, tc.data, tc.rows, tc.operands)
+			if tc.input {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			} else {
+				// Use a present parent for mapping errors, which are internal failures.
+				typeutil.SetFieldDataValidData(stored, []bool{true, true})
+				err = materializeJSONPathReplace(jsonPathTestField(), stored, jsonPathTestField(`1`), path, tc.data, tc.rows, tc.operands)
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+			}
+		})
+	}
 }
 
 func TestVectorArrayElementWidth(t *testing.T) {
@@ -650,18 +937,22 @@ func TestObservePathReplaceParentOperations(t *testing.T) {
 	labels := []string{paramtable.GetStringNodeID(), req.GetDbName(), req.GetCollectionName()}
 	arrayOps := metrics.ProxyPathReplaceParentOperations.WithLabelValues(append(labels, pathReplaceParentArray)...)
 	structOps := metrics.ProxyPathReplaceParentOperations.WithLabelValues(append(labels, pathReplaceParentStructArray)...)
+	jsonOps := metrics.ProxyPathReplaceParentOperations.WithLabelValues(append(labels, pathReplaceParentJSON)...)
 
 	arrayOpsBefore := testutil.ToFloat64(arrayOps)
 	structOpsBefore := testutil.ToFloat64(structOps)
+	jsonOpsBefore := testutil.ToFloat64(jsonOps)
 
 	observePathReplaceParentOperations(req, map[string]*fieldPartialUpdatePlan{
-		"scores":  {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, arrayParent: arrayIntFieldSchema("scores", false, 8)},
-		"profile": {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, structParent: pathReplaceStructSchema()},
-		"replace": {op: schemapb.FieldPartialUpdateOp_REPLACE},
+		"scores":   {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, arrayParent: arrayIntFieldSchema("scores", false, 8)},
+		"profile":  {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, structParent: pathReplaceStructSchema()},
+		"replace":  {op: schemapb.FieldPartialUpdateOp_REPLACE},
+		"metadata": {op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, jsonPath: []jsonPathSegment{{key: "age", isKey: true}}},
 	})
 
 	assert.Equal(t, arrayOpsBefore+1, testutil.ToFloat64(arrayOps))
 	assert.Equal(t, structOpsBefore+1, testutil.ToFloat64(structOps))
+	assert.Equal(t, jsonOpsBefore+1, testutil.ToFloat64(jsonOps))
 }
 
 func TestResolveFieldPartialUpdateOps_ArrayPathReplace(t *testing.T) {
@@ -1123,6 +1414,37 @@ func TestUpsertTaskQueryPreExecutePathReplaceAlignsRowsByPrimaryKey(t *testing.T
 		assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Status(err).GetCode())
 		assert.ErrorContains(t, err, "injected row operation failure")
 		assert.EqualValues(t, 1, mockRowOp.Times())
+	})
+
+	t.Run("JSON shuffled retrieve result", func(t *testing.T) {
+		task := newTask()
+		jsonSchema := proto.Clone(collectionSchema).(*schemapb.CollectionSchema)
+		jsonSchema.Fields[1] = &schemapb.FieldSchema{FieldID: 101, Name: "metadata", DataType: schemapb.DataType_JSON}
+		task.schema = mustNewSchemaInfo(jsonSchema)
+		task.req.FieldsData = []*schemapb.FieldData{idField(2, 1), jsonPathTestField(`null`, `{"age":18}`)}
+		task.req.FieldOps = []*schemapb.FieldPartialUpdateOp{pathOp("metadata", `["profile"][0]`)}
+		task.upsertMsg.InsertMsg.FieldsData = task.req.FieldsData
+		plans, _, err := resolveFieldPartialUpdateOps(task.req, jsonSchema)
+		require.NoError(t, err)
+		task.fieldPartialUpdatePlans = plans
+		old := jsonPathTestField(`{"profile":[{"age":1,"city":"A"}],"large":9007199254740993}`, `{"profile":[{"age":2}]}`)
+		mockRetrieve := mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+			Status: merr.Success(), FieldsData: []*schemapb.FieldData{idField(1, 2), old},
+		}, segcore.StorageCost{}, nil).Build()
+		defer mockRetrieve.UnPatch()
+		_, err = task.queryPreExecute(context.Background())
+		require.NoError(t, err)
+		for _, field := range task.insertFieldData {
+			if field.GetFieldName() == "metadata" {
+				rows := field.GetScalars().GetJsonData().GetData()
+				require.Len(t, rows, 2)
+				assert.JSONEq(t, `{"profile":[null]}`, string(rows[0]))
+				assert.Contains(t, string(rows[1]), `9007199254740993`)
+				assert.JSONEq(t, `{"profile":[{"age":18}],"large":9007199254740993}`, string(rows[1]))
+				return
+			}
+		}
+		t.Fatal("materialized JSON field is missing")
 	})
 
 	t.Run("shuffled retrieve result", func(t *testing.T) {

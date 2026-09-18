@@ -1,8 +1,11 @@
 package fieldvalidator
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"reflect"
 
@@ -25,6 +28,38 @@ type ValidateUtil struct {
 	checkMaxLen   bool
 	checkOverflow bool
 	checkMaxCap   bool
+}
+
+// MaxJSONDepth is simdjson DOM's maximum node depth. A container at the
+// limit can be empty, but cannot contain another value.
+const MaxJSONDepth = 1024
+
+// CheckJSONDepth checks a syntactically valid, complete JSON document without
+// decoding numbers through float64. Call after materialization: a valid operand
+// can exceed the engine limit when nested inside an existing document.
+func CheckJSONDepth(field string, document []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(document))
+	decoder.UseNumber()
+	depth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return merr.WrapErrParameterInvalidErr(err, "field %s is not readable JSON", field)
+		}
+		if delimiter, ok := token.(json.Delim); ok && (delimiter == ']' || delimiter == '}') {
+			depth--
+			continue
+		}
+		if depth+1 > MaxJSONDepth {
+			return merr.WrapErrParameterInvalidMsg("field %s nests deeper than %d levels, which the JSON engine cannot read", field, MaxJSONDepth)
+		}
+		if delimiter, ok := token.(json.Delim); ok && (delimiter == '[' || delimiter == '{') {
+			depth++
+		}
+	}
 }
 
 type ValidateOption func(*ValidateUtil)

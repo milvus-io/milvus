@@ -5125,6 +5125,34 @@ func buildStructArrayTestSchema() *schemapb.CollectionSchema {
 	}
 }
 
+func TestJSONPathReplaceRESTOperands(t *testing.T) {
+	paramtable.Init()
+	key := paramtable.Get().HTTPCfg.CompatibilityMode.Key
+	defer paramtable.Get().Reset(key)
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "metadata", DataType: schemapb.DataType_JSON, Nullable: true},
+	}}
+	op := &schemapb.FieldPartialUpdateOp{FieldName: "metadata", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: `["age"]`}
+	for _, compatibility := range []string{"true", "false"} {
+		paramtable.Get().Save(key, compatibility)
+		for _, value := range []string{`null`, `18`, `true`, `"123"`, `"{\"x\":1}"`, `{"age":18}`, `[1,2]`} {
+			body := []byte(`{"data":[{"metadata":` + value + `}]}`)
+			rows, valid, err := checkAndSetData(body, schema, true, op)
+			require.NoError(t, err)
+			require.Equal(t, []bool{true}, valid["metadata"])
+			fields, err := anyToColumns(rows, valid, schema, false, true)
+			require.NoError(t, err)
+			require.Len(t, fields, 1)
+			assert.JSONEq(t, value, string(fields[0].GetScalars().GetJsonData().GetData()[0]))
+		}
+		_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, true, op)
+		require.ErrorContains(t, err, "required in every row")
+		_, valid, err := checkAndSetData([]byte(`{"data":[{"metadata":null}]}`), schema, true)
+		require.NoError(t, err)
+		require.Equal(t, []bool{false}, valid["metadata"], "ordinary upsert keeps field NULL semantics")
+	}
+}
+
 func TestSchemaForPathReplaceOperands(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	body := []byte(`{"data":[
