@@ -97,7 +97,7 @@ func (suite *ChannelCheckerTestSuite) SetupTest() {
 	// Initialize global assign policy factory before creating checker
 	assign.InitGlobalAssignPolicyFactory(scheduler, suite.nodeMgr, distManager, suite.meta, targetManager)
 
-	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler)
+	suite.checker = NewChannelChecker(suite.meta, distManager, targetManager, suite.nodeMgr, scheduler, nil)
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }

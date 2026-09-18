@@ -49,6 +49,11 @@ type ChannelChecker struct {
 	scheduler    task.Scheduler
 	assignPolicy assign.AssignPolicy
 
+	// splitState skips watching a collection's not-yet-adopted split targets
+	// (ShardState_ShardCreating): they are fronted in-process by the source
+	// delegator and must not be picked up by querycoord until adoption. May be nil.
+	splitState *meta.ShardSplitStateCache
+
 	// version cache for fast skip when nothing changed
 	versionCache map[int64]*collectionVersionCache
 }
@@ -59,6 +64,7 @@ func NewChannelChecker(
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
+	splitState *meta.ShardSplitStateCache,
 ) *ChannelChecker {
 	// Create RoundRobin assign policy in constructor to maximize loading speed
 	// Note: RoundRobin may break short-term balance but prioritizes loading speed
@@ -72,6 +78,7 @@ func NewChannelChecker(
 		nodeMgr:           nodeMgr,
 		scheduler:         scheduler,
 		assignPolicy:      assignPolicy,
+		splitState:        splitState,
 		versionCache:      make(map[int64]*collectionVersionCache),
 	}
 }
@@ -227,7 +234,15 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 	nextTargetMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
 
-	// get channels which exists on dist, but not exist on current and next
+	// get channels which exists on dist, but not exist on current and next.
+	//
+	// This is also what releases a shard split source, and only at the right
+	// time. Adoption delists the source from the collection, so the next
+	// target pulled after it no longer lists the source, but the current
+	// target keeps listing it until it flips to that pull -- and the flip
+	// needs every target delegator synced and data-ready. GetShardLeaders
+	// enumerates the current target, so releasing the source any earlier would
+	// leave a channel with no leader and fail every read of the collection.
 	for _, ch := range dist {
 		_, existOnCurrent := currentTargetMap[ch.GetChannelName()]
 		_, existOnNext := nextTargetMap[ch.GetChannelName()]
@@ -236,10 +251,18 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
+	// not-yet-adopted split targets are fronted in-process by the source
+	// delegator; querycoord must not watch them until they leave the Creating
+	// state at adoption, or it would build a fresh delegator and replay the WAL.
+	creatingTargets := typeutil.NewSet[string]()
+	if c.splitState != nil {
+		creatingTargets.Insert(c.splitState.CreatingTargetChannels(ctx, collectionID)...)
+	}
+
 	// get channels which exists on next target, but not on dist
 	for name, channel := range nextTargetMap {
 		_, existOnDist := distMap[name]
-		if !existOnDist {
+		if !existOnDist && !creatingTargets.Contain(name) {
 			toLoad = append(toLoad, channel)
 		}
 	}
