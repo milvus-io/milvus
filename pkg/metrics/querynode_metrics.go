@@ -912,6 +912,48 @@ var (
 		},
 	)
 
+	// QueryNodeSplitChildNum tracks the un-adopted in-process shard-split children
+	// this node is fronting. It rises when a source spawns a child and falls when
+	// the child is adopted by querycoord (or torn down before adoption), so it
+	// returns to zero once every target of a split is adopted — a clean
+	// "pending fronting work" signal independent of source-release ordering.
+	QueryNodeSplitChildNum = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "split_child_num",
+			Help:      "number of un-adopted in-process shard-split children fronted on this node",
+		}, []string{
+			nodeIDLabelName,
+		},
+	)
+
+	// QueryNodeSplitChildSpawnedTotal counts shard-split child delegators spawned,
+	// including re-spawns after a source recovery.
+	QueryNodeSplitChildSpawnedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "split_child_spawned_total",
+			Help:      "total shard-split child delegators spawned on this node",
+		}, []string{
+			nodeIDLabelName,
+		},
+	)
+
+	// QueryNodeSplitChildAdoptedTotal counts shard-split children adopted by
+	// querycoord (promoted from fronted to independently serviceable).
+	QueryNodeSplitChildAdoptedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "split_child_adopted_total",
+			Help:      "total shard-split child delegators adopted by querycoord on this node",
+		}, []string{
+			nodeIDLabelName,
+		},
+	)
+
 	QueryNodeCGOCallLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -1078,6 +1120,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeSegmentFilterTotalSegmentNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
 	registry.MustRegister(QueryNodeDeleteBufferRowNum)
+	registry.MustRegister(QueryNodeSplitChildNum)
+	registry.MustRegister(QueryNodeSplitChildSpawnedTotal)
+	registry.MustRegister(QueryNodeSplitChildAdoptedTotal)
 	registry.MustRegister(QueryNodeCGOCallLatency)
 	registry.MustRegister(QueryNodePartialResultCount)
 	registry.MustRegister(QueryNodeTwoStageFilterLatency)
