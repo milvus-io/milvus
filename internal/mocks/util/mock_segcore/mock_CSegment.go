@@ -22,6 +22,65 @@ func (_m *MockCSegment) EXPECT() *MockCSegment_Expecter {
 	return &MockCSegment_Expecter{mock: &_m.Mock}
 }
 
+// ComputeFilterBitset provides a mock function with given fields: ctx, searchReq
+func (_m *MockCSegment) ComputeFilterBitset(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SharedFilterBitsetResult, error) {
+	ret := _m.Called(ctx, searchReq)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ComputeFilterBitset")
+	}
+
+	var r0 *segcore.SharedFilterBitsetResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.SearchRequest) (*segcore.SharedFilterBitsetResult, error)); ok {
+		return rf(ctx, searchReq)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.SearchRequest) *segcore.SharedFilterBitsetResult); ok {
+		r0 = rf(ctx, searchReq)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcore.SharedFilterBitsetResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.SearchRequest) error); ok {
+		r1 = rf(ctx, searchReq)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCSegment_ComputeFilterBitset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ComputeFilterBitset'
+type MockCSegment_ComputeFilterBitset_Call struct {
+	*mock.Call
+}
+
+// ComputeFilterBitset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - searchReq *segcore.SearchRequest
+func (_e *MockCSegment_Expecter) ComputeFilterBitset(ctx interface{}, searchReq interface{}) *MockCSegment_ComputeFilterBitset_Call {
+	return &MockCSegment_ComputeFilterBitset_Call{Call: _e.mock.On("ComputeFilterBitset", ctx, searchReq)}
+}
+
+func (_c *MockCSegment_ComputeFilterBitset_Call) Run(run func(ctx context.Context, searchReq *segcore.SearchRequest)) *MockCSegment_ComputeFilterBitset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*segcore.SearchRequest))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_ComputeFilterBitset_Call) Return(_a0 *segcore.SharedFilterBitsetResult, _a1 error) *MockCSegment_ComputeFilterBitset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCSegment_ComputeFilterBitset_Call) RunAndReturn(run func(context.Context, *segcore.SearchRequest) (*segcore.SharedFilterBitsetResult, error)) *MockCSegment_ComputeFilterBitset_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: ctx, request
 func (_m *MockCSegment) Delete(ctx context.Context, request *segcore.DeleteRequest) (*segcore.DeleteResult, error) {
 	ret := _m.Called(ctx, request)
@@ -769,6 +828,66 @@ func (_c *MockCSegment_Search_Call) Return(_a0 *segcore.SearchResult, _a1 error)
 }
 
 func (_c *MockCSegment_Search_Call) RunAndReturn(run func(context.Context, *segcore.SearchRequest) (*segcore.SearchResult, error)) *MockCSegment_Search_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SearchWithBitset provides a mock function with given fields: ctx, searchReq, bitset
+func (_m *MockCSegment) SearchWithBitset(ctx context.Context, searchReq *segcore.SearchRequest, bitset *segcore.SharedFilterBitsetResult) (*segcore.SearchResult, error) {
+	ret := _m.Called(ctx, searchReq, bitset)
+
+	if len(ret) == 0 {
+		panic("no return value specified for SearchWithBitset")
+	}
+
+	var r0 *segcore.SearchResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.SearchRequest, *segcore.SharedFilterBitsetResult) (*segcore.SearchResult, error)); ok {
+		return rf(ctx, searchReq, bitset)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *segcore.SearchRequest, *segcore.SharedFilterBitsetResult) *segcore.SearchResult); ok {
+		r0 = rf(ctx, searchReq, bitset)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcore.SearchResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *segcore.SearchRequest, *segcore.SharedFilterBitsetResult) error); ok {
+		r1 = rf(ctx, searchReq, bitset)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCSegment_SearchWithBitset_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SearchWithBitset'
+type MockCSegment_SearchWithBitset_Call struct {
+	*mock.Call
+}
+
+// SearchWithBitset is a helper method to define mock.On call
+//   - ctx context.Context
+//   - searchReq *segcore.SearchRequest
+//   - bitset *segcore.SharedFilterBitsetResult
+func (_e *MockCSegment_Expecter) SearchWithBitset(ctx interface{}, searchReq interface{}, bitset interface{}) *MockCSegment_SearchWithBitset_Call {
+	return &MockCSegment_SearchWithBitset_Call{Call: _e.mock.On("SearchWithBitset", ctx, searchReq, bitset)}
+}
+
+func (_c *MockCSegment_SearchWithBitset_Call) Run(run func(ctx context.Context, searchReq *segcore.SearchRequest, bitset *segcore.SharedFilterBitsetResult)) *MockCSegment_SearchWithBitset_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*segcore.SearchRequest), args[2].(*segcore.SharedFilterBitsetResult))
+	})
+	return _c
+}
+
+func (_c *MockCSegment_SearchWithBitset_Call) Return(_a0 *segcore.SearchResult, _a1 error) *MockCSegment_SearchWithBitset_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCSegment_SearchWithBitset_Call) RunAndReturn(run func(context.Context, *segcore.SearchRequest, *segcore.SharedFilterBitsetResult) (*segcore.SearchResult, error)) *MockCSegment_SearchWithBitset_Call {
 	_c.Call.Return(run)
 	return _c
 }
