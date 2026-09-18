@@ -89,6 +89,36 @@ func TestKnowhereConfig_GetRuntimeParameter(t *testing.T) {
 	assert.Empty(t, params)
 }
 
+func TestKnowhereConfig_GetAnalyzeParams(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+
+	assert.Equal(t, "KMEANS", cfg.ClusterType.GetValue())
+	assert.NoError(t, bt.Save("knowhere.cluster.type", "custom_kmeans"))
+	assert.NoError(t, bt.Save("knowhere.cluster.analyze.global_train_method", "index"))
+	assert.NoError(t, bt.Save("knowhere.cluster.analyze.search_list_size", "50"))
+
+	assert.Equal(t, "custom_kmeans", cfg.ClusterType.GetValue())
+	assert.Equal(t, map[string]string{
+		"global_train_method": "index",
+		"search_list_size":    "50",
+	}, cfg.GetAnalyzeParams())
+}
+
+func TestKnowhereConfig_GetCompactionPlanParams(t *testing.T) {
+	bt := NewBaseTable(SkipRemote(true))
+	cfg := &knowhereConfig{}
+	cfg.init(bt)
+
+	assert.NoError(t, bt.Save("knowhere.cluster.compactionPlan.planner", "ivf"))
+	assert.NoError(t, bt.Save("knowhere.cluster.compactionPlan.compaction_neighbor_k", "32"))
+	assert.Equal(t, map[string]string{
+		"planner":               "ivf",
+		"compaction_neighbor_k": "32",
+	}, cfg.GetCompactionPlanParams())
+}
+
 func TestKnowhereConfig_UpdateParameter(t *testing.T) {
 	bt := NewBaseTable(SkipRemote(true))
 	cfg := &knowhereConfig{}

@@ -1032,6 +1032,84 @@ func (ifv *FloatVectorFieldValue) Size() int64 {
 	return int64(len(ifv.Value) * 8)
 }
 
+var _ VectorFieldValue = (*Float16VectorFieldValue)(nil)
+
+type Float16VectorFieldValue struct {
+	Value []byte `json:"value"`
+}
+
+func NewFloat16VectorFieldValue(v []byte) *Float16VectorFieldValue {
+	return &Float16VectorFieldValue{Value: v}
+}
+
+func (value *Float16VectorFieldValue) MarshalJSON() ([]byte, error) {
+	return json.Marshal(value.Value)
+}
+
+func (value *Float16VectorFieldValue) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &value.Value)
+}
+
+func (value *Float16VectorFieldValue) SetValue(data interface{}) error {
+	bytes, ok := data.([]byte)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for Float16VectorFieldValue")
+	}
+	value.Value = bytes
+	return nil
+}
+
+func (value *Float16VectorFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_Float16Vector
+}
+
+func (value *Float16VectorFieldValue) GetValue() interface{} {
+	return value.Value
+}
+
+func (value *Float16VectorFieldValue) Size() int64 {
+	return int64(len(value.Value))
+}
+
+var _ VectorFieldValue = (*BFloat16VectorFieldValue)(nil)
+
+type BFloat16VectorFieldValue struct {
+	Value []byte `json:"value"`
+}
+
+func NewBFloat16VectorFieldValue(v []byte) *BFloat16VectorFieldValue {
+	return &BFloat16VectorFieldValue{Value: v}
+}
+
+func (value *BFloat16VectorFieldValue) MarshalJSON() ([]byte, error) {
+	return json.Marshal(value.Value)
+}
+
+func (value *BFloat16VectorFieldValue) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &value.Value)
+}
+
+func (value *BFloat16VectorFieldValue) SetValue(data interface{}) error {
+	bytes, ok := data.([]byte)
+	if !ok {
+		return merr.WrapErrServiceInternalMsg("wrong type value when setValue for BFloat16VectorFieldValue")
+	}
+	value.Value = bytes
+	return nil
+}
+
+func (value *BFloat16VectorFieldValue) Type() schemapb.DataType {
+	return schemapb.DataType_BFloat16Vector
+}
+
+func (value *BFloat16VectorFieldValue) GetValue() interface{} {
+	return value.Value
+}
+
+func (value *BFloat16VectorFieldValue) Size() int64 {
+	return int64(len(value.Value))
+}
+
 func NewScalarFieldValueFromGenericValue(dtype schemapb.DataType, gVal *planpb.GenericValue) (ScalarFieldValue, error) {
 	switch dtype {
 	case schemapb.DataType_Int8:
@@ -1108,6 +1186,10 @@ func NewVectorFieldValue(dtype schemapb.DataType, data *schemapb.VectorField) Ve
 	switch dtype {
 	case schemapb.DataType_FloatVector:
 		return NewFloatVectorFieldValue(data.GetFloatVector().GetData())
+	case schemapb.DataType_Float16Vector:
+		return NewFloat16VectorFieldValue(data.GetFloat16Vector())
+	case schemapb.DataType_BFloat16Vector:
+		return NewBFloat16VectorFieldValue(data.GetBfloat16Vector())
 	default:
 		// should not be reach
 		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))

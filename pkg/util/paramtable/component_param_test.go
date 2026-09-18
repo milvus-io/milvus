@@ -129,6 +129,14 @@ func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	}
 }
 
+func TestComponentParam_ClusteringCompactionLayout(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+
+	assert.Equal(t, int64(8*1024*1024), params.DataCoordCfg.ClusteringCompactionLayoutChunkSizePerCentroid.GetAsSize())
+	assert.Equal(t, int64(1_000_000), params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64())
+}
+
 func TestMembershipFilterConfig(t *testing.T) {
 	base := NewBaseTable(SkipRemote(true))
 	params := proxyConfig{}
@@ -1245,6 +1253,9 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 		params.Save("datanode.clusteringCompaction.workPoolSize", "2")
 		assert.Equal(t, int64(2), Params.ClusteringCompactionWorkerPoolSize.GetAsInt64())
+		assert.Equal(t, 0, Params.ClusteringCompactionSpillPoolSize.GetAsInt())
+		params.Save("datanode.clusteringCompaction.spillPoolSize", "3")
+		assert.Equal(t, 3, Params.ClusteringCompactionSpillPoolSize.GetAsInt())
 
 		assert.Equal(t, 2, Params.BloomFilterApplyParallelFactor.GetAsInt())
 		assert.Equal(t, "dataNode.storage.format", Params.StorageFormat.Key)

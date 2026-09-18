@@ -174,14 +174,17 @@ func (stats *FieldStats) UnmarshalJSON(data []byte) error {
 	} else {
 		// "centroids" carries no omitempty, so a snapshot Milvus wrote always has the
 		// key, null when there is nothing to store. Types without centroid support also
-		// reach this branch, so only a float vector may read a missing key as corruption.
+		// reach this branch, so only a supported dense float vector may read a
+		// missing key as corruption.
 		value, ok := messageMap["centroids"]
 		switch {
 		case value != nil:
 			if err := stats.unmarshalCentroids(*value, stats.Type); err != nil {
 				return err
 			}
-		case !ok && stats.Type == schemapb.DataType_FloatVector:
+		case !ok && (stats.Type == schemapb.DataType_FloatVector ||
+			stats.Type == schemapb.DataType_Float16Vector ||
+			stats.Type == schemapb.DataType_BFloat16Vector):
 			// Accepting this silently hands segment pruning an empty centroid set,
 			// which degrades to a full scan with no signal.
 			return merr.WrapErrDataIntegrityMsg("field stats of field %d has no centroids key", stats.FieldID)
@@ -212,6 +215,18 @@ func (stats *FieldStats) unmarshalCentroids(data json.RawMessage, dataType schem
 		switch dataType {
 		case schemapb.DataType_FloatVector:
 			centroid := &FloatVectorFieldValue{}
+			if err := json.Unmarshal(rawCentroid, centroid); err != nil {
+				return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroid at index %d", stats.FieldID, i)
+			}
+			centroids = append(centroids, centroid)
+		case schemapb.DataType_Float16Vector:
+			centroid := &Float16VectorFieldValue{}
+			if err := json.Unmarshal(rawCentroid, centroid); err != nil {
+				return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroid at index %d", stats.FieldID, i)
+			}
+			centroids = append(centroids, centroid)
+		case schemapb.DataType_BFloat16Vector:
+			centroid := &BFloat16VectorFieldValue{}
 			if err := json.Unmarshal(rawCentroid, centroid); err != nil {
 				return merr.WrapErrDataIntegrity(err, "field stats of field %d has a malformed centroid at index %d", stats.FieldID, i)
 			}

@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/compaction"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
@@ -445,6 +446,51 @@ func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_NamespaceFile
 		s.Empty(plan.GetFileResources(),
 			"non-namespace clustering does not build text index inline, so no FileResources are fetched")
 		s.Equal(int32(42), plan.GetCurrentScalarIndexVersion())
+	})
+}
+
+func (s *ClusteringCompactionTaskSuite) TestBuildCompactionRequest_CompactionPlanParams() {
+	addInputSegments := func() {
+		for _, segmentID := range []int64{101, 102} {
+			s.meta.AddSegment(context.TODO(), &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            segmentID,
+				CollectionID:  1,
+				PartitionID:   10,
+				InsertChannel: "ch-1",
+				State:         commonpb.SegmentState_Flushed,
+				Level:         datapb.SegmentLevel_L1,
+			}})
+		}
+	}
+
+	s.Run("dense vector carries opaque params", func() {
+		addInputSegments()
+		config := paramtable.Get()
+		s.Require().NoError(config.Save("knowhere.cluster.compactionPlan.planner", "ivf"))
+		s.Require().NoError(config.Save("knowhere.cluster.compactionPlan.compaction_neighbor_k", "32"))
+		s.T().Cleanup(func() {
+			config.Reset("knowhere.cluster.compactionPlan.planner")
+			config.Reset("knowhere.cluster.compactionPlan.compaction_neighbor_k")
+		})
+		task := s.generateBasicTask(true)
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		params, err := compaction.ParseParamsFromJSON(plan.GetJsonParams())
+		s.Require().NoError(err)
+		s.Equal(map[string]string{
+			"planner":               "ivf",
+			"compaction_neighbor_k": "32",
+		}, params.ClusteringCompactionPlanParams)
+	})
+
+	s.Run("scalar clustering leaves planner empty", func() {
+		addInputSegments()
+		task := s.generateBasicTask(false)
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		params, err := compaction.ParseParamsFromJSON(plan.GetJsonParams())
+		s.Require().NoError(err)
+		s.Empty(params.ClusteringCompactionPlanParams)
 	})
 }
 

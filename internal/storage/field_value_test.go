@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 )
 
@@ -351,4 +352,41 @@ func TestFloatVectorFieldValue(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, pk.Value, unmarshalledPk.Value)
 	})
+}
+
+func TestLowPrecisionVectorFieldValue(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		dataType schemapb.DataType
+		field    *schemapb.VectorField
+	}{
+		{
+			name:     "float16",
+			dataType: schemapb.DataType_Float16Vector,
+			field: &schemapb.VectorField{Dim: 2,
+				Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4}}},
+		},
+		{
+			name:     "bfloat16",
+			dataType: schemapb.DataType_BFloat16Vector,
+			field: &schemapb.VectorField{Dim: 2,
+				Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{5, 6, 7, 8}}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			value := NewVectorFieldValue(test.dataType, test.field)
+			blob, err := json.Marshal(value)
+			assert.NoError(t, err)
+
+			var decoded VectorFieldValue
+			if test.dataType == schemapb.DataType_Float16Vector {
+				decoded = &Float16VectorFieldValue{}
+			} else {
+				decoded = &BFloat16VectorFieldValue{}
+			}
+			assert.NoError(t, json.Unmarshal(blob, decoded))
+			assert.Equal(t, value.Type(), decoded.Type())
+			assert.Equal(t, value.GetValue(), decoded.GetValue())
+		})
+	}
 }
