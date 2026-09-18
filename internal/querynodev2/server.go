@@ -80,6 +80,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -151,6 +152,11 @@ type QueryNode struct {
 
 	// binlogSaver for growing-source segment flush
 	binlogSaver segments.BinlogSaver
+
+	// mixCoord is the coordinator client used to fetch a shard-split target
+	// vchannel's recovery seek position (GetRecoveryInfoV2) when spawning an
+	// in-process child delegator. Resolved asynchronously by the grpc server.
+	mixCoord *syncutil.Future[types.MixCoordClient]
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
@@ -625,6 +631,12 @@ func (node *QueryNode) UpdateStateCode(code commonpb.StateCode) {
 // SetEtcdClient assigns parameter client to its member etcdCli
 func (node *QueryNode) SetEtcdClient(client *clientv3.Client) {
 	node.etcdCli = client
+}
+
+// SetMixCoordClient injects the coordinator client future used to fetch a
+// shard-split target's recovery seek position when spawning a child delegator.
+func (node *QueryNode) SetMixCoordClient(mixCoord *syncutil.Future[types.MixCoordClient]) {
+	node.mixCoord = mixCoord
 }
 
 // SetBinlogSaver sets the BinlogSaver for growing-source segment flush.

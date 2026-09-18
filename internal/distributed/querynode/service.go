@@ -182,6 +182,10 @@ func (s *Server) init() error {
 	s.initMixCoord()
 	if qnImpl, ok := s.querynode.(*qn.QueryNode); ok {
 		qnImpl.SetBinlogSaver(&lazyBinlogSaver{mixCoordFuture: s.mixCoord})
+		// A source delegator that consumes a shard-split fence fetches each
+		// target's seek position through this client; without it the spawn has
+		// no coordinator to ask.
+		qnImpl.SetMixCoordClient(s.mixCoord)
 	}
 
 	return nil
