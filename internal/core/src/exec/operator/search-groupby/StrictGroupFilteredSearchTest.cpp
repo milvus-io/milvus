@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
 #include <unordered_map>
@@ -233,6 +234,8 @@ TEST(StrictGroupSearchEligibilityTest,
 
 TEST(StrictGroupLocalExhaustionTest,
      AvailabilityAndPartialResultsAcrossStrategies) {
+    gflags::FlagSaver restore_flags;
+    gflags::SetCommandLineOption("minloglevel", "0");
     StrictGroupLogSink sink;
     google::AddLogSink(&sink);
     Defer remove_sink([&] { google::RemoveLogSink(&sink); });
@@ -241,6 +244,7 @@ TEST(StrictGroupLocalExhaustionTest,
             for (int available : {0, 1, 2, 4}) {
                 for (int topk : {1, 3}) {
                     for (bool debug : {false, true}) {
+                        gflags::SetCommandLineOption("v", debug ? "5" : "4");
                         SCOPED_TRACE(testing::Message()
                                      << static_cast<int>(strategy) << "/" << n
                                      << "/" << available << "/" << topk << "/"
@@ -322,7 +326,6 @@ TEST(StrictGroupLocalExhaustionTest,
                         info.group_by_field_ids_ = {field};
                         info.metric_type_ = knowhere::metric::L2;
                         info.strict_group_strategy_ = strategy;
-                        info.strict_group_debug_ = debug;
                         const auto before =
                             milvus::monitor::
                                 internal_core_strict_group_phase2_original_remaining_candidates
@@ -404,7 +407,15 @@ TEST(StrictGroupPerGroupTest, OrdinarySearchSettingsDoNotMutatePhaseOne) {
     original.strict_group_size_ = true;
     original.iterative_filter_execution = true;
     original.iterator_v2_info_ = SearchIteratorV2Info{};
-    original.search_params_ = {{"ef", 123}, {knowhere::meta::TOPK, 50}};
+    original.field_id_ = FieldId(100);
+    original.metric_type_ = knowhere::metric::IP;
+    original.search_params_ = {{"ef", 123},
+                               {"nprobe", 128},
+                               {"search_list", 200},
+                               {"radius", 0.5},
+                               {"iterator_refine_ratio", 0.5},
+                               {knowhere::meta::TOPK, 50}};
+    const auto original_params = original.search_params_;
     for (int64_t remaining : {1, 2}) {
         auto ordinary = query::StrictGroupSearchInfo(original, remaining);
         EXPECT_FALSE(UseVectorIterator(ordinary));
@@ -412,11 +423,40 @@ TEST(StrictGroupPerGroupTest, OrdinarySearchSettingsDoNotMutatePhaseOne) {
         EXPECT_FALSE(ordinary.strict_group_size_);
         EXPECT_EQ(ordinary.topk_, remaining);
         EXPECT_EQ(ordinary.search_params_[knowhere::meta::TOPK], remaining);
-        EXPECT_EQ(ordinary.search_params_["ef"], 123);
+        EXPECT_EQ(ordinary.field_id_, original.field_id_);
+        EXPECT_EQ(ordinary.metric_type_, original.metric_type_);
+        EXPECT_EQ(ordinary.round_decimal_, -1);
+        EXPECT_EQ(ordinary.search_params_,
+                  (knowhere::Json{{knowhere::meta::TOPK, remaining},
+                                  {"skip_refine", false}}));
     }
     EXPECT_TRUE(UseVectorIterator(original));
     EXPECT_EQ(original.topk_, 50);
     EXPECT_EQ(original.search_params_[knowhere::meta::TOPK], 50);
+    EXPECT_EQ(original.search_params_, original_params);
+}
+
+TEST(StrictGroupPerGroupTest, IndependentSearchPreservesScoringContext) {
+    SearchInfo original;
+    original.topk_ = 50;
+    original.metric_type_ = knowhere::metric::BM25;
+    original.field_id_ = FieldId(100);
+    original.group_by_field_ids_ = {FieldId(101)};
+    original.strict_group_size_ = true;
+    original.group_size_ = 3;
+    original.strict_group_skip_refine_ = true;
+    original.search_params_ = {{knowhere::meta::BM25_AVGDL, 123.5},
+                               {"drop_ratio_search", 0.2},
+                               {"ef", 2},
+                               {"nprobe", 128}};
+    const auto params = original.search_params_;
+    const auto ordinary = query::StrictGroupSearchInfo(original, 2);
+    EXPECT_EQ(ordinary.metric_type_, original.metric_type_);
+    EXPECT_EQ(ordinary.search_params_,
+              (knowhere::Json{{knowhere::meta::TOPK, 2},
+                              {"skip_refine", true},
+                              {knowhere::meta::BM25_AVGDL, 123.5}}));
+    EXPECT_EQ(original.search_params_, params);
 }
 
 TEST(StrictGroupPhase1Test, SkipRefineAllPathsAndEligibility) {
@@ -735,7 +775,10 @@ TEST(StrictGroupPerGroupTest, IsolatedFiltersReuseStorageAndKeepShortResults) {
             info.strict_group_strategy_ = disabled
                                               ? StrictGroupStrategy::Original
                                               : StrictGroupStrategy::PerGroup;
-            info.strict_group_debug_ = response % 2 == 1;
+            const bool debug = response % 2 == 1;
+            gflags::FlagSaver restore_flags;
+            gflags::SetCommandLineOption("minloglevel", "0");
+            gflags::SetCommandLineOption("v", debug ? "5" : "4");
             std::vector<GroupByValueType> groups;
             std::vector<int64_t> offsets;
             std::vector<float> distances;
@@ -761,7 +804,7 @@ TEST(StrictGroupPerGroupTest, IsolatedFiltersReuseStorageAndKeepShortResults) {
             EXPECT_EQ(
                 std::unordered_set<int64_t>(offsets.begin(), offsets.end()),
                 expected_offsets);
-            if (info.strict_group_debug_ && !disabled) {
+            if (debug && !disabled) {
                 ASSERT_FALSE(sink.records.empty());
                 EXPECT_EQ(sink.records.back()["completion_reason"],
                           "search_short_result");

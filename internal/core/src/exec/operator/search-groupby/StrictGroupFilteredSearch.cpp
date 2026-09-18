@@ -375,7 +375,7 @@ TryStrictGroupFiltered(const std::shared_ptr<VectorIterator>& iterator,
 
     StrictGroupPhase2Stats stats;
     bool phase1_truncated = false;
-    const bool debug = context->search_info->strict_group_debug_;
+    const bool debug = VLOG_IS_ON(GLOG_DEBUG);
     using Clock = std::chrono::steady_clock;
     Clock::time_point debug_start{}, last_log{};
     uint64_t diagnostic_id = 0;
@@ -455,7 +455,7 @@ TryStrictGroupFiltered(const std::shared_ptr<VectorIterator>& iterator,
              std::chrono::duration_cast<std::chrono::microseconds>(now -
                                                                    debug_start)
                  .count()}};
-        LOG_INFO("strict_group_diagnostic {}", record.dump());
+        LOG_DEBUG("strict_group_diagnostic {}", record.dump());
         last_log = now;
     };
     diagnostic(context->eligible ? "begin" : "ineligible_original");
