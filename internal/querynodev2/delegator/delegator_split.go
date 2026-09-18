@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -78,16 +76,17 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
-	children, err := sd.frontingFamily()
+	family, err := sd.frontingFamily()
 	if err != nil {
 		return nil, err
 	}
-	scope := frontingSourceScope(children)
+	scope := frontingSourceScope(family)
 	results, err := sd.searchInternal(ctx, req, scope)
 	if err != nil {
 		return nil, err
 	}
-	if len(children) == 0 {
+	descendants := family.descendants()
+	if len(descendants) == 0 {
 		return results, nil
 	}
 	// An advanced (hybrid) search returns one already-reduced element per
@@ -97,23 +96,23 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	// returns per-source partial results that the downstream reduce flattens, so
 	// concatenation is correct there.
 	if req.GetReq().GetIsAdvanced() {
-		return sd.frontAdvancedSearch(ctx, req, results, children, scope.forChild())
+		return sd.frontAdvancedSearch(ctx, req, results, descendants, scope)
 	}
-	for _, child := range children {
-		childResults, err := child.searchInternal(ctx, req, scope.forChild())
+	for _, node := range descendants {
+		childResults, err := node.sd.searchInternal(ctx, req, scope.forChild(node))
 		if err != nil {
-			return nil, errors.Wrapf(err, "fronting search on split child %s failed", child.vchannelName)
+			return nil, merr.Wrapf(err, "fronting search on split child %s failed", node.sd.vchannelName)
 		}
 		results = append(results, childResults...)
 	}
 	return results, nil
 }
 
-// frontAdvancedSearch merges each fronting child's per-sub-request results into
-// the source's corresponding sub-request slot and reduces per slot, so the
+// frontAdvancedSearch merges each fronted delegator's per-sub-request results
+// into the source's corresponding sub-request slot and reduces per slot, so the
 // returned slice keeps exactly one element per sub-request (the contract the
 // advanced reduce relies on for ReqIndex).
-func (sd *shardDelegator) frontAdvancedSearch(ctx context.Context, req *querypb.SearchRequest, sourceResults []*internalpb.SearchResults, children []*shardDelegator, childScope splitReadScope) ([]*internalpb.SearchResults, error) {
+func (sd *shardDelegator) frontAdvancedSearch(ctx context.Context, req *querypb.SearchRequest, sourceResults []*internalpb.SearchResults, descendants []*familyNode, scope splitReadScope) ([]*internalpb.SearchResults, error) {
 	subReqs := req.GetReq().GetSubReqs()
 	if len(sourceResults) != len(subReqs) {
 		return nil, merr.WrapErrServiceInternalMsg("advanced search returned %d sub-results, expected %d sub-requests", len(sourceResults), len(subReqs))
@@ -122,13 +121,13 @@ func (sd *shardDelegator) frontAdvancedSearch(ctx context.Context, req *querypb.
 	for i := range sourceResults {
 		perSubReq[i] = []*internalpb.SearchResults{sourceResults[i]}
 	}
-	for _, child := range children {
-		childResults, err := child.searchInternal(ctx, req, childScope)
+	for _, node := range descendants {
+		childResults, err := node.sd.searchInternal(ctx, req, scope.forChild(node))
 		if err != nil {
-			return nil, errors.Wrapf(err, "fronting advanced search on split child %s failed", child.vchannelName)
+			return nil, merr.Wrapf(err, "fronting advanced search on split child %s failed", node.sd.vchannelName)
 		}
 		if len(childResults) != len(subReqs) {
-			return nil, merr.WrapErrServiceInternalMsg("split child %s returned %d sub-results, expected %d", child.vchannelName, len(childResults), len(subReqs))
+			return nil, merr.WrapErrServiceInternalMsg("split child %s returned %d sub-results, expected %d", node.sd.vchannelName, len(childResults), len(subReqs))
 		}
 		for i := range childResults {
 			perSubReq[i] = append(perSubReq[i], childResults[i])
@@ -149,88 +148,125 @@ func (sd *shardDelegator) frontAdvancedSearch(ctx context.Context, req *querypb.
 	return merged, nil
 }
 
-// Query serves a query on this delegator's logical shard, fronting its
-// in-process split children the same way Search does: own view plus each child's
-// view, concatenated. Disjoint segment sets keep the downstream reduce correct.
+// Query serves a query on this delegator's logical shard, fronting its split
+// family the same way Search does: own view plus the view of every fronted
+// delegator below it, concatenated. Segments are counted once across them (see
+// splitReadScope), which keeps the downstream reduce correct.
 func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
-	children, err := sd.frontingFamily()
+	family, err := sd.frontingFamily()
 	if err != nil {
 		return nil, err
 	}
-	scope := frontingSourceScope(children)
+	scope := frontingSourceScope(family)
 	results, err := sd.queryInternal(ctx, req, scope)
 	if err != nil {
 		return nil, err
 	}
-	for _, child := range children {
-		childResults, err := child.queryInternal(ctx, req, scope.forChild())
+	for _, node := range family.descendants() {
+		childResults, err := node.sd.queryInternal(ctx, req, scope.forChild(node))
 		if err != nil {
-			return nil, errors.Wrapf(err, "fronting query on split child %s failed", child.vchannelName)
+			return nil, merr.Wrapf(err, "fronting query on split child %s failed", node.sd.vchannelName)
 		}
 		results = append(results, childResults...)
 	}
 	return results, nil
 }
 
-// QueryStream serves a streaming query, fronting the split children: the source
-// streams its own view and then each child streams its own view to the same
-// stream server, so the proxy reduces the union.
+// QueryStream serves a streaming query, fronting the split family: the source
+// streams its own view and then every fronted delegator below it streams its
+// own view to the same stream server, so the proxy reduces the union.
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
-	children, err := sd.frontingFamily()
+	family, err := sd.frontingFamily()
 	if err != nil {
 		return err
 	}
-	scope := frontingSourceScope(children)
+	scope := frontingSourceScope(family)
 	if err := sd.queryStreamInternal(ctx, req, srv, scope); err != nil {
 		return err
 	}
-	for _, child := range children {
-		if err := child.queryStreamInternal(ctx, req, srv, scope.forChild()); err != nil {
-			return errors.Wrapf(err, "fronting query stream on split child %s failed", child.vchannelName)
+	for _, node := range family.descendants() {
+		if err := node.sd.queryStreamInternal(ctx, req, srv, scope.forChild(node)); err != nil {
+			return merr.Wrapf(err, "fronting query stream on split child %s failed", node.sd.vchannelName)
 		}
 	}
 	return nil
 }
 
-// GetStatistics serves a statistics request, fronting the split children by
-// concatenating the source's own statistics with each child's.
+// GetStatistics serves a statistics request, fronting the split family by
+// concatenating the source's own statistics with those of every fronted
+// delegator below it.
 func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error) {
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("GetStatistics channels %v", req.GetDmlChannels()))
 	}
-	children, err := sd.frontingFamily()
+	family, err := sd.frontingFamily()
 	if err != nil {
 		return nil, err
 	}
-	scope := frontingSourceScope(children)
+	scope := frontingSourceScope(family)
 	results, err := sd.getStatisticsInternal(ctx, req, scope)
 	if err != nil {
 		return nil, err
 	}
-	for _, child := range children {
-		childResults, err := child.getStatisticsInternal(ctx, req, scope.forChild())
+	for _, node := range family.descendants() {
+		childResults, err := node.sd.getStatisticsInternal(ctx, req, scope.forChild(node))
 		if err != nil {
-			return nil, errors.Wrapf(err, "fronting statistics on split child %s failed", child.vchannelName)
+			return nil, merr.Wrapf(err, "fronting statistics on split child %s failed", node.sd.vchannelName)
 		}
 		results = append(results, childResults...)
 	}
 	return results, nil
 }
 
+// familyNode is one delegator of a read's split family, with the children it
+// fronted when the read took its snapshot. The tree is taken once per public
+// read, one children snapshot per level, and every step of that read -- the
+// MVCC speedup, the tsafe wait, the fan-out and the post-wait re-check -- walks
+// this same tree. A child published or detached mid-read at any level therefore
+// cannot make those steps disagree about which delegators the read covers.
+//
+// A child's children exist when the child is itself fenced by a cascaded split
+// while its source still fronts it.
+type familyNode struct {
+	sd       *shardDelegator
+	children []*familyNode
+}
+
+// fronted returns the node's fronted children, or nil for a nil node.
+func (n *familyNode) fronted() []*familyNode {
+	if n == nil {
+		return nil
+	}
+	return n.children
+}
+
+// descendants lists every fronted delegator below the node, depth first.
+func (n *familyNode) descendants() []*familyNode {
+	var out []*familyNode
+	for _, child := range n.fronted() {
+		out = append(out, child)
+		out = append(out, child.descendants()...)
+	}
+	return out
+}
+
 // splitReadScope is how one delegator takes part in a read of a shard that is
-// being split: the source reads its own view, then each fronted child reads its
-// own, and every segment must be counted exactly once across them.
+// being split: the source reads its own view, then every fronted delegator
+// below it reads its own, and every segment must be counted exactly once across
+// them.
 //
 // The views are disjoint while the split window is open, but not after
 // adoption: a relabeled sealed segment is synced into the adopted child's view
 // while the source still holds it, and the source keeps fronting the child until
-// it is released. So the source records what it pinned and each child skips it.
+// it is released. The same holds one level down for a cascaded split. So every
+// delegator of the read records what it pinned and skips what those read
+// before it pinned.
 type splitReadScope struct {
 	// asChild: this delegator is a split child read in-process by its source, so
 	// its pin bypasses the serviceability gate.
@@ -239,37 +275,29 @@ type splitReadScope struct {
 	pinned typeutil.UniqueSet
 	// exclude holds the IDs another delegator of the same read already pinned.
 	exclude typeutil.UniqueSet
-	// family is the one snapshot of fronted children the source took for this
-	// read. The read fans out to exactly these children, so its MVCC speedup and
-	// tsafe wait cover exactly these too, even when a concurrent source release
-	// detaches them mid-read.
-	family []*shardDelegator
+	// family is this delegator's node in the read's family tree: the children
+	// it fronts, as the read snapshotted them. The read's MVCC speedup and tsafe
+	// wait cover exactly that tree, even when a concurrent release detaches a
+	// delegator from it mid-read.
+	family *familyNode
 }
 
-// frontingSourceScope is the source's scope for one read over the children
-// snapshot it fans out to: it records its pins only when there are children to
+// frontingSourceScope is the source's scope for one read over the family tree
+// it fans out to: it records its pins only when there are fronted delegators to
 // exclude them from.
-func frontingSourceScope(children []*shardDelegator) splitReadScope {
-	if len(children) == 0 {
-		return splitReadScope{}
+func frontingSourceScope(family *familyNode) splitReadScope {
+	if len(family.fronted()) == 0 {
+		return splitReadScope{family: family}
 	}
-	return splitReadScope{pinned: typeutil.NewUniqueSet(), family: children}
+	return splitReadScope{pinned: typeutil.NewUniqueSet(), family: family}
 }
 
-// readFamily returns the fronted children the read on sd must cover: the
-// source's snapshot for its own read, or, for a fronted child, the child's own
-// snapshot of any children it fronts in turn.
-func (s splitReadScope) readFamily(sd *shardDelegator) []*shardDelegator {
-	if s.asChild {
-		return sd.frontingChildren()
-	}
-	return s.family
-}
-
-// forChild is the scope a fronted child reads under: the gate bypass, minus
-// every segment the source has already pinned.
-func (s splitReadScope) forChild() splitReadScope {
-	return splitReadScope{asChild: true, exclude: s.pinned}
+// forChild is the scope a fronted delegator, at any depth, reads under within
+// its source's read: the gate bypass, its own node of the read's family tree,
+// and the read's shared pin set, so it skips every segment a delegator read
+// before it already pinned and records its own for those read after it.
+func (s splitReadScope) forChild(node *familyNode) splitReadScope {
+	return splitReadScope{asChild: true, pinned: s.pinned, exclude: s.pinned, family: node}
 }
 
 // pinReadableSegments selects the serviceability-gated pin for the source
@@ -326,8 +354,9 @@ func excludeSegments(sealed []SnapshotItem, growing []SegmentEntry, exclude type
 
 // familyMVCCTimestamp returns the latest WAL MVCC timestamp over every vchannel
 // a write of this delegator's logical shard can land on: its own vchannel and,
-// while it fronts a shard split, each child in the read's snapshot children
-// (recursively over each child's own fronted children, for a cascaded split).
+// while it fronts a shard split, every delegator below it in the read's family
+// tree (children, and their children for a cascaded split), without taking any
+// new snapshot.
 //
 // A Strong read may lower its guarantee to this value (speedupGuranteeTS) only
 // because every write acknowledged before the read began is at or below the
@@ -340,13 +369,13 @@ func excludeSegments(sealed []SnapshotItem, growing []SegmentEntry, exclude type
 //
 // If any member's MVCC is not known locally the error is returned, and the
 // caller keeps the proxy's guarantee timestamp.
-func (sd *shardDelegator) familyMVCCTimestamp(ctx context.Context, children []*shardDelegator) (uint64, error) {
+func (sd *shardDelegator) familyMVCCTimestamp(ctx context.Context, family *familyNode) (uint64, error) {
 	mvcc, err := streaming.WAL().Local().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName)
 	if err != nil {
 		return 0, err
 	}
-	for _, child := range children {
-		childMVCC, err := child.familyMVCCTimestamp(ctx, child.frontingChildren())
+	for _, child := range family.fronted() {
+		childMVCC, err := child.sd.familyMVCCTimestamp(ctx, child)
 		if err != nil {
 			return 0, err
 		}
@@ -358,7 +387,8 @@ func (sd *shardDelegator) familyMVCCTimestamp(ctx context.Context, children []*s
 // waitChildrenTSafe waits for every fronted child's tsafe to reach ts and
 // returns the minimum, so the source delegator serves the merged shard at
 // min(child tsafes): it never answers at a timestamp before every child has
-// consumed (and forwarded the deletes) up to it.
+// consumed (and forwarded the deletes) up to it. A child that fronts children of
+// its own is waited on through them, over its node of the read's family tree.
 //
 // Every child is first told that a read needs ts, before the wait on any of
 // them. A child's pipeline filters empty time ticks unless a read requires them,
@@ -366,13 +396,13 @@ func (sd *shardDelegator) familyMVCCTimestamp(ctx context.Context, children []*s
 // which runs after this wait. Without it the tick that lifts a child's tsafe to
 // ts can be held back for the whole filter interval, and the wait fails with a
 // tsafe stall.
-func (sd *shardDelegator) waitChildrenTSafe(ctx context.Context, children []*shardDelegator, ts uint64) (uint64, error) {
+func (sd *shardDelegator) waitChildrenTSafe(ctx context.Context, children []*familyNode, ts uint64) (uint64, error) {
 	for _, child := range children {
-		child.updateLatestRequiredMVCCTimestamp(ts)
+		child.sd.updateLatestRequiredMVCCTimestamp(ts)
 	}
 	var minTSafe uint64
 	for i, child := range children {
-		childTSafe, err := child.waitTSafe(ctx, ts)
+		childTSafe, err := child.sd.waitFamilyTSafe(ctx, ts, child.fronted())
 		if err != nil {
 			return 0, err
 		}
@@ -421,41 +451,90 @@ func (sd *shardDelegator) frontingChildren() []*shardDelegator {
 	return sd.frontingChildrenLocked()
 }
 
-// frontingFamily takes the one snapshot of fronted children a public read fans
-// out to, and refuses the read while a child spawn is in flight.
+// frontingFamily takes the family tree a public read fans out to, one children
+// snapshot per level, and refuses the read while a child spawn is in flight at
+// any level.
 //
-// A spawn is in flight from the moment the source consumes the fence until the
+// A spawn is in flight from the moment a delegator consumes its fence until the
 // child is published. Over that gap the split key range's new writes already
-// land on the target vchannels, but no child fronts them, so the source's view
-// alone would miss target inserts and target deletes of rows the source holds.
-// The spawn usually finishes within milliseconds but can block for seconds on
-// the target's recovery info, so the read is refused at once with a retriable
-// System error for the proxy to retry, rather than held on the source.
-func (sd *shardDelegator) frontingFamily() ([]*shardDelegator, error) {
+// land on the target vchannels, but no child fronts them, so the read would miss
+// target inserts and target deletes of rows the family holds. The spawn usually
+// finishes within milliseconds but can block for seconds on the target's
+// recovery info, so the read is refused at once with a retriable System error
+// for the proxy to retry, rather than held on the source.
+func (sd *shardDelegator) frontingFamily() (*familyNode, error) {
+	return sd.takeFamily(true)
+}
+
+// snapshotFamily takes the family tree rooted at sd without refusing on a spawn
+// in flight, for callers that only wait on the family's tsafe.
+func (sd *shardDelegator) snapshotFamily() *familyNode {
+	family, _ := sd.takeFamily(false) // never fails without refuse
+	return family
+}
+
+// takeFamily builds the family tree rooted at sd, locking one delegator at a
+// time. With refuse set it fails as soon as any level has a child spawn in
+// flight.
+func (sd *shardDelegator) takeFamily(refuse bool) (*familyNode, error) {
 	sd.childMut.Lock()
-	defer sd.childMut.Unlock()
-	if err := sd.refuseWhileSpawningLocked(); err != nil {
-		return nil, err
+	if refuse {
+		if err := sd.refuseWhileSpawningLocked(); err != nil {
+			sd.childMut.Unlock()
+			return nil, err
+		}
 	}
-	return sd.frontingChildrenLocked(), nil
+	children := sd.frontingChildrenLocked()
+	sd.childMut.Unlock()
+
+	node := &familyNode{sd: sd}
+	for _, child := range children {
+		childNode, err := child.takeFamily(refuse)
+		if err != nil {
+			return nil, err
+		}
+		node.children = append(node.children, childNode)
+	}
+	return node, nil
 }
 
 // checkReadFamily re-checks, once a source read has waited for its read
-// timestamp, that the children snapshot it took still covers that timestamp.
+// timestamp, that the family tree it took still covers that timestamp at every
+// level.
 //
-// A read that found no spawn at entry can be overtaken by the fence. Every write
+// A read that found no spawn at entry can be overtaken by a fence. Every write
 // acknowledged before the read began is at or below the read timestamp, and a
-// target write is only acknowledged after the fence, so once the source's tsafe
-// reaches the read timestamp it has consumed any fence those writes depend on
-// (the filter node spawns before the delete node advances tsafe). If that
-// started a spawn, or published a child the snapshot lacks, the read is refused
-// like one that met the spawn at entry. A child detached since the snapshot is
-// fine: the read still covers it. A fronted child's own read is not re-checked;
-// its source's read covers it.
+// target write is only acknowledged after its fence, so once a delegator's
+// tsafe reaches the read timestamp it has consumed any fence those writes
+// depend on (the filter node spawns before the delete node advances tsafe). If
+// that started a spawn, or published a child the tree lacks, the read is
+// refused like one that met the spawn at entry. A child detached since the
+// snapshot is fine: the read still covers it. A fronted delegator's own read is
+// not re-checked; its source's read covers it.
 func (sd *shardDelegator) checkReadFamily(scope splitReadScope) error {
 	if scope.asChild {
 		return nil
 	}
+	return sd.checkFamilySnapshot(scope.family.fronted())
+}
+
+// checkFamilySnapshot checks sd against the children snapshot the read took of
+// it, then each snapshotted child against its own.
+func (sd *shardDelegator) checkFamilySnapshot(snapshot []*familyNode) error {
+	if err := sd.checkChildrenSnapshot(snapshot); err != nil {
+		return err
+	}
+	for _, child := range snapshot {
+		if err := child.sd.checkFamilySnapshot(child.fronted()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkChildrenSnapshot refuses the read if sd now has a spawn in flight or a
+// child the snapshot lacks.
+func (sd *shardDelegator) checkChildrenSnapshot(snapshot []*familyNode) error {
 	sd.childMut.Lock()
 	defer sd.childMut.Unlock()
 	if err := sd.refuseWhileSpawningLocked(); err != nil {
@@ -467,8 +546,8 @@ func (sd *shardDelegator) checkReadFamily(scope splitReadScope) error {
 			continue // not frontable, see frontingChildrenLocked
 		}
 		covered := false
-		for _, snapshotted := range scope.family {
-			if snapshotted == concrete {
+		for _, snapshotted := range snapshot {
+			if snapshotted.sd == concrete {
 				covered = true
 				break
 			}

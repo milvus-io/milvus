@@ -618,7 +618,7 @@ func (sd *shardDelegator) searchInternal(ctx context.Context, req *querypb.Searc
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
-	family := scope.readFamily(sd)
+	family := scope.family
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
 		ctx,
 		family,
@@ -639,7 +639,7 @@ func (sd *shardDelegator) searchInternal(ctx context.Context, req *querypb.Searc
 		// a stale channel checkpoint does not hide snapshot rows or deltalog deletes.
 		tSafe = typeutil.MaxTimestamp
 	} else if partialResultRequiredDataRatio >= 1.0 {
-		tSafe, err = sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, family)
+		tSafe, err = sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, family.fronted())
 	} else {
 		// partial search enabled, could ignore streaming data
 		tSafe = sd.GetTSafe()
@@ -778,7 +778,7 @@ func (sd *shardDelegator) queryStreamInternal(ctx context.Context, req *querypb.
 		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
-	family := scope.readFamily(sd)
+	family := scope.family
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
 		ctx,
 		family,
@@ -790,7 +790,7 @@ func (sd *shardDelegator) queryStreamInternal(ctx context.Context, req *querypb.
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitFamilyTSafe(ctx, req.Req.GetGuaranteeTimestamp(), family)
+	tSafe, err := sd.waitFamilyTSafe(ctx, req.Req.GetGuaranteeTimestamp(), family.fronted())
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		paramtable.GetStringNodeID(), contextutil.GetQueryLabel(ctx)).
 		Observe(float64(waitTr.ElapseSpan().Milliseconds()))
@@ -873,7 +873,7 @@ func (sd *shardDelegator) queryInternal(ctx context.Context, req *querypb.QueryR
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
 
-	family := scope.readFamily(sd)
+	family := scope.family
 	req.Req.GuaranteeTimestamp = sd.speedupGuranteeTS(
 		ctx,
 		family,
@@ -885,7 +885,7 @@ func (sd *shardDelegator) queryInternal(ctx context.Context, req *querypb.QueryR
 
 	// wait tsafe
 	waitTr := timerecord.NewTimeRecorder("wait tSafe")
-	tSafe, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, family)
+	tSafe, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, family.fronted())
 
 	metrics.QueryNodeSQLatencyWaitTSafe.WithLabelValues(
 		paramtable.GetStringNodeID(), contextutil.GetQueryLabel(ctx)).
@@ -998,7 +998,7 @@ func (sd *shardDelegator) getStatisticsInternal(ctx context.Context, req *queryp
 
 	// wait tsafe
 	sd.updateLatestRequiredMVCCTimestamp(req.Req.GuaranteeTimestamp)
-	_, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, scope.readFamily(sd))
+	_, err := sd.waitFamilyTSafe(ctx, req.Req.GuaranteeTimestamp, scope.family.fronted())
 	if err != nil {
 		mlog.Warn(ctx, "delegator GetStatistics failed to wait tsafe", mlog.Err(err))
 		return nil, err
@@ -1229,11 +1229,11 @@ func executeSubTasks[T any, R interface {
 // speedupGuranteeTS returns the guarantee timestamp for strong consistency search.
 // TODO: we just make a speedup right now, but in the future, we will make the mvcc and guarantee timestamp same.
 //
-// family is the snapshot of fronted split children the read covers (nil when it
-// fronts none); see familyMVCCTimestamp.
+// family is this delegator's node in the read's split family tree (nil, or no
+// children, when it fronts none); see familyMVCCTimestamp.
 func (sd *shardDelegator) speedupGuranteeTS(
 	ctx context.Context,
-	family []*shardDelegator,
+	family *familyNode,
 	cl commonpb.ConsistencyLevel,
 	guaranteeTS uint64,
 	mvccTS uint64,
@@ -1266,12 +1266,12 @@ func (sd *shardDelegator) speedupGuranteeTS(
 // waitTSafe returns when tsafe listener notifies a timestamp which meet the guarantee ts.
 // It waits on the split children this delegator fronts at the time of the call.
 func (sd *shardDelegator) waitTSafe(ctx context.Context, ts uint64) (uint64, error) {
-	return sd.waitFamilyTSafe(ctx, ts, sd.frontingChildren())
+	return sd.waitFamilyTSafe(ctx, ts, sd.snapshotFamily().fronted())
 }
 
-// waitFamilyTSafe is waitTSafe over a given snapshot of fronted split children,
-// so a read waits on exactly the children it fans out to.
-func (sd *shardDelegator) waitFamilyTSafe(ctx context.Context, ts uint64, children []*shardDelegator) (uint64, error) {
+// waitFamilyTSafe is waitTSafe over the fronted split children of a given
+// family tree, so a read waits on exactly the delegators it fans out to.
+func (sd *shardDelegator) waitFamilyTSafe(ctx context.Context, ts uint64, children []*familyNode) (uint64, error) {
 	if sd.skipStreamingForExternalTable {
 		// External collection data is materialized by refresh/load manifests,
 		// not by this WAL. Use a full snapshot timestamp so low guarantee
@@ -1279,11 +1279,12 @@ func (sd *shardDelegator) waitFamilyTSafe(ctx context.Context, ts uint64, childr
 		return typeutil.MaxTimestamp, nil
 	}
 
-	// shard-split fronting: after the fence the source delegator consumes nothing
-	// so its own tsafe freezes at T_switch; a query past T_switch must instead
-	// wait on the children's tsafe (their TimeTick progress), which the source
-	// serves at the min over — it never answers at t before every child has
-	// forwarded all deletes <= t.
+	// shard-split fronting: after the fence the source vchannel takes no DML, but
+	// the source pipeline keeps consuming time ticks, so its own tsafe keeps
+	// advancing and says nothing about the split key range's writes, which land
+	// on the children. A read therefore waits on the children's tsafe instead,
+	// and the source serves at the min over them — it never answers at t before
+	// every child has consumed and forwarded all deletes <= t.
 	if len(children) > 0 {
 		return sd.waitChildrenTSafe(ctx, children, ts)
 	}
@@ -1431,8 +1432,9 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 
 func (sd *shardDelegator) GetTSafe() uint64 {
 	// shard-split fronting: the source serves the merged shard at min(child
-	// tsafes) — its own tsafe is frozen at T_switch and its data is complete, so
-	// the children's TimeTick progress governs the serviceable timestamp.
+	// tsafes). Its own view takes no DML after the fence, so it is complete at any
+	// later timestamp, and its own tsafe (which keeps advancing on time ticks)
+	// does not bound the split key range; the children's progress does.
 	if children := sd.frontingChildren(); len(children) > 0 {
 		var minTSafe uint64
 		for i, child := range children {
