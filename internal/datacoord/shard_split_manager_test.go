@@ -512,11 +512,13 @@ func TestShardSplitTriggerGates(t *testing.T) {
 	})
 
 	t.Run("a vchannel that is a target of an active task is skipped", func(t *testing.T) {
+		// A vchannel belongs to one collection, so a task naming it is a task
+		// of that collection, and the one-split-per-collection guard skips it.
 		manager, _ := newTriggerCase(t)
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.ShardSplitMaxConcurrentTasks.Key, "5")
 		defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.ShardSplitMaxConcurrentTasks.Key)
 		require.NoError(t, manager.store.create(context.Background(), manager.catalog, &datapb.SplitShardTask{
-			TaskId: 900, CollectionId: 7, State: datapb.SplitShardTaskState_SplitShardTaskRedistributing,
+			TaskId: 900, CollectionId: splitMgrCollection, State: datapb.SplitShardTaskState_SplitShardTaskRedistributing,
 			Sources: []*datapb.SplitShardTaskSource{{Vchannel: "by-dev-rootcoord-dml_5_7v0"}},
 			Targets: []*datapb.SplitShardTaskTarget{{Vchannel: splitMgrV0}, {Vchannel: "by-dev-rootcoord-dml_6_7v1"}},
 		}))

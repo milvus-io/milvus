@@ -106,7 +106,7 @@ func shardByOf(coll *splitCollection) (string, error) {
 	return "", merr.WrapErrServiceInternalMsg("collection %d declares no primary key to route by", coll.CollectionID)
 }
 
-// splitTargetVChannels lists a task's target vchannel names.
+// splitTaskTargetVChannels lists a task's target vchannel names.
 func splitTaskTargetVChannels(task *datapb.SplitShardTask) []string {
 	out := make([]string, 0, len(task.GetTargets()))
 	for _, target := range task.GetTargets() {
