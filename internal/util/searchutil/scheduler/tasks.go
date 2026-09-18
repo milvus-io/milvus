@@ -96,7 +96,7 @@ type queuedTask struct {
 
 	enqueueTime time.Time
 	// accountedNQ is the NQ this task carried when it was popped, before
-	// PruneCancelled may have shrunk it. The waiting counters were credited
+	// PruneCanceled may have shrunk it. The waiting counters were credited
 	// with that value at push time, so they must be debited with the same
 	// value regardless of how many members survive.
 	accountedNQ int64
@@ -162,25 +162,25 @@ type MergeTask interface {
 }
 
 // PrunableTask is a Task that may stand for a group of merged requests and can
-// drop the members whose context is already cancelled before the group
+// drop the members whose context is already canceled before the group
 // executes. It keeps one member's cancellation from ending the others.
 type PrunableTask interface {
 	Task
 
-	// PruneCancelled completes every member whose context is cancelled with
+	// PruneCanceled completes every member whose context is canceled with
 	// that member's own context error and returns the task to execute for the
 	// remaining members. It returns the receiver when nothing was pruned and
 	// nil when no member remains.
-	PruneCancelled() Task
+	PruneCanceled() Task
 }
 
-// pruneCancelled drops a task whose context is cancelled, or the cancelled
+// pruneCanceled drops a task whose context is canceled, or the canceled
 // members of a prunable group. It returns the task to execute, or nil when
 // there is nothing left to run. A dropped task has been completed with its own
 // context error.
-func pruneCancelled(t Task) Task {
+func pruneCanceled(t Task) Task {
 	if p, ok := t.(PrunableTask); ok {
-		return p.PruneCancelled()
+		return p.PruneCanceled()
 	}
 	if err := t.Context().Err(); err != nil {
 		t.Done(err)

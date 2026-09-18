@@ -419,7 +419,7 @@ func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 	}
 }
 
-// cancellationOf reports why a task's request was cancelled, or nil if it was
+// cancellationOf reports why a task's request was canceled, or nil if it was
 // not. A task built by NewSearchTask always carries a context, but the struct
 // is also built directly, notably in tests that exercise the merge rules
 // alone; a task with no context has nothing that could cancel it, and reading
@@ -432,7 +432,7 @@ func cancellationOf(ctx context.Context) error {
 }
 
 // Merge folds other into this task's group when the two are compatible. A
-// task whose context is already cancelled is never merged, in either
+// task whose context is already canceled is never merged, in either
 // direction: it would only be dropped again at dequeue.
 func (t *SearchTask) Merge(other *SearchTask) bool {
 	if cancellationOf(t.ctx) != nil || cancellationOf(other.ctx) != nil {
@@ -505,14 +505,14 @@ func (t *SearchTask) resetGroup() {
 	t.nq = t.originNqs[0]
 }
 
-// PruneCancelled implements scheduler.PrunableTask. It must run before
+// PruneCanceled implements scheduler.PrunableTask. It must run before
 // Execute, while every member still holds its own placeholder group.
 //
-// Members whose context is cancelled are completed right away with their own
+// Members whose context is canceled are completed right away with their own
 // context error and leave the group. The survivors are regrouped, with the
-// first of them as the new owner, so that cancelling the owner does not end
+// first of them as the new owner, so that canceling the owner does not end
 // the requests merged behind it.
-func (t *SearchTask) PruneCancelled() scheduler.Task {
+func (t *SearchTask) PruneCanceled() scheduler.Task {
 	members := t.members()
 	alive := make([]*SearchTask, 0, len(members))
 	for _, m := range members {
@@ -553,7 +553,7 @@ func (t *SearchTask) notify(err error) {
 }
 
 // resultErr is what a group member is told when the group finishes with
-// groupErr: its own context error if its request was cancelled meanwhile,
+// groupErr: its own context error if its request was canceled meanwhile,
 // otherwise the group's outcome.
 func (t *SearchTask) resultErr(groupErr error) error {
 	if err := cancellationOf(t.ctx); err != nil {
@@ -562,8 +562,8 @@ func (t *SearchTask) resultErr(groupErr error) error {
 	return groupErr
 }
 
-// useGroupContext makes the group execute under a context that is cancelled
-// only once every member's context is cancelled, so that one member's
+// useGroupContext makes the group execute under a context that is canceled
+// only once every member's context is canceled, so that one member's
 // cancellation cannot fail the segcore call the others are waiting on. Trace
 // and other values of the owner's context are kept. The returned function
 // restores the owner's own context and releases the listeners.
@@ -601,7 +601,7 @@ func (t *SearchTask) Done(err error) {
 		t.notify(err)
 		return
 	}
-	// A merged group: each member learns its own outcome. A member cancelled
+	// A merged group: each member learns its own outcome. A member canceled
 	// while the group ran gets its own context error; the others get the
 	// group's result.
 	t.notify(t.resultErr(err))

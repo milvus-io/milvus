@@ -460,12 +460,12 @@ func (s *SchedulerSuite) TestExecRecordsReadTaskExecuteDuration() {
 	s.Equal(uint64(1), readTaskExecuteDurationCount(metrics.CancelLabel))
 }
 
-// TestPruneCancelledBeforeExec verifies that a prunable task is asked to drop
-// its cancelled members at dequeue and again right before execution, that a
+// TestPruneCanceledBeforeExec verifies that a prunable task is asked to drop
+// its canceled members at dequeue and again right before execution, that a
 // group with no survivor is never executed, that the survivor is what gets
 // executed, and that the waiting counters are debited with the NQ they were
 // credited with, not with the pruned NQ.
-func (s *SchedulerSuite) TestPruneCancelledBeforeExec() {
+func (s *SchedulerSuite) TestPruneCanceledBeforeExec() {
 	paramtable.Init()
 	scheduler := newScheduler(newFIFOPolicy())
 	scheduler.Start()
@@ -511,7 +511,7 @@ func (s *SchedulerSuite) TestPruneCancelledBeforeExec() {
 			},
 		})
 		group.(*MockTask).prune = func() Task {
-			// the owner was cancelled: it is told so, the survivor goes on
+			// the owner was canceled: it is told so, the survivor goes on
 			group.(*MockTask).Done(context.Canceled)
 			return survivor
 		}
