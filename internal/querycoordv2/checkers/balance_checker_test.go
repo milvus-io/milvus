@@ -23,8 +23,11 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
 	"github.com/milvus-io/milvus/internal/querycoordv2/balance"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -34,7 +37,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // createMockPriorityQueue creates a mock priority queue for testing
@@ -61,7 +66,7 @@ func createTestBalanceChecker() *BalanceChecker {
 	balance.ResetGlobalBalancerFactoryForTest()
 	balance.InitGlobalBalancerFactory(scheduler, nodeMgr, dist, targetMgr)
 
-	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler)
+	return NewBalanceChecker(metaInstance, dist, targetMgr, nodeMgr, scheduler, nil)
 }
 
 // =============================================================================
@@ -221,6 +226,28 @@ func TestBalanceChecker_ReadyToCheck_NoTarget(t *testing.T) {
 
 	result := checker.readyToCheck(ctx, collectionID)
 	assert.False(t, result)
+}
+
+func TestBalanceChecker_ReadyToCheck_FrozenWhileSplitting(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	collectionID := int64(1)
+
+	// the collection is otherwise ready for balance.
+	mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
+	defer mockGetCollection.UnPatch()
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+	defer mockIsNextTargetExist.UnPatch()
+
+	// but one of its shards is a fenced split source, so balance is frozen.
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v0"},
+		ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardSplitting}},
+	}, nil)
+	checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
+
+	assert.False(t, checker.readyToCheck(ctx, collectionID))
 }
 
 func TestBalanceChecker_FilterCollectionForBalance_Success(t *testing.T) {
@@ -1962,4 +1989,98 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 
 	assert.Nil(t, result)
 	assert.Greater(t, duration, 100*time.Millisecond) // Should trigger log
+}
+
+// C1: adoption delists the source and lifts the Splitting state, but the current
+// target keeps listing the source until it flips to a pull taken after the
+// adoption. A balance or stopping-balance move of the source in that gap rebuilds
+// it on another node without the in-process children it fronts, and reads still
+// route to it. Balance stays frozen while the current target lists a vchannel
+// the collection no longer lists, and lifts once the current target drops it.
+func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *testing.T) {
+	ctx := context.Background()
+	collectionID := int64(1)
+	adopted := &milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v1", "v2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardNormal},
+			{State: schemapb.ShardState_ShardNormal},
+		},
+	}
+	channels := func(names ...string) map[string]*meta.DmChannel {
+		out := make(map[string]*meta.DmChannel, len(names))
+		for _, name := range names {
+			out[name] = &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: name}}
+		}
+		return out
+	}
+
+	run := func(t *testing.T, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (ready bool, stopping int) {
+		checker := createTestBalanceChecker()
+		mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
+		defer mockGetCollection.UnPatch()
+		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{collectionID}).Build()
+		defer mockGetAll.UnPatch()
+		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+		defer mockIsNextTargetExist.UnPatch()
+		mockRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+		defer mockRowCount.UnPatch()
+		mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
+			To(func(_ context.Context, _ int64, scope meta.TargetScope) map[string]*meta.DmChannel {
+				if scope == meta.CurrentTarget {
+					return current
+				}
+				return channels("v0", "v1", "v2")
+			}).Build()
+		defer mockChannels.UnPatch()
+		mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).
+			To(func(_ context.Context, _ int64, scope meta.TargetScope) typeutil.Set[string] {
+				if scope == meta.NextTarget && len(window) > 0 {
+					return typeutil.NewSet(window...)
+				}
+				return nil
+			}).Build()
+		defer mockWindow.UnPatch()
+
+		broker := meta.NewMockBroker(t)
+		describe(broker)
+		checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
+		return checker.readyToCheck(ctx, collectionID), checker.constructStoppingBalanceQueue(ctx).Len()
+	}
+	describeAs := func(resp *milvuspb.DescribeCollectionResponse) func(*meta.MockBroker) {
+		return func(broker *meta.MockBroker) {
+			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(resp, nil).Maybe()
+		}
+	}
+
+	t.Run("delisted source still current: frozen", func(t *testing.T) {
+		ready, stopping := run(t, channels("v0"), nil, describeAs(adopted))
+		assert.False(t, ready, "normal balance must not move a delisted source still in the current target")
+		assert.Zero(t, stopping, "stopping balance must not move it either")
+	})
+	t.Run("current target flipped past the source: unfrozen", func(t *testing.T) {
+		ready, stopping := run(t, channels("v1", "v2"), nil, describeAs(adopted))
+		assert.True(t, ready)
+		assert.Equal(t, 1, stopping)
+	})
+	t.Run("fresh fence, cached state still pre-fence, next target marks window targets: frozen", func(t *testing.T) {
+		// the TTL cache still holds a read from before the fence: v0 Normal, no
+		// target listed yet. The next target's pull read the states fresh and
+		// marked the new targets, which is what gives the fence away.
+		preFence := &milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		}
+		ready, stopping := run(t, channels("v0"), []string{"v1", "v2"}, describeAs(preFence))
+		assert.False(t, ready, "a freshly fenced source must not be balanced on a stale state")
+		assert.Zero(t, stopping)
+	})
+	t.Run("shard states unknown: frozen", func(t *testing.T) {
+		ready, stopping := run(t, channels("v0"), nil, func(broker *meta.MockBroker) {
+			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+				Return(nil, merr.WrapErrServiceUnavailable("rootcoord down")).Maybe()
+		})
+		assert.False(t, ready, "without the shard states the freeze cannot be ruled out")
+		assert.Zero(t, stopping)
+	})
 }

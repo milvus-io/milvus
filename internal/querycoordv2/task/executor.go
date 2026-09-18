@@ -250,6 +250,20 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if err != nil {
 		return err
 	}
+	// The segment is loaded by the delegator of the shard the task targets,
+	// which is the shard the target groups the segment under. The load info
+	// carries the channel datacoord's segment meta records, and the querynode
+	// picks the delegator by it. The two differ only in a shard split's lineage
+	// window, where the target groups a split target's flushed segment under
+	// the split source so that the source delegator serves it; for any other
+	// segment they are equal and this is a no-op.
+	if loadInfo.GetInsertChannel() != task.Shard() {
+		mlog.Info(ctx, "load segment through the shard the target attributes it to",
+			mlog.FieldSegmentID(action.SegmentID),
+			mlog.String("recordedChannel", loadInfo.GetInsertChannel()),
+			mlog.String("shard", task.Shard()))
+		loadInfo.InsertChannel = task.Shard()
+	}
 	req := packLoadSegmentRequest(
 		task,
 		action,
@@ -418,6 +432,14 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	collectionInfo, err := ex.broker.DescribeCollection(ctx, task.CollectionID())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
+		return err
+	}
+	// The channel checker chose this channel from a shard-state view that may be
+	// seconds old. This describe is fresh, so it has the last word on whether a
+	// shard split still allows the watch.
+	if err = meta.ShardStatesOf(collectionInfo).CheckWatchable(action.ChannelName()); err != nil {
+		mlog.Warn(ctx, "refuse to watch a channel a shard split does not allow to watch",
+			mlog.String("channel", action.ChannelName()), mlog.Err(err))
 		return err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())

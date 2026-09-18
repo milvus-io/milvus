@@ -208,6 +208,24 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 			continue
 		}
 		segmentInfo := dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.CurrentTargetFirst)
+		// A shard split is the only operation that re-homes an already-loaded sealed
+		// segment. While the split source is listed, datacoord reports a split
+		// target's flushed segments under the source; once adoption delists the
+		// source, it reports them under the target. So the next target pulled after
+		// adoption carries the target's channel while the current target still
+		// attributes the segment to the source. This channel is what the leader
+		// checker filters dist by when it decides which segments a delegator's view
+		// is missing, so answering with the stale one starves the target delegator
+		// forever: it never becomes data-ready, and the current target only advances
+		// once every delegator is data-ready -- a cycle that never breaks. Prefer the
+		// next target whenever the two disagree; the segment itself does not move,
+		// only the routing entry the target delegator needs.
+		if segmentInfo != nil {
+			if next := dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.NextTarget); next != nil &&
+				next.GetInsertChannel() != segmentInfo.GetInsertChannel() {
+				segmentInfo = next
+			}
+		}
 		if segmentInfo == nil {
 			segmentInfo = &datapb.SegmentInfo{
 				ID:            s.GetID(),
@@ -309,6 +327,7 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 		}
 	}
 
+	removed := dh.removedDelegators(resp, updates)
 	var newLeaderOnNode []*meta.DmChannel
 	if resp.GetIsDelta() {
 		newLeaderOnNode = dh.dist.ChannelDistManager.Patch(resp.GetNodeID(), updates, resp.GetRemovedChannelNames())
@@ -320,8 +339,44 @@ func (dh *distHandler) updateChannelsDistribution(ctx context.Context, resp *que
 		for _, ch := range newLeaderOnNode {
 			collectionIDs.Insert(ch.CollectionID)
 		}
-		dh.notifyFunc(collectionIDs.Collect()...)
+		// A released delegator invalidates the shard leaders too. A proxy that
+		// still has it cached would route a read to a node that no longer serves
+		// the channel and get a non-retriable ErrChannelNotFound -- after a shard
+		// split's flip, exactly the retired source.
+		for _, ch := range removed {
+			collectionIDs.Insert(ch.CollectionID)
+		}
+		if collectionIDs.Len() > 0 {
+			dh.notifyFunc(collectionIDs.Collect()...)
+		}
 	}
+}
+
+// removedDelegators returns the delegators this node reported before and this
+// response drops: the ones a delta names as removed, or, for a full report,
+// the ones it no longer lists.
+func (dh *distHandler) removedDelegators(resp *querypb.GetDataDistributionResponse, updates []*meta.DmChannel) []*meta.DmChannel {
+	previous := dh.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(resp.GetNodeID()))
+	if len(previous) == 0 {
+		return nil
+	}
+	gone := typeutil.NewSet[string]()
+	if resp.GetIsDelta() {
+		gone.Insert(resp.GetRemovedChannelNames()...)
+	} else {
+		kept := typeutil.NewSet[string]()
+		for _, ch := range updates {
+			kept.Insert(ch.GetChannelName())
+		}
+		for _, ch := range previous {
+			if !kept.Contain(ch.GetChannelName()) {
+				gone.Insert(ch.GetChannelName())
+			}
+		}
+	}
+	return lo.Filter(previous, func(ch *meta.DmChannel, _ int) bool {
+		return gone.Contain(ch.GetChannelName())
+	})
 }
 
 func checkDelegatorServiceable(ctx context.Context, dh *distHandler, view *meta.LeaderView) bool {

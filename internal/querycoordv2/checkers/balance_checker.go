@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/assign"
@@ -138,6 +139,11 @@ type BalanceChecker struct {
 	// used when nodes are being gracefully stopped
 	stoppingBalanceQueue *assign.PriorityQueue
 
+	// splitState freezes balance for a collection while one of its shards is
+	// being split: a rebalance would tear down the source delegator together with
+	// the in-process split children it fronts. May be nil (no freeze).
+	splitState *meta.ShardSplitStateCache
+
 	// autoBalanceTs records the timestamp of the last auto balance operation
 	// to ensure balance operations don't happen too frequently
 	autoBalanceTs time.Time
@@ -148,6 +154,7 @@ func NewBalanceChecker(meta *meta.Meta,
 	targetMgr meta.TargetManagerInterface,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
+	splitState *meta.ShardSplitStateCache,
 ) *BalanceChecker {
 	return &BalanceChecker{
 		checkerActivation:    newCheckerActivation(),
@@ -158,6 +165,7 @@ func NewBalanceChecker(meta *meta.Meta,
 		normalBalanceQueue:   assign.NewPriorityQueuePtr(),
 		stoppingBalanceQueue: assign.NewPriorityQueuePtr(),
 		scheduler:            scheduler,
+		splitState:           splitState,
 	}
 }
 
@@ -179,7 +187,23 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 	metaExist := (b.meta.GetCollection(ctx, collectionID) != nil)
 	targetExist := b.targetMgr.IsNextTargetExist(ctx, collectionID) || b.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
 
+	if b.frozenForShardSplit(ctx, collectionID) {
+		return false
+	}
+
 	return metaExist && targetExist
+}
+
+// frozenForShardSplit reports whether balance of the collection is frozen for a
+// shard split (meta.CheckShardSplitMovable). Both the normal and the stopping
+// balance queue are built through readyToCheck, so the freeze holds for both.
+func (b *BalanceChecker) frozenForShardSplit(ctx context.Context, collectionID int64) bool {
+	if err := meta.CheckShardSplitMovable(ctx, b.splitState, b.targetMgr, collectionID); err != nil {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "freeze balance for a shard split",
+			mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		return true
+	}
+	return false
 }
 
 type ReadyForBalanceFilter func(ctx context.Context, collectionID int64) bool
