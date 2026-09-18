@@ -786,11 +786,29 @@ func (sd *shardDelegator) spawnChildAsync(ctx context.Context, vchannel string) 
 		log.Warn(ctx, "failed to spawn split child delegator, reads through this delegator are refused until a retry succeeds",
 			mlog.String("targetVChannel", vchannel), mlog.Int("attempt", attempt+1),
 			mlog.Duration("retryIn", backoff), mlog.Err(err))
-		time.Sleep(backoff)
-		if sd.abandonSpawn(ctx, vchannel) {
+		if sd.waitSpawnBackoff(ctx, vchannel, backoff) {
 			return
 		}
 	}
+}
+
+// spawnBackoffPoll is how often a spawn waiting out its backoff checks whether
+// it must give up.
+const spawnBackoffPoll = 50 * time.Millisecond
+
+// waitSpawnBackoff waits out a failed spawn's backoff, but gives the spawn up
+// (see abandonSpawn) as soon as the source is being released or the delegator
+// has stopped, rather than sleeping through a backoff of up to thirty seconds
+// first. It reports whether the spawn was given up.
+func (sd *shardDelegator) waitSpawnBackoff(ctx context.Context, vchannel string, backoff time.Duration) bool {
+	deadline := time.Now().Add(backoff)
+	for remaining := backoff; remaining > 0; remaining = time.Until(deadline) {
+		time.Sleep(min(remaining, spawnBackoffPoll))
+		if sd.abandonSpawn(ctx, vchannel) {
+			return true
+		}
+	}
+	return false
 }
 
 // abandonSpawn gives up a failed spawn, clearing its pending slot, once the
