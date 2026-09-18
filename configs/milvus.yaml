@@ -208,6 +208,16 @@ woodpecker:
       maxBlocks: 1000 # Maximum number of blocks in a segment
     auditor:
       maxInterval: 10s # Maximum interval between two auditing operations, default is 10 seconds.
+      # How long this client waits for one logstore node to answer one compaction request.
+      # It travels to the node as the gRPC deadline; the node applies its own ceiling
+      # (woodpecker.logstore.segmentCompactionPolicy.timeout) on top and the shorter of the two applies.
+      # Raise it together with that ceiling: on its own it has no effect while it stays above the node's.
+      compactionAttemptTimeout: 330s
+      # How long one auditor cycle keeps starting compactions. It is a start deadline, not a cap on the
+      # cycle: once spent no further segment is begun, but one already running finishes, so a cycle can
+      # overrun this by one segment. Raise it to trade the timeliness of the auditor's other passes
+      # (truncate state, snapshot publication, orphan sweep) for compaction throughput.
+      compactionPassBudget: 60s
     directRead:
       enabled: true # Whether the Woodpecker client reads sealed segments directly from object storage in service storage mode.
       maxBatchSize: 16M # Maximum batch size for direct reads from object storage in service storage mode.
@@ -263,6 +273,27 @@ woodpecker:
       maxSize: 2M # The maximum size of the merged files.
       maxParallelUploads: 4 # The maximum number of parallel upload threads for compaction.
       maxParallelReads: 8 # The maximum number of parallel read threads for compaction.
+      # Ceiling on how long one compaction may run on a logstore node. This is the node's guardrail, not a
+      # per-tenant policy: one node serves many logs from this single value, and it exists so no one
+      # request can hold a node's compaction resources indefinitely.
+      timeout: 300s
+      # Memory a logstore node will reserve for the compactions it runs at once, across every log it
+      # serves. Absolute rather than a share of the pod: useful compaction concurrency saturates on
+      # object-storage bandwidth long before memory, so a larger node does not need a larger allowance.
+      # Raise it alongside maxSize or maxParallelUploads, which raise what one compaction costs.
+      # Compactions beyond it are refused, not queued, and retried on a later auditor cycle.
+      maxInflightMemory: 1000000000
+      # Stop taking on new compactions once a logstore node's memory usage passes this fraction of its
+      # limit, whatever is using it -- maxInflightMemory above only accounts for compaction. Applies only
+      # where a container memory limit can be read; on bare metal, with no limit set, or if detection
+      # fails, it is skipped rather than measured against host memory.
+      memoryHighWatermark: 0.7
+    syncScheduler:
+      # Workers in a logstore node's shared flush pool, as a plain count. Each one blocks in fdatasync
+      # while a flush is in flight, so this bounds concurrent syncs, not CPU usage. Tune it from the
+      # volume's IOPS budget: workers ~= target IOPS x fsync latency. Past the point where the device
+      # saturates, more workers buy queueing rather than throughput.
+      maxWorkers: 32
     segmentReadPolicy:
       maxBatchSize: 16M # Maximum size of a batch in bytes.
       maxFetchThreads: 32 # Maximum number of threads to fetch data.
