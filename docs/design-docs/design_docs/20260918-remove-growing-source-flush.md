@@ -209,6 +209,23 @@ Retry classification follows `docs/dev/error_handling_guide.md`. Channel-absent
 is a transient system error and stays retriable; segment-absent is terminal and
 is not converted into an input error, so no `retry.Do` consumer changes meaning.
 
+## Deviation from this design, recorded deliberately
+
+The convergence section calls for metacache mutation from exactly one commit
+point, and segment removal ended up with two rather than one. `SyncTask` removes
+the segment when it drops one; the write buffer removes it when a flush
+completes. Both are post-ack, so neither is the pre-ack mutation the design was
+guarding against, and the third owner that made this a problem, the
+growing-source task, is gone.
+
+Consolidating the remaining two would mean moving drop removal out of the task
+and into the write buffer's settlement path. That is safe today, because only
+the write buffer ever sets the drop flag, but `SyncTask` is also constructed by
+the import path in `internal/datanode/importv2`. Moving the cleanup would leave
+a task that no longer cleans up after itself, so any future non-write-buffer
+caller that set the drop flag would silently skip removal. Two owners, each
+removing what it knows it finished, is the safer shape.
+
 ## Out of scope
 
 Deliberately not attempted here, to keep the change reviewable:

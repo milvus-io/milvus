@@ -534,6 +534,23 @@ func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 	s.JSONEq(expectedJSON, string(data))
 }
 
+// Run's defer and the sync manager's submit handler both call HandleError for
+// one failure, so the failure callback and the two failure metrics used to fire
+// twice per failed sync. The deleted growing-source task had a guard for this;
+// SyncTask never did.
+func (s *SyncTaskSuite) TestHandleErrorRunsOnce() {
+	calls := 0
+	pack := new(SyncPack)
+	pack.WithErrorHandler(func(error) { calls++ })
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(pack)
+
+	err := errors.New("boom")
+	task.HandleError(err)
+	task.HandleError(err)
+
+	s.Equal(1, calls, "the failure callback must fire once per failed sync")
+}
+
 func TestSyncTask(t *testing.T) {
 	suite.Run(t, new(SyncTaskSuite))
 }

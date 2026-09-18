@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -57,6 +58,8 @@ type SyncTask struct {
 	dataSource    string
 	// reservation owns this batch's row accounting; settled exactly once.
 	reservation *metacache.SyncReservation
+	// errorOnce keeps HandleError to one report per failed sync.
+	errorOnce sync.Once
 	// batchRows is the row number of this sync task,
 	// not the total num of rows of segemnt
 	batchRows int64
@@ -109,15 +112,20 @@ func (t *SyncTask) getLogger() *mlog.Logger {
 	)
 }
 
+// HandleError reports one failed sync exactly once. Both Run's defer and the
+// sync manager's submit handler call it for the same failure, so without the
+// guard the failure callback fires twice and both failure metrics double-count.
 func (t *SyncTask) HandleError(err error) {
-	if t.failureCallback != nil {
-		t.failureCallback(err)
-	}
+	t.errorOnce.Do(func() {
+		if t.failureCallback != nil {
+			t.failureCallback(err)
+		}
 
-	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
-	if !t.pack.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
-	}
+		metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+		if !t.pack.isFlush {
+			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+		}
+	})
 }
 
 // settleAction returns the metacache action that ends this task's row

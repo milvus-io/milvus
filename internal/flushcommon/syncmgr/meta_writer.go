@@ -136,10 +136,26 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 				mlog.Err(err))
 			return false, nil
 		}
-		// meta error, datanode handles a virtual channel does not belong here
-		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
-			mlog.Warn(ctx, "meta error found, skip sync and start to drop virtual channel", mlog.String("channel", pack.channelName))
-			return false, nil
+		// Terminal. A segment id is never reissued, so a segment DataCoord no
+		// longer knows cannot come back and there is no meta left for these
+		// rows to belong to. Surface it so the caller settles the reservation
+		// as discarded instead of recording a flush that never happened.
+		if errors.Is(err, merr.ErrSegmentNotFound) {
+			mlog.Warn(ctx, "segment gone at datacoord, discarding sync",
+				mlog.FieldSegmentID(pack.segmentID),
+				mlog.String("channel", pack.channelName))
+			return false, err
+		}
+		// Transient. DataCoord rejects on its ownership check while the flusher
+		// is ready but the coordinator has not yet observed the assignment, and
+		// says so at that check. Retry: reporting success here would
+		// acknowledge rows DataCoord never recorded and let the channel
+		// checkpoint advance past them.
+		if errors.Is(err, merr.ErrChannelNotFound) {
+			mlog.Warn(ctx, "channel ownership not yet visible at datacoord, retrying",
+				mlog.FieldSegmentID(pack.segmentID),
+				mlog.String("channel", pack.channelName))
+			return true, err
 		}
 
 		if err != nil {
