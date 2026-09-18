@@ -799,7 +799,7 @@ func serializeHeaders(headerstr string) string {
 func InitPluginLoader() error {
 	if hookutil.IsClusterEncryptionEnabled() {
 		cSoPath := C.CString(paramtable.GetCipherParams().SoPathCpp.GetValue())
-		log.Info("Init PluginLoader", zap.String("soPath", paramtable.GetCipherParams().SoPathCpp.GetValue()))
+		log.Ctx(context.TODO()).Info("Init PluginLoader")
 		defer C.free(unsafe.Pointer(cSoPath))
 		status := C.InitPluginLoader(cSoPath)
 		return HandleCStatus(&status, "InitPluginLoader failed")

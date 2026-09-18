@@ -205,8 +205,21 @@ InitPluginLoader(const char* plugin_path) {
     try {
         milvus::storage::PluginLoader::GetInstance().load(plugin_path);
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
+    } catch (const milvus::SegcoreError& error) {
+        // Plugin callbacks may include protected configuration in their errors.
+        // Preserve the typed code without exporting the opaque message.
+        return milvus::FailureCStatus(error.get_error_code(),
+                                      "Native plugin initialization failed");
+    } catch (const std::exception&) {
+        // The 2.6 FailureCStatus maps every untyped std::exception, including
+        // bad_alloc, to UnexpectedError. Preserve that classification.
+        const std::runtime_error safe_error(
+            "Native plugin initialization failed");
+        return milvus::FailureCStatus(&safe_error);
+    } catch (...) {
+        return milvus::FailureCStatus(
+            milvus::UnexpectedError,
+            "Unknown exception during native plugin initialization");
     }
 }
 

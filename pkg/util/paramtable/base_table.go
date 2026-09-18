@@ -17,6 +17,7 @@
 package paramtable
 
 import (
+	"context"
 	"os"
 	"path"
 	"runtime"
@@ -159,6 +160,11 @@ func (bt *BaseTable) init() {
 		panic(err)
 	}
 
+	// Establish the initial file-backed group spellings before importing
+	// environment overrides. A spelling learned only after an unsegmented
+	// value exists must fail closed, as it does for later source refreshes.
+	// Source priority still makes environment values override file values.
+	bt.initConfigsFromLocal()
 	if !bt.config.skipEnv {
 		err := bt.mgr.AddSource(config.NewEnvSource(formatter))
 		if err != nil {
@@ -166,7 +172,6 @@ func (bt *BaseTable) init() {
 			return
 		}
 	}
-	bt.initConfigsFromLocal()
 	if !bt.config.skipRemote {
 		bt.initConfigsFromRemote()
 	}
@@ -193,7 +198,8 @@ func (bt *BaseTable) initConfigsFromLocal() {
 		RefreshInterval: refreshInterval,
 	}))
 	if err != nil {
-		log.Warn("init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles), zap.Error(err))
+		log.Ctx(context.TODO()).Warn("init baseTable with file failed", zap.Strings("configFile", bt.config.yamlFiles),
+			zap.String("error", config.RedactedValue))
 		return
 	}
 }
@@ -222,7 +228,9 @@ func (bt *BaseTable) initConfigsFromRemote() {
 		etcdConfig.EtcdTLSCACert.GetValue(),
 		etcdConfig.EtcdTLSMinVersion.GetValue())
 	if err != nil {
-		log.Warn("init with etcd client failed", zap.Error(err))
+		// TLS and dial errors can contain protected paths, endpoints, or
+		// transport settings. Keep those details in the in-process error only.
+		log.Ctx(context.TODO()).Warn("init with etcd client failed", zap.String("error", config.RedactedValue))
 		return
 	}
 	bt.etcdClient = etcdCli

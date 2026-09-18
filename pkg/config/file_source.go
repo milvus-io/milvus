@@ -17,6 +17,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -165,17 +166,29 @@ func (fs *FileSource) update(configs map[string]string) error {
 	fs.updateMu.Lock()
 	defer fs.updateMu.Unlock()
 
-	fs.Lock()
-	events, err := PopulateEvents(fs.GetSourceName(), fs.configs, configs)
+	fs.RLock()
+	manager := fs.manager
+	fs.RUnlock()
+	var events []*Event
+	err := publishSourceSnapshot(manager, fs.GetSourceName(), configs, func() error {
+		fs.Lock()
+		defer fs.Unlock()
+		var err error
+		events, err = PopulateEvents(fs.GetSourceName(), fs.configs, configs)
+		if err != nil {
+			return err
+		}
+		fs.configs = configs
+		return nil
+	})
 	if err != nil {
-		fs.Unlock()
-		log.Warn("generating event error", zap.Error(err))
+		log.Ctx(context.TODO()).Warn("generating event error", zap.Error(err))
 		return err
 	}
-	fs.configs = configs
-	fs.Unlock()
-	if fs.manager != nil {
-		fs.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
+	// Cache eviction and callbacks may read configuration; keep them outside
+	// both the source lock and the manager snapshot publication section.
+	if manager != nil {
+		manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
 
 	fs.configRefresher.fireEvents(events...)

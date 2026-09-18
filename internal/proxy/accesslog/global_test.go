@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
+	"github.com/milvus-io/milvus/pkg/v2/log"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
 
@@ -301,4 +302,24 @@ func TestAccessLogger_WithMinio(t *testing.T) {
 	logfiles, err := writer.handler.listAll()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(logfiles))
+}
+
+// Capture the real initialization failure log, not only the parser return.
+// Dynamic formatter names arrive from management configuration updates.
+func TestAccessLoggerInvalidFormatterDoesNotLogPayload(t *testing.T) {
+	base := paramtable.NewBaseTable(paramtable.SkipRemote(true), paramtable.SkipEnv(true))
+	t.Cleanup(base.Manager().Close)
+	require.NoError(t, base.Save("localStorage.path", t.TempDir()))
+	params := &paramtable.ComponentParam{}
+	params.Init(base)
+	require.NoError(t, params.Save(params.ProxyCfg.AccessLog.Enable.Key, "true"))
+	params.SaveGroup(map[string]string{
+		params.ProxyCfg.AccessLog.Formatter.KeyPrefix + "formatter-name-canary.invalid": "formatter-value-canary",
+	})
+	logs := log.CaptureGlobalLogs(t, &log.Config{Level: "debug", Format: "text", DisableCaller: true, DisableTimestamp: true, DisableStacktrace: true})
+	once = sync.Once{}
+	InitAccessLogger(params)
+	assert.Contains(t, logs.String(), "Init access logger failed")
+	assert.NotContains(t, logs.String(), "formatter-name-canary")
+	assert.NotContains(t, logs.String(), "formatter-value-canary")
 }
