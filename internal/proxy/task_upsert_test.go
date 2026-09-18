@@ -2453,6 +2453,20 @@ func TestAttachPartialUpdateCASRejectsVChannelMismatch(t *testing.T) {
 	})
 }
 
+// checkPartialUpdateProofsCoverRoute must not swallow a failure building the
+// CAS groups it checks: buildPartialUpdateCASGroups refuses an empty primary
+// key selection, and that refusal has to reach the caller as it is, not be
+// misread as a routing change with no proof.
+func TestCheckPartialUpdateProofsCoverRoutePropagatesABuildFailure(t *testing.T) {
+	task, _, _ := partialUpdateCASTestTask(t, true, nil, nil, nil)
+	setPartialUpdateCASTestChannels(task, partialUpdateCASTestVChannels[:1])
+
+	err := task.checkPartialUpdateProofsCoverRoute(context.Background(), legacyWriteRoute(partialUpdateCASTestVChannels[:1]))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "primary keys are empty")
+}
+
 func TestPartialUpdateCASMetadataSizeIsBounded(t *testing.T) {
 	smallTask, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	setPartialUpdateCASTestChannels(smallTask, partialUpdateCASTestVChannels[:1])
