@@ -3289,6 +3289,64 @@ TEST(SearchResultExport, GlobalRefineTruncate_MergesBeforeSegmentPruning) {
     EXPECT_EQ(seg1.topk_per_nq_prefix_sum_, std::vector<size_t>({0, 0}));
 }
 
+// SearchResult distances use a larger-is-better representation: AsyncSearch
+// negates distances for metrics that are not positively related before the
+// global-refine reducer sees them.
+TEST(SearchResultExport, GlobalRefineTruncate_UsesNormalizedMetricScores) {
+    auto schema = std::make_shared<Schema>();
+    Plan plan(schema);
+    plan.plan_node_ = std::make_unique<VectorPlanNode>();
+    plan.plan_node_->search_info_.refine_topk_ratio_ = 0.5;
+
+    SearchResult l2_seg0;
+    l2_seg0.total_nq_ = 1;
+    l2_seg0.unity_topK_ = 1;
+    l2_seg0.distances_ = {-1.0f};
+    l2_seg0.seg_offsets_ = {10};
+    l2_seg0.topk_per_nq_prefix_sum_ = {0, 1};
+
+    SearchResult l2_seg1;
+    l2_seg1.total_nq_ = 1;
+    l2_seg1.unity_topK_ = 1;
+    l2_seg1.distances_ = {-2.0f};
+    l2_seg1.seg_offsets_ = {20};
+    l2_seg1.topk_per_nq_prefix_sum_ = {0, 1};
+
+    std::vector<SearchResult*> l2_results{&l2_seg0, &l2_seg1};
+    int64_t slice_nqs[] = {1};
+    int64_t slice_topks[] = {2};
+    plan.plan_node_->search_info_.metric_type_ = knowhere::metric::L2;
+    TestReduceHelper l2_helper(
+        l2_results, &plan, nullptr, slice_nqs, slice_topks, 1, nullptr);
+    l2_helper.TruncateForTest();
+
+    ASSERT_EQ(l2_seg0.seg_offsets_, std::vector<int64_t>({10}));
+    EXPECT_TRUE(l2_seg1.seg_offsets_.empty());
+
+    SearchResult ip_seg0;
+    ip_seg0.total_nq_ = 1;
+    ip_seg0.unity_topK_ = 1;
+    ip_seg0.distances_ = {4.0f};
+    ip_seg0.seg_offsets_ = {10};
+    ip_seg0.topk_per_nq_prefix_sum_ = {0, 1};
+
+    SearchResult ip_seg1;
+    ip_seg1.total_nq_ = 1;
+    ip_seg1.unity_topK_ = 1;
+    ip_seg1.distances_ = {3.0f};
+    ip_seg1.seg_offsets_ = {20};
+    ip_seg1.topk_per_nq_prefix_sum_ = {0, 1};
+
+    std::vector<SearchResult*> ip_results{&ip_seg0, &ip_seg1};
+    plan.plan_node_->search_info_.metric_type_ = knowhere::metric::IP;
+    TestReduceHelper ip_helper(
+        ip_results, &plan, nullptr, slice_nqs, slice_topks, 1, nullptr);
+    ip_helper.TruncateForTest();
+
+    ASSERT_EQ(ip_seg0.seg_offsets_, std::vector<int64_t>({10}));
+    EXPECT_TRUE(ip_seg1.seg_offsets_.empty());
+}
+
 // TruncateToRefineTopk with mixed per-segment result sizes and ef=3:
 // refine_topk = ceil(1.0 * max(slice_topk=2, ef=3)) = 3. Global
 // top-3 by distance: 0.99 (seg0), 0.98 (seg1), 0.95 (seg0) — seg0 keeps 2,
