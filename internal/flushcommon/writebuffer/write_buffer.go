@@ -373,6 +373,26 @@ func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []
 	return result
 }
 
+// settleSync releases the checkpoint pin a sync task holds, according to how
+// the task ended. This is the only place a syncCheckpoint candidate is removed,
+// so pin release follows the outcome rather than the order two statements happen
+// to run in.
+//
+// SettleFailed deliberately keeps the pin. The payload was yielded out of the
+// buffer and released without being persisted, so those rows exist only in the
+// WAL; releasing the pin would let the channel checkpoint advance past data
+// that was never written. The pin is reclaimed when the channel is torn down
+// and replayed, which is what the escalating error handler forces.
+func (wb *writeBufferBase) settleSync(segmentID int64, startPos *msgpb.MsgPosition, outcome metacache.SettleOutcome) {
+	if startPos == nil {
+		return
+	}
+	if outcome == metacache.SettleFailed {
+		return
+	}
+	wb.syncCheckpoint.Remove(segmentID, startPos.GetTimestamp())
+}
+
 func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []syncmgr.Task) []*conc.Future[struct{}] {
 	result := make([]*conc.Future[struct{}], 0, len(syncTasks))
 	for _, syncTask := range syncTasks {
@@ -382,12 +402,11 @@ func (wb *writeBufferBase) submitSyncTasks(ctx context.Context, syncTasks []sync
 			}
 
 			if err != nil {
+				wb.settleSync(syncTask.SegmentID(), syncTask.StartPosition(), metacache.SettleFailed)
 				return err
 			}
 
-			if syncTask.StartPosition() != nil {
-				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
-			}
+			wb.settleSync(syncTask.SegmentID(), syncTask.StartPosition(), metacache.SettleCommitted)
 
 			if syncTask.IsFlush() {
 				wb.metaCache.RemoveSegments(metacache.WithSegmentIDs(syncTask.SegmentID()))
@@ -778,13 +797,12 @@ func (wb *writeBufferBase) submitDropSyncTasks(ctx context.Context, syncTasks []
 			}
 
 			if err != nil {
+				wb.settleSync(syncTask.SegmentID(), syncTask.StartPosition(), metacache.SettleFailed)
 				return err
 			}
-			if syncTask.StartPosition() != nil {
-				wb.mut.Lock()
-				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
-				wb.mut.Unlock()
-			}
+			// A drop task's rows are intentionally not kept, so the pin goes
+			// even though nothing persisted them.
+			wb.settleSync(syncTask.SegmentID(), syncTask.StartPosition(), metacache.SettleDiscarded)
 			return nil
 		})
 		if err != nil {

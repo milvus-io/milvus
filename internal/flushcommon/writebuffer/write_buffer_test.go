@@ -217,6 +217,52 @@ func (s *WriteBufferSuite) TestSealSegmentsMissingSegment() {
 	s.ErrorIs(err, merr.ErrSegmentNotFound)
 }
 
+// A sync that settles as failed must keep its checkpoint pin. The payload was
+// yielded out of the buffer and released without being persisted, so only a WAL
+// replay can recover those rows; releasing the pin here would let the channel
+// checkpoint advance past data that was never written.
+func (s *WriteBufferSuite) TestSettleSyncPinPolicy() {
+	const segmentID = int64(1000)
+	pos := &msgpb.MsgPosition{ChannelName: s.channelName, Timestamp: 100}
+
+	count := func() int {
+		n := 0
+		s.wb.syncCheckpoint.candidates.Range(func(string, *checkpointCandidate) bool {
+			n++
+			return true
+		})
+		return n
+	}
+
+	s.Run("failed_keeps_the_pin", func() {
+		s.wb.syncCheckpoint.Add(segmentID, pos, "syncing task")
+		s.Equal(1, count())
+		s.wb.settleSync(segmentID, pos, metacache.SettleFailed)
+		s.Equal(1, count(), "a failed sync must not release its pin")
+		s.wb.syncCheckpoint.Remove(segmentID, pos.GetTimestamp())
+	})
+
+	s.Run("committed_releases_the_pin", func() {
+		s.wb.syncCheckpoint.Add(segmentID, pos, "syncing task")
+		s.Equal(1, count())
+		s.wb.settleSync(segmentID, pos, metacache.SettleCommitted)
+		s.Equal(0, count(), "a committed sync releases its pin")
+	})
+
+	s.Run("discarded_releases_the_pin", func() {
+		s.wb.syncCheckpoint.Add(segmentID, pos, "syncing task")
+		s.Equal(1, count())
+		s.wb.settleSync(segmentID, pos, metacache.SettleDiscarded)
+		s.Equal(0, count(), "a discarded segment leaves nothing to replay for")
+	})
+
+	s.Run("nil_position_is_a_noop", func() {
+		s.Equal(0, count())
+		s.wb.settleSync(segmentID, nil, metacache.SettleCommitted)
+		s.Equal(0, count())
+	})
+}
+
 func (s *WriteBufferSuite) TestSealAllSegments() {
 	s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
 	wb, err := NewWriteBuffer(s.channelName, s.metacache, s.syncMgr, WithIDAllocator(allocator.NewMockAllocator(s.T())))
