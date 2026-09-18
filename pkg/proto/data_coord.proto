@@ -2210,6 +2210,12 @@ message SplitShardTaskSource {
   // enforces that the routing never flips while a source still accepts writes
   // for keys the targets have already claimed.
   uint64 switch_time_tick = 2;
+  // Segments of this source whose data has not reached the targets yet.
+  // Written only by the split manager of the cluster that drives the
+  // redistribution, never by the SplitShard ack callback, which keeps it when
+  // a commit is redelivered. It drives the redistribution rounds and lets a
+  // restart resume where they left off.
+  repeated int64 pending_segments = 3;
 }
 
 // SplitShardTask is the persisted state of a shard split task: what the
@@ -2232,6 +2238,15 @@ message SplitShardTask {
   // than recomputed so a retry of the routing commit reproduces the same
   // topology.
   uint64 routing_modulus                = 8;
+
+  // Fields 9-11 are owned by the split manager of the cluster that drives the
+  // split. The SplitShard ack callback (CommitShardSplit) never writes them,
+  // and keeps them when a commit is redelivered.
+  uint64 end_time                       = 9; // unix seconds; set on Done or Aborted.
+  string fail_reason                    = 10; // why a task was aborted, or finished early.
+  // Redistribution plans dispatched but not yet confirmed committed. On a
+  // restart they are checked again, and dispatched again if they were lost.
+  repeated int64 dispatched_plan_ids    = 11;
 }
 
 // CommitShardSplitRequest is the datacoord half of the SplitShard broadcast ack
