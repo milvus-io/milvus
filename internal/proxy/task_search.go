@@ -698,6 +698,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			plan.OutputFieldIds = allFieldIDs.Collect()
 			plan.DynamicFields = t.userDynamicFields
 		}
+		t.retainRerankDynamicFields(plan)
 		plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 		plan.QuerynodeFunctionChains = querynodeFunctionChains
 
@@ -927,7 +928,10 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("L1 function chain is not supported with search_aggregation")
 		}
 	} else if t.request.FunctionScore != nil {
-		t.rerankMeta = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
+		t.rerankMeta, err = newRerankMeta(t.schema.CollectionSchema, t.request.FunctionScore)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Search iterators use the final result score to derive the ANN continuation
@@ -1037,6 +1041,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 			}
 		}
 	}
+	t.retainRerankDynamicFields(plan)
 	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.request.Namespace)
 	plan.QuerynodeFunctionChains = querynodeFunctionChains
 
@@ -1145,6 +1150,26 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		mlog.Stringer("plan", planparserv2.RedactPlanForLog(plan))) // may be very large if a large term is passed; membership blobs are redacted.
 
 	return nil
+}
+
+// retainRerankDynamicFields keeps hidden L2 inputs in the materialized dynamic
+// root for ordinary Search and each Hybrid sub-search. Empty DynamicFields
+// already fetches the whole root; userOutputFields still owns client projection.
+func (t *searchTask) retainRerankDynamicFields(plan *planpb.PlanNode) {
+	if len(plan.DynamicFields) == 0 || t.rerankMeta == nil {
+		return
+	}
+	inputPlan := t.rerankMeta.GetInputPlan()
+	if inputPlan == nil {
+		return
+	}
+	fields := typeutil.NewSet[string](plan.DynamicFields...)
+	for _, input := range inputPlan.Inputs {
+		if input.FieldName == common.MetaFieldName && len(input.NestedPath) > 0 {
+			fields.Insert(input.NestedPath[0])
+		}
+	}
+	plan.DynamicFields = fields.Collect()
 }
 
 func (t *searchTask) skipRequeryByNamespacePartitionMode() bool {

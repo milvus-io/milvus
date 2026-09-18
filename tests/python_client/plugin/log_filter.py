@@ -2,8 +2,9 @@
 Pytest plugin for conditional logging based on test outcome.
 
 This plugin captures logs per test in memory buffers and only persists
-detailed logs for failed/xpass tests:
-- PASSED tests: Only metadata saved (nodeid, duration, timestamp)
+detailed logs for failed/xpass tests, plus explicitly opted-in audit records
+for tests marked ``compaction_data_integrity_serial``:
+- PASSED tests: Metadata only, unless the marked test emits ``persist_on_pass=True`` records
 - FAILED tests: Full logs + error traceback + metadata
 - SKIPPED tests: Only metadata + skip reason
 - XFAIL tests: Only metadata + xfail reason (expected failures)
@@ -17,6 +18,7 @@ Generates two report formats:
 import json
 import logging
 import os
+from copy import copy
 from datetime import datetime
 
 import pytest
@@ -30,6 +32,7 @@ class LogBuffer:
         self.records = []  # List of LogRecord objects
         self.start_time = None
         self.end_time = None
+        self.phase_reports = []
 
     def emit(self, record):
         """Add a log record to the buffer - must be thread-safe"""
@@ -56,10 +59,18 @@ class LogBuffer:
         return "\n".join(formatted_logs) if formatted_logs else "(No logs captured)"
 
     def get_structured_logs(self):
-        """Get logs structured by level for JSON output"""
+        """Get all logs structured by level for JSON output"""
+        return self._structure_logs(self.records)
+
+    def get_pass_audit_logs(self):
+        """Get explicitly retained audit logs for a passed test"""
+        return self._structure_logs(record for record in self.records if getattr(record, "persist_on_pass", False))
+
+    @staticmethod
+    def _structure_logs(records):
         structured = {"debug": [], "info": [], "warning": [], "error": [], "critical": []}
 
-        for record in self.records:
+        for record in records:
             try:
                 level = record.levelname.lower()
                 if level in structured:
@@ -125,7 +136,27 @@ class ConditionalLogHandler(logging.Handler):
         self.buffers[item.nodeid] = buffer
         self.current_test_buffer = buffer
 
-    def end_test(self, item, report):
+    def end_phase(self, item, report):
+        """Keep the dedicated integrity workload's evidence until teardown finishes."""
+        buffer = self.buffers.get(item.nodeid)
+        if buffer is None:
+            return
+        buffer.phase_reports.append(report)
+        if report.when != "teardown":
+            return
+        reports = buffer.phase_reports
+        failures = [phase for phase in reports if phase.failed]
+        skipped = [phase for phase in reports if phase.skipped]
+        call = next((phase for phase in reports if phase.when == "call"), report)
+        combined = copy((failures or skipped or [call])[0])
+        combined.duration = sum(phase.duration for phase in reports)
+        if failures:
+            combined.longrepr = "\n\n".join(f"{phase.when}:\n{phase.longreprtext}" for phase in failures)
+            if hasattr(combined, "wasxfail"):
+                del combined.wasxfail
+        self.end_test(item, combined, phase_reports=reports)
+
+    def end_test(self, item, report, phase_reports=None):
         """Process test result and write logs"""
         buffer = self.buffers.get(item.nodeid)
         if buffer:
@@ -170,16 +201,19 @@ class ConditionalLogHandler(logging.Handler):
                         }
                     )
                 elif report.passed:
-                    self.test_stats["passed"].append(
-                        {
-                            "nodeid": item.nodeid,
-                            "file": file_path,
-                            "class": test_class,
-                            "function": test_function,
-                            "duration": report.duration,
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                    )
+                    passed_test = {
+                        "nodeid": item.nodeid,
+                        "file": file_path,
+                        "class": test_class,
+                        "function": test_function,
+                        "duration": report.duration,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    if item.get_closest_marker("compaction_data_integrity_serial") is not None:
+                        persisted_logs = buffer.get_pass_audit_logs()
+                        if any(persisted_logs.values()):
+                            passed_test["logs"] = persisted_logs
+                    self.test_stats["passed"].append(passed_test)
                 elif report.failed:
                     # Extract error information
                     error_info = self._extract_error_info(report)
@@ -210,6 +244,19 @@ class ConditionalLogHandler(logging.Handler):
                             else "Unknown",
                         }
                     )
+                if phase_reports is not None:
+                    for outcome in ("passed", "failed", "skipped", "xfail", "xpass"):
+                        results = self.test_stats[outcome]
+                        if results and results[-1]["nodeid"] == item.nodeid:
+                            results[-1]["phases"] = [
+                                {
+                                    "phase": phase.when,
+                                    "outcome": phase.outcome,
+                                    "duration": phase.duration,
+                                    "error": phase.longreprtext if phase.failed else None,
+                                }
+                                for phase in phase_reports
+                            ]
             except Exception:
                 pass  # Silently ignore write errors
 
@@ -368,6 +415,7 @@ class ConditionalLogHandler(logging.Handler):
                             "function": t["function"],
                             "duration": round(t["duration"], 3),
                             "timestamp": t["timestamp"],
+                            **({"logs": t["logs"]} if "logs" in t else {}),
                         }
                         for t in self.test_stats["passed"]
                     ],
@@ -441,6 +489,12 @@ class ConditionalLogHandler(logging.Handler):
                     ],
                 },
             }
+
+            # Only dedicated workload entries carry phase-level audit evidence.
+            for outcome, entries in report_data["tests"].items():
+                for entry, source in zip(entries, self.test_stats[outcome]):
+                    if "phases" in source:
+                        entry["phases"] = source["phases"]
 
             # Write JSON report with pretty printing
             with open(self.report_json, "w", encoding="utf-8") as f:
@@ -835,12 +889,15 @@ def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
 
-    # Only process after the main test execution (call phase)
-    if report.when == "call":
+    integrity_case = item.get_closest_marker("compaction_data_integrity_serial") is not None
+    if integrity_case or report.when == "call":
         global _conditional_handler
         if _conditional_handler:
             try:
-                _conditional_handler.end_test(item, report)
+                if integrity_case:
+                    _conditional_handler.end_phase(item, report)
+                else:
+                    _conditional_handler.end_test(item, report)
             except Exception:
                 pass  # Don't break test execution
 

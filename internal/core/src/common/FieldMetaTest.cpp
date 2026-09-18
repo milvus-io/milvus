@@ -236,6 +236,109 @@ TEST(FieldMetaTest, RawLocalFormatIsDefaultAndNotSerialized) {
     }
 }
 
+TEST(FieldMetaTest, ElementNullableArrayRoundTrip) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(204);
+    proto.set_name("nullable_elements");
+    proto.set_data_type(milvus::proto::schema::DataType::Array);
+    proto.set_element_type(milvus::proto::schema::DataType::Int64);
+    proto.set_nullable(true);
+    proto.set_element_nullable(true);
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::ARRAY);
+    EXPECT_EQ(field.get_element_type(), DataType::INT64);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.is_element_nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_EQ(serialized.data_type(), milvus::proto::schema::DataType::Array);
+    EXPECT_EQ(serialized.element_type(),
+              milvus::proto::schema::DataType::Int64);
+    EXPECT_TRUE(serialized.nullable());
+    EXPECT_TRUE(serialized.element_nullable());
+}
+
+TEST(FieldMetaTest, ElementNullableVectorArrayRoundTrip) {
+    constexpr int64_t kDim = 16;
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(205);
+    proto.set_name("nullable_vectors");
+    proto.set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    proto.set_element_type(milvus::proto::schema::DataType::FloatVector);
+    proto.set_nullable(true);
+    proto.set_element_nullable(true);
+    auto* dim = proto.add_type_params();
+    dim->set_key("dim");
+    dim->set_value(std::to_string(kDim));
+
+    auto field = FieldMeta::ParseFrom(proto);
+    EXPECT_EQ(field.get_data_type(), DataType::VECTOR_ARRAY);
+    EXPECT_EQ(field.get_element_type(), DataType::VECTOR_FLOAT);
+    EXPECT_EQ(field.get_dim(), kDim);
+    EXPECT_TRUE(field.is_nullable());
+    EXPECT_TRUE(field.is_element_nullable());
+
+    auto serialized = field.ToProto();
+    EXPECT_EQ(serialized.data_type(),
+              milvus::proto::schema::DataType::ArrayOfVector);
+    EXPECT_EQ(serialized.element_type(),
+              milvus::proto::schema::DataType::FloatVector);
+    EXPECT_TRUE(serialized.nullable());
+    EXPECT_TRUE(serialized.element_nullable());
+
+    auto reparsed = FieldMeta::ParseFrom(serialized);
+    EXPECT_EQ(reparsed.get_dim(), kDim);
+    EXPECT_TRUE(reparsed.is_element_nullable());
+}
+
+TEST(FieldMetaTest, RejectElementNullableNonArrayFields) {
+    milvus::proto::schema::FieldSchema scalar;
+    scalar.set_fieldid(206);
+    scalar.set_name("scalar");
+    scalar.set_data_type(milvus::proto::schema::DataType::Int64);
+    scalar.set_element_nullable(true);
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(scalar));
+
+    milvus::proto::schema::FieldSchema vector;
+    vector.set_fieldid(207);
+    vector.set_name("vector");
+    vector.set_data_type(milvus::proto::schema::DataType::FloatVector);
+    vector.set_element_nullable(true);
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(vector));
+}
+
+TEST(FieldMetaTest, RejectUnsupportedVectorArrayElementType) {
+    milvus::proto::schema::FieldSchema proto;
+    proto.set_fieldid(208);
+    proto.set_name("nested_vectors");
+    proto.set_data_type(milvus::proto::schema::DataType::ArrayOfVector);
+    proto.set_element_type(milvus::proto::schema::DataType::SparseFloatVector);
+    auto* dim = proto.add_type_params();
+    dim->set_key("dim");
+    dim->set_value("16");
+
+    EXPECT_ANY_THROW(FieldMeta::ParseFrom(proto));
+}
+
+TEST(FieldMetaTest, RejectVectorArrayThroughOtherConstructors) {
+    EXPECT_ANY_THROW((void)FieldMeta(FieldName("vector_array"),
+                                     FieldId(209),
+                                     DataType::VECTOR_ARRAY,
+                                     16,
+                                     std::nullopt,
+                                     false,
+                                     std::nullopt));
+
+    EXPECT_ANY_THROW((void)FieldMeta(FieldName("vector_array"),
+                                     FieldId(210),
+                                     DataType::VECTOR_ARRAY,
+                                     DataType::VECTOR_FLOAT,
+                                     false,
+                                     false,
+                                     std::nullopt));
+}
+
 TEST(FieldMetaTest, ShouldLoadFieldReturnsFalseForExternalField) {
     auto schema = std::make_shared<Schema>();
 
