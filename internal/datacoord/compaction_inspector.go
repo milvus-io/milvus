@@ -230,9 +230,26 @@ func (c *compactionInspector) schedule() []CompactionTask {
 	clusterChannelExcludes := typeutil.NewSet[string]()
 	mixLabelExcludes := typeutil.NewSet[string]()
 	clusterLabelExcludes := typeutil.NewSet[string]()
+	// A shard split's rewrite never runs next to any other compaction on its
+	// channel: splitChannels holds the channels running a rewrite, and
+	// otherChannels those running anything else. The split's freeze and its
+	// preemption at the fence keep other compactions off the source already;
+	// the scheduler holds the rule too. Rewrites of one source run together:
+	// each has its own input, and their outputs land on the targets, which
+	// nothing else compacts during the split.
+	splitChannels := typeutil.NewSet[string]()
+	otherChannels := typeutil.NewSet[string]()
+	markChannel := func(t CompactionTask) {
+		if t.GetTaskProto().GetType() == datapb.CompactionType_HashSplitCompaction {
+			splitChannels.Insert(t.GetTaskProto().GetChannel())
+		} else {
+			otherChannels.Insert(t.GetTaskProto().GetChannel())
+		}
+	}
 
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
+		markChannel(t)
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
@@ -270,6 +287,15 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			continue
 		}
 		selectedBefore := len(selected)
+		if channel := t.GetTaskProto().GetChannel(); t.GetTaskProto().GetType() == datapb.CompactionType_HashSplitCompaction {
+			if otherChannels.Contain(channel) {
+				excluded = append(excluded, t)
+				continue
+			}
+		} else if splitChannels.Contain(channel) {
+			excluded = append(excluded, t)
+			continue
+		}
 
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
@@ -314,6 +340,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			c.dropFrozenQueuedTask(t)
 			continue
 		}
+		markChannel(t)
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.scheduler.Enqueue(t)
 		mlog.Info(context.TODO(), "compaction task enqueued",
