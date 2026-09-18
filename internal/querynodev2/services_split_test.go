@@ -45,17 +45,47 @@ func TestSpawnSplitChildIdempotent(t *testing.T) {
 		ctx:        context.Background(),
 		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
 	}
+	parent := delegator.NewMockShardDelegator(t)
 	existing := delegator.NewMockShardDelegator(t)
+	existing.EXPECT().FrontingParent().Return(parent)
 	node.delegators.Insert("v1", existing)
 
-	// the target already has a registered child: return it without touching the
-	// coordinator, so a re-consume of the fence never double-spawns.
+	// the target already has a registered child of this source: return it
+	// without touching the coordinator, so a re-consume of the fence never
+	// double-spawns.
 	got, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{
 		CollectionID:   1,
 		TargetVChannel: "v1",
+		Parent:         parent,
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, existing, got)
+}
+
+// A delegator already registered for the target but not fronted by the
+// spawning source -- one querycoord watched on its own -- forwards no delete to
+// that source. Handing it back as the source's child would let the source front
+// it and serve rows deleted on the target, so the spawn is refused instead.
+func TestSpawnSplitChildRefusesADelegatorItDoesNotFront(t *testing.T) {
+	node := &QueryNode{
+		ctx:        context.Background(),
+		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+	}
+	parent := delegator.NewMockShardDelegator(t)
+	watched := delegator.NewMockShardDelegator(t)
+	watched.EXPECT().FrontingParent().Return(nil)
+	node.delegators.Insert("v1", watched)
+
+	got, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{
+		CollectionID:   1,
+		TargetVChannel: "v1",
+		Parent:         parent,
+	})
+	assert.ErrorIs(t, err, merr.ErrChannelReduplicate)
+	assert.Nil(t, got)
+	current, ok := node.delegators.Get("v1")
+	assert.True(t, ok)
+	assert.Same(t, watched, current)
 }
 
 func TestWaitSplitTargetRecovery(t *testing.T) {
