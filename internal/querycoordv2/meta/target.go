@@ -57,9 +57,12 @@ type CollectionTarget struct {
 	// segment of their own here and look trivially data-ready. A delegator of a
 	// window target must never be synced to, nor promoted through, this target.
 	//
-	// It is set by the next-target pull only and is not persisted: a current
-	// target is never built from a snapshot that still had window targets
-	// (the promotion is refused), and a recovered next target is re-pulled.
+	// It is set by the next-target pull only, and is not persisted, because a
+	// current target never carries a live mark: such a snapshot is promoted only
+	// narrowed to the channels outside the mark (withoutChannels, under
+	// TargetManager.GetSplitWindowExclusions), which leaves the promoted copy
+	// with none, and is otherwise not promoted at all. A recovered next target is
+	// re-pulled and marked afresh.
 	windowTargets typeutil.Set[string]
 }
 
@@ -255,6 +258,56 @@ func (p *CollectionTarget) GetRowCount() int64 {
 // this target was pulled; see windowTargets.
 func (p *CollectionTarget) SplitWindowTargets() typeutil.Set[string] {
 	return p.windowTargets
+}
+
+// withoutChannels returns a copy of the target with the given channels -- and
+// every sealed segment attributed to one of them -- removed. The copy keeps the
+// original's version, partitions and lackSegmentInfo flag: it is the same pull,
+// narrowed to the channels a reader is actually served from.
+//
+// It is how a next target pulled inside a shard split window becomes a current
+// target without its window targets. Those channels carry no sealed segment of
+// their own in such a pull (datacoord attributes a target's flushed data to its
+// still-listed source), so dropping segments by attribution normally drops
+// none; it is done anyway so the copy can never describe data on a channel it
+// does not list. The partition set is deliberately NOT narrowed: a partition
+// whose segments all sit on excluded channels is still a partition of this
+// collection, and IsCurrentTargetExist must keep answering for it.
+//
+// windowTargets on the copy is what remains of the mark after the exclusion --
+// empty whenever the caller excludes the whole mark, which is the only
+// promotion GetSplitWindowExclusions allows.
+func (p *CollectionTarget) withoutChannels(exclude typeutil.Set[string]) *CollectionTarget {
+	if len(exclude) == 0 {
+		return p
+	}
+	dmChannels := make(map[string]*DmChannel, len(p.dmChannels))
+	for name, channel := range p.dmChannels {
+		if exclude.Contain(name) {
+			continue
+		}
+		dmChannels[name] = channel
+	}
+	segments := make(map[int64]*datapb.SegmentInfo, len(p.segments))
+	for id, segment := range p.segments {
+		if exclude.Contain(segment.GetInsertChannel()) {
+			continue
+		}
+		segments[id] = segment
+	}
+	kept := NewCollectionTarget(segments, dmChannels, p.partitions.Collect())
+	kept.version = p.version
+	kept.lackSegmentInfo = p.lackSegmentInfo
+	remainingMark := make([]string, 0, len(p.windowTargets))
+	for channel := range p.windowTargets {
+		if !exclude.Contain(channel) {
+			remainingMark = append(remainingMark, channel)
+		}
+	}
+	if len(remainingMark) > 0 {
+		kept.windowTargets = typeutil.NewSet(remainingMark...)
+	}
+	return kept
 }
 
 type target struct {
