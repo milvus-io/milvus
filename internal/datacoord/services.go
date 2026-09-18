@@ -901,7 +901,12 @@ func (s *Server) GetComponentStates(ctx context.Context, req *milvuspb.GetCompon
 }
 
 // GetRecoveryInfo get recovery info for segment.
-// Called by: QueryCoord.
+//
+// Legacy: it has no live caller -- QueryCoord's broker declares the call but
+// nothing in QueryCoord invokes it; targets are built from GetRecoveryInfoV2.
+// It carries no shard split attribution: during a split's lineage window a
+// source's view here takes in its targets' flushed segments, but they are
+// reported under their own channels. Use GetRecoveryInfoV2.
 func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInfoRequest) (*datapb.GetRecoveryInfoResponse, error) {
 	collectionID := req.GetCollectionID()
 	partitionID := req.GetPartitionID()
