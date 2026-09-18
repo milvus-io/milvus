@@ -352,6 +352,62 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		s.T().Logf("status=%v", resp)
 	})
 
+	s.Run("compact_hash_split", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
+		s.Require().NoError(err)
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1003,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 104, Level: datapb.SegmentLevel_L1},
+			},
+			Type:                   datapb.CompactionType_HashSplitCompaction,
+			BeginLogID:             100,
+			PreAllocatedSegmentIDs: &datapb.IDRange{Begin: 100, End: 200},
+			PreAllocatedLogIDs:     &datapb.IDRange{Begin: 200, End: 2000},
+			JsonParams:             jsonParams,
+			HashSplitModulus:       2,
+			HashSplitTargets: []*datapb.SplitShardTaskTarget{
+				{Vchannel: "by-dev-rootcoord-dml_1_100v0", Buckets: []uint64{0}},
+				{Vchannel: "by-dev-rootcoord-dml_2_100v0", Buckets: []uint64{1}},
+			},
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(resp))
+	})
+
+	s.Run("compact_hash_split_without_segment_ids", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		jsonParams, err := compaction.GenerateJSONParams(&schemapb.CollectionSchema{})
+		s.Require().NoError(err)
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1004,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 105, Level: datapb.SegmentLevel_L1},
+			},
+			Type:               datapb.CompactionType_HashSplitCompaction,
+			BeginLogID:         100,
+			PreAllocatedLogIDs: &datapb.IDRange{Begin: 200, End: 2000},
+			JsonParams:         jsonParams,
+		}
+
+		resp, err := node.CompactionV2(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+	})
+
 	s.Run("bump schema version compaction", func() {
 		node := s.node
 		ctx, cancel := context.WithCancel(context.Background())
