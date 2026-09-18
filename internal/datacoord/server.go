@@ -733,9 +733,10 @@ func (s *Server) stopCompaction() {
 }
 
 // startCompaction starts the compaction inspector's schedule loop whatever
-// dataCoord.enableCompaction says: it runs every plan, including the rewrite a
-// shard split already in the WAL needs on every cluster. The switch, read once
-// here as it is not refreshable, gates only the policy-driven triggers.
+// dataCoord.enableCompaction says: a shard split already in the WAL needs its
+// rewrite run on every cluster. With the switch off -- it is not refreshable,
+// and is read once here and when the inspector is built -- the policy-driven
+// triggers do not start and the loop admits only those rewrites.
 func (s *Server) startCompaction() {
 	if s.compactionInspector != nil {
 		s.compactionInspector.start()

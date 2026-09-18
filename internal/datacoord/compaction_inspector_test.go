@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -1273,6 +1274,36 @@ func (s *CompactionPlanHandlerSuite) newScheduleTask(planID int64, kind datapb.C
 		return newL0CompactionTask(proto, nil, s.mockMeta)
 	}
 	return newMixCompactionTask(proto, nil, s.mockMeta, newMockVersionManager())
+}
+
+// dataCoord.enableCompaction, read when the inspector is built, keeps every
+// compaction off but a shard split's own rewrite: the schedule loop always
+// runs for the split, and a Mix task left in the queue (one persisted before a
+// restart) stays unscheduled while the switch is off.
+func (s *CompactionPlanHandlerSuite) TestSchedule_CompactionOffAdmitsOnlyShardSplitRewrites() {
+	params := paramtable.Get()
+	defer params.Reset(params.DataCoordCfg.EnableCompaction.Key)
+	cases := []struct {
+		enabled bool
+		want    []int64
+	}{
+		{enabled: false, want: []int64{2}},
+		{enabled: true, want: []int64{1, 2}},
+	}
+	for _, tc := range cases {
+		params.Save(params.DataCoordCfg.EnableCompaction.Key, strconv.FormatBool(tc.enabled))
+		s.SetupTest()
+		s.handler.scheduler.(*task.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Return().Maybe()
+		s.NoError(s.handler.submitTask(s.newScheduleTask(1, datapb.CompactionType_MixCompaction, "ch-mix")))
+		s.NoError(s.handler.submitTask(s.newScheduleTask(2, datapb.CompactionType_HashSplitCompaction, "src")))
+		got := lo.Map(s.handler.schedule(), func(t CompactionTask, _ int) int64 { return t.GetTaskProto().GetPlanID() })
+		s.ElementsMatch(tc.want, got, "enableCompaction=%v", tc.enabled)
+		if !tc.enabled {
+			// The Mix task is kept queued, not dropped: it runs once the
+			// switch is back on.
+			s.Equal(1, s.handler.queueTasks.Len())
+		}
+	}
 }
 
 // The rewrite plans of one shard split all run on its source channel, each
