@@ -124,7 +124,7 @@ ResolvePackedHybridIndexType(const nlohmann::json& metadata,
             } else if (metadata.contains(BITMAP_INDEX_LENGTH)) {
                 type = ScalarIndexType::BITMAP;
             } else {
-                ThrowInfo(UnexpectedError,
+                ThrowInfo(DataFormatBroken,
                           "hybrid index file has neither index_type meta, a "
                           "recognizable packed filename, nor a recognizable "
                           "physical index meta");

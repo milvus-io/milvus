@@ -86,15 +86,19 @@ IsScalarArrayField(const storage::FileManagerContext& file_manager_context) {
 
 size_t
 MmapFileSize(size_t data_size) {
-    AssertInfo(data_size <= std::numeric_limits<size_t>::max() -
-                                (SCALAR_SORT_ALIGNMENT - 1),
-               "ScalarIndexSort mmap alignment size overflow");
+    if (!(data_size <=
+          std::numeric_limits<size_t>::max() - (SCALAR_SORT_ALIGNMENT - 1))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "ScalarIndexSort mmap alignment size overflow");
+    }
     auto aligned_size =
         ((data_size + SCALAR_SORT_ALIGNMENT - 1) / SCALAR_SORT_ALIGNMENT) *
         SCALAR_SORT_ALIGNMENT;
-    AssertInfo(aligned_size <= std::numeric_limits<size_t>::max() -
-                                   SCALAR_SORT_MMAP_INDEX_PADDING,
-               "ScalarIndexSort mmap padding size overflow");
+    if (!(aligned_size <= std::numeric_limits<size_t>::max() -
+                              SCALAR_SORT_MMAP_INDEX_PADDING)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "ScalarIndexSort mmap padding size overflow");
+    }
     return aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
 }
 
@@ -763,20 +767,26 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
     context->is_mmap =
         GetValueFromConfig<bool>(config, ENABLE_MMAP).value_or(true);
 
-    AssertInfo(context->index_size <= std::numeric_limits<size_t>::max() /
-                                          sizeof(IndexStructure<T>),
-               "ScalarIndexSort index_data size overflow for {} elements",
-               context->index_size);
+    if (!(context->index_size <=
+          std::numeric_limits<size_t>::max() / sizeof(IndexStructure<T>))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "ScalarIndexSort index_data size overflow for {} elements",
+                  context->index_size);
+    }
     context->index_data_bytes = context->index_size * sizeof(IndexStructure<T>);
-    AssertInfo(context->index_data_bytes <=
-                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
-               "ScalarIndexSort index_data size {} exceeds int64 range",
-               context->index_data_bytes);
-    AssertInfo(
-        directory.At("index_data").plaintext_size == context->index_data_bytes,
-        "invalid index_data size: expected {}, got {}",
-        context->index_data_bytes,
-        directory.At("index_data").plaintext_size);
+    if (!(context->index_data_bytes <=
+          static_cast<size_t>(std::numeric_limits<int64_t>::max()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "ScalarIndexSort index_data size {} exceeds int64 range",
+                  context->index_data_bytes);
+    }
+    if (!(directory.At("index_data").plaintext_size ==
+          context->index_data_bytes)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid index_data size: expected {}, got {}",
+                  context->index_data_bytes,
+                  directory.At("index_data").plaintext_size);
+    }
 
     IndexLoadPlan plan;
     plan.load_context = context;
@@ -812,25 +822,30 @@ ScalarIndexSort<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
         return plan;
     }
 
-    AssertInfo(context->total_num_rows <=
-                   std::numeric_limits<size_t>::max() / sizeof(int32_t),
-               "ScalarIndexSort idx_to_offsets size overflow for {} rows",
-               context->total_num_rows);
+    if (!(context->total_num_rows <=
+          std::numeric_limits<size_t>::max() / sizeof(int32_t))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "ScalarIndexSort idx_to_offsets size overflow for {} rows",
+                  context->total_num_rows);
+    }
     context->offsets_bytes = context->total_num_rows * sizeof(int32_t);
-    AssertInfo(
-        directory.At("idx_to_offsets").plaintext_size == context->offsets_bytes,
-        "invalid idx_to_offsets size: expected {}, got {}",
-        context->offsets_bytes,
-        directory.At("idx_to_offsets").plaintext_size);
+    if (!(directory.At("idx_to_offsets").plaintext_size ==
+          context->offsets_bytes)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid idx_to_offsets size: expected {}, got {}",
+                  context->offsets_bytes,
+                  directory.At("idx_to_offsets").plaintext_size);
+    }
 
     context->valid_bitset =
         std::make_shared<TargetBitmap>(context->total_num_rows, false);
     auto valid_bitset_bytes = context->valid_bitset->size_in_bytes();
-    AssertInfo(
-        directory.At("valid_bitset").plaintext_size == valid_bitset_bytes,
-        "invalid valid_bitset size: expected {}, got {}",
-        valid_bitset_bytes,
-        directory.At("valid_bitset").plaintext_size);
+    if (!(directory.At("valid_bitset").plaintext_size == valid_bitset_bytes)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid valid_bitset size: expected {}, got {}",
+                  valid_bitset_bytes,
+                  directory.At("valid_bitset").plaintext_size);
+    }
 
     if (context->is_mmap) {
         auto mmap_meta_path =
@@ -902,10 +917,13 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
                                     MAP_PRIVATE,
                                     file.Descriptor(),
                                     0));
+        const auto mmap_errno = errno;
         file.Close();
-        AssertInfo(new_mmap_data != MAP_FAILED,
-                   "failed to mmap ScalarIndexSort index_data: {}",
-                   strerror(errno));
+        if (new_mmap_data == MAP_FAILED) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to mmap ScalarIndexSort index_data: {}",
+                      strerror(mmap_errno));
+        }
     } else {
         AssertInfo(context->index_data != nullptr,
                    "ScalarIndexSort memory target is null");
@@ -928,10 +946,13 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
                                         MAP_PRIVATE,
                                         file.Descriptor(),
                                         0));
+            const auto mmap_errno = errno;
             file.Close();
-            AssertInfo(new_mmap_meta_data != MAP_FAILED,
-                       "failed to mmap ScalarIndexSort idx_to_offsets: {}",
-                       strerror(errno));
+            if (new_mmap_meta_data == MAP_FAILED) {
+                ThrowInfo(ErrorCode::MmapError,
+                          "failed to mmap ScalarIndexSort idx_to_offsets: {}",
+                          strerror(mmap_errno));
+            }
         } else {
             AssertInfo(context->offsets != nullptr,
                        "ScalarIndexSort offsets memory target is null");
@@ -945,10 +966,12 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
                 : new_index_data.data();
         for (size_t i = 0; i < context->index_size; ++i) {
             const auto& item = index_data[i];
-            AssertInfo(item.idx_ < context->total_num_rows,
-                       "ScalarIndexSort row offset {} exceeds row count {}",
-                       item.idx_,
-                       context->total_num_rows);
+            if (!(item.idx_ < context->total_num_rows)) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "ScalarIndexSort row offset {} exceeds row count {}",
+                          item.idx_,
+                          context->total_num_rows);
+            }
             new_offsets[item.idx_] = i;
             new_valid_bitset.set(item.idx_);
         }
@@ -959,9 +982,11 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
     is_mmap_ = context->is_mmap;
     data_size_ = static_cast<int64_t>(context->index_data_bytes);
     if (is_mmap_) {
-        AssertInfo(context->index_data_file->file_size <=
-                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
-                   "ScalarIndexSort mmap size exceeds int64 range");
+        if (!(context->index_data_file->file_size <=
+              static_cast<size_t>(std::numeric_limits<int64_t>::max()))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "ScalarIndexSort mmap size exceeds int64 range");
+        }
         mmap_filepath_ = context->index_data_file->path;
         mmap_size_ = static_cast<int64_t>(context->index_data_file->file_size);
         mmap_data_ = new_mmap_data;
@@ -972,9 +997,11 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
 
     valid_bitset_ = std::move(new_valid_bitset);
     if (context->has_persisted_aux && is_mmap_) {
-        AssertInfo(context->offsets_file->file_size <=
-                       static_cast<size_t>(std::numeric_limits<int64_t>::max()),
-                   "ScalarIndexSort mmap meta size exceeds int64 range");
+        if (!(context->offsets_file->file_size <=
+              static_cast<size_t>(std::numeric_limits<int64_t>::max()))) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "ScalarIndexSort mmap meta size exceeds int64 range");
+        }
         mmap_meta_filepath_ = context->offsets_file->path;
         mmap_meta_size_ =
             static_cast<int64_t>(context->offsets_file->file_size);

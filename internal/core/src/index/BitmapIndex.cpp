@@ -617,8 +617,15 @@ BitmapIndex<T>::MMapIndexData(const std::string& file_name,
                               size_t index_length,
                               milvus::proto::common::LoadPriority priority,
                               bool rebuild_validity_from_postings) {
-    std::filesystem::create_directories(
-        std::filesystem::path(file_name).parent_path());
+    const auto parent = std::filesystem::path(file_name).parent_path();
+    std::error_code error;
+    std::filesystem::create_directories(parent, error);
+    if (error) {
+        ThrowInfo(ErrorCode::FileCreateFailed,
+                  "Failed to create index directory '{}': {}",
+                  parent.string(),
+                  error.message());
+    }
     auto cleanup = std::make_unique<MmapFileRAII>(file_name);
     FrozenIndexData frozen{std::span(data_ptr, data_size), index_length};
     {
@@ -684,9 +691,12 @@ BitmapIndex<T>::MapFrozenIndex(const std::string& file_name,
     mmap_data_ = static_cast<char*>(
         mmap(nullptr, file_size, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
     if (mmap_data_ == MAP_FAILED) {
+        const auto mmap_errno = errno;
         file.Close();
-        ThrowInfo(
-            ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
+        ThrowInfo(ErrorCode::MmapError,
+                  "failed to mmap frozen Bitmap index '{}': {}",
+                  file_name,
+                  strerror(mmap_errno));
     }
     mmap_size_ = file_size;
     is_mmap_ = true;
@@ -713,8 +723,16 @@ BitmapIndex<T>::MMapIndexDataAsync(const std::string& file_name,
         co_await storage::RunLocalFileIOAsync(
             [&] {
                 storage::ThrowIfCancelled(token, "Bitmap::WriteFrozen");
-                std::filesystem::create_directories(
-                    std::filesystem::path(file_name).parent_path());
+                const auto parent =
+                    std::filesystem::path(file_name).parent_path();
+                std::error_code error;
+                std::filesystem::create_directories(parent, error);
+                if (error) {
+                    ThrowInfo(ErrorCode::FileCreateFailed,
+                              "Failed to create index directory '{}': {}",
+                              parent.string(),
+                              error.message());
+                }
                 cleanup = std::make_unique<MmapFileRAII>(file_name);
                 writer = std::make_unique<storage::FileWriter>(
                     file_name,
@@ -1575,15 +1593,17 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
         ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_LENGTH);
     context->total_num_rows =
         ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_NUM_ROWS);
-    AssertInfo(context->total_num_rows <=
-                   std::numeric_limits<size_t>::max() -
-                       (TargetBitmap::policy_type::data_bits - 1),
-               "Bitmap valid bitset size overflow for {} rows",
-               context->total_num_rows);
-    context->is_nested =
-        (metadata.contains(BITMAP_INDEX_IS_NESTED_META)
-             ? metadata.at(BITMAP_INDEX_IS_NESTED_META).get<bool>()
-             : is_nested_index_);
+    if (!(context->total_num_rows <=
+          std::numeric_limits<size_t>::max() -
+              (TargetBitmap::policy_type::data_bits - 1))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Bitmap valid bitset size overflow for {} rows",
+                  context->total_num_rows);
+    }
+    context->is_nested = (metadata.contains(BITMAP_INDEX_IS_NESTED_META)
+                              ? ReadRequiredIndexMeta<bool>(
+                                    metadata, BITMAP_INDEX_IS_NESTED_META)
+                              : is_nested_index_);
     context->has_valid_bitset = directory.HasEntry(BITMAP_INDEX_VALID_BITSET);
     context->rebuild_validity_from_postings =
         schema_.nullable() && !context->is_nested && !context->has_valid_bitset;
@@ -1626,10 +1646,12 @@ BitmapIndex<T>::PlanLoad(const storage::IndexEntryDirectory& directory,
         auto valid_bitset_size =
             directory.At(BITMAP_INDEX_VALID_BITSET).plaintext_size;
         auto expected_valid_bitset_size = (context->total_num_rows + 7) / 8;
-        AssertInfo(valid_bitset_size == expected_valid_bitset_size,
-                   "bitmap valid_bitset size mismatch, expect {}, got {}",
-                   expected_valid_bitset_size,
-                   valid_bitset_size);
+        if (!(valid_bitset_size == expected_valid_bitset_size)) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "bitmap valid_bitset size mismatch, expect {}, got {}",
+                      expected_valid_bitset_size,
+                      valid_bitset_size);
+        }
         context->valid_bitset =
             std::make_shared<TargetBitmap>(context->total_num_rows, false);
         plan.entries.push_back(storage::EntryLoadPlan{
@@ -1682,9 +1704,11 @@ BitmapIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
                              raw_file.Descriptor(),
                              0);
         auto mmap_errno = errno;
-        AssertInfo(raw_map != MAP_FAILED,
-                   "failed to mmap Bitmap raw staging file: {}",
-                   strerror(mmap_errno));
+        if (raw_map == MAP_FAILED) {
+            ThrowInfo(ErrorCode::MmapError,
+                      "failed to mmap Bitmap raw staging file: {}",
+                      strerror(mmap_errno));
+        }
         auto raw_map_guard = folly::makeGuard([&raw_file, raw_map, raw_size]() {
             munmap(raw_map, raw_size);
             // Best-effort cache eviction after removing the mapping's references.
@@ -1748,7 +1772,8 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
                                                     BITMAP_INDEX_NUM_ROWS);
     is_nested_index_ =
         (reader.IndexMeta().contains(BITMAP_INDEX_IS_NESTED_META)
-             ? reader.IndexMeta().at(BITMAP_INDEX_IS_NESTED_META).get<bool>()
+             ? ReadRequiredIndexMeta<bool>(reader.IndexMeta(),
+                                           BITMAP_INDEX_IS_NESTED_META)
              : is_nested_index_);
     valid_bitset_ =
         TargetBitmap(total_num_rows_, is_nested_index_ || !schema_.nullable());
@@ -1778,8 +1803,16 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         // Stream entry to temp file, mmap as read buffer for MMapIndexData.
         // MMapIndexData normally creates the parent directory, but we need
         // the temp file in the same directory first, so ensure it exists here.
-        std::filesystem::create_directories(
-            std::filesystem::path(mmap_filepath.value()).parent_path());
+        const auto parent =
+            std::filesystem::path(mmap_filepath.value()).parent_path();
+        std::error_code error;
+        std::filesystem::create_directories(parent, error);
+        if (error) {
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "Failed to create index directory '{}': {}",
+                      parent.string(),
+                      error.message());
+        }
         auto tmp_path = mmap_filepath.value() + ".tmp_load";
         auto tmp_path_guard =
             folly::makeGuard([&tmp_path]() { unlink(tmp_path.c_str()); });

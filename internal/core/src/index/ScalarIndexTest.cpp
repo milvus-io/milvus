@@ -50,6 +50,9 @@
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
 #include "index/IndexLoadUtils.h"
+#include "index/JsonIndexLoadPlan.h"
+#include "index/NgramInvertedIndex.h"
+#include "folly/coro/BlockingWait.h"
 #include "index/InvertedIndexTantivy.h"
 #include "index/JsonFlatIndex.h"
 #include "index/ScalarIndex.h"
@@ -1215,4 +1218,204 @@ TEST(ScalarIndexV3LoadRouteTest, RejectsEmbeddedNulBeforePreparingDirectory) {
         EXPECT_EQ(error.get_error_code(), ErrorCode::DataFormatBroken);
     }
     EXPECT_TRUE(plan.entries.empty());
+}
+
+namespace {
+template <typename Index>
+class PackedLoadAccess : public Index {
+ public:
+    using Index::FinishLoadAsync;
+    using Index::Index;
+    using Index::PlanLoad;
+};
+
+milvus::storage::IndexEntryDirectory
+ErrorTestDirectory(
+    std::initializer_list<std::pair<std::string, size_t>> entries) {
+    nlohmann::json directory = {{"entries", nlohmann::json::array()}};
+    size_t offset = 0;
+    for (const auto& [name, bytes] : entries) {
+        directory["entries"].push_back({{"name", name},
+                                        {"offset", offset},
+                                        {"size", bytes},
+                                        {"crc32", "00000000"}});
+        offset += bytes;
+    }
+    const auto json = directory.dump();
+    return milvus::storage::ParseIndexEntryDirectory(
+               std::span(reinterpret_cast<const uint8_t*>(json.data()),
+                         json.size()),
+               json.size() + offset + milvus::storage::MILVUS_V3_MAGIC_SIZE +
+                   milvus::storage::MILVUS_V3_FOOTER_SIZE)
+        .first;
+}
+
+template <typename F>
+void
+ExpectPackedLoadError(milvus::ErrorCode expected, F&& load) {
+    try {
+        load();
+        FAIL() << "expected classified packed load error";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), expected);
+        auto status = milvus::FailureCStatus(&error);
+        EXPECT_EQ(status.error_code, static_cast<int>(expected));
+        free(const_cast<char*>(status.error_msg));
+    }
+}
+}  // namespace
+
+TEST(ScalarIndexV3ErrorCodeTest, PersistedLengthsAreDataFormatErrors) {
+    using namespace milvus;
+    using namespace milvus::index;
+    const auto ctx = GetTempFileManagerCtx(Int64);
+    PackedLoadAccess<ScalarIndexSort<int64_t>> sort(ctx);
+    Config config{{ENABLE_MMAP, false}};
+    nlohmann::json sort_meta{
+        {"index_length", 1}, {"num_rows", 1}, {"is_nested", false}};
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        sort.PlanLoad(
+            ErrorTestDirectory({{"index_data", 1}}), sort_meta, config);
+    });
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        sort.PlanLoad(
+            ErrorTestDirectory({{"index_data", sizeof(IndexStructure<int64_t>)},
+                                {"idx_to_offsets", 1},
+                                {"valid_bitset", 1}}),
+            sort_meta,
+            config);
+    });
+
+    PackedLoadAccess<StringIndexSort> strings(GetTempFileManagerCtx(VarChar));
+    const nlohmann::json string_meta{
+        {"version", StringIndexSort::SERIALIZATION_VERSION},
+        {"num_rows", 8},
+        {"is_nested", false}};
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        strings.PlanLoad(
+            ErrorTestDirectory({{"index_data", 1}, {"valid_bitset", 2}}),
+            string_meta,
+            {});
+    });
+    PackedLoadAccess<BitmapIndex<int64_t>> bitmap(ctx);
+    const nlohmann::json bitmap_meta{{BITMAP_INDEX_LENGTH, 1},
+                                     {BITMAP_INDEX_NUM_ROWS, 8}};
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        bitmap.PlanLoad(ErrorTestDirectory({{BITMAP_INDEX_DATA, 1},
+                                            {BITMAP_INDEX_VALID_BITSET, 2}}),
+                        bitmap_meta,
+                        {});
+    });
+    PackedLoadAccess<StringIndexMarisa> marisa(GetTempFileManagerCtx(VarChar));
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        marisa.PlanLoad(
+            ErrorTestDirectory({{MARISA_TRIE_INDEX, 1},
+                                {MARISA_STR_IDS, sizeof(int64_t)},
+                                {MARISA_CSR_INDEX, sizeof(uint32_t)}}),
+            {},
+            {});
+    });
+    PackedLoadAccess<NgramInvertedIndex> ngram(GetTempFileManagerCtx(VarChar),
+                                               NgramParams{true, 2, 3});
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        ngram.PlanLoad(ErrorTestDirectory({{"engine_file", 1},
+                                           {NGRAM_AVG_ROW_SIZE_FILE_NAME, 1}}),
+                       {{"has_null", false}, {"file_names", {"engine_file"}}},
+                       {});
+    });
+    IndexLoadPlan plan;
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        AppendJsonNonExistOffsetsPlan(
+            plan,
+            ErrorTestDirectory({{INDEX_NON_EXIST_OFFSET_FILE_NAME, 1}}),
+            {{"has_non_exist", true}});
+    });
+}
+
+TEST(ScalarIndexV3ErrorCodeTest, OptionalMetadataValidatesPresentTypes) {
+    using namespace milvus;
+    using namespace milvus::index;
+    PackedLoadAccess<BitmapIndex<int64_t>> bitmap(GetTempFileManagerCtx(Int64));
+    const auto directory = ErrorTestDirectory({{BITMAP_INDEX_DATA, 0}});
+    nlohmann::json metadata{{BITMAP_INDEX_LENGTH, 0},
+                            {BITMAP_INDEX_NUM_ROWS, 0}};
+    EXPECT_NO_THROW(bitmap.PlanLoad(directory, metadata, {}));
+    metadata["is_nested"] = "true";
+    ExpectPackedLoadError(DataFormatBroken,
+                          [&] { bitmap.PlanLoad(directory, metadata, {}); });
+    IndexLoadPlan plan;
+    EXPECT_NO_THROW(AppendJsonNonExistOffsetsPlan(plan, directory, {}));
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        AppendJsonNonExistOffsetsPlan(
+            plan, directory, {{"has_non_exist", "false"}});
+    });
+    ExpectPackedLoadError(DataFormatBroken, [&] {
+        AppendJsonNonExistOffsetsPlan(
+            plan, directory, {{"has_non_exist", true}});
+    });
+}
+
+TEST(ScalarIndexV3ErrorCodeTest, UnsupportedFormatVersionKeepsItsCode) {
+    using namespace milvus;
+    using namespace milvus::index;
+    PackedLoadAccess<StringIndexSort> strings(GetTempFileManagerCtx(VarChar));
+    ExpectPackedLoadError(Unsupported, [&] {
+        strings.PlanLoad(ErrorTestDirectory({}), {{"version", 9999}}, {});
+    });
+    PackedLoadAccess<StringIndexMarisa> marisa(GetTempFileManagerCtx(VarChar));
+    ExpectPackedLoadError(Unsupported, [&] {
+        marisa.PlanLoad(
+            ErrorTestDirectory({{MARISA_TRIE_INDEX, 1},
+                                {MARISA_STR_IDS, sizeof(int64_t)},
+                                {MARISA_CSR_INDEX, sizeof(uint32_t)},
+                                {MARISA_CSR_OFFSETS, 0}}),
+            {{"csr_num_keys", 0}, {"marisa_csr_format_version", 9999}},
+            {});
+    });
+}
+
+TEST(ScalarIndexV3ErrorCodeTest, UnrecognizedHybridMetadataIsDataFormatError) {
+    using namespace milvus;
+    using namespace milvus::index;
+    const Config config{{INDEX_FILES, {"milvus_packed_hybrid_index.v3"}}};
+    ExpectPackedLoadError(DataFormatBroken,
+                          [&] { ResolvePackedHybridIndexType({}, config); });
+    // Old standalone files still identify their type without hybrid metadata.
+    EXPECT_EQ(ResolvePackedHybridIndexType(
+                  {}, {{INDEX_FILES, {"milvus_packed_stlsort_index.v3"}}}),
+              ScalarIndexType::STLSORT);
+}
+
+TEST(ScalarIndexV3ErrorCodeTest, MmapFailureKeepsItsCodeAndCleansTargets) {
+    using namespace milvus;
+    using namespace milvus::index;
+    PackedLoadAccess<ScalarIndexSort<int64_t>> sort(
+        GetTempFileManagerCtx(Int64));
+    std::vector<std::string> paths;
+    {
+        auto plan = sort.PlanLoad(
+            ErrorTestDirectory({{"index_data", 0},
+                                {"idx_to_offsets", 0},
+                                {"valid_bitset", 0}}),
+            {{"index_length", 0}, {"num_rows", 0}, {"is_nested", false}},
+            {{ENABLE_MMAP, true}});
+        for (const auto& entry : plan.entries) {
+            if (const auto* file =
+                    std::get_if<storage::FileEntryTarget>(&entry.target)) {
+                paths.push_back(file->staging->path);
+                std::filesystem::create_directories(
+                    std::filesystem::path(file->staging->path).parent_path());
+                file->staging->Prepare(storage::io::Priority::HIGH);
+                file->staging->Finish();
+            }
+        }
+        // mmap(length=0) deterministically fails with EINVAL for the offsets file.
+        ExpectPackedLoadError(MmapError, [&] {
+            folly::coro::blockingWait(sort.FinishLoadAsync(plan, {}));
+        });
+    }
+    ASSERT_EQ(paths.size(), 2);
+    for (const auto& path : paths) {
+        EXPECT_FALSE(std::filesystem::exists(path));
+    }
 }

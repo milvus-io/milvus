@@ -17,6 +17,7 @@
 #pragma once
 
 #include "index/Meta.h"
+#include "index/IndexLoadUtils.h"
 #include "storage/EntryStreamUtils.h"
 #include "index/ScalarIndex.h"
 
@@ -26,15 +27,17 @@ AppendJsonNonExistOffsetsPlan(IndexLoadPlan& plan,
                               const storage::IndexEntryDirectory& directory,
                               const nlohmann::json& metadata) {
     if (!(metadata.contains("has_non_exist")
-              ? metadata.at("has_non_exist").get<bool>()
+              ? ReadRequiredIndexMeta<bool>(metadata, "has_non_exist")
               : false)) {
         return;
     }
     const auto bytes =
         directory.At(INDEX_NON_EXIST_OFFSET_FILE_NAME).plaintext_size;
-    AssertInfo(bytes % sizeof(size_t) == 0,
-               "invalid non_exist_offsets Entry size {}",
-               bytes);
+    if (!(bytes % sizeof(size_t) == 0)) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid non_exist_offsets Entry size {}",
+                  bytes);
+    }
     auto offsets =
         std::make_shared<std::vector<size_t>>(bytes / sizeof(size_t));
     plan.entries.push_back(storage::EntryLoadPlan{

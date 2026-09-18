@@ -247,10 +247,12 @@ NgramInvertedIndex::PlanLoad(const storage::IndexEntryDirectory& directory,
         directory, metadata, config);
     auto avg_row_size_bytes =
         directory.At(NGRAM_AVG_ROW_SIZE_FILE_NAME).plaintext_size;
-    AssertInfo(avg_row_size_bytes == sizeof(size_t),
-               "invalid ngram avg_row_size Entry size: expected {}, got {}",
-               sizeof(size_t),
-               avg_row_size_bytes);
+    if (!(avg_row_size_bytes == sizeof(size_t))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "invalid ngram avg_row_size Entry size: expected {}, got {}",
+                  sizeof(size_t),
+                  avg_row_size_bytes);
+    }
     auto avg_row_size = std::make_shared<size_t>(0);
     plan.entries.push_back(storage::EntryLoadPlan{
         NGRAM_AVG_ROW_SIZE_FILE_NAME,

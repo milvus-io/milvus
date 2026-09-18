@@ -435,7 +435,14 @@ PrepareFileTargetAsync(const FileEntryTarget* target,
     }
     auto parent = std::filesystem::path(staging.path).parent_path();
     if (!parent.empty()) {
-        std::filesystem::create_directories(parent);
+        std::error_code error;
+        std::filesystem::create_directories(parent, error);
+        if (error) {
+            ThrowInfo(ErrorCode::FileCreateFailed,
+                      "Failed to create index directory '{}': {}",
+                      parent.string(),
+                      error.message());
+        }
     }
     staging.Prepare(io::GetPriorityFromLoadPriority(priority));
     co_return;

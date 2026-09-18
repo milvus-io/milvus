@@ -974,10 +974,11 @@ RTreeIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
                    "RTree null-offset target is null");
         new_null_offsets = std::move(*context->null_offsets);
     }
-    AssertInfo(new_wrapper->count() <=
-                   std::numeric_limits<int64_t>::max() -
-                       static_cast<int64_t>(new_null_offsets.size()),
-               "RTree row count overflow");
+    if (!(new_wrapper->count() <=
+          std::numeric_limits<int64_t>::max() -
+              static_cast<int64_t>(new_null_offsets.size()))) {
+        ThrowInfo(ErrorCode::DataFormatBroken, "RTree row count overflow");
+    }
     auto new_total_rows =
         new_wrapper->count() + static_cast<int64_t>(new_null_offsets.size());
 

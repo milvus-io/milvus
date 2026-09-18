@@ -433,6 +433,40 @@ TEST_F(AsyncIndexEntryReaderTest, FileTargetCleanupPreservesOwnership) {
     }
 }
 
+TEST_F(AsyncIndexEntryReaderTest, DirectoryCreationFailureKeepsErrorCode) {
+    const auto path = kV3FilePath + "_directory_failure";
+    const auto data = GeneratePattern(kStreamSliceAlignment);
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        writer.WriteEntry("data", data.data(), data.size());
+        writer.Finish();
+    }
+    auto reader = OpenAsyncReader(CreateInputStream(path));
+    const auto blocker = GetRootPath() + "/parent_is_file";
+    {
+        std::ofstream output(blocker);
+        output << "keep";
+    }
+    auto target = std::make_shared<IndexFileTarget>(
+        blocker + "/child/index", data.size(), false);
+    try {
+        folly::coro::blockingWait(ReadEntriesForTest(
+            *reader,
+            {{"data", FileEntryTarget{target, 0, data.size()}}},
+            milvus::proto::common::LoadPriority::HIGH));
+        FAIL() << "expected directory creation failure";
+    } catch (const milvus::SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), milvus::ErrorCode::FileCreateFailed);
+        auto status = milvus::FailureCStatus(&error);
+        EXPECT_EQ(status.error_code,
+                  static_cast<int>(milvus::ErrorCode::FileCreateFailed));
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_FALSE(target->Prepared());
+    EXPECT_EQ(ReadLocalFileBytes(blocker),
+              (std::vector<uint8_t>{'k', 'e', 'e', 'p'}));
+}
+
 TEST_F(AsyncIndexEntryReaderTest,
        CancelledMetadataAdmissionPreservesErrorCode) {
     const std::string file_path = kV3FilePath + "_cancel_metadata";

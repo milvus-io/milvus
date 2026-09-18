@@ -28,6 +28,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -227,6 +228,44 @@ TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesBufferedPlannedLoad) {
     auto value = int32_t{17};
     auto hits = load_index.In(1, &value);
     EXPECT_TRUE(hits[17]);
+}
+
+TEST(BitmapIndexV3AsyncLoadTest, FrozenMmapFailureKeepsCodeAndCleansFiles) {
+    BitmapAsyncLoadFixture fixture("bitmap_async_frozen_mmap_failure");
+    std::vector<int32_t> data(DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND + 1);
+    std::iota(data.begin(), data.end(), 0);
+    ExposedBitmapIndex build_index(fixture.ctx);
+    build_index.Build(data.size(), data.data());
+    auto stats = build_index.UploadUnified({});
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+
+    const auto path = fixture.root_path + "/mmap/index";
+    std::filesystem::create_directories(
+        std::filesystem::path(path).parent_path());
+    // /dev/null accepts buffered writes but cannot be mapped. Only the test's
+    // symlink is owned and removed by the load's failure cleanup.
+    std::filesystem::create_symlink("/dev/null", path);
+    ExposedBitmapIndex loaded(fixture.ctx);
+    try {
+        loaded.LoadPlannedForTest(
+            *reader,
+            {{MMAP_FILE_PATH, path},
+             {LOAD_PRIORITY, proto::common::LoadPriority::HIGH}});
+        FAIL() << "expected final frozen mmap failure";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::MmapError);
+        EXPECT_NE(std::string(error.what()).find("frozen Bitmap index"),
+                  std::string::npos);
+        auto status = FailureCStatus(&error);
+        EXPECT_EQ(status.error_code, static_cast<int>(ErrorCode::MmapError));
+        free(const_cast<char*>(status.error_msg));
+    }
+    EXPECT_FALSE(std::filesystem::is_symlink(path));
+    EXPECT_FALSE(std::filesystem::exists(path + ".raw.tmp_load"));
+    EXPECT_FALSE(loaded.is_mmap_);
 }
 
 TEST(BitmapIndexV3AsyncLoadTest, PackedValidityUsesFinalAllocation) {
