@@ -120,11 +120,14 @@ func (it *insertTask) probeFencedWindows(
 		}
 		if !duplicate {
 			// The probe was appended: the vchannel took a write although the
-			// collection lists it as fenced. Its row is durable there.
-			mlog.Warn(ctx, "idempotency probe of a fenced vchannel was appended; its row stays where it landed",
+			// collection lists it as fenced. A Splitting shard is fenced from the
+			// fence on and never unfenced, so this is a Milvus bug; placing the
+			// other rows on the targets could write them next to data the
+			// source still takes. Fail the request instead.
+			mlog.Error(ctx, "idempotency probe of a vchannel listed as fenced was appended",
 				mlog.FieldVChannel(probe.VChannel()), mlog.Int("row", row))
-			pending.settle([]int{row})
-			continue
+			return nil, merr.WrapErrServiceInternalMsg(
+				"vchannel %s is listed as fenced by a shard split but took a write", probe.VChannel())
 		}
 		mlog.RatedInfo(ctx, 1, "a fenced vchannel answered a keyed insert from its idempotency window",
 			mlog.FieldVChannel(probe.VChannel()), mlog.Int("rows", len(offsets)))
