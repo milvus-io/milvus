@@ -156,9 +156,10 @@ func TestSourceServesAtMinChildTSafe(t *testing.T) {
 		// non-serviceable query view so the source keeps fronting it.
 		qv := NewChannelQueryView(nil, nil, nil, InitialTargetVersion)
 		return &shardDelegator{
-			vchannelName: "child",
-			latestTsafe:  atomic.NewUint64(tsafe),
-			distribution: NewDistribution("child", qv),
+			vchannelName:               "child",
+			latestTsafe:                atomic.NewUint64(tsafe),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+			distribution:               NewDistribution("child", qv),
 		}
 	}
 	// the source's own tsafe is frozen at T_switch (50) after the fence; the two
