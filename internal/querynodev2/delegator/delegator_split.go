@@ -506,6 +506,17 @@ func (sd *shardDelegator) frontingChildrenLocked() []*shardDelegator {
 	return children
 }
 
+// WithChildSpawner wires the spawner a delegator uses to front its own shard
+// split. The querynode passes it to every delegator it builds, whether watched
+// by querycoord or spawned as a split child, so the spawner is in place before
+// the delegator's pipeline can deliver a fence. A child adopted later keeps the
+// spawner it was built with, so it too can front a cascaded split.
+func WithChildSpawner(spawner ChildSpawner) ShardDelegatorOption {
+	return func(sd *shardDelegator) {
+		sd.childSpawner = spawner
+	}
+}
+
 // SetChildSpawner injects the spawner the source delegator uses to create its
 // in-process children when it consumes a SplitShard fence. The querynode sets it
 // right after creating the delegator.
