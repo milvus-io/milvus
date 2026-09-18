@@ -17,22 +17,12 @@
 package inspector
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
-	"strconv"
-	"strings"
-
-	"github.com/apache/arrow/go/v17/parquet"
-	"github.com/apache/arrow/go/v17/parquet/file"
-	"github.com/apache/arrow/go/v17/parquet/metadata"
 
 	binlogutil "github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 )
-
-var encryptedParquetMagic = []byte("PARE")
 
 type RawDataObject struct {
 	CollectionID   int64
@@ -99,50 +89,4 @@ func LocateRawDataV2(rootPath string, segments []*datapb.SegmentInfo) ([]RawData
 		}
 	}
 	return objects, nil
-}
-
-// InspectRawDataV2 parses only the cleartext Parquet crypto metadata. It does
-// not obtain a key or invoke Milvus's production PackedRecordBatchReader.
-func InspectRawDataV2(raw []byte, expectedEZID, expectedCollectionID int64) error {
-	if len(raw) <= 8 || !bytes.Equal(raw[:4], encryptedParquetMagic) || !bytes.Equal(raw[len(raw)-4:], encryptedParquetMagic) {
-		return fmt.Errorf("storage V2 object does not use an encrypted footer")
-	}
-	footerSize := int(binary.LittleEndian.Uint32(raw[len(raw)-8 : len(raw)-4]))
-	footerStart := len(raw) - 8 - footerSize
-	if footerSize <= 0 || footerStart < 4 {
-		return fmt.Errorf("storage V2 encrypted footer has invalid size %d", footerSize)
-	}
-	cryptoMetadata, err := metadata.NewFileCryptoMetaData(raw[footerStart : len(raw)-8])
-	if err != nil {
-		return fmt.Errorf("parse Storage V2 encrypted Parquet crypto metadata: %w", err)
-	}
-	if cryptoMetadata.EncryptionAlgorithm().Algo != parquet.AesGcm {
-		return fmt.Errorf("storage V2 encrypted Parquet does not use AES_GCM_V1")
-	}
-	parts := strings.SplitN(string(cryptoMetadata.KeyMetadata()), "_", 3)
-	if len(parts) != 3 || parts[2] == "" {
-		return fmt.Errorf("storage V2 footer key metadata must be <ezID>_<collectionID>_<EDEK>")
-	}
-	ezID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return fmt.Errorf("storage V2 footer key metadata has invalid EZ id %q: %w", parts[0], err)
-	}
-	if ezID != expectedEZID {
-		return fmt.Errorf("storage V2 footer key metadata EZ id %d, want %d", ezID, expectedEZID)
-	}
-	collectionID, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return fmt.Errorf("storage V2 footer key metadata has invalid collection id %q: %w", parts[1], err)
-	}
-	if collectionID != expectedCollectionID {
-		return fmt.Errorf("storage V2 footer key metadata collection id %d, want %d", collectionID, expectedCollectionID)
-	}
-	plainReader, plainErr := file.NewParquetReader(bytes.NewReader(raw))
-	if plainReader != nil {
-		_ = plainReader.Close()
-	}
-	if plainErr == nil {
-		return fmt.Errorf("storage V2 encrypted Parquet is readable without CMEK decryption information")
-	}
-	return nil
 }

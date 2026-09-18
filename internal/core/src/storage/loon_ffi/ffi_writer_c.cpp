@@ -13,12 +13,16 @@
 // limitations under the License.
 
 #include <string.h>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <string>
 #include <utility>
 
+#include <arrow/util/base64.h>
+
 #include "PluginInterface.h"
+#include "common/CGoCatch.h"
 #include "common/EasyAssert.h"
 #include "common/common_type_c.h"
 #include "storage/KeyRetriever.h"
@@ -33,7 +37,7 @@
  *   2. Updates the plugin with encryption zone ID, collection ID, and key
  *   3. Retrieves the encryptor for the given zone and collection
  *   4. Encodes key metadata containing zone ID, collection ID, and key version
- *   5. Returns the encryption key and metadata as newly allocated strings
+ *   5. Returns the Base64-encoded key and metadata as newly allocated strings
  *
  * @see GetEncParams declaration in ffi_writer_c.h for parameter documentation
  */
@@ -42,6 +46,10 @@ GetEncParams(CPluginContext* c_plugin_context,
              char** out_key,
              char** out_meta) {
     try {
+        AssertInfo(out_key != nullptr && out_meta != nullptr,
+                   "encryption parameter outputs must not be null");
+        *out_key = nullptr;
+        *out_meta = nullptr;
         AssertInfo(c_plugin_context != nullptr, "c_plugin_context is nullptr");
         auto plugin_ptr =
             milvus::storage::PluginLoader::GetInstance().getCipherPlugin();
@@ -56,15 +64,20 @@ GetEncParams(CPluginContext* c_plugin_context,
             milvus::storage::EncodeKeyMetadata(c_plugin_context->ez_id,
                                                c_plugin_context->collection_id,
                                                got.second);
-        *out_key = strdup(got.first->GetKey().c_str());
-        *out_meta = strdup(metadata.c_str());
+        // Both cgo and Loon properties use NUL-terminated strings. Encode the
+        // binary DEK before crossing either boundary. The Parquet writer
+        // decodes it when constructing its encryption configuration.
+        auto key = arrow::util::base64_encode(got.first->GetKey());
+        auto key_buffer =
+            std::unique_ptr<char, decltype(&free)>(strdup(key.c_str()), free);
+        auto metadata_buffer = std::unique_ptr<char, decltype(&free)>(
+            strdup(metadata.c_str()), free);
+        if (!key_buffer || !metadata_buffer) {
+            throw std::bad_alloc();
+        }
+        *out_key = key_buffer.release();
+        *out_meta = metadata_buffer.release();
         return milvus::SuccessCStatus();
-
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
-                                      e.what());
-    } catch (...) {
-        return milvus::FailureCStatus(milvus::ErrorCode::UnexpectedError,
-                                      "unknown exception");
     }
+    CGO_CATCH_AND_RETURN_CSTATUS
 }
