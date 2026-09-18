@@ -36,6 +36,56 @@ import (
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
 
+func TestJSONPathReplace(t *testing.T) {
+	ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+	mc := hp.CreateDefaultMilvusClient(ctx, t)
+	name := fmt.Sprintf("json_path_%d", time.Now().UnixNano())
+	schema := entity.NewSchema().WithName(name).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vec").WithDataType(entity.FieldTypeFloatVector).WithDim(4)).
+		WithField(entity.NewField().WithName("metadata").WithDataType(entity.FieldTypeJSON))
+	require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, schema)))
+	t.Cleanup(func() { _ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(name)) })
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(name).WithColumns(
+		column.NewColumnInt64("id", []int64{1}),
+		column.NewColumnFloatVector("vec", 4, [][]float32{{1, 0, 0, 0}}),
+		column.NewColumnJSONBytes("metadata", [][]byte{[]byte(`{"profile":[{"age":1,"city":"A"}],"large":9007199254740993}`)})))
+	require.NoError(t, err)
+	idx, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(name, "vec", index.NewAutoIndex(entity.COSINE)))
+	require.NoError(t, err)
+	require.NoError(t, idx.Await(ctx))
+	load, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(name))
+	require.NoError(t, err)
+	require.NoError(t, load.Await(ctx))
+	query := func() string {
+		result, err := mc.Query(ctx, client.NewQueryOption(name).WithFilter("id == 1").WithOutputFields("metadata").WithConsistencyLevel(entity.ClStrong))
+		require.NoError(t, err)
+		require.Equal(t, 1, result.ResultCount)
+		value, err := result.GetColumn("metadata").Get(0)
+		require.NoError(t, err)
+		return string(value.([]byte))
+	}
+	for _, tc := range []struct{ path, value, want string }{
+		{`["profile"][0]`, `{"age":18}`, `{"profile":[{"age":18}],"large":9007199254740993}`},
+		{`["profile"][0]["city"]`, `"B"`, `{"profile":[{"age":18,"city":"B"}],"large":9007199254740993}`},
+		{`["profile"][0]["age"]`, `null`, `{"profile":[{"age":null,"city":"B"}],"large":9007199254740993}`},
+	} {
+		_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name).WithColumns(
+			column.NewColumnInt64("id", []int64{1}), column.NewColumnJSONBytes("metadata", [][]byte{[]byte(tc.value)})).WithPathReplace("metadata", tc.path))
+		require.NoError(t, err)
+		got := query()
+		require.JSONEq(t, tc.want, got)
+		require.Contains(t, got, "9007199254740993")
+	}
+	for _, path := range []string{`["missing"]["age"]`, `["profile"][1]`, `["profile"][0]["age"]["x"]`, `["profile"][0]["city"][0]`} {
+		before := query()
+		_, err := mc.Upsert(ctx, client.NewColumnBasedInsertOption(name).WithColumns(
+			column.NewColumnInt64("id", []int64{1}), column.NewColumnJSONBytes("metadata", [][]byte{[]byte(`1`)})).WithPathReplace("metadata", path))
+		require.Error(t, err)
+		require.JSONEq(t, before, query())
+	}
+}
+
 // End-to-end tests for Array partial-update
 // operators on Array fields. Unlike the in-process integration test,
 // these run against a live Milvus deployment through the Go SDK.

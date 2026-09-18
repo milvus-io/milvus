@@ -407,8 +407,9 @@ func (opt *columnBasedDataOption) WithArrayRemove(fieldName string) *columnBased
 	return opt.WithFieldPartialOp(fieldName, schemapb.FieldPartialUpdateOp_ARRAY_REMOVE)
 }
 
-// WithPathReplace replaces one existing value selected by a request-wide
-// relative path such as "[1]" or "[1][age]".
+// WithPathReplace replaces the value selected by a request-wide relative path,
+// such as "[1]", "[1][age]", or `["profile"][1]["age"]` for JSON fields.
+// A missing final JSON object key is added; intermediate containers must exist.
 func (opt *columnBasedDataOption) WithPathReplace(fieldName, path string) *columnBasedDataOption {
 	opt.setFieldPartialUpdateOp(&schemapb.FieldPartialUpdateOp{
 		FieldName: fieldName,
@@ -565,8 +566,9 @@ func (opt *rowBasedDataOption) WithArrayAppend(fieldName string) *rowBasedDataOp
 	return opt
 }
 
-// WithPathReplace replaces one existing value selected by a request-wide
-// relative path such as "[1]" or "[1][age]".
+// WithPathReplace replaces the value selected by a request-wide relative path,
+// such as "[1]", "[1][age]", or `["profile"][1]["age"]` for JSON fields.
+// Use encoded JSON bytes for scalar, array and JSON null operands.
 func (opt *rowBasedDataOption) WithPathReplace(fieldName, path string) *rowBasedDataOption {
 	opt.columnBasedDataOption.WithPathReplace(fieldName, path)
 	return opt
