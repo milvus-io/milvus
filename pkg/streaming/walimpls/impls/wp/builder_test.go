@@ -133,3 +133,30 @@ func TestSetCustomWpConfigDirectReadParams(t *testing.T) {
 		})
 	}
 }
+
+// TestSetCustomWpConfigStorageType guards the value the WAL switch depends on: the
+// configured storage type has to reach the woodpecker configuration, because it is what
+// selects the service client over the embedded one.
+func TestSetCustomWpConfigStorageType(t *testing.T) {
+	params := paramtable.Get()
+	key := params.WoodpeckerCfg.StorageType.Key
+	t.Cleanup(func() { params.Reset(key) })
+
+	for _, tc := range []struct {
+		storageType string
+		isService   bool
+	}{
+		{storageType: "service", isService: true},
+		{storageType: "minio", isService: false},
+		{storageType: "local", isService: false},
+	} {
+		t.Run(tc.storageType, func(t *testing.T) {
+			require.NoError(t, params.Save(key, tc.storageType))
+			wpConfig, err := config.NewConfiguration()
+			require.NoError(t, err)
+			require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+			assert.Equal(t, tc.storageType, wpConfig.Woodpecker.Storage.Type)
+			assert.Equal(t, tc.isService, wpConfig.Woodpecker.Storage.IsStorageService())
+		})
+	}
+}

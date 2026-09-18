@@ -44,7 +44,9 @@ type EtcdSource struct {
 	currentConfigs map[string]string
 	keyPrefix      string
 
-	updateMu        sync.Mutex
+	updateMu sync.Mutex
+	// appliedRevision is the etcd revision of the published snapshot. Guarded by updateMu.
+	appliedRevision int64
 	configRefresher *refresher
 	manager         ConfigManager
 }
@@ -196,13 +198,24 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 		newConfig[formatKey(key)] = string(kv.Value)
 		mlog.Debug(es.ctx, "got config from etcd", mlog.String("key", string(kv.Key)), mlog.String("value", string(kv.Value)))
 	}
-	return es.update(newConfig)
+	return es.update(newConfig, response.Header.Revision)
 }
 
-func (es *EtcdSource) update(configs map[string]string) error {
+func (es *EtcdSource) update(configs map[string]string, revision int64) error {
 	// make sure config not change when fire event
 	es.updateMu.Lock()
 	defer es.updateMu.Unlock()
+
+	// The etcd read that produced configs runs before updateMu is taken, so refreshes can
+	// finish out of order, and a serializable poll served by a lagging member can return an
+	// older revision than a linearizable refresh that has already published. Publishing it
+	// would roll the configuration back, so drop any snapshot older than the applied one.
+	if revision < es.appliedRevision {
+		mlog.RatedInfo(es.ctx, rate.Limit(1), "ignore etcd config snapshot older than the applied one",
+			mlog.Int64("revision", revision),
+			mlog.Int64("appliedRevision", es.appliedRevision))
+		return nil
+	}
 
 	es.Lock()
 	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
@@ -212,6 +225,7 @@ func (es *EtcdSource) update(configs map[string]string) error {
 		return err
 	}
 	es.currentConfigs = configs
+	es.appliedRevision = revision
 	es.Unlock()
 	if es.manager != nil {
 		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
