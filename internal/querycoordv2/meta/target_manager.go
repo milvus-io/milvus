@@ -79,11 +79,16 @@ type TargetManagerInterface interface {
 	GetPartitions(ctx context.Context, collectionID int64, scope TargetScope) ([]int64, error)
 	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
 	GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64
+	GetSplitWindowTargets(ctx context.Context, collectionID int64, scope TargetScope) typeutil.Set[string]
 }
 
 type TargetManager struct {
 	broker Broker
 	meta   *Meta
+	// splitStates reads the collection's shard states right before each
+	// next-target pull, to mark the split targets that pull was taken inside
+	// the split window of. nil (only through NewTargetManager) disables the mark.
+	splitStates *ShardSplitStateCache
 
 	// metaView resolves segment details on demand from the shared metacache
 	// store instead of keeping full proto copies in CollectionTargets.
@@ -97,12 +102,31 @@ type TargetManager struct {
 }
 
 func NewTargetManager(broker Broker, meta *Meta, metaView metacache.MetaView) *TargetManager {
+	return newTargetManager(broker, meta, metaView, nil)
+}
+
+// NewTargetManagerWithSplitState is NewTargetManager with the shard-split state
+// cache the next-target pull marks its split window targets through. The
+// querycoord server passes the same cache its checkers use.
+//
+// It panics on a nil cache: a caller that means to split must not silently lose
+// the window marks. A target manager without one is built by NewTargetManager.
+func NewTargetManagerWithSplitState(broker Broker, meta *Meta, metaView metacache.MetaView, splitStates *ShardSplitStateCache) *TargetManager {
+	if splitStates == nil {
+		panic(merr.WrapErrServiceInternal("NewTargetManagerWithSplitState requires a shard split state cache",
+			"build a target manager without one with NewTargetManager"))
+	}
+	return newTargetManager(broker, meta, metaView, splitStates)
+}
+
+func newTargetManager(broker Broker, meta *Meta, metaView metacache.MetaView, splitStates *ShardSplitStateCache) *TargetManager {
 	return &TargetManager{
-		broker:   broker,
-		meta:     meta,
-		metaView: metaView,
-		current:  newTarget(),
-		next:     newTarget(),
+		broker:      broker,
+		meta:        meta,
+		splitStates: splitStates,
+		metaView:    metaView,
+		current:     newTarget(),
+		next:        newTarget(),
 	}
 }
 
@@ -149,8 +173,20 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collectionID int64) error {
 	var vChannelInfos []*datapb.VchannelInfo
 	var segmentInfos []*datapb.SegmentInfo
+	var shardStates *ShardStateSnapshot
 	err := retry.Handle(ctx, func() (bool, error) {
 		var err error
+		// Read the shard states BEFORE the pull: the mark is the complement of
+		// what this read saw settled (ShardStateSnapshot.SplitWindowTargets),
+		// which never misses a target the later pull still has in the window.
+		// A failed fresh read falls back to the last cached one, which is just
+		// as sound; only with nothing cached is the read retried with the pull.
+		if mgr.splitStates != nil {
+			shardStates, err = mgr.readShardStates(ctx, collectionID)
+			if err != nil {
+				return true, err
+			}
+		}
 		vChannelInfos, segmentInfos, err = mgr.broker.GetRecoveryInfoV2(ctx, collectionID)
 		if err != nil {
 			return true, err
@@ -199,14 +235,40 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		return nil
 	}
 
+	var windowTargets []string
+	if shardStates != nil {
+		windowTargets = shardStates.SplitWindowTargets(lo.Map(vChannelInfos, func(info *datapb.VchannelInfo, _ int) string {
+			return info.GetChannelName()
+		}))
+	}
 	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs, mgr.metaView)
+	allocatedTarget.windowTargets = typeutil.NewSet(windowTargets...)
+
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
+	if len(windowTargets) > 0 {
+		mlog.Info(ctx, "next target pulled inside a shard split window; its split targets are held back from sync and promotion",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Int64("version", allocatedTarget.GetTargetVersion()),
+			mlog.Strings("windowTargets", windowTargets))
+	}
 	mlog.Debug(ctx, "finish to update next targets for collection",
 		mlog.FieldCollectionID(collectionID),
 		mlog.Int64s("PartitionIDs", partitionIDs))
 
 	return nil
+}
+
+// readShardStates reads the collection's shard states for the next-target pull
+// about to be taken. It needs the split state cache.
+func (mgr *TargetManager) readShardStates(ctx context.Context, collectionID int64) (*ShardStateSnapshot, error) {
+	states, err := mgr.splitStates.ReadShardStates(ctx, collectionID)
+	if err != nil {
+		mlog.Warn(ctx, "failed to read shard split states before pulling the next target",
+			mlog.FieldCollectionID(collectionID), mlog.Err(err))
+		return nil, merr.Wrap(err, "read shard split states before pulling the next target")
+	}
+	return states, nil
 }
 
 func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
@@ -357,8 +419,11 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 		channel2SegmentIDs[channel] = kept
 	}
 
-	return newCollectionTargetFromGrouping(segIDs, channel2SegmentIDs, partition2SegmentIDs,
+	newTarget := newCollectionTargetFromGrouping(segIDs, channel2SegmentIDs, partition2SegmentIDs,
 		channels, partitions, oldTarget.lackSegmentInfo, oldTarget.metaView)
+	// trimming partitions does not change when the snapshot was pulled.
+	newTarget.windowTargets = oldTarget.windowTargets
+	return newTarget
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -747,6 +812,18 @@ func (mgr *TargetManager) IsCurrentTargetReady(ctx context.Context, collectionID
 	}
 
 	return target.Ready()
+}
+
+// GetSplitWindowTargets returns the channels the collection's target in scope
+// marked as split window targets when it was pulled (see
+// ShardStateSnapshot.SplitWindowTargets); empty when that target was not pulled
+// inside a split window, or does not exist.
+func (mgr *TargetManager) GetSplitWindowTargets(ctx context.Context, collectionID int64, scope TargetScope) typeutil.Set[string] {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	if len(targets) == 0 {
+		return nil
+	}
+	return targets[0].SplitWindowTargets()
 }
 
 func (mgr *TargetManager) GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64 {
