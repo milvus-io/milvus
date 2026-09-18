@@ -19,12 +19,15 @@ package querynodev2
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -36,7 +39,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/v2/util/etcd"
+	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v2/util/resource"
 )
 
 type LocalWorkerTestSuite struct {
@@ -162,8 +167,8 @@ func (suite *LocalWorkerTestSuite) TestReleaseSegment() {
 
 func (suite *LocalWorkerTestSuite) TestSearchSegments_EmptyResult() {
 	// SearchSegments on an empty node returns a valid response with empty blob.
-	// This exercises the new SearchSegments wrapper: when SlicedBlob is empty,
-	// the unmarshal+release path is skipped.
+	// When SlicedBlob is empty, materialization is skipped and the deferred
+	// MsgPins release is a no-op.
 	req := &querypb.SearchRequest{
 		Req: &internalpb.SearchRequest{
 			Base: &commonpb.MsgBase{
@@ -183,6 +188,47 @@ func (suite *LocalWorkerTestSuite) TestSearchSegments_EmptyResult() {
 			suite.Nil(resp.GetResultData())
 		}
 	}
+}
+
+func TestConsumeLocalSearchResults(t *testing.T) {
+	data := &schemapb.SearchResultData{NumQueries: 2, TopK: 3}
+	blob, err := proto.Marshal(data)
+	require.NoError(t, err)
+
+	resp := &internalpb.SearchResults{
+		SlicedBlob: blob,
+		SubResults: []*internalpb.SubSearchResults{
+			{SlicedBlob: blob},
+			{},
+			{SlicedBlob: blob},
+		},
+	}
+	var released atomic.Int32
+	resource.MsgPins.Pin(resp, func() { released.Add(1) })
+	got, err := consumeLocalSearchResults(resp)
+	require.NoError(t, err)
+	require.Same(t, resp, got)
+	require.EqualValues(t, 1, released.Load())
+	require.Nil(t, resp.GetSlicedBlob())
+	require.EqualValues(t, 2, resp.GetResultData().GetNumQueries())
+	for _, index := range []int{0, 2} {
+		require.Nil(t, resp.GetSubResults()[index].GetSlicedBlob())
+		require.EqualValues(t, 2, resp.GetSubResults()[index].GetResultData().GetNumQueries())
+	}
+	require.Nil(t, resp.GetSubResults()[1].GetResultData())
+
+	released.Store(0)
+	invalid := &internalpb.SearchResults{
+		SubResults: []*internalpb.SubSearchResults{
+			{SlicedBlob: blob},
+			{SlicedBlob: []byte{0xff}},
+		},
+	}
+	resource.MsgPins.Pin(invalid, func() { released.Add(1) })
+	got, err = consumeLocalSearchResults(invalid)
+	require.Nil(t, got)
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.EqualValues(t, 1, released.Load(), "decode failure must release the envelope")
 }
 
 func TestLocalWorker(t *testing.T) {

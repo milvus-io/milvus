@@ -67,19 +67,36 @@ func (w *LocalWorker) SearchSegments(ctx context.Context, req *querypb.SearchReq
 	if err != nil {
 		return nil, err
 	}
+	return consumeLocalSearchResults(resp)
+}
+
+func consumeLocalSearchResults(resp *internalpb.SearchResults) (*internalpb.SearchResults, error) {
+	defer resource.MsgPins.Release(resp)
 	// The gRPC codec (releaseCodec) never runs for in-process calls, so any C
 	// memory pinned in MsgPins will never be triggered by Marshal. We must
-	// consume it here: unmarshal SlicedBlob → ResultData (so the delegator can
-	// use it directly), then release any pinned C memory.
+	// consume top-level and grouped branch blobs here, then release the final
+	// response after every C-backed slice has been materialized into Go memory.
 	if blob := resp.GetSlicedBlob(); len(blob) > 0 {
 		var resultData schemapb.SearchResultData
 		if unmarshalErr := proto.Unmarshal(blob, &resultData); unmarshalErr != nil {
-			resource.MsgPins.Release(resp) // still release to avoid leak
-			return nil, merr.WrapErrServiceInternal("unmarshal SearchResultData from SlicedBlob", unmarshalErr.Error())
+			return nil, merr.WrapErrServiceInternalErr(unmarshalErr, "unmarshal SearchResultData from SlicedBlob")
 		}
 		resp.ResultData = &resultData
 		resp.SlicedBlob = nil
-		resource.MsgPins.Release(resp) // no-op if not pinned
+	}
+	for i, subResult := range resp.GetSubResults() {
+		if blob := subResult.GetSlicedBlob(); len(blob) > 0 {
+			var resultData schemapb.SearchResultData
+			if unmarshalErr := proto.Unmarshal(blob, &resultData); unmarshalErr != nil {
+				return nil, merr.WrapErrServiceInternalErr(
+					unmarshalErr,
+					"unmarshal grouped SearchResultData at branch %d from SlicedBlob",
+					i,
+				)
+			}
+			subResult.ResultData = &resultData
+			subResult.SlicedBlob = nil
+		}
 	}
 	return resp, nil
 }

@@ -56,6 +56,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/conc"
 	"github.com/milvus-io/milvus/pkg/v2/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v2/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
 	"github.com/milvus-io/milvus/pkg/v2/util/metautil"
@@ -353,6 +354,8 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 		Req:             sd.shallowCopySearchRequest(req.GetReq(), targetID),
 		FromShardLeader: req.FromShardLeader,
 		TotalChannelNum: req.TotalChannelNum,
+		// Shared read-only across per-worker requests, like Req's shallow copy.
+		ExtraFilterSharingReqs: req.ExtraFilterSharingReqs,
 	}
 	return nodeReq
 }
@@ -404,12 +407,16 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		func() {
+		err := func() error {
 			sd.partitionStatsMut.RLock()
 			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
-				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+			return pruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()},
+				len(req.GetExtraFilterSharingReqs()) > 0)
 		}()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentFilter.GetAsBool() {
@@ -422,11 +429,16 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		)
 	}
 
-	avgdl, skipSearch, err := sd.prepareSearchFunction(ctx, req.GetReq())
+	avgdl, skipSearch, err := sd.prepareSharedFilterBranchFunctions(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	if skipSearch {
+		if len(req.GetExtraFilterSharingReqs()) > 0 {
+			// "only this branch returns nothing" cannot be expressed inside a
+			// group; let the caller retry the branches separately.
+			return nil, errSharedFilterUngroupable
+		}
 		log.Warn("search bm25 from empty data, skip search", zap.String("channel", sd.vchannelName), zap.Float64("avgdl", avgdl))
 		return []*internalpb.SearchResults{}, nil
 	}
@@ -438,7 +450,7 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("growingNum", len(growing)),
 	)
 
-	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	req, err = sd.optimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
@@ -459,6 +471,20 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 	if err != nil {
 		log.Warn("Delegator search failed", zap.Error(err))
 		return nil, err
+	}
+	// executeSubTasks returned fewer results than tasks, so a worker failed and
+	// the partial-result evaluator accepted the rest (with the ratio at 1 it
+	// would have failed the whole call instead). One worker response carries
+	// one result set for every branch of a group, so all of them would inherit
+	// that gap -- ungrouped, only the branch that hit the failing worker did.
+	// Retry the branches separately so each gets its own partial-result
+	// decision, exactly as before grouping.
+	if len(req.GetExtraFilterSharingReqs()) > 0 && len(results) < len(tasks) {
+		log.Warn("shared-filter group lost a worker to a partial result, retrying per branch",
+			zap.Int("tasks", len(tasks)),
+			zap.Int("results", len(results)),
+		)
+		return nil, errSharedFilterUngroupable
 	}
 
 	log.Debug("Delegator search done", zap.Int("results", len(results)))
@@ -523,81 +549,136 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	defer sd.distribution.Unpin(version)
 
 	if req.GetReq().GetIsAdvanced() {
-		futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetSubReqs()))
-		for index, subReq := range req.GetReq().GetSubReqs() {
-			newRequest := &internalpb.SearchRequest{
-				Base:                    req.GetReq().GetBase(),
-				ReqID:                   req.GetReq().GetReqID(),
-				DbID:                    req.GetReq().GetDbID(),
-				CollectionID:            req.GetReq().GetCollectionID(),
-				PartitionIDs:            subReq.GetPartitionIDs(),
-				Dsl:                     subReq.GetDsl(),
-				PlaceholderGroup:        subReq.GetPlaceholderGroup(),
-				DslType:                 subReq.GetDslType(),
-				SerializedExprPlan:      subReq.GetSerializedExprPlan(),
-				OutputFieldsId:          req.GetReq().GetOutputFieldsId(),
-				MvccTimestamp:           req.GetReq().GetMvccTimestamp(),
-				GuaranteeTimestamp:      req.GetReq().GetGuaranteeTimestamp(),
-				TimeoutTimestamp:        req.GetReq().GetTimeoutTimestamp(),
-				Nq:                      subReq.GetNq(),
-				Topk:                    subReq.GetTopk(),
-				MetricType:              subReq.GetMetricType(),
-				IgnoreGrowing:           subReq.GetIgnoreGrowing(),
-				Username:                req.GetReq().GetUsername(),
-				IsAdvanced:              false,
-				GroupByFieldId:          subReq.GetGroupByFieldId(),
-				GroupSize:               subReq.GetGroupSize(),
-				FieldId:                 subReq.GetFieldId(),
-				IsTopkReduce:            req.GetReq().GetIsTopkReduce(),
-				IsIterator:              req.GetReq().GetIsIterator(),
-				CollectionTtlTimestamps: req.GetReq().GetCollectionTtlTimestamps(),
-				AnalyzerName:            subReq.GetAnalyzerName(),
-				PkFilter:                common.PkFilterNoPkFilter, // hybrid search sub-requests rarely have PK predicates, skip unmarshal
-			}
-			future := conc.Go(func() (*internalpb.SearchResults, error) {
-				searchReq := &querypb.SearchRequest{
-					Req:             newRequest,
-					DmlChannels:     req.GetDmlChannels(),
-					TotalChannelNum: req.GetTotalChannelNum(),
-				}
-				searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
-				searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
-				if searchReq.GetReq().GetMvccTimestamp() == 0 {
-					searchReq.GetReq().MvccTimestamp = tSafe
-				}
-				searchReq.Req.CollectionTtlTimestamps = req.GetReq().GetCollectionTtlTimestamps()
-				results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
-				if err != nil {
-					return nil, err
-				}
+		subReqs := req.GetReq().GetSubReqs()
+		// Sub-requests carrying an identical filter predicate travel as one
+		// request and evaluate that filter once per segment. A sub-request
+		// that cannot share ends up alone in its group, which is exactly
+		// today's behavior.
+		groups := groupSubReqsBySharedFilter(ctx, sd.collectionID, sd.collection.Schema(), subReqs)
 
-				return segments.ReduceSearchOnQueryNode(ctx,
-					results,
-					reduce.NewReduceSearchResultInfo(searchReq.GetReq().GetNq(),
-						searchReq.GetReq().GetTopk()).WithMetricType(searchReq.GetReq().GetMetricType()).
-						WithGroupByField(searchReq.GetReq().GetGroupByFieldId()).
-						WithGroupSize(searchReq.GetReq().GetGroupSize()))
+		futures := make([]*conc.Future[[]*internalpb.SearchResults], len(groups))
+		for groupIdx := range groups {
+			group := groups[groupIdx]
+			future := conc.Go(func() ([]*internalpb.SearchResults, error) {
+				reduced, err := sd.searchSharedFilterGroup(ctx, req, subReqs, group, tSafe, sealed, growing, sealedRowCount)
+				if errors.Is(err, errSharedFilterUngroupable) {
+					// The group cannot be answered as a group -- a branch must
+					// be skipped, a worker failure was absorbed as a partial
+					// result, or vector pruning was activated after grouping.
+					// Redo it one branch at a time, each branch in its own future,
+					// which is exactly the ungrouped path.
+					log.Debug("shared-filter group not executable as a group, retrying per branch",
+						zap.Int("branches", len(group)))
+					branchFutures := make([]*conc.Future[*internalpb.SearchResults], len(group))
+					for branchIdx := range group {
+						subReqIdx := group[branchIdx]
+						branchFutures[branchIdx] = conc.Go(func() (*internalpb.SearchResults, error) {
+							single, singleErr := sd.searchSharedFilterGroup(ctx, req, subReqs,
+								[]int{subReqIdx}, tSafe, sealed, growing, sealedRowCount)
+							if singleErr != nil {
+								return nil, singleErr
+							}
+							return single[0], nil
+						})
+					}
+					if branchErr := conc.AwaitAll(branchFutures...); branchErr != nil {
+						return nil, branchErr
+					}
+					reduced = make([]*internalpb.SearchResults, len(group))
+					for branchIdx, branchFuture := range branchFutures {
+						reduced[branchIdx] = branchFuture.Value()
+					}
+					return reduced, nil
+				}
+				return reduced, err
 			})
-			futures[index] = future
+			futures[groupIdx] = future
 		}
 
 		err = conc.AwaitAll(futures...)
 		if err != nil {
 			return nil, err
 		}
-		results := make([]*internalpb.SearchResults, len(futures))
-		for i, future := range futures {
-			result := future.Value()
-			if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Debug("delegator hybrid search failed",
-					zap.String("reason", result.GetStatus().GetReason()))
-				return nil, merr.Error(result.GetStatus())
+		results := make([]*internalpb.SearchResults, len(subReqs))
+		for groupIdx, future := range futures {
+			groupResults := future.Value()
+			for branchIdx, subReqIdx := range groups[groupIdx] {
+				result := groupResults[branchIdx]
+				if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Debug("delegator hybrid search failed",
+						zap.String("reason", result.GetStatus().GetReason()))
+					return nil, merr.Error(result.GetStatus())
+				}
+				results[subReqIdx] = result
 			}
-			results[i] = result
 		}
 		return results, nil
 	}
 	return sd.search(ctx, req, sealed, growing, sealedRowCount)
+}
+
+// searchSharedFilterGroup executes one group (which may be a single branch)
+// and reduces each branch's shard-local results.
+func (sd *shardDelegator) searchSharedFilterGroup(
+	ctx context.Context,
+	req *querypb.SearchRequest,
+	subReqs []*internalpb.SubSearchRequest,
+	group []int,
+	tSafe uint64,
+	sealed []SnapshotItem,
+	growing []SegmentEntry,
+	sealedRowCount map[int64]int64,
+) ([]*internalpb.SearchResults, error) {
+	searchReq := buildSharedFilterSearchRequest(req, subReqs, group, tSafe)
+	results, err := sd.search(ctx, searchReq, sealed, growing, sealedRowCount)
+	if err != nil {
+		return nil, err
+	}
+
+	perBranch := [][]*internalpb.SearchResults{results}
+	if len(group) > 1 {
+		perBranch, err = demuxSharedFilterResults(results, len(group))
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	reduced := make([]*internalpb.SearchResults, len(group))
+	reduceBranch := func(reduceCtx context.Context, branchIdx, subReqIdx int) error {
+		subReq := subReqs[subReqIdx]
+		branchResult, err := segments.ReduceSearchOnQueryNode(reduceCtx,
+			perBranch[branchIdx],
+			reduce.NewReduceSearchResultInfo(subReq.GetNq(), subReq.GetTopk()).
+				WithMetricType(subReq.GetMetricType()).
+				WithGroupByField(subReq.GetGroupByFieldId()).
+				WithGroupSize(subReq.GetGroupSize()))
+		if err != nil {
+			return err
+		}
+		reduced[branchIdx] = branchResult
+		return nil
+	}
+	if len(group) == 1 {
+		if err := reduceBranch(ctx, 0, group[0]); err != nil {
+			return nil, err
+		}
+		return reduced, nil
+	}
+
+	// Reduce grouped branches concurrently, as they were when each
+	// sub-request was its own future.
+	reduceGroup, reduceCtx := errgroup.WithContext(ctx)
+	reduceGroup.SetLimit(min(len(group), hardware.GetCPUNum()))
+	for branchIdx, subReqIdx := range group {
+		branchIdx, subReqIdx := branchIdx, subReqIdx
+		reduceGroup.Go(func() error {
+			return reduceBranch(reduceCtx, branchIdx, subReqIdx)
+		})
+	}
+	if err := reduceGroup.Wait(); err != nil {
+		return nil, err
+	}
+	return reduced, nil
 }
 
 func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error {

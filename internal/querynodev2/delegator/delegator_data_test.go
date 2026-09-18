@@ -2204,3 +2204,425 @@ func (s *DelegatorDataSuite) TestReleaseSegmentsWorkerNotAvailable() {
 func TestDelegatorDataSuite(t *testing.T) {
 	suite.Run(t, new(DelegatorDataSuite))
 }
+
+// A shared-filter group cannot express "this branch returns nothing", which is
+// what a BM25 branch over a collection with no text yet needs. The delegator
+// answers errSharedFilterUngroupable and redoes the group one branch at a time
+// -- the pre-grouping behavior. The part worth pinning is the bookkeeping: each
+// retried branch's result must land at its own sub-request index. A swap here
+// hands the caller another sub-request's hits with no error to notice.
+func (s *DelegatorDataSuite) TestSearchRetriesUngroupableSharedFilterGroupPerBranch() {
+	// BM25 over `text` into `sparse`, plus a dense field for the other branch.
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		Name:    "TestCollection",
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: true},
+			{Name: "sparse", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector},
+			{Name: "text", FieldID: 102, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}}},
+			{Name: "dense", FieldID: 103, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{102},
+			OutputFieldIds: []int64{101},
+		}},
+	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version,
+		s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.Require().NoError(err)
+	s.delegator = delegator.(*shardDelegator)
+	s.delegator.Start()
+
+	// One sealed segment on one worker keeps the worker's answer for the
+	// dense branch a single response, which the shard-level reduce passes
+	// through untouched -- so a marker on it survives to the caller.
+	s.delegator.SyncDistribution(context.Background(),
+		SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 500, Version: 2001})
+	s.delegator.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2001,
+		SealedSegmentRowCount: map[int64]int64{1000: 100},
+		Checkpoint:            &msgpb.MsgPosition{},
+		DeleteCP:              &msgpb.MsgPosition{},
+	}, []int64{500})
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.HybridSearchSharedFilterEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.HybridSearchSharedFilterEnabled.Key)
+
+	marker := []byte("dense-branch-result")
+	var workerReqs []*querypb.SearchRequest
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().SearchSegments(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, req *querypb.SearchRequest) { workerReqs = append(workerReqs, req) }).
+		Return(&internalpb.SearchResults{SlicedBlob: marker, MetricType: metric.IP}, nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.Anything).Return(worker, nil)
+	defer func() { s.workerManager.ExpectedCalls = nil }()
+
+	textPlaceholder, err := funcutil.FieldDataToPlaceholderGroupBytes(&schemapb.FieldData{
+		Type: schemapb.DataType_VarChar, FieldId: 102,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
+		}},
+	})
+	s.Require().NoError(err)
+	plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{
+		VectorAnns: &planpb.VectorANNS{QueryInfo: &planpb.QueryInfo{Topk: 10}},
+	}})
+	s.Require().NoError(err)
+
+	// Both carry the proxy's hint for the same predicate, so they form one
+	// group. BM25 goes first: it is branch 0 of the group, and the branch the
+	// delegator has to skip -- no stats have been loaded, so avgdl is 0.
+	subReqs := []*internalpb.SubSearchRequest{
+		{FieldId: 101, MetricType: metric.BM25, Nq: 1, Topk: 10, FilterSharingGroup: 1, PlaceholderGroup: textPlaceholder, SerializedExprPlan: plan},
+		{FieldId: 103, MetricType: metric.IP, Nq: 1, Topk: 10, FilterSharingGroup: 1, SerializedExprPlan: plan},
+	}
+	results, err := s.delegator.Search(context.Background(), &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			CollectionID: s.collectionID,
+			IsAdvanced:   true,
+			SubReqs:      subReqs,
+		},
+		DmlChannels: []string{s.vchannelName},
+	})
+	s.Require().NoError(err, "an ungroupable group is retried per branch, not failed")
+	s.Require().Len(results, 2)
+
+	// Sub-request 0 (BM25) was skipped: an empty result, reduced under its
+	// own metric. Sub-request 1 (dense) is the worker's answer, marker intact.
+	s.Equal(metric.BM25, results[0].GetMetricType())
+	s.NotEqual(marker, results[0].GetSlicedBlob())
+	skipped, err := segments.DecodeSearchResults(context.Background(), []*internalpb.SearchResults{results[0]})
+	s.Require().NoError(err)
+	for _, data := range skipped {
+		s.Zero(typeutil.GetSizeOfIDs(data.GetIds()))
+	}
+	s.Equal(marker, results[1].GetSlicedBlob())
+
+	// Only the dense branch reached a worker, and it went alone.
+	s.Require().Len(workerReqs, 1)
+	s.EqualValues(103, workerReqs[0].GetReq().GetFieldId())
+	s.Empty(workerReqs[0].GetExtraFilterSharingReqs())
+}
+
+// A shared-filter group is answered by one worker response per worker, shared
+// by every branch. When a worker fails and the partial-result evaluator
+// accepts what is left, that gap would reach every branch of the group --
+// ungrouped, only the branch that hit the failing worker lost anything. The
+// delegator answers errSharedFilterUngroupable instead and redoes the group
+// one branch at a time, so each branch gets its own partial-result decision.
+func (s *DelegatorDataSuite) TestSearchRetriesSharedFilterGroupOnAbsorbedWorkerFailure() {
+	// Two dense fields, so neither branch touches the BM25 machinery.
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		Name:    "TestCollection",
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: true},
+			{Name: "sparse", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector},
+			{Name: "text", FieldID: 102, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}}},
+			{Name: "dense1", FieldID: 103, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+			{Name: "dense2", FieldID: 104, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{102},
+			OutputFieldIds: []int64{101},
+		}},
+	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version,
+		s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.Require().NoError(err)
+	s.delegator = delegator.(*shardDelegator)
+	s.delegator.Start()
+
+	// Two sealed segments of equal size on two workers: losing one leaves
+	// exactly half the rows, which the ratio the first sub-test sets accepts.
+	s.delegator.SyncDistribution(context.Background(),
+		SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 500, Version: 2001},
+		SegmentEntry{NodeID: 2, SegmentID: 1001, PartitionID: 500, Version: 2001})
+	s.delegator.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2001,
+		SealedSegmentRowCount: map[int64]int64{1000: 100, 1001: 100},
+		Checkpoint:            &msgpb.MsgPosition{},
+		DeleteCP:              &msgpb.MsgPosition{},
+	}, []int64{500})
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.HybridSearchSharedFilterEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.HybridSearchSharedFilterEnabled.Key)
+
+	// One hit per (worker, branch), with an id naming both, so a worker
+	// missing from a branch's answer shows up in the final ids.
+	hitID := func(nodeID int64, branch int) int64 { return nodeID*10 + int64(branch) }
+	oneHit := func(id int64) *schemapb.SearchResultData {
+		return &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       1,
+			Ids:        &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{id}}}},
+			Scores:     []float32{1 / float32(id)},
+			Topks:      []int64{1},
+		}
+	}
+
+	type workerCall struct {
+		nodeID  int64
+		fieldID int64
+		grouped bool
+	}
+	var mu sync.Mutex
+	var calls []workerCall
+	newWorker := func(nodeID int64, failsGroupedSearch bool) *cluster.MockWorker {
+		worker := &cluster.MockWorker{}
+		worker.EXPECT().SearchSegments(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
+				grouped := len(req.GetExtraFilterSharingReqs()) > 0
+				mu.Lock()
+				calls = append(calls, workerCall{nodeID: nodeID, fieldID: req.GetReq().GetFieldId(), grouped: grouped})
+				mu.Unlock()
+
+				if !grouped {
+					branch := 0
+					if req.GetReq().GetFieldId() == 104 {
+						branch = 1
+					}
+					return &internalpb.SearchResults{
+						MetricType:      metric.IP,
+						NumQueries:      1,
+						TopK:            1,
+						ResultData:      oneHit(hitID(nodeID, branch)),
+						CostAggregation: &internalpb.CostAggregation{},
+					}, nil
+				}
+				if failsGroupedSearch {
+					return nil, merr.WrapErrServiceInternal("worker cannot answer the group")
+				}
+				results := &internalpb.SearchResults{MetricType: metric.IP, CostAggregation: &internalpb.CostAggregation{}}
+				for branch := 0; branch <= len(req.GetExtraFilterSharingReqs()); branch++ {
+					results.SubResults = append(results.SubResults, &internalpb.SubSearchResults{
+						ReqIndex:   int64(branch),
+						MetricType: metric.IP,
+						NumQueries: 1,
+						TopK:       1,
+						ResultData: oneHit(hitID(nodeID, branch)),
+					})
+				}
+				return results, nil
+			})
+		return worker
+	}
+
+	workers := map[int64]cluster.Worker{1: newWorker(1, false), 2: newWorker(2, true)}
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, nodeID int64) (cluster.Worker, error) { return workers[nodeID], nil })
+	defer func() { s.workerManager.ExpectedCalls = nil }()
+
+	plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{
+		VectorAnns: &planpb.VectorANNS{QueryInfo: &planpb.QueryInfo{Topk: 10}},
+	}})
+	s.Require().NoError(err)
+	// Both carry the proxy's hint for the same predicate, so they form one group.
+	subReqs := []*internalpb.SubSearchRequest{
+		{FieldId: 103, MetricType: metric.IP, Nq: 1, Topk: 10, FilterSharingGroup: 1, SerializedExprPlan: plan},
+		{FieldId: 104, MetricType: metric.IP, Nq: 1, Topk: 10, FilterSharingGroup: 1, SerializedExprPlan: plan},
+	}
+	search := func() ([]*internalpb.SearchResults, []workerCall, error) {
+		mu.Lock()
+		calls = nil
+		mu.Unlock()
+		results, err := s.delegator.Search(context.Background(), &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				Base:         commonpbutil.NewMsgBase(),
+				CollectionID: s.collectionID,
+				IsAdvanced:   true,
+				SubReqs:      subReqs,
+			},
+			DmlChannels: []string{s.vchannelName},
+		})
+		mu.Lock()
+		defer mu.Unlock()
+		return results, calls, err
+	}
+	ratioKey := paramtable.Get().QueryNodeCfg.PartialResultRequiredDataRatio.Key
+
+	s.Run("partial result absorbs the failure, so the group is retried per branch", func() {
+		paramtable.Get().Save(ratioKey, "0.5")
+		defer paramtable.Get().Reset(ratioKey)
+
+		results, calls, err := search()
+		s.Require().NoError(err)
+		s.Require().Len(results, 2)
+
+		grouped := lo.Filter(calls, func(call workerCall, _ int) bool { return call.grouped })
+		single := lo.Filter(calls, func(call workerCall, _ int) bool { return !call.grouped })
+		s.Len(grouped, 2, "the group was first tried on both workers")
+		s.Len(single, 4, "then every branch went to every worker on its own")
+
+		// The retry gives each branch its own partial-result decision, and
+		// both workers answer a single-branch request, so no branch loses the
+		// hits of the worker that failed the group.
+		for branch, result := range results {
+			decoded, err := segments.DecodeSearchResults(context.Background(), []*internalpb.SearchResults{result})
+			s.Require().NoError(err)
+			s.Require().Len(decoded, 1)
+			s.ElementsMatch([]int64{hitID(1, branch), hitID(2, branch)},
+				decoded[0].GetIds().GetIntId().GetData(), "branch %d lost a worker's hits", branch)
+		}
+	})
+
+	s.Run("without partial results the hybrid search fails, as it did ungrouped", func() {
+		paramtable.Get().Save(ratioKey, "1")
+		defer paramtable.Get().Reset(ratioKey)
+
+		_, calls, err := search()
+		s.Error(err)
+		for _, call := range calls {
+			s.True(call.grouped, "a worker failure must not be retried per branch when partial results are off")
+		}
+	})
+}
+
+// prepareSharedFilterBranchFunctions runs branch 0 and the extras concurrently.
+// A branch that has to be skipped entirely (a BM25 field with no data) still
+// makes the caller surface the ungroupable sentinel, and the retried branches
+// still have to land at their own sub-request indexes -- here the skipped branch
+// is an extra, not the head the group was built from.
+func (s *DelegatorDataSuite) TestSearchRetriesGroupWhenAnExtraBranchIsSkipped() {
+	s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+		Name:    "TestCollection",
+		Version: 1,
+		Fields: []*schemapb.FieldSchema{
+			{Name: "id", FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: true},
+			{Name: "sparse", FieldID: 101, DataType: schemapb.DataType_SparseFloatVector},
+			{Name: "text", FieldID: 102, DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "256"}}},
+			{Name: "dense", FieldID: 103, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		},
+		Functions: []*schemapb.FunctionSchema{{
+			Type:           schemapb.FunctionType_BM25,
+			InputFieldIds:  []int64{102},
+			OutputFieldIds: []int64{101},
+		}},
+	}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version,
+		s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+	s.Require().NoError(err)
+	s.delegator = delegator.(*shardDelegator)
+	s.delegator.Start()
+
+	// One sealed segment on one worker keeps the dense branch's answer a
+	// single response, which the shard-level reduce passes through untouched.
+	s.delegator.SyncDistribution(context.Background(),
+		SegmentEntry{NodeID: 1, SegmentID: 1000, PartitionID: 500, Version: 2001})
+	s.delegator.SyncTargetVersion(&querypb.SyncAction{
+		TargetVersion:         2001,
+		SealedSegmentRowCount: map[int64]int64{1000: 100},
+		Checkpoint:            &msgpb.MsgPosition{},
+		DeleteCP:              &msgpb.MsgPosition{},
+	}, []int64{500})
+
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.HybridSearchSharedFilterEnabled.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.HybridSearchSharedFilterEnabled.Key)
+
+	marker := []byte("dense-branch-result")
+	var workerReqs []*querypb.SearchRequest
+	worker := &cluster.MockWorker{}
+	worker.EXPECT().SearchSegments(mock.Anything, mock.Anything).
+		Run(func(_ context.Context, req *querypb.SearchRequest) { workerReqs = append(workerReqs, req) }).
+		Return(&internalpb.SearchResults{SlicedBlob: marker, MetricType: metric.IP}, nil)
+	s.workerManager.EXPECT().GetWorker(mock.Anything, mock.Anything).Return(worker, nil)
+	defer func() { s.workerManager.ExpectedCalls = nil }()
+
+	textPlaceholder, err := funcutil.FieldDataToPlaceholderGroupBytes(&schemapb.FieldData{
+		Type: schemapb.DataType_VarChar, FieldId: 102,
+		Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+			Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"hello"}}},
+		}},
+	})
+	s.Require().NoError(err)
+	plan, err := proto.Marshal(&planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{
+		VectorAnns: &planpb.VectorANNS{QueryInfo: &planpb.QueryInfo{Topk: 10}},
+	}})
+	s.Require().NoError(err)
+
+	// The dense branch heads the group; BM25 rides along as an extra and is
+	// the one that must be skipped -- no stats are loaded, so avgdl is 0.
+	subReqs := []*internalpb.SubSearchRequest{
+		{FieldId: 103, MetricType: metric.IP, Nq: 1, Topk: 10, FilterSharingGroup: 1, SerializedExprPlan: plan},
+		{FieldId: 101, MetricType: metric.BM25, Nq: 1, Topk: 10, FilterSharingGroup: 1, PlaceholderGroup: textPlaceholder, SerializedExprPlan: plan},
+	}
+	results, err := s.delegator.Search(context.Background(), &querypb.SearchRequest{
+		Req: &internalpb.SearchRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			CollectionID: s.collectionID,
+			IsAdvanced:   true,
+			SubReqs:      subReqs,
+		},
+		DmlChannels: []string{s.vchannelName},
+	})
+	s.Require().NoError(err, "an ungroupable group is retried per branch, not failed")
+	s.Require().Len(results, 2)
+
+	s.Equal(marker, results[0].GetSlicedBlob())
+	s.Equal(metric.BM25, results[1].GetMetricType())
+	s.NotEqual(marker, results[1].GetSlicedBlob())
+	skipped, err := segments.DecodeSearchResults(context.Background(), []*internalpb.SearchResults{results[1]})
+	s.Require().NoError(err)
+	for _, data := range skipped {
+		s.Zero(typeutil.GetSizeOfIDs(data.GetIds()))
+	}
+
+	// Only the dense branch reached a worker, and it went alone.
+	s.Require().Len(workerReqs, 1)
+	s.EqualValues(103, workerReqs[0].GetReq().GetFieldId())
+	s.Empty(workerReqs[0].GetExtraFilterSharingReqs())
+}
+
+// groupSubReqsBySharedFilter keeps a collection whose clustering key is a
+// vector field ungrouped, but what the clustering key is depends on
+// refreshable config (EnableVectorClusteringKey and friends), which can change
+// after a group has been formed. The pruning implementation rejects the group
+// from the same key-selection decision it would use to prune, so no sibling is
+// ever pruned by branch 0's query vector. A scalar clustering key is shared by
+// construction and must not trip the same check.
+func (s *DelegatorDataSuite) TestSearchRejectsAGroupedRequestOnAVectorClusteringKey() {
+	newDelegatorWithClusteringKey := func(clusteringKeyFieldID int64) *shardDelegator {
+		fields := []*schemapb.FieldSchema{
+			{Name: "id", FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64, AutoID: true},
+			{Name: "age", FieldID: 102, DataType: schemapb.DataType_Int64},
+			{Name: "dense", FieldID: 103, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "4"}}},
+		}
+		for _, field := range fields {
+			field.IsClusteringKey = field.FieldID == clusteringKeyFieldID
+		}
+		s.manager.Collection.PutOrRef(s.collectionID, &schemapb.CollectionSchema{
+			Name: "TestCollection", Version: 1, Fields: fields,
+		}, nil, &querypb.LoadMetaInfo{SchemaVersion: tsoutil.ComposeTSByTime(time.Now(), 0)})
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version,
+			s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
+		s.Require().NoError(err)
+		sd := delegator.(*shardDelegator)
+		sd.Start()
+		return sd
+	}
+
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.EnableSegmentPrune.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.EnableSegmentPrune.Key)
+
+	groupedReq := func() *querypb.SearchRequest {
+		return &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				CollectionID: s.collectionID, FieldId: 103, MetricType: metric.IP, Nq: 1, Topk: 10,
+			},
+			ExtraFilterSharingReqs: []*internalpb.SubSearchRequest{
+				{FieldId: 103, MetricType: metric.IP, Nq: 1, Topk: 10},
+			},
+		}
+	}
+
+	_, err := newDelegatorWithClusteringKey(103).search(context.Background(), groupedReq(), nil, nil, nil)
+	s.ErrorIs(err, errSharedFilterUngroupable, "a vector clustering key must send the group back")
+
+	_, err = newDelegatorWithClusteringKey(102).search(context.Background(), groupedReq(), nil, nil, nil)
+	s.NoError(err, "a scalar clustering key prunes by the predicate the group shares")
+}

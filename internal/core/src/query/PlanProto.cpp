@@ -671,4 +671,97 @@ ProtoParser::ParseScorer(const proto::plan::ScoreFunction& function) {
     }
 }
 
+namespace {
+
+// Walk from the root down to VectorSearchNode, accepting only the chain
+// RebindNodeToPrecomputedBitset knows how to rebuild. Returns the
+// VectorSearchNode; throws on any other node above it. Both phases of a
+// shared-filter search go through this, so they agree by construction on
+// which plans are groupable.
+std::shared_ptr<plan::PlanNode>
+SharedFilterForkPoint(const std::shared_ptr<plan::PlanNode>& node) {
+    AssertInfo(node != nullptr, "null node in a shared-filter search plan");
+
+    if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
+        return node;
+    }
+
+    if (std::dynamic_pointer_cast<plan::GroupByNode>(node) ||
+        std::dynamic_pointer_cast<plan::RescoresNode>(node)) {
+        auto sources = node->sources();
+        AssertInfo(sources.size() == 1,
+                   "{} must have exactly one source, got {}",
+                   node->name(),
+                   sources.size());
+        return SharedFilterForkPoint(sources[0]);
+    }
+
+    ThrowInfo(ErrorCode::UnexpectedError,
+              "plan node {} cannot sit above VectorSearchNode in a "
+              "shared-filter search; this plan should not have been grouped",
+              node->name());
+}
+
+// Rebuild the chain above VectorSearchNode, replacing its source subtree with
+// a node that emits an already-computed bitset. Plan nodes are immutable, so
+// each one on the path is reconstructed. Precondition: SharedFilterForkPoint
+// has accepted `node`, so every node here is a VectorSearchNode or a
+// single-source GroupByNode / RescoresNode.
+std::shared_ptr<plan::PlanNode>
+RebindNodeToPrecomputedBitset(const std::shared_ptr<plan::PlanNode>& node) {
+    if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
+        auto bitset_source = std::make_shared<plan::PrecomputedBitsetNode>(
+            milvus::plan::GetNextPlanNodeId());
+        return std::make_shared<plan::VectorSearchNode>(
+            milvus::plan::GetNextPlanNodeId(),
+            std::vector<plan::PlanNodePtr>{bitset_source});
+    }
+
+    auto rebound_source = RebindNodeToPrecomputedBitset(node->sources()[0]);
+    if (auto rescores = std::dynamic_pointer_cast<plan::RescoresNode>(node)) {
+        return std::make_shared<plan::RescoresNode>(
+            milvus::plan::GetNextPlanNodeId(),
+            rescores->scorers(),
+            *rescores->option(),
+            std::vector<plan::PlanNodePtr>{rebound_source});
+    }
+    return std::make_shared<plan::GroupByNode>(
+        milvus::plan::GetNextPlanNodeId(),
+        std::vector<plan::PlanNodePtr>{rebound_source});
+}
+
+}  // namespace
+
+std::shared_ptr<plan::PlanNode>
+ProtoParser::ExtractSharedFilterPrefix(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    auto fork_point = SharedFilterForkPoint(root_node);
+    auto sources = fork_point->sources();
+    AssertInfo(sources.size() == 1,
+               "VectorSearchNode must have exactly one source, got {}",
+               sources.size());
+    return sources[0];
+}
+
+std::shared_ptr<plan::PlanNode>
+ProtoParser::RebindToPrecomputedBitset(
+    const std::shared_ptr<plan::PlanNode>& root_node) {
+    if (!root_node) {
+        return nullptr;
+    }
+    // Validate the whole chain before rebuilding any of it, so a bad shape
+    // fails the same way in both phases.
+    SharedFilterForkPoint(root_node);
+    return RebindNodeToPrecomputedBitset(root_node);
+}
+
+const std::shared_ptr<plan::PlanNode>&
+VectorPlanNode::shared_filter_plannodes() {
+    std::call_once(shared_filter_once_, [this]() {
+        shared_filter_plannodes_ =
+            ProtoParser::RebindToPrecomputedBitset(plannodes_);
+    });
+    return shared_filter_plannodes_;
+}
+
 }  // namespace milvus::query

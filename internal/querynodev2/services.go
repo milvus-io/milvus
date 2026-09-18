@@ -785,7 +785,12 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	}()
 
 	var task scheduler.Task
-	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
+	// A shared-filter group (extra branches on the request) is executed only
+	// by the regular SearchTask; the streaming task runs branch 0 alone and
+	// returns no SubResults, which the delegator would reject. Deciding on
+	// the request itself keeps this independent of which node's config the
+	// delegator read.
+	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() && len(req.GetExtraFilterSharingReqs()) == 0 {
 		task = tasks.NewStreamingSearchTask(searchCtx, collection, node.manager, req, node.serverID)
 	} else {
 		task = tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)

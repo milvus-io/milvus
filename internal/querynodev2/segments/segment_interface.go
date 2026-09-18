@@ -19,6 +19,8 @@ package segments
 import (
 	"context"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	pkoracle "github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -114,6 +116,15 @@ type Segment interface {
 
 	// Read operations
 	Search(ctx context.Context, searchReq *segcore.SearchRequest) (*segcore.SearchResult, error)
+	// SearchGrouped executes several searches that share one filter predicate.
+	// The shared prefix runs once and the branch vector searches run
+	// concurrently against its result, with at most limiter's weight of them
+	// in flight. limiter is the task's, shared with every other segment of the
+	// same request, so the bound holds across the whole fan-out; a nil one
+	// means the caller has no task scope and the segment bounds itself.
+	// Returns one SearchResult per request, in the same order.
+	// len(searchReqs) == 1 behaves like Search and ignores limiter.
+	SearchGrouped(ctx context.Context, searchReqs []*segcore.SearchRequest, limiter *semaphore.Weighted) ([]*segcore.SearchResult, error)
 	Retrieve(ctx context.Context, plan *segcore.RetrievePlan) (*segcorepb.RetrieveResults, error)
 	RetrieveByOffsets(ctx context.Context, plan *segcore.RetrievePlanWithOffsets) (*segcorepb.RetrieveResults, error)
 	IsLazyLoad() bool
