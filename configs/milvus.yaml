@@ -811,6 +811,11 @@ dataCoord:
     # Whether a new shard split may be issued. While it is off, the split builder refuses to issue one.
     # It never affects a split already written to the WAL: that split is always carried through, on every cluster.
     enable: false
+    checkInterval: 3600 # The interval in seconds the shard split trigger inspects the per-shard statistics.
+    taskInterval: 10 # The interval in seconds the shard split manager advances every split task it holds by one step.
+    maxShardSize: 2048 # The data size of one shard that triggers a split, unit: GB.
+    maxShardRows: 500000000 # The row count of one shard that triggers a split.
+    maxConcurrentTasks: 1 # The cluster-wide maximum number of shard split tasks that are not Done or Aborted.
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index
