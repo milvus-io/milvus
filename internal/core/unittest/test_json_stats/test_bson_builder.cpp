@@ -182,7 +182,8 @@ TEST_F(BsonBuilderTest, CreateValueNodeTest) {
 TEST_F(BsonBuilderTest, MalformedJsonArrayIsDataFormatBroken) {
     auto code_of = [](const std::string& input) {
         try {
-            BuildBsonArrayBytesFromJsonString(input);
+            BuildBsonArrayBytesFromJsonString(
+                input, UnrepresentableJsonNumberPolicy::LEGACY_V3);
         } catch (const SegcoreError& e) {
             return e.get_error_code();
         }
@@ -200,14 +201,105 @@ TEST_F(BsonBuilderTest, MalformedJsonArrayIsDataFormatBroken) {
     EXPECT_EQ(code_of("[1, \"a\", null]"), ErrorCode::Success);
 }
 
-TEST_F(BsonBuilderTest, UnescapeJsonStringIsDataFormatBroken) {
+TEST_F(BsonBuilderTest, ArrayStringEscapeIsDataFormatBroken) {
     try {
         // A backslash escape that does not decode to a JSON string.
-        UnescapeJsonString("\\uZZZZ");
-        FAIL() << "expected UnescapeJsonString to throw";
+        BuildBsonArrayBytesFromJsonString(
+            R"(["\uZZZZ"])", UnrepresentableJsonNumberPolicy::LEGACY_V3);
+        FAIL() << "expected array string decoding to throw";
     } catch (const SegcoreError& e) {
         EXPECT_EQ(e.get_error_code(), ErrorCode::DataFormatBroken);
     }
+}
+
+TEST_F(BsonBuilderTest, MalformedNestedArrayPreservesErrorCodeInV4) {
+    for (const auto& input : {R"([tru])",
+                              R"([[tru]])",
+                              R"([{"a":tru}])",
+                              R"(["\uZZZZ"])",
+                              R"([{"\uZZZZ":1}])"}) {
+        SCOPED_TRACE(input);
+        try {
+            BsonBuilder::CreateValueNode(input, JSONType::ARRAY);
+            FAIL() << "expected malformed JSON to fail";
+        } catch (const SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), ErrorCode::DataFormatBroken);
+        }
+    }
+}
+
+TEST_F(BsonBuilderTest, NullValueIsEmptyAndNotIndexed) {
+    DomNode root(DomNode::Type::DOCUMENT);
+    BsonBuilder::AppendToDom(root, {"bad"}, "null", JSONType::NONE);
+    BsonBuilder::AppendDoubleToDom(root, {"ok"}, 1.5);
+
+    BsonDocument bson_doc;
+    BsonBuilder::ConvertDomToBson(root, bson_doc.get());
+    auto offsets =
+        BsonBuilder::ExtractBsonKeyOffsets(bson_doc.data(), bson_doc.length());
+    ASSERT_EQ(offsets.size(), 1);
+    EXPECT_EQ(offsets[0].first, "/ok");
+
+    BsonView view(bson_doc.data(), bson_doc.length());
+    milvus::bson::document_view document(bson_doc.data(), bson_doc.length());
+    auto bad = view.FindByPath(document, {"bad"});
+    ASSERT_TRUE(bad.has_value());
+    EXPECT_EQ(bad->type(), milvus::bson::type::k_null);
+}
+
+TEST_F(BsonBuilderTest, ArrayInvalidNumberKeepsValidElementsQueryable) {
+    const std::string json =
+        R"([1e400,7,{"bad":18446744073709551616,"ok":9},[1e400,11]])";
+
+    auto bytes = BuildBsonArrayBytesFromJsonString(
+        json, UnrepresentableJsonNumberPolicy::NORMALIZE_TO_NULL);
+    milvus::bson::array_view array(bytes.data(), bytes.size());
+    ASSERT_EQ(std::distance(array.begin(), array.end()), 4);
+
+    auto it = array.begin();
+    EXPECT_EQ(it->type(), milvus::bson::type::k_null);
+    ++it;
+    EXPECT_EQ(it->type(), milvus::bson::type::k_int64);
+    EXPECT_EQ(it->get_int64().value, 7);
+    ++it;
+    ASSERT_EQ(it->type(), milvus::bson::type::k_document);
+    auto object = it->get_value().get_document().value;
+    auto object_it = object.begin();
+    ASSERT_NE(object_it, object.end());
+    EXPECT_EQ(object_it->type(), milvus::bson::type::k_null);
+    ++object_it;
+    ASSERT_NE(object_it, object.end());
+    EXPECT_EQ(object_it->get_int64().value, 9);
+    ++it;
+    ASSERT_EQ(it->type(), milvus::bson::type::k_array);
+    auto nested = it->get_value().get_array().value;
+    auto nested_it = nested.begin();
+    EXPECT_EQ(nested_it->type(), milvus::bson::type::k_null);
+    ++nested_it;
+    EXPECT_EQ(nested_it->get_int64().value, 11);
+
+    // Skipping over a zero-payload null element must still reach later array
+    // indexes.
+    auto seven = BsonView::GetNthElementInArray<int64_t>(bytes.data(), 1);
+    ASSERT_TRUE(seven.has_value());
+    EXPECT_EQ(seven.value(), 7);
+
+    DomNode root(DomNode::Type::DOCUMENT);
+    BsonBuilder::AppendArrayToDom(root, {"array"}, std::move(bytes));
+    BsonDocument bson_doc;
+    BsonBuilder::ConvertDomToBson(root, bson_doc.get());
+    auto offsets =
+        BsonBuilder::ExtractBsonKeyOffsets(bson_doc.data(), bson_doc.length());
+    ASSERT_EQ(offsets.size(), 1);
+    BsonView view(bson_doc.data(), bson_doc.length());
+    EXPECT_TRUE(view.IsBsonValuePresentForExists(offsets[0].second));
+
+    auto null_only = BuildBsonArrayBytesFromJsonString(
+        R"([1e400])", UnrepresentableJsonNumberPolicy::NORMALIZE_TO_NULL);
+    milvus::bson::array_view null_only_array(null_only.data(),
+                                             null_only.size());
+    ASSERT_EQ(std::distance(null_only_array.begin(), null_only_array.end()), 1);
+    EXPECT_EQ(null_only_array.begin()->type(), milvus::bson::type::k_null);
 }
 
 TEST_F(BsonBuilderTest, AppendToDomTest) {

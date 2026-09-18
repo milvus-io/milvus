@@ -82,6 +82,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) override {
+        // This direct/test-only entry point has no build-version config, so it
+        // retains the current semantics. Production builds use Build(config).
         if constexpr (kIsInverted) {
             BuildInvertedWithJsonFieldData(field_datas);
         } else {
@@ -99,17 +101,22 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
     void
     Build(const Config& config) override {
+        auto scalar_index_version =
+            GetValueFromConfig<int32_t>(config, SCALAR_INDEX_ENGINE_VERSION)
+                .value_or(0);
         auto json_field_datas =
             storage::CacheRawDataAndFillMissing(json_file_manager_, config);
 
         if constexpr (kIsInverted) {
-            BuildInvertedWithJsonFieldData(json_field_datas);
+            BuildInvertedWithJsonFieldData(json_field_datas,
+                                           scalar_index_version);
         } else {
             auto result = ConvertJsonToTypedFieldData<T>(json_field_datas,
                                                          json_schema_,
                                                          nested_path_,
                                                          cast_type_,
-                                                         cast_function_);
+                                                         cast_function_,
+                                                         scalar_index_version);
 
             non_exist_offsets_ = std::move(result.non_exist_offsets);
             auto total_rows = result.field_data->get_num_rows();
@@ -337,13 +344,16 @@ class JsonScalarIndexWrapper : public BaseIndex {
     template <typename B = BaseIndex>
     std::enable_if_t<std::is_base_of_v<InvertedIndexTantivy<T>, B>>
     BuildInvertedWithJsonFieldData(
-        const std::vector<FieldDataPtr>& field_datas) {
+        const std::vector<FieldDataPtr>& field_datas,
+        int32_t scalar_index_version =
+            JSON_PATH_NON_NULL_PRESENCE_MIN_SCALAR_INDEX_VERSION) {
         if (cast_type_.data_type() != JsonCastType::DataType::ARRAY) {
             auto result = ConvertJsonToTypedFieldData<T>(field_datas,
                                                          json_schema_,
                                                          nested_path_,
                                                          cast_type_,
-                                                         cast_function_);
+                                                         cast_function_,
+                                                         scalar_index_version);
             non_exist_offsets_ = std::move(result.non_exist_offsets);
             auto total_rows = result.field_data->get_num_rows();
             BaseIndex::BuildWithFieldData({result.field_data});
@@ -374,7 +384,8 @@ class JsonScalarIndexWrapper : public BaseIndex {
             },
             [this](int64_t offset) { this->null_offset_.push_back(offset); },
             [this](int64_t offset) { non_exist_offsets_.push_back(offset); },
-            [](const Json&, const std::string&, simdjson::error_code) {});
+            [](const Json&, const std::string&, simdjson::error_code) {},
+            scalar_index_version);
 
         BuildExistsBitset(total_rows);
     }

@@ -37,11 +37,19 @@ import (
 )
 
 func getCurrentIndexVersion(v int32) int32 {
-	cMaximum := int32(C.GetMaximumIndexVersion())
+	_, _, cMaximum := GetIndexEngineVersion()
 	if cMaximum < v {
 		return cMaximum
 	}
 	return v
+}
+
+// GetIndexEngineVersion returns the vector index-engine version range that
+// this DataNode's local C++ writer supports.
+func GetIndexEngineVersion() (minimal, current, maximum int32) {
+	return int32(C.GetMinimalIndexVersion()),
+		int32(C.GetCurrentIndexVersion()),
+		int32(C.GetMaximumIndexVersion())
 }
 
 func getFieldDataSizeFromBinlogs(insertLogs []*datapb.FieldBinlog, fieldID int64) uint64 {

@@ -40,6 +40,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
+#include "index/json_stats/JsonKeyStats.h"
 #include "log/Log.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnFilter.h"
@@ -741,14 +742,14 @@ class SegmentExpr : public Expr {
             BindColumnFilter(skip_func, std::move(resources.second));
     }
 
-    detail::ColumnFilterPtr
+    milvus::detail::ColumnFilterPtr
     BindColumnFilter(const SkipChunkFn& skip_func,
                      FieldSkipMetricsView view) const {
         if (!skip_func || !view.HasMetrics()) {
             return {};
         }
-        return std::make_shared<const detail::ColumnFilter>(
-            detail::ColumnFilter::MetricsSource::PreloadedStatistics,
+        return std::make_shared<const milvus::detail::ColumnFilter>(
+            milvus::detail::ColumnFilter::MetricsSource::PreloadedStatistics,
             [skip_func = skip_func, view = std::move(view)](int64_t cell_id) {
                 return skip_func(view, cell_id);
             },
@@ -3333,6 +3334,20 @@ class SegmentExpr : public Expr {
                    pinned_index_[0].get()) != nullptr;
     }
 
+    // Returns the Milvus scalar type of the pinned typed JSON path index, or
+    // DataType::NONE when no typed (non-flat) JSON index is pinned. The flat
+    // index is excluded because it keeps an exact integer field and is handled
+    // separately. Used to dispatch int64 JSON literals to the exact integer
+    // executor when the user provisioned an INT64 cast type.
+    DataType
+    PinnedJsonIndexCastElementType() const {
+        if (field_type_ != DataType::JSON || pinned_index_.empty() ||
+            PinnedJsonIndexIsFlat()) {
+            return DataType::NONE;
+        }
+        return pinned_index_[0].get()->GetCastType().ToMilvusDataType();
+    }
+
     static bool
     IsInt64SafeForJsonDoubleIndex(int64_t value) {
         constexpr int64_t kFirstNonInjectiveInteger = int64_t{1} << 53;
@@ -3411,11 +3426,21 @@ class SegmentExpr : public Expr {
     }
 
     bool
-    HasJsonStats(FieldId field_id) const {
-        return segment_->type() == SegmentType::Sealed &&
-               static_cast<const segcore::SegmentSealed*>(segment_)
-                       ->GetJsonStats(op_ctx_, field_id)
-                       .get() != nullptr;
+    HasQueryableJsonStats(FieldId field_id) const {
+        if (segment_->type() != SegmentType::Sealed) {
+            return false;
+        }
+        auto stats =
+            static_cast<const segcore::SegmentSealed*>(segment_)->GetJsonStats(
+                op_ctx_, field_id);
+        // V3 and V4 stats are both queryable. Historical V3 numeric values and
+        // the typed-column empty-string null sentinel may differ from current
+        // raw semantics. Keep these artifacts serving without reinterpreting
+        // their stored values until compaction rebuilds them as V4. See
+        // docs/agent_guides/json-filtering/cross-path-semantics.md for the
+        // accepted migration-window differences.
+        return stats != nullptr &&
+               IsSupportedJsonStatsDataFormat(stats->GetDataFormatVersion());
     }
 
     static bool
@@ -3430,10 +3455,41 @@ class SegmentExpr : public Expr {
 
     // Check whether this expression can use JsonStats without pinning.
     // All conditions are available before execution path determination.
+    // A typed Path index provisioned for this exact path outranks stats, so
+    // the probe below is part of this single answer instead of being repeated
+    // by every JSON expression.
     bool
     CanUseJsonStatsAtInit() const {
-        return plan_options_.expr_use_json_stats && HasJsonStats(field_id_) &&
-               !nested_path_.empty() && !PathContainsInteger(nested_path_);
+        return plan_options_.expr_use_json_stats &&
+               HasQueryableJsonStats(field_id_) && !nested_path_.empty() &&
+               !PathContainsInteger(nested_path_) &&
+               !PrefersTypedJsonPathIndex();
+    }
+
+    // A typed JSON Path index whose cast type accepts this operand is
+    // explicitly provisioned for the exact path. This metadata-only probe
+    // avoids pinning and deliberately excludes JsonFlatIndex. Once selected,
+    // the Path index answers within its configured projection; numeric
+    // precision does not downgrade it to RawData.
+    bool
+    HasTypedJsonPathIndexForOperandTypeAtInit() const {
+        if (field_type_ != DataType::JSON) {
+            return false;
+        }
+        return segment_->HasTypedJsonPathIndexForOperandType(
+            field_id_,
+            milvus::Json::pointer(nested_path_),
+            value_type_,
+            allow_any_json_cast_type_,
+            is_json_contains_);
+    }
+
+    // Whether the typed Path index should be preferred over JsonStats.
+    // Overridden by expressions whose operand shape can be rejected by the
+    // typed projection even when the cast type matches.
+    virtual bool
+    PrefersTypedJsonPathIndex() const {
+        return HasTypedJsonPathIndexForOperandTypeAtInit();
     }
 
     virtual bool
@@ -3785,7 +3841,7 @@ class SegmentExpr : public Expr {
     // cursor owns the physical Cell pin; callers never pin Cells separately.
     std::shared_ptr<ChunkedColumnInterface> data_scan_column_{nullptr};
     std::unique_ptr<ChunkedColumnInterface::ScanCursor> data_scan_cursor_;
-    detail::ColumnFilterPtr data_scan_filter_{nullptr};
+    milvus::detail::ColumnFilterPtr data_scan_filter_{nullptr};
     ChunkedColumnInterface::TargetType data_scan_target_type_{
         ChunkedColumnInterface::TargetType::None};
     // Offset input is evaluated in multiple batches by the same expression.
@@ -3793,7 +3849,7 @@ class SegmentExpr : public Expr {
     // like the persistent sequential Scan cursor does.
     bool data_take_resources_initialized_{false};
     std::shared_ptr<ChunkedColumnInterface> data_take_column_{nullptr};
-    detail::ColumnFilterPtr data_take_filter_{nullptr};
+    milvus::detail::ColumnFilterPtr data_take_filter_{nullptr};
 
     // Unified cache for all index paths (ScalarIndex, PkIndex, TextIndex, JsonStats).
     // Populated once per segment, then sliced per batch via SliceCachedResult().

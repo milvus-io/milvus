@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -242,7 +243,7 @@ func (s *statsInspectorSuite) SetupTest() {
 	gs := task.NewMockGlobalScheduler(s.T())
 	gs.EXPECT().Enqueue(mock.Anything).Return().Maybe()
 	gs.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
-	gs.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(0).Maybe()
+	gs.EXPECT().GetPendingTaskCount(taskcommon.Stats, mock.Anything).Return(0).Maybe()
 	s.scheduler = gs
 
 	s.inspector = newStatsInspector(
@@ -352,12 +353,94 @@ func (s *statsInspectorSuite) TestSubmitStatsTask() {
 	s.NoError(err)
 }
 
+func (s *statsInspectorSuite) TestSubmitStatsTaskPinsJSONStatsFormat() {
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "4")
+	s.T().Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.JSONStatsFormatVersion.Key)
+	})
+
+	err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.Require().NoError(err)
+	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob)
+	s.Require().NotNil(task)
+	s.Equal(common.JSONStatsDataFormatV4, task.GetJsonStatsDataFormat())
+	s.Equal(getJSONStatsFieldIDs(s.mt.GetCollection(task.GetCollectionID())), task.GetJsonStatsFieldIds())
+
+	// A refresh affects only tasks created afterwards. Retry/restart of this
+	// persisted task must keep producing the same format.
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "3")
+	s.Equal(common.JSONStatsDataFormatV4, task.GetJsonStatsDataFormat())
+}
+
+func (s *statsInspectorSuite) TestSubmitStatsTaskBeforeVersionGate() {
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "auto")
+	s.T().Cleanup(func() { Params.Reset(Params.DataCoordCfg.JSONStatsFormatVersion.Key) })
+	s.Require().NoError(s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil))
+	task := s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob)
+	s.Require().NotNil(task)
+	s.Equal(common.JSONStatsDataFormatV3, task.GetJsonStatsDataFormat())
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "4")
+	s.Equal(common.JSONStatsDataFormatV3, task.GetJsonStatsDataFormat(), "the gate must not relabel persisted V3 tasks")
+}
+
+func (s *statsInspectorSuite) TestSubmitStatsTaskRechecksJSONStatsFormatOwnership() {
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "4")
+	s.T().Cleanup(func() {
+		Params.Reset(Params.DataCoordCfg.JSONStatsFormatVersion.Key)
+	})
+
+	collection := s.mt.GetCollection(1)
+	collection.Schema.Fields = append(collection.Schema.Fields,
+		&schemapb.FieldSchema{FieldID: 102, Name: "json_old", DataType: schemapb.DataType_JSON},
+		&schemapb.FieldSchema{FieldID: 103, Name: "json_missing", DataType: schemapb.DataType_JSON},
+	)
+	segment := s.mt.GetHealthySegment(s.ctx, 10)
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3},
+	}
+
+	// This is the submission-time half of the activation race: discovery may
+	// have selected the missing field while the target was still V3, but once
+	// submission observes V4 it must leave the whole segment to compaction.
+	err := s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	// A future-format field must also block an in-place V4 task. Otherwise a
+	// direct caller could bypass migration policy selection and downgrade it.
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3},
+		103: {FieldID: 103, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4 + 1},
+	}
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4 + 1},
+	}
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+	// The same no-downgrade rule applies during rollback. A task discovered
+	// while V4 was active must not overwrite a V4 field if submission observes
+	// a V3 target.
+	Params.Save(Params.DataCoordCfg.JSONStatsFormatVersion.Key, "3")
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		102: {FieldID: 102, JsonKeyStatsDataFormat: common.JSONStatsDataFormatV4},
+	}
+	err = s.inspector.SubmitStatsTask(10, 10, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil)
+	s.NoError(err)
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
 func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 	pendingTaskLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt()
 
 	s.Run("allow at limit", func() {
 		scheduler := task.NewMockGlobalScheduler(s.T())
-		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit).Once()
+		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats, mock.Anything).Return(pendingTaskLimit).Once()
 		scheduler.EXPECT().Enqueue(mock.Anything).Return().Once()
 		s.inspector.scheduler = scheduler
 
@@ -368,7 +451,7 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 
 	s.Run("skip over limit", func() {
 		scheduler := task.NewMockGlobalScheduler(s.T())
-		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).Return(pendingTaskLimit + 1).Once()
+		scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats, mock.Anything).Return(pendingTaskLimit + 1).Once()
 		s.inspector.scheduler = scheduler
 		// A strict allocator asserts the admission check runs before task ID allocation.
 		s.inspector.allocator = allocator.NewMockAllocator(s.T())
@@ -377,6 +460,114 @@ func (s *statsInspectorSuite) TestSubmitStatsTaskPendingLimit() {
 		s.NoError(err)
 		s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(10, indexpb.StatsSubJob_TextIndexJob))
 	})
+}
+
+func (s *statsInspectorSuite) TestJSONShreddingDisabledAdmissionAndResume() {
+	for i, key := range []string{Params.CommonCfg.EnabledJSONKeyStats.Key, Params.DataCoordCfg.JSONStatsTriggerCount.Key} {
+		s.Run(key, func() {
+			original := Params.CommonCfg.EnabledJSONKeyStats.GetValue()
+			disabled, enabled := "false", "true"
+			if key == Params.DataCoordCfg.JSONStatsTriggerCount.Key {
+				original = Params.DataCoordCfg.JSONStatsTriggerCount.GetValue()
+				disabled, enabled = "0", "100"
+			}
+			defer Params.Save(key, original)
+			s.NoError(Params.Save(key, disabled))
+			segmentID := int64(710 + i)
+			s.putExternalSegment(segmentID, false, storage.StorageV3,
+				packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", segmentID), 1))
+			// Strict mocks prove disabling rejects admission before allocating
+			// IDs, persisting tasks or touching the scheduler, for both entries.
+			s.inspector.allocator = allocator.NewMockAllocator(s.T())
+			s.inspector.scheduler = task.NewMockGlobalScheduler(s.T())
+			s.inspector.triggerJSONKeyIndexStatsTask()
+			s.NoError(s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil))
+			s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+
+			s.NoError(Params.Save(key, enabled))
+			scheduler := task.NewGlobalTaskScheduler(s.ctx, s.cluster)
+			defer scheduler.Stop()
+			s.inspector.scheduler = scheduler
+			s.inspector.allocator = s.alloc
+			s.NoError(s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_JsonKeyIndexJob, true, nil))
+			s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+			s.Equal(1, scheduler.GetPendingTaskCount(taskcommon.Stats))
+		})
+	}
+}
+
+func (s *statsInspectorSuite) TestJSONShreddingDisabledDuringDiscovery() {
+	key := Params.CommonCfg.EnabledJSONKeyStats.Key
+	original := Params.CommonCfg.EnabledJSONKeyStats.GetValue()
+	defer Params.Save(key, original)
+	s.NoError(Params.Save(key, "true"))
+	segmentID := int64(720)
+	s.putExternalSegment(segmentID, false, storage.StorageV3,
+		packed.MarshalManifestPath("files/insert_log/2/3/720", 1))
+	// Discovery began with shredding enabled. Toggle at its admission check;
+	// the later per-segment check must prevent task creation.
+	scheduler := task.NewMockGlobalScheduler(s.T())
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats, mock.Anything).
+		RunAndReturn(func(taskcommon.Type, ...func(task.Task) bool) int {
+			s.NoError(Params.Save(key, "false"))
+			return 0
+		}).Once()
+	s.inspector.scheduler = scheduler
+	s.inspector.allocator = allocator.NewMockAllocator(s.T())
+	s.inspector.triggerJSONKeyIndexStatsTask()
+	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
+}
+
+func (s *statsInspectorSuite) TestPausedJSONBacklogDoesNotBlockTextAdmission() {
+	enabledKey := Params.CommonCfg.EnabledJSONKeyStats.Key
+	formatKey := Params.DataCoordCfg.JSONStatsFormatVersion.Key
+	limitKey := Params.DataCoordCfg.StatsTaskPendingLimit.Key
+	originalEnabled := Params.CommonCfg.EnabledJSONKeyStats.GetValue()
+	originalFormat := Params.DataCoordCfg.JSONStatsFormatVersion.GetValue()
+	originalLimit := Params.DataCoordCfg.StatsTaskPendingLimit.GetValue()
+	defer Params.Save(enabledKey, originalEnabled)
+	defer Params.Save(formatKey, originalFormat)
+	defer Params.Save(limitKey, originalLimit)
+	s.NoError(Params.Save(limitKey, "1"))
+	for i, disabled := range []bool{true, false} {
+		s.Run(fmt.Sprintf("shredding_disabled=%v", disabled), func() {
+			s.NoError(Params.Save(enabledKey, fmt.Sprint(!disabled)))
+			s.NoError(Params.Save(formatKey, "3"))
+			scheduler := task.NewGlobalTaskScheduler(s.ctx, s.cluster)
+			defer scheduler.Stop()
+			s.inspector.scheduler = scheduler
+			var queued []*statsTask
+			for id := int64(1); id <= 2; id++ {
+				st := newStatsTask(&indexpb.StatsTask{
+					TaskID: id, SegmentID: 20, State: indexpb.JobState_JobStateInit,
+					SubJobType:          indexpb.StatsSubJob_JsonKeyIndexJob,
+					JsonStatsDataFormat: common.JSONStatsDataFormatV4,
+				}, 1, s.mt, nil, s.alloc, s.inspector.ievm)
+				s.False(st.CanRunOnNode(10))
+				scheduler.Enqueue(st)
+				queued = append(queued, st)
+			}
+			s.Equal(2, scheduler.GetPendingTaskCount(taskcommon.Stats))
+			s.True(s.inspector.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob))
+			s.False(s.inspector.canSubmitStatsTask(indexpb.StatsSubJob_JsonKeyIndexJob))
+			// Exercise real discovery -> persistence -> scheduler admission.
+			segmentID := int64(730 + i)
+			s.putExternalSegment(segmentID, false, storage.StorageV3,
+				packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", segmentID), 1))
+			spareSegmentID := int64(740 + i)
+			s.putExternalSegment(spareSegmentID, false, storage.StorageV3,
+				packed.MarshalManifestPath(fmt.Sprintf("files/insert_log/2/3/%d", spareSegmentID), 1))
+			s.NoError(s.inspector.SubmitStatsTask(segmentID, segmentID, indexpb.StatsSubJob_TextIndexJob, true, nil))
+			s.inspector.triggerTextStatsTask()
+			s.NotNil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_TextIndexJob))
+			// The JSON backlog is retained, not deleted to manufacture capacity.
+			for _, st := range queued {
+				s.Equal(indexpb.JobState_JobStateInit, st.GetState())
+			}
+			s.Equal(4, scheduler.GetPendingTaskCount(taskcommon.Stats))
+			s.False(s.inspector.canSubmitStatsTask(indexpb.StatsSubJob_TextIndexJob), "text backlog still enforces its own limit")
+		})
+	}
 }
 
 // A segment whose task is already in meta must be dropped by the segment
@@ -457,6 +648,22 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZe
 	s.Nil(s.mt.statsTaskMeta.GetStatsTaskBySegmentID(segmentID, indexpb.StatsSubJob_JsonKeyIndexJob))
 }
 
+func (s *statsInspectorSuite) TestNeedJSONKeyIndexDoesNotRewriteExistingStats() {
+	const fieldID = int64(202)
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		State: commonpb.SegmentState_Flushed,
+		Level: datapb.SegmentLevel_L1,
+	})
+
+	s.True(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+	segment.JsonKeyStats = map[int64]*datapb.JsonKeyStats{
+		fieldID: {JsonKeyStatsDataFormat: common.JSONStatsDataFormatV3},
+	}
+	s.False(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+	segment.JsonKeyStats[fieldID].JsonKeyStatsDataFormat = common.JSONStatsDataFormatV4
+	s.False(needDoJSONKeyIndex(segment, []UniqueID{fieldID}, true))
+}
+
 // Every trigger loop must give up as soon as the scheduler is backlogged instead
 // of walking the remaining collections. The call count is what proves it: the
 // text and JSON loops each ask once for the first collection they look at and
@@ -464,7 +671,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskHonorsDeprecatedZe
 // docked yet. Walking on (continue) would ask once per collection instead.
 func (s *statsInspectorSuite) TestTriggerStatsTaskStopsWhenSchedulerBacklogged() {
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats, mock.Anything).
 		Return(Params.DataCoordCfg.StatsTaskPendingLimit.GetAsInt() + 1).Times(2)
 	s.inspector.scheduler = scheduler
 	s.inspector.allocator = allocator.NewMockAllocator(s.T())
@@ -493,7 +700,7 @@ func (s *statsInspectorSuite) TestTriggerJSONKeyIndexStatsTaskStopsAtPendingLimi
 
 	pending := 0
 	scheduler := task.NewMockGlobalScheduler(s.T())
-	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats).RunAndReturn(func(taskcommon.Type) int { return pending })
+	scheduler.EXPECT().GetPendingTaskCount(taskcommon.Stats, mock.Anything).RunAndReturn(func(taskcommon.Type, ...func(task.Task) bool) int { return pending })
 	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(_ task.Task) { pending++ }).Return()
 	s.inspector.scheduler = scheduler
 

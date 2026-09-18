@@ -506,7 +506,6 @@ not_supported_json_cast_types = [
     DataType.INT8.name,
     DataType.INT16.name,
     DataType.INT32.name,
-    DataType.INT64.name,
     DataType.FLOAT.name,
     DataType.ARRAY.name,
     DataType.FLOAT_VECTOR.name,

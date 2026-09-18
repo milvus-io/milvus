@@ -108,8 +108,9 @@ PhyExistsFilterExpr::EvalJsonExistsForIndex() {
                     // JsonFlatIndex needs special handling via executor.
                     auto* json_flat_index = const_cast<index::JsonFlatIndex*>(
                         dynamic_cast<const index::JsonFlatIndex*>(index));
-                    auto executor =
-                        json_flat_index->create_executor<double>(pointer);
+                    auto index_path = json_flat_index->GetNestedPath();
+                    auto executor = json_flat_index->create_executor<double>(
+                        pointer.substr(index_path.size()));
                     res = executor->Exists();
                 } else {
                     // All other JSON path indexes (Inverted, Sort, Bitmap,
@@ -132,7 +133,6 @@ VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegment(EvalCtx& context) {
     auto* input = context.get_offset_input();
     const auto& bitmap_input = context.get_bitmap_input();
-    FieldId field_id = expr_->column_.field_id_;
     if (exec_path_ == ExprExecPath::JsonStats && !has_offset_input_) {
         milvus::ScopedTimer timer("exists_json_by_stats", [this](double us) {
             json_filter_stats_latency_us_ += us;
@@ -248,6 +248,9 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                     for (const auto& field : shredding_fields) {
                         TargetBitmap temp_valid(active_count_, true);
                         TargetBitmapView temp_valid_view(temp_valid);
+                        // A valid typed value is present. ARRAY columns keep
+                        // empty arrays and [null] as valid BSON operands, so no
+                        // recursive content inspection is needed here.
                         index->ExecutorForGettingValid(
                             op_ctx_, field, temp_valid_view);
                         res_view |= temp_valid_view;
@@ -265,7 +268,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegmentByStats() {
                         bson_index_,
                         pointer,
                         [&](BsonView bson, uint32_t row_id, uint32_t offset) {
-                            res_view[row_id] = !bson.IsBsonValueEmpty(offset);
+                            res_view[row_id] |=
+                                bson.IsBsonValuePresentForExists(offset);
                         });
                 }
 

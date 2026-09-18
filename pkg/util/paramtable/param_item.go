@@ -18,6 +18,7 @@ package paramtable
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
@@ -41,6 +42,8 @@ type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue strin
 //   - once the cluster-wide confirmed version reaches GateVersion and the
 //     SwitchDelay stability window has elapsed since the confirmation, the
 //     one-shot confirmator flips the config-center value to TargetValue;
+//     with PreserveAuto it records readiness separately and leaves the
+//     configured value unchanged, so auto can follow later releases;
 //   - before that the item resolves to PreSwitchValue (the value used before
 //     the switch, i.e. the pre-change behavior) on every read path.
 //
@@ -61,6 +64,7 @@ type VersionGateSwitcher struct {
 	GateVersion           string        // minimum cluster version (semver) required to switch
 	TargetValue           string        // effective value after AutoSwitch takes effect
 	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
+	PreserveAuto          bool          // persist gate readiness instead of replacing the configured sentinel
 
 	// localSatisfied is set by StartVersionGateSwitcher for embedded-etcd
 	// (single-process) deployments: the local process is the entire cluster, so
@@ -68,6 +72,17 @@ type VersionGateSwitcher struct {
 	// coordinate and the gate resolves directly to TargetValue. It is a pure
 	// paramtable-internal hint, never part of the configurable contract.
 	localSatisfied bool
+}
+
+// readinessKey identifies one release's target independently of the operator's
+// configuration. Hash the tuple because config.FormatKey strips punctuation,
+// including the separators in semantic versions.
+func (sw *VersionGateSwitcher) readinessKey(key string) string {
+	if !sw.PreserveAuto {
+		return ""
+	}
+	identity := config.FormatKey(key) + "\x00" + sw.GateVersion + "\x00" + sw.TargetValue
+	return fmt.Sprintf("internal.versiongate.%x", sha256.Sum256([]byte(identity)))
 }
 
 // Validate checks the switcher's field contract, panicking on a missing or
@@ -134,7 +149,8 @@ type ParamItem struct {
 	// item; nil means no version gating (backward compatible).
 	VersionGateSwitcher *VersionGateSwitcher
 
-	manager *config.Manager
+	manager          *config.Manager
+	gateReadinessKey string
 
 	// for unittest.
 	tempValue atomic.Pointer[string]
@@ -149,6 +165,7 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 		// A version-gated item must declare its full semantics; a
 		// misconfigured switcher is a coding error and must fail fast.
 		pi.VersionGateSwitcher.Validate()
+		pi.gateReadinessKey = pi.VersionGateSwitcher.readinessKey(pi.Key)
 	}
 	if pi.Forbidden {
 		pi.manager.ForbidUpdate(pi.Key)
@@ -309,10 +326,9 @@ func (pi *ParamItem) getWithRaw() (result, raw string, err error) {
 // gateValue applies the version-gated auto-switch semantics to a configured
 // value: when the item carries a VersionGateSwitcher and the value is the
 // sentinel (EnableAutoSwitchValue), the effective value is TargetValue when
-// the gate is locally satisfied (embedded-etcd single-process deployments
-// where the local version is already >= GateVersion, see localSatisfied), and
-// PreSwitchValue otherwise, until the one-shot confirmator flips the config
-// center value to TargetValue. Every read path (GetValue and all GetAs*)
+// the gate is locally satisfied or its separate readiness marker is present,
+// and PreSwitchValue otherwise. Gates without PreserveAuto instead replace
+// the config-center value with TargetValue. Every read path (GetValue and all GetAs*)
 // resolves through this, so the gate is uniformly visible regardless of the
 // caller's accessor type. The raw value is unaffected: callers that need to
 // detect the sentinel (e.g. the version gate confirmator) still see it.
@@ -323,7 +339,29 @@ func (pi *ParamItem) gateValue(v string) string {
 	if pi.VersionGateSwitcher.localSatisfied {
 		return pi.VersionGateSwitcher.TargetValue
 	}
+	if pi.gateReadinessKey != "" {
+		if _, ready, err := pi.manager.GetConfig(pi.gateReadinessKey); err == nil && ready == "true" {
+			return pi.VersionGateSwitcher.TargetValue
+		}
+	}
 	return pi.VersionGateSwitcher.PreSwitchValue
+}
+
+// A preserved auto value depends on a second config key. The manager's cache
+// CAS only compares the primary raw value, so invalidating on readiness updates
+// alone would allow a concurrent old read to repopulate a stale typed value.
+// Bypass that cache for these items; ordinary parameters retain their cache.
+func (pi *ParamItem) getCachedValue() (any, bool) {
+	if pi.gateReadinessKey != "" {
+		return nil, false
+	}
+	return pi.manager.GetCachedValue(pi.Key)
+}
+
+func (pi *ParamItem) cacheValue(raw string, value any) {
+	if pi.gateReadinessKey == "" {
+		pi.manager.CASCachedValue(pi.Key, raw, value)
+	}
 }
 
 // SetTempValue set the value for this ParamItem,
@@ -348,122 +386,122 @@ func (pi *ParamItem) GetValue() string {
 }
 
 func (pi *ParamItem) GetAsStrings() []string {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if strings, ok := val.([]string); ok {
 			return strings
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	realStrs := getAsStrings(val)
-	pi.manager.CASCachedValue(pi.Key, raw, realStrs)
+	pi.cacheValue(raw, realStrs)
 	return realStrs
 }
 
 func (pi *ParamItem) GetAsBool() bool {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if boolVal, ok := val.(bool); ok {
 			return boolVal
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	boolVal := getAsBool(val)
-	pi.manager.CASCachedValue(pi.Key, raw, boolVal)
+	pi.cacheValue(raw, boolVal)
 	return boolVal
 }
 
 func (pi *ParamItem) GetAsInt() int {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if intVal, ok := val.(int); ok {
 			return intVal
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	intVal := getAsInt(val)
-	pi.manager.CASCachedValue(pi.Key, raw, intVal)
+	pi.cacheValue(raw, intVal)
 	return intVal
 }
 
 func (pi *ParamItem) GetAsInt32() int32 {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if int32Val, ok := val.(int32); ok {
 			return int32Val
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	int32Val := int32(getAsInt64(val))
-	pi.manager.CASCachedValue(pi.Key, raw, int32Val)
+	pi.cacheValue(raw, int32Val)
 	return int32Val
 }
 
 func (pi *ParamItem) GetAsUint() uint {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if uintVal, ok := val.(uint); ok {
 			return uintVal
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	uintVal := uint(getAsUint64(val))
-	pi.manager.CASCachedValue(pi.Key, raw, uintVal)
+	pi.cacheValue(raw, uintVal)
 	return uintVal
 }
 
 func (pi *ParamItem) GetAsUint32() uint32 {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if uint32Val, ok := val.(uint32); ok {
 			return uint32Val
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	uint32Val := uint32(getAsUint64(val))
-	pi.manager.CASCachedValue(pi.Key, raw, uint32Val)
+	pi.cacheValue(raw, uint32Val)
 	return uint32Val
 }
 
 func (pi *ParamItem) GetAsUint64() uint64 {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if uint64Val, ok := val.(uint64); ok {
 			return uint64Val
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	uint64Val := getAsUint64(val)
-	pi.manager.CASCachedValue(pi.Key, raw, uint64Val)
+	pi.cacheValue(raw, uint64Val)
 	return uint64Val
 }
 
 func (pi *ParamItem) GetAsUint16() uint16 {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if uint16Val, ok := val.(uint16); ok {
 			return uint16Val
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	uint16Val := uint16(getAsUint64(val))
-	pi.manager.CASCachedValue(pi.Key, raw, uint16Val)
+	pi.cacheValue(raw, uint16Val)
 	return uint16Val
 }
 
 func (pi *ParamItem) GetAsInt64() int64 {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if int64Val, ok := val.(int64); ok {
 			return int64Val
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	int64Val := getAsInt64(val)
-	pi.manager.CASCachedValue(pi.Key, raw, int64Val)
+	pi.cacheValue(raw, int64Val)
 	return int64Val
 }
 
 func (pi *ParamItem) GetAsFloat() float64 {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if floatVal, ok := val.(float64); ok {
 			return floatVal
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	floatVal := getAsFloat(val)
-	pi.manager.CASCachedValue(pi.Key, raw, floatVal)
+	pi.cacheValue(raw, floatVal)
 	return floatVal
 }
 
@@ -478,14 +516,14 @@ type cachedDuration struct {
 }
 
 func (pi *ParamItem) GetAsDuration(unit time.Duration) time.Duration {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if durationVal, ok := val.(cachedDuration); ok && durationVal.unit == unit {
 			return durationVal.value
 		}
 	}
 	val, raw, _ := pi.getWithRaw()
 	durationVal := getAsDuration(val, unit)
-	pi.manager.CASCachedValue(pi.Key, raw, cachedDuration{unit: unit, value: durationVal})
+	pi.cacheValue(raw, cachedDuration{unit: unit, value: durationVal})
 	return durationVal
 }
 
@@ -498,7 +536,7 @@ func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]st
 }
 
 func (pi *ParamItem) GetAsDurationByParse() time.Duration {
-	if val, exist := pi.manager.GetCachedValue(pi.Key); exist {
+	if val, exist := pi.getCachedValue(); exist {
 		if durationVal, ok := val.(time.Duration); ok {
 			return durationVal
 		}
@@ -511,7 +549,7 @@ func (pi *ParamItem) GetAsDurationByParse() time.Duration {
 			panic(fmt.Sprintf("unreachable: parse duration from default value failed, %s, err: %s", pi.DefaultValue, err.Error()))
 		}
 	}
-	pi.manager.CASCachedValue(pi.Key, raw, durationVal)
+	pi.cacheValue(raw, durationVal)
 	return durationVal
 }
 
