@@ -1286,10 +1286,10 @@ func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) 
 	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
 }
 
-func TestOwnedCommitImportRequiresConsumerACK(t *testing.T) {
+func TestOwnedCommitImportUsesResourceKeyOwner(t *testing.T) {
 	bc := mock_broadcaster.NewMockBroadcaster(t)
 	bc.EXPECT().BroadcastWithResourceKeyOwner(mock.Anything, mock.MatchedBy(func(msg message.BroadcastMutableMessage) bool {
-		return msg.MessageType() == message.MessageTypeCommitImport && msg.BroadcastHeader().AckSyncUp
+		return msg.MessageType() == message.MessageTypeCommitImport && !msg.BroadcastHeader().AckSyncUp
 	})).Return(true, nil)
 	get := mockey.Mock(broadcast.GetWithContext).Return(bc, nil).Build()
 	defer get.UnPatch()

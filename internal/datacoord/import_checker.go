@@ -333,6 +333,8 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	if totalRows == 0 {
 		// Even empty auto-commit jobs must close their retained Begin through
 		// CommitImport; checkUncommittedJob drives the existing auto-commit path.
+		// Otherwise, transitioning directly to Completed would leave no paired End
+		// to release the Begin's retained resource-key locks.
 		log.Info(c.ctx, "no data to import, transitioning to Uncommitted")
 		updateJobState(internalpb.ImportJobState_Uncommitted)
 		return

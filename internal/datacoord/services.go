@@ -3062,17 +3062,18 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-	builder := message.NewCommitImportMessageBuilderV2().
+	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
-		WithBody(&messagespb.CommitImportMessageBody{})
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		WithBroadcast(vchannels).
+		MustBuildBroadcast()
 	bc, err := broadcast.GetWithContext(ctx)
 	if err != nil {
 		return err
 	}
-	// Owned imports release only after flusher HandleCommitVchannel has accepted
-	// every data-channel fence; it can advance Uncommitted without the ACK callback.
-	ownedMsg := builder.WithBroadcast(vchannels, message.OptBuildBroadcastAckSyncUp()).MustBuildBroadcast()
-	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, ownedMsg); handled || err != nil {
+	// WAL ordering places later DDL after this commit fence, so owned imports can
+	// release the Begin's keys through the normal FastAck path.
+	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, msg); handled || err != nil {
 		return err
 	}
 
@@ -3082,7 +3083,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 		return err
 	}
 	defer api.Close()
-	_, err = api.Broadcast(ctx, builder.WithBroadcast(vchannels).MustBuildBroadcast())
+	_, err = api.Broadcast(ctx, msg)
 	return err
 }
 
