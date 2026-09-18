@@ -4148,6 +4148,121 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 	})
 }
 
+// TestServer_CreateSnapshot_ShardSplitCollection covers the refusal of a
+// snapshot of a shard split collection, checked under the collection lock
+// before anything is broadcast, and that a never split collection still
+// reaches the broadcast.
+func TestServer_CreateSnapshot_ShardSplitCollection(t *testing.T) {
+	const collectionID = int64(100)
+
+	run := func(t *testing.T, desc *milvuspb.DescribeCollectionResponse, descErr error) (*commonpb.Status, bool) {
+		ctx := context.Background()
+
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+			nil, merr.WrapErrSnapshotNotFound("snap", "not found"),
+		).Build()
+		defer mockGet.UnPatch()
+
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
+			&collectionInfo{
+				ID:           collectionID,
+				DatabaseName: "default",
+				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
+			}, nil,
+		).Build()
+		defer mockGetColl.UnPatch()
+
+		broadcastCalled := false
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalled = true
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+		defer mockDoBroadcast.UnPatch()
+		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		fakeBroker := &embeddedBroker{}
+		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
+		defer mockHasCollection.UnPatch()
+		mockDescribe := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(desc, descErr).Build()
+		defer mockDescribe.UnPatch()
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			handler:         fakeHandler,
+			broker:          fakeBroker,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "snap",
+			CollectionId: collectionID,
+		})
+		assert.NoError(t, err)
+		return resp, broadcastCalled
+	}
+
+	t.Run("split_collection_refused", func(t *testing.T) {
+		resp, broadcastCalled := run(t, &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			CollectionID:        collectionID,
+			CollectionName:      "test_collection",
+			RoutingModulus:      4,
+			VirtualChannelNames: []string{"v0", "v1", "v2"},
+			ShardsNum:           2,
+		}, nil)
+
+		err := merr.Error(resp)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrOperationNotSupported))
+		assert.NotEqual(t, merr.InputError, merr.GetErrorType(err))
+		assert.False(t, resp.GetRetriable())
+		assert.Contains(t, resp.GetReason(), "shard split")
+		assert.False(t, broadcastCalled, "a snapshot of a split collection must be refused before the broadcast")
+	})
+
+	t.Run("never_split_collection_broadcasts", func(t *testing.T) {
+		resp, broadcastCalled := run(t, &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			CollectionID:        collectionID,
+			CollectionName:      "test_collection",
+			VirtualChannelNames: []string{"v0", "v1"},
+			ShardsNum:           2,
+		}, nil)
+
+		assert.NoError(t, merr.Error(resp))
+		assert.True(t, broadcastCalled, "a never split collection must still be snapshotted")
+	})
+
+	t.Run("describe_error_after_lock", func(t *testing.T) {
+		resp, broadcastCalled := run(t, nil, merr.WrapErrServiceNotReady("rootcoord", 1, "not ready"))
+
+		err := merr.Error(resp)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceNotReady), "the describe error must surface with its own code")
+		assert.False(t, broadcastCalled)
+	})
+}
+
+func TestCheckSnapshotSupported(t *testing.T) {
+	assert.NoError(t, checkSnapshotSupported(nil))
+	assert.NoError(t, checkSnapshotSupported(&milvuspb.DescribeCollectionResponse{}))
+	err := checkSnapshotSupported(&milvuspb.DescribeCollectionResponse{CollectionID: 7, CollectionName: "c", RoutingModulus: 2})
+	assert.True(t, errors.Is(err, merr.ErrOperationNotSupported))
+}
+
 // --- Test PinSnapshotData ---
 
 // TestServer_PinSnapshotData_AcquiresResourceKeyLock verifies that
