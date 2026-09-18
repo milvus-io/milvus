@@ -74,9 +74,17 @@ MakeInternalPropertiesFromStorageConfig(CStorageConfig c_storage_config) {
                                       PROPERTY_FS_ACCESS_KEY_VALUE,
                                       c_storage_config.access_key_value);
     }
-    if (c_storage_config.root_path != nullptr) {
+    const std::string storage_type = c_storage_config.storage_type != nullptr
+                                         ? c_storage_config.storage_type
+                                         : "";
+    if (c_storage_config.root_path != nullptr || storage_type == "local") {
+        const std::string root_path = c_storage_config.root_path != nullptr
+                                          ? c_storage_config.root_path
+                                          : "";
         milvus_storage::api::SetValue(
-            *properties_map, PROPERTY_FS_ROOT_PATH, c_storage_config.root_path);
+            *properties_map,
+            PROPERTY_FS_ROOT_PATH,
+            LoonFSRootPath(storage_type, root_path).c_str());
     }
     if (c_storage_config.storage_type != nullptr) {
         milvus_storage::api::SetValue(*properties_map,
@@ -186,6 +194,7 @@ static const std::unordered_set<std::string> kAllowedExtfsSpecKeys = {
     "use_virtual_host",
     "region",
     "cloud_provider",
+    "endpoint_url",
     "iam_endpoint",
     "storage_type",
     "ssl_ca_cert",
@@ -533,9 +542,12 @@ InjectExternalSpecProperties(
     // Layer 2: apply spec.extfs JSON. Gate every key through
     // kAllowedExtfsSpecKeys — defense-in-depth against property injection
     // if a caller bypasses Go ParseExternalSpec. Note: "address" is NOT in
-    // the allowlist; user-facing endpoint override must use Milvus-form URI.
+    // the allowlist. endpoint_url is captured below and translated to the
+    // internal address property instead of being forwarded verbatim.
     std::string spec_cloud_provider;
     std::string spec_region;
+    std::string spec_endpoint_url;
+    bool has_spec_endpoint_url = false;
     if (!external_spec.empty()) {
         try {
             simdjson::ondemand::parser parser;
@@ -558,6 +570,11 @@ InjectExternalSpecProperties(
                         }
                         auto val =
                             std::string(field.value().get_string().value());
+                        if (key == "endpoint_url") {
+                            has_spec_endpoint_url = true;
+                            spec_endpoint_url = val;
+                            continue;
+                        }
                         if (val.empty()) {
                             continue;
                         }
@@ -602,41 +619,97 @@ InjectExternalSpecProperties(
         }
     }
 
-    // Layer 3: AWS-form disambiguation via derived-endpoint vs URI.host.
-    //   Compute DeriveEndpoint(cp, region). If non-empty and different from
-    //   URI.host, source is AWS-form (scheme://bucket/key) — swap URI.host
-    //   into bucket_name and write derived endpoint as address. Otherwise
-    //   Milvus-form (URI.host == endpoint) or unresolvable — keep Layer1
-    //   values.
+    // Layer 3: resolve the effective endpoint.
     //
-    //   Path-segment heuristics are unreliable: AWS-form S3 keys may contain
-    //   '/' (`s3://bucket/deep/key.parquet`) and Milvus-form URIs may omit
-    //   keys (`s3://endpoint/bucket`). Comparing derive result with host
-    //   handles both cases correctly — the derived endpoint string is a
-    //   stable cloud-provider identifier, not dependent on path structure.
-    // Swap decision uses ONLY the user-supplied cloud_provider, never a
-    // scheme-inferred fallback. Self-hosted MinIO with
-    // `s3://localhost:9000/bucket/...` is Milvus-form; inferring
-    // cloud_provider=aws from scheme=s3 would produce
-    // derived=https://s3.<region>.amazonaws.com, falsely classify host
-    // as a bucket, and swap. When the user does not declare
-    // cloud_provider, DeriveEndpoint returns empty and the URI is
-    // treated as Milvus-form (host is endpoint).
-    std::string derived = DeriveEndpoint(spec_cloud_provider, spec_region);
-    // Cloud-family host suffix check: if URI.host ends with a known cloud
-    // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
-    // endpoint variants including global/accelerate/dualstack/FIPS/VPC), the
-    // URI is Milvus-form and URI.host is authoritative. Skip swap regardless
-    // of whether DeriveEndpoint string-matches. This prevents misclassifying
-    // `s3://s3.amazonaws.com/bucket/key` as AWS-form when spec.region is a
-    // regional value.
-    bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
-    if (!uri_host_is_cloud_endpoint && !derived.empty() &&
-        StripURIScheme(derived) != host) {
+    // endpoint_url selects explicit-endpoint mode. In this mode
+    // external_source has the standard scheme://bucket/key shape: URI.host is
+    // the bucket, while endpoint_url is the physical S3-compatible address.
+    // The Go API boundary validates the full URL contract. The checks here are
+    // defense in depth for corrupted metadata or callers that bypass Go.
+    if (has_spec_endpoint_url) {
+        std::string effective_endpoint = spec_endpoint_url;
+        if (!effective_endpoint.empty() && effective_endpoint.back() == '/') {
+            effective_endpoint.pop_back();
+        }
+        auto endpoint_scheme_end = effective_endpoint.find("://");
+        AssertInfo(endpoint_scheme_end != std::string::npos,
+                   "extfs.endpoint_url for collection {} missing scheme",
+                   collection_id);
+        std::string endpoint_scheme =
+            effective_endpoint.substr(0, endpoint_scheme_end);
+        std::transform(endpoint_scheme.begin(),
+                       endpoint_scheme.end(),
+                       endpoint_scheme.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        AssertInfo(endpoint_scheme == "http" || endpoint_scheme == "https",
+                   "extfs.endpoint_url for collection {} must use http or "
+                   "https",
+                   collection_id);
+        std::string endpoint_authority =
+            effective_endpoint.substr(endpoint_scheme_end + 3);
+        AssertInfo(
+            !endpoint_authority.empty() &&
+                endpoint_authority.find_first_of("/@?#") == std::string::npos,
+            "extfs.endpoint_url for collection {} must contain only "
+            "scheme and authority",
+            collection_id);
+        AssertInfo(
+            host.find(':') == std::string::npos,
+            "external_source host for collection {} must be a bucket name "
+            "without a port when extfs.endpoint_url is set",
+            collection_id);
+
+        effective_endpoint = endpoint_scheme + "://" + endpoint_authority;
+        milvus_storage::api::SetValue(properties,
+                                      (extfs_prefix + "address").c_str(),
+                                      effective_endpoint.c_str());
         milvus_storage::api::SetValue(
             properties, (extfs_prefix + "bucket_name").c_str(), host.c_str());
         milvus_storage::api::SetValue(
-            properties, (extfs_prefix + "address").c_str(), derived.c_str());
+            properties,
+            (extfs_prefix + "use_ssl").c_str(),
+            endpoint_scheme == "https" ? "true" : "false");
+    } else {
+        // AWS-form disambiguation via derived-endpoint vs URI.host.
+        //   Compute DeriveEndpoint(cp, region). If non-empty and different
+        //   from URI.host, source is AWS-form (scheme://bucket/key) — swap
+        //   URI.host into bucket_name and write derived endpoint as address.
+        //   Otherwise Milvus-form (URI.host == endpoint) or unresolvable —
+        //   keep Layer1 values.
+        //
+        //   Path-segment heuristics are unreliable: AWS-form S3 keys may
+        //   contain '/' (`s3://bucket/deep/key.parquet`) and Milvus-form URIs
+        //   may omit keys (`s3://endpoint/bucket`). Comparing derive result
+        //   with host handles both cases correctly — the derived endpoint
+        //   string is a stable cloud-provider identifier, not dependent on
+        //   path structure.
+        // Swap decision uses ONLY the user-supplied cloud_provider, never a
+        // scheme-inferred fallback. Self-hosted MinIO with
+        // `s3://localhost:9000/bucket/...` is Milvus-form; inferring
+        // cloud_provider=aws from scheme=s3 would produce
+        // derived=https://s3.<region>.amazonaws.com, falsely classify host
+        // as a bucket, and swap. When the user does not declare
+        // cloud_provider, DeriveEndpoint returns empty and the URI is
+        // treated as Milvus-form (host is endpoint).
+        std::string derived = DeriveEndpoint(spec_cloud_provider, spec_region);
+        // Cloud-family host suffix check: if URI.host ends with a known cloud
+        // provider domain (AWS, GCP, Aliyun, Tencent, Huawei, Azure — all
+        // endpoint variants including global/accelerate/dualstack/FIPS/VPC),
+        // the URI is Milvus-form and URI.host is authoritative. Skip swap
+        // regardless of whether DeriveEndpoint string-matches. This prevents
+        // misclassifying `s3://s3.amazonaws.com/bucket/key` as AWS-form when
+        // spec.region is a regional value.
+        bool uri_host_is_cloud_endpoint = IsCloudEndpointHost(host);
+        if (!uri_host_is_cloud_endpoint && !derived.empty() &&
+            StripURIScheme(derived) != host) {
+            milvus_storage::api::SetValue(
+                properties,
+                (extfs_prefix + "bucket_name").c_str(),
+                host.c_str());
+            milvus_storage::api::SetValue(properties,
+                                          (extfs_prefix + "address").c_str(),
+                                          derived.c_str());
+        }
     }
 
     // Reconcile bare address with final use_ssl. Addresses that already
@@ -736,17 +809,12 @@ InjectExternalSpecProperties(milvus_storage::api::Properties& properties,
     }
 }
 
-std::shared_ptr<milvus_storage::api::Properties>
-MakeInternalLocalProperies(const char* c_path) {
-    auto properties_map = std::make_shared<milvus_storage::api::Properties>();
-
-    milvus_storage::api::SetValue(
-        *properties_map, PROPERTY_FS_STORAGE_TYPE, "local");
-
-    milvus_storage::api::SetValue(
-        *properties_map, PROPERTY_FS_ROOT_PATH, c_path);
-
-    return properties_map;
+std::string
+LoonFSRootPath(const std::string& storage_type, const std::string& root_path) {
+    if (storage_type == "local") {
+        return kLoonLocalFSRootPath;
+    }
+    return root_path;
 }
 
 CStorageConfig

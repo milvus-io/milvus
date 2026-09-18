@@ -49,7 +49,7 @@ len(child.valid_data)             = logical element count
 count(child.valid_data == true)   = physical payload element count
 ```
 
-Proxy validates this relationship before normalization. Row payloads are also compact and 
+Proxy validates this relationship before normalization. Row payloads are also compact and
 restores null row positions without changing child validity. Element-level
 normalization depends on the payload type:
 
@@ -59,9 +59,9 @@ normalization depends on the payload type:
 | ArrayOfVector | `[vec0, null, vec2]` | `[vec0, vec2]` | `[vec0, vec2]` |
 
 Both examples retain child validity `[true, false, true]`. Scalar arrays use
-dense placeholders to simplify downstream logical-index access.The placeholder has no 
-semantic value and costs additional payload space. Vector arrays stay compact because 
-a placeholder would occupy an entire vector. Empty and all-null arrays retain their 
+dense placeholders to simplify downstream logical-index access.The placeholder has no
+semantic value and costs additional payload space. Vector arrays stay compact because
+a placeholder would occupy an entire vector. Empty and all-null arrays retain their
 element type even when their physical payload is empty.
 
 The insert-to-query flow is:

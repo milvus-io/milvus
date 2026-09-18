@@ -321,6 +321,14 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
+	// An empty prefix matches every object in the bucket, so this API would
+	// erase the whole instance. LocalChunkManager refuses it for the same
+	// reason; the guard belongs here rather than in each caller.
+	if len(prefix) == 0 {
+		errMsg := "empty prefix is not allowed for ChunkManager remove operation"
+		mlog.Warn(ctx, errMsg)
+		return merr.WrapErrStorageMsg("%s", errMsg)
+	}
 	// removeObject in parallel.
 	runningGroup, _ := errgroup.WithContext(ctx)
 	runningGroup.SetLimit(10)

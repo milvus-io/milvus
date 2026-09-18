@@ -10,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/helper"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 const (
@@ -37,8 +36,9 @@ func (t tenant) MustGetFullTopicName(topic string) string {
 
 // openerImpl is the opener for pulsar wal.
 type openerImpl struct {
-	tenant tenant
-	c      pulsar.Client
+	tenant            tenant
+	c                 pulsar.Client
+	newProducerClient clientFactory // creates the client dedicated to the producer of each read-write wal.
 }
 
 // Open opens a wal instance.
@@ -47,25 +47,27 @@ func (o *openerImpl) Open(ctx context.Context, opt *walimpls.OpenOption) (walimp
 		return nil, err
 	}
 
-	var backlogClearHelper *backlogClearHelper
-	if opt.Channel.AccessMode == types.AccessModeRW {
-		backlogAutoClearBytes := paramtable.Get().PulsarCfg.BacklogAutoClearBytes.GetAsSize()
-		if backlogAutoClearBytes <= 0 {
-			backlogAutoClearBytes = defaultBacklogSize
-		}
-		backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes, o.tenant)
-	}
 	w := &walImpl{
-		WALHelper:          helper.NewWALHelper(opt),
-		c:                  o.c,
-		p:                  syncutil.NewFuture[pulsar.Producer](),
-		notifier:           syncutil.NewAsyncTaskNotifier[struct{}](),
-		backlogClearHelper: backlogClearHelper,
-		tenant:             o.tenant,
+		WALHelper: helper.NewWALHelper(opt),
+		c:         o.c,
+		tenant:    o.tenant,
 	}
-	// because the producer of pulsar cannot be created if the topic is backlog exceeded,
-	// so we need to set the producer at background with backoff retry.
-	w.initProducerAtBackground()
+	if opt.Channel.AccessMode != types.AccessModeRW {
+		return w, nil
+	}
+
+	backlogAutoClearBytes := paramtable.Get().PulsarCfg.BacklogAutoClearBytes.GetAsSize()
+	if backlogAutoClearBytes <= 0 {
+		backlogAutoClearBytes = defaultBacklogSize
+	}
+	// The backlog clear helper starts before the producer, because a backlog exceeded topic rejects producer creation.
+	w.backlogClearHelper = newBacklogClearHelper(o.c, opt.Channel, backlogAutoClearBytes, o.tenant)
+	producer, err := newWALProducer(ctx, o.newProducerClient, o.tenant.MustGetFullTopicName(opt.Channel.Name), w.Log())
+	if err != nil {
+		w.Close()
+		return nil, err
+	}
+	w.producer = producer
 	return w, nil
 }
 

@@ -12,6 +12,7 @@ require (
 	github.com/apache/pulsar-client-go v0.19.0
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/blang/semver/v4 v4.0.0
+	github.com/bytedance/mockey v1.4.6
 	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cockroachdb/errors v1.9.1
 	github.com/confluentinc/confluent-kafka-go v1.9.1
@@ -20,7 +21,7 @@ require (
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.174
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/json-iterator/go v1.1.13-0.20220915233716-71ac16282d12
-	github.com/klauspost/compress v1.18.2
+	github.com/klauspost/compress v1.18.7
 	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.0-20260813034415-c39cddab3fac
 	github.com/minio/minio-go/v7 v7.0.73
 	github.com/panjf2000/ants/v2 v2.11.3
@@ -37,9 +38,9 @@ require (
 	github.com/twpayne/go-geom v1.6.1
 	github.com/x448/float16 v0.8.4
 	github.com/zilliztech/woodpecker v0.1.42
-	go.etcd.io/etcd/api/v3 v3.5.23
-	go.etcd.io/etcd/client/v3 v3.5.23
-	go.etcd.io/etcd/server/v3 v3.5.23
+	go.etcd.io/etcd/api/v3 v3.5.33
+	go.etcd.io/etcd/client/v3 v3.5.33
+	go.etcd.io/etcd/server/v3 v3.5.33
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.59.0
 	go.opentelemetry.io/otel v1.43.0
 	go.opentelemetry.io/otel/exporters/jaeger v1.13.0
@@ -68,9 +69,14 @@ require (
 
 require (
 	github.com/ebitengine/purego v0.9.0 // indirect
+	github.com/gopherjs/gopherjs v1.12.80 // indirect
 	github.com/iskorotkov/avro/v2 v2.33.1 // indirect
+	github.com/jtolds/gls v4.20.0+incompatible // indirect
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
+	github.com/smartystreets/assertions v1.2.0 // indirect
+	github.com/smartystreets/goconvey v1.7.2 // indirect
 	github.com/spaolacci/murmur3 v1.1.0 // indirect
+	golang.org/x/arch v0.11.0 // indirect
 )
 
 require (
@@ -214,10 +220,10 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/bbolt v1.3.12 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.5.23 // indirect
-	go.etcd.io/etcd/client/v2 v2.305.23 // indirect
-	go.etcd.io/etcd/pkg/v3 v3.5.23 // indirect
-	go.etcd.io/etcd/raft/v3 v3.5.23 // indirect
+	go.etcd.io/etcd/client/pkg/v3 v3.5.33 // indirect
+	go.etcd.io/etcd/client/v2 v2.305.33 // indirect
+	go.etcd.io/etcd/pkg/v3 v3.5.33 // indirect
+	go.etcd.io/etcd/raft/v3 v3.5.33 // indirect
 	go.mongodb.org/mongo-driver v1.17.7 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/detectors/gcp v1.43.0 // indirect

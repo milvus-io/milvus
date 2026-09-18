@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
 #include <map>
 #include <optional>
 #include <thread>
@@ -28,6 +27,7 @@
 #include "test_utils/c_api_test_utils.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
+#include "test_utils/TmpPath.h"
 #include "storage/Util.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "knowhere/index/index_factory.h"
@@ -37,8 +37,6 @@
 
 using namespace milvus;
 using namespace milvus::segcore;
-
-namespace fs = std::filesystem;
 
 class FlushGrowingSegmentTest : public ::testing::Test {
  protected:
@@ -50,21 +48,13 @@ class FlushGrowingSegmentTest : public ::testing::Test {
 
     void
     SetUp() override {
-        // create a temporary directory for test output
-        test_dir_ = "/tmp/flush_growing_test_" + std::to_string(time(nullptr));
-        fs::create_directories(test_dir_);
-
+        // Each fixture owns a unique directory under the shard-specific
+        // TestLocalPath. TmpPath also cleans up only this fixture's files.
+        test_dir_ = temp_path_.get().string();
         // Arrow filesystem is initialized by init_gtest.cpp
     }
 
-    void
-    TearDown() override {
-        // cleanup test directory
-        if (fs::exists(test_dir_)) {
-            fs::remove_all(test_dir_);
-        }
-    }
-
+    milvus::test::TmpPath temp_path_;
     std::string test_dir_;
 
     std::vector<FieldDataPtr>
@@ -1200,7 +1190,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayRoundTrip) {
         auto actual = static_cast<const milvus::VectorArray*>(
             field_datas[0]->RawValue(i));
         ASSERT_NE(actual, nullptr);
-        EXPECT_EQ(actual->length(), array_len);
+        EXPECT_EQ(actual->physical_length(), array_len);
         EXPECT_EQ(actual->output_data().SerializeAsString(),
                   expected[i].SerializeAsString());
     }
@@ -1366,7 +1356,7 @@ TEST_F(FlushGrowingSegmentTest, FlushVectorArrayElementTypesRoundTrip) {
             auto actual = static_cast<const milvus::VectorArray*>(
                 field_datas[0]->RawValue(i));
             ASSERT_NE(actual, nullptr);
-            EXPECT_EQ(actual->length(), array_len);
+            EXPECT_EQ(actual->physical_length(), array_len);
             EXPECT_EQ(actual->get_element_type(), test_case.element_type);
             EXPECT_EQ(actual->output_data().SerializeAsString(),
                       expected[i].SerializeAsString());

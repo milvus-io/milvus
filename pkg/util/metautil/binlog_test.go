@@ -26,6 +26,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestBuildJSONKeyStatsV3PrefixPreservesBase(t *testing.T) {
+	for _, base := range []string{"files/insert_log/1/2/3", "/data/insert_log/1/2/3", "files/tmp/../insert_log/1/2/3", "files//insert_log/1/2/3"} {
+		for _, trailing := range []string{"", "/"} {
+			got := BuildJSONKeyStatsV3Prefix(base+trailing, 100)
+			if want := base + "/_stats/json_stats.100"; got != want {
+				t.Fatalf("base %q: got %q, want %q", base+trailing, got, want)
+			}
+		}
+	}
+	for base, want := range map[string]string{"": "_stats/json_stats.100", "/": "/_stats/json_stats.100"} {
+		if got := BuildJSONKeyStatsV3Prefix(base, 100); got != want {
+			t.Fatalf("base %q: got %q, want %q", base, got, want)
+		}
+	}
+}
+
 func TestParseInsertLogPath(t *testing.T) {
 	type args struct {
 		path string

@@ -88,7 +88,7 @@ func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
 // preparePartialUpdateRetryAttempt restores the original payload and rebuilds
 // terms, Strong query snapshots, and DML state for one retry.
 func (ut *upsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
-	if err := ut.preparePartialUpdate(ctx); err != nil {
+	if err := ut.prepareUpsert(ctx); err != nil {
 		return err
 	}
 	if err := ut.insertPreExecute(ctx); err != nil {
@@ -205,10 +205,11 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	// Upsert never carries an idempotency key, so it passes no header decorator.
 	if ut.partitionKeys == nil {
-		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ez, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
 	} else {
-		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups)
+		msgs, err = repackInsertDataWithPartitionKeyForStreamingService(ut.TraceCtx(), ut.GetMetaCache(), channelNames, ut.upsertMsg.InsertMsg, ut.result, ut.partitionKeys, ez, ut.schema.CollectionSchema, ut.schemaVersion, ut.partialUpdateCASGroups, nil)
 	}
 	if err != nil {
 		log.Warn(ctx, "assign segmentID and repack insert data failed", mlog.Err(err))
@@ -219,12 +220,16 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 }
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
-		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
+		// Fall back only when no delete subset was prepared; an empty subset
+		// means no lookup IDs should be deleted.
 		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	}
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
 	// hash primary keys to channels

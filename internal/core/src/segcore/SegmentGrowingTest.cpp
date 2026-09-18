@@ -400,7 +400,8 @@ TEST(Growing, MissingStructArrayOffsetsReturnsEmptyForOldRows) {
                          label,
                          DataType::ARRAY,
                          DataType::VARCHAR,
-                         true);
+                         true,
+                         false);
     segment->Reopen(new_schema);
 
     auto offsets = segment->GetArrayOffsets(label);
@@ -1361,7 +1362,7 @@ TEST(GrowingTest, EmptyVectorArrayRowsInitializeElementOneof) {
         EXPECT_EQ(row.data_case(),
                   proto::schema::VectorField::DataCase::kFloatVector);
         EXPECT_TRUE(row.float_vector().data().empty());
-        EXPECT_NO_THROW(milvus::VectorArray(row));
+        EXPECT_NO_THROW(milvus::VectorArray(row, false));
     }
 }
 
@@ -2448,7 +2449,7 @@ TEST(Growing, ReopenRetryAfterTextIndexFailureBackfillsOnce) {
     EXPECT_NE(first_failure.find("failed to create text writer"),
               std::string::npos)
         << "attempt 1 did not reach the text index build: " << first_failure;
-    EXPECT_EQ(segment->get_schema().get_schema_version(), 1);
+    EXPECT_EQ(segment->get_schema_snapshot()->get_schema_version(), 1);
 
     auto nvec_fid = v2->get_field_id(FieldName("nvec"));
     {
@@ -2465,7 +2466,7 @@ TEST(Growing, ReopenRetryAfterTextIndexFailureBackfillsOnce) {
     // segment can never take a schema upgrade again.
     auto v3 = make_schema(3, true, {});
     segment_impl->Reopen(v3);
-    EXPECT_EQ(segment->get_schema().get_schema_version(), 3);
+    EXPECT_EQ(segment->get_schema_snapshot()->get_schema_version(), 3);
     {
         const auto& mapping = segment_impl->get_insert_record()
                                   .get_data_base(nvec_fid)

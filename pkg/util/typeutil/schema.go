@@ -4314,9 +4314,13 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 	} else if !ok1 && !ok2 {
 		// try format2
 		for k, v := range input {
-			idx, err := strconv.ParseUint(k, 0, 32)
+			// Base 10 is mandatory: the accepted format documents the key as a
+			// decimal index. With base 0 strconv infers the base from the
+			// prefix, so "010" silently became index 8 and "0x10" index 16,
+			// while "08"/"09" were rejected as invalid octal.
+			idx, err := strconv.ParseUint(k, 10, 32)
 			if err != nil {
-				return nil, err
+				return nil, merr.WrapErrParameterInvalidMsg("invalid index in JSON: %s must be a decimal index in [0, 2^32-1)", k)
 			}
 
 			val, err := getValue(v)

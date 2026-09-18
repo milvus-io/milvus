@@ -89,13 +89,6 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
         AssertInfo(static_cast<bool>(pin_cell_),
                    "raw take cell accessor is null");
         AssertInfo(planner_ != nullptr, "raw take planner is null");
-        for (int64_t i = 0; i < offsets_.size; ++i) {
-            const auto offset = offsets_.AtUnchecked(i);
-            AssertInfo(offset >= 0 && offset < planner_->NumRows(),
-                       "take offset {} is outside column rows {}",
-                       offset,
-                       planner_->NumRows());
-        }
     }
 
     int64_t
@@ -121,16 +114,17 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
                     read_data && owned_data_.data_skipped &&
                         owned_data_.data_skipped[index]};
         }
+        const auto& location = ResolveLocation(index);
         if (!nullable_ && !read_data) {
             return {true, false};
         }
-        const auto& location = ResolveLocation(index);
         const auto preloaded_skip =
             read_data && filter_ != nullptr &&
             filter_->Source() ==
                 ColumnFilter::MetricsSource::PreloadedStatistics &&
             ShouldSkipFilteredCell(location.source_cell_id);
-        if (!nullable_ && preloaded_skip) {
+        if (preloaded_skip &&
+            (!nullable_ || !filter_->SkippedValidityRequired())) {
             return {true, true};
         }
         auto* chunk = PinCell(location.source_cell_id);

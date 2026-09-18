@@ -2,7 +2,6 @@ package segment
 
 import (
 	"context"
-	"path"
 
 	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
@@ -18,13 +17,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -396,7 +393,9 @@ func manifestPathForGrowingPack(meta *streamingpb.SegmentAssignmentMeta) string 
 	if meta.GetStorageVersion() != storage.StorageV3 {
 		return ""
 	}
-	k := metautil.JoinIDPath(meta.GetCollectionId(), meta.GetPartitionId(), meta.GetSegmentId())
-	basePath := path.Join(paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath, k)
+	// Use the primary storage root: localStorage.path for local storage,
+	// minio.rootPath for remote storage, consistent with other V3 writers.
+	basePath := storage.SegmentManifestBasePath(packed.CreateStorageConfig().GetRootPath(),
+		meta.GetCollectionId(), meta.GetPartitionId(), meta.GetSegmentId())
 	return packed.MarshalManifestPath(basePath, packed.ManifestEarliest)
 }

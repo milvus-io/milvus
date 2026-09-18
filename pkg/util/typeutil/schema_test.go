@@ -3177,6 +3177,72 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 	})
 }
 
+func TestParseJsonSparseFloatRowDictIndexBase(t *testing.T) {
+	// The dict format documents its keys as decimal indices
+	// ({"1": 0.1, "2": 0.2}). Keys must therefore be read in base 10 only:
+	// inferring the base from the prefix silently maps "010" to index 8 and
+	// accepts non-decimal spellings such as "0x10" or "0b11".
+	type testCase struct {
+		name        string
+		row         map[string]interface{}
+		expectedErr bool
+		expected    []byte
+	}
+	cases := []testCase{
+		{
+			name:     "plain decimal key",
+			row:      map[string]interface{}{"10": 0.5},
+			expected: CreateSparseFloatRow([]uint32{10}, []float32{0.5}),
+		},
+		{
+			name:     "zero padded decimal key",
+			row:      map[string]interface{}{"010": 0.5},
+			expected: CreateSparseFloatRow([]uint32{10}, []float32{0.5}),
+		},
+		{
+			name:     "multiple zero padded decimal keys",
+			row:      map[string]interface{}{"01": 1.0, "0003": 2.0},
+			expected: CreateSparseFloatRow([]uint32{1, 3}, []float32{1.0, 2.0}),
+		},
+		{
+			name:        "hexadecimal key rejected",
+			row:         map[string]interface{}{"0x10": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "binary key rejected",
+			row:         map[string]interface{}{"0b11": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "octal key rejected",
+			row:         map[string]interface{}{"0o11": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "underscore separated key rejected",
+			row:         map[string]interface{}{"1_0": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "non numeric key rejected",
+			row:         map[string]interface{}{"a": 0.5},
+			expectedErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := CreateSparseFloatRowFromMap(tc.row)
+			if tc.expectedErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, res)
+		})
+	}
+}
+
 func TestParseJsonSparseFloatRowBytes(t *testing.T) {
 	t.Run("valid row 1", func(t *testing.T) {
 		row := []byte(`{"indices":[1,3,5],"values":[1.0,2.0,3.0]}`)

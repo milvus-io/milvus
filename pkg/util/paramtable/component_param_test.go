@@ -48,6 +48,40 @@ func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	assert.Equal(t, 100, cfg.StrictGroupProbeCandidates.GetAsInt())
 }
 
+func TestComponentParamDerivedLocalStoragePathsUseCanonicalFrozenValue(t *testing.T) {
+	workingDir := t.TempDir()
+	t.Chdir(workingDir)
+	configDir := t.TempDir()
+	t.Setenv("MILVUSCONF", configDir)
+	configFile := filepath.Join(configDir, "local-storage.yaml")
+	root := filepath.Join(t.TempDir(), "canonical")
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: \"  "+root+"/./  \"\n"), 0o600))
+
+	bt := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{filepath.Base(configFile)}), Interval(10*time.Millisecond))
+	t.Cleanup(bt.mgr.Close)
+	params := &ComponentParam{}
+	params.Init(bt)
+
+	wantRoot := filepath.Clean(root)
+	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
+	initialDiskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetValue()
+
+	// File/config-center updates replace the raw source value before the
+	// Forbidden handler rejects them. Derived paths must keep using the same
+	// canonical startup root as LocalStorageCfg.Path, not that rejected raw value.
+	require.NoError(t, os.WriteFile(configFile, []byte("localStorage:\n  path: relative/data\n"), 0o600))
+	require.Eventually(t, func() bool {
+		return bt.Get("localStorage.path") == "relative/data"
+	}, time.Second, 10*time.Millisecond)
+	require.Equal(t, wantRoot, params.LocalStorageCfg.Path.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "pprof"), params.ProfileCfg.PprofPath.GetValue())
+	require.Equal(t, filepath.Join(wantRoot, "mmap"), params.QueryNodeCfg.MmapDirPath.GetValue())
+	require.Equal(t, initialDiskCapacity, params.QueryNodeCfg.DiskCapacityLimit.GetValue())
+	require.NoDirExists(t, filepath.Join(workingDir, "relative"))
+}
+
 func shouldPanic(t *testing.T, name string, f func()) {
 	defer func() { recover() }()
 	f()
@@ -1245,6 +1279,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 0.01, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceTolerance.GetAsFloat())
 		assert.Equal(t, 3, params.StreamingCfg.WALBalancerPolicyVChannelFairRebalanceMaxStep.GetAsInt())
 		assert.Equal(t, 30*time.Minute, params.StreamingCfg.WALBalancerOperationTimeout.GetAsDurationByParse())
+		assert.Equal(t, 5*time.Second, params.StreamingCfg.WALBalancerNodeLostGracePeriod.GetAsDurationByParse())
 		assert.Equal(t, 4.0, params.StreamingCfg.WALBroadcasterConcurrencyRatio.GetAsFloat())
 		assert.Equal(t, 5*time.Minute, params.StreamingCfg.WALBroadcasterTombstoneCheckInternal.GetAsDurationByParse())
 		assert.Equal(t, 8192, params.StreamingCfg.WALBroadcasterTombstoneMaxCount.GetAsInt())
@@ -1259,6 +1294,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 24*time.Hour, params.StreamingCfg.WALRecoverySchemaExpirationTolerance.GetAsDurationByParse())
 		assert.Equal(t, 100, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, false, params.StreamingCfg.IdempotencyEnabled.GetAsBool())
+		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
+		assert.Equal(t, int64(256*1024*1024), params.StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize())
+		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt())
+		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, float64(0.6), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.2), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.1), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())
@@ -1353,6 +1393,11 @@ func TestComponentParam(t *testing.T) {
 		params.Save(params.StreamingCfg.WALRecoveryGracefulCloseTimeout.Key, "4s")
 		params.Save(params.StreamingCfg.WALRecoveryMaxDirtyMessage.Key, "200")
 		params.Save(params.StreamingCfg.WALRecoveryPersistInterval.Key, "20s")
+		params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
+		params.Save(params.StreamingCfg.IdempotencyMaxBytesPerWindow.Key, "33554432")
+		params.Save(params.StreamingCfg.IdempotencyMaxRetainedBytes.Key, "1073741824")
+		params.Save(params.StreamingCfg.IdempotencyMaxRetainedChunks.Key, "512")
+		params.Save(params.StreamingCfg.IdempotencyMaxKeyLength.Key, "2048")
 		params.Save(params.StreamingCfg.FlushMemoryThreshold.Key, "0.7")
 		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.Key, "0.25")
 		params.Save(params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.Key, "0.15")
@@ -1380,6 +1425,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4*time.Second, params.StreamingCfg.WALRecoveryGracefulCloseTimeout.GetAsDurationByParse())
 		assert.Equal(t, 200, params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt())
 		assert.Equal(t, 20*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
+		assert.Equal(t, true, params.StreamingCfg.IdempotencyEnabled.GetAsBool())
+		assert.Equal(t, int64(32*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
+		assert.Equal(t, int64(1024*1024*1024), params.StreamingCfg.IdempotencyMaxRetainedBytes.GetAsSize())
+		assert.Equal(t, 512, params.StreamingCfg.IdempotencyMaxRetainedChunks.GetAsInt())
+		assert.Equal(t, 2048, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, float64(0.7), params.StreamingCfg.FlushMemoryThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.25), params.StreamingCfg.FlushGrowingSegmentBytesHwmThreshold.GetAsFloat())
 		assert.Equal(t, float64(0.15), params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat())

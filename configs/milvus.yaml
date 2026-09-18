@@ -87,6 +87,8 @@ tikv:
 
 localStorage:
   # Local path to where vector data are stored during a search or a query to avoid repetitve access to MinIO or S3 service.
+  # Must be an absolute filesystem path. Milvus refuses to start if this value is relative or empty.
+  # Migration of data written using a relative path in older versions is not supported.
   # Caution: Changing this parameter after using Milvus for a period of time will affect your access to old data.
   # It is recommended to change this parameter before starting Milvus for the first time.
   path: /var/lib/milvus/data/
@@ -310,6 +312,15 @@ pulsar:
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
+  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+  # exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+  # shared: multiple producers can write to the topic at the same time.
+  # exclusive access is enforced by pulsar broker 2.8.0 or later.
+  producerAccessMode: exclusive
+  # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+  # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+  # When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.
+  producerCreateTimeout: 1m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -812,14 +823,9 @@ dataCoord:
     # The max number of binlog (which is equal to the binlog file num of primary key) for one segment,
     # the segment will be sealed if the number of binlog file reaches to max value.
     maxBinlogFileNumber: 32
-    smallProportion: 0.5 # The segment is considered as "small segment" when its # of rows is smaller than
-    # (smallProportion * segment max # of rows).
-    # A compaction will happen on small segments if the segment after compaction will have
-    compactableProportion: 0.85
-    # over (compactableProportion * segment max # of rows) rows.
-    # MUST BE GREATER THAN OR EQUAL TO <smallProportion>!!!
-    # During compaction, the size of segment # of rows is able to exceed segment max # of rows by (expansionRate-1) * 100%. 
-    expansionRate: 1.25
+    smallProportion: 0.5 # Deprecated: unused since two-tier compaction. Replaced by middleSize (idealSize/4) × fillRate.
+    compactableProportion: 0.85 # Deprecated: fill rate is now a hardcoded constant (0.85) in the two-tier compaction algorithm.
+    expansionRate: 1.25 # Deprecated: no longer used by the mix compaction planner. Still read by v2 trigger and import paths.
   sealPolicy:
     channel:
       # The size threshold in MB, if the total size of growing segments of each shard
@@ -887,6 +893,7 @@ dataCoord:
         maxnum: 200 # The deltalog count of a segment to trigger a compaction, default as 200
       expiredlog:
         maxsize: 10485760 # The expired log size of a segment to trigger a compaction, default as 10MB
+    maxFragmentsPerGroup: 8 # maximum number of fragment segments allowed per channel-partition group before fragment-tier compaction triggers
     clustering:
       enable: true # Enable clustering compaction
       autoEnable: false # Enable auto clustering compaction
@@ -1212,7 +1219,7 @@ common:
   gracefulTime: 5000 # milliseconds. it represents the interval (in ms) by which the request arrival time needs to be subtracted in the case of Bounded Consistency.
   gracefulStopTimeout: 1800 # seconds. it will force quit the server if the graceful stop process is not completed during this time.
   parquetStatsSkipIndex:
-    enabled: false # whether to skip parquet stats index when reading; set true to enable skipping.
+    enabled: true # whether to force one row group per cache cell and build the sealed-segment chunk skip index from parquet footer statistics. When enabled, packing is 1:1 even without usable statistics; disabling allows target-size packing. Takes effect only at startup (not refreshable): the flag decides the segment cache cell layout, which must not change while queries are running. Storage v2 segments only; manifest-based (v3) segments do not build this index yet.
   storageType: remote # please adjust in embedded Milvus: local, available values are [local, remote], value minio is deprecated, use remote instead
   storage:
     manifestTransactionRetryLimit: 10 # Maximum number of retry attempts for V3 storage manifest transaction commits on optimistic concurrency conflicts
@@ -1269,6 +1276,23 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Whether the metrics port (default 9091) requires root HTTP Basic authentication
+    # for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
+    # Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
+    # Legacy /api/v1 data operations keep valid-user/API-key auth when
+    # common.security.authorizationEnabled is true, and otherwise require root.
+    # Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
+    # Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
+    # Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
+    # up to 10 minutes after its last fetch, including a password rotated during an outage.
+    # A Proxy receiving a root credential notification revokes that cached hash and any
+    # in-flight verification results; it returns 503 if the current hash cannot be fetched.
+    # Other nodes and Proxies that have not received the notification retain the TTL policy.
+    # Update graceful-shutdown and profiling clients before enabling. The eventlog gRPC
+    # stream becomes loopback-only. This port remains plaintext: use a trusted network
+    # or TLS proxy and rotate root with UpdateCredential, not defaultRootPassword.
+    # Not settable through /management/config/alter. Watch milvus_admin_auth_total.
+    adminAuthEnabled: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 
@@ -1595,6 +1619,11 @@ streaming:
     # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
     operationTimeout: 30m
+    # The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    # It gives the old streaming node time to exit before another streaming node writes to the same wal.
+    # It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.
+    nodeLostGracePeriod: 5s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.

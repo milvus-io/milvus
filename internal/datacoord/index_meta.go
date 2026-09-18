@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -1537,25 +1536,6 @@ func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.Segme
 		return false, model.CloneSegmentIndex(segIndex)
 	}
 	return true, nil
-}
-
-// GetDeletedIndexesWithV1Path returns deleted SegmentIndex entries stored under
-// the v1 index_v1 layout. v0 cleanup still walks the buildID-rooted
-// index_files prefix and does not use this metadata-driven query.
-func (m *indexMeta) GetDeletedIndexesWithV1Path() []*model.SegmentIndex {
-	if m.segmentBuildInfo == nil {
-		return nil
-	}
-	var result []*model.SegmentIndex
-	for _, segIdx := range m.segmentBuildInfo.List() {
-		if !segIdx.IsDeleted {
-			continue
-		}
-		if metautil.IsCollectionRooted(segIdx.IndexStorePathVersion) {
-			result = append(result, model.CloneSegmentIndex(segIdx))
-		}
-	}
-	return result
 }
 
 func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []UniqueID) map[int64]map[int64]*indexpb.SegmentIndexState {

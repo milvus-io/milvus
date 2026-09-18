@@ -574,6 +574,58 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMerge() {
 	s.Greater(merged.GetScores()[1], merged.GetScores()[2])
 }
 
+func (s *SearchPipelineSuite) TestRerankOpOrdinaryFunctionChainOwnsFinalWindow() {
+	repr, err := chain.ProtoChainToRepr(l2FunctionChain(&schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{types.ScoreFieldName, types.IDFieldName},
+		Params: map[string]*schemapb.FunctionParamValue{
+			"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+		},
+	}))
+	s.Require().NoError(err)
+
+	result := func(scores []float32) *milvuspb.SearchResults {
+		return &milvuspb.SearchResults{
+			Status: merr.Success(),
+			Results: &schemapb.SearchResultData{
+				NumQueries: 1,
+				TopK:       3,
+				Topks:      []int64{3},
+				Ids:        testSearchResultIDs(1, 2, 3),
+				Scores:     scores,
+				ElementIndices: &schemapb.LongArray{
+					Data: []int64{10, 20, 30},
+				},
+			},
+		}
+	}
+
+	task := getHybridSearchTask("test_collection", nil, nil)
+	task.IsAdvanced = false
+	task.Nq = 1
+	task.Topk = 2
+	task.queryInfos[0].RoundDecimal = 1
+	task.rerankMeta = &functionChainRerankMeta{repr: repr}
+	op, err := newRerankOperator(task, nil)
+	s.Require().NoError(err)
+	outputs, err := op.run(
+		context.Background(),
+		s.span,
+		[]*milvuspb.SearchResults{
+			result([]float32{0.94, 0.84, 0.74}),
+		},
+		[]string{"IP"},
+	)
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+
+	chainResult := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{3}, chainResult.GetTopks())
+	s.Equal([]int64{1, 2, 3}, chainResult.GetIds().GetIntId().GetData())
+	s.Equal([]int64{10, 20, 30}, chainResult.GetElementIndices().GetData())
+	s.Equal([]float32{0.94, 0.84, 0.74}, chainResult.GetScores())
+}
+
 func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMergeElementLevel() {
 	repr, err := chain.ProtoChainToRepr(l2FunctionChain(
 		&schemapb.FunctionChainOp{

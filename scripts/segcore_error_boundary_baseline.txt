@@ -91,6 +91,8 @@ arrow	internal/core/src/index/json_stats/utils.cpp
 arrow	internal/core/src/index/json_stats/utils.h
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.cpp
 arrow	internal/core/src/index/skipindex_stats/SkipIndexStats.h
+arrow	internal/core/src/segcore/arrow_field_utils.cpp
+arrow	internal/core/src/segcore/arrow_field_utils.h
 arrow	internal/core/src/segcore/boost_score.cpp
 arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp
 arrow	internal/core/src/segcore/ChunkedSegmentSealedImpl.h
@@ -99,6 +101,8 @@ arrow	internal/core/src/segcore/memory_planner.cpp
 arrow	internal/core/src/segcore/memory_planner.h
 arrow	internal/core/src/segcore/packed_reader_c.cpp
 arrow	internal/core/src/segcore/packed_writer_c.cpp
+arrow	internal/core/src/segcore/retrieve_result_export_c.cpp
+arrow	internal/core/src/segcore/retrieve_result_export_c.h
 arrow	internal/core/src/segcore/search_result_export_c.cpp
 arrow	internal/core/src/segcore/segment_c.cpp
 arrow	internal/core/src/segcore/SegmentGrowingImpl.cpp
@@ -163,6 +167,7 @@ milvus_storage	internal/core/src/storage/ArrowFileSystemChunkManager.h
 milvus_storage	internal/core/src/storage/FileManager.h
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.cpp
 milvus_storage	internal/core/src/storage/IndexEntryEncryptedLocalWriter.h
+milvus_storage	internal/core/src/storage/minio/MinioChunkManager.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/ffi_reader_c.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/loon_error_code.h
 milvus_storage	internal/core/src/storage/loon_ffi/milvus_table_c.cpp

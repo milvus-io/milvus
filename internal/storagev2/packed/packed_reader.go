@@ -78,7 +78,7 @@ func NewPackedReaderWithExtfs(
 		var filesystemPath string
 		normalizedPaths := make([]string, 0, len(filePaths))
 		for _, filePath := range filePaths {
-			currentFilesystemPath, normalizedPath, err := normalizeExternalPathForFilesystem(filePath, cProperties, extfs)
+			currentFilesystemPath, normalizedPath, err := normalizeExternalResolvedPathForFilesystem(filePath, cProperties, extfs)
 			if err != nil {
 				return nil, merr.WrapErrServiceInternalErr(err, "normalize external packed file path %s", filePath)
 			}

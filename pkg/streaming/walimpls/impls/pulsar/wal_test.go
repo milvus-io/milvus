@@ -86,8 +86,6 @@ func TestEstimatePulsarRecordSizeForEncryptedChunks(t *testing.T) {
 	require.Len(t, chunks, logicalPlaintextSize/chunkSize)
 
 	producer := &recordingPulsarProducer{}
-	producerFuture := syncutil.NewFuture[pulsar.Producer]()
-	producerFuture.Set(producer)
 	backlogHelper := &backlogClearHelper{
 		cond:      syncutil.NewContextCond(&sync.Mutex{}),
 		threshold: math.MaxInt64,
@@ -100,7 +98,7 @@ func TestEstimatePulsarRecordSizeForEncryptedChunks(t *testing.T) {
 				AccessMode: types.AccessModeRW,
 			},
 		}),
-		p:                  producerFuture,
+		producer:           &walProducer{producer: producer},
 		backlogClearHelper: backlogHelper,
 	}
 
