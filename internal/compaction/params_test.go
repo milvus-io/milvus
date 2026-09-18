@@ -98,6 +98,7 @@ func TestGetJSONParams(t *testing.T) {
 	paramtable.Init()
 	jsonStr, err := GenerateJSONParams(nil)
 	assert.NoError(t, err)
+	assert.NotContains(t, jsonStr, "clustering_compaction_plan_params")
 
 	storageVersion := storage.StorageV2
 	if paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool() {
@@ -122,6 +123,24 @@ func TestGetJSONParams(t *testing.T) {
 		TextMaxLobFileBytes:       getTextMaxLobFileBytes(),
 		TextFlushThresholdBytes:   getTextFlushThresholdBytes(),
 	}, result)
+}
+
+func TestGenerateClusteringJSONParams(t *testing.T) {
+	paramtable.Init()
+	jsonStr, err := GenerateClusteringJSONParams(nil, map[string]string{"planner": "ivf"})
+	require.NoError(t, err)
+
+	result, err := ParseParamsFromJSON(jsonStr)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{"planner": "ivf"}, result.ClusteringCompactionPlanParams)
+
+	// Older DataNodes decode compaction JSON into a Params shape without the
+	// compaction plan parameter field. Standard JSON semantics ignore this new field.
+	var legacyParams struct {
+		StorageVersion int64 `json:"storage_version,omitempty"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonStr), &legacyParams))
+	require.Equal(t, result.StorageVersion, legacyParams.StorageVersion)
 }
 
 func TestCreateStorageConfigMaxConnections(t *testing.T) {
