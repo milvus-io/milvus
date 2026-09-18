@@ -51,6 +51,28 @@
 
 namespace milvus::index {
 
+// Count UTF-8 code points by counting non-continuation bytes.
+// The tantivy ngram tokenizer counts the literal in unicode chars, so the
+// pre-checks against min_gram must use char count instead of byte length,
+// otherwise a single multi-byte char (e.g. "）" = 1 char / 3 bytes) slips
+// through and trips the rust-side assert, which aborts the process since
+// the panic crosses an extern "C" boundary.
+inline size_t
+Utf8CharCount(const char* str, size_t len) {
+    size_t count = 0;
+    for (size_t i = 0; i < len; i++) {
+        if ((static_cast<unsigned char>(str[i]) & 0xC0) != 0x80) {
+            count++;
+        }
+    }
+    return count;
+}
+
+inline size_t
+Utf8LiteralLength(const std::string& literal) {
+    return Utf8CharCount(literal.data(), literal.size());
+}
+
 const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME = "ngram_avg_row_size";
 
 const JsonCastType JSON_CAST_TYPE = JsonCastType::FromString("VARCHAR");
@@ -310,7 +332,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  exec::SegmentExpr* segment) {
     tracer::AutoSpan span(
         "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
-    if (literal.length() < min_gram_) {
+    if (Utf8LiteralLength(literal) < min_gram_) {
         return std::nullopt;
     }
 
@@ -518,7 +540,7 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     TargetBitmap bitset(static_cast<size_t>(Count()), true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
-        if (l.length() < min_gram_) {
+        if (Utf8LiteralLength(l) < min_gram_) {
             return std::nullopt;
         }
         TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);
