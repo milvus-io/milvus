@@ -3528,7 +3528,6 @@ Set to 0 to disable the penalty period.`,
 // --- querynode ---
 type queryNodeConfig struct {
 	StrictGroupStrategy              ParamItem `refreshable:"true"`
-	StrictGroupDebug                 ParamItem `refreshable:"true"`
 	StrictGroupPhase1CandidateWeight ParamItem `refreshable:"true"`
 	StrictGroupSkipRefine            ParamItem `refreshable:"true"`
 	SoPath                           ParamItem `refreshable:"false"`
@@ -3746,12 +3745,6 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc: "Strict group completion strategy: original or per_group. Independent phase-one and refinement controls still apply to original.",
 	}
 	p.StrictGroupStrategy.Init(base.mgr)
-	p.StrictGroupDebug = ParamItem{
-		Key:     "queryNode.groupBy.strictGroupDebug",
-		Version: "2.6.23", DefaultValue: "false", Export: true,
-		Doc: "Opt-in segment/stage diagnostic logs; no per-candidate logs or customer field values.",
-	}
-	p.StrictGroupDebug.Init(base.mgr)
 	p.StrictGroupPhase1CandidateWeight = ParamItem{
 		Key:     "queryNode.groupBy.strictGroupPhase1CandidateWeight",
 		Version: "2.6.23", DefaultValue: "0", Export: true,

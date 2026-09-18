@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/protobuf/proto"
 
@@ -250,12 +251,12 @@ func (suite *QueryHookSuite) TestStrictGroupConfigSnapshotLog() {
 	paramtable.Init()
 	cfg := paramtable.Get()
 	q := &cfg.QueryNodeCfg
-	defer cfg.Reset(q.StrictGroupDebug.Key)
 	defer cfg.Reset(q.StrictGroupStrategy.Key)
-	core, observed := observer.New(zap.InfoLevel)
+	level := zap.NewAtomicLevelAt(zap.InfoLevel)
+	core, observed := observer.New(level)
 	ctx := context.WithValue(context.Background(), log.CtxLogKey, &log.MLogger{Logger: zap.New(core)})
-	for _, debug := range []bool{false, true, false} {
-		cfg.Save(q.StrictGroupDebug.Key, strconv.FormatBool(debug))
+	for _, severity := range []zapcore.Level{zap.InfoLevel, zap.DebugLevel, zap.InfoLevel} {
+		level.SetLevel(severity)
 		cfg.Save(q.StrictGroupStrategy.Key, "original")
 		info := &planpb.QueryInfo{
 			Topk: 1, GroupByFieldId: 101, GroupSize: 3, StrictGroupSize: true,
@@ -265,11 +266,12 @@ func (suite *QueryHookSuite) TestStrictGroupConfigSnapshotLog() {
 		suite.Require().NoError(err)
 		suite.True(changed)
 		entries := observed.TakeAll()
-		if !debug {
+		if severity != zap.DebugLevel {
 			suite.Empty(entries)
 			continue
 		}
 		suite.Require().Len(entries, 1)
+		suite.Equal(zap.DebugLevel, entries[0].Level)
 		suite.Equal("strict_group_config_snapshot", entries[0].Message)
 		fields := entries[0].ContextMap()
 		suite.Equal("original", fields["strategy"])
@@ -282,9 +284,7 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 	paramtable.Init()
 	cfg := paramtable.Get()
 	sKey := cfg.QueryNodeCfg.StrictGroupStrategy.Key
-	dKey := cfg.QueryNodeCfg.StrictGroupDebug.Key
 	defer cfg.Reset(sKey)
-	defer cfg.Reset(dKey)
 	defer cfg.Reset(cfg.AutoIndexConfig.Enable.Key)
 	makeRequest := func(strict bool, raw string) *querypb.SearchRequest {
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
@@ -304,7 +304,7 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 		suite.Require().NoError(json.Unmarshal([]byte(p.GetVectorAnns().GetQueryInfo().GetSearchParams()), &values))
 		return values
 	}
-	raw := `{"large":9007199254740993,"text":"0.5","strict_group_strategy":"invalid-client","strict_group_debug":"invalid-client"}`
+	raw := `{"large":9007199254740993,"text":"0.5","strict_group_strategy":"invalid-client"}`
 	// Exercise no hook, AutoIndex disabled, a hook dropping all caller keys,
 	// and a hook injecting conflicting/invalid values.
 	for _, enabled := range []string{"false", "true"} {
@@ -321,31 +321,25 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 				hook = h
 			}
 			cfg.Save(sKey, "per_group")
-			cfg.Save(dKey, "true")
 			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1)
 			suite.Require().NoError(err)
 			values := readParams(req)
 			suite.Equal(`"per_group"`, string(values[common.StrictGroupStrategyKey]))
-			suite.Equal("true", string(values[common.StrictGroupDebugKey]))
 			suite.Equal("9007199254740993", string(values["large"]))
 			suite.Equal(`"0.5"`, string(values["text"]))
 			// Updating config affects a later request, not the serialized snapshot.
 			cfg.Save(sKey, "original")
-			cfg.Save(dKey, "false")
 			next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
 			suite.Require().NoError(err)
 			suite.Equal(`"original"`, string(readParams(next)[common.StrictGroupStrategyKey]))
 			suite.Equal(`"per_group"`, string(readParams(req)[common.StrictGroupStrategyKey]))
-			suite.Equal("false", string(readParams(next)[common.StrictGroupDebugKey]))
-			suite.Equal("true", string(readParams(req)[common.StrictGroupDebugKey]))
 		}
 	}
 	cfg.Reset(sKey)
 	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1)
 	suite.Require().NoError(err)
 	suite.Equal(`"per_group"`, string(readParams(defaultReq)[common.StrictGroupStrategyKey]))
-	suite.Equal("false", string(readParams(defaultReq)[common.StrictGroupDebugKey]))
-	// All strategies are server controlled, including direct union filtering.
+	// Both strategies are server controlled.
 	for _, strategy := range []string{"per_group", "original"} {
 		cfg.Save(sKey, strategy)
 		req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
@@ -357,10 +351,8 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1)
 	suite.Require().NoError(err)
 	suite.NotContains(readParams(plain), common.StrictGroupStrategyKey)
-	suite.NotContains(readParams(plain), common.StrictGroupDebugKey)
 	for key, badValues := range map[string][]string{
 		sKey: {"", "PER_GROUP", "other", "1", "sampling", "filtered_iterator"},
-		dKey: {"", "other", "0.5"},
 	} {
 		for _, value := range badValues {
 			cfg.Save(key, value)
