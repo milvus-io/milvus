@@ -193,7 +193,9 @@ func TestKeyedPartitionKeyInsertRetriedAfterTheFenceIsAnsweredByTheSource(t *tes
 }
 
 // A probe that cannot resolve its row's partition fails the request before
-// anything is written.
+// anything is written. The probe runs before the first append of the attempt,
+// same as reading the routing or repacking, so the failure ends the request
+// through prepareFailed and Execute reports it directly.
 func TestKeyedInsertFailsWhenTheProbeCannotResolveItsPartition(t *testing.T) {
 	useSingleMessageRepack(t)
 	pre, post := oneShardSplit()
@@ -205,13 +207,15 @@ func TestKeyedInsertFailsWhenTheProbeCannotResolveItsPartition(t *testing.T) {
 	task := f.keyedInsertTask(seqPKs(4), "key")
 	task.partitionKeys = partialUpdateCASPKFieldData(seqPKs(4))
 
-	require.NoError(t, task.Execute(context.Background()))
+	assert.ErrorContains(t, task.Execute(context.Background()), "partitions unavailable")
 	assert.Contains(t, task.result.GetStatus().GetReason(), "partitions unavailable")
 	assert.Empty(t, wal.batches)
 }
 
 // An error from the fenced vchannel that is not the fence fails the request:
-// nothing tells whether the window holds the key.
+// nothing tells whether the window holds the key. The probe runs before the
+// first append of the attempt, so the failure ends the request through
+// prepareFailed and Execute reports it directly.
 func TestKeyedInsertFailsOnAProbeErrorThatIsNotTheFence(t *testing.T) {
 	useSingleMessageRepack(t)
 	pre, post := oneShardSplit()
@@ -221,7 +225,7 @@ func TestKeyedInsertFailsOnAProbeErrorThatIsNotTheFence(t *testing.T) {
 	wal.failing[splitSource] = errors.New("boom")
 	task := f.keyedInsertTask(seqPKs(4), "key")
 
-	require.NoError(t, task.Execute(context.Background()))
+	assert.ErrorContains(t, task.Execute(context.Background()), "boom")
 	assert.Contains(t, task.result.GetStatus().GetReason(), "boom")
 	require.Len(t, wal.batches, 1, "only the probe was sent")
 	assert.Empty(t, wal.insertedRowIDs[splitTarget0])
@@ -239,7 +243,8 @@ func TestKeyedInsertFailsWhenAFencedVChannelTakesItsProbe(t *testing.T) {
 	wal := installSplitFenceTestWAL(t)
 	task := f.keyedInsertTask(seqPKs(8), "key")
 
-	require.NoError(t, task.Execute(context.Background()))
+	err := task.Execute(context.Background())
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err), err)
 	st := task.result.GetStatus()
 	assert.Equal(t, merr.Code(merr.ErrServiceInternal), st.GetCode(), st.GetReason())
 	assert.False(t, st.GetRetriable())
