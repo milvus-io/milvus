@@ -246,3 +246,92 @@ func TestStrongReadCoversGrandchildrenDetachedMidRead(t *testing.T) {
 		})
 	}
 }
+
+// fanOutRead is one public read on v0 whose per-delegator internal read is
+// replaced by a recorder.
+type fanOutRead struct {
+	name  string
+	mock  func(record func(sd *shardDelegator)) *mockey.Mocker
+	fetch func(ctx context.Context, source *shardDelegator) error
+}
+
+func fanOutReads() []fanOutRead {
+	return []fanOutRead{
+		{"query", func(record func(sd *shardDelegator)) *mockey.Mocker {
+			return mockey.Mock((*shardDelegator).queryInternal).To(
+				func(sd *shardDelegator, _ context.Context, _ *querypb.QueryRequest, _ splitReadScope) ([]*internalpb.RetrieveResults, error) {
+					record(sd)
+					return nil, nil
+				}).Build()
+		}, func(ctx context.Context, source *shardDelegator) error {
+			_, err := source.Query(ctx, &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{}, DmlChannels: []string{"v0"}})
+			return err
+		}},
+		{"search", func(record func(sd *shardDelegator)) *mockey.Mocker {
+			return mockey.Mock((*shardDelegator).searchInternal).To(
+				func(sd *shardDelegator, _ context.Context, _ *querypb.SearchRequest, _ splitReadScope) ([]*internalpb.SearchResults, error) {
+					record(sd)
+					return nil, nil
+				}).Build()
+		}, func(ctx context.Context, source *shardDelegator) error {
+			_, err := source.Search(ctx, &querypb.SearchRequest{Req: &internalpb.SearchRequest{}, DmlChannels: []string{"v0"}})
+			return err
+		}},
+		{"query stream", func(record func(sd *shardDelegator)) *mockey.Mocker {
+			return mockey.Mock((*shardDelegator).queryStreamInternal).To(
+				func(sd *shardDelegator, _ context.Context, _ *querypb.QueryRequest, _ streamrpc.QueryStreamServer, _ splitReadScope) error {
+					record(sd)
+					return nil
+				}).Build()
+		}, func(ctx context.Context, source *shardDelegator) error {
+			return source.QueryStream(ctx, &querypb.QueryRequest{Req: &internalpb.RetrieveRequest{}, DmlChannels: []string{"v0"}}, nil)
+		}},
+		{"statistics", func(record func(sd *shardDelegator)) *mockey.Mocker {
+			return mockey.Mock((*shardDelegator).getStatisticsInternal).To(
+				func(sd *shardDelegator, _ context.Context, _ *querypb.GetStatisticsRequest, _ splitReadScope) ([]*internalpb.GetStatisticsResponse, error) {
+					record(sd)
+					return nil, nil
+				}).Build()
+		}, func(ctx context.Context, source *shardDelegator) error {
+			_, err := source.GetStatistics(ctx, &querypb.GetStatisticsRequest{Req: &internalpb.GetStatisticsRequest{}, DmlChannels: []string{"v0"}})
+			return err
+		}},
+	}
+}
+
+// The fan-out walks the tree the read took at entry, not whatever the family
+// looks like by the time it fans out. A child and a grandchild detached right
+// after the read took its tree are still read: the read's MVCC speedup and wait
+// were resolved over that same tree.
+func TestReadThroughSourceFansOutOverTheTreeItTook(t *testing.T) {
+	paramtable.Init()
+
+	for _, tc := range fanOutReads() {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var read []string
+			internalMock := tc.mock(func(sd *shardDelegator) {
+				mu.Lock()
+				defer mu.Unlock()
+				read = append(read, sd.vchannelName)
+			})
+			defer internalMock.UnPatch()
+
+			family := newCascadeFamily(0, 0, 0, 0)
+			var origin func(*shardDelegator) (*familyNode, error)
+			hook := mockey.Mock((*shardDelegator).frontingFamily).To(func(sd *shardDelegator) (*familyNode, error) {
+				tree, err := origin(sd)
+				family.source.DetachSplitChild("v1")
+				family.child1.DetachSplitChild("v3")
+				return tree, err
+			}).Origin(&origin).Build()
+			defer hook.UnPatch()
+
+			require.NoError(t, tc.fetch(context.Background(), family.source))
+			mu.Lock()
+			defer mu.Unlock()
+			assert.ElementsMatch(t, []string{"v0", "v1", "v2", "v3"}, read,
+				"the fan-out must cover the tree the read resolved its timestamp over")
+		})
+	}
+}
