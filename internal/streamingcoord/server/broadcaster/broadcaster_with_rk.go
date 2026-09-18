@@ -16,6 +16,12 @@ type broadcasterWithRK struct {
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+	// The idempotency decision lives in the manager, under the same lock that
+	// registers the task: see getOrAddBroadcastTask. It used to live here, as a
+	// lookup separate from the registration, with the resource keys this object
+	// holds expected to keep two same-key requests apart in between. They do not,
+	// whenever the lock names a different object than the scope does.
+	//
 	// Consume the guards up front: broadcast takes ownership on every path -- the
 	// registered task owns them, or broadcast releases them itself -- so Close()
 	// must stay a no-op from here on, panic paths included.
