@@ -24,11 +24,14 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // fakeChildSpawner records every target it was asked to spawn and returns a
@@ -41,6 +44,8 @@ type fakeChildSpawner struct {
 	aborted    []string
 	lastParent ShardDelegator
 	err        error
+	// failures makes the first failures spawn attempts fail, then succeed.
+	failures int
 }
 
 func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildParams) (ShardDelegator, error) {
@@ -51,7 +56,17 @@ func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildP
 	if f.err != nil {
 		return nil, f.err
 	}
+	if len(f.spawned) <= f.failures {
+		return nil, errors.New("transient spawn failure")
+	}
 	return &MockShardDelegator{}, nil
+}
+
+// attempts is how many spawns were attempted, failed ones included.
+func (f *fakeChildSpawner) attempts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.spawned)
 }
 
 func (f *fakeChildSpawner) AbortSplitChild(_ context.Context, _ ShardDelegator, _ int64, vchannel string) {
@@ -242,25 +257,80 @@ func TestProcessSplitShard(t *testing.T) {
 		assert.Equal(t, []string{"v2"}, spawner.spawnedVChannels())
 	})
 
-	t.Run("a spawn failure leaves no child and clears the in-flight slot", func(t *testing.T) {
+	t.Run("a failed spawn stays pending, refusing reads, and is retried until the child is published", func(t *testing.T) {
+		spawner := &fakeChildSpawner{failures: 1}
+		sd := &shardDelegator{
+			vchannelName: "v0",
+			children:     make(map[string]ShardDelegator),
+			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
+		}
+
+		// the failure is handled in the background, not returned (the spawn does
+		// not block the flow-graph goroutine).
+		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+		require.Eventually(t, func() bool { return spawner.attempts() == 1 }, time.Second, time.Millisecond)
+
+		// The fence has been consumed, so the target's writes are no longer in the
+		// source's view. Until a child fronts them a read through the source must
+		// be refused, not answered from the incomplete family.
+		assert.Never(t, func() bool {
+			_, err := sd.frontingFamily()
+			return err == nil
+		}, 300*time.Millisecond, 5*time.Millisecond, "a read was served while the failed target had no child")
+		_, err := sd.frontingFamily()
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+
+		// the spawn is retried and the child is published.
+		assert.Eventually(t, func() bool { return len(childVChannels(sd)) == 1 }, 10*time.Second, 10*time.Millisecond)
+		assert.Equal(t, 2, spawner.attempts())
+		_, err = sd.frontingFamily()
+		assert.NoError(t, err)
+	})
+
+	t.Run("a failing spawn stops retrying and clears its slot once the source is releasing", func(t *testing.T) {
 		spawner := &fakeChildSpawner{err: errors.New("spawn boom")}
 		sd := &shardDelegator{
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
 			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
 		}
 
-		// the failure is logged in the background, not returned (the spawn no
-		// longer blocks the flow-graph goroutine).
-		err := sd.ProcessSplitShard(context.Background(), newSplitTargets("v1"))
-		assert.NoError(t, err)
-		assert.Eventually(t, func() bool { return len(spawner.spawnedVChannels()) == 1 }, time.Second, 5*time.Millisecond)
+		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+		require.Eventually(t, func() bool { return spawner.attempts() >= 1 }, time.Second, time.Millisecond)
+		sd.MarkReleasing()
+
+		assert.Eventually(t, func() bool {
+			sd.childMut.Lock()
+			defer sd.childMut.Unlock()
+			return len(sd.spawning) == 0
+		}, 10*time.Second, 10*time.Millisecond)
+		attempts := spawner.attempts()
+		assert.LessOrEqual(t, attempts, 2)
 		assert.Empty(t, childVChannels(sd))
-		// the in-flight slot is cleared so a later fence re-consume can retry.
-		sd.childMut.Lock()
-		_, stillSpawning := sd.spawning["v1"]
-		sd.childMut.Unlock()
-		assert.False(t, stillSpawning)
+	})
+
+	t.Run("a failing spawn stops retrying and clears its slot once the delegator is closed", func(t *testing.T) {
+		spawner := &fakeChildSpawner{err: errors.New("spawn boom")}
+		sd := &shardDelegator{
+			vchannelName: "v0",
+			children:     make(map[string]ShardDelegator),
+			childSpawner: spawner,
+			lifetime:     lifetime.NewLifetime(lifetime.Working),
+		}
+
+		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+		require.Eventually(t, func() bool { return spawner.attempts() >= 1 }, time.Second, time.Millisecond)
+		sd.lifetime.SetState(lifetime.Stopped)
+
+		assert.Eventually(t, func() bool {
+			sd.childMut.Lock()
+			defer sd.childMut.Unlock()
+			return len(sd.spawning) == 0
+		}, 10*time.Second, 10*time.Millisecond)
+		assert.LessOrEqual(t, spawner.attempts(), 2)
+		assert.Empty(t, childVChannels(sd))
 	})
 
 	t.Run("an empty target vchannel is rejected", func(t *testing.T) {
@@ -274,14 +344,18 @@ func TestProcessSplitShard(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("a missing spawner is an internal error", func(t *testing.T) {
+	t.Run("a missing spawner is an internal error and leaves the targets pending, refusing reads", func(t *testing.T) {
 		sd := &shardDelegator{
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
 		}
 
 		err := sd.ProcessSplitShard(context.Background(), newSplitTargets("v1"))
-		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		// the fence was consumed but nothing can front its target: reads through
+		// the source are refused rather than served without the target's writes.
+		_, err = sd.frontingFamily()
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	})
 
 	t.Run("a child spawned after the source is releasing is aborted, not fronted", func(t *testing.T) {
