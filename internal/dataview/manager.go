@@ -189,7 +189,9 @@ type dataViewRef struct {
 // manager only serves synchronous operations (PrepareFlush, RecomputeNow,
 // bootstrap); Recompute requests then return an error.
 func NewManager(catalog Catalog, project Projector) Manager {
-	return newManager(context.Background(), catalog, project)
+	m := newManager(context.Background(), catalog, project)
+	m.startWorker()
+	return m
 }
 
 func newManager(ctx context.Context, catalog Catalog, project Projector) *dataViewManager {
@@ -201,7 +203,6 @@ func newManager(ctx context.Context, catalog Catalog, project Projector) *dataVi
 		workerCtx: ctx,
 	}
 	m.queue = newDataViewRecomputeQueue(m)
-	m.startWorker()
 	return m
 }
 
@@ -385,6 +386,9 @@ func RecoverManager(
 				mlog.Int64("collectionID", collectionID), mlog.Err(err))
 		}
 	}
+	// Failed recovery attempts must not leave a worker retaining their
+	// snapshots and SegmentMeta projection until the server context ends.
+	manager.startWorker()
 	return manager, nil
 }
 

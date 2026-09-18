@@ -303,6 +303,12 @@ visible, with a data footprint) resolved from SegmentMeta, and the subsequent
 reconcile keeps it converged. A per-Collection failure is logged and skipped so
 one anomalous Collection cannot brick Coordinator startup.
 
+DataCoord retries SegmentMeta loading, Collection detail loading, and DataView
+recovery independently. A failure in a later phase does not repeat a successful
+manifest scan. It publishes the recovered metadata only after all phases
+succeed. `RecoverManager` starts its async worker only after recovery succeeds,
+so failed attempts do not retain workers or their metadata snapshots.
+
 Recovery validates every discovered Collection against CollectionMeta before
 deleting any stale prefix. This prevents a transient validation failure from
 causing partial, speculative cleanup.

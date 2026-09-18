@@ -641,43 +641,50 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	if s.meta != nil {
 		return nil
 	}
+	catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
+	var recoveredMeta *meta
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
-		if err != nil {
-			return err
-		}
-		if err := s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker); err != nil {
-			return err
-		}
+		recoveredMeta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
+		return err
+	}
+	if err := retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
+	// Retry each recovery phase independently: a later metadata error must
+	// not repeat newMeta's successful object-storage manifest scan.
+	if err := retry.Do(s.ctx, func() error {
+		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
+	}
 
-		// RecoverManager performs the whole DataView recovery pass at
-		// construction: it loads persisted snapshots, injects the loadable
-		// SegmentMeta projection, reconciles every live recoverable Collection
-		// against it (SegmentMeta is the source of truth; a no-op when the
-		// snapshot already matches, which keeps the initMeta retry safe), and
-		// starts the async recompute worker.
-		collections := s.meta.GetCollections()
-		collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
-		collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
-			return c.ID, c.VChannelNames
-		})
-		s.dataViewManager, err = dataview.RecoverManager(
+	collections := recoveredMeta.GetCollections()
+	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
+	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
+		return c.ID, c.VChannelNames
+	})
+	var manager dataview.Manager
+	if err := retry.Do(s.ctx, func() error {
+		var err error
+		manager, err = dataview.RecoverManager(
 			s.ctx,
 			catalog,
 			s.dataViewCollectionRecoveryValidator,
-			s.meta.loadableProjection,
+			recoveredMeta.loadableProjection,
 			collectionIDs,
 			collectionVChannels,
 		)
-		if err != nil {
-			return err
-		}
-		s.meta.dataViewManager = s.dataViewManager
-		return nil
+		return err
+	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
+		return err
 	}
-	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
+	// Publish only fully recovered metadata. A failed later phase must not
+	// make a subsequent initMeta call return early with partial state.
+	recoveredMeta.dataViewManager = manager
+	s.meta = recoveredMeta
+	s.dataViewManager = manager
+	return nil
 }
 
 func (s *Server) initAnalyzeInspector() {
