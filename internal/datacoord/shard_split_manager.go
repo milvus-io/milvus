@@ -280,6 +280,22 @@ func (m *shardSplitManager) hasActiveTaskOnVChannel(vchannel string) bool {
 	return false
 }
 
+// hasActiveTaskOnCollection reports whether a split of the collection is not
+// Done or Aborted. The trigger splits one shard of a collection at a time: a
+// split is planned against the collection's routing as it stands, and every
+// split changes it -- fencing a source, creating targets, possibly doubling
+// the modulus -- so a second plan made meanwhile would no longer fit the
+// record its write switch is checked against, and would be refused before its
+// fence on every tick without end.
+func (m *shardSplitManager) hasActiveTaskOnCollection(collectionID int64) bool {
+	for _, task := range m.store.list() {
+		if task.GetCollectionId() == collectionID && isSplitShardTaskActive(task) {
+			return true
+		}
+	}
+	return false
+}
+
 // splittableCollection reports whether the trigger may split a collection at
 // all: one with a schema, placed by primary key. A namespace collection is
 // never selected (design doc §1.3), whatever its placement, and neither is an
@@ -318,7 +334,7 @@ func (m *shardSplitManager) detectOnce() {
 	maxConcurrent := params.ShardSplitMaxConcurrentTasks.GetAsInt()
 	active := m.activeTaskCount()
 	for _, collection := range m.meta.GetCollections() {
-		if !splittableCollection(collection) {
+		if !splittableCollection(collection) || m.hasActiveTaskOnCollection(collection.ID) {
 			continue
 		}
 		for _, vchannel := range collection.VChannelNames {
@@ -349,6 +365,8 @@ func (m *shardSplitManager) detectOnce() {
 				mlog.Int64("rows", stats.rows),
 				mlog.Uint64("routingModulus", task.GetRoutingModulus()))
 			active++
+			// One split per collection at a time.
+			break
 		}
 	}
 }
