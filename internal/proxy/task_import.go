@@ -91,6 +91,9 @@ func (it *importTask) OnEnqueue() error {
 func (it *importTask) PreExecute(ctx context.Context) error {
 	req := it.req
 	node := it.node
+	if err := importutilv2.ValidateSnapshotSourceRequest(req.GetOptions()); err != nil {
+		return err
+	}
 	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
@@ -119,7 +122,25 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 
 	var partitionIDs []int64
-	if isBackup {
+	partitionMapping, err := importutilv2.GetPartitionMapping(req.GetOptions())
+	if err != nil {
+		return err
+	}
+	// Snapshot import rewrites rows using ordinary target partition routing.
+	// Its backup flag preserves source PKs; it does not require the legacy
+	// binlog backup contract of restoring one explicitly named partition.
+	if partitionMapping != nil {
+		if req.GetPartitionName() != "" || hasPartitionKey {
+			return merr.WrapErrImportFailedMsg("partition_mapping cannot be combined with partition_name or a partition-key target collection")
+		}
+		for _, name := range importutilv2.PartitionMappingTargets(partitionMapping) {
+			id, err := it.GetMetaCache().GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), name)
+			if err != nil {
+				return err
+			}
+			partitionIDs = append(partitionIDs, id)
+		}
+	} else if isBackup && !importutilv2.IsSnapshotSource(req.GetOptions()) {
 		if req.GetPartitionName() == "" {
 			return merr.WrapErrParameterMissingMsg("partition not specified")
 		}
@@ -181,6 +202,12 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	})
 	if len(req.Files) == 0 {
 		return merr.WrapErrParameterInvalidMsg("import request is empty")
+	}
+	if importutilv2.IsSnapshotSource(req.GetOptions()) &&
+		(len(req.Files) != 1 || len(req.Files[0].GetPaths()) != 1) {
+		return merr.WrapErrImportFailedMsg(
+			"snapshot-source import requires exactly one snapshot metadata path",
+		)
 	}
 	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
 		return merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
