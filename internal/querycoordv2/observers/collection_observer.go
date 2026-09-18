@@ -278,7 +278,17 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 		loaded := true
 		hasUpdate := false
 
-		channelTargetNum, subChannelCount := ob.observeChannelStatus(ctx, task.CollectionID)
+		// While a shard split window is open, the window targets are held back
+		// from sync and promotion: nothing routes a read to them, and until
+		// adoption they have no delegator to count at all. Counting them would
+		// hold the load short of 100% for the whole window even though the
+		// source is loaded and serving the entire key range through lineage
+		// attribution. The exclusion is granted only while the collection's
+		// shard states still describe that window and a fenced source is still
+		// among the channels that stay -- once the targets ARE the servers,
+		// nothing is excluded and they count as before.
+		excluded, _ := ob.targetMgr.GetSplitWindowExclusions(ctx, task.CollectionID, meta.NextTarget)
+		channelTargetNum, subChannelCount := ob.observeChannelStatus(ctx, task.CollectionID, excluded)
 
 		for _, partition := range partitions {
 			if partition.LoadPercentage == 100 {
@@ -286,7 +296,7 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 			}
 			if ob.readyToObserve(ctx, partition.CollectionID) {
 				replicaNum := ob.meta.GetReplicaNumber(ctx, partition.GetCollectionID())
-				has := ob.observePartitionLoadStatus(ctx, partition, replicaNum, channelTargetNum, subChannelCount)
+				has := ob.observePartitionLoadStatus(ctx, partition, replicaNum, channelTargetNum, subChannelCount, excluded)
 				if has {
 					hasUpdate = true
 				}
@@ -325,10 +335,20 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 	}
 }
 
-func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collectionID int64) (int, int) {
+// observeChannelStatus counts the channels a load must cover and how many of
+// them have a delegator per replica. excluded holds the split window targets the
+// read path is not served from (see GetSplitWindowExclusions); they are counted
+// on neither side.
+func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collectionID int64, excluded typeutil.Set[string]) (int, int) {
 	channelTargets := ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)
 
-	channelTargetNum := len(channelTargets)
+	channelTargetNum := 0
+	for name := range channelTargets {
+		if excluded.Contain(name) {
+			continue
+		}
+		channelTargetNum++
+	}
 	if channelTargetNum == 0 {
 		mlog.Info(ctx, "channels in target is empty, waiting for new target content")
 		return 0, 0
@@ -336,6 +356,9 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 
 	subChannelCount := 0
 	for _, channel := range channelTargets {
+		if excluded.Contain(channel.GetChannelName()) {
+			continue
+		}
 		delegatorList := ob.dist.ChannelDistManager.GetByFilter(meta.WithChannelName2Channel(channel.GetChannelName()))
 		nodes := lo.Map(delegatorList, func(v *meta.DmChannel, _ int) int64 { return v.Node })
 		group := utils.GroupNodesByReplica(ctx, ob.meta.ReplicaManager, collectionID, nodes)
@@ -344,7 +367,7 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 	return channelTargetNum, subChannelCount
 }
 
-func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) bool {
+func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int, excluded typeutil.Set[string]) bool {
 	// Numerator and denominator must share one basis. Sizing the denominator by
 	// the target's ID set while counting the numerator over only what the store
 	// resolves lets the two disagree, and the percentage can then never reach
@@ -354,6 +377,19 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	// soon as it resolves.
 	segmentTargetIDs := ob.targetMgr.GetSealedSegmentIDsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
+	if len(excluded) > 0 {
+		// a segment attributed to an excluded channel has no delegator to load
+		// it; it is served through the source it is attributed to instead. The
+		// attribution is the target's own channel grouping, so the segment
+		// leaves the ID set the denominator is sized by together with its
+		// resolved info, and the two keep one basis.
+		for channel := range excluded {
+			for segmentID := range ob.targetMgr.GetSealedSegmentIDsByChannel(ctx, partition.GetCollectionID(), channel, meta.NextTarget) {
+				segmentTargetIDs.Remove(segmentID)
+				delete(segmentTargets, segmentID)
+			}
+		}
+	}
 
 	targetNum := len(segmentTargetIDs) + channelTargetNum
 	if targetNum == 0 {
