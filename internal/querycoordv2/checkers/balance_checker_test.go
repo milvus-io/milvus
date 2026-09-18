@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // createMockPriorityQueue creates a mock priority queue for testing
@@ -2014,7 +2015,7 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 		return out
 	}
 
-	run := func(t *testing.T, current map[string]*meta.DmChannel, describe func(*meta.MockBroker)) (ready bool, stopping int) {
+	run := func(t *testing.T, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (ready bool, stopping int) {
 		checker := createTestBalanceChecker()
 		mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
 		defer mockGetCollection.UnPatch()
@@ -2032,6 +2033,14 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 				return channels("v0", "v1", "v2")
 			}).Build()
 		defer mockChannels.UnPatch()
+		mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).
+			To(func(_ context.Context, _ int64, scope meta.TargetScope) typeutil.Set[string] {
+				if scope == meta.NextTarget && len(window) > 0 {
+					return typeutil.NewSet(window...)
+				}
+				return nil
+			}).Build()
+		defer mockWindow.UnPatch()
 
 		broker := meta.NewMockBroker(t)
 		describe(broker)
@@ -2045,17 +2054,29 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 	}
 
 	t.Run("delisted source still current: frozen", func(t *testing.T) {
-		ready, stopping := run(t, channels("v0"), describeAs(adopted))
+		ready, stopping := run(t, channels("v0"), nil, describeAs(adopted))
 		assert.False(t, ready, "normal balance must not move a delisted source still in the current target")
 		assert.Zero(t, stopping, "stopping balance must not move it either")
 	})
 	t.Run("current target flipped past the source: unfrozen", func(t *testing.T) {
-		ready, stopping := run(t, channels("v1", "v2"), describeAs(adopted))
+		ready, stopping := run(t, channels("v1", "v2"), nil, describeAs(adopted))
 		assert.True(t, ready)
 		assert.Equal(t, 1, stopping)
 	})
+	t.Run("fresh fence, cached state still pre-fence, next target marks window targets: frozen", func(t *testing.T) {
+		// the TTL cache still holds a read from before the fence: v0 Normal, no
+		// target listed yet. The next target's pull read the states fresh and
+		// marked the new targets, which is what gives the fence away.
+		preFence := &milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		}
+		ready, stopping := run(t, channels("v0"), []string{"v1", "v2"}, describeAs(preFence))
+		assert.False(t, ready, "a freshly fenced source must not be balanced on a stale state")
+		assert.Zero(t, stopping)
+	})
 	t.Run("shard states unknown: frozen", func(t *testing.T) {
-		ready, stopping := run(t, channels("v0"), func(broker *meta.MockBroker) {
+		ready, stopping := run(t, channels("v0"), nil, func(broker *meta.MockBroker) {
 			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
 				Return(nil, merr.WrapErrServiceUnavailable("rootcoord down")).Maybe()
 		})
