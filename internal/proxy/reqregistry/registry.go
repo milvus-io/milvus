@@ -15,7 +15,7 @@
 // limitations under the License.
 
 // Package reqregistry keeps track of the client requests a proxy is currently
-// serving, so that they can be listed and cancelled.
+// serving, so that they can be listed and canceled.
 //
 // The unit of registration is one client RPC (a Search, HybridSearch or
 // Query call), not one scheduler task: a single RPC can spawn several tasks
@@ -26,7 +26,7 @@
 //
 // Cancellation is expressed purely through the request context: Register
 // wraps the caller's ctx with context.WithCancelCause and stores the cancel
-// function in the Entry; Cancel invokes it with merr.ErrRequestCancelled as
+// function in the Entry; Cancel invokes it with merr.ErrRequestCanceled as
 // the cause. Everything downstream -- the proxy scheduler, the QueryNode RPCs,
 // the cgo futures and segcore -- already reacts to that ctx.
 package reqregistry
@@ -116,11 +116,11 @@ func (f Filter) matches(info *Info, now time.Time) bool {
 // registering goroutine, the scheduler (task linkage) and an operator's cancel
 // all touch it.
 type Entry struct {
-	mu          sync.Mutex // guards info, cancelled, cancelledAt
-	info        Info
-	cancel      context.CancelCauseFunc
-	cancelled   bool
-	cancelledAt time.Time
+	mu         sync.Mutex // guards info, canceled, canceledAt
+	info       Info
+	cancel     context.CancelCauseFunc
+	canceled   bool
+	canceledAt time.Time
 }
 
 // Snapshot returns a copy of the request description with ElapsedMS computed
@@ -165,28 +165,28 @@ func (e *Entry) MarkRunning(queued time.Duration) {
 	e.info.QueuedMS = queued.Milliseconds()
 }
 
-// Cancel cancels the request's context with merr.ErrRequestCancelled as the
+// Cancel cancels the request's context with merr.ErrRequestCanceled as the
 // cause. It returns the snapshot taken at the moment of cancellation and true
 // on the first call; later calls return false and do nothing, so an operator
-// cancelling twice is reported once.
+// canceling twice is reported once.
 func (e *Entry) Cancel(operator, reason string, now time.Time) (Info, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.cancelled {
+	if e.canceled {
 		return Info{}, false
 	}
-	e.cancelled = true
-	e.cancelledAt = now
+	e.canceled = true
+	e.canceledAt = now
 	snapshot := e.snapshotLocked(now)
-	e.cancel(merr.WrapErrRequestCancelled(operator, reason))
+	e.cancel(merr.WrapErrRequestCanceled(operator, reason))
 	return snapshot, true
 }
 
-// CancelledAt returns when Cancel was first called and whether it was.
-func (e *Entry) CancelledAt() (time.Time, bool) {
+// CanceledAt returns when Cancel was first called and whether it was.
+func (e *Entry) CanceledAt() (time.Time, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.cancelledAt, e.cancelled
+	return e.canceledAt, e.canceled
 }
 
 type ctxKey struct{}
@@ -202,13 +202,13 @@ func FromContext(ctx context.Context) *Entry {
 // CancelCause returns the operator cancellation that ended ctx, or nil when
 // ctx is still live or ended for any other reason (client deadline, client
 // disconnect). Callers use it at the outermost RPC layer to turn the generic
-// ctx error into merr.ErrRequestCancelled for the client.
+// ctx error into merr.ErrRequestCanceled for the client.
 func CancelCause(ctx context.Context) error {
 	if ctx.Err() == nil {
 		return nil
 	}
 	cause := context.Cause(ctx)
-	if errors.Is(cause, merr.ErrRequestCancelled) {
+	if errors.Is(cause, merr.ErrRequestCanceled) {
 		return cause
 	}
 	return nil
@@ -250,7 +250,7 @@ func (r *Registry) Unregister(e *Entry) {
 	}
 	r.entries.Remove(e.info.RequestID)
 	// Release the derived ctx. A request that finished normally has never
-	// been cancelled; give context.Canceled so nothing downstream mistakes
+	// been canceled; give context.Canceled so nothing downstream mistakes
 	// this bookkeeping release for an operator cancel.
 	e.cancel(context.Canceled)
 }
@@ -281,9 +281,9 @@ func (r *Registry) List(filter Filter, now time.Time) []Info {
 
 // Cancel cancels every request in requestIDs that this registry holds and
 // returns their snapshots taken at cancellation, plus the ids it does not
-// hold. An id whose request was already cancelled counts as cancelled again
+// hold. An id whose request was already canceled counts as canceled again
 // but is not reported a second time.
-func (r *Registry) Cancel(requestIDs []int64, operator, reason string, now time.Time) (cancelled []Info, notFound []int64) {
+func (r *Registry) Cancel(requestIDs []int64, operator, reason string, now time.Time) (canceled []Info, notFound []int64) {
 	for _, id := range requestIDs {
 		e, ok := r.entries.Get(id)
 		if !ok {
@@ -291,8 +291,8 @@ func (r *Registry) Cancel(requestIDs []int64, operator, reason string, now time.
 			continue
 		}
 		if snapshot, first := e.Cancel(operator, reason, now); first {
-			cancelled = append(cancelled, snapshot)
+			canceled = append(canceled, snapshot)
 		}
 	}
-	return cancelled, notFound
+	return canceled, notFound
 }

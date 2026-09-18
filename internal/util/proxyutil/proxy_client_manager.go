@@ -492,7 +492,7 @@ func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *m
 }
 
 // CancelRequests asks every proxy to cancel the given request ids and returns
-// the descriptions of what was cancelled, the ids no proxy held, and one
+// the descriptions of what was canceled, the ids no proxy held, and one
 // result row per proxy.
 //
 // The call is broadcast because a request id does not say which proxy serves
@@ -500,7 +500,7 @@ func (p *ProxyClientManager) ListRunningRequests(ctx context.Context, request *m
 // single proxy's "not found" is not mistaken for the cluster's answer.
 //
 // Like the list, this succeeds as long as one proxy answered, so that a proxy
-// that is down cannot stop the others from cancelling what they hold. When
+// that is down cannot stop the others from canceling what they hold. When
 // nodeResults contains a failure, notFound is not authoritative: an id in it
 // may still be running on the proxy that did not answer.
 func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvuspb.CancelRequestsRequest) ([]*milvuspb.RunningRequestInfo, []int64, []*milvuspb.RunningRequestNodeResult, error) {
@@ -512,8 +512,8 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 	defer cancel()
 
 	var mu sync.Mutex
-	cancelled := make([]*milvuspb.RunningRequestInfo, 0, len(request.GetRequestIds()))
-	// Start from every requested id and strike out the ones a proxy cancelled.
+	canceled := make([]*milvuspb.RunningRequestInfo, 0, len(request.GetRequestIds()))
+	// Start from every requested id and strike out the ones a proxy canceled.
 	// Whatever remains was held by nobody that answered.
 	pending := typeutil.NewSet(request.GetRequestIds()...)
 	nodeResults := make([]*milvuspb.RunningRequestNodeResult, 0, p.proxyClient.Len())
@@ -542,8 +542,8 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 				return
 			}
 			answered++
-			for _, info := range resp.GetCancelled() {
-				cancelled = append(cancelled, info)
+			for _, info := range resp.GetCanceled() {
+				canceled = append(canceled, info)
 				pending.Remove(info.GetRequestId())
 			}
 		}()
@@ -551,9 +551,9 @@ func (p *ProxyClientManager) CancelRequests(ctx context.Context, request *milvus
 	})
 	wg.Wait()
 	if answered == 0 {
-		return cancelled, pending.Collect(), nodeResults, noProxyAnswered("cannot cancel requests", nodeResults)
+		return canceled, pending.Collect(), nodeResults, noProxyAnswered("cannot cancel requests", nodeResults)
 	}
-	return cancelled, pending.Collect(), nodeResults, nil
+	return canceled, pending.Collect(), nodeResults, nil
 }
 
 // noProxyAnswered builds the error for a fan-out that reached nobody, naming

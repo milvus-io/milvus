@@ -2664,7 +2664,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
-	rsp.Status = statusIfCancelled(ctx, rsp.Status)
+	rsp.Status = statusIfCanceled(ctx, rsp.Status)
 	return rsp, nil
 }
 
@@ -2908,7 +2908,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
-	rsp.Status = statusIfCancelled(ctx, rsp.Status)
+	rsp.Status = statusIfCanceled(ctx, rsp.Status)
 	return rsp, nil
 }
 
@@ -3671,7 +3671,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		return false, merr.CheckRPCCall(result, err)
 	})
 	if err != nil {
-		return &milvuspb.QueryResults{Status: statusIfCancelled(ctx, merr.Status(err))}, nil
+		return &milvuspb.QueryResults{Status: statusIfCanceled(ctx, merr.Status(err))}, nil
 	}
 	return result, nil
 }
