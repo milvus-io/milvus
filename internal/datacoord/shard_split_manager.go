@@ -272,8 +272,9 @@ func (m *shardSplitManager) activeTaskCount() int {
 }
 
 // hasActiveTaskOnVChannel reports whether a task that is not Done or Aborted
-// names the vchannel as its source or one of its targets. The trigger skips
-// such a shard: it would otherwise fire on it again every round.
+// names the vchannel as its source or one of its targets: the channels a split
+// freezes (IsVChannelSplitting). The trigger needs no such check -- it skips a
+// collection with any active split (hasActiveTaskOnCollection).
 func (m *shardSplitManager) hasActiveTaskOnVChannel(vchannel string) bool {
 	for _, task := range m.store.list() {
 		if !isSplitShardTaskActive(task) {
@@ -378,9 +379,6 @@ func (m *shardSplitManager) detectOnce() {
 		for _, vchannel := range collection.VChannelNames {
 			if active >= maxConcurrent {
 				return
-			}
-			if m.hasActiveTaskOnVChannel(vchannel) {
-				continue
 			}
 			stats := m.collectShardStats(vchannel)
 			if !shouldSplit(stats) {
