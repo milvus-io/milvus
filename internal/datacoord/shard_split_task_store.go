@@ -21,10 +21,12 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -153,6 +155,61 @@ func (s *shardSplitTasks) upsert(ctx context.Context, catalog metastore.DataCoor
 	}
 	s.cache(task)
 	return nil
+}
+
+// modify applies mutate to a private copy of the latest record of taskID and
+// persists the result through upsert, all under the task's write lock
+// (lockTask), the same lock CommitShardSplit holds around its own
+// read-merge-upsert. So the split manager and the SplitShard ack callback, the
+// two writers of one record, never write back a stale copy over each other: a
+// manager write that raced the callback cannot revert the T_switch and the
+// fence the callback recorded, and a redelivered callback cannot drop what the
+// manager wrote.
+//
+// mutate returns false to leave the record untouched, and nothing is persisted.
+// It returns the record as it stands afterwards. A task the store does not hold
+// is a System error: every caller acts on a task it has already observed, and
+// records are never removed.
+func (s *shardSplitTasks) modify(
+	ctx context.Context,
+	catalog metastore.DataCoordCatalog,
+	taskID int64,
+	mutate func(task *datapb.SplitShardTask) bool,
+) (*datapb.SplitShardTask, error) {
+	s.lockTask(taskID)
+	defer s.unlockTask(taskID)
+	latest, ok := s.tasks.Get(taskID)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("shard split task %d is not in the store", taskID)
+	}
+	cloned := proto.Clone(latest).(*datapb.SplitShardTask)
+	if !mutate(cloned) {
+		return latest, nil
+	}
+	if err := s.upsert(ctx, catalog, cloned); err != nil {
+		return nil, err
+	}
+	return cloned, nil
+}
+
+// create persists a task the store does not hold yet, under its write lock.
+// Refused when the id is already recorded: a task id is allocated once, so an
+// existing record under it is either this very task (a retry, which must not
+// overwrite what has happened since) or another split's, and neither may be
+// replaced.
+func (s *shardSplitTasks) create(ctx context.Context, catalog metastore.DataCoordCatalog, task *datapb.SplitShardTask) error {
+	s.lockTask(task.GetTaskId())
+	defer s.unlockTask(task.GetTaskId())
+	if _, ok := s.tasks.Get(task.GetTaskId()); ok {
+		return merr.WrapErrServiceInternalMsg("shard split task %d is already recorded", task.GetTaskId())
+	}
+	return s.upsert(ctx, catalog, task)
+}
+
+// list returns every recorded task. The records are the store's own and must
+// not be mutated; modify is the only way to change one.
+func (s *shardSplitTasks) list() []*datapb.SplitShardTask {
+	return s.tasks.Values()
 }
 
 // splitSourceVChannels lists a task's source vchannel names.

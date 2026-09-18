@@ -18,7 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -27,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestShardSplitTaskStoreLoadsFromTheCatalog(t *testing.T) {
@@ -160,4 +163,118 @@ func TestShardSplitTaskStoreLocksOneTaskAtATime(t *testing.T) {
 	store.unlockTask(200)
 	assert.True(t, store.taskLocks.TryLock(200))
 	store.taskLocks.Unlock(200)
+}
+
+func TestShardSplitTaskStoreModify(t *testing.T) {
+	ctx := context.Background()
+	catalog := mocks.NewDataCoordCatalog(t)
+	store := newShardSplitTasks()
+
+	// an unknown task is a System error: nothing acts on a task it never saw.
+	_, err := store.modify(ctx, catalog, 200, func(*datapb.SplitShardTask) bool { return true })
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+	require.NoError(t, store.create(ctx, catalog, &datapb.SplitShardTask{TaskId: 200, CollectionId: 100}))
+	// an id is created once.
+	require.ErrorIs(t, store.create(ctx, catalog, &datapb.SplitShardTask{TaskId: 200}), merr.ErrServiceInternal)
+	assert.Len(t, store.list(), 1)
+
+	// a mutation that declines writes nothing and returns the record as it is.
+	got, err := store.modify(ctx, catalog, 200, func(*datapb.SplitShardTask) bool { return false })
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), got.GetCollectionId())
+
+	// a mutation works on a copy: a failed save leaves the cached record alone.
+	catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(errors.New("etcd down")).Once()
+	_, err = store.modify(ctx, catalog, 200, func(task *datapb.SplitShardTask) bool {
+		task.FailReason = "lost"
+		return true
+	})
+	require.Error(t, err)
+	cached, _ := store.get(200)
+	assert.Empty(t, cached.GetFailReason())
+
+	catalog.EXPECT().SaveSplitShardTask(mock.Anything, mock.Anything).Return(nil).Once()
+	got, err = store.modify(ctx, catalog, 200, func(task *datapb.SplitShardTask) bool {
+		task.FailReason = "kept"
+		return true
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "kept", got.GetFailReason())
+	cached, _ = store.get(200)
+	assert.Equal(t, "kept", cached.GetFailReason())
+}
+
+// The split manager and the SplitShard ack callback write one record. The
+// manager's read-modify-write must take the same per-task lock the callback
+// holds, or a manager write that read the record before the callback landed
+// reverts the fence the callback recorded (audit 1.5): the task then waits
+// forever for a fence that is already in the WAL.
+func TestShardSplitManagerWriteCannotRevertTheCallbacksFence(t *testing.T) {
+	svr := newShardSplitTestServer(t)
+	ctx := context.Background()
+	require.NoError(t, svr.shardSplitTasks.create(ctx, svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskPreparing,
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+		Targets:      splitTestCommitRequest().GetTargets(),
+	}))
+
+	// The manager has read the Preparing record and is about to write Fencing;
+	// the callback lands in between.
+	committed := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	_, err := svr.shardSplitTasks.modify(ctx, svr.meta.catalog, 200, func(task *datapb.SplitShardTask) bool {
+		go func() {
+			defer wg.Done()
+			status, err := svr.CommitShardSplit(ctx, splitTestCommitRequest())
+			assert.NoError(t, merr.CheckRPCCall(status, err))
+			close(committed)
+		}()
+		select {
+		case <-committed:
+			t.Error("the callback ran inside the manager's read-modify-write")
+		case <-time.After(100 * time.Millisecond):
+		}
+		task.State = datapb.SplitShardTaskState_SplitShardTaskFencing
+		return true
+	})
+	require.NoError(t, err)
+	wg.Wait()
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
+	assert.True(t, task.GetFenced())
+	assert.Equal(t, uint64(2000), task.GetSources()[0].GetSwitchTimeTick())
+}
+
+// Fields 9-11 and the source's pending segments are the split manager's. A
+// redelivered SplitShard callback carries none of them and must keep all of
+// them.
+func TestCommitShardSplitRedeliveryKeepsTheManagersFields(t *testing.T) {
+	svr := newShardSplitTestServer(t)
+	ctx := context.Background()
+	status, err := svr.CommitShardSplit(ctx, splitTestCommitRequest())
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	_, err = svr.shardSplitTasks.modify(ctx, svr.meta.catalog, 200, func(task *datapb.SplitShardTask) bool {
+		task.GetSources()[0].PendingSegments = []int64{7, 8}
+		task.DispatchedPlanIds = []int64{70}
+		task.FailReason = "noted"
+		task.EndTime = 12345
+		return true
+	})
+	require.NoError(t, err)
+
+	status, err = svr.CommitShardSplit(ctx, splitTestCommitRequest())
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, []int64{7, 8}, task.GetSources()[0].GetPendingSegments())
+	assert.Equal(t, []int64{70}, task.GetDispatchedPlanIds())
+	assert.Equal(t, "noted", task.GetFailReason())
+	assert.Equal(t, uint64(12345), task.GetEndTime())
 }
