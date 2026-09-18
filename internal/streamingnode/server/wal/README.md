@@ -32,7 +32,7 @@ developper who want to add a new implementation of `wal` should implements the `
 - `walimpls.WALImpls`
 
 `OpenerBuilderImpls` create `OpenerImpls`; `OpenerImpls` creates `WALImpls`; `WALImpls` create `ScannerImpls`. 
-Then register the implmentation of `walimpls.OpenerBuilderImpls` into `github.com/milvus-io/milvus/pkg/streaming/walimpls/registry` package.
+Then register the implementation of `walimpls.OpenerBuilderImpls` into `github.com/milvus-io/milvus/pkg/streaming/walimpls/registry` package.
 
 ```
 import "github.com/milvus-io/milvus/pkg/streaming/walimpls/registry"
