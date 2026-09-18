@@ -113,6 +113,85 @@ func TestShardSplitStateCache(t *testing.T) {
 		assert.Empty(t, cache.CreatingTargetChannels(ctx, 6))
 	})
 
+	t.Run("ReadShardStates reads past the TTL and refreshes the cache", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(8)).Return(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		}, nil).Once()
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(8)).Return(splittingCollectionResp(), nil).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		assert.Empty(t, cache.CreatingTargetChannels(ctx, 8))
+		// a fresh read ignores the still-valid cached entry.
+		states, err := cache.ReadShardStates(ctx, 8)
+		assert.NoError(t, err)
+		assert.ElementsMatch(t, []string{"v1", "v2"}, states.SplitWindowTargets([]string{"v0", "v1", "v2"}))
+		// and later cached queries see what it read.
+		assert.ElementsMatch(t, []string{"v1", "v2"}, cache.CreatingTargetChannels(ctx, 8))
+	})
+
+	t.Run("ReadShardStates falls back to the last cached read when the fresh read fails", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(9)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(9)).Return(nil, errors.New("coord down")).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		assert.NotEmpty(t, cache.CreatingTargetChannels(ctx, 9))
+		states, err := cache.ReadShardStates(ctx, 9)
+		assert.NoError(t, err)
+		// the cached read's complement: v1, v2 Creating, and v3 never listed.
+		assert.ElementsMatch(t, []string{"v1", "v2", "v3"}, states.SplitWindowTargets([]string{"v0", "v1", "v2", "v3"}))
+	})
+
+	t.Run("ReadShardStates reports the error when nothing is cached", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(12)).Return(nil, errors.New("coord down")).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		states, err := cache.ReadShardStates(ctx, 12)
+		assert.Error(t, err)
+		assert.Nil(t, states)
+	})
+
+	t.Run("SplitWindowTargets marks every pulled channel the read did not see settled", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(10)).Return(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"normal", "splitting", "dropped", "creating"},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardNormal},
+				{State: schemapb.ShardState_ShardSplitting},
+				{State: schemapb.ShardState_ShardDropped},
+				{State: schemapb.ShardState_ShardCreating},
+			},
+		}, nil).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		states, err := cache.ReadShardStates(ctx, 10)
+		assert.NoError(t, err)
+		// Normal, Splitting and Dropped never return to Creating; a Creating
+		// channel and one the read never listed (fenced after it) are marked.
+		assert.ElementsMatch(t, []string{"creating", "fenced"},
+			states.SplitWindowTargets([]string{"normal", "splitting", "dropped", "creating", "fenced"}))
+		assert.Empty(t, states.SplitWindowTargets([]string{"normal", "splitting"}))
+		assert.Empty(t, states.SplitWindowTargets(nil))
+	})
+
+	t.Run("a listed vchannel without a shard info is a Normal legacy shard", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(11)).Return(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"a", "b"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardCreating}},
+		}, nil).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		states, err := cache.ReadShardStates(ctx, 11)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"a"}, states.SplitWindowTargets([]string{"a", "b"}))
+		assert.Equal(t, []string{"a"}, cache.CreatingTargetChannels(ctx, 11))
+		assert.False(t, cache.IsShardSplitting(ctx, 11))
+	})
+
 	t.Run("Invalidate forces a refetch", func(t *testing.T) {
 		broker := NewMockBroker(t)
 		broker.EXPECT().DescribeCollection(mock.Anything, int64(4)).Return(splittingCollectionResp(), nil).Once()
