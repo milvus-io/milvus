@@ -216,14 +216,20 @@ func TestCheckReadFamilyAcceptsACoveredRead(t *testing.T) {
 	child2 := newTSafeTestDelegator("v2", 0)
 	source.children["v1"] = child1
 	source.children["v2"] = child2
-	scope := frontingSourceScope(source.frontingChildren())
+	scope := frontingSourceScope(source.snapshotFamily())
 	source.DetachSplitChild("v2")
 	assert.NoError(t, source.checkReadFamily(scope), "a detached child is still covered")
 
 	source.children["mock"] = &MockShardDelegator{}
 	assert.NoError(t, source.checkReadFamily(scope), "a delegator that cannot be fronted is not read")
 
+	// a child published one level down, after the snapshot, is not covered.
+	grandchild := newTSafeTestDelegator("v3", 0)
+	child1.children["v3"] = grandchild
+	assert.ErrorIs(t, source.checkReadFamily(scope), merr.ErrServiceUnavailable)
+	delete(child1.children, "v3")
+
 	markSpawning(source, "v9")
-	assert.NoError(t, source.checkReadFamily(scope.forChild()), "a fronted child's read is covered by its source")
+	assert.NoError(t, source.checkReadFamily(scope.forChild(nil)), "a fronted child's read is covered by its source")
 	assertRetriableFamilyRefusal(t, source.checkReadFamily(scope))
 }
