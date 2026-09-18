@@ -83,7 +83,9 @@ func (sd *shardDelegator) executeFilterStage(
 // Stage 2: Optimize search params using actual filter stats, execute normal search (filter re-executed)
 // Note: Filter bitsets are cached via the process-level ExprResCacheManager
 // (Stage 1 writes, Stage 2 reads). Cross-query reuse comes for free when the
-// same predicate runs on the same sealed segment.
+// same predicate runs on the same sealed segment. For a shared-filter group
+// stage 1 runs once for the whole group rather than once per sub-request,
+// because every branch carries the same predicate.
 // twoStageSearch returns (results, fallback, error). When fallback is true,
 // the caller should continue with the normal single-stage search path;
 // results will be nil in that case.
@@ -133,8 +135,17 @@ func (sd *shardDelegator) twoStageSearch(
 	// ==================== Optimize with actual stats ====================
 	log.Debug(ctx, "Optimizing search params with actual stats")
 	const isSecondStageSearch = true
-	indexType := sd.collection.GetIndexType(req.GetReq().GetFieldId())
-	optimizedReq, err := optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, effectiveSegmentNum, isSecondStageSearch, sd.getVectorFieldDim, indexType)
+	// An ungrouped request is here because branch 0 qualified, so it takes
+	// stage-2 semantics exactly as before. A grouped request is here because
+	// *some* branch qualified, which need not be branch 0; a branch that would
+	// not have qualified on its own keeps its ordinary parameters even though
+	// it shares the group's stage-1 bitset.
+	branch0Stage2 := isSecondStageSearch
+	if len(req.GetExtraFilterSharingReqs()) > 0 {
+		branch0Stage2 = branchQualifiesForTwoStage(req.GetReq().GetTopk(), req.GetReq().GetSearchType())
+	}
+	optimizedReq, err := sd.optimizeSearchParams(ctx, req, sd.queryHook, validCounts, effectiveSegmentNum,
+		branch0Stage2, isSecondStageSearch, sd.getVectorFieldDim, sd.collection.GetIndexType)
 	if err != nil {
 		log.Warn(ctx, "Two-stage search: failed to optimize search params", mlog.Err(err))
 		return nil, false, err

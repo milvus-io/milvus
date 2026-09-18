@@ -100,11 +100,14 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	QueryNodeSQCount.WithLabelValues(nodeIDStr, "search", "success", "default", collectionIDStr).Add(50)
 	// QueryNodeLevelZeroSize: nodeID, collectionID, channelName
 	QueryNodeLevelZeroSize.WithLabelValues(nodeIDStr, collectionIDStr, "ch1").Set(256)
+	// QueryNodeSharedFilterFallbackTotal: nodeID, collectionID, reason
+	QueryNodeSharedFilterFallbackTotal.WithLabelValues(nodeIDStr, collectionIDStr, "unshareable").Add(3)
 
 	// Set up metrics for a different collection (should not be cleaned up)
 	otherCollectionIDStr := "200"
 	QueryNodeConsumerMsgCount.WithLabelValues(nodeIDStr, "insert", otherCollectionIDStr).Add(20)
 	QueryNodeNumEntities.WithLabelValues("default", "other_collection", nodeIDStr, otherCollectionIDStr, "growing").Set(200)
+	QueryNodeSharedFilterFallbackTotal.WithLabelValues(nodeIDStr, otherCollectionIDStr, "unshareable").Add(4)
 
 	// Helper function to count metrics
 	countCounterMetrics := func(vec *prometheus.CounterVec) int {
@@ -132,6 +135,7 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	// Record counts before cleanup
 	consumerCountBefore := countCounterMetrics(QueryNodeConsumerMsgCount)
 	numEntitiesBefore := countGaugeMetrics(QueryNodeNumEntities)
+	sharedFilterFallbackBefore := countCounterMetrics(QueryNodeSharedFilterFallbackTotal)
 
 	// Clean up metrics for the target collection
 	CleanupQueryNodeCollectionMetrics(nodeID, collectionID)
@@ -140,14 +144,17 @@ func TestCleanupQueryNodeCollectionMetrics(t *testing.T) {
 	// and other collection's metrics still exist
 	consumerCountAfter := countCounterMetrics(QueryNodeConsumerMsgCount)
 	numEntitiesAfter := countGaugeMetrics(QueryNodeNumEntities)
+	sharedFilterFallbackAfter := countCounterMetrics(QueryNodeSharedFilterFallbackTotal)
 
 	// At least one metric should be removed from each
 	assert.Less(t, consumerCountAfter, consumerCountBefore)
 	assert.Less(t, numEntitiesAfter, numEntitiesBefore)
+	assert.Less(t, sharedFilterFallbackAfter, sharedFilterFallbackBefore)
 
 	// Other collection's metrics should still exist
 	assert.Greater(t, consumerCountAfter, 0)
 	assert.Greater(t, numEntitiesAfter, 0)
+	assert.Greater(t, sharedFilterFallbackAfter, 0)
 }
 
 // TestDeletePartialMatch test deletes all metrics where the variable labels contain all of those

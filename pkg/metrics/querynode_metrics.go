@@ -470,6 +470,20 @@ var (
 			queryTypeLabelName,
 		})
 
+	// QueryNodeSharedFilterFallbackTotal counts hybrid-search sub-requests whose
+	// filter evaluation was not shared, labelled by why.
+	QueryNodeSharedFilterFallbackTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "hybrid_shared_filter_fallback_total",
+			Help:      "hybrid-search sub-requests whose filter evaluation was not shared, by reason",
+		}, []string{
+			nodeIDLabelName,
+			collectionIDLabelName,
+			"reason",
+		})
+
 	QueryNodeSegmentFilterSkippedSegmentNum = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: milvusNamespace,
@@ -1074,6 +1088,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeForwardDeleteCost)
 	registry.MustRegister(QueryNodeSearchHitSegmentNum)
 	registry.MustRegister(QueryNodeSegmentFilterHitSegmentNum)
+	registry.MustRegister(QueryNodeSharedFilterFallbackTotal)
 	registry.MustRegister(QueryNodeSegmentFilterSkippedSegmentNum)
 	registry.MustRegister(QueryNodeSegmentFilterTotalSegmentNum)
 	registry.MustRegister(QueryNodeDeleteBufferSize)
@@ -1123,6 +1138,7 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 	QueryNodeTwoStageSearchFallbackCount.DeletePartialMatch(labels)
 	QueryNodeGlobalRefineCount.DeletePartialMatch(labels)
 	QueryNodeSearchFTSNumTokens.DeletePartialMatch(labels)
+	QueryNodeSharedFilterFallbackTotal.DeletePartialMatch(labels)
 }
 
 // PoolStats holds the snapshot of a single pool's state.
