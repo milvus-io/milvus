@@ -106,9 +106,9 @@ func (wb *l0WriteBuffer) bufferInsert(inData *InsertData, startPos, endPos *msgp
 	}
 	segBuf := wb.getOrCreateBuffer(inData.segmentID, startPos.GetTimestamp())
 
-	totalMemSize := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
+	totalMemSize, bufferedRows := segBuf.insertBuffer.Buffer(inData, startPos, endPos)
 	wb.metaCache.UpdateSegments(metacache.SegmentActions(
-		metacache.UpdateBufferedRows(segBuf.insertBuffer.rows),
+		metacache.AddBufferedRows(bufferedRows),
 		metacache.SetStartPositionIfNil(startPos),
 	), metacache.WithSegmentIDs(inData.segmentID))
 

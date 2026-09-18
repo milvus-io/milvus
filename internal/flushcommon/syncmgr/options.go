@@ -22,6 +22,7 @@ func (t *SyncTask) WithSyncPack(pack *SyncPack) *SyncTask {
 	t.channelName = t.pack.channelName
 	t.segmentID = t.pack.segmentID
 	t.batchRows = t.pack.batchRows
+	t.reservation = t.pack.reservation
 	// t.metacache = t.pack.metacache
 	// t.schema = t.metacache.Schema()
 	t.startPosition = t.pack.startPosition

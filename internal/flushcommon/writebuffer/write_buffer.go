@@ -669,7 +669,11 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		totalMemSize += float64(delta.Size())
 	}
 
-	actions = append(actions, metacache.StartSyncing(batchSize))
+	// One reservation owns this batch's accounting from here to whichever
+	// terminal outcome the task reaches. Created in the same metacache update
+	// that the yielded payload is accounted against.
+	reservation := metacache.NewSyncReservation(segmentID, batchSize)
+	actions = append(actions, reservation.Apply())
 	wb.metaCache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(segmentID))
 
 	pack := &syncmgr.SyncPack{}
@@ -684,7 +688,7 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		WithLevel(segmentInfo.Level()).
 		WithDataSource(metrics.StreamingDataSourceLabel).
 		WithCheckpoint(wb.checkpoint).
-		WithBatchRows(batchSize).
+		WithReservation(reservation).
 		WithErrorHandler(wb.errHandler)
 
 	if len(bm25) != 0 {

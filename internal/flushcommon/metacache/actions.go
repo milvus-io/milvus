@@ -122,12 +122,6 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 	})
 }
 
-func WithNoSyncingTask() SegmentFilter {
-	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.syncingTasks == 0
-	})
-}
-
 type SegmentAction func(info *SegmentInfo)
 
 func SegmentActions(actions ...SegmentAction) SegmentAction {
@@ -174,6 +168,11 @@ func UpdateCheckpoint(checkpoint *msgpb.MsgPosition) SegmentAction {
 	}
 }
 
+// UpdateNumOfRows seeds flushedRows absolutely. It has no production caller:
+// the live accounting is delta-only, owned by SyncReservation and
+// AddBufferedRows. This exists so tests can stand up a segment that already
+// holds rows. Do not call it from production code; an absolute write here would
+// discard a pending reservation.
 func UpdateNumOfRows(numOfRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows = numOfRows
@@ -194,9 +193,11 @@ func SetStorageVersion(version int64) SegmentAction {
 	}
 }
 
-func UpdateBufferedRows(bufferedRows int64) SegmentAction {
+// AddBufferedRows records newly buffered rows. Delta, never absolute: an
+// absolute write racing a pending SyncReservation would discard it.
+func AddBufferedRows(rows int64) SegmentAction {
 	return func(info *SegmentInfo) {
-		info.bufferRows = bufferedRows
+		info.bufferRows += rows
 	}
 }
 
@@ -220,30 +221,6 @@ func SetStatistics(stats *SegmentStats) SegmentAction {
 		if stats != nil {
 			info.stats = stats
 		}
-	}
-}
-
-func StartSyncing(batchSize int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.syncingRows += batchSize
-		info.bufferRows -= batchSize
-		info.syncingTasks++
-	}
-}
-
-func AbortSyncing(batchSize int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.syncingRows -= batchSize
-		info.bufferRows += batchSize
-		info.syncingTasks--
-	}
-}
-
-func FinishSyncing(batchSize int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.flushedRows += batchSize
-		info.syncingRows -= batchSize
-		info.syncingTasks--
 	}
 }
 

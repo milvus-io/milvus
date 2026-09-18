@@ -126,22 +126,26 @@ func (ib *InsertBuffer) YieldStats() map[int64]*storage.BM25Stats {
 	return ib.statsBuffer.yieldBuffer()
 }
 
-func (ib *InsertBuffer) Buffer(inData *InsertData, startPos, endPos *msgpb.MsgPosition) int64 {
-	bufferedSize := int64(0)
+// Buffer appends inData and reports the bytes and the rows it added. The row
+// count is returned rather than read back from ib.rows so the caller can record
+// a delta; an absolute write of ib.rows would discard a concurrent reservation.
+func (ib *InsertBuffer) Buffer(inData *InsertData, startPos, endPos *msgpb.MsgPosition) (bufferedSize int64, bufferedRows int64) {
 	for idx, data := range inData.data {
 		tsData := inData.tsField[idx]
 
 		tr := ib.getTimestampRange(tsData)
 		ib.buffer(data, tr, startPos, endPos)
 		// update buffer size
-		ib.UpdateStatistics(int64(data.GetRowNum()), int64(data.GetMemorySize()), tr, startPos, endPos)
+		rows := int64(data.GetRowNum())
+		ib.UpdateStatistics(rows, int64(data.GetMemorySize()), tr, startPos, endPos)
 		bufferedSize += int64(data.GetMemorySize())
+		bufferedRows += rows
 	}
 	if inData.bm25Stats != nil {
 		ib.statsBuffer.Buffer(inData.bm25Stats)
 	}
 
-	return bufferedSize
+	return bufferedSize, bufferedRows
 }
 
 func (ib *InsertBuffer) getTimestampRange(tsData *storage.Int64FieldData) TimeRange {
