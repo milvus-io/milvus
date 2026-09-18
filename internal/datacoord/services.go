@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -78,11 +79,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	}, nil
 }
 
-// Flush notify segment to flush
-// this api only guarantees all the segments requested is sealed
-// these segments will be flushed only after the Flush policy is fulfilled
+// Flush waits for collection-wide L1 and L0 completion when streaming is enabled.
+// The legacy path seals segments and leaves persistence to the flush policy.
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	mlog.Info(context.TODO(), "receive flush request")
+	mlog.Info(ctx, "receive flush request")
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
 	defer sp.End()
 
@@ -92,17 +92,21 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
-	ts, err := s.allocator.AllocTimestamp(ctx)
-	if err != nil {
-		mlog.Warn(context.TODO(), "unable to alloc timestamp", mlog.Err(err))
-		return nil, err
+	var bc broadcaster.BroadcastAPI
+	if streamingutil.IsStreamingServiceEnabled() {
+		var err error
+		bc, err = s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+		if err != nil {
+			return &datapb.FlushResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		defer bc.Close()
 	}
-	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), ts, req.GetSegmentIDs())
+
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), req.GetSegmentIDs(), bc)
 	if err != nil {
-		return &datapb.FlushResponse{
-			Status: merr.Status(err),
-		}, nil
+		return &datapb.FlushResponse{Status: merr.Status(err)}, nil
 	}
 
 	return &datapb.FlushResponse{
@@ -117,11 +121,22 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}, nil
 }
 
-func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flushTs uint64, toFlushSegments []UniqueID) (*datapb.FlushResult, error) {
+// broadcastManualFlush waits for L1 and L0 completion on every collection VChannel.
+func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.BroadcastAPI, coll *collectionInfo) error {
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: coll.ID}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast()
+	_, err := bc.Broadcast(ctx, msg)
+	return err
+}
+
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toFlushSegments []UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		mlog.Warn(context.TODO(), "fail to get collection", mlog.Err(err))
+		mlog.Warn(ctx, "fail to get collection", mlog.Err(err))
 		return nil, err
 	}
 	if coll == nil {
@@ -133,10 +148,22 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		channelCPs[vchannel] = cp
 	}
 
-	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
+	var flushTs uint64
+	timeOfSeal := time.Now()
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
-	if !streamingutil.IsStreamingServiceEnabled() {
+	if bc != nil {
+		// AckSyncUp proves completion directly; zero tells GetFlushState that
+		// no independently reported channel checkpoint needs to be checked.
+		if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
+			return nil, err
+		}
+	} else {
+		flushTs, err = s.allocator.AllocTimestamp(ctx)
+		if err != nil {
+			return nil, err
+		}
+		timeOfSeal, _ = tsoutil.ParseTS(flushTs)
 		for _, channel := range coll.VChannelNames {
 			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
@@ -159,7 +186,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		}
 	}
 
-	mlog.Info(context.TODO(), "flush response with segments",
+	mlog.Info(ctx, "flush response with segments",
 		mlog.Int64("collectionID", collectionID),
 		mlog.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		mlog.Int("flushedSegmentsCount", len(flushSegmentIDs)),
@@ -1638,8 +1665,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 }
 
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
-// Unlike FlushAll, ManualFlush uses RawAppend and returns before consuming-side
-// completion, so its follow-up state check must still wait for durable progress.
+// A zero flush timestamp requires only segment-state checks. Streaming Flush
+// returns zero after its AckSyncUp broadcast has completed all L1 and L0 work.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	log := mlog.With(mlog.Int64("collection", req.GetCollectionID()),
 		mlog.Uint64("flushTs", req.GetFlushTs()),
@@ -1656,9 +1683,6 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		for _, sid := range req.GetSegmentIDs() {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
-			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
-			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
-			// use timetick for GetFlushState in-future but not segment list.
 			if segment == nil || isFlushState(segment.GetState()) {
 				continue
 			}
@@ -1670,6 +1694,11 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 			return resp, nil
 		}
+	}
+
+	if req.GetFlushTs() == 0 {
+		resp.Flushed = true
+		return resp, nil
 	}
 
 	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())

@@ -102,12 +102,25 @@ Global recovery checkpoint publication is not part of this RPC completion
 boundary. A crash before publication replays unfinished recovery bookkeeping
 and may repeat already durable output safely.
 
-ManualFlush currently uses per-VChannel `RawAppend`, not Broadcast. Its append
-response does not wait for retained consumers, although RecoveryStorage holds
-the message through L1/L0 completion. `GetFlushState` therefore continues to
-check segment/flush progress. Giving ManualFlush the same synchronous API
-contract would require an explicit consuming-side wait or a broadcast path;
-setting a broadcast option on RawAppend cannot provide that contract.
+Collection Flush calls DataCoord's Flush RPC. DataCoord acquires the shared
+DB and exclusive collection-name broadcast resource keys, then broadcasts a
+ManualFlush with AckSyncUp to every collection VChannel. CChannel is omitted:
+ManualFlush has no coordinator metadata callback requiring CChannel ordering.
+The RPC waits for every split message's L1 final commits and L0 output/registration,
+independently of unrelated VChannels holding the global recovery checkpoint.
+
+Each VChannel uses its ManualFlush message TimeTick as the completion boundary.
+No independent coordinator TSO or BarrierTimeTick is needed. The returned FlushTs
+is zero: completion is already guaranteed by the successful RPC. GetFlushState
+checks the supplied segment states, then returns true for zero FlushTs even if
+channel checkpoints are absent. Nonzero FlushTs retains the existing channel
+checkpoint checks. TimeOfSeal remains an informational wall-clock timestamp.
+
+A successful streaming Flush returns an empty pending SegmentIDs list. Proxy
+preserves the collection entry with an empty array. The existing flushed-segment
+list is still collected from DataCoord metadata after completion, with the same
+state and non-L0 filters. Channel checkpoints are captured before broadcasting,
+as before; they are recovery positions, not proof of this Flush's completion.
 
 ## 8. Import Commit Ownership
 

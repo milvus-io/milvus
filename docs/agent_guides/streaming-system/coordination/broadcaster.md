@@ -14,7 +14,7 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`. The exception i
 2. **Persist**: Stamp BroadcastID, ResourceKeys and the CChannel into the broadcast header, create task in PENDING state, persist to catalog. Once persisted, the broadcast is guaranteed to eventually complete even across crashes.
 3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels.
 4. **FastAck**: If `AckSyncUp` is not set, the broadcaster immediately self-acks all VChannels using the append results (no need to wait for consumer-side ACK). Otherwise, waits for StreamingNode consumers to ACK each VChannel.
-5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
+5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`; a broadcast without CChannel is enqueued when all target VChannels have ACKed. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
 6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` garbage-collects aged-out tasks from the catalog.
 
 ## Idempotent Broadcast
@@ -73,3 +73,12 @@ REPLICATED → TOMBSTONE → DONE (removed from catalog)
 ## Key Packages
 
 - `internal/streamingcoord/server/broadcaster/` — `Broadcaster`, task scheduling, resource locking, ACK callbacks, singleton accessor
+
+## Collection Flush Completion
+
+DataCoord Flush broadcasts ManualFlush with AckSyncUp to the collection's business
+VChannels under shared DB and exclusive collection-name locks. It omits CChannel
+because no coordinator metadata callback needs ordering. The consuming-side Ack
+waits for both L1 and L0 completion, without waiting for global recovery checkpoint
+publication. Flush returns an empty pending segment list and preserves the existing
+flushed-segment listing. See [Flush API completion](../../../design-docs/design_docs/wal/broadcast_ack_module.md#flush-api-completion).
