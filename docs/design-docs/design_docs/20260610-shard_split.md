@@ -8,7 +8,8 @@
 **What this branch implements.** The write switch (§6.1), the drain
 predicate and the adoption commit's apply path (§6.3), the per-cluster
 replication pieces (§6.5), and the StreamingNode lifecycle of a fenced source.
-Nothing on this branch issues a split. Everything else this document describes
+Nothing on this branch issues a split, and for now no split is issued for a
+namespace collection at all (§1.3). Everything else this document describes
 is marked **not on this branch**, and §11 lists all of it.
 
 ## 1. Overview
@@ -49,8 +50,10 @@ handles it. Without that guarantee the relabel argument of §3.1 does not hold.
 
 - Split **one** shard into **two** shards online. Reads and writes keep working;
   a short latency increase is acceptable, data loss or inconsistency is not.
-- A namespace collection redistributes by metadata-only relabel. A collection
-  placed by primary key redistributes by rewrite (§6.3).
+- A namespace collection redistributes by metadata-only relabel *(deferred:
+  namespace collections are not split until the namespace(=partition) work
+  lands, §1.3)*. A collection placed by primary key redistributes by rewrite
+  (§6.3).
 - Full consistency: no message loss or duplication, ordering preserved, no MVCC
   ghost reads, and correct deletes throughout the window.
 - Crash safety: every step is idempotent and resumable. Before the fence a
@@ -61,6 +64,46 @@ handles it. Without that guarantee the relabel argument of §3.1 does not hold.
 
 Out of scope: changing several shards at once, shrinking, a declared
 shard count, and isolating a named tenant into its own shard.
+
+### 1.3 Current scope: namespace collections are not split yet
+
+**Convention.** Until the namespace(=partition) work §1.1 depends on lands on
+master, no split is issued for a namespace collection
+(`schema.enable_namespace=true`), in either `namespace.mode`. The planner must
+not select one. Only collections placed by primary key are split, and they
+split by rewrite (§6.3 step 2).
+
+**Why.** Relabel needs every segment to lie wholly on one residue of the new
+routing. Neither namespace mode on master provides that:
+
+- `namespace.mode=partition`: a namespace is a real partition, but the proxy
+  places rows by `hash(pk)` (`assignChannelsByPK`), so partition and shard are
+  orthogonal and a segment holds rows of every residue.
+- `namespace.mode=partition_key` with `namespace.sharding.enabled=true`: rows are
+  placed by `hash($namespace_id)`, but the collection has a single partition-key
+  bucket. The namespace field is added in rootcoord `prepareSchema`, after
+  `broadcastCreateCollectionV1` has already set `NumPartitions = 1` for a schema
+  without a partition-key field, and the proxy refuses `num_partitions` on such
+  a schema. Every namespace therefore shares one partition, and with P = 1
+  `routing.CheckNamespaceRelabelGranularity` refuses every M ≥ 2.
+
+Splitting either shape today would take a rewrite of every row. That is
+deliberately not done: namespace collections will split by the relabel this
+document describes, once their data layout supports it.
+
+**What the document keeps.** The namespace design (`hash($namespace_id)`
+routing, relabel as its redistribution, and the admission and granularity
+checks of §3.1) stays as the target for when the namespace(=partition) work
+lands, with every partition's segments on one shard. It is marked
+*deferred* where it appears. The checks on this branch are unchanged. They
+refuse a `hash($namespace_id)` post-image that the layout cannot relabel, but
+they do not refuse a `hash(pk)` split of a namespace collection: the
+convention above is the planner's to enforce.
+
+**To revisit when that work lands:** the planner's selection rule, and whether
+the granularity rule still applies. If a namespace is its own partition and is
+placed by its own hash, every segment is single-residue and relabel needs no
+divisibility.
 
 ## 2. Background and Constraints
 
@@ -118,7 +161,8 @@ the table (`routing.Derive`) checks that the residue sets tile `[0, M)` exactly
 and that M does not exceed `2^15`. A gap or an overlap is refused, so malformed
 routing meta fails loudly instead of misplacing writes.
 
-**Admission for `hash($namespace_id)`.** The namespace key is valid only for a
+**Admission for `hash($namespace_id)`** *(deferred with namespace splits,
+§1.3; the checks run on this branch)*. The namespace key is valid only for a
 collection whose rows have *always* been placed by it. The proxy places a row
 by namespace only when `namespace.sharding.enabled=true` **and**
 `namespace.mode=partition_key`. `sharding.enabled` is written as `false` at
@@ -682,9 +726,9 @@ sequenceDiagram
 
 ### 6.3 Redistribution and adoption
 
-1. **Relabel** *(not on this branch)*. This is the redistribution for a
-   collection routed by `hash($namespace_id)`. Each segment of the source
-   moves to the target owning its bucket's residue: same segment id, new
+1. **Relabel** *(deferred, §1.3; not on this branch)*. This is the
+   redistribution for a collection routed by `hash($namespace_id)`. Each
+   segment of the source moves to the target owning its bucket's residue: same segment id, new
    `InsertChannel`, done in batches. Namespace-scoped L0 segments move with
    their bucket. Segments the fence sealed are included; segments flushed from
    the targets' WALs are born there and need no relabel. `IsImporting`
@@ -1443,10 +1487,12 @@ The trigger's thresholds land with the trigger.
   `SplitShardParam.Schema`, call `streaming.CheckSplitShardAgainstCollection`
   under the collection lock right before `Broadcast` (§6.1 step 2), check
   DataCoord's split task store for the task id already recorded against a
-  different collection or source (§6.1 step 2). The feature switch and
-  configuration (§9) come with it.
+  different collection or source (§6.1 step 2). It must never select a
+  namespace collection (§1.3). The feature switch and configuration (§9) come
+  with it.
 - **Redistribution.**
-  - Relabel for namespace collections (§6.3 step 1): metadata-only, mutually
+  - Relabel for namespace collections (§6.3 step 1), *deferred* until the
+    namespace(=partition) work lands (§1.3): metadata-only, mutually
     exclusive with compaction tasks on the source channel, and making sure
     every AllPartitions L0 on the source is L0-compacted within the window.
   - The rewrite contract for pk-routed collections (§6.3 step 2): a
