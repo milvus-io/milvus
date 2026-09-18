@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -84,6 +85,11 @@ func (suite *CheckerControllerSuite) SetupTest() {
 	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, suite.metaStore)
 	suite.dist = meta.NewDistributionManager(suite.nodeMgr)
 	suite.broker = meta.NewMockBroker(suite.T())
+	// The channel and balance checkers consult the shard-split state cache,
+	// which reads the collection's per-shard routing from the coordinator. No
+	// split is in flight in these tests, so an empty topology is the answer.
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+		Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
 	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta, suite.metaStore)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
