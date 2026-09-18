@@ -208,7 +208,8 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 		source := delegator.NewMockShardDelegator(t)
 		// ProcessSplitShard is never set up, so the mock fails the test if the
 		// rebuild fronts anything at all. The targets stay unfronted until they
-		// are adopted, which reads as a channel not yet serving -- never as rows
+		// are adopted (I-2): reads through "src" still succeed, from its own
+		// pre-fence view alone, missing the targets' post-fence rows -- never
 		// returned twice.
 		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
