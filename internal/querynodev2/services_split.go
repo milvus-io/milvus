@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -119,7 +117,7 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 		delegator.WithChildSpawner(node),
 	)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create split child delegator")
+		return nil, merr.Wrap(err, "failed to create split child delegator")
 	}
 	// wire the fronting parent before the pipeline starts so no delete the child
 	// consumes escapes forwarding to the source delegator.
@@ -136,7 +134,7 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 
 	pipeline, err := node.pipelineManager.Add(params.CollectionID, targetVChannel)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to create split child pipeline")
+		return nil, merr.Wrap(err, "failed to create split child pipeline")
 	}
 	defer func() {
 		if !success {
@@ -145,7 +143,7 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	}()
 
 	if err := pipeline.ConsumeMsgStream(ctx, seekPosition); err != nil {
-		return nil, errors.Wrap(err, "failed to seek split child pipeline")
+		return nil, merr.Wrap(err, "failed to seek split child pipeline")
 	}
 	pipeline.Start()
 	child.Start()
@@ -341,7 +339,7 @@ func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChanne
 	}
 	mixCoord, err := node.mixCoord.GetWithContext(node.ctx)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to get coordinator client for split child recovery")
+		return nil, merr.Wrap(err, "failed to get coordinator client for split child recovery")
 	}
 
 	var seekPosition *msgpb.MsgPosition
@@ -372,7 +370,7 @@ func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChanne
 		return merr.WrapErrChannelNotFound(targetVChannel, "split target not yet in recovery info")
 	}, retry.Attempts(120), retry.Sleep(time.Second), retry.MaxSleepTime(time.Second))
 	if err != nil {
-		return nil, errors.Wrapf(err, "split target %s recovery info not available", targetVChannel)
+		return nil, merr.Wrapf(err, "split target %s recovery info not available", targetVChannel)
 	}
 	return seekPosition, nil
 }
