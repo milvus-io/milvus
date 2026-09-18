@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -310,7 +311,8 @@ func (s ShardStates) Delisted(channels map[string]*DmChannel) []string {
 	return out
 }
 
-// CheckWatchable refuses a watch of a vchannel the collection no longer lists.
+// CheckWatchable refuses a watch of a vchannel the collection no longer lists,
+// or of a split target not yet adopted.
 //
 // Such a vchannel is a shard split source that an adoption retired. The next
 // target pulled inside the split window still lists it until the window-end
@@ -320,12 +322,20 @@ func (s ShardStates) Delisted(channels map[string]*DmChannel) []string {
 // that carry the targets' writes: adoption delisted the source, so its rebuild
 // re-derives no target to front. The flip releases it instead.
 //
-// The refusal is a System error: nothing in any request forces it, and it is
-// the stale target that has to catch up.
+// A not-yet-adopted split target (ShardCreating) is fronted in-process by its
+// source's delegator until adoption; a watch before that would build a second
+// delegator for it, or adopt the source's child early.
+//
+// Both refusals are System errors: nothing in any request forces them, and it
+// is the stale view that has to catch up. The second is transient and says so.
 func (s ShardStates) CheckWatchable(vchannel string) error {
 	if !s.Lists(vchannel) {
 		return merr.WrapErrChannelNotFound(vchannel,
 			"the collection no longer lists it: a retired shard split source is released at the flip, never re-watched")
+	}
+	if s[vchannel] == schemapb.ShardState_ShardCreating {
+		return merr.WrapErrServiceUnavailable("shard split target not adopted yet",
+			fmt.Sprintf("vchannel %s is fronted by its split source until adoption", vchannel))
 	}
 	return nil
 }
