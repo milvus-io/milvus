@@ -452,7 +452,25 @@ func TestShardSplitTriggerGates(t *testing.T) {
 
 	t.Run("compaction off issues nothing", func(t *testing.T) {
 		manager, _ := newTriggerCase(t)
-		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+		manager.compactionEnabled = false
+		manager.detectOnce()
+		assert.Empty(t, manager.store.list())
+	})
+
+	t.Run("the compaction switch is the one read at startup", func(t *testing.T) {
+		// dataCoord.enableCompaction is not refreshable: the trigger follows
+		// the value the policy-driven compactions started with, not a later
+		// change nothing else follows.
+		params := paramtable.Get()
+		enableShardSplit(t)
+		params.Save(params.DataCoordCfg.EnableCompaction.Key, "false")
+		coordinator := &fakeSplitCoordinator{
+			coll: splitCollectionFromDescribe(splitTestDescribe([]string{splitMgrV0}, nil, 0), []int64{10}),
+		}
+		manager, _ := newSplitTestManager(t, coordinator)
+		addSplitTestCollection(manager.meta, splitTestSchema(false), splitMgrV0)
+		addSplitTestSegment(manager.meta, 1, splitMgrV0, 5000, 1)
+		params.Save(params.DataCoordCfg.EnableCompaction.Key, "true")
 		manager.detectOnce()
 		assert.Empty(t, manager.store.list())
 	})
@@ -755,12 +773,17 @@ func TestShardSplitPreparingFailures(t *testing.T) {
 		assert.Equal(t, "collection dropped before the write switch", task.GetFailReason())
 	})
 
-	t.Run("compaction off leaves the task unfenced", func(t *testing.T) {
+	t.Run("compaction off still fences a created task", func(t *testing.T) {
+		// The rewrite runs whatever the compaction switch (the inspector's
+		// schedule loop always runs), so a task created before a restart with
+		// compaction off is carried through instead of holding its source
+		// frozen in Preparing.
 		manager, coordinator, _ := newPreparingCase(t)
 		paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+		manager.compactionEnabled = false
 		manager.advanceTasks()
-		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPreparing, mustTask(t, manager, 100).GetState())
-		assert.Empty(t, coordinator.issued)
+		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskFencing, mustTask(t, manager, 100).GetState())
+		assert.Len(t, coordinator.issued, 1)
 	})
 
 	t.Run("a callback that lands during the broadcast is not dragged back", func(t *testing.T) {

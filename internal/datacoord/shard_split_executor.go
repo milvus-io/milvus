@@ -26,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -78,12 +77,6 @@ func splitTargetsAllocated(task *datapb.SplitShardTask) bool {
 // datacoord has happened, and the task may be aborted.
 func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
-	if !paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
-		// The rewrite is dispatched as compaction plans; fenced with compaction
-		// off, the split could never move and never abort.
-		logger.RatedWarn(m.ctx, 60, "a shard split needs dataCoord.enableCompaction, not fencing it")
-		return
-	}
 	if !splitTargetsAllocated(task) {
 		allocated, ok := m.allocateTargets(task)
 		if !ok {
