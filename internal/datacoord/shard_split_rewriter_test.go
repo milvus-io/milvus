@@ -719,3 +719,104 @@ func TestHashSplitRewriterRunsARoundThroughTheInspector(t *testing.T) {
 	assert.Equal(t, []int64{101}, inspector.enqueued[0].GetInputSegments())
 	assert.Equal(t, []int64{inspector.enqueued[0].GetPlanID()}, c.task().GetDispatchedPlanIds())
 }
+
+// L0-2: every plan folds the source's L0s, so they go once nothing on the
+// source is left to fold them -- and not before, or the deletes an input still
+// has to fold are lost.
+func TestRewriteRetiresTheSourceL0sOnceTheInputsAreRewritten(t *testing.T) {
+	m := newHashRewriteMeta(t, []int64{101})
+	setSourceSegment(m, 102, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+	c := newRewriteCase(t, m, newHashTask([]int64{101}))
+
+	assert.ElementsMatch(t, []int64{101}, c.tick().dispatched, "an L0 is never itself rewritten")
+	assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(102),
+		"the L0 survives while an input still has to fold it")
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+
+	// 101's rewrite commits. Its plan carried the L0, so its outputs are
+	// already delete-applied and the L0 may go.
+	addRewriteOutput(m, 901, hashTgtA, 101)
+	c.dispatcher.complete(c.dispatcher.dispatched[101])
+	c.tick()
+	assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(102))
+	assert.True(t, m.GetSegment(context.Background(), 102).GetCompacted())
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state(),
+		"and the drain passes in the same tick")
+}
+
+// A source may hold L0s and no rewrite input at all. No commit would ever run
+// then, so the retire cannot live in the commit; the round does it.
+func TestRewriteRetiresTheL0sOfASourceWithNoInput(t *testing.T) {
+	m := newHashRewriteMeta(t, nil)
+	setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+	setSourceSegment(m, 202, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+	c := newRewriteCase(t, m, newHashTask(nil))
+
+	c.tick()
+	for _, id := range []int64{201, 202} {
+		segment := m.GetSegment(context.Background(), id)
+		assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+		assert.True(t, segment.GetCompacted())
+		assert.NotZero(t, segment.GetDroppedAt())
+	}
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
+}
+
+// The retire waits for the fence too: before it, a segment that has not folded
+// these L0s can still appear on the source.
+func TestRewriteRoundDoesNotRetireL0sBeforeTheFenceFlushes(t *testing.T) {
+	m := newHashRewriteMeta(t, nil)
+	setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+	m.channelCPs.checkpoints[hashSrcVChannel] = &msgpb.MsgPosition{Timestamp: hashFenceTick - 1}
+	c := newRewriteCase(t, m, newHashTask(nil))
+
+	c.round(10)
+	assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+}
+
+// A failed retire loses nothing: the drain refuses while the L0s live, and the
+// next round tries again.
+func TestRewriteRetriesAFailedL0Retire(t *testing.T) {
+	m := newHashRewriteMeta(t, nil)
+	setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+	c := newRewriteCase(t, m, newHashTask(nil))
+
+	failing := mockey.Mock((*meta).RetireLevelZeroSegments).Return(errors.New("catalog down")).Build()
+	c.tick()
+	failing.UnPatch()
+	assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201))
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+
+	c.tick()
+	assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
+}
+
+// A rewrite input is Flushed and non-L0, so guarding the retire on "no rewrite
+// input" alone would let a Sealed, Growing or Flushing segment -- data about to
+// become an input, which has folded nothing -- sit on the source while its
+// deletes were thrown away. The guard is the drain's own scan.
+func TestRewriteHoldsTheL0RetireWhileAnyDataRemains(t *testing.T) {
+	for _, state := range []commonpb.SegmentState{
+		commonpb.SegmentState_Sealed,
+		commonpb.SegmentState_Growing,
+		commonpb.SegmentState_Flushing,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			m := newHashRewriteMeta(t, nil)
+			setSourceSegment(m, 103, state, datapb.SegmentLevel_L1)
+			setSourceSegment(m, 201, commonpb.SegmentState_Flushed, datapb.SegmentLevel_L0)
+			c := newRewriteCase(t, m, newHashTask(nil))
+
+			c.tick()
+			assert.Equal(t, commonpb.SegmentState_Flushed, c.segmentState(201),
+				"the L0 outlives a segment that has not folded it")
+			assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+
+			setSourceSegment(m, 103, commonpb.SegmentState_Dropped, datapb.SegmentLevel_L1)
+			c.tick()
+			assert.Equal(t, commonpb.SegmentState_Dropped, c.segmentState(201))
+			assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, c.state())
+		})
+	}
+}

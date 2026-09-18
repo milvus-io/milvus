@@ -175,6 +175,12 @@ func (m *shardSplitManager) rewriteRound(
 		return m.persistRewriteRound(ctx, task, result, pending, stillDispatched, nil, arrived)
 	}
 
+	// Every plan that ran carried the source's L0s and folded them into the
+	// outputs it wrote; once no data is left on the source to fold them, they
+	// hold nothing that is not already applied, and they are all that keeps the
+	// drain false.
+	m.retireSourceLevelZeroSegments(ctx, task)
+
 	if totalPendingRewrites(pending) == 0 && len(stillDispatched) == 0 {
 		// Nothing left to rewrite and nothing in flight. The manager moves the
 		// task on once the drain holds; say which conjunct it still waits on,
@@ -220,6 +226,77 @@ func (m *shardSplitManager) rewriteRound(
 		return result
 	}
 	return m.persistRewriteRound(ctx, task, result, pending, stillDispatched, dispatchedNow, arrived)
+}
+
+// retireSourceLevelZeroSegments drops the L0 segments of every source that
+// holds no data left to fold them.
+//
+// Safe because every rewrite plan carries its source's L0s
+// (hashSplitDeleteSources) and folds them into the outputs it writes, so a row
+// deleted through a source L0 is already gone from the targets. The guard is
+// wider than "no rewrite input": a Sealed or Growing segment is data about to
+// become an input that has folded nothing, and datacoord does not assume the
+// fence makes one impossible, so the scan is the drain's own (every real
+// non-Dropped segment on the channel) minus the L0s being retired. An input
+// stays Flushed until its own commit, so the retire never runs while a plan on
+// the source is still in flight.
+//
+// Not part of any commit: a source may hold L0s and no input at all (every row
+// deleted, or its inputs rewritten in an earlier round), and then no commit
+// would ever run to carry it. Its own write, after the last commit: a crash in
+// between leaves the deletes applied twice, harmlessly, and the next round
+// retires them.
+func (m *shardSplitManager) retireSourceLevelZeroSegments(ctx context.Context, task *datapb.SplitShardTask) {
+	logger := m.taskLogger(task)
+	for _, source := range task.GetSources() {
+		vchannel := source.GetVchannel()
+		if blocking := m.unfoldedSourceData(vchannel); blocking != nil {
+			logger.RatedInfo(ctx, 30, "not retiring the source's L0 segments yet, the source still holds data to fold them into",
+				mlog.String("vchannel", vchannel),
+				mlog.Int64("segmentID", blocking.GetID()),
+				mlog.String("state", blocking.GetState().String()),
+				mlog.String("level", blocking.GetLevel().String()))
+			continue
+		}
+		ids := m.sourceLevelZeroIDs(vchannel)
+		if len(ids) == 0 {
+			continue
+		}
+		if err := m.meta.RetireLevelZeroSegments(ctx, ids); err != nil {
+			// Nothing is lost: the drain still refuses while they live, and
+			// the next round tries again.
+			logger.Warn(ctx, "retire the source's L0 segments failed, retrying next round",
+				mlog.String("vchannel", vchannel), mlog.Int64s("segmentIDs", ids), mlog.Err(err))
+			continue
+		}
+		logger.Info(ctx, "retired the source's L0 segments the rewrite folded",
+			mlog.String("vchannel", vchannel), mlog.Int64s("segmentIDs", ids))
+	}
+}
+
+// unfoldedSourceData returns the first real segment on vchannel that is
+// neither Dropped nor L0, or nil when there is none.
+func (m *shardSplitManager) unfoldedSourceData(vchannel string) *SegmentInfo {
+	for _, segment := range m.meta.GetRealSegmentsForChannel(vchannel) {
+		if segment.GetState() == commonpb.SegmentState_Dropped || segment.GetLevel() == datapb.SegmentLevel_L0 {
+			continue
+		}
+		return segment
+	}
+	return nil
+}
+
+// sourceLevelZeroIDs lists the healthy L0 segments on a vchannel, in id order:
+// the set every rewrite plan of the source folded, over every partition.
+func (m *shardSplitManager) sourceLevelZeroIDs(vchannel string) []int64 {
+	ids := make([]int64, 0)
+	for _, segment := range m.meta.GetSegmentsByChannel(vchannel) {
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			ids = append(ids, segment.GetID())
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }
 
 // persistRewriteRound writes back what one round changed: the work list and the

@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"context"
 	"time"
 
 	"github.com/samber/lo"
@@ -182,6 +183,23 @@ func (m *meta) completeHashSplitCompactionMutation(
 		mlog.Int64s("sourceSegments", inputIDs),
 		mlog.Int64s("outputs", lo.Map(outputs, func(info *SegmentInfo, _ int) int64 { return info.GetID() })))
 	return outputs, metricMutation, nil
+}
+
+// RetireLevelZeroSegments drops the given L0 segments exactly as an L0
+// compaction retires the ones it folded (l0CompactionTask.saveSegmentMeta):
+// Dropped and Compacted, in one UpdateSegmentsInfo.
+//
+// It is unconditional; the caller decides when an L0's deletes may go. For a
+// shard split that is retireSourceLevelZeroSegments, once no data is left on
+// the source that has not folded them.
+func (m *meta) RetireLevelZeroSegments(ctx context.Context, segmentIDs []int64) error {
+	operators := make([]UpdateOperator, 0, 2*len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		operators = append(operators,
+			UpdateStatusOperator(segmentID, commonpb.SegmentState_Dropped),
+			UpdateCompactedOperator(segmentID))
+	}
+	return m.UpdateSegmentsInfo(ctx, operators...)
 }
 
 // hashSplitTargetChannels lists the vchannels a rewrite plan may write to.
