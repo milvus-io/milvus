@@ -116,11 +116,21 @@ func TestFrontingSourceScope(t *testing.T) {
 	assert.Nil(t, plain.pinned)
 	assert.False(t, plain.asChild)
 
-	fronting := frontingSourceScope([]*shardDelegator{{vchannelName: "v1"}})
+	children := []*shardDelegator{{vchannelName: "v1"}}
+	fronting := frontingSourceScope(children)
 	assert.NotNil(t, fronting.pinned)
 	assert.False(t, fronting.asChild)
 
 	child := fronting.forChild()
 	assert.True(t, child.asChild)
 	assert.Nil(t, child.pinned)
+
+	// the source's read covers the snapshot it took, even after its children
+	// change; a fronted child covers whatever it fronts in turn.
+	source := &shardDelegator{vchannelName: "v0", children: map[string]ShardDelegator{}}
+	assert.Nil(t, plain.readFamily(source))
+	assert.Equal(t, children, fronting.readFamily(source))
+	grandchild := &shardDelegator{vchannelName: "v3"}
+	children[0].children = map[string]ShardDelegator{"v3": grandchild}
+	assert.Equal(t, []*shardDelegator{grandchild}, child.readFamily(children[0]))
 }
