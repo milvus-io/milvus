@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
@@ -225,15 +226,31 @@ type splitReadScope struct {
 	pinned typeutil.UniqueSet
 	// exclude holds the IDs another delegator of the same read already pinned.
 	exclude typeutil.UniqueSet
+	// family is the one snapshot of fronted children the source took for this
+	// read. The read fans out to exactly these children, so its MVCC speedup and
+	// tsafe wait cover exactly these too, even when a concurrent source release
+	// detaches them mid-read.
+	family []*shardDelegator
 }
 
-// frontingSourceScope is the source's scope for one read: it records its pins
-// only when there are children to exclude them from.
+// frontingSourceScope is the source's scope for one read over the children
+// snapshot it fans out to: it records its pins only when there are children to
+// exclude them from.
 func frontingSourceScope(children []*shardDelegator) splitReadScope {
 	if len(children) == 0 {
 		return splitReadScope{}
 	}
-	return splitReadScope{pinned: typeutil.NewUniqueSet()}
+	return splitReadScope{pinned: typeutil.NewUniqueSet(), family: children}
+}
+
+// readFamily returns the fronted children the read on sd must cover: the
+// source's snapshot for its own read, or, for a fronted child, the child's own
+// snapshot of any children it fronts in turn.
+func (s splitReadScope) readFamily(sd *shardDelegator) []*shardDelegator {
+	if s.asChild {
+		return sd.frontingChildren()
+	}
+	return s.family
 }
 
 // forChild is the scope a fronted child reads under: the gate bypass, minus
@@ -294,11 +311,52 @@ func excludeSegments(sealed []SnapshotItem, growing []SegmentEntry, exclude type
 	return keptSealed, keptGrowing
 }
 
+// familyMVCCTimestamp returns the latest WAL MVCC timestamp over every vchannel
+// a write of this delegator's logical shard can land on: its own vchannel and,
+// while it fronts a shard split, each child in the read's snapshot children
+// (recursively over each child's own fronted children, for a cascaded split).
+//
+// A Strong read may lower its guarantee to this value (speedupGuranteeTS) only
+// because every write acknowledged before the read began is at or below the
+// MVCC of the vchannel it was written to. After a fence the source vchannel
+// takes no DML: the split key range is written to the target vchannels, on other
+// pchannels, so the source's own MVCC can sit below an acknowledged delete.
+// Taking the max over the family keeps the guarantee at or above every such
+// write, and waitChildrenTSafe then holds the read until each child has consumed
+// up to it.
+//
+// If any member's MVCC is not known locally the error is returned, and the
+// caller keeps the proxy's guarantee timestamp.
+func (sd *shardDelegator) familyMVCCTimestamp(ctx context.Context, children []*shardDelegator) (uint64, error) {
+	mvcc, err := streaming.WAL().Local().GetLatestMVCCTimestampIfLocal(ctx, sd.vchannelName)
+	if err != nil {
+		return 0, err
+	}
+	for _, child := range children {
+		childMVCC, err := child.familyMVCCTimestamp(ctx, child.frontingChildren())
+		if err != nil {
+			return 0, err
+		}
+		mvcc = max(mvcc, childMVCC)
+	}
+	return mvcc, nil
+}
+
 // waitChildrenTSafe waits for every fronted child's tsafe to reach ts and
 // returns the minimum, so the source delegator serves the merged shard at
 // min(child tsafes): it never answers at a timestamp before every child has
 // consumed (and forwarded the deletes) up to it.
+//
+// Every child is first told that a read needs ts, before the wait on any of
+// them. A child's pipeline filters empty time ticks unless a read requires them,
+// and only the child's own read path would otherwise raise that requirement,
+// which runs after this wait. Without it the tick that lifts a child's tsafe to
+// ts can be held back for the whole filter interval, and the wait fails with a
+// tsafe stall.
 func (sd *shardDelegator) waitChildrenTSafe(ctx context.Context, children []*shardDelegator, ts uint64) (uint64, error) {
+	for _, child := range children {
+		child.updateLatestRequiredMVCCTimestamp(ts)
+	}
 	var minTSafe uint64
 	for i, child := range children {
 		childTSafe, err := child.waitTSafe(ctx, ts)

@@ -3413,6 +3413,7 @@ func TestExternalCollectionStrongConsistencyDoesNotRequestWALMVCC(t *testing.T) 
 
 	actual := sd.speedupGuranteeTS(
 		context.Background(),
+		nil,
 		commonpb.ConsistencyLevel_Strong,
 		guaranteeTS,
 		0,
