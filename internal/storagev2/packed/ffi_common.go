@@ -73,7 +73,7 @@ var (
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
-	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Encryption key for data encryption
+	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Base64-encoded encryption key for the FFI writer
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
@@ -223,6 +223,22 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		}
 	}
 
+	return makeProperties(keys, values)
+}
+
+// MakeProperties creates FFI properties without adding filesystem defaults.
+// Call FreeProperties after the native caller finishes using them.
+func MakeProperties(kvs map[string]string) (*C.LoonProperties, error) {
+	keys := make([]string, 0, len(kvs))
+	values := make([]string, 0, len(kvs))
+	for key, value := range kvs {
+		keys = append(keys, key)
+		values = append(values, value)
+	}
+	return makeProperties(keys, values)
+}
+
+func makeProperties(keys, values []string) (*C.LoonProperties, error) {
 	// Convert to C arrays
 	cKeys := make([]*C.char, len(keys))
 	cValues := make([]*C.char, len(values))

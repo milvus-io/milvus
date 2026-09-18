@@ -24,6 +24,8 @@
 #include <array>
 #include <cstdint>
 #include <iomanip>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -279,8 +281,9 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     Update(int64_t ez_id,
            int64_t coll_id,
            const std::string& root_key) override {
-        static_cast<void>(coll_id);
         if (root_key.empty()) {
+            std::lock_guard<std::mutex> lock(context_mutex_);
+            contexts_.erase({ez_id, coll_id});
             return;
         }
         auto expected_key = base64Encode(deriveEZKey(ez_id));
@@ -289,16 +292,25 @@ class FixtureCipherPlugin final : public ICipherPlugin {
                 "fixture cipher received an unexpected EZ key for EZ " +
                 std::to_string(ez_id));
         }
+        std::lock_guard<std::mutex> lock(context_mutex_);
+        contexts_.insert({ez_id, coll_id});
     }
 
     std::pair<std::shared_ptr<IEncryptor>, std::string>
     GetEncryptor(int64_t ez_id, int64_t coll_id) const override {
+        {
+            std::lock_guard<std::mutex> lock(context_mutex_);
+            if (contexts_.count({ez_id, coll_id}) == 0) {
+                throw std::runtime_error(
+                    "fixture cipher has no registered collection context");
+            }
+        }
         auto ezk = deriveEZKey(ez_id);
         auto nonce = newNonce();
+        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         auto tag = deriveEDEKTag(ezk, nonce, ez_id, coll_id);
         auto edek = std::string(kEDEKVersion) + ":" + hexEncode(nonce) + ":" +
                     hexEncode(tag);
-        auto dek = deriveDataKey(ezk, nonce, ez_id, coll_id);
         return {std::make_shared<FixtureEncryptor>(std::move(dek)),
                 std::move(edek)};
     }
@@ -319,6 +331,10 @@ class FixtureCipherPlugin final : public ICipherPlugin {
         auto dek = deriveDataKey(ezk, decoded.nonce, ez_id, coll_id);
         return std::make_shared<FixtureDecryptor>(std::move(dek));
     }
+
+ private:
+    mutable std::mutex context_mutex_;
+    std::set<std::pair<int64_t, int64_t>> contexts_;
 };
 
 }  // namespace

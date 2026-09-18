@@ -24,6 +24,7 @@ package segments
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "common/init_c.h"
+#include "milvus-storage/ffi_c.h"
 */
 import "C"
 
@@ -1585,6 +1586,10 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	if config.Schema == nil {
 		return nil, merr.WrapErrServiceInternalMsg("flush schema is nil")
 	}
+	ezID, err := growingFlushEncryptionZone(config)
+	if err != nil {
+		return nil, err
+	}
 
 	schemaBlob, err := proto.Marshal(config.Schema)
 	if err != nil {
@@ -1596,6 +1601,21 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 	// build C flush config
 	var cConfig C.CFlushConfig
+	if ezID != 0 {
+		writerProperties, err := packed.WriterEncryptionProperties(ezID, config.CollectionID)
+		if err != nil {
+			return nil, err
+		}
+		cWriterProperties, err := packed.MakeProperties(writerProperties)
+		if err != nil {
+			return nil, err
+		}
+		defer packed.FreeProperties(cWriterProperties)
+		// CFlushConfig must not contain a pointer to a Go-allocated struct.
+		cConfig.writer_properties = (*C.struct_LoonProperties)(C.malloc(C.sizeof_struct_LoonProperties))
+		defer C.free(unsafe.Pointer(cConfig.writer_properties))
+		*cConfig.writer_properties = *(*C.struct_LoonProperties)(unsafe.Pointer(cWriterProperties))
+	}
 	cSegmentPath := C.CString(config.SegmentBasePath)
 	defer C.free(unsafe.Pointer(cSegmentPath))
 	cConfig.segment_path = cSegmentPath

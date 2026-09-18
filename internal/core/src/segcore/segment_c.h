@@ -26,6 +26,8 @@ extern "C" {
 #include "segcore/load_index_c.h"
 #include "segcore/plan_c.h"
 
+struct LoonProperties;
+
 typedef void* CSearchResult;
 typedef CProto CRetrieveResult;
 
@@ -272,8 +274,10 @@ typedef struct CFlushConfig {
     const char* segment_path;  // base path for segment manifest and data
     const void* schema_blob;  // serialized CollectionSchema for this flush task
     int64_t schema_length;    // length of schema_blob in bytes
-    int64_t read_version;     // version to read (-1 = latest)
-    uint32_t retry_limit;     // retry limit for commit
+    // Writer properties prepared by the caller; valid for this flush call.
+    const struct LoonProperties* writer_properties;
+    int64_t read_version;               // version to read (-1 = latest)
+    uint32_t retry_limit;               // retry limit for commit
     const char* writer_format;          // writer.format
     const char* schema_based_pattern;   // writer.split.schema_based.patterns
     const char* schema_based_formats;   // writer.split.schema_based.formats

@@ -24,14 +24,16 @@ extern "C" {
 /**
  * @brief Retrieves encryption parameters from the cipher plugin for CMEK (Customer Managed Encryption Keys).
  *
- * This function loads the cipher plugin, updates it with the provided plugin context,
+ * This function loads the cipher plugin, optionally updates its key context,
  * and retrieves the encryption key and metadata required for encrypting data in storage.
  *
  * @param[in] c_plugin_context Pointer to the plugin context containing:
  *                             - ez_id: Encryption zone ID
  *                             - collection_id: The collection ID
- *                             - key: The encryption key string
- * @param[out] out_key Pointer to receive the encryption key (caller must free with free())
+ *                             - key: Base64 EZ key to register, or null to reuse
+ *                                    a context already registered by Collection.Ref
+ * @param[out] out_key Pointer to receive the Base64-encoded encryption key (caller must free with free()).
+ *                    Pass this text unchanged to Loon's writer.enc.key property.
  * @param[out] out_meta Pointer to receive the encoded key metadata (caller must free with free())
  *
  * @return CStatus Success status or error with message if failed
