@@ -380,3 +380,42 @@ func TestHashSplitMutationRefusesAPlanItCannotCommit(t *testing.T) {
 		})
 	}
 }
+
+// A rewrite never reorders, so an output is published sorted exactly when the
+// datanode reports it sorted AND its input was: a sorted input's outputs are
+// indexed at once, and an output claiming an order its input never had is not
+// trusted -- a segment flagged sorted is binary-searched by pk.
+func TestHashSplitMutationPublishesTheInputSortOrder(t *testing.T) {
+	publish := func(t *testing.T, inputSorted, inputNamespaceSorted bool, out *datapb.CompactionSegment) *SegmentInfo {
+		m := newHashSplitMutationMeta(t)
+		m.segments.GetSegment(500).IsSorted = inputSorted
+		m.segments.GetSegment(500).IsSortedByNamespace = inputNamespaceSorted
+		out.SegmentID, out.NumOfRows, out.Channel = 601, 60, hsTgt0
+		outputs, _, err := m.CompleteCompactionMutation(context.Background(), hashSplitRewriteTask(),
+			&datapb.CompactionPlanResult{PlanID: 900, Channel: hsSource, Segments: []*datapb.CompactionSegment{out}})
+		require.NoError(t, err)
+		require.Len(t, outputs, 1)
+		return m.GetSegment(context.Background(), 601)
+	}
+
+	t.Run("a sorted input's outputs are sorted", func(t *testing.T) {
+		seg := publish(t, true, false, &datapb.CompactionSegment{IsSorted: true})
+		assert.True(t, seg.GetIsSorted())
+		assert.False(t, seg.GetIsSortedByNamespace())
+	})
+	t.Run("a namespace-sorted input's outputs are namespace-sorted", func(t *testing.T) {
+		seg := publish(t, false, true, &datapb.CompactionSegment{IsSortedByNamespace: true})
+		assert.False(t, seg.GetIsSorted())
+		assert.True(t, seg.GetIsSortedByNamespace())
+	})
+	t.Run("an unsorted input's outputs are never sorted", func(t *testing.T) {
+		seg := publish(t, false, false, &datapb.CompactionSegment{IsSorted: true, IsSortedByNamespace: true})
+		assert.False(t, seg.GetIsSorted())
+		assert.False(t, seg.GetIsSortedByNamespace())
+	})
+	t.Run("an output the datanode reports unsorted stays unsorted", func(t *testing.T) {
+		seg := publish(t, true, true, &datapb.CompactionSegment{})
+		assert.False(t, seg.GetIsSorted())
+		assert.False(t, seg.GetIsSortedByNamespace())
+	})
+}

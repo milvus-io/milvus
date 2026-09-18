@@ -19,10 +19,12 @@ package compactor
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -573,4 +575,102 @@ func (s *HashSplitRewriteSuite) TestRewriteFailsCleanlyWhenAppendFails() {
 	result, err := task.Compact()
 	s.Nil(result)
 	s.ErrorContains(err, "injected append failure")
+}
+
+// readOutputPKs reads one rewrite output segment back from storage and returns
+// its int64 primary keys in stored order.
+func (s *HashSplitRewriteSuite) readOutputPKs(schema *schemapb.CollectionSchema, segment *datapb.CompactionSegment) []int64 {
+	params := compaction.GenParams()
+	var (
+		reader storage.RecordReader
+		err    error
+	)
+	if segment.GetManifest() != "" {
+		reader, err = storage.NewManifestRecordReader(context.Background(), segment.GetManifest(), schema,
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(params.StorageConfig))
+	} else {
+		reader, err = storage.NewBinlogRecordReader(context.Background(), segment.GetInsertLogs(), schema,
+			storage.WithVersion(segment.GetStorageVersion()),
+			storage.WithStorageConfig(params.StorageConfig))
+	}
+	s.Require().NoError(err)
+	defer reader.Close()
+	pks := make([]int64, 0, segment.GetNumOfRows())
+	for {
+		r, err := reader.Next()
+		if err != nil {
+			s.Require().ErrorIs(err, io.EOF)
+			break
+		}
+		col := r.Column(100).(*array.Int64)
+		for i := range col.Len() {
+			pks = append(pks, col.Value(i))
+		}
+	}
+	return pks
+}
+
+// The partitioner hands each target a subsequence of the input, in input order,
+// so a pk-sorted input yields pk-sorted outputs -- also across several output
+// segments of one target. The outputs are flagged sorted, which is what lets
+// the index and stats inspectors pick them up without a sort compaction the
+// split freeze would hold back until Done.
+func (s *HashSplitRewriteSuite) TestRewriteOfASortedInputYieldsSortedOutputs() {
+	const numRows = 20000
+	deleted := []int64{5, 6, 7, 10001}
+	schema := genCollectionSchema()
+	plan := s.prepareRewrite(schema, numRows, nil, deleted)
+	plan.SegmentBinlogs[0].IsSorted = true
+	// Small enough that a target rotates to more than one output segment.
+	plan.MaxSize = 256 * 1024
+
+	task := NewHashSplitCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	result, err := task.Compact()
+	s.Require().NoError(err)
+
+	perChannel := map[string]int64{}
+	segmentsPerChannel := map[string]int{}
+	for _, seg := range result.GetSegments() {
+		s.True(seg.GetIsSorted(), "output %d of a sorted input must be flagged sorted", seg.GetSegmentID())
+		s.False(seg.GetIsSortedByNamespace())
+		pks := s.readOutputPKs(schema, seg)
+		s.EqualValues(seg.GetNumOfRows(), len(pks))
+		for i := 1; i < len(pks); i++ {
+			s.Require().Less(pks[i-1], pks[i], "output %d is not pk-sorted at row %d", seg.GetSegmentID(), i)
+		}
+		perChannel[seg.GetChannel()] += int64(len(pks))
+		segmentsPerChannel[seg.GetChannel()]++
+	}
+	s.Equal(s.expectedByPK(numRows, deleted), perChannel)
+	s.Greater(lo.Max(lo.Values(segmentsPerChannel)), 1, "the check must cover a target split over several segments")
+}
+
+// An unsorted input stays unsorted: the rewrite does not sort, and flagging its
+// outputs would let segcore binary-search rows that are out of order.
+func (s *HashSplitRewriteSuite) TestRewriteOfAnUnsortedInputIsNotFlaggedSorted() {
+	plan := s.prepareRewrite(genCollectionSchema(), 200, nil, nil)
+	task := NewHashSplitCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	result, err := task.Compact()
+	s.Require().NoError(err)
+	s.NotEmpty(result.GetSegments())
+	for _, seg := range result.GetSegments() {
+		s.False(seg.GetIsSorted())
+		s.False(seg.GetIsSortedByNamespace())
+	}
+}
+
+// A namespace-sorted input keeps its (partition key, pk) order the same way,
+// and only that flag is carried.
+func (s *HashSplitRewriteSuite) TestRewriteCarriesTheNamespaceSortFlag() {
+	plan := s.prepareRewrite(genCollectionSchema(), 200, nil, nil)
+	plan.SegmentBinlogs[0].IsSortedByNamespace = true
+	task := NewHashSplitCompactionTask(context.Background(), s.mockBinlogIO, plan, compaction.GenParams())
+	result, err := task.Compact()
+	s.Require().NoError(err)
+	s.NotEmpty(result.GetSegments())
+	for _, seg := range result.GetSegments() {
+		s.False(seg.GetIsSorted())
+		s.True(seg.GetIsSortedByNamespace())
+	}
 }
