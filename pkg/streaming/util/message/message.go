@@ -1,6 +1,8 @@
 package message
 
 import (
+	"context"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -250,11 +252,11 @@ type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body returns the message body.
-	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
-	Body() (B, error)
+	// Body decrypts and unmarshals the message body on every call.
+	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
+	Body(ctx context.Context) (B, error)
 
-	// MustBody return the message body, panic if error occurs.
+	// MustBody is Body with context.Background(), it panics on any error.
 	MustBody() B
 
 	// OverwriteHeader overwrites the message header.
@@ -275,11 +277,11 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body returns the message body.
-	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
-	Body() (B, error)
+	// Body decrypts and unmarshals the message body on every call.
+	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
+	Body(ctx context.Context) (B, error)
 
-	// MustBody return the message body, panic if error occurs.
+	// MustBody is Body with context.Background(), it panics on any error.
 	MustBody() B
 
 	// OverwriteHeader overwrites the message header.
@@ -297,11 +299,11 @@ type SpecializedImmutableMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body returns the message body.
-	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
-	Body() (B, error)
+	// Body decrypts and unmarshals the message body on every call.
+	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
+	Body(ctx context.Context) (B, error)
 
-	// MustBody return the message body, panic if error occurs.
+	// MustBody is Body with context.Background(), it panics on any error.
 	MustBody() B
 }
 

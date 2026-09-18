@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -54,7 +55,7 @@ func TestValidateCommitPublishesAfterSuccessfulAppend(t *testing.T) {
 	require.NoError(t, err)
 	state.publishCommit(commit, txnState)
 
-	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 299, 301))
+	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 299, 301))
 }
 
 func TestValidateCommitMarkerConsistency(t *testing.T) {
@@ -120,7 +121,7 @@ func TestValidateCommitRejectsInvalidProof(t *testing.T) {
 		state := newTestAdmissionState(types.PChannelInfo{Name: "p1", Term: 1})
 		state.txns[1] = &pendingTxn{
 			meta:          validCASMeta(100, 1),
-			pks:           primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}},
+			pks:           primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}},
 			observedBegin: true,
 		}
 
@@ -214,7 +215,7 @@ func TestValidateCommitReplicatedCASBypassesSourceProof(t *testing.T) {
 	txnState, err := state.validateCommit(commit, 1)
 	require.NoError(t, err)
 	state.publishCommit(commit, txnState)
-	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 159, 161))
+	requirePartialUpdateRetryable(t, state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 159, 161))
 }
 
 func TestValidateCommitReplicatedCASWithoutRuntimeStateUsesFence(t *testing.T) {
