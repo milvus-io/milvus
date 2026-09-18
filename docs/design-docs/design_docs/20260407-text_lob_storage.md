@@ -1,5 +1,13 @@
 # MEP: TEXT Storage with LOB and Growing-Segment Flush
 
+> **Superseded on 2026-09-18.** The growing-source flush path this document
+> describes, including `FlushGrowingSegmentData`, `CFlushConfig` and
+> `GrowingFlushManager`, has been removed. TEXT data now reaches storage
+> through the DataNode write buffer's StorageV3 writer like every other field.
+> The sections below are retained as a record of the original design; treat any
+> reference to those symbols as historical. See
+> [20260918-remove-growing-source-flush.md](20260918-remove-growing-source-flush.md).
+
 - **Created:** 2026-04-07
 - **Author(s):** @zhagnlu
 - **Status:** Draft

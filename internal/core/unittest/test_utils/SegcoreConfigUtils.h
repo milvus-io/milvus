@@ -49,8 +49,6 @@ class ScopedSegcoreConfigRestore {
           interim_index_target_version_(
               config.get_interim_index_target_version()),
           storage_v3_enabled_(config.get_storage_v3_enabled()),
-          enable_growing_source_flush_(
-              config.get_enable_growing_source_flush()),
           sub_dim_(config.get_sub_dim()),
           refine_ratio_(config.get_refine_ratio()),
           dense_vector_interim_index_type_(
@@ -69,7 +67,6 @@ class ScopedSegcoreConfigRestore {
         config_.set_enable_interim_segment_index(enable_interim_segment_index_);
         config_.set_interim_index_target_version(interim_index_target_version_);
         config_.set_storage_v3_enabled(storage_v3_enabled_);
-        config_.set_enable_growing_source_flush(enable_growing_source_flush_);
         config_.set_sub_dim(sub_dim_);
         config_.set_refine_ratio(refine_ratio_);
         config_.set_dense_vector_intermin_index_type(
@@ -92,7 +89,6 @@ class ScopedSegcoreConfigRestore {
     bool enable_interim_segment_index_;
     int32_t interim_index_target_version_;
     bool storage_v3_enabled_;
-    bool enable_growing_source_flush_;
     int64_t sub_dim_;
     float refine_ratio_;
     std::string dense_vector_interim_index_type_;

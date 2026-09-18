@@ -481,7 +481,6 @@ class GrowingIndexRawOwnershipTest : public ::testing::Test {
         interim_config.refine_with_quant_flag = false;
         ApplyInterimIndexConfigForTest(interim_config, config_);
         config_.set_storage_v3_enabled(true);
-        config_.set_enable_growing_source_flush(true);
     }
 
     GeneratedData
