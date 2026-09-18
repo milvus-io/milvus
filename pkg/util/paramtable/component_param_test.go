@@ -983,6 +983,34 @@ func TestQueryCoordForceLoadPriority(t *testing.T) {
 	})
 }
 
+func TestQueryNodeStrictGroupSettings(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.QueryNodeCfg
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Save(cfg.StrictGroupPhase1CandidateWeight.Key, "50")
+	params.Save(cfg.StrictGroupSkipRefine.Key, "true")
+	assert.Equal(t, int64(50), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.True(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	params.Reset(cfg.StrictGroupPhase1CandidateWeight.Key)
+	params.Reset(cfg.StrictGroupSkipRefine.Key)
+	assert.Equal(t, int64(0), cfg.StrictGroupPhase1CandidateWeight.GetAsInt64())
+	assert.False(t, cfg.StrictGroupSkipRefine.GetAsBool())
+	for _, name := range []string{"StrictGroupPhase1CandidateWeight", "StrictGroupSkipRefine"} {
+		field, ok := reflect.TypeOf(cfg).Elem().FieldByName(name)
+		assert.True(t, ok)
+		assert.Equal(t, "true", field.Tag.Get("refreshable"))
+	}
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "per_group")
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+	params.Save(cfg.StrictGroupStrategy.Key, "original")
+	assert.Equal(t, "original", cfg.StrictGroupStrategy.GetValue())
+	params.Reset(cfg.StrictGroupStrategy.Key)
+	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
+}
+
 func TestQueryNodeMaxLoadingMemoryRatio(t *testing.T) {
 	Init()
 	params := Get()

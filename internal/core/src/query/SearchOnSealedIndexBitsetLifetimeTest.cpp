@@ -22,6 +22,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "common/BitsetView.h"
@@ -38,11 +39,14 @@
 #include "mmap/ChunkedColumn.h"
 #include "query/SearchOnGrowing.h"
 #include "query/SearchOnSealed.h"
+#include "query/Utils.h"
+#include "exec/operator/groupby/SearchGroupByOperator.h"
 #include "segcore/SegmentGrowing.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SealedIndexingRecord.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/cachinglayer_test_utils.h"
+#include "test_utils/storage_test_utils.h"
 
 namespace milvus::query {
 namespace {
@@ -57,6 +61,62 @@ MakeLogicalBitsetBytes(int64_t total_count) {
         logical_bitset_bytes[i >> 3] |= 1U << (i & 0x07);
     }
     return logical_bitset_bytes;
+}
+
+TargetBitmap
+MakeAdditionalFilter(int64_t total_count) {
+    TargetBitmap additional_filter(total_count, false);
+    for (int64_t i = 3; i < total_count; i += 5) {
+        additional_filter[i] = true;
+    }
+    return additional_filter;
+}
+
+bool
+IsFiltered(const std::vector<uint8_t>& bitset_bytes, int64_t offset) {
+    return (bitset_bytes[offset >> 3] & (1U << (offset & 0x07))) != 0;
+}
+
+template <typename IsValid>
+void
+AssertSearchUsesCombinedLogicalFilter(SearchResult& search_result,
+                                      const std::vector<uint8_t>& base_filter,
+                                      const TargetBitmap& additional_filter,
+                                      IsValid&& is_valid) {
+    // Exercise ordinary Search through each real provider (sealed index,
+    // nullable raw chunks, growing). Quotas differ from the phase-one topK.
+    ASSERT_TRUE(search_result.CanSearchFilteredVectors());
+    auto shared_filter =
+        std::make_shared<TargetBitmap>(additional_filter.clone());
+    for (int64_t remaining : {1, 2, 4}) {
+        auto searched =
+            search_result.SearchFilteredVectors(shared_filter, remaining);
+        ASSERT_TRUE(searched);
+        const auto& batch = **searched;
+        EXPECT_FALSE(batch.vector_iterators_.has_value());
+        EXPECT_FALSE(batch.CanSearchFilteredVectors());
+        EXPECT_EQ(batch.total_nq_, 1);
+        EXPECT_EQ(batch.unity_topK_, remaining);
+        ASSERT_EQ(batch.seg_offsets_.size(), remaining);
+        ASSERT_EQ(batch.distances_.size(), remaining);
+        std::unordered_set<int64_t> seen;
+        for (auto offset : batch.seg_offsets_) {
+            ASSERT_GE(offset, 0);
+            ASSERT_LT(offset, additional_filter.size());
+            EXPECT_TRUE(seen.insert(offset).second);
+            EXPECT_FALSE(IsFiltered(base_filter, offset));
+            EXPECT_FALSE(additional_filter[offset]);
+            EXPECT_TRUE(is_valid(offset));
+        }
+    }
+    for (size_t i = 0; i < shared_filter->size(); ++i) {
+        (*shared_filter)[i] = true;
+    }
+    auto empty = search_result.SearchFilteredVectors(shared_filter, 2);
+    ASSERT_TRUE(empty);
+    EXPECT_FALSE((**empty).vector_iterators_.has_value());
+    EXPECT_EQ((**empty).seg_offsets_,
+              (std::vector<int64_t>{INVALID_SEG_OFFSET, INVALID_SEG_OFFSET}));
 }
 
 std::unique_ptr<bool[]>
@@ -94,6 +154,8 @@ MakeGroupBySearchInfo(FieldId vector_field,
         {knowhere::indexparam::NPROBE, "32"},
     };
     search_info.group_by_field_id_ = group_by_field;
+    search_info.group_size_ = 3;
+    search_info.strict_group_size_ = true;
     return search_info;
 }
 
@@ -178,14 +240,16 @@ BuildNullableFloatVectorColumn(const FieldMeta& field_meta,
 }
 
 std::unique_ptr<index::IndexBase>
-BuildNullableVectorIndex(int64_t total_count,
-                         int64_t dim,
-                         const bool* valid_data,
-                         const std::vector<float>& vectors) {
+BuildNullableVectorIndex(
+    int64_t total_count,
+    int64_t dim,
+    const bool* valid_data,
+    const std::vector<float>& vectors,
+    const std::string& index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT) {
     index::CreateIndexInfo create_index_info;
     create_index_info.field_type = DataType::VECTOR_FLOAT;
     create_index_info.metric_type = knowhere::metric::COSINE;
-    create_index_info.index_type = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT;
+    create_index_info.index_type = index_type;
     create_index_info.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
 
@@ -203,6 +267,8 @@ BuildNullableVectorIndex(int64_t total_count,
         {knowhere::meta::METRIC_TYPE, knowhere::metric::COSINE},
         {knowhere::meta::DIM, std::to_string(dim)},
         {knowhere::indexparam::NLIST, "128"},
+        {"M", "16"},
+        {"efConstruction", "100"},
     };
     index_base->BuildWithDataset(build_dataset, build_conf);
     vector_index->BuildValidData(valid_data, total_count);
@@ -210,6 +276,154 @@ BuildNullableVectorIndex(int64_t total_count,
 }
 
 }  // namespace
+
+TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
+    constexpr int64_t n = 1000;
+    auto schema = std::make_shared<Schema>();
+    auto vector_field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE);
+    auto group_field = schema->AddDebugField("group", DataType::INT64);
+    auto pk = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk);
+    auto data = segcore::DataGen(schema, n);
+    for (auto& column : *data.raw_->mutable_fields_data()) {
+        if (column.field_id() == group_field.get()) {
+            for (int64_t i = 0; i < n; ++i) {
+                column.mutable_scalars()->mutable_long_data()->set_data(i,
+                                                                        i % 2);
+            }
+        }
+    }
+    auto segment = CreateSealedWithFieldDataLoaded(schema, data);
+    auto vectors = MakeCompactVectors(n, kDim);
+    auto valid = std::make_unique<bool[]>(n);
+    std::fill_n(valid.get(), n, true);
+    auto index =
+        BuildNullableVectorIndex(n, kDim, valid.get(), vectors, "HNSW");
+    segcore::SealedIndexingRecord record;
+    record.append_field_indexing(
+        vector_field,
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("strict-hnsw-ef-regression", std::move(index)));
+    for (const auto& [ef, as_string] :
+         std::vector<std::pair<int, bool>>{{0, false},
+                                           {2, false},
+                                           {4, false},
+                                           {16, false},
+                                           {2, true},
+                                           {4, true},
+                                           {16, true}}) {
+        SCOPED_TRACE(ef);
+        auto info = MakeGroupBySearchInfo(
+            vector_field, group_field, knowhere::metric::COSINE);
+        info.topk_ = 2;
+        info.group_size_ = 5;
+        info.search_params_ = knowhere::Json::object();
+        if (ef != 0)
+            info.search_params_["ef"] = as_string
+                                            ? knowhere::Json(std::to_string(ef))
+                                            : knowhere::Json(ef);
+        const auto original_params = info.search_params_;
+        SearchResult result;
+        // VectorSearchNode normally supplies the segment row count.
+        result.total_data_cnt_ = n;
+        SearchOnSealedIndex(*schema,
+                            record,
+                            info,
+                            vectors.data(),
+                            nullptr,
+                            1,
+                            {},
+                            nullptr,
+                            result);
+        ASSERT_TRUE(result.CanSearchFilteredVectors());
+        auto filter = std::make_shared<TargetBitmap>(n, false);
+        // Also exceed the backend's small-k default: it must choose a valid
+        // search budget from the new k without Milvus knowing about ef.
+        for (int64_t remaining : {4, 32}) {
+            auto completed = result.SearchFilteredVectors(filter, remaining);
+            ASSERT_TRUE(completed);
+            ASSERT_EQ((**completed).seg_offsets_.size(), remaining);
+            for (auto id : (**completed).seg_offsets_) EXPECT_GE(id, 0);
+            const auto phase2 = StrictGroupSearchInfo(info, remaining);
+            EXPECT_FALSE(phase2.search_params_.contains("ef"));
+        }
+        std::vector<GroupByValueType> groups;
+        std::vector<int64_t> offsets;
+        std::vector<float> distances;
+        std::vector<size_t> prefix;
+        exec::SearchGroupBy(nullptr,
+                            *result.vector_iterators_,
+                            info,
+                            groups,
+                            *segment,
+                            offsets,
+                            distances,
+                            prefix,
+                            &result);
+        EXPECT_EQ(offsets.size(), 10);
+        EXPECT_EQ(info.search_params_, original_params);
+        EXPECT_EQ(info.topk_, 2);
+        EXPECT_EQ(info.group_size_, 5);
+    }
+    // Invalid first-phase tuning must still fail in the backend. Independent
+    // completion parameters are not a way to bypass initial validation.
+    for (const auto& ef : {knowhere::Json(-1), knowhere::Json("invalid")}) {
+        auto info = MakeGroupBySearchInfo(
+            vector_field, group_field, knowhere::metric::COSINE);
+        info.search_params_ = {{"ef", ef}};
+        SearchResult result;
+        result.total_data_cnt_ = n;
+        EXPECT_THROW(SearchOnSealedIndex(*schema,
+                                         record,
+                                         info,
+                                         vectors.data(),
+                                         nullptr,
+                                         1,
+                                         {},
+                                         nullptr,
+                                         result),
+                     SegcoreError);
+    }
+}
+
+TEST(StrictGroupIvfSearch, IndependentPhaseTwoUsesDefaultProbes) {
+    constexpr int64_t n = 2000;
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE);
+    auto group = schema->AddDebugField("group", DataType::INT64);
+    auto vectors = MakeCompactVectors(n, kDim);
+    auto valid = std::make_unique<bool[]>(n);
+    std::fill_n(valid.get(), n, true);
+    auto index = BuildNullableVectorIndex(n, kDim, valid.get(), vectors);
+    segcore::SealedIndexingRecord record;
+    record.append_field_indexing(
+        field,
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("strict-ivf-independent-search",
+                             std::move(index)));
+    auto info = MakeGroupBySearchInfo(field, group, knowhere::metric::COSINE);
+    info.topk_ = 2;
+    info.group_size_ = 5;
+    info.search_params_ = {{"nprobe", 1}, {"ef", 2}};
+    const auto params = info.search_params_;
+    SearchResult result;
+    result.total_data_cnt_ = n;
+    SearchOnSealedIndex(
+        *schema, record, info, vectors.data(), nullptr, 1, {}, nullptr, result);
+    ASSERT_TRUE(result.CanSearchFilteredVectors());
+    auto filter = std::make_shared<TargetBitmap>(n, false);
+    (*filter)[0] = true;
+    auto completed = result.SearchFilteredVectors(filter, 4);
+    ASSERT_TRUE(completed);
+    ASSERT_EQ((**completed).seg_offsets_.size(), 4);
+    for (auto id : (**completed).seg_offsets_) EXPECT_GT(id, 0);
+    const auto phase2 = StrictGroupSearchInfo(info, 4);
+    EXPECT_FALSE(phase2.search_params_.contains("nprobe"));
+    EXPECT_FALSE(phase2.search_params_.contains("ef"));
+    EXPECT_EQ(info.search_params_, params);
+}
 
 TEST(SearchOnSealedIndexBitsetLifetime,
      GroupByIteratorMustNotKeepDanglingTransformedBitset) {
@@ -257,6 +471,54 @@ TEST(SearchOnSealedIndexBitsetLifetime,
                         search_result);
 
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+    auto additional_filter = MakeAdditionalFilter(total_count);
+    AssertSearchUsesCombinedLogicalFilter(
+        search_result,
+        logical_bitset_bytes,
+        additional_filter,
+        [&](int64_t offset) { return valid_data[offset]; });
+
+    auto non_strict_search_info = search_info;
+    non_strict_search_info.strict_group_size_ = false;
+    SearchResult non_strict_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_record,
+                        non_strict_search_info,
+                        query.data(),
+                        nullptr,
+                        1,
+                        logical_bitset,
+                        nullptr,
+                        non_strict_result);
+    EXPECT_FALSE(non_strict_result.CanSearchFilteredVectors());
+
+    auto single_group_result_search_info = search_info;
+    single_group_result_search_info.group_size_ = 1;
+    SearchResult single_group_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_record,
+                        single_group_result_search_info,
+                        query.data(),
+                        nullptr,
+                        1,
+                        logical_bitset,
+                        nullptr,
+                        single_group_result);
+    EXPECT_FALSE(single_group_result.CanSearchFilteredVectors());
+
+    std::vector<float> two_queries = query;
+    two_queries.insert(two_queries.end(), query.begin(), query.end());
+    SearchResult multiple_query_result;
+    SearchOnSealedIndex(*schema,
+                        indexing_record,
+                        search_info,
+                        two_queries.data(),
+                        nullptr,
+                        2,
+                        logical_bitset,
+                        nullptr,
+                        multiple_query_result);
+    EXPECT_FALSE(multiple_query_result.CanSearchFilteredVectors());
 }
 
 TEST(SearchOnSealedIndexNullableNoFilter,
@@ -394,6 +656,8 @@ TEST(SearchOnGrowingBitsetLifetime,
     const auto& vector_data = FindFieldData(dataset, vector_field);
     auto valid_count = CountValidRows(vector_data, total_count);
     ASSERT_GT(valid_count, 0);
+    ASSERT_LT(valid_count, total_count);
+    ASSERT_EQ(vector_data.valid_data_size(), total_count);
 
     auto segment = segcore::CreateGrowingSegment(schema, empty_index_meta);
     auto reserved_offset = segment->PreInsert(total_count);
@@ -426,6 +690,12 @@ TEST(SearchOnGrowingBitsetLifetime,
                     search_result);
 
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+    auto additional_filter = MakeAdditionalFilter(total_count);
+    AssertSearchUsesCombinedLogicalFilter(
+        search_result,
+        logical_bitset_bytes,
+        additional_filter,
+        [&](int64_t offset) { return vector_data.valid_data(offset); });
 }
 
 TEST(SearchOnSealedColumnBitsetLifetime,
@@ -472,6 +742,12 @@ TEST(SearchOnSealedColumnBitsetLifetime,
                          search_result);
 
     AssertVectorIteratorUsableAfterSearchReturns(search_result, valid_count);
+    auto additional_filter = MakeAdditionalFilter(total_count);
+    AssertSearchUsesCombinedLogicalFilter(
+        search_result,
+        logical_bitset_bytes,
+        additional_filter,
+        [&](int64_t offset) { return valid_data[offset]; });
 }
 
 }  // namespace milvus::query

@@ -20,11 +20,83 @@
 #include "common/BitsetView.h"
 #include "common/Consts.h"
 #include "common/OffsetMapping.h"
+#include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/Utils.h"
 
 namespace milvus::query {
+inline bool
+CanUseStrictGroupControls(const SearchInfo& info, int64_t nq) {
+    return info.strict_group_size_ && info.group_size_ > 1 && info.topk_ > 0 &&
+           nq == 1 && info.array_offsets_ == nullptr;
+}
+
+// Zero disables truncation; saturation prevents overflow from causing an
+// unintended early cutoff.
+inline int64_t
+StrictGroupPhase1CandidateLimit(const SearchInfo& info) {
+    if (info.strict_group_phase1_candidate_weight_ <= 0 || info.topk_ <= 0 ||
+        info.group_size_ <= 0) {
+        return 0;
+    }
+    const auto max = std::numeric_limits<int64_t>::max();
+    int64_t limit = info.strict_group_phase1_candidate_weight_;
+    for (int64_t factor : {info.topk_, info.group_size_}) {
+        if (limit > max / factor) {
+            return max;
+        }
+        limit *= factor;
+    }
+    return limit;
+}
+
+inline void
+ApplyStrictGroupSkipRefine(const SearchInfo& info,
+                           int64_t nq,
+                           knowhere::Json& params) {
+    if (CanUseStrictGroupControls(info, nq)) {
+        params["skip_refine"] = info.strict_group_skip_refine_;
+    }
+}
+
+// Convert a group quota into ordinary vector Search without mutating phase one.
+inline SearchInfo
+StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
+    auto info = original;
+    // Phase two is an independent filtered Search. Do not inherit iterator
+    // tuning (ef, nprobe, search_list, etc.); let the backend choose defaults
+    // for the new quota. Retain the typed query context and metric.
+    info.search_params_ = knowhere::Json::object();
+    // BM25's collection-level statistic is part of the scoring context, not
+    // an index tuning parameter. Keep scores comparable across both phases.
+    if (original.metric_type_ == knowhere::metric::BM25 &&
+        original.search_params_.contains(knowhere::meta::BM25_AVGDL)) {
+        info.search_params_[knowhere::meta::BM25_AVGDL] =
+            original.search_params_[knowhere::meta::BM25_AVGDL];
+    }
+    // Providers are registered only for nq=1. Set the backend parameter before
+    // converting per-group completion into an ordinary (non-grouped) Search.
+    ApplyStrictGroupSkipRefine(original, 1, info.search_params_);
+    info.topk_ = remaining_topk;
+    info.group_by_field_id_.reset();
+    info.group_size_ = 1;
+    info.strict_group_size_ = false;
+    info.iterative_filter_execution = false;
+    info.iterator_v2_info_.reset();
+    // Group-by consumes unrounded iterator distances; preserve that here.
+    info.round_decimal_ = -1;
+    info.search_params_[knowhere::meta::TOPK] = remaining_topk;
+    return info;
+}
+
+inline bool
+CanUseStrictGroupSearch(const SearchInfo& search_info, int64_t num_queries) {
+    return search_info.strict_group_strategy_ ==
+               StrictGroupStrategy::PerGroup &&
+           CanUseStrictGroupControls(search_info, num_queries);
+}
+
 inline void
 FillEmptySearchResult(SearchResult& result, int64_t num_queries, int64_t topk) {
     auto total_num = num_queries * topk;
