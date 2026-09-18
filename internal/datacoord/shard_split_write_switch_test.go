@@ -580,3 +580,18 @@ func TestIssueShardSplitMarksOnlyRefusalsBeforeTheBroadcast(t *testing.T) {
 		assert.False(t, errors.Is(err, errSplitRefusedBeforeBroadcast))
 	})
 }
+
+// A refusal made before the broadcast but retriable is a transient state of
+// the collection: the task keeps Preparing and issues again next tick.
+func TestShardSplitRetriesARetriableRefusalBeforeTheBroadcast(t *testing.T) {
+	manager, coordinator, _ := newPreparingCase(t)
+	coordinator.issueErr = markRefusedBeforeBroadcast(merr.WrapErrServiceUnavailableMsg("not ready"))
+
+	manager.advanceTasks()
+	manager.advanceTasks()
+	task := mustTask(t, manager, 100)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPreparing, task.GetState())
+	assert.True(t, splitTargetsAllocated(task))
+	assert.Len(t, coordinator.issued, 2, "issued again on the next tick")
+	assert.Equal(t, 1, manager.activeTaskCount())
+}
