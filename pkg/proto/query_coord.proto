@@ -525,6 +525,12 @@ message SearchRequest {
     // If true, enable expression filter cache for two-stage search.
     // Stage 1 caches filter bitset, Stage 2 reuses it to skip re-execution.
     bool enable_expr_cache = 8;
+    // Additional branches that share the filter predicate carried in `req` and
+    // must be executed together with it against one shared per-segment filter
+    // bitset. Branch 0 always lives in `req` itself, fully populated exactly as
+    // it is for an ordinary search. Empty means an ordinary single-branch
+    // search and the whole shared-filter path is bypassed.
+    repeated internal.SubSearchRequest extra_filter_sharing_reqs = 9;
 }
 
 message QueryRequest {
