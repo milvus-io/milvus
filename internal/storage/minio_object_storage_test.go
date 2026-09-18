@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -204,7 +205,9 @@ func TestMinioObjectStorage(t *testing.T) {
 		SecretAccessKeyID: Params.MinioCfg.SecretAccessKey.GetValue(),
 		RootPath:          Params.MinioCfg.RootPath.GetValue(),
 
-		BucketName:    Params.MinioCfg.BucketName.GetValue(),
+		// Use a dedicated bucket: the subtests below remove their bucket on exit, which would wipe
+		// the shared default bucket that tests in other packages write to when run with -p > 1.
+		BucketName:    "minio-object-storage-ut-" + strings.ToLower(funcutil.RandomString(8)),
 		CreateBucket:  true,
 		UseIAM:        false,
 		CloudProvider: "minio",
