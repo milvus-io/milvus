@@ -56,9 +56,9 @@
 #include "segcore/memory_planner.h"
 #include "segcore/storagev2translator/AsyncLoadPipeline.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/LocalFileIOPool.h"
-#include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
 namespace milvus::segcore::storagev2translator {
@@ -151,7 +151,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                                    })),
       writeback_mode_(writeback_mode),
       load_priority_(load_priority),
-      enable_async_load_(enable_async_load) {
+      enable_async_load_(enable_async_load),
+      async_read_window_bytes_(StorageV2AsyncLoadReadWindowSizeBytes()) {
     auto rows_result = chunk_reader_->get_chunk_rows();
     if (!rows_result.ok()) {
         auto error = milvus_storage::ToSegcoreError(rows_result.status());
@@ -480,15 +481,18 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     if (!meta_.chunk_memory_size_.empty()) {
         int64_t max_cell_sz = *std::max_element(
             meta_.chunk_memory_size_.begin(), meta_.chunk_memory_size_.end());
-        auto max_overhead_size = loading_overhead_bytes(max_cell_sz);
-        auto max_memory_runtime_unit =
-            std::max(FieldDataLoadBatchTargetBytes(), max_overhead_size);
-        auto max_file_runtime_unit =
-            std::max(FieldDataLoadBatchTargetBytes(), max_cell_sz);
-        auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
+        // Async admission leases a whole window, including all of its cells.
+        // Sync batches are instead split by their accumulated overhead bytes.
+        const auto max_file_runtime_unit =
+            std::max(enable_async_load_ ? async_read_window_bytes_
+                                        : FieldDataLoadBatchTargetBytes(),
+                     max_cell_sz);
+        const auto max_memory_runtime_unit =
+            enable_async_load_ ? loading_overhead_bytes(max_file_runtime_unit)
+                               : std::max(FieldDataLoadBatchTargetBytes(),
+                                          loading_overhead_bytes(max_cell_sz));
         auto memory_group =
-            milvus::storage::LoadMemoryOverheadController::GetInstance()
-                .GetOrCreate(executor_workers);
+            storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
         meta_.loading_overhead_config =
             milvus::cachinglayer::LoadingOverheadConfig{
                 milvus::cachinglayer::LoadingOverheadGroupBinding{
@@ -496,9 +500,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                 use_mmap_
                     ? std::make_optional(
                           milvus::cachinglayer::LoadingOverheadGroupBinding{
-                              milvus::storage::LoadFileOverheadController::
-                                  GetInstance()
-                                      .GetOrCreate(executor_workers),
+                              storage::LoadFileOverheadController::GetInstance()
+                                  .GetOrCreate(),
                               max_file_runtime_unit})
                     : std::nullopt};
     }
@@ -669,7 +672,9 @@ ManifestGroupTranslator::get_cells_via_async_pipeline(
         cell_specs.size(),
         column_group_index_,
         segment_id_);
-    AsyncLoadPipelineOptions options{.load_priority = load_priority_};
+    AsyncLoadPipelineOptions options{
+        .read_window_bytes = static_cast<size_t>(async_read_window_bytes_),
+        .load_priority = load_priority_};
     if (use_mmap_) {
         options.finalization_executor_provider = []() {
             return storage::LocalFileIOPool::GetInstance().GetExecutor();

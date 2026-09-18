@@ -258,7 +258,7 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 	assert.NoError(t, pt.Save(item.Key, "true"))
 
 	var applied atomic.Bool
-	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) {
+	registerQueryNodeLoadConfig(t.Context(), pt, func(enabled bool, budgetBytes, slots int64) error {
 		applied.Store(enabled)
 		if enabled {
 			assert.EqualValues(t, 2*1024*1024*1024, budgetBytes)
@@ -267,6 +267,8 @@ func TestRegisterQueryNodeLoadConfigCatchesUp(t *testing.T) {
 			assert.Zero(t, budgetBytes)
 			assert.Zero(t, slots)
 		}
+
+		return nil
 	})
 	assert.True(t, applied.Load())
 

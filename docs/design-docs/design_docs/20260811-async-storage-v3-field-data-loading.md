@@ -850,7 +850,9 @@ sealed-segment tests, and `make verifiers`.
 
 ## Follow-Up Work
 
-- Add the async scalar-index path described by issue #51245.
+- The [packed scalar-index extension](20260907-async-packed-scalar-index-loading.md)
+  reuses this executor and admission controller. Its admission/accounting section
+  describes the shared overhead policy based on byte and slot limits.
 - Add dedicated window/read/finalization latency metrics before broad rollout.
 - Validate the 2 GiB transient budget and CPU-derived slots with the read-window
   default on object-storage and mmap workloads before supported enablement.
@@ -867,7 +869,7 @@ sealed-segment tests, and `make verifiers`.
 |---|---|
 | bounded async reader preparation | `internal/core/src/segcore/storagev2translator/AsyncChunkReader.{h,cpp}` |
 | coroutine pipeline and window planner | `internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.{h,cpp}` |
-| shared async executor and priority | `internal/core/src/segcore/storagev2translator/AsyncLoadExecutor.{h,cpp}` |
+| shared async executor and priority | `internal/core/src/storage/AsyncLoadExecutor.{h,cpp}` |
 | native exception classification | `internal/core/src/segcore/storagev2translator/AsyncLoadException.h` |
 | manifest translator integration | `internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.{h,cpp}` |
 | per-process async configuration | `internal/core/src/segcore/storagev2translator/StorageV2Config.{h,cpp}` |

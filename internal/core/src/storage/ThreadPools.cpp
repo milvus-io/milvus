@@ -24,6 +24,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "storage/LoadOverheadController.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
 
 namespace milvus {
@@ -32,15 +33,18 @@ namespace {
 
 bool
 UpdateLoadOverheadControllers(int64_t executor_workers) {
+    if (segcore::storagev2translator::StorageV2AsyncLoadEnabled()) {
+        return true;
+    }
     // All current Group bindings provide max_runtime_unit, so both policy
     // updates should succeed. If that invariant is violated and only one
     // update succeeds, ResizeThreadPool's ordering keeps admission
     // fail-conservative: expansion stops before resizing, while shrinking
     // updates the policies after resizing.
     auto memory_updated = storage::LoadMemoryOverheadController::GetInstance()
-                              .UpdateExecutorWorkers(executor_workers);
+                              .UpdateConcurrencyLimit(executor_workers);
     auto file_updated = storage::LoadFileOverheadController::GetInstance()
-                            .UpdateExecutorWorkers(executor_workers);
+                            .UpdateConcurrencyLimit(executor_workers);
     if (memory_updated != file_updated) {
         LOG_ERROR(
             "Load overhead controllers were updated partially, "

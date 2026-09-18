@@ -21,6 +21,7 @@
 
 #include <arrow/buffer.h>
 #include <arrow/io/interfaces.h>
+#include <arrow/filesystem/localfs.h>
 #include <arrow/result.h>
 #include <arrow/status.h>
 
@@ -32,7 +33,9 @@
 #include <vector>
 
 #include "common/EasyAssert.h"
+#include "folly/executors/ManualExecutor.h"
 #include "storage/RemoteInputStream.h"
+#include "test_utils/AsyncLoadTestUtils.h"
 
 namespace milvus::storage {
 namespace {
@@ -233,6 +236,140 @@ InternalDifferentStatus() {
 arrow::Status
 SeekResetStatus() {
     return arrow::Status::IOError("seek reset failed");
+}
+
+class AsyncOpenFileSystem : public arrow::fs::LocalFileSystem {
+ public:
+    explicit AsyncOpenFileSystem(
+        arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>> file)
+        : file_(std::move(file)) {
+    }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string&) override {
+        ADD_FAILURE() << "The async stream must use OpenInputFileAsync";
+        return arrow::Status::NotImplemented("sync open");
+    }
+
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFileAsync(const std::string& path) override {
+        opened_path = path;
+        return arrow::Future<
+            std::shared_ptr<arrow::io::RandomAccessFile>>::MakeFinished(file_);
+    }
+
+    std::string opened_path;
+
+ private:
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>> file_;
+};
+
+TEST(RemoteInputStreamTest, AsyncOpenCachesNativeSizeAndPreservesObjectPaths) {
+    for (const bool is_index : {true, false}) {
+        auto file = std::make_shared<milvus::test::ControlledDirectReadFile>(
+            std::vector<uint8_t>{'a', 'b', 'c'});
+        auto size = arrow::Future<int64_t>::Make();
+        file->SetSizeFuture(size);
+        auto fs = std::make_shared<AsyncOpenFileSystem>(file);
+        FileManagerContext ctx(FieldDataMeta{},
+                               IndexMeta{},
+                               std::make_shared<LocalChunkManager>("root"),
+                               fs);
+        ctx.set_stats_base_path("stats/text");
+        MemFileManagerImpl manager(ctx);
+        auto opened = manager.OpenInputStreamAsync("local/packed.v3", is_index)
+                          .via(ResolveAsyncLoadExecutor(
+                              {}, proto::common::LoadPriority::HIGH));
+        EXPECT_TRUE(file->WaitForSizeCall());
+        EXPECT_FALSE(opened.isReady());
+        size.MarkFinished(3);
+        auto stream = std::move(opened).get();
+        EXPECT_EQ(stream->Size(), 3);
+        EXPECT_EQ(stream->Size(), 3);
+        EXPECT_EQ(file->GetSizeCalls(), 0);
+        EXPECT_EQ(
+            fs->opened_path,
+            (is_index ? manager.GetRemoteIndexObjectPrefix() : "stats/text") +
+                "/packed.v3");
+
+        std::array<char, 4> data{};
+        EXPECT_EQ(
+            std::move(stream->ReadAtAsync(data.data(), 1, data.size())).get(),
+            2);
+        EXPECT_EQ(std::string(data.data(), 2), "bc");
+        EXPECT_EQ(data[2], 0);
+        EXPECT_EQ(stream->ReadAtAsync(nullptr, 3, 0).get(), 0);
+        EXPECT_EQ(file->ReadAtCalls(), 0);
+        EXPECT_EQ(file->AsyncReadCalls(), 0);
+        EXPECT_EQ(file->DirectReadCalls().size(), 1);
+    }
+}
+
+TEST(RemoteInputStreamTest, AsyncOpenPreservesOpenAndSizeErrors) {
+    const auto status = milvus_storage::MakeExtendError(
+        milvus_storage::ExtendStatusCode::StorageTransientThrottling,
+        "throttled");
+    for (const bool fail_open : {true, false}) {
+        auto file = std::make_shared<milvus::test::ControlledDirectReadFile>(
+            std::vector<uint8_t>{'a'});
+        file->SetSizeFuture(arrow::Future<int64_t>::MakeFinished(status));
+        auto fs = fail_open ? std::make_shared<AsyncOpenFileSystem>(status)
+                            : std::make_shared<AsyncOpenFileSystem>(file);
+        try {
+            folly::coro::blockingWait(
+                RemoteInputStream::OpenAsync(fs, "packed"));
+            FAIL() << "expected storage error";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(),
+                      milvus_storage::ToSegcoreError(status).get_error_code());
+        }
+        EXPECT_EQ(file->GetSizeCalls(), 0);
+    }
+}
+
+TEST(RemoteInputStreamTest, AsyncOpenRejectsNegativeSize) {
+    auto file = std::make_shared<milvus::test::ControlledDirectReadFile>(
+        std::vector<uint8_t>{'a'});
+    file->SetSizeFuture(arrow::Future<int64_t>::MakeFinished(-1));
+    auto fs = std::make_shared<AsyncOpenFileSystem>(file);
+    EXPECT_THROW(
+        folly::coro::blockingWait(RemoteInputStream::OpenAsync(fs, "packed")),
+        SegcoreError);
+}
+
+TEST(RemoteInputStreamTest, AsyncFallbackCopiesOnCallerExecutor) {
+    class PendingReadFile : public milvus::test::AsyncTrackingRandomAccessFile {
+     public:
+        PendingReadFile() : AsyncTrackingRandomAccessFile({'a', 'b', 'c'}) {
+        }
+
+        arrow::Future<std::shared_ptr<arrow::Buffer>>
+        ReadAsync(const arrow::io::IOContext&, int64_t, int64_t) override {
+            started = true;
+            return pending;
+        }
+
+        bool started{false};
+        arrow::Future<std::shared_ptr<arrow::Buffer>> pending =
+            arrow::Future<std::shared_ptr<arrow::Buffer>>::Make();
+    };
+
+    auto file = std::make_shared<PendingReadFile>();
+    RemoteInputStream stream(file);
+    folly::ManualExecutor executor;
+    std::array<char, 3> data{};
+    auto read = stream.ReadAtAsync(data.data(), 0, data.size()).via(&executor);
+    executor.drain();
+    EXPECT_TRUE(file->started);
+    EXPECT_FALSE(read.isReady());
+
+    // Completing Arrow IO must only enqueue the copy on the caller's executor.
+    file->pending.MarkFinished(arrow::Buffer::FromString("abc"));
+    EXPECT_EQ(data, (std::array<char, 3>{}));
+    EXPECT_FALSE(read.isReady());
+    executor.drain();
+    EXPECT_EQ(std::move(read).get(), data.size());
+    EXPECT_EQ(std::string(data.data(), data.size()), "abc");
 }
 
 TEST(RemoteInputStreamTest, RetriesInternalFailedFlushError) {
