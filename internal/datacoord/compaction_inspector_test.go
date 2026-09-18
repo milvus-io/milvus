@@ -23,6 +23,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/magiconair/properties/assert"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	taskcommon "github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -59,6 +61,9 @@ type CompactionPlanHandlerSuite struct {
 func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockMeta = NewMockCompactionMeta(s.T())
 	s.mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	// checkCompaction() records terminal failures/timeouts via GetCompactionTaskMeta();
+	// any test whose tasks reach a failed/timeout state exercises this call.
+	s.mockMeta.EXPECT().GetCompactionTaskMeta().Return(newTestCompactionTaskMeta(s.T())).Maybe()
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocTimestamp(mock.Anything).Return(uint64(1000), nil).Maybe()
 	s.mockAlloc = mockAlloc
@@ -730,6 +735,54 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 
 	t = s.handler.getCompactionTask(6)
 	s.Equal(datapb.CompactionTaskState_executing, t.GetTaskProto().GetState())
+}
+
+// TestCheckCompactionMetricsAndFailureHistory verifies checkCompaction no longer folds
+// failed and timed-out tasks into the "done" metric label, and that a terminal task's
+// FailReason is captured into the failure history before its regular meta is cleaned up.
+func (s *CompactionPlanHandlerSuite) TestCheckCompactionMetricsAndFailureHistory() {
+	s.SetupTest()
+
+	catalog := &datacoord.Catalog{MetaKv: NewMetaMemoryKV()}
+	compactionTaskMeta, err := newCompactionTaskMeta(context.TODO(), catalog)
+	s.NoError(err)
+	s.handler.meta = &meta{compactionTaskMeta: compactionTaskMeta}
+
+	failedTask := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:     10,
+		Type:       datapb.CompactionType_MixCompaction,
+		Channel:    "ch-1",
+		State:      datapb.CompactionTaskState_failed,
+		FailReason: "segment integrity check failed",
+		NodeID:     111,
+		StartTime:  time.Now().Unix(),
+	}, s.mockAlloc, s.handler.meta, newMockVersionManager())
+
+	timeoutTask := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:    11,
+		Type:      datapb.CompactionType_MixCompaction,
+		Channel:   "ch-1",
+		State:     datapb.CompactionTaskState_timeout,
+		NodeID:    111,
+		StartTime: time.Now().Unix(),
+	}, s.mockAlloc, s.handler.meta, newMockVersionManager())
+
+	s.handler.executingTasks[10] = failedTask
+	s.handler.executingTasks[11] = timeoutTask
+
+	labelValues := func(status string) float64 {
+		return testutil.ToFloat64(metrics.DataCoordCompactionTaskNum.WithLabelValues("111", datapb.CompactionType_MixCompaction.String(), status))
+	}
+	failedBefore, timeoutBefore, doneBefore := labelValues(metrics.Failed), labelValues(metrics.Timeout), labelValues(metrics.Done)
+
+	s.NoError(s.handler.checkCompaction())
+
+	s.Equal(failedBefore+1, labelValues(metrics.Failed))
+	s.Equal(timeoutBefore+1, labelValues(metrics.Timeout))
+	// Neither the failure nor the timeout should also be counted into "done".
+	s.Equal(doneBefore, labelValues(metrics.Done))
+
+	s.Contains(s.handler.meta.GetCompactionTaskMeta().FailureHistoryJSON(), "segment integrity check failed")
 }
 
 func (s *CompactionPlanHandlerSuite) TestCompactionGC() {

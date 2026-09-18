@@ -1155,6 +1155,11 @@ func (s *Server) registerMetricsRequest() {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
 		})
 
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskFailureKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			return s.meta.compactionTaskMeta.FailureHistoryJSON(), nil
+		})
+
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.indexMeta.TaskStatsJSON(), nil
