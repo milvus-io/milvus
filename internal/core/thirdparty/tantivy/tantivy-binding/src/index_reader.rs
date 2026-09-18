@@ -11,6 +11,7 @@ use tantivy::{Directory, HasLen, Index, IndexReader, ReloadPolicy, Term};
 
 use crate::bitset_wrapper::BitsetWrapper;
 use crate::docid_collector::{DocIdCollector, DocIdCollectorI64};
+use crate::hit_callback_collector::HitCallbackCollector;
 use crate::index_reader_c::{RegexMatchFn, SetBitsetFn};
 use crate::log::init_log;
 use crate::milvus_id_collector::MilvusIdCollector;
@@ -181,6 +182,31 @@ impl IndexReaderWrapper {
         self.search(&q, bitset)
     }
 
+    #[inline]
+    fn single_term_query_with_callback<F>(
+        &self,
+        term_builder: F,
+        context: *mut c_void,
+        callback: SetBitsetFn,
+    ) -> Result<()>
+    where
+        F: FnOnce(Field) -> Term,
+    {
+        let q = TermQuery::new(term_builder(self.field), IndexRecordOption::Basic);
+        let searcher = self.reader.searcher();
+        searcher
+            .search(
+                &q,
+                &HitCallbackCollector::new(
+                    context,
+                    callback,
+                    self.id_field.is_some(),
+                    self.id_field.is_none() && !self.user_specified_doc_id,
+                ),
+            )
+            .map_err(TantivyBindingError::TantivyError)
+    }
+
     // Due to overhead, `TermSetQuery` is not efficient for small number of terms. So we execute term query one by one
     // when the terms number is less than `BATCH_THRESHOLD`.
     #[inline]
@@ -212,12 +238,51 @@ impl IndexReaderWrapper {
         self.batch_terms_query(terms, Term::from_field_bool, bitset)
     }
 
+    pub fn term_query_bool_with_callback(
+        &self,
+        term: bool,
+        context: *mut c_void,
+        callback: SetBitsetFn,
+    ) -> Result<()> {
+        self.single_term_query_with_callback(
+            |field| Term::from_field_bool(field, term),
+            context,
+            callback,
+        )
+    }
+
     pub fn terms_query_i64(&self, terms: &[i64], bitset: *mut c_void) -> Result<()> {
         self.batch_terms_query(terms, Term::from_field_i64, bitset)
     }
 
+    pub fn term_query_i64_with_callback(
+        &self,
+        term: i64,
+        context: *mut c_void,
+        callback: SetBitsetFn,
+    ) -> Result<()> {
+        self.single_term_query_with_callback(
+            |field| Term::from_field_i64(field, term),
+            context,
+            callback,
+        )
+    }
+
     pub fn terms_query_f64(&self, terms: &[f64], bitset: *mut c_void) -> Result<()> {
         self.batch_terms_query(terms, Term::from_field_f64, bitset)
+    }
+
+    pub fn term_query_f64_with_callback(
+        &self,
+        term: f64,
+        context: *mut c_void,
+        callback: SetBitsetFn,
+    ) -> Result<()> {
+        self.single_term_query_with_callback(
+            |field| Term::from_field_f64(field, term),
+            context,
+            callback,
+        )
     }
 
     #[inline]
@@ -244,6 +309,19 @@ impl IndexReaderWrapper {
         let q = TermSetQuery::new(term_strs);
 
         self.search(&q, bitset)
+    }
+
+    pub fn term_query_keyword_with_callback(
+        &self,
+        term: &str,
+        context: *mut c_void,
+        callback: SetBitsetFn,
+    ) -> Result<()> {
+        self.single_term_query_with_callback(
+            |field| Term::from_field_text(field, term),
+            context,
+            callback,
+        )
     }
 
     pub fn term_query_keyword_i64(&self, term: &str) -> Result<Vec<i64>> {
@@ -855,7 +933,10 @@ mod test {
     use std::{
         collections::HashSet,
         ffi::{c_void, CString},
-        sync::Arc,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
     };
 
     use tantivy::{
@@ -867,6 +948,45 @@ mod test {
     use crate::util::set_bitset;
 
     use super::IndexReaderWrapper;
+
+    extern "C" fn collect_hits(context: *mut c_void, docs: *const u32, len: usize) {
+        let hits = unsafe { &mut *(context as *mut Vec<u32>) };
+        hits.extend_from_slice(unsafe { std::slice::from_raw_parts(docs, len) });
+    }
+
+    static MATERIALIZED_BITSET_CALLBACK_USED: AtomicBool = AtomicBool::new(false);
+
+    extern "C" fn mark_materialized_bitmap(_context: *mut c_void, _docs: *const u32, _len: usize) {
+        MATERIALIZED_BITSET_CALLBACK_USED.store(true, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn test_term_query_keyword_with_callback() {
+        let mut schema_builder = Schema::builder();
+        let tag = schema_builder.add_text_field("tag", STRING | STORED);
+        let schema = schema_builder.build();
+        let index = Index::create_in_ram(schema);
+        let mut writer = index.writer(50_000_000).unwrap();
+        writer.add_document(doc!(tag => "common")).unwrap();
+        writer.add_document(doc!(tag => "other")).unwrap();
+        writer.add_document(doc!(tag => "common")).unwrap();
+        writer.commit().unwrap();
+
+        MATERIALIZED_BITSET_CALLBACK_USED.store(false, Ordering::Relaxed);
+        let reader =
+            IndexReaderWrapper::from_index(Arc::new(index), mark_materialized_bitmap).unwrap();
+        let mut hits: Vec<u32> = Vec::new();
+        reader
+            .term_query_keyword_with_callback(
+                "common",
+                &mut hits as *mut _ as *mut c_void,
+                collect_hits,
+            )
+            .unwrap();
+        hits.sort_unstable();
+        assert_eq!(hits, vec![0, 2]);
+        assert!(!MATERIALIZED_BITSET_CALLBACK_USED.load(Ordering::Relaxed));
+    }
 
     #[test]
     pub fn test_escape_regex() {

@@ -185,14 +185,34 @@ RustResult tantivy_index_size_bytes(void *ptr);
 
 RustResult tantivy_terms_query_bool(void *ptr, const bool *terms, uintptr_t len, void *bitset);
 
+RustResult tantivy_term_query_bool_with_callback(void *ptr,
+                                                 bool term,
+                                                 void *context,
+                                                 SetBitsetFn callback);
+
 RustResult tantivy_terms_query_i64(void *ptr, const int64_t *terms, uintptr_t len, void *bitset);
 
+RustResult tantivy_term_query_i64_with_callback(void *ptr,
+                                                int64_t term,
+                                                void *context,
+                                                SetBitsetFn callback);
+
 RustResult tantivy_terms_query_f64(void *ptr, const double *terms, uintptr_t len, void *bitset);
+
+RustResult tantivy_term_query_f64_with_callback(void *ptr,
+                                                double term,
+                                                void *context,
+                                                SetBitsetFn callback);
 
 RustResult tantivy_terms_query_keyword(void *ptr,
                                        const char *const *terms,
                                        uintptr_t len,
                                        void *bitset);
+
+RustResult tantivy_term_query_keyword_with_callback(void *ptr,
+                                                    const char *term,
+                                                    void *context,
+                                                    SetBitsetFn callback);
 
 RustResult tantivy_term_query_keyword_i64(void *ptr, const char *term);
 

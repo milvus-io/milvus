@@ -59,6 +59,34 @@
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+
+namespace {
+
+struct HitCallbackContext {
+    const std::function<void(size_t)>* callback;
+    std::exception_ptr error;
+};
+
+void
+ForwardHitBatch(void* opaque,
+                const uint32_t* doc_ids,
+                uintptr_t count) noexcept {
+    auto* context = static_cast<HitCallbackContext*>(opaque);
+    if (context->error != nullptr) {
+        return;
+    }
+    try {
+        for (uintptr_t i = 0; i < count; ++i) {
+            (*context->callback)(doc_ids[i]);
+        }
+    } catch (...) {
+        // Never unwind C++ through Rust. Re-throw after the synchronous query
+        // returns to C++.
+        context->error = std::current_exception();
+    }
+}
+
+}  // namespace
 inline TantivyDataType
 get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
     switch (schema.data_type()) {
@@ -530,6 +558,16 @@ InvertedIndexTantivy<T>::InApplyCallback(
     size_t n, const T* values, const std::function<void(size_t)>& callback) {
     tracer::AutoSpan span("InvertedIndexTantivy::InApplyCallback",
                           tracer::GetRootSpan());
+    if (n == 1) {
+        HitCallbackContext context{&callback, nullptr};
+        wrapper_->term_query_with_callback(
+            values[0], &context, ForwardHitBatch);
+        if (context.error != nullptr) {
+            std::rethrow_exception(context.error);
+        }
+        return;
+    }
+
     TargetBitmap bitset(Count());
     wrapper_->terms_query(values, n, &bitset);
     // todo(SpadeA): could push-down the callback to tantivy query
