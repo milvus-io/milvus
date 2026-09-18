@@ -116,3 +116,74 @@ func (suite *ServiceSuite) TestSplitChildFrontsItsOwnSplit() {
 		"an adopted split child must be able to front its own split")
 	suite.awaitSplitChild(child, grandchild4)
 }
+
+// A spawn waits up to minutes for the target's recovery info. If querycoord
+// watches the target meanwhile, its delegator must win: the spawn must neither
+// overwrite it (and then remove it from the node on its own failure while its
+// pipeline keeps running) nor hand it to the source as a child.
+func (suite *ServiceSuite) TestSpawnSplitChildNeverOverwritesADelegatorWatchedDuringItsWait() {
+	ctx := context.Background()
+	const target = "by-dev-rootcoord-dml_2_111v3"
+
+	status, err := suite.node.WatchDmChannels(ctx, suite.splitWatchRequest(suite.vchannel))
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	source, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+
+	watched := delegator.NewMockShardDelegator(suite.T())
+	watched.EXPECT().FrontingParent().Return(nil).Maybe()
+	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
+		func(node *QueryNode, _ int64, vchannel string) (*msgpb.MsgPosition, error) {
+			// querycoord's watch of the target lands while the spawn waits.
+			node.delegators.Insert(vchannel, watched)
+			return &msgpb.MsgPosition{ChannelName: vchannel, MsgID: suite.position.GetMsgID()}, nil
+		}).Build()
+	defer recovery.UnPatch()
+	defer suite.node.delegators.GetAndRemove(target)
+
+	child, err := suite.node.SpawnSplitChild(ctx, delegator.SpawnChildParams{
+		CollectionID:   suite.collectionID,
+		SourceVChannel: suite.vchannel,
+		TargetVChannel: target,
+		Parent:         source,
+	})
+	suite.ErrorIs(err, merr.ErrChannelReduplicate)
+	suite.Nil(child)
+	current, ok := suite.node.delegators.Get(target)
+	suite.True(ok)
+	suite.Same(watched, current, "the spawn overwrote the delegator querycoord watched")
+	suite.Nil(suite.node.pipelineManager.Get(target), "the spawn started a pipeline for a target it does not own")
+}
+
+// While querycoord's watch of the target is in progress the spawn yields with a
+// retriable error rather than racing it to register a delegator.
+func (suite *ServiceSuite) TestSpawnSplitChildYieldsToAWatchInProgress() {
+	ctx := context.Background()
+	const target = "by-dev-rootcoord-dml_2_111v3"
+
+	status, err := suite.node.WatchDmChannels(ctx, suite.splitWatchRequest(suite.vchannel))
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	source, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+
+	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
+		func(_ *QueryNode, _ int64, vchannel string) (*msgpb.MsgPosition, error) {
+			return &msgpb.MsgPosition{ChannelName: vchannel, MsgID: suite.position.GetMsgID()}, nil
+		}).Build()
+	defer recovery.UnPatch()
+	suite.Require().True(suite.node.subscribingChannels.Insert(target))
+	defer suite.node.subscribingChannels.Remove(target)
+	defer suite.node.delegators.GetAndRemove(target)
+
+	child, err := suite.node.SpawnSplitChild(ctx, delegator.SpawnChildParams{
+		CollectionID:   suite.collectionID,
+		SourceVChannel: suite.vchannel,
+		TargetVChannel: target,
+		Parent:         source,
+	})
+	suite.Error(err)
+	suite.True(merr.IsRetryableErr(err), "a watch in progress is transient: the spawn must retry")
+	suite.NotErrorIs(err, merr.ErrChannelReduplicate)
+	suite.Nil(child)
+	suite.False(suite.node.delegators.Contain(target))
+}

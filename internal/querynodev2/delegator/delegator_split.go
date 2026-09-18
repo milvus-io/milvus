@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
+	"golang.org/x/time/rate"
+
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/reduce"
@@ -770,6 +773,15 @@ func (sd *shardDelegator) spawnChildAsync(ctx context.Context, vchannel string) 
 		if sd.abandonSpawn(ctx, vchannel) {
 			return
 		}
+		if errors.Is(err, merr.ErrChannelReduplicate) {
+			// A delegator this source does not front already serves the target,
+			// typically one querycoord watched on its own. Retrying cannot change
+			// that, and fronting it would serve rows deleted on the target, so the
+			// target stays pending and reads through this delegator stay refused.
+			log.RatedWarn(ctx, rate.Every(10*time.Second), "split target is served by a delegator this source does not front, keeping the target pending",
+				mlog.String("targetVChannel", vchannel), mlog.Err(err))
+			return
+		}
 		backoff := splitChildSpawnBackoff(attempt)
 		log.Warn(ctx, "failed to spawn split child delegator, reads through this delegator are refused until a retry succeeds",
 			mlog.String("targetVChannel", vchannel), mlog.Int("attempt", attempt+1),
@@ -796,16 +808,31 @@ func (sd *shardDelegator) abandonSpawn(ctx context.Context, vchannel string) boo
 }
 
 // publishSpawnedChild clears the pending slot and adds the spawned child to the
-// fronting set, or aborts it if the source was released while it spawned.
+// fronting set.
+//
+// Only a delegator this source fronts is published. One whose fronting parent
+// is not this source (typically a delegator querycoord watched for the target
+// on its own) forwards no delete here, so fronting it would serve rows deleted
+// on the target: it is neither published nor torn down, and the target stays
+// pending. Being adopted does not disqualify this source's own child, since
+// adoption does not detach it and querycoord can adopt it before this runs.
+//
+// A child of this source is aborted instead if the source was released or has
+// stopped while it spawned.
 func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel string, child ShardDelegator) {
+	if child.FrontingParent() != ShardDelegator(sd) {
+		sd.getLogger(ctx).RatedWarn(ctx, rate.Every(10*time.Second), "spawned split target delegator is not fronted by this source, keeping the target pending",
+			mlog.String("targetVChannel", vchannel))
+		return
+	}
 	sd.childMut.Lock()
 	delete(sd.spawning, vchannel)
-	if sd.releasing.Load() {
-		// the source was released while this spawn was in flight: do not publish
-		// the child (it would be fronted by a gone source). releaseSplitChildren
-		// set releasing before snapshotting children, and that snapshot is taken
-		// under childMut, so it could not have seen this not-yet-published child —
-		// hence we, not it, must tear the child down.
+	if sd.releasing.Load() || sd.Stopped() {
+		// the source was released (or stopped) while this spawn was in flight: do
+		// not publish the child (it would be fronted by a gone source).
+		// releaseSplitChildren set releasing before snapshotting children, and that
+		// snapshot is taken under childMut, so it could not have seen this
+		// not-yet-published child — hence we, not it, must tear the child down.
 		sd.childMut.Unlock()
 		sd.childSpawner.AbortSplitChild(ctx, child, sd.collectionID, vchannel)
 		sd.getLogger(ctx).Info(ctx, "aborted a split child spawned after source release",
