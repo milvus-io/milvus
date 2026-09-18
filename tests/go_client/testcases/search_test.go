@@ -897,26 +897,29 @@ func TestSearchEmptyInvalidVectors(t *testing.T) {
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	type invalidVectorsStruct struct {
+		name    string
 		vectors []entity.Vector
 		errNil  bool
 		errMsg  string
 	}
 
 	invalidVectors := []invalidVectorsStruct{
-		// dim not match
-		{vectors: hp.GenSearchVectors(common.DefaultNq, 64, entity.FieldTypeFloatVector), errNil: true, errMsg: "vector dimension mismatch"},
+		// Proxy validates dimensions even when the collection has no segments.
+		{name: "dimension mismatch", vectors: hp.GenSearchVectors(common.DefaultNq, 64, entity.FieldTypeFloatVector), errNil: false, errMsg: "vector dimension mismatch"},
 
 		// vector type not match
-		{vectors: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector), errNil: true, errMsg: "vector type must be the same"},
+		{name: "type mismatch", vectors: hp.GenSearchVectors(common.DefaultNq, common.DefaultDim, entity.FieldTypeBinaryVector), errNil: true, errMsg: "vector type must be the same"},
 
 		// empty vectors
-		{vectors: []entity.Vector{}, errNil: false, errMsg: "nq [0] is invalid"},
-		{vectors: []entity.Vector{entity.FloatVector{}}, errNil: true, errMsg: "vector dimension mismatch"},
+		{name: "no queries", vectors: []entity.Vector{}, errNil: false, errMsg: "nq [0] is invalid"},
+		{name: "empty vector", vectors: []entity.Vector{entity.FloatVector{}}, errNil: false, errMsg: "vector dimension mismatch"},
 	}
 
 	for _, invalidVector := range invalidVectors {
-		_, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, invalidVector.vectors).WithANNSField(common.DefaultFloatVecFieldName))
-		common.CheckErr(t, errSearchEmpty, invalidVector.errNil, invalidVector.errMsg)
+		t.Run(invalidVector.name, func(t *testing.T) {
+			_, errSearchEmpty := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, invalidVector.vectors).WithANNSField(common.DefaultFloatVecFieldName))
+			common.CheckErr(t, errSearchEmpty, invalidVector.errNil, invalidVector.errMsg)
+		})
 	}
 }
 
