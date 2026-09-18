@@ -43,6 +43,7 @@ type collectionState struct {
 	policyRefreshedAt time.Time
 	policyBackoff     *typeutil.BackoffWithInstant
 	policies          map[string]*rlsutil.RowPolicy
+	compiled          map[compiledKey]*compiledCacheEntry
 
 	// Principal tags are cached and invalidated independently per principal.
 	principalTags            map[string]*principalTagsEntry
@@ -66,6 +67,8 @@ type principalRefreshToken uint64
 
 type manager struct {
 	mu sync.RWMutex
+
+	// Per-collection cache state.
 	// ponytail: collection states and drop tombstones are unbounded; add an LRU
 	// or byte budget if production scale makes this measurable.
 	collections map[UniqueID]*collectionState
@@ -77,7 +80,7 @@ type manager struct {
 	coord      CoordClient
 	refreshCtx context.Context
 
-	// Use the native group so canceled callers do not leave one waiter goroutine each.
+	// Independent policy and principal refresh coalescing.
 	policyRefreshes    singleflight.Group
 	principalRefreshes singleflight.Group
 }
@@ -179,6 +182,7 @@ func (m *manager) invalidatePolicies(collectionID UniqueID, revision typeutil.Ti
 	state.policyRefreshedAt = time.Time{}
 	state.policyBackoff = nil
 	state.policies = nil
+	state.compiled = nil
 	state.mu.Unlock()
 	m.mu.Unlock()
 }
@@ -433,5 +437,6 @@ func (state *collectionState) rememberInvalidationRevision(revision typeutil.Tim
 func (state *collectionState) setPreparedPolicySnapshotLocked(refreshedAt time.Time, policies map[string]*rlsutil.RowPolicy) {
 	state.policyRefreshedAt = refreshedAt
 	state.policyBackoff = nil
+	state.compiled = nil
 	state.policies = policies
 }
