@@ -2689,3 +2689,88 @@ func TestBumpUTUnitNewV3WriterRejectsNonV3(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "requires a StorageV3 segment")
 }
+
+// ============================================================================
+// Multipart upload size propagation (P1/P2 review regression)
+// ============================================================================
+
+// TestBumpUTMultiPartUploadSizeReachesFFIWriters verifies that the configured
+// dataNode.storage.multiPartUploadSize reaches the properties consumed by the
+// storage library in BOTH schema-bump branches:
+//   - additive: newV3WriterResult → partial packed writer → packed.NewFFIPackedWriter
+//   - full rewrite: runFullSchemaRewrite → storage.NewBinlogRecordWriter →
+//     packed.NewFFIPackedWriter (ordinary) or packed.NewFFISegmentWriter (TEXT)
+//
+// Capture happens at the FFI boundary and delegates to the original writer so
+// the compaction itself still runs against real local storage.
+func TestBumpUTMultiPartUploadSizeReachesFFIWriters(t *testing.T) {
+	setupBumpUTEnv(t)
+
+	// Build fixtures before overriding the param and installing capture mocks,
+	// so source-segment writes do not pollute the captured properties.
+	const droppedID = int64(102)
+	fullFix := buildBumpFixture(t,
+		withSourceFields(&schemapb.FieldSchema{FieldID: droppedID, Name: "dropped", DataType: schemapb.DataType_Int64}),
+		withFillValue(func(i int, ts uint64, v map[int64]any) { v[droppedID] = int64(i * 10) }),
+		withTargetDroppedField(droppedID),
+	)
+	const addedID = int64(103)
+	addFix := buildBumpFixture(t, withTargetAddedField(&schemapb.FieldSchema{
+		FieldID: addedID, Name: "added_nullable", DataType: schemapb.DataType_Int64, Nullable: true,
+	}))
+
+	const customSize = int64(20 * 1024 * 1024) // 20 MiB, inside the valid 5MiB~5GiB range
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.DataNodeCfg.MultiPartUploadSize.Key, strconv.FormatInt(customSize, 10)))
+	defer params.Reset(params.DataNodeCfg.MultiPartUploadSize.Key)
+
+	var packedProps []map[string]string
+	var segmentSizes []int64
+
+	var origPacked func(string, *arrow.Schema, []storagecommon.ColumnGroup, *indexpb.StorageConfig,
+		*indexcgopb.StoragePluginContext, ...map[string]string) (*packed.FFIPackedWriter, error)
+	packedPatch := mockey.Mock(packed.NewFFIPackedWriter).Origin(&origPacked).To(
+		func(basePath string, schema *arrow.Schema, columnGroups []storagecommon.ColumnGroup,
+			storageConfig *indexpb.StorageConfig, pluginContext *indexcgopb.StoragePluginContext,
+			extraProperties ...map[string]string,
+		) (*packed.FFIPackedWriter, error) {
+			if len(extraProperties) > 0 {
+				packedProps = append(packedProps, extraProperties[0])
+			}
+			return origPacked(basePath, schema, columnGroups, storageConfig, pluginContext, extraProperties...)
+		}).Build()
+	defer packedPatch.UnPatch()
+
+	var origSegment func(*arrow.Schema, *packed.SegmentWriterConfig, *indexpb.StorageConfig) (*packed.FFISegmentWriter, error)
+	segmentPatch := mockey.Mock(packed.NewFFISegmentWriter).Origin(&origSegment).To(
+		func(schema *arrow.Schema, config *packed.SegmentWriterConfig, storageConfig *indexpb.StorageConfig) (*packed.FFISegmentWriter, error) {
+			if config != nil {
+				segmentSizes = append(segmentSizes, config.MultiPartUploadSize)
+			}
+			return origSegment(schema, config, storageConfig)
+		}).Build()
+	defer segmentPatch.UnPatch()
+
+	assertCapturedSize := func(branch string) {
+		require.Positive(t, len(packedProps)+len(segmentSizes),
+			"%s branch must construct an FFI writer", branch)
+		for _, props := range packedProps {
+			require.Equal(t, strconv.FormatInt(customSize, 10), props[packed.PropertyFSMultiPartUploadSize],
+				"%s packed writer must consume the configured part size via the fs-scoped key", branch)
+		}
+		for _, size := range segmentSizes {
+			require.Equal(t, customSize, size,
+				"%s TEXT segment writer must consume the configured part size", branch)
+		}
+	}
+
+	// Full-rewrite branch (physical field drop → replacement segment).
+	runCompact(t, fullFix)
+	assertCapturedSize("full-rewrite")
+
+	// Additive branch (nullable column added → in-place increment).
+	packedProps = nil
+	segmentSizes = nil
+	runAdditiveCompact(t, addFix)
+	assertCapturedSize("additive")
+}

@@ -17,10 +17,15 @@
 package compactor
 
 import (
+	"context"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/compaction"
+	"github.com/milvus-io/milvus/internal/mocks/flushcommon/mock_util"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -72,4 +77,64 @@ func (s *SegmentWriteSuite) TestWriteFailed() {
 		err = writer.Write(&v)
 		s.Error(err)
 	})
+}
+
+// TestRotateWriterPreservesRwOptions verifies that repeated rotateWriter() calls
+// do not append WithUploader/WithVersion options to the stored w.rwOption slice.
+// If they did, each subsequent rotateWriter() would accumulate extra options,
+// causing duplicate uploader/version entries on writers created after the first rotation.
+func (s *SegmentWriteSuite) TestRotateWriterPreservesRwOptions() {
+	paramtable.Get().Init(paramtable.NewBaseTable())
+	paramtable.Get().Save(paramtable.Get().CommonCfg.StorageType.Key, "local")
+	paramtable.Get().Save(paramtable.Get().LocalStorageCfg.Path.Key, s.T().TempDir())
+	defer func() {
+		paramtable.Get().Reset(paramtable.Get().CommonCfg.StorageType.Key)
+		paramtable.Get().Reset(paramtable.Get().LocalStorageCfg.Path.Key)
+	}()
+
+	mockBinlogIO := mock_util.NewMockBinlogIO(s.T())
+	mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	mockAlloc := allocator.NewMockAllocator(s.T())
+	var nextID int64 = 1000
+	mockAlloc.EXPECT().AllocOne().RunAndReturn(func() (int64, error) {
+		nextID++
+		return nextID, nil
+	}).Maybe()
+	mockAlloc.EXPECT().Alloc(mock.Anything).RunAndReturn(func(n uint32) (int64, int64, error) {
+		start := nextID
+		nextID += int64(n)
+		return start, nextID, nil
+	}).Maybe()
+
+	schema := genCollectionSchema()
+	compAlloc := NewCompactionAllocator(mockAlloc, mockAlloc)
+	params := compaction.GenParams()
+
+	extraOpt := storage.WithStorageConfig(params.StorageConfig)
+	writer, err := NewMultiSegmentWriter(
+		context.Background(),
+		mockBinlogIO,
+		compAlloc,
+		1024*1024,
+		schema,
+		params,
+		1000,
+		s.parititonID,
+		s.collectionID,
+		"test_channel",
+		100,
+		extraOpt,
+	)
+	s.Require().NoError(err)
+
+	initialLen := len(writer.rwOption)
+
+	// Rotate the writer multiple times; each rotation must NOT grow rwOption.
+	for i := range 3 {
+		err = writer.rotateWriter()
+		s.Require().NoError(err)
+		s.Equal(initialLen, len(writer.rwOption),
+			"rwOption must not grow after rotateWriter (iteration %d)", i+1)
+	}
 }
