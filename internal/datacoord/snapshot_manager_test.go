@@ -1650,6 +1650,7 @@ func TestRestoreSnapshot_SnapshotSkipIndexIsEnforced(t *testing.T) {
 	mockAllocID := mockey.Mock((*restoreAllocatorTarget).AllocID).Return(int64(999), nil).Build()
 	defer mockAllocID.UnPatch()
 	sm := &snapshotManager{
+		broker:          newRestoreAbsentTargetBroker(t),
 		allocator:       &restoreAllocatorTarget{},
 		snapshotMeta:    &snapshotMeta{},
 		copySegmentMeta: &copySegmentMeta{},
@@ -6001,7 +6002,7 @@ func TestRestoreSnapshot_AdmissionFailureReleasesLocks(t *testing.T) {
 			mPin := mockey.Mock((*snapshotMeta).PinSnapshot).Return(int64(0), 0, tc.pinErr).Build()
 			defer mPin.UnPatch()
 			sm := &snapshotManager{broker: &restoreBrokerTarget{}, snapshotMeta: &snapshotMeta{}}
-			jobID, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default",
+			jobID, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default", false,
 				func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
 					if tc.lockErr != nil {
 						return nil, tc.lockErr
@@ -6149,11 +6150,11 @@ func TestRestoreSnapshot_ConcurrentTargetAdmission(t *testing.T) {
 			}
 			call := func(external bool, db, coll string) result {
 				if external {
-					id, err := sm.RestoreExternalSnapshot(ctx, "s3://bucket/snapshot.json", coll, db, "",
+					id, err := sm.RestoreExternalSnapshot(ctx, "s3://bucket/snapshot.json", coll, db, "", false,
 						func(context.Context, string, string) (broadcaster.BroadcastAPI, error) { return startPhase0() }, startBroadcast, rollback, validate)
 					return result{id, err}
 				}
-				id, err := sm.RestoreSnapshot(ctx, 100, "snap", coll, db,
+				id, err := sm.RestoreSnapshot(ctx, 100, "snap", coll, db, false,
 					func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
 						return startPhase0()
 					}, startBroadcast, rollback, validate)
@@ -6476,7 +6477,7 @@ func TestRestoreSnapshot_PinOwnershipOnFailure(t *testing.T) {
 			mFinish := mockey.Mock((*snapshotManager).finishRestoreSnapshot).Return(tc.jobID, merr.ErrServiceInternal).Build()
 			defer mFinish.UnPatch()
 			sm := &snapshotManager{broker: newRestoreAbsentTargetBroker(t), snapshotMeta: &snapshotMeta{}}
-			_, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default",
+			_, err := sm.RestoreSnapshot(context.Background(), 100, "snap", "target", "default", false,
 				func(context.Context, int64, string, string, string) (broadcaster.BroadcastAPI, error) {
 					return &mockBroadcastAPI{closeFn: func() {}}, nil
 				}, nil, nil, nil)
@@ -6525,7 +6526,7 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 			closed := 0
 			mFinish := mockey.Mock((*snapshotManager).finishRestoreSnapshot).To(
 				func(_ *snapshotManager, _ context.Context, _ *mlog.Logger, _ *snapshotstorage.SnapshotData,
-					name string, _ int64, _, _ string, _ int64, _ bool, _, _ string,
+					name string, _ int64, _, _ string, _ int64, _ bool, _, _ string, _ bool,
 					_ StartBroadcasterFunc, _ RollbackFunc, _ ValidateResourcesFunc,
 				) (int64, error) {
 					assert.Equal(t, uri, name)
@@ -6534,7 +6535,7 @@ func TestRestoreExternalSnapshot_PreparationFailuresReleaseLocks(t *testing.T) {
 				}).Build()
 			defer mFinish.UnPatch()
 			sm := &snapshotManager{broker: newRestoreAbsentTargetBroker(t), snapshotMeta: &snapshotMeta{}}
-			id, err := sm.RestoreExternalSnapshot(context.Background(), uri, "target", "default", "",
+			id, err := sm.RestoreExternalSnapshot(context.Background(), uri, "target", "default", "", false,
 				func(context.Context, string, string) (broadcaster.BroadcastAPI, error) {
 					if stage == "phase zero lock" {
 						return nil, merr.ErrServiceUnavailable
