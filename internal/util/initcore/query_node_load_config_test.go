@@ -17,7 +17,6 @@
 package initcore
 
 import (
-	"errors"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
