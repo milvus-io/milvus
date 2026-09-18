@@ -58,6 +58,15 @@ func (r *writeRoute) split() bool {
 	return r != nil && r.table != nil
 }
 
+// modulus is the routing modulus rows are placed by: the table's for a split
+// collection, the shard count for one that has never been split.
+func (r *writeRoute) modulus() uint64 {
+	if r.split() {
+		return r.table.Modulus()
+	}
+	return uint64(len(r.vchannels))
+}
+
 // legacyWriteRoute is the route of a collection that has never been split.
 func legacyWriteRoute(vchannels []string) *writeRoute {
 	return &writeRoute{vchannels: vchannels, writable: vchannels}

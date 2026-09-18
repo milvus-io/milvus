@@ -3,20 +3,29 @@ package proxy
 import (
 	"math"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/routing"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // reassignAutoIDForStableIdempotency re-draws the auto ids of an idempotent
-// insert so that row offset i always lands on channelNames[i % n]. table is the
-// routing table of a split collection (channelNames are then the vchannels that
-// own a residue, in vchannel order), nil for one that has never been split.
-func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan, table *routing.ResidueTable) error {
-	if len(channelNames) <= 1 || len(it.insertMsg.GetRowIDs()) == 0 {
+// insert so that the id of row offset i has residue i % M, where M is the
+// routing modulus of route: the collection's modulus once it has been split,
+// its shard count before. Row offset i therefore lands on the shard owning
+// residue i % M, whatever ids a retry draws.
+//
+// Bucketing by residue, not by position in a channel list, is what keeps a
+// retry stable across a shard split: a split only refines residues (M stays,
+// or doubles, and i % 2M refines i % M), so a shard the split did not touch
+// owns exactly the offsets it owned before, and the offsets of the split shard
+// go to its targets, where the source's idempotency window answers for them
+// (see split_fence_idempotency.go). For a never-split collection, M is the
+// shard count and the residue of a key is its HashPK2Channels index, so this is
+// the legacy offset % shardNum bucketing bit for bit.
+func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, route *writeRoute) error {
+	modulus := route.modulus()
+	if modulus <= 1 || len(it.insertMsg.GetRowIDs()) == 0 {
 		return nil
 	}
 	if it.idempotencyKey == "" {
@@ -26,20 +35,12 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 		return merr.WrapErrServiceInternalMsg("id allocator is required to stabilize auto id shard assignment")
 	}
 
-	// The routing base must stay exactly the channel list returned by the channel
-	// manager: PK routing is index-based (HashPK2Channels only uses len(channels),
-	// then channelNames[idx]), and delete / the delete leg of upsert hash against
-	// that same unpermuted list. Reordering it here would map a PK to a different
-	// vchannel than delete later picks for the very same PK. A split collection
-	// routes by residue rather than by index, and its vchannel list is read
-	// again with its table on every write attempt.
-	it.vChannels = channelNames
+	it.vChannels = route.vchannels
 	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
-	if err := reassignAutoIDByOffsetChannels(
+	if err := reassignAutoIDByResidue(
 		it.insertMsg.RowIDs,
 		primaryFieldSchema.GetDataType(),
-		channelNames,
-		table,
+		modulus,
 		clusterID,
 		it.idAllocator.Alloc,
 	); err != nil {
@@ -71,56 +72,47 @@ func replacePrimaryFieldData(it *insertTask, primaryFieldSchema *schemapb.FieldS
 	it.insertMsg.FieldsData = append(it.insertMsg.FieldsData, primaryFieldData)
 }
 
-func reassignAutoIDByOffsetChannels(
+// reassignAutoIDByResidue replaces rowIDs so that the id of offset i has
+// residue i % modulus (see reassignAutoIDForStableIdempotency).
+func reassignAutoIDByResidue(
 	rowIDs []int64,
 	primaryDataType schemapb.DataType,
-	channelNames []vChan,
-	table *routing.ResidueTable,
+	modulus uint64,
 	clusterID uint64,
 	allocFunc func(uint32) (int64, int64, error),
 ) error {
-	numChannels := len(channelNames)
-	if len(rowIDs) == 0 || numChannels <= 1 {
+	if len(rowIDs) == 0 || modulus <= 1 {
 		return nil
 	}
 	if allocFunc == nil {
 		return merr.WrapErrServiceInternalMsg("id allocator is nil")
 	}
 
-	// Retry stability comes from the offset bucketing alone: offset%numChannels is
-	// evaluated against the caller's channel order, which is the collection's stored
-	// vchannel list. That order must not be permuted here, otherwise the resulting
-	// PK->vchannel map diverges from the one delete uses; see
-	// reassignAutoIDForStableIdempotency.
-	required := make([]int, numChannels)
+	required := make([]int, modulus)
 	for offset := range rowIDs {
-		required[offset%numChannels]++
+		required[uint64(offset)%modulus]++
 	}
 
-	buckets := make([][]int64, numChannels)
-	if err := appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames, table); err != nil {
+	buckets := make([][]int64, modulus)
+	if err := appendAutoIDCandidatesByResidue(buckets, rowIDs, primaryDataType, modulus); err != nil {
 		return err
 	}
-	// Each round allocates ids and routes them to buckets by PK hash, which
-	// normally fills every short bucket within a couple of rounds. Bound the loop
-	// so a pathological hash distribution cannot spin forever and keep burning the
+	// Each round allocates ids and files them by residue, which normally fills
+	// every short bucket within a couple of rounds. Bound the loop so a
+	// pathological hash distribution cannot spin forever and keep burning the
 	// global id space; fail loudly after a generous cap instead.
 	//
-	// COST (accepted by design): a candidate that hashes into an already-satisfied
+	// COST (accepted by design): a candidate that falls into an already-satisfied
 	// bucket is discarded, and each top-up round deliberately over-allocates
-	// (missing * numChannels) so that one round almost always suffices. Id
-	// amplification therefore grows with shard count and shrinks with batch size:
-	// ~1.01x for 100k rows over 4 shards, ~1.25x for 10k over 16, but ~21x for a
-	// 100-row insert over 64 shards, where the over-allocation dominates. Rounds
-	// stay at 1 in the common case, far below maxAutoIDStabilizeRounds. The id
-	// space is int64, so even the worst ratio is immaterial in absolute terms:
-	// 21x of a 100-row insert is ~2k ids. The alternatives do not work: deriving the
-	// shard from the row offset directly would break Delete/Upsert, whose
-	// index-based routing hashes the PK against the same channel list (the
-	// insert's row->shard assignment MUST equal hash(assignedPK)%%n), and
-	// deterministic PRNG-generated ids cannot guarantee global uniqueness. The
-	// id space is int64, so the burn is negligible; the extra RTT only applies
-	// to idempotency-enabled autoID collections.
+	// (missing * modulus) so that one round almost always suffices. Id
+	// amplification therefore grows with the modulus and shrinks with batch size:
+	// ~1.01x for 100k rows at M=4, ~1.25x for 10k at M=16, but ~21x for a 100-row
+	// insert at M=64, where the over-allocation dominates. The id space is int64,
+	// so the burn is negligible; the extra RTT only applies to idempotency-enabled
+	// autoID collections. The alternatives do not work: deriving the shard from
+	// the row offset directly would break Delete/Upsert, which route the PK by its
+	// own hash, and deterministic PRNG-generated ids cannot guarantee global
+	// uniqueness.
 	const maxAutoIDStabilizeRounds = 256
 	for round := 0; ; round++ {
 		missing := missingAutoIDBucketCount(required, buckets)
@@ -128,12 +120,9 @@ func reassignAutoIDByOffsetChannels(
 			break
 		}
 		if round >= maxAutoIDStabilizeRounds {
-			return merr.WrapErrServiceInternalMsg("failed to stabilize idempotent autoID assignment: still short %d candidate(s) across %d channels after %d allocation rounds", missing, numChannels, maxAutoIDStabilizeRounds)
+			return merr.WrapErrServiceInternalMsg("failed to stabilize idempotent autoID assignment: still short %d candidate(s) across %d residues after %d allocation rounds", missing, modulus, maxAutoIDStabilizeRounds)
 		}
-		allocCount := uint64(missing) * uint64(numChannels)
-		if allocCount < uint64(numChannels) {
-			allocCount = uint64(numChannels)
-		}
+		allocCount := uint64(missing) * modulus
 		if allocCount > math.MaxUint32 {
 			allocCount = math.MaxUint32
 		}
@@ -141,48 +130,41 @@ func reassignAutoIDByOffsetChannels(
 		if err != nil {
 			return err
 		}
-		if err := appendAutoIDRangeCandidates(buckets, begin, end, primaryDataType, channelNames, table); err != nil {
+		if err := appendAutoIDRangeCandidates(buckets, begin, end, primaryDataType, modulus); err != nil {
 			return err
 		}
 	}
 
-	cursor := make([]int, numChannels)
+	cursor := make([]int, modulus)
 	for offset := range rowIDs {
-		bucket := offset % numChannels
+		bucket := uint64(offset) % modulus
 		rowIDs[offset] = buckets[bucket][cursor[bucket]]
 		cursor[bucket]++
 	}
 	return nil
 }
 
-func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, channelNames []vChan, table *routing.ResidueTable) error {
+func appendAutoIDRangeCandidates(buckets [][]int64, begin, end int64, primaryDataType schemapb.DataType, modulus uint64) error {
 	rowIDs := make([]int64, 0, end-begin)
 	for id := begin; id < end; id++ {
 		rowIDs = append(rowIDs, id)
 	}
-	return appendAutoIDCandidatesByChannels(buckets, rowIDs, primaryDataType, channelNames, table)
+	return appendAutoIDCandidatesByResidue(buckets, rowIDs, primaryDataType, modulus)
 }
 
-func appendAutoIDCandidatesByChannels(buckets [][]int64, rowIDs []int64, primaryDataType schemapb.DataType, channelNames []vChan, table *routing.ResidueTable) error {
+// appendAutoIDCandidatesByResidue files every candidate id under the residue
+// of the primary key it becomes.
+func appendAutoIDCandidatesByResidue(buckets [][]int64, rowIDs []int64, primaryDataType schemapb.DataType, modulus uint64) error {
 	ids, err := autoIDCandidatesToPrimaryIDs(rowIDs, primaryDataType)
 	if err != nil {
 		return err
 	}
-	channel2RowOffsets, err := assignChannelsByPK(table, ids, channelNames, &msgstream.InsertMsg{
-		InsertRequest: &msgpb.InsertRequest{},
-	})
+	residues, err := routing.PKResidues(ids, modulus)
 	if err != nil {
 		return err
 	}
-	channelIndex := make(map[string]int, len(channelNames))
-	for idx, channelName := range channelNames {
-		channelIndex[channelName] = idx
-	}
-	for _, channelName := range channelNames {
-		bucket := channelIndex[channelName]
-		for _, offset := range channel2RowOffsets[channelName] {
-			buckets[bucket] = append(buckets[bucket], rowIDs[offset])
-		}
+	for i, residue := range residues {
+		buckets[residue] = append(buckets[residue], rowIDs[i])
 	}
 	return nil
 }
