@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
 // ActionType classifies the intent of an UpdateAction.
@@ -75,9 +76,9 @@ type SegmentEntry struct {
 	Segment *datapb.SegmentInfo
 	// Binlogs carries per-segment binlog increments for an ActionUpdate with
 	// AlterEncoding (the legacy AlterSegments encoding). Compaction's
-	// AlterSegment leaves it nil (a retirement rewrite); the batch publication
-	// path composes it so the staged members' binlogs persist atomically with
-	// the segment record and the segment change group.
+	// AlterSegment leaves it nil (a retirement rewrite); flush and batch
+	// publication compose it so binlogs persist atomically with the segment
+	// record and the corresponding DataView or segment change group.
 	Binlogs []BinlogsIncrement
 	// AlterEncoding selects the legacy AlterSegments key/value encoding for an
 	// ActionUpdate instead of the record-only SaveDroppedSegmentsInBatch
@@ -182,6 +183,14 @@ type SegmentChangeGroupEntry struct {
 	GroupID      int64
 }
 
+// DataViewEntry targets a persisted DataView snapshot. An ActionAdd writes the
+// snapshot under its immutable version key; the entry is composed into a
+// catalog.Update together with the SegmentMeta actions of the same mutation so
+// both catalogs commit atomically (flush). Only ActionAdd is wired.
+type DataViewEntry struct {
+	DataView *viewpb.DataViewOfCollection
+}
+
 func (SegmentEntry) isEntry()               {}
 func (SegmentIndexEntry) isEntry()          {}
 func (ChannelEntry) isEntry()               {}
@@ -194,6 +203,7 @@ func (PartitionStatsVersionEntry) isEntry() {}
 func (ReplicaEntry) isEntry()               {}
 func (ReplicaKeyEntry) isEntry()            {}
 func (SegmentChangeGroupEntry) isEntry()    {}
+func (DataViewEntry) isEntry()              {}
 
 // UpdateAction is a single composable write against a metastore catalog,
 // applied via that catalog's composite Update. Type and Entry together
@@ -247,6 +257,13 @@ func AlterSegment(seg *datapb.SegmentInfo) UpdateAction {
 // MarkChannelDropped returns an UpdateAction that marks channel as removed.
 func MarkChannelDropped(channel string) UpdateAction {
 	return UpdateAction{Type: ActionUpdate, Entry: ChannelEntry{Channel: channel}}
+}
+
+// SaveDataView returns an UpdateAction that persists a DataView snapshot under
+// its immutable version key, composable into the same catalog.Update as the
+// SegmentMeta actions of a mutation so both catalogs commit atomically.
+func SaveDataView(dataView *viewpb.DataViewOfCollection) UpdateAction {
+	return UpdateAction{Type: ActionAdd, Entry: DataViewEntry{DataView: dataView}}
 }
 
 // CreateCollection returns an UpdateAction that creates coll.

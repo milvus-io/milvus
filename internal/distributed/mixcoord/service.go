@@ -18,6 +18,7 @@ package grpcmixcoord
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -57,12 +58,14 @@ import (
 
 // Server grpc wrapper
 type Server struct {
-	mixCoord    types.MixCoordComponent
-	grpcServer  *grpc.Server
-	listener    *netutil.NetListener
-	grpcErrChan chan error
+	mixCoord       types.MixCoordComponent
+	recoveryWaiter recoveryWaiter
+	grpcServer     *grpc.Server
+	listener       *netutil.NetListener
+	grpcErrChan    chan error
 
-	grpcWG sync.WaitGroup
+	grpcWG    sync.WaitGroup
+	grpcReady atomic.Bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -75,16 +78,21 @@ type Server struct {
 	mixCoordClient types.MixCoordClient
 }
 
+type recoveryWaiter interface {
+	WaitForRecovery(ctx context.Context) error
+}
+
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx) //nolint:gosec
 	s := &Server{
 		ctx:         ctx1,
 		cancel:      cancel,
-		grpcErrChan: make(chan error),
+		grpcErrChan: make(chan error, 1),
 	}
 
-	var err error
-	s.mixCoord, err = mixcoord.NewMixCoordServer(ctx, factory)
+	mixCoordServer, err := mixcoord.NewMixCoordServer(ctx, factory)
+	s.mixCoord = mixCoordServer
+	s.recoveryWaiter = mixCoordServer
 	mixCoordClient, _ := mix.NewClient(ctx1)
 	s.mixCoordClient = mixCoordClient
 	if err != nil {
@@ -94,6 +102,12 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 }
 
 func (s *Server) Prepare() error {
+	// The listener is bound here (so the address can be advertised before
+	// recovery) but Serve is deferred until after the coordinator recovery
+	// barrier (startGrpcAfterRecovery). During recovery or while standby, the
+	// port accepts TCP connections but never answers HTTP/2: clients observe
+	// the dial timeout, not an immediate connection refused, and a TCP-socket
+	// liveness probe reports the never-accepting standby as up.
 	listener, err := netutil.NewListener(
 		netutil.OptIP(paramtable.Get().RootCoordGrpcServerCfg.IP),
 		netutil.OptPort(paramtable.Get().RootCoordGrpcServerCfg.Port.GetAsInt()),
@@ -167,24 +181,12 @@ func (s *Server) init() error {
 	}
 	mlog.Info(s.ctx, "MixCoord init done ...")
 
-	err = s.startGrpc()
-	if err != nil {
-		return err
-	}
-	mlog.Info(s.ctx, "grpc init done ...")
+	s.initGrpcServer()
+	mlog.Info(s.ctx, "grpc server initialized ...")
 	return nil
 }
 
-func (s *Server) startGrpc() error {
-	s.grpcWG.Add(1)
-	go s.startGrpcLoop()
-	// wait for grpc server loop start
-	err := <-s.grpcErrChan
-	return err
-}
-
-func (s *Server) startGrpcLoop() {
-	defer s.grpcWG.Done()
+func (s *Server) initGrpcServer() {
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -195,11 +197,6 @@ func (s *Server) startGrpcLoop() {
 		Time:    60 * time.Second, // Ping the client if it is idle for 60 seconds to ensure the connection is still active
 		Timeout: 10 * time.Second, // Wait 10 second for the ping ack before assuming the connection is dead
 	}
-
-	mlog.Info(s.ctx, "start grpc ", mlog.Int("port", s.listener.Port()))
-
-	ctx, cancel := context.WithCancel(s.ctx)
-	defer cancel()
 
 	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
@@ -237,10 +234,66 @@ func (s *Server) startGrpcLoop() {
 	querypb.RegisterQueryCoordServer(s.grpcServer, s)
 	datapb.RegisterDataCoordServer(s.grpcServer, s)
 	s.mixCoord.RegisterStreamingCoordGRPCService(s.grpcServer)
+}
+
+func (s *Server) startGrpc() error {
+	s.grpcWG.Add(1)
+	go s.startGrpcLoop()
+	// wait for grpc server loop start
+	select {
+	case err := <-s.grpcErrChan:
+		if err == nil {
+			s.grpcReady.Store(true)
+		}
+		return err
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	}
+}
+
+func (s *Server) startGrpcLoop() {
+	defer s.grpcWG.Done()
+	mlog.Info(s.ctx, "start grpc", mlog.Int("port", s.listener.Port()))
+
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(s.listener); err != nil {
-		s.grpcErrChan <- err
+		select {
+		case s.grpcErrChan <- err:
+		case <-s.ctx.Done():
+		}
 	}
+}
+
+func (s *Server) startGrpcAfterRecovery(waiter recoveryWaiter) {
+	if err := waitForRecoveryAndStart(s.ctx, waiter, s.startGrpc); err != nil {
+		if s.ctx.Err() == nil {
+			mlog.Error(s.ctx, "failed to start MixCoord grpc server after recovery", mlog.Err(err))
+			// The failure happens after Run() has already returned, so it
+			// cannot propagate through the normal startup path. Stop the
+			// component from a separate goroutine (Stop waits on grpcWG, which
+			// includes this one) and terminate the process with a fatal exit
+			// instead of panicking from this detached goroutine.
+			go func() {
+				if err := s.Stop(); err != nil {
+					mlog.Warn(s.ctx, "failed to cleanly stop MixCoord after grpc startup failure", mlog.Err(err))
+				}
+				mlog.Cleanup()
+				os.Exit(1)
+			}()
+		}
+	}
+}
+
+func waitForRecoveryAndStart(ctx context.Context, waiter recoveryWaiter, start func() error) error {
+	if err := waiter.WaitForRecovery(ctx); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return start()
 }
 
 func (s *Server) start() error {
@@ -255,6 +308,11 @@ func (s *Server) start() error {
 		return err
 	}
 
+	s.grpcWG.Add(1)
+	go func() {
+		defer s.grpcWG.Done()
+		s.startGrpcAfterRecovery(s.recoveryWaiter)
+	}()
 	return nil
 }
 
@@ -281,8 +339,19 @@ func (s *Server) Stop() (err error) {
 		mlog.Info(s.ctx, "graceful stop rootCoord done")
 	}
 
+	// Unblock the startup goroutine when the server is stopped before recovery
+	// finishes, for example while it is still in standby. Cancel before stopping
+	// gRPC so a concurrent delayed Serve is treated as shutdown, not startup
+	// failure.
+	s.cancel()
 	if s.grpcServer != nil {
-		utils.GracefulStopGRPCServer(s.grpcServer)
+		if s.grpcReady.Load() {
+			utils.GracefulStopGRPCServer(s.grpcServer)
+		} else {
+			// No external RPC has been admitted yet, so a direct stop avoids
+			// racing GracefulStop with the delayed Serve call.
+			s.grpcServer.Stop()
+		}
 	}
 	s.grpcWG.Wait()
 
@@ -293,7 +362,6 @@ func (s *Server) Stop() (err error) {
 		}
 	}
 
-	s.cancel()
 	if s.listener != nil {
 		s.listener.Close()
 	}

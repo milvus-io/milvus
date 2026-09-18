@@ -96,7 +96,7 @@ func (c *DDLCallback) dropPartitionV1AckCallback(ctx context.Context, result mes
 			continue
 		}
 		// drop all historical partition data when the vchannel is acknowledged.
-		if err := c.mixCoord.NotifyDropPartition(ctx, vchannel, []int64{header.PartitionId}); err != nil {
+		if err := c.mixCoord.NotifyDropPartition(ctx, vchannel, header.CollectionId, []int64{header.PartitionId}); err != nil {
 			return err
 		}
 	}
