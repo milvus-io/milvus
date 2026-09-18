@@ -315,13 +315,23 @@ func splittableCollection(collection *collectionInfo) bool {
 //
 // A TEXT field is stored through LOB references the rewrite writer does not
 // carry, so every rewrite plan of such a collection would fail and the split,
-// which cannot abort past its fence, would never finish. Rootcoord refuses to
-// add a TEXT field while a split is in flight (Splitting or Creating shards),
-// so a collection refused here is refused on every check from planning to the
-// write switch.
+// which cannot abort past its fence, would never finish. Every field the
+// writer writes is looked at (typeutil.GetAllFieldSchemas), struct sub-fields
+// included.
+//
+// A collection is checked at the trigger, at planning, at target allocation
+// and under the collection's keys at the write switch; a TEXT field appearing
+// before the fence aborts the task (abortTask, abortUnfencedTask). From the
+// fence on, rootcoord refuses to add a TEXT field -- through AddCollectionField
+// or AlterCollectionSchema -- while any shard is Splitting or Creating.
 func splitRefusalReason(schema *schemapb.CollectionSchema) string {
-	if typeutil.HasTextField(schema) {
-		return "the collection has a TEXT field, which a shard split rewrite cannot carry yet"
+	if schema == nil {
+		return ""
+	}
+	for _, field := range typeutil.GetAllFieldSchemas(schema) {
+		if field.GetDataType() == schemapb.DataType_Text {
+			return "the collection has a TEXT field, which a shard split rewrite cannot carry yet"
+		}
 	}
 	return ""
 }

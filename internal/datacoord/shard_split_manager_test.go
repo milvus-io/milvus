@@ -324,6 +324,14 @@ func TestSplittableCollection(t *testing.T) {
 	assert.Equal(t, "the collection has a TEXT field, which a shard split rewrite cannot carry yet",
 		splitRefusalReason(splitTestSchemaWithText()))
 	assert.Empty(t, splitRefusalReason(splitTestSchema(false)))
+	assert.Empty(t, splitRefusalReason(nil))
+	// Every field the writer writes is looked at, struct sub-fields included.
+	nested := splitTestSchema(false)
+	nested.StructArrayFields = []*schemapb.StructArrayFieldSchema{{
+		Name:   "st",
+		Fields: []*schemapb.FieldSchema{{FieldID: 103, Name: "st_doc", DataType: schemapb.DataType_Text}},
+	}}
+	assert.NotEmpty(t, splitRefusalReason(nested))
 }
 
 // splitTestSchemaWithText is splitTestSchema with a TEXT field.
