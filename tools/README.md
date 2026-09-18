@@ -39,7 +39,22 @@
 
    # OpenAI API
    export OPENAI_API_KEY=sk-...
+
+   # MiniMax API
+   export MINIMAX_API_KEY=your-minimax-key
+   export MINIMAX_MODEL=MiniMax-M3
+   export MINIMAX_API_BASE_URL=https://api.minimax.io/v1
    ```
+
+   `MINIMAX_MODEL` defaults to `MiniMax-M3`; `MiniMax-M2.7` is also supported.
+   Set `MINIMAX_API_BASE_URL` to the API base for your region and protocol:
+
+   | Protocol | International | China |
+   |---|---|---|
+   | OpenAI-compatible | `https://api.minimax.io/v1` | `https://api.minimaxi.com/v1` |
+   | Anthropic-compatible | `https://api.minimax.io/anthropic` | `https://api.minimaxi.com/anthropic` |
+
+   `mgit.py` appends `/chat/completions` or `/v1/messages` to these API bases.
 
    Add to `~/.bashrc` or `~/.zshrc` for persistence:
    ```bash
@@ -278,7 +293,7 @@ git config --global user.email "your.email@example.com"
 ```
 
 **API rate limit:**
-Wait and retry, or switch to another AI provider (Gemini ↔ Claude ↔ OpenAI)
+Wait and retry, or switch to another AI provider (Gemini ↔ Claude ↔ OpenAI ↔ MiniMax)
 
 **Format tools not found:**
 Ensure you're in the Milvus repository root, or skip formatting step
@@ -289,7 +304,8 @@ Ensure you're in the Milvus repository root, or skip formatting step
 2. **Gemini API** (if `GEMINI_API_KEY` set)
 3. **Claude API** (if `ANTHROPIC_API_KEY` set)
 4. **OpenAI API** (if `OPENAI_API_KEY` set)
-5. **Manual Input** (if no AI available)
+5. **MiniMax API** (if `MINIMAX_API_KEY` set)
+6. **Manual Input** (if no AI available)
 
 ### Contributing
 
