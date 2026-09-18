@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -147,6 +149,46 @@ func (m *messageImpl) WithWALTerm(term int64) MutableMessage {
 	return m
 }
 
+// SetAppendExtra records an extra append response on the message itself, so
+// the record in the WAL carries the same extra the producer receives in its
+// append result: a consumer-side ack of the record can then report it too (read
+// back with AppendExtraOf). A nil extra clears it. A MutableMessage that is not
+// this package's implementation carries no properties to set, and is left
+// unchanged.
+// !!! preserved for streaming system internal usage, don't call it outside of streaming system.
+func SetAppendExtra(msg MutableMessage, extra *anypb.Any) {
+	if impl, ok := msg.(interface{ setAppendExtra(*anypb.Any) }); ok {
+		impl.setAppendExtra(extra)
+	}
+}
+
+func (m *messageImpl) setAppendExtra(extra *anypb.Any) {
+	if extra == nil {
+		m.properties.Delete(messageAppendExtra)
+		return
+	}
+	value, err := EncodeProto(extra)
+	if err != nil {
+		panic("should not happen on append extra proto")
+	}
+	m.properties.Set(messageAppendExtra, value)
+}
+
+// AppendExtraOf returns the extra append response recorded on msg by
+// SetAppendExtra, or nil when the message carries none (or carries one that
+// cannot be decoded, which a reader that requires it must treat as missing).
+func AppendExtraOf(msg BasicMessage) *anypb.Any {
+	value, ok := msg.Properties().Get(messageAppendExtra)
+	if !ok {
+		return nil
+	}
+	extra := &anypb.Any{}
+	if err := DecodeProto(value, extra); err != nil {
+		return nil
+	}
+	return extra
+}
+
 func (m *messageImpl) injectTraceContext(ctx context.Context) {
 	injectTraceContext(ctx, m.properties)
 }
@@ -236,13 +278,19 @@ func (m *messageImpl) WithBroadcastID(id uint64) BroadcastMutableMessage {
 }
 
 // OverwriteReplicateVChannel overwrites the vchannel of the replicate message.
-func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string) {
+//
+// It returns an error only for a malformed BROADCAST HEADER, which arrives from
+// another cluster and must therefore fail the message rather than the process:
+// the replicate stream re-delivers the same bytes after every reconnect, so a
+// panic here is a crash loop, not a diagnosis. The other refusals stay panics --
+// they can only be reached by a local caller passing the wrong arguments.
+func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChannels ...[]string) error {
 	if !m.properties.Exist(messageVChannel) {
 		panic("vchannel not set in properties of message")
 	}
 	m.properties.Set(messageVChannel, vchannel)
 	if !m.properties.Exist(messageBroadcastHeader) {
-		return
+		return nil
 	}
 	if len(broadcastVChannels) == 0 {
 		panic("broadcast vchannels not set when overwrite replicate vchannel")
@@ -250,6 +298,40 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 	bh := m.broadcastHeader()
 	if len(bh.Vchannels) != len(broadcastVChannels[0]) {
 		panic("broadcast vchannels length mismatch")
+	}
+	// AppendFirstVchannels names a SUBSET of Vchannels, so it is rewritten
+	// through the very mapping the caller just supplied for that list, position
+	// by position, rather than through a second mapping that could disagree
+	// with it. Leaving it in the source cluster's namespace would leave the
+	// secondary's append gate naming vchannels that exist nowhere in this
+	// cluster -- it would wait on them forever.
+	if len(bh.AppendFirstVchannels) > 0 {
+		mapping := make(map[string]string, len(bh.Vchannels))
+		for idx, vchannel := range bh.Vchannels {
+			mapping[vchannel] = broadcastVChannels[0][idx]
+		}
+		appendFirst := make([]string, 0, len(bh.AppendFirstVchannels))
+		for _, vchannel := range bh.AppendFirstVchannels {
+			mapped, ok := mapping[vchannel]
+			if !ok {
+				// A broadcast header whose append-first list is not a subset of
+				// its own vchannel list is malformed at the source; there is no
+				// name to map it to. Refuse the message -- carrying a foreign
+				// name through would leave the secondary's append gate waiting
+				// on a vchannel that exists nowhere here -- but refuse it as an
+				// error, since nothing local produced this header.
+				// System-classed: the header was written by the primary
+				// cluster's broadcaster, so a malformed one is a replication
+				// contract violation -- a Milvus bug, never request content. The
+				// replicate service refuses such a header itself, once, as a
+				// ReplicateViolation before calling this; this return only
+				// catches a caller that skipped that check.
+				return merr.WrapErrServiceInternalMsg(
+					"append first vchannel %s is not one of the broadcast vchannels %v", vchannel, bh.Vchannels)
+			}
+			appendFirst = append(appendFirst, mapped)
+		}
+		bh.AppendFirstVchannels = appendFirst
 	}
 	bh.Vchannels = broadcastVChannels[0]
 	bhVal, err := EncodeProto(bh)
@@ -264,6 +346,7 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 		txnCtx.Keepalive = TxnKeepaliveInfinite
 		m.WithTxnContext(*txnCtx)
 	}
+	return nil
 }
 
 // OverwriteBroadcastHeader overwrites the broadcast header of the message.
@@ -549,9 +632,13 @@ func (m *immutableMessageImpl) IntoBroadcastMutableMessage() BroadcastMutableMes
 	if !m.properties.Exist(messageBroadcastHeader) {
 		panic("the message is not generated by broadcast message")
 	}
+	properties := m.properties.Clone()
+	// The append extra belongs to the one replica the WAL appended, not to the
+	// broadcast every replica is split from again.
+	properties.Delete(messageAppendExtra)
 	return &messageImpl{
 		payload:    m.payload,
-		properties: m.properties.Clone(),
+		properties: properties,
 	}
 }
 

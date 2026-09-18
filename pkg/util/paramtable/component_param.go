@@ -6081,6 +6081,16 @@ type dataCoordConfig struct {
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
 
+	// --- SHARD SPLIT ---
+	ShardSplitEnable             ParamItem `refreshable:"true"`
+	ShardSplitCheckInterval      ParamItem `refreshable:"true"`
+	ShardSplitTaskInterval       ParamItem `refreshable:"true"`
+	ShardSplitMaxShardSize       ParamItem `refreshable:"true"`
+	ShardSplitMaxShardRows       ParamItem `refreshable:"true"`
+	ShardSplitMaxConcurrentTasks ParamItem `refreshable:"true"`
+	ShardSplitMinSiblingRatio    ParamItem `refreshable:"true"`
+	ShardSplitRewriteBatchSize   ParamItem `refreshable:"true"`
+
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
 	DiskSegmentMaxSize             ParamItem `refreshable:"true"`
@@ -6477,6 +6487,86 @@ Compaction merges small-size segments into a large segment, and clears the entit
 		Export: true,
 	}
 	p.EnableCompaction.Init(base.mgr)
+
+	p.ShardSplitEnable = ParamItem{
+		Key:          "dataCoord.shardSplit.enable",
+		Version:      "3.0.0",
+		DefaultValue: "false",
+		Doc: `Whether a new shard split may be issued. While it is off, the split builder refuses to issue one.
+It never affects a split already written to the WAL: that split is always carried through, on every cluster.`,
+		Export: true,
+	}
+	p.ShardSplitEnable.Init(base.mgr)
+
+	p.ShardSplitCheckInterval = ParamItem{
+		Key:          "dataCoord.shardSplit.checkInterval",
+		Version:      "3.0.0",
+		DefaultValue: "3600",
+		Doc:          "The interval in seconds the shard split trigger inspects the per-shard statistics.",
+		Export:       true,
+	}
+	p.ShardSplitCheckInterval.Init(base.mgr)
+
+	p.ShardSplitTaskInterval = ParamItem{
+		Key:          "dataCoord.shardSplit.taskInterval",
+		Version:      "3.0.0",
+		DefaultValue: "10",
+		Doc:          "The interval in seconds the shard split manager advances every split task it holds by one step.",
+		Export:       true,
+	}
+	p.ShardSplitTaskInterval.Init(base.mgr)
+
+	p.ShardSplitMaxShardSize = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardSize",
+		Version:      "3.0.0",
+		DefaultValue: "2048",
+		Doc:          "The data size of one shard that triggers a split, unit: GB.",
+		Export:       true,
+	}
+	p.ShardSplitMaxShardSize.Init(base.mgr)
+
+	p.ShardSplitMaxShardRows = ParamItem{
+		Key:          "dataCoord.shardSplit.maxShardRows",
+		Version:      "3.0.0",
+		DefaultValue: "500000000",
+		Doc:          "The row count of one shard that triggers a split.",
+		Export:       true,
+	}
+	p.ShardSplitMaxShardRows.Init(base.mgr)
+
+	p.ShardSplitMaxConcurrentTasks = ParamItem{
+		Key:          "dataCoord.shardSplit.maxConcurrentTasks",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Doc:          "The cluster-wide maximum number of shard split tasks that are not Done or Aborted.",
+		Export:       true,
+	}
+	p.ShardSplitMaxConcurrentTasks.Init(base.mgr)
+
+	p.ShardSplitMinSiblingRatio = ParamItem{
+		Key:          "dataCoord.shardSplit.minSiblingRatio",
+		Version:      "3.0.0",
+		DefaultValue: "0.05",
+		Doc: `Guard against re-splitting a shard that its previous doubling did not relieve.
+A doubling cuts a shard's keys on the next hash bit, so its two halves should end up
+comparable in size. They do not if one primary key is inserted enough times to dominate
+the shard: every copy hashes the same, one half takes everything, and splitting it again
+burns a full rewrite for nothing. The trigger refuses to double a shard whose sibling
+half is smaller than this fraction of it, and warns instead. Set to 0 to disable.`,
+		Export: false,
+	}
+	p.ShardSplitMinSiblingRatio.Init(base.mgr)
+
+	p.ShardSplitRewriteBatchSize = ParamItem{
+		Key:          "dataCoord.shardSplit.rewriteBatchSize",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Doc: `The largest number of rewrite plans one shard split keeps in flight. A split rewrites its
+source one flushed segment per plan; each plan holds its input segment as compacting until it
+commits, and the compaction scheduler's slots bound how many actually run at once.`,
+		Export: false,
+	}
+	p.ShardSplitRewriteBatchSize.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",

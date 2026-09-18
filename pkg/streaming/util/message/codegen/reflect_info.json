@@ -10,12 +10,14 @@
         "FieldMaskCollectionDescription": "description",
         "FieldMaskCollectionSchema": "schema",
         "FieldMaskCollectionProperties": "properties",
-        "FieldMaskCollectionConsistencyLevel": "consistency_level"
+        "FieldMaskCollectionConsistencyLevel": "consistency_level",
+        "FieldMaskCollectionShardSplitRouting": "shard_split_routing"
     },
     "ExtraExportTypes": [
         "messagespb.PartitionSegmentAssignment",
         "messagespb.SegmentAssignment",
         "messagespb.ManualFlushExtraResponse",
+        "messagespb.SplitShardExtraResponse",
         "messagespb.RoleBinding",
         "messagespb.AlterLoadConfigOfAlterDatabase",
         "messagespb.AlterLoadConfigOfAlterCollection",
@@ -132,6 +134,16 @@
             },
             "MessageTypeWithVersion": {
                 "MessageType": "MessageTypeRollbackImport",
+                "Version": 2
+            }
+        },
+        {
+            "MessageSpecializedType": {
+                "HeaderType": "messagespb.SplitShardMessageHeader",
+                "BodyType": "messagespb.SplitShardMessageBody"
+            },
+            "MessageTypeWithVersion": {
+                "MessageType": "MessageTypeSplitShard",
                 "Version": 2
             }
         },

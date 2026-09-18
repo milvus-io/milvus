@@ -45,6 +45,7 @@ var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration
 	datapb.CompactionType_MixCompaction:               30 * time.Minute,
 	datapb.CompactionType_Level0DeleteCompaction:      30 * time.Minute,
 	datapb.CompactionType_ClusteringCompaction:        60 * time.Minute,
+	datapb.CompactionType_HashSplitCompaction:         60 * time.Minute,
 	datapb.CompactionType_SortCompaction:              20 * time.Minute,
 	datapb.CompactionType_BumpSchemaVersionCompaction: 30 * time.Minute,
 }
@@ -89,6 +90,21 @@ type compactionInspector struct {
 	handler          Handler
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
+	// isChannelSplitting reports whether a shard split that is not Done names
+	// the channel as its source or a target; nil when no split manager is
+	// wired. Such a channel takes no compaction but the split's own
+	// (frozenBySplit).
+	isChannelSplitting func(channel string) bool
+	// compactionEnabled is dataCoord.enableCompaction as read when the
+	// inspector is built (the switch is not refreshable). The schedule loop
+	// runs either way, for the rewrite of a shard split already in the WAL;
+	// with the switch off it admits only those rewrites.
+	compactionEnabled bool
+	// isChannelSplitTarget reports whether such a split names the channel as
+	// a target and none names it as its source; nil when no split manager is
+	// wired. The sort of a rewrite output is let through there
+	// (sortsRewriteOutputsOnTarget).
+	isChannelSplitTarget func(channel string) bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -184,16 +200,17 @@ func newCompactionInspector(meta CompactionMeta,
 ) *compactionInspector {
 	capacity := paramtable.Get().DataCoordCfg.CompactionTaskQueueCapacity.GetAsInt()
 	return &compactionInspector{
-		queueTasks:       NewCompactionQueue(capacity, getPrioritizer()),
-		meta:             meta,
-		allocator:        allocator,
-		stopCh:           make(chan struct{}),
-		executingTasks:   make(map[int64]CompactionTask),
-		cleaningTasks:    make(map[int64]CompactionTask),
-		handler:          handler,
-		scheduler:        scheduler,
-		analyzeScheduler: analyzeScheduler,
-		ievm:             ievm,
+		queueTasks:        NewCompactionQueue(capacity, getPrioritizer()),
+		meta:              meta,
+		allocator:         allocator,
+		stopCh:            make(chan struct{}),
+		executingTasks:    make(map[int64]CompactionTask),
+		cleaningTasks:     make(map[int64]CompactionTask),
+		handler:           handler,
+		scheduler:         scheduler,
+		analyzeScheduler:  analyzeScheduler,
+		ievm:              ievm,
+		compactionEnabled: paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool(),
 	}
 }
 
@@ -224,13 +241,32 @@ func (c *compactionInspector) schedule() []CompactionTask {
 	clusterChannelExcludes := typeutil.NewSet[string]()
 	mixLabelExcludes := typeutil.NewSet[string]()
 	clusterLabelExcludes := typeutil.NewSet[string]()
+	// A shard split's rewrite never runs next to any other compaction on its
+	// channel: splitChannels holds the channels running a rewrite, and
+	// otherChannels those running anything else. The split's freeze and its
+	// preemption at the fence keep other compactions off the source already;
+	// the scheduler holds the rule too. Rewrites of one source run together:
+	// each has its own input, and their outputs land on the targets, where
+	// nothing else runs during the split but the sort of an output already
+	// committed, a segment no rewrite touches again.
+	splitChannels := typeutil.NewSet[string]()
+	otherChannels := typeutil.NewSet[string]()
+	markChannel := func(t CompactionTask) {
+		if t.GetTaskProto().GetType() == datapb.CompactionType_HashSplitCompaction {
+			splitChannels.Insert(t.GetTaskProto().GetChannel())
+		} else {
+			otherChannels.Insert(t.GetTaskProto().GetChannel())
+		}
+	}
 
 	c.executingGuard.RLock()
 	for _, t := range c.executingTasks {
+		markChannel(t)
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction,
+			datapb.CompactionType_HashSplitCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -256,6 +292,22 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		if err != nil {
 			break // 1. no more task to schedule
 		}
+		if !c.compactionEnabled && t.GetTaskProto().GetType() != datapb.CompactionType_HashSplitCompaction {
+			// Compaction is off: only a shard split's rewrite runs. Anything
+			// else left in the queue, such as a task persisted before a
+			// restart, waits for the switch to be turned back on.
+			excluded = append(excluded, t)
+			continue
+		}
+		if channel := t.GetTaskProto().GetChannel(); t.GetTaskProto().GetType() == datapb.CompactionType_HashSplitCompaction {
+			if otherChannels.Contain(channel) {
+				excluded = append(excluded, t)
+				continue
+			}
+		} else if splitChannels.Contain(channel) {
+			excluded = append(excluded, t)
+			continue
+		}
 
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
@@ -266,7 +318,8 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction,
+			datapb.CompactionType_HashSplitCompaction:
 			// BumpSchemaVersionCompaction shares the same exclusion rules as Mix/Sort:
 			// - Channel-level mutual exclusion with L0 (L0 may write delta logs to any segment on the channel)
 			// - Label-level exclusion registered for Clustering awareness
@@ -289,6 +342,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			selected = append(selected, t)
 		}
 
+		markChannel(t)
 		c.executingGuard.Lock()
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.scheduler.Enqueue(t)
@@ -595,6 +649,10 @@ func (c *compactionInspector) getCompactionTask(planID int64) CompactionTask {
 
 func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
+	if c.frozenBySplit(task) {
+		log.RatedInfo(context.TODO(), rate.Limit(60), "channel is splitting, reject compaction until the split is done", mlog.String("channel", task.GetChannel()))
+		return merr.WrapErrCompactionPlanConflict("channel " + task.GetChannel() + " is splitting")
+	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		// Conflict is normal
@@ -633,7 +691,10 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction,
+		datapb.CompactionType_HashSplitCompaction:
+		// A shard split rewrite runs the mix task's lifecycle; only the plan it
+		// builds and the commit it makes differ.
 		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = newL0CompactionTask(t, c.allocator, c.meta)

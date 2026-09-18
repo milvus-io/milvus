@@ -35,6 +35,13 @@ type (
 	AllocVChannelParam struct {
 		CollectionID int64
 		Num          int
+		// ExistingVChannels is the collection's current vchannels, empty at
+		// create-collection time. When vchannels are added to an existing
+		// collection (a shard split's targets), the pchannels they occupy are
+		// excluded, which keeps a collection at most one vchannel per pchannel,
+		// and the shard indexes continue after the largest one listed, so a
+		// vchannel name is never reused.
+		ExistingVChannels []string
 	}
 
 	WatchChannelAssignmentsCallbackParam struct {
@@ -391,21 +398,54 @@ func (cm *ChannelManager) CurrentPChannelsView() *PChannelView {
 
 // AllocVirtualChannels allocates virtual channels for a collection.
 // Only channels that are available in replication are considered.
+// When param.ExistingVChannels is set (vchannels added to an existing
+// collection, e.g. a shard split's targets), the pchannels the collection
+// already occupies are excluded and the shard indexes continue after the
+// largest one listed, so a vchannel name is never reused.
 func (cm *ChannelManager) AllocVirtualChannels(ctx context.Context, param AllocVChannelParam) ([]string, error) {
 	cm.cond.L.Lock()
 	defer cm.cond.L.Unlock()
 
+	occupied := make(map[string]struct{}, len(param.ExistingVChannels))
+	nextShardIdx := 0
+	for _, vchannel := range param.ExistingVChannels {
+		// ParseVChannel validates the whole name, so a malformed vchannel is
+		// refused rather than contributing no index and letting the next
+		// allocation reuse one already in service.
+		_, collectionID, idx, err := funcutil.ParseVChannel(vchannel)
+		if err != nil {
+			return nil, err
+		}
+		if collectionID != param.CollectionID {
+			return nil, status.NewInner("existing vchannel %s does not belong to collection %d", vchannel, param.CollectionID)
+		}
+		occupied[funcutil.ToPhysicalChannel(vchannel)] = struct{}{}
+		if idx >= nextShardIdx {
+			nextShardIdx = idx + 1
+		}
+	}
+
 	availableChannels := cm.sortAvailableChannelsByVChannelCount()
-	if len(availableChannels) < param.Num {
-		return nil, status.NewInner("not enough pchannels to allocate, expected: %d, got: %d", param.Num, len(availableChannels))
+	candidates := make([]withVChannelCount, 0, len(availableChannels))
+	for _, channel := range availableChannels {
+		if _, ok := occupied[channel.id.Name]; ok {
+			continue
+		}
+		candidates = append(candidates, channel)
+	}
+	if len(candidates) < param.Num {
+		return nil, status.NewInner(
+			"not enough pchannels to allocate, expected: %d, got: %d (%d occupied by collection %d, a collection holds at most one vchannel per pchannel)",
+			param.Num, len(candidates), len(occupied), param.CollectionID)
 	}
 
 	vchannels := make([]string, 0, param.Num)
-	for _, channel := range availableChannels {
+	for _, channel := range candidates {
 		if len(vchannels) >= param.Num {
 			break
 		}
-		vchannels = append(vchannels, funcutil.GetVirtualChannel(channel.id.Name, param.CollectionID, len(vchannels)))
+		vchannels = append(vchannels, funcutil.GetVirtualChannel(channel.id.Name, param.CollectionID, nextShardIdx))
+		nextShardIdx++
 	}
 	return vchannels, nil
 }
