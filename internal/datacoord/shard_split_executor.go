@@ -87,6 +87,10 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 		}
 		task = allocated
 	}
+	// The freeze has refused new compactions on the source since the task was
+	// created; what is already running on it is killed before the fence, so
+	// the split never waits behind a long compaction.
+	m.preemptSourceCompactions(task)
 	if err := m.coordinator.issueShardSplit(m.ctx, task, m.controlChannel()); err != nil {
 		if m.finishOnDroppedCollection(task, err, "collection dropped before the write switch") {
 			return
@@ -229,6 +233,7 @@ func (m *shardSplitManager) advanceRedistributing(task *datapb.SplitShardTask) {
 		logger.RatedError(m.ctx, 60, "a redistributing shard split task carries no recorded fence, waiting")
 		return
 	}
+	m.preemptSourceCompactions(task)
 	if reason := m.coordinator.fenceFlushBlockReason(task); reason != "" {
 		logger.RatedInfo(m.ctx, 60, "shard split redistribution waits for its source to pass the fence", mlog.String("reason", reason))
 		return

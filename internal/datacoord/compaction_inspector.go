@@ -89,6 +89,11 @@ type compactionInspector struct {
 	handler          Handler
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
+	// isChannelSplitting reports whether a shard split that is not Done names
+	// the channel as its source or a target; nil when no split manager is
+	// wired. Such a channel takes no compaction but the split's own
+	// (frozenBySplit).
+	isChannelSplitting func(channel string) bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -595,6 +600,10 @@ func (c *compactionInspector) getCompactionTask(planID int64) CompactionTask {
 
 func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
+	if c.frozenBySplit(task) {
+		log.RatedInfo(context.TODO(), rate.Limit(60), "channel is splitting, reject compaction until the split is done", mlog.String("channel", task.GetChannel()))
+		return merr.WrapErrCompactionPlanConflict("channel " + task.GetChannel() + " is splitting")
+	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		// Conflict is normal
