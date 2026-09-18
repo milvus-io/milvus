@@ -46,6 +46,7 @@ var (
 	ErrWaitForNewSegment = errors.New("wait for new segment")
 	ErrNotGrowing        = errors.New("segment is not growing")
 	ErrNotEnoughSpace    = stats.ErrNotEnoughSpace
+	ErrTooLargeInsert    = stats.ErrTooLargeInsert
 )
 
 // ShardManagerRecoverParam is the parameter for recovering the segment assignment manager.
@@ -92,6 +93,7 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 				param.TxnManager,
 				param.InitialRecoverSnapshot.Checkpoint.TimeTick, // use the checkpoint time tick to fence directly.
 				metrics,
+				collectionInfo.SchemaInfo(),
 			)
 			segmentTotal += len(segmentManagers)
 		}
@@ -116,6 +118,11 @@ func RecoverShardManager(param *ShardManagerRecoverParam) ShardManager {
 		stat := m.partitionManagers[belong.PartitionUniqueKey()].segments[belong.SegmentID].GetStatFromRecovery()
 		if info := m.collections[belong.CollectionID]; info != nil {
 			stat.RuntimeFlushSize = info.RuntimeFlushSize(stat.Modified)
+			// SealSize is persisted in recovery meta (modified_seal_size), so
+			// the main-column budget is compared against main-column bytes after
+			// recovery with no backfill needed. Pre-upgrade segments read 0 and
+			// start from a full budget, bounded by the persisted row cap (fixed
+			// dim) and the whole-row ceiling (variable size).
 		}
 		stats = append(stats, stat)
 	}
@@ -240,6 +247,14 @@ func (c *CollectionInfo) setSchema(schema *streamingpb.CollectionSchemaOfVChanne
 	if err == nil {
 		c.primaryKey = &descriptor
 	}
+}
+
+// SchemaInfo returns the current collection schema, or nil when not set.
+func (c *CollectionInfo) SchemaInfo() *schemapb.CollectionSchema {
+	if c == nil || c.Schema == nil {
+		return nil
+	}
+	return c.Schema.GetSchema()
 }
 
 func primaryKeyDescriptorFromSchema(schema *schemapb.CollectionSchema) (PrimaryKeyDescriptor, error) {

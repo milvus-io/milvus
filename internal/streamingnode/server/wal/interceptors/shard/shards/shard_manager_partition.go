@@ -79,6 +79,7 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 		m.txnManager,
 		tiemtick,
 		m.metrics,
+		m.collections[collectionID].SchemaInfo(),
 	)
 	m.Logger().Info(m.ctx, "partition created")
 	m.updateMetrics()

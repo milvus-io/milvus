@@ -19,9 +19,61 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const interceptorName = "shard"
+
+// sealSizeOrDefault returns the seal budget bytes for a partition, falling back
+// to the whole-row payload size when the seal-specific size is unavailable
+// (wholeRow metric, or a vector column that could not be measured/estimated).
+func sealSizeOrDefault(sealSize, binarySize uint64) uint64 {
+	if sealSize > 0 {
+		return sealSize
+	}
+	return binarySize
+}
+
+// estimateSealSize returns the per-message bytes consumed against the seal
+// budget in the active size metric's unit. Returns 0 when the wholeRow metric
+// is active or the dominant vector column cannot be measured/estimated, in
+// which case the caller falls back to the whole-row payload size.
+func (impl *shardInterceptor) estimateSealSize(ctx context.Context, insertMsg message.MutableInsertMessageV1, collectionID int64, schemaVersion int32) uint64 {
+	if !typeutil.IsMainIndexSizeMetric(paramtable.Get().DataCoordCfg.SizeMetric.GetValue()) {
+		return 0
+	}
+	perRecord, hasVariableSizeVector, schemaErr := impl.shardManager.GetMainIndexSizeInfo(collectionID, schemaVersion)
+	rows := uint64(0)
+	for _, partition := range insertMsg.Header().GetPartitions() {
+		rows += partition.GetRows()
+	}
+	// O(1) fast path: for fixed-dim dense vector schemas the measured main
+	// column size equals rows × dim × element_size, so skip body parsing.
+	if schemaErr == nil && perRecord > 0 && !hasVariableSizeVector {
+		return rows * uint64(perRecord)
+	}
+	// Measured path: the insert body holds the actual vector columns.
+	if body, err := insertMsg.Body(); err == nil && body != nil && len(body.GetFieldsData()) > 0 {
+		maxSize := 0
+		for _, fd := range body.GetFieldsData() {
+			if !typeutil.IsVectorType(fd.GetType()) {
+				continue
+			}
+			if size, err := typeutil.EstimateVectorColumnSize(fd); err == nil && size > maxSize {
+				maxSize = size
+			}
+		}
+		if maxSize > 0 {
+			return uint64(maxSize)
+		}
+	}
+	// Schema fallback (no plaintext body, e.g. cipher messages).
+	if schemaErr == nil && perRecord > 0 && rows > 0 {
+		return rows * uint64(perRecord)
+	}
+	// No dense vector field (sparse-only, or no vector): whole-row semantics.
+	return 0
+}
 
 var _ interceptors.InterceptorWithMetrics = (*shardInterceptor)(nil)
 
@@ -202,6 +254,14 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			return nil, status.NewUnrecoverableError("failed to materialize function fields before WAL append: %s", err.Error())
 		}
 	}
+	// Compute the per-message seal budget in the active size metric's unit once
+	// the function fields are materialized (the vector columns are real here).
+	// 0 means wholeRow semantics (caller falls back to the whole-row payload size).
+	// NOTE: an insert message maps to a single partition today (see the comment
+	// above), so the whole-message SealSize is assigned to that partition. A
+	// future partition-key merge path that splits one message across partitions
+	// must compute SealSize per partition instead.
+	sealSize := impl.estimateSealSize(ctx, insertMsg, header.GetCollectionId(), schemaVersion)
 	for _, partition := range header.GetPartitions() {
 		if partition.BinarySize == 0 {
 			// Proxy does not estimate binary size today. Use the payload size;
@@ -209,12 +269,18 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// version gate is off (matching pre-feature behavior).
 			partition.BinarySize = uint64(msg.EstimateSize())
 		}
+		// Carry the seal budget bytes on the WAL message header so recovery
+		// replay (segmentRecoveryInfo.ObserveInsert) can persist
+		// modified_seal_size and the main-column budget survives restart under
+		// mainIndex.
+		partition.SealSize = sealSizeOrDefault(sealSize, partition.GetBinarySize())
 		req := &shards.AssignSegmentRequest{
 			CollectionID: header.GetCollectionId(),
 			PartitionID:  partition.GetPartitionId(),
 			ModifiedMetrics: stats.ModifiedMetrics{
 				Rows:       partition.GetRows(),
 				BinarySize: partition.GetBinarySize(),
+				SealSize:   partition.GetSealSize(),
 			},
 			TimeTick: msg.TimeTick(),
 		}
@@ -231,8 +297,10 @@ func (impl *shardInterceptor) handleInsertMessage(ctx context.Context, msg messa
 			// we just redo it to refresh a new latest timetick.
 			return nil, redo.ErrRedo
 		}
-		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound) {
-			// The target metadata no longer exists, so retrying cannot recover the operation.
+		if errors.IsAny(err, shards.ErrPartitionNotFound, shards.ErrCollectionNotFound, shards.ErrTooLargeInsert) {
+			// The target metadata no longer exists, or the message alone can
+			// never fit any segment (e.g. it exceeds the whole-row ceiling), so
+			// retrying cannot recover the operation.
 			impl.shardManager.Logger().Warn(ctx, "unrecoverable insert operation", mlog.Object("message", msg), mlog.Err(err))
 			return nil, status.NewUnrecoverableError("fail to assign segment, %s", err.Error())
 		}

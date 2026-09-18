@@ -873,10 +873,10 @@ func getExpectedSegmentSize(meta *meta, collectionID int64, schema *schemapb.Col
 	allDiskIndex := meta.indexMeta.AllDenseWithDiskIndex(collectionID, schema)
 	if allDiskIndex {
 		// Only if all dense vector fields index type are DiskANN, recalc segment max size here.
-		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
+		return capByCeiling(Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024)
 	}
 	// If some dense vector fields index type are not DiskANN, recalc segment max size using default policy.
-	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	return capByCeiling(Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024)
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName

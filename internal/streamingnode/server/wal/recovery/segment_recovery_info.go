@@ -95,6 +95,7 @@ func (info *segmentRecoveryInfo) ObserveInsert(timetick uint64, assignment *mess
 		return
 	}
 	info.meta.Stat.ModifiedBinarySize += assignment.BinarySize
+	info.meta.Stat.ModifiedSealSize += assignment.GetSealSize()
 	info.meta.Stat.ModifiedRows += assignment.Rows
 	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
 	info.meta.CheckpointTimeTick = timetick

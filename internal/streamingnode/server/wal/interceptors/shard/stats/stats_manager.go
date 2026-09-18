@@ -24,7 +24,14 @@ type (
 	SealOperator         = utils.SealOperator
 )
 
-var ErrNotEnoughSpace = errors.New("not enough space")
+var (
+	ErrNotEnoughSpace = errors.New("not enough space")
+	// ErrTooLargeInsert is returned when a single message can never fit any
+	// segment (e.g. it alone exceeds the whole-row ceiling even on an empty
+	// segment). It is an unrecoverable client error — the caller must not
+	// redo-allocate a fresh segment for it, which would loop forever.
+	ErrTooLargeInsert = errors.New("too large insert")
+)
 
 // StatsManager is the manager of stats.
 // It manages the insert stats of all segments, used to check if a segment has enough space to insert or should be sealed.
@@ -263,6 +270,13 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtim
 
 		m.metricHelper.ObservePChannelBytesUpdate(info.PChannel, m.pchannelStats[info.PChannel])
 		return stat.ShouldBeSealed(), nil
+	}
+	if stat.IsEmpty() {
+		// A message that cannot be inserted into an empty segment can never fit
+		// any segment (e.g. it exceeds the whole-row ceiling). Surface it as an
+		// unrecoverable client error instead of ErrNotEnoughSpace, which the
+		// caller would interpret as "wait for a new segment" and redo forever.
+		return stat.ShouldBeSealed(), ErrTooLargeInsert
 	}
 	return stat.ShouldBeSealed(), ErrNotEnoughSpace
 }

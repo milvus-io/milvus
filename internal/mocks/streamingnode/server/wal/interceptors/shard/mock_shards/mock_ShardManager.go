@@ -948,6 +948,70 @@ func (_c *MockShardManager_FlushSegment_Call) RunAndReturn(run func(message.Immu
 	return _c
 }
 
+// GetMainIndexSizeInfo provides a mock function with given fields: collectionID, schemaVersion
+func (_m *MockShardManager) GetMainIndexSizeInfo(collectionID int64, schemaVersion int32) (int, bool, error) {
+	ret := _m.Called(collectionID, schemaVersion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetMainIndexSizeInfo")
+	}
+
+	var r0 int
+	var r1 bool
+	var r2 error
+	if rf, ok := ret.Get(0).(func(int64, int32) (int, bool, error)); ok {
+		return rf(collectionID, schemaVersion)
+	}
+	if rf, ok := ret.Get(0).(func(int64, int32) int); ok {
+		r0 = rf(collectionID, schemaVersion)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+
+	if rf, ok := ret.Get(1).(func(int64, int32) bool); ok {
+		r1 = rf(collectionID, schemaVersion)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	if rf, ok := ret.Get(2).(func(int64, int32) error); ok {
+		r2 = rf(collectionID, schemaVersion)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// MockShardManager_GetMainIndexSizeInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetMainIndexSizeInfo'
+type MockShardManager_GetMainIndexSizeInfo_Call struct {
+	*mock.Call
+}
+
+// GetMainIndexSizeInfo is a helper method to define mock.On call
+//   - collectionID int64
+//   - schemaVersion int32
+func (_e *MockShardManager_Expecter) GetMainIndexSizeInfo(collectionID interface{}, schemaVersion interface{}) *MockShardManager_GetMainIndexSizeInfo_Call {
+	return &MockShardManager_GetMainIndexSizeInfo_Call{Call: _e.mock.On("GetMainIndexSizeInfo", collectionID, schemaVersion)}
+}
+
+func (_c *MockShardManager_GetMainIndexSizeInfo_Call) Run(run func(collectionID int64, schemaVersion int32)) *MockShardManager_GetMainIndexSizeInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(int32))
+	})
+	return _c
+}
+
+func (_c *MockShardManager_GetMainIndexSizeInfo_Call) Return(_a0 int, _a1 bool, _a2 error) *MockShardManager_GetMainIndexSizeInfo_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *MockShardManager_GetMainIndexSizeInfo_Call) RunAndReturn(run func(int64, int32) (int, bool, error)) *MockShardManager_GetMainIndexSizeInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Logger provides a mock function with no fields
 func (_m *MockShardManager) Logger() *mlog.Logger {
 	ret := _m.Called()

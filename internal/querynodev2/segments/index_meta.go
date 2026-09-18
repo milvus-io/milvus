@@ -49,6 +49,21 @@ func ComposeIndexMeta(ctx context.Context, indexInfos []*indexpb.IndexInfo, sche
 		threshold := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsFloat() * 1024 * 1024
 		proportion := paramtable.Get().DataCoordCfg.SegmentSealProportion.GetAsFloat()
 		maxIndexRecordPerSegment = int64(threshold * proportion / float64(sizePerRecord))
+		if typeutil.IsMainIndexSizeMetric(paramtable.Get().DataCoordCfg.SizeMetric.GetValue()) {
+			// mainIndex metric: min(main-index budget rows, whole-row ceiling rows).
+			// Schema fallback only (compose-time estimate; an index-build threshold,
+			// not a hard per-segment cap).
+			mainIndexPerRecord, err := typeutil.EstimateMainIndexSizePerRecord(schema)
+			if err == nil && mainIndexPerRecord > 0 {
+				maxIndexRecordPerSegment = int64(threshold * proportion / float64(mainIndexPerRecord))
+				if ceilingMB := paramtable.Get().DataCoordCfg.MaxFullSegmentSize.GetAsInt64(); ceilingMB > 0 {
+					ceilingRows := int64(float64(ceilingMB) * 1024 * 1024 / float64(sizePerRecord))
+					if ceilingRows < maxIndexRecordPerSegment {
+						maxIndexRecordPerSegment = ceilingRows
+					}
+				}
+			}
+		}
 	}
 
 	return &segcorepb.CollectionIndexMeta{
