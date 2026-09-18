@@ -183,6 +183,18 @@ func TestSourceServesAtMinChildTSafe(t *testing.T) {
 	assert.Equal(t, uint64(100), got)
 }
 
+// A delegator built with WithChildSpawner fronts its own split with that
+// spawner.
+func TestWithChildSpawnerWiresTheSpawner(t *testing.T) {
+	spawner := &fakeChildSpawner{}
+	sd := &shardDelegator{vchannelName: "v1", children: make(map[string]ShardDelegator)}
+	WithChildSpawner(spawner)(sd)
+
+	assert.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v3")))
+	assert.Eventually(t, func() bool { return len(childVChannels(sd)) == 1 }, time.Second, 5*time.Millisecond)
+	assert.Equal(t, []string{"v3"}, spawner.spawnedVChannels())
+}
+
 func TestProcessSplitShard(t *testing.T) {
 	t.Run("spawns one child per target", func(t *testing.T) {
 		spawner := &fakeChildSpawner{}

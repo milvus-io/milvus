@@ -290,15 +290,15 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		queryView,
 		node.binlogSaver,
 		delegator.WithLeaderViewUpdatedCallback(node.markLeaderViewUpdated),
+		// the node spawns this delegator's in-process split children when it
+		// consumes a SplitShard fence on its vchannel.
+		delegator.WithChildSpawner(node),
 	)
 	if err != nil {
 		log.Warn(ctx, "failed to create shard delegator", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 	node.delegators.Insert(channel.GetChannelName(), delegator)
-	// the node spawns this delegator's in-process split children when it consumes
-	// a SplitShard fence on its vchannel.
-	delegator.SetChildSpawner(node)
 	defer func() {
 		if err != nil {
 			node.delegators.GetAndRemove(channel.GetChannelName())
