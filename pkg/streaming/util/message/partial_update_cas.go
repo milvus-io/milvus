@@ -1,12 +1,7 @@
 package message
 
 import (
-	"context"
-
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -110,26 +105,6 @@ func HasPartialUpdateCAS(msg BasicMessage) bool {
 	return msg.Properties().Exist(messagePartialUpdateCAS)
 }
 
-// ExtractPartialUpdateCAS decodes partial update CAS metadata from the DML body.
-func ExtractPartialUpdateCAS(msg BasicMessage) (*messagespb.PartialUpdateCAS, error) {
-	if !HasPartialUpdateCAS(msg) {
-		return nil, nil
-	}
-	encoded, err := extractPartialUpdateCASBody(msg)
-	if err != nil {
-		return nil, err
-	}
-
-	meta := &messagespb.PartialUpdateCAS{}
-	if err := DecodeProto(encoded, meta); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "decode partial update CAS metadata")
-	}
-	if err := validatePartialUpdateCAS(meta); err != nil {
-		return nil, err
-	}
-	return meta, nil
-}
-
 // DecodePartialUpdateCASMetadata decodes the serialized CAS metadata stored in
 // the Insert body properties map.
 func DecodePartialUpdateCASMetadata(encoded string) (*messagespb.PartialUpdateCAS, error) {
@@ -141,30 +116,6 @@ func DecodePartialUpdateCASMetadata(encoded string) (*messagespb.PartialUpdateCA
 		return nil, err
 	}
 	return meta, nil
-}
-
-func extractPartialUpdateCASBody(msg BasicMessage) (string, error) {
-	if msg.MessageType() != MessageTypeInsert {
-		return "", merr.WrapErrServiceInternalMsg("partial update CAS marker requires an insert message")
-	}
-	payload, err := DecodePayload(context.Background(), msg)
-	if err != nil {
-		return "", merr.WrapErrServiceInternalErr(err, "decode partial update insert body")
-	}
-	return extractPartialUpdateCASPayload(payload)
-}
-
-func extractPartialUpdateCASPayload(payload []byte) (string, error) {
-	body := &msgpb.InsertRequest{}
-	if err := proto.Unmarshal(payload, body); err != nil {
-		return "", merr.WrapErrServiceInternalErr(err, "decode partial update insert body")
-	}
-	properties := body.GetBase().GetProperties()
-	encoded, ok := properties[messagePartialUpdateCAS]
-	if !ok || encoded == "" {
-		return "", merr.WrapErrServiceInternalMsg("partial update CAS body metadata is missing")
-	}
-	return encoded, nil
 }
 
 func validatePartialUpdateCAS(meta *messagespb.PartialUpdateCAS) error {

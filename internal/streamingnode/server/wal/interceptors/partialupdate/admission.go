@@ -7,6 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -160,7 +161,7 @@ func (s *partialUpdateState) publishCommit(msg message.MutableMessage, txnState 
 // transaction. observedBegin distinguishes a complete runtime write set from
 // a recovered transaction for which only a body suffix or CommitTxn was seen.
 type pendingTxn struct {
-	pks               primaryKeys
+	pks               primarykey.Keys
 	meta              *messagespb.PartialUpdateCAS
 	collectionID      int64
 	schemaVersion     int32
@@ -179,14 +180,14 @@ func (s *partialUpdateState) txnLocked(txnID message.TxnID) *pendingTxn {
 	return txnState
 }
 
-func (s *partialUpdateState) recordTxnWritesTyped(txnID message.TxnID, pks primaryKeys) {
+func (s *partialUpdateState) recordTxnWritesTyped(txnID message.TxnID, pks primarykey.Keys) {
 	if pks.Len() == 0 {
 		return
 	}
 	s.txnMu.Lock()
 	defer s.txnMu.Unlock()
 	txnState := s.txnLocked(txnID)
-	txnState.pks.append(pks)
+	txnState.pks.Append(pks)
 }
 
 func (s *partialUpdateState) recordTxnWrites(txnID message.TxnID, pks []any) {
@@ -273,7 +274,7 @@ func (s *partialUpdateState) getTxn(txnID message.TxnID) *pendingTxn {
 		return nil
 	}
 	return &pendingTxn{
-		pks:               txnState.pks.clone(),
+		pks:               txnState.pks.Clone(),
 		meta:              cloneCASMeta(txnState.meta),
 		collectionID:      txnState.collectionID,
 		schemaVersion:     txnState.schemaVersion,

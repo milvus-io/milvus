@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
@@ -20,73 +21,19 @@ const (
 	estimatedVersionEntryFixedBytes int64 = 128
 )
 
-type primaryKeyKind uint8
-
-const (
-	primaryKeyKindNone primaryKeyKind = iota
-	primaryKeyKindInt64
-	primaryKeyKindString
-	primaryKeyKindMixed
-)
-
-type primaryKeys struct {
-	kind         primaryKeyKind
-	int64Values  []int64
-	stringValues []string
-}
-
-func (p primaryKeys) Len() int {
-	return len(p.int64Values) + len(p.stringValues)
-}
-
-func (p primaryKeys) clone() primaryKeys {
-	return primaryKeys{
-		kind:         p.kind,
-		int64Values:  append([]int64(nil), p.int64Values...),
-		stringValues: append([]string(nil), p.stringValues...),
-	}
-}
-
-// toAny keeps the existing test and helper API while the append path uses the
-// typed representation above.
-func (p primaryKeys) toAny() []any {
-	values := make([]any, 0, p.Len())
-	for _, value := range p.int64Values {
-		values = append(values, value)
-	}
-	for _, value := range p.stringValues {
-		values = append(values, value)
-	}
-	return values
-}
-
-func (p *primaryKeys) append(other primaryKeys) {
-	if other.Len() == 0 {
-		return
-	}
-	if p.kind == primaryKeyKindNone {
-		p.kind = other.kind
-	}
-	if p.kind != other.kind && p.kind != primaryKeyKindMixed {
-		p.kind = primaryKeyKindMixed
-	}
-	p.int64Values = append(p.int64Values, other.int64Values...)
-	p.stringValues = append(p.stringValues, other.stringValues...)
-}
-
-func primaryKeysFromAny(values []any) (primaryKeys, error) {
-	result := primaryKeys{}
+func primaryKeysFromAny(values []any) (primarykey.Keys, error) {
+	result := primarykey.Keys{}
 	for _, value := range values {
-		var current primaryKeys
+		var current primarykey.Keys
 		switch value := value.(type) {
 		case int64:
-			current = primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{value}}
+			current = primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{value}}
 		case string:
-			current = primaryKeys{kind: primaryKeyKindString, stringValues: []string{value}}
+			current = primarykey.Keys{Kind: primarykey.KindString, StringValues: []string{value}}
 		default:
-			return primaryKeys{}, status.NewUnrecoverableError("partial update pk must be int64 or string")
+			return primarykey.Keys{}, status.NewUnrecoverableError("partial update pk must be int64 or string")
 		}
-		result.append(current)
+		result.Append(current)
 	}
 	return result, nil
 }
@@ -279,17 +226,17 @@ func (idx *vchannelPKVersionIndex) clear() {
 	idx.budget.release(releasedBytes)
 }
 
-func (idx *pkVersionIndex) UpdateAllTyped(vchannel string, pks primaryKeys, commitTS uint64) {
+func (idx *pkVersionIndex) UpdateAllTyped(vchannel string, pks primarykey.Keys, commitTS uint64) {
 	idx.channel(vchannel).updateAll(pks, commitTS)
 }
 
-func (idx *vchannelPKVersionIndex) updateAll(pks primaryKeys, commitTS uint64) {
+func (idx *vchannelPKVersionIndex) updateAll(pks primarykey.Keys, commitTS uint64) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
 	idx.advanceRetentionLocked(commitTS)
 	missedWrite := false
-	for _, pk := range pks.int64Values {
+	for _, pk := range pks.Int64Values {
 		entry, ok := idx.int64Versions[pk]
 		if ok && entry.commitTS >= commitTS {
 			continue
@@ -319,7 +266,7 @@ func (idx *vchannelPKVersionIndex) updateAll(pks primaryKeys, commitTS uint64) {
 		idx.int64Versions[pk] = entry
 		heap.Push(&idx.expirations, entry)
 	}
-	for _, pk := range pks.stringValues {
+	for _, pk := range pks.StringValues {
 		entry, ok := idx.stringVersions[pk]
 		if ok && entry.commitTS >= commitTS {
 			continue
@@ -367,7 +314,7 @@ func (idx *vchannelPKVersionIndex) advance(currentTS uint64) {
 	idx.advanceRetentionLocked(currentTS)
 }
 
-func (idx *pkVersionIndex) VerifyTyped(vchannel string, pks primaryKeys, readTS, commitTS uint64) error {
+func (idx *pkVersionIndex) VerifyTyped(vchannel string, pks primarykey.Keys, readTS, commitTS uint64) error {
 	return idx.channel(vchannel).verify(vchannel, pks, readTS, commitTS)
 }
 
@@ -380,7 +327,7 @@ func (idx *pkVersionIndex) Verify(vchannel string, pks []any, readTS, commitTS u
 	return idx.VerifyTyped(vchannel, keys, readTS, commitTS)
 }
 
-func (idx *vchannelPKVersionIndex) verify(vchannel string, pks primaryKeys, readTS, commitTS uint64) error {
+func (idx *vchannelPKVersionIndex) verify(vchannel string, pks primarykey.Keys, readTS, commitTS uint64) error {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
@@ -389,12 +336,12 @@ func (idx *vchannelPKVersionIndex) verify(vchannel string, pks primaryKeys, read
 		return err
 	}
 
-	for _, pk := range pks.int64Values {
+	for _, pk := range pks.Int64Values {
 		if entry := idx.int64Versions[pk]; entry != nil && entry.commitTS > readTS {
 			return status.NewPartialUpdateRetryable("partial update pk conflict, vchannel: %s, read ts: %d, last commit ts: %d", vchannel, readTS, entry.commitTS)
 		}
 	}
-	for _, pk := range pks.stringValues {
+	for _, pk := range pks.StringValues {
 		if entry := idx.stringVersions[pk]; entry != nil && entry.commitTS > readTS {
 			return status.NewPartialUpdateRetryable("partial update pk conflict, vchannel: %s, read ts: %d, last commit ts: %d", vchannel, readTS, entry.commitTS)
 		}

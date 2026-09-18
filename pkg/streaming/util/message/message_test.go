@@ -1,6 +1,7 @@
 package message
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -200,7 +201,7 @@ func TestCiper(t *testing.T) {
 
 	msg2, err := AsMutableInsertMessageV1(msg)
 	assert.NoError(t, err)
-	body, err := msg2.Body()
+	body, err := msg2.Body(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, body.ShardName, "123123")
 	assert.Equal(t, msg2.EstimateSize(), 36)
@@ -208,7 +209,7 @@ func TestCiper(t *testing.T) {
 	msg2.OverwriteBody(&msgpb.InsertRequest{
 		ShardName: "overwritten",
 	})
-	body, err = msg2.Body()
+	body, err = msg2.Body(context.Background())
 	assert.NoError(t, err)
 	assert.Equal(t, body.ShardName, "overwritten")
 }
