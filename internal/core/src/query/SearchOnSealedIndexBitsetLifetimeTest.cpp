@@ -528,7 +528,7 @@ SearchSealedNullableRawBruteForce(const NullableRawVectorFixture& fixture,
 
 }  // namespace
 
-TEST(StrictGroupHnswSearch, RaisesExplicitEfOnlyInPhaseTwoCopy) {
+TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
     constexpr int64_t n = 1000;
     auto schema = std::make_shared<Schema>();
     auto vector_field = schema->AddDebugField(
@@ -587,18 +587,16 @@ TEST(StrictGroupHnswSearch, RaisesExplicitEfOnlyInPhaseTwoCopy) {
         result.total_data_cnt_ = n;
         ASSERT_TRUE(result.CanSearchFilteredVectors());
         auto filter = std::make_shared<TargetBitmap>(n, false);
-        auto completed = result.SearchFilteredVectors(filter, 4);
-        ASSERT_TRUE(completed);
-        ASSERT_EQ((**completed).seg_offsets_.size(), 4);
-        for (auto id : (**completed).seg_offsets_) EXPECT_GE(id, 0);
-        const auto phase2 = StrictGroupSearchInfo(info, 4);
-        if (ef != 0)
-            EXPECT_EQ(phase2.search_params_["ef"],
-                      as_string
-                          ? knowhere::Json(std::to_string(std::max(ef, 4)))
-                          : knowhere::Json(std::max(ef, 4)));
-        else
+        // Also exceed the backend's small-k default: it must choose a valid
+        // search budget from the new k without Milvus knowing about ef.
+        for (int64_t remaining : {4, 32}) {
+            auto completed = result.SearchFilteredVectors(filter, remaining);
+            ASSERT_TRUE(completed);
+            ASSERT_EQ((**completed).seg_offsets_.size(), remaining);
+            for (auto id : (**completed).seg_offsets_) EXPECT_GE(id, 0);
+            const auto phase2 = StrictGroupSearchInfo(info, remaining);
             EXPECT_FALSE(phase2.search_params_.contains("ef"));
+        }
         std::vector<CompositeGroupKey> groups;
         std::vector<int64_t> offsets;
         std::vector<float> distances;
@@ -618,21 +616,63 @@ TEST(StrictGroupHnswSearch, RaisesExplicitEfOnlyInPhaseTwoCopy) {
         EXPECT_EQ(info.topk_, 2);
         EXPECT_EQ(info.group_size_, 5);
     }
+    // Invalid first-phase tuning must still fail in the backend. Independent
+    // completion parameters are not a way to bypass initial validation.
+    for (const auto& ef : {knowhere::Json(-1), knowhere::Json("invalid")}) {
+        auto info = MakeGroupBySearchInfo(
+            vector_field, group_field, knowhere::metric::COSINE);
+        info.search_params_ = {{"ef", ef}};
+        SearchResult result;
+        result.total_data_cnt_ = n;
+        EXPECT_THROW(SearchOnSealedIndex(*schema,
+                                         record,
+                                         info,
+                                         vectors.data(),
+                                         nullptr,
+                                         1,
+                                         {},
+                                         nullptr,
+                                         result),
+                     SegcoreError);
+    }
 }
 
-TEST(StrictGroupHnswSearch, DoesNotHideInvalidExplicitEf) {
-    SearchInfo original;
-    original.topk_ = 2;
-    for (auto ef : {knowhere::Json(0),
-                    knowhere::Json(-1),
-                    knowhere::Json(2.5),
-                    knowhere::Json("2x"),
-                    knowhere::Json(nullptr),
-                    knowhere::Json(uint64_t(1) << 63)}) {
-        original.search_params_ = {{"ef", ef}};
-        EXPECT_EQ(StrictGroupSearchInfo(original, 4).search_params_["ef"], ef);
-        EXPECT_EQ(original.search_params_["ef"], ef);
-    }
+TEST(StrictGroupIvfSearch, IndependentPhaseTwoUsesDefaultProbes) {
+    constexpr int64_t n = 2000;
+    auto schema = std::make_shared<Schema>();
+    auto field = schema->AddDebugField(
+        "vector", DataType::VECTOR_FLOAT, kDim, knowhere::metric::COSINE);
+    auto group = schema->AddDebugField("group", DataType::INT64);
+    auto vectors = MakeCompactVectors(n, kDim);
+    auto valid = std::make_unique<bool[]>(n);
+    std::fill_n(valid.get(), n, true);
+    auto index = BuildNullableVectorIndex(n, kDim, valid.get(), vectors);
+    segcore::SealedIndexingRecord record;
+    record.append_field_indexing(
+        field,
+        knowhere::metric::COSINE,
+        CreateTestCacheIndex("strict-ivf-independent-search",
+                             std::move(index)));
+    auto info = MakeGroupBySearchInfo(field, group, knowhere::metric::COSINE);
+    info.topk_ = 2;
+    info.group_size_ = 5;
+    info.search_params_ = {{"nprobe", 1}, {"ef", 2}};
+    const auto params = info.search_params_;
+    SearchResult result;
+    result.total_data_cnt_ = n;
+    SearchOnSealedIndex(
+        *schema, record, info, vectors.data(), nullptr, 1, {}, nullptr, result);
+    ASSERT_TRUE(result.CanSearchFilteredVectors());
+    auto filter = std::make_shared<TargetBitmap>(n, false);
+    (*filter)[0] = true;
+    auto completed = result.SearchFilteredVectors(filter, 4);
+    ASSERT_TRUE(completed);
+    ASSERT_EQ((**completed).seg_offsets_.size(), 4);
+    for (auto id : (**completed).seg_offsets_) EXPECT_GT(id, 0);
+    const auto phase2 = StrictGroupSearchInfo(info, 4);
+    EXPECT_FALSE(phase2.search_params_.contains("nprobe"));
+    EXPECT_FALSE(phase2.search_params_.contains("ef"));
+    EXPECT_EQ(info.search_params_, params);
 }
 
 TEST(SearchOnSealedIndexBitsetLifetime,

@@ -230,7 +230,6 @@ const (
 	CollectionKey                       = "collection"
 	RecallEvalKey                       = "recall_eval"
 	StrictGroupStrategyKey              = "strict_group_strategy"
-	StrictGroupDebugKey                 = "strict_group_debug"
 	StrictGroupPhase1CandidateWeightKey = "strict_group_phase1_candidate_weight"
 	StrictGroupSkipRefineKey            = "strict_group_skip_refine"
 

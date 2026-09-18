@@ -50,11 +50,6 @@ func TestQueryNodeStrictGroupSettings(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "true", field.Tag.Get("refreshable"))
 	}
-	assert.False(t, cfg.StrictGroupDebug.GetAsBool())
-	params.Save(cfg.StrictGroupDebug.Key, "true")
-	assert.True(t, cfg.StrictGroupDebug.GetAsBool())
-	params.Reset(cfg.StrictGroupDebug.Key)
-	assert.False(t, cfg.StrictGroupDebug.GetAsBool())
 	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())
 	params.Save(cfg.StrictGroupStrategy.Key, "per_group")
 	assert.Equal(t, "per_group", cfg.StrictGroupStrategy.GetValue())

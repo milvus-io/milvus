@@ -87,13 +87,6 @@ ParseStrictGroupSettings(SearchInfo& info) {
         info.strict_group_phase1_candidate_weight_ = it->get<int64_t>();
         params.erase(it);
     }
-    if (auto it = params.find(kStrictGroupDebug); it != params.end()) {
-        if (!it->is_boolean()) {
-            ThrowInfo(InvalidParameter, "strict group debug must be boolean");
-        }
-        info.strict_group_debug_ = it->get<bool>();
-        params.erase(it);
-    }
     if (auto it = params.find(kStrictGroupStrategy); it != params.end()) {
         if (!it->is_string() || (*it != "original" && *it != "per_group")) {
             ThrowInfo(InvalidParameter,

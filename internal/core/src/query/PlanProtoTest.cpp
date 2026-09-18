@@ -752,21 +752,6 @@ TEST(PlanProto, StrictGroupSettings) {
         EXPECT_FALSE(
             parsed->search_info_.search_params_.contains(kStrictGroupStrategy));
     }
-    for (bool debug : {false, true}) {
-        info->set_search_params(
-            knowhere::Json{{kStrictGroupDebug, debug}}.dump());
-        auto parsed = query::ProtoParser(schema).PlanNodeFromProto(node);
-        EXPECT_EQ(parsed->search_info_.strict_group_debug_, debug);
-        EXPECT_FALSE(
-            parsed->search_info_.search_params_.contains(kStrictGroupDebug));
-    }
-    for (const auto& value :
-         {knowhere::Json("true"), knowhere::Json(1), knowhere::Json(nullptr)}) {
-        info->set_search_params(
-            knowhere::Json{{kStrictGroupDebug, value}}.dump());
-        EXPECT_THROW(query::ProtoParser(schema).PlanNodeFromProto(node),
-                     SegcoreError);
-    }
     for (const auto& value : {knowhere::Json("invalid"),
                               knowhere::Json("sampling"),
                               knowhere::Json("filtered_iterator"),

@@ -196,11 +196,9 @@ func applyStrictGroupSettings(ctx context.Context, info *planpb.QueryInfo) (bool
 		params = make(map[string]json.RawMessage)
 	}
 	_, hadStrategy := params[common.StrictGroupStrategyKey]
-	_, hadDebug := params[common.StrictGroupDebugKey]
 	_, hadPhase1 := params[common.StrictGroupPhase1CandidateWeightKey]
 	_, hadSkipRefine := params[common.StrictGroupSkipRefineKey]
 	delete(params, common.StrictGroupStrategyKey)
-	delete(params, common.StrictGroupDebugKey)
 	delete(params, common.StrictGroupPhase1CandidateWeightKey)
 	delete(params, common.StrictGroupSkipRefineKey)
 	eligible := info.GetStrictGroupSize() && info.GetGroupSize() > 1 && (info.GetGroupByFieldId() > 0 || len(info.GetGroupByFieldIds()) > 0)
@@ -216,28 +214,20 @@ func applyStrictGroupSettings(ctx context.Context, info *planpb.QueryInfo) (bool
 		}
 		params[common.StrictGroupPhase1CandidateWeightKey] = json.RawMessage(strconv.FormatInt(phase1, 10))
 		params[common.StrictGroupSkipRefineKey] = json.RawMessage(strconv.FormatBool(skipRefine))
-		debug, err := strconv.ParseBool(cfg.StrictGroupDebug.GetValue())
-		if err != nil {
-			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupDebug.Key)
-		}
-		params[common.StrictGroupDebugKey] = json.RawMessage(strconv.FormatBool(debug))
 		strategy := cfg.StrictGroupStrategy.GetValue()
 		if strategy != "original" && strategy != "per_group" {
 			return false, merr.WrapErrServiceUnavailable("invalid server config: " + cfg.StrictGroupStrategy.Key)
 		}
 		params[common.StrictGroupStrategyKey] = json.RawMessage(strconv.Quote(strategy))
-		if debug {
-			// Log the exact snapshot injected after the hook, not another config
-			// read that might race a refresh. Never log caller search payloads.
-			mlog.Info(ctx, "strict_group_config_snapshot",
-				mlog.Int64("node_id", paramtable.GetNodeID()),
-				mlog.String("strategy", strategy),
-				mlog.Int64("phase1_candidate_weight", phase1),
-				mlog.Bool("skip_refine", skipRefine),
-				mlog.Bool("strict_group_debug", debug))
-		}
+		// Log the injected snapshot, not a second read that could race a refresh.
+		// Caller payloads are never logged. Use the standard logging level.
+		mlog.Debug(ctx, "strict_group_config_snapshot",
+			mlog.Int64("node_id", paramtable.GetNodeID()),
+			mlog.String("strategy", strategy),
+			mlog.Int64("phase1_candidate_weight", phase1),
+			mlog.Bool("skip_refine", skipRefine))
 	}
-	if !eligible && !hadStrategy && !hadDebug && !hadPhase1 && !hadSkipRefine {
+	if !eligible && !hadStrategy && !hadPhase1 && !hadSkipRefine {
 		return false, nil
 	}
 	encoded, err := json.Marshal(params)

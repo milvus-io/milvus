@@ -67,6 +67,17 @@ ApplyStrictGroupSkipRefine(const SearchInfo& info,
 inline SearchInfo
 StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
     auto info = original;
+    // Phase two is an independent filtered Search. Do not inherit iterator
+    // tuning (ef, nprobe, search_list, etc.); let the backend choose defaults
+    // for the new quota. Retain the typed query context and metric.
+    info.search_params_ = knowhere::Json::object();
+    // BM25's collection-level statistic is part of the scoring context, not
+    // an index tuning parameter. Keep scores comparable across both phases.
+    if (original.metric_type_ == knowhere::metric::BM25 &&
+        original.search_params_.contains(knowhere::meta::BM25_AVGDL)) {
+        info.search_params_[knowhere::meta::BM25_AVGDL] =
+            original.search_params_[knowhere::meta::BM25_AVGDL];
+    }
     // Providers are registered only for nq=1. Set the backend parameter before
     // converting per-group completion into an ordinary (non-grouped) Search.
     ApplyStrictGroupSkipRefine(original, 1, info.search_params_);
@@ -79,31 +90,6 @@ StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
     // Group-by consumes unrounded iterator distances; preserve that here.
     info.round_decimal_ = -1;
     info.search_params_[knowhere::meta::TOPK] = remaining_topk;
-    // Iterator accepts ef < k, but HNSW Search does not. Knowhere accepts
-    // integer strings as well as JSON integers. Raise only a valid explicit ef
-    // in this copy; leave malformed values and defaults to backend validation.
-    auto ef = info.search_params_.find("ef");
-    if (ef != info.search_params_.end()) {
-        if (ef->is_number_integer() && *ef > 0 &&
-            *ef <= std::numeric_limits<int>::max() && *ef < remaining_topk) {
-            *ef = remaining_topk;
-        } else if (ef->is_string()) {
-            const auto& value = ef->get_ref<const std::string&>();
-            try {
-                size_t end = 0;
-                const auto parsed = std::stoll(value, &end);
-                if (end == value.size() && parsed > 0 &&
-                    parsed <= std::numeric_limits<int>::max() &&
-                    parsed < remaining_topk) {
-                    *ef = std::to_string(remaining_topk);
-                }
-            } catch (const std::invalid_argument&) {
-                // Preserve the invalid input for Knowhere's validation.
-            } catch (const std::out_of_range&) {
-                // Preserve overflow instead of turning it into a valid ef.
-            }
-        }
-    }
     return info;
 }
 
