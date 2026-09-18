@@ -100,7 +100,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 			}
 			if err != nil {
 				mlog.Warn(ctx, "ask the idempotency windows of fenced vchannels failed", mlog.Err(err))
-				return false, err
+				return prepareFailed(err)
 			}
 			if pending.done() {
 				return false, nil

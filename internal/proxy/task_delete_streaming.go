@@ -87,7 +87,7 @@ func (dt *deleteTask) Execute(ctx context.Context) (err error) {
 		}
 		msgs, msgOffsets, err := dt.buildDeleteMessages(result, offsets, ez)
 		if err != nil {
-			return false, err
+			return prepareFailed(err)
 		}
 		msgs, msgOffsets = pending.dropFenced(msgs, msgOffsets)
 

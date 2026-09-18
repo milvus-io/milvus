@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -1326,4 +1327,107 @@ func TestUpsertAppendToleratesAShortResponse(t *testing.T) {
 	err := task.appendUpsertAttempt(ctx, nil)
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	assert.GreaterOrEqual(t, wal.appends, 2)
+}
+
+// A transient failure met during a retry -- after an earlier attempt already
+// landed rows -- backs off through prepareFailed like a fence refusal does,
+// instead of ending the request outright: failing then would fail a request
+// that is already partly written (shard_fenced_retry.go's retryPreparation
+// doc). The idempotency probe of a fenced vchannel is one such failure: it is
+// asked on a retry (the first attempt has nothing fenced to probe yet), and a
+// plain, uncoded error from it -- e.g. a transport hiccup -- must not be
+// confused with the vchannel telling the probe it holds no proof of the key.
+func TestKeyedInsertBacksOffOnATransientProbeFailureDuringARetry(t *testing.T) {
+	useSingleMessageRepack(t)
+	pre, post := oneShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := installSplitFenceTestWAL(t)
+	// The source's every append or probe is routed through wal.failing rather
+	// than wal.fenced, so its first (real) refusal, its transient hiccup, and
+	// its later (real) refusal of the probe can each be swapped in in turn.
+	wal.failing[splitSource] = fencedErr(splitSource)
+	f.onEvict = func(eviction int) {
+		switch eviction {
+		case 1:
+			// Between the fenced first attempt and the retry that probes the
+			// source's window, a transient, uncoded failure takes the probe.
+			wal.failing[splitSource] = errors.New("transient probe hiccup")
+		case 2:
+			// The retry that backed off from the transient failure asks again;
+			// the source is still fenced.
+			wal.failing[splitSource] = fencedErr(splitSource)
+		}
+	}
+	pks := seqPKs(4)
+	task := f.keyedInsertTask(pks, "key")
+
+	require.NoError(t, task.Execute(context.Background()))
+	require.True(t, merr.Ok(task.result.GetStatus()), task.result.GetStatus().GetReason())
+	assert.Equal(t, 2, f.evictions, "one refresh for the fence, one more backing off the transient probe failure")
+	assertRowsLandedOnceOnTheirOwner(t, wal, post, pks, 1)
+	assert.Empty(t, wal.insertedRowIDs[splitSource], "the source never actually took a write")
+}
+
+// realBuildDeleteMessages is buildDeleteMessages' own logic, reused by
+// TestDeleteExecuteBacksOffOnATransientBuildFailureDuringARetry to answer every
+// call its mock does not inject a failure into.
+func realBuildDeleteMessages(
+	dt *deleteTask,
+	result map[uint32][]*msgstream.DeleteMsg,
+	offsets map[*msgstream.DeleteMsg][]int,
+	ez *streamingmessage.CipherConfig,
+) ([]streamingmessage.MutableMessage, [][]int, error) {
+	var msgs []streamingmessage.MutableMessage
+	var msgOffsets [][]int
+	for hashKey, deleteMsgs := range result {
+		vchannel := dt.vChannels[hashKey]
+		for _, deleteMsg := range deleteMsgs {
+			msg, err := streamingmessage.NewDeleteMessageBuilderV1().
+				WithHeader(&streamingmessage.DeleteMessageHeader{
+					CollectionId: dt.collectionID,
+					Rows:         uint64(deleteMsg.NumRows),
+				}).
+				WithBody(deleteMsg.DeleteRequest).
+				WithVChannel(vchannel).
+				WithCipher(ez).
+				BuildMutable()
+			if err != nil {
+				return nil, nil, err
+			}
+			msgs = append(msgs, msg)
+			msgOffsets = append(msgOffsets, offsets[deleteMsg])
+		}
+	}
+	return msgs, msgOffsets, nil
+}
+
+// A transient failure building the WAL messages of an already-repacked delete
+// -- met on a retry, after an earlier attempt landed tombstones on another
+// vchannel -- backs off through prepareFailed instead of ending the request:
+// task_delete_streaming.go's buildDeleteMessages carries no Milvus code of its
+// own on such a failure (a message-encoding error, not a fence), and ending the
+// request there would fail a delete that is already partly written.
+func TestDeleteExecuteBacksOffOnATransientBuildFailureDuringARetry(t *testing.T) {
+	pre, post := oneShardSplit()
+	f := newSplitFenceFixture(t, pre, post)
+	wal := installSplitFenceTestWAL(t, splitSource)
+	pks := seqPKs(4)
+	task := f.deleteTask(pks)
+
+	calls := 0
+	mockBuild := mockey.Mock((*deleteTask).buildDeleteMessages).To(
+		func(dt *deleteTask, result map[uint32][]*msgstream.DeleteMsg, offsets map[*msgstream.DeleteMsg][]int, ez *streamingmessage.CipherConfig) ([]streamingmessage.MutableMessage, [][]int, error) {
+			calls++
+			if calls == 2 {
+				// The retry that follows the source's fence hits a transient
+				// failure building its (now target-addressed) messages.
+				return nil, nil, errors.New("transient build hiccup")
+			}
+			return realBuildDeleteMessages(dt, result, offsets, ez)
+		}).Build()
+	defer mockBuild.UnPatch()
+
+	require.NoError(t, task.Execute(context.Background()))
+	assertTombstonesLandedOnTheirOwner(t, wal, post, pks)
+	assert.GreaterOrEqual(t, calls, 3, "the transient failure cost one more attempt")
 }
