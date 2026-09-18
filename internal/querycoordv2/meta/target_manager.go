@@ -23,7 +23,9 @@ import (
 	"sync"
 
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -75,6 +77,7 @@ type TargetManagerInterface interface {
 	IsCurrentTargetReady(ctx context.Context, collectionID int64) bool
 	GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64
 	GetSplitWindowTargets(ctx context.Context, collectionID int64, scope TargetScope) typeutil.Set[string]
+	GetSplitWindowExclusions(ctx context.Context, collectionID int64, scope TargetScope) (typeutil.Set[string], bool)
 }
 
 type TargetManager struct {
@@ -131,8 +134,54 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(ctx context.Context, col
 		log.Info(ctx, "next target does not exist, skip it")
 		return false
 	}
+
+	// A next target pulled inside a shard split window is promoted WITHOUT its
+	// window targets, and does not consume the next target.
+	//
+	// Not promoting it at all was what made a load of the collection sit
+	// unfinished for the whole window: the read path serves the source for the
+	// whole window, but with no current target GetShardLeaders has nothing to
+	// enumerate and the collection never reaches Loaded. Promoting the snapshot
+	// whole is not an option either -- that is the duplicate read the hold-back
+	// exists to prevent. So the current target becomes exactly the channels the
+	// read path serves: the source, plus any shard the split does not touch.
+	//
+	// The next target is deliberately left in place. Removing it would leave an
+	// adopted-but-not-yet-flipped target channel in NEITHER target for as long
+	// as it takes to re-pull, and the channel checker releases exactly the
+	// channels that are in neither. Keeping it also pins nextTargetLastUpdate,
+	// which the window-end refresh compares its state read against.
+	consumeNextTarget := true
+	if len(newTarget.SplitWindowTargets()) > 0 {
+		exclusions, promotable := mgr.splitWindowExclusions(ctx, collectionID, newTarget)
+		if !promotable {
+			log.RatedInfo(ctx, rate.Limit(10), "refuse to promote a next target pulled inside a shard split window",
+				mlog.Strings("windowTargets", newTarget.SplitWindowTargets().Collect()))
+			return false
+		}
+		if current := mgr.current.getCollectionTarget(collectionID); current != nil &&
+			current.GetTargetVersion() >= newTarget.GetTargetVersion() {
+			// this snapshot is already the current target; nothing to redo.
+			return true
+		}
+		narrowed := newTarget.withoutChannels(exclusions)
+		if narrowed.IsEmpty() {
+			log.Warn(ctx, "refuse to promote an empty current target from a shard split window snapshot",
+				mlog.Strings("excluded", exclusions.Collect()))
+			return false
+		}
+		log.Info(ctx, "promote a shard split window snapshot without its window targets",
+			mlog.Int64("version", narrowed.GetTargetVersion()),
+			mlog.Strings("servingChannels", narrowed.GetAllDmChannelNames()),
+			mlog.Strings("excluded", exclusions.Collect()))
+		newTarget = narrowed
+		consumeNextTarget = false
+	}
+
 	mgr.current.updateCollectionTarget(collectionID, newTarget)
-	mgr.next.removeCollectionTarget(collectionID)
+	if consumeNextTarget {
+		mgr.next.removeCollectionTarget(collectionID)
+	}
 
 	partStatsVersionInfo := "partitionStats:"
 	for channelName, dmlChannel := range newTarget.dmChannels {
@@ -737,6 +786,83 @@ func (mgr *TargetManager) GetSplitWindowTargets(ctx context.Context, collectionI
 		return nil
 	}
 	return targets[0].SplitWindowTargets()
+}
+
+// GetSplitWindowExclusions reports the channels of the collection's target under
+// scope that a current target may be promoted WITHOUT, and whether such a
+// promotion is allowed at all.
+//
+// A target with no window targets excludes nothing and is promotable as it
+// always was: (nil, true). Otherwise the exclusion is the whole mark, and it is
+// allowed only when the collection's shard states, read now, still describe
+// exactly the window that mark was taken in:
+//
+//  1. every marked channel is still ShardCreating. A marked channel that has
+//     since been adopted -- or that was only ever an over-mark -- is data the
+//     read path may have to serve, and this snapshot cannot say where it lives,
+//     so nothing is excluded and the promotion waits for the window-end re-pull.
+//  2. every fenced source (ShardSplitting) is one of the channels that stay.
+//     This is what stops a stale state read from hiding a whole key range: if
+//     the states still call a channel a fenced source but the pull no longer
+//     lists it, the source was delisted between them and the read is behind the
+//     pull -- its targets are the servers now, and excluding them would report a
+//     collection Loaded while nobody serves that range.
+//  3. there is at least one such fenced source. A mark with no source behind it
+//     is not a window this rule can reason about.
+//
+// Conditions 2 and 3 together also guarantee the promotion leaves at least one
+// channel. The rule only ever refuses: every refusal falls back to the behavior
+// before it existed, which is that a window snapshot is not promoted at all.
+func (mgr *TargetManager) GetSplitWindowExclusions(ctx context.Context, collectionID int64, scope TargetScope) (typeutil.Set[string], bool) {
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	if len(targets) == 0 {
+		return nil, true
+	}
+	return mgr.splitWindowExclusions(ctx, collectionID, targets[0])
+}
+
+func (mgr *TargetManager) splitWindowExclusions(ctx context.Context, collectionID int64, target *CollectionTarget) (typeutil.Set[string], bool) {
+	window := target.SplitWindowTargets()
+	if len(window) == 0 {
+		return nil, true
+	}
+	refuse := func(reason string, fields ...mlog.Field) (typeutil.Set[string], bool) {
+		mlog.RatedInfo(ctx, rate.Limit(10), "shard split window targets cannot be excluded from a current target: "+reason,
+			append([]mlog.Field{
+				mlog.FieldCollectionID(collectionID),
+				mlog.Strings("windowTargets", window.Collect()),
+			}, fields...)...)
+		return nil, false
+	}
+	if mgr.splitStates == nil {
+		return refuse("no shard split state cache is wired")
+	}
+	states, ok := mgr.splitStates.ChannelStates(ctx, collectionID)
+	if !ok {
+		return refuse("the collection's shard states could not be read")
+	}
+	for channel := range window {
+		if states[channel] != schemapb.ShardState_ShardCreating {
+			return refuse("a marked channel is no longer a not-yet-adopted split target",
+				mlog.String("channel", channel),
+				mlog.String("state", states[channel].String()))
+		}
+	}
+	fencedSources := 0
+	for channel, state := range states {
+		if state != schemapb.ShardState_ShardSplitting {
+			continue
+		}
+		fencedSources++
+		if _, kept := target.dmChannels[channel]; !kept || window.Contain(channel) {
+			return refuse("a fenced split source is not among the channels that would stay",
+				mlog.String("channel", channel))
+		}
+	}
+	if fencedSources == 0 {
+		return refuse("the collection has no fenced split source")
+	}
+	return window, true
 }
 
 func (mgr *TargetManager) GetCollectionRowCount(ctx context.Context, collectionID int64, scope TargetScope) int64 {
