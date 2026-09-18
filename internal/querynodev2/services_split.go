@@ -48,8 +48,9 @@ var _ delegator.ChildSpawner = (*QueryNode)(nil)
 // it; the source delegator reaches it only through the returned in-process
 // handle. It is started so it consumes its WAL and serves fronted reads.
 //
-// It is idempotent: a re-consume of the fence finds the child already
-// registered and returns it.
+// It is idempotent: a re-consume of the fence finds the source's child already
+// registered and returns it. A registered delegator the source does not front
+// is never returned or replaced (see reuseSplitChild).
 func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.SpawnChildParams) (delegator.ShardDelegator, error) {
 	targetVChannel := params.TargetVChannel
 	log := mlog.With(
@@ -59,8 +60,7 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	)
 
 	if existing, ok := node.delegators.Get(targetVChannel); ok {
-		log.Info(ctx, "split child delegator already registered, reuse it")
-		return existing, nil
+		return reuseSplitChild(ctx, existing, params)
 	}
 
 	collection := node.manager.Collection.Get(params.CollectionID)
@@ -74,6 +74,20 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	seekPosition, err := node.waitSplitTargetRecovery(params.CollectionID, targetVChannel)
 	if err != nil {
 		return nil, err
+	}
+
+	// The wait can take minutes, and querycoord may watch the target meanwhile.
+	// Claim the channel the way WatchDmChannels does, so neither registers a
+	// delegator for it while the other is part-way through, then look again: a
+	// delegator registered during the wait is never overwritten (and so never
+	// removed from the node by this spawn's failure cleanup).
+	if !node.subscribingChannels.Insert(targetVChannel) {
+		return nil, merr.WrapErrServiceUnavailable("split target is being watched",
+			fmt.Sprintf("target %s, source %s", targetVChannel, params.SourceVChannel))
+	}
+	defer node.subscribingChannels.Remove(targetVChannel)
+	if existing, ok := node.delegators.Get(targetVChannel); ok {
+		return reuseSplitChild(ctx, existing, params)
 	}
 
 	// keep the collection alive for the child's lifetime.
@@ -135,6 +149,23 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	log.Info(ctx, "spawned an in-process child delegator for a split target",
 		mlog.Uint64("seekTimestamp", seekPosition.GetTimestamp()))
 	return child, nil
+}
+
+// reuseSplitChild returns a delegator already registered for a split target
+// only if the spawning source fronts it, i.e. it is that source's own child
+// (re-consume of the fence). Anything else, typically a delegator querycoord
+// watched for the target on its own, forwards no delete to the source, and
+// fronting it would serve rows deleted on the target. It is refused with
+// ErrChannelReduplicate, which the source does not retry.
+func reuseSplitChild(ctx context.Context, existing delegator.ShardDelegator, params delegator.SpawnChildParams) (delegator.ShardDelegator, error) {
+	targetVChannel := params.TargetVChannel
+	if params.Parent != nil && existing.FrontingParent() == params.Parent {
+		mlog.Info(ctx, "split child delegator already registered, reuse it",
+			mlog.String("sourceVChannel", params.SourceVChannel), mlog.String("targetVChannel", targetVChannel))
+		return existing, nil
+	}
+	return nil, merr.WrapErrChannelReduplicate(targetVChannel,
+		fmt.Sprintf("a delegator not fronted by source %s already serves the split target", params.SourceVChannel))
 }
 
 // respawnSplitChildrenOnRecovery re-creates the in-process split children for a
