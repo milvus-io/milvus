@@ -36,6 +36,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func servingChannel(name string, node int64) *meta.DmChannel {
@@ -78,6 +80,16 @@ func releasedSourcesAfter(t *testing.T, adopted *milvuspb.DescribeCollectionResp
 func channelDiff(t *testing.T, states *milvuspb.DescribeCollectionResponse,
 	nextTarget, currentTarget map[string]*meta.DmChannel, inDist ...string,
 ) (loaded, released []string) {
+	return channelDiffWith(t, func(broker *meta.MockBroker) {
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(states, nil).Maybe()
+	}, nil, nextTarget, currentTarget, inDist...)
+}
+
+// channelDiffWith is channelDiff with the broker's DescribeCollection set up by
+// describe, and the next target marking window as its split window targets.
+func channelDiffWith(t *testing.T, describe func(*meta.MockBroker), window typeutil.Set[string],
+	nextTarget, currentTarget map[string]*meta.DmChannel, inDist ...string,
+) (loaded, released []string) {
 	nodeMgr := session.NewNodeManager()
 	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID: 1, Address: "localhost", Hostname: "localhost",
@@ -101,9 +113,10 @@ func channelDiff(t *testing.T, states *milvuspb.DescribeCollectionResponse,
 	targetMgr := meta.NewMockTargetManager(t)
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.NextTarget).Return(nextTarget).Maybe()
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.CurrentTarget).Return(currentTarget).Maybe()
+	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), meta.NextTarget).Return(window).Maybe()
 
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(states, nil).Maybe()
+	describe(broker)
 
 	// The checker's constructor reaches for the global assign policy factory.
 	scheduler := task.NewMockScheduler(t)
@@ -191,5 +204,68 @@ func TestADelistedSourceIsNotReWatchedAfterItsNodeStops(t *testing.T) {
 	loaded, released := channelDiff(t, delistedSplitResp(), window, current)
 	assert.NotContains(t, loaded, "v0", "a delisted source must never be re-watched")
 	assert.ElementsMatch(t, []string{"v1", "v2"}, loaded)
+	assert.Empty(t, released)
+}
+
+// I2: the next target pulled just after a fence lists the new targets, while
+// the cached shard states were read just before it and do not list them yet.
+// The window mark, taken from a fresh read before that same pull, catches the
+// targets either way.
+func TestAFenceRaceWithAStaleCacheDoesNotWatchTheTargets(t *testing.T) {
+	window := map[string]*meta.DmChannel{
+		"v0": servingChannel("v0", 1),
+		"v1": servingChannel("v1", 1),
+		"v2": servingChannel("v2", 1),
+	}
+	current := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1)}
+	preFence := func(broker *meta.MockBroker) {
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0"},
+			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+		}, nil).Maybe()
+	}
+	loaded, released := channelDiffWith(t, preFence, typeutil.NewSet("v1", "v2"), window, current, "v0")
+	assert.Empty(t, loaded)
+	assert.Empty(t, released)
+}
+
+// I2: a target adopted while the next target is still the window snapshot is
+// watched only from the pull taken after the adoption. The window snapshot
+// attributes the target's flushed data to its source and carries no seek or
+// segment of the target's own, so the shard states calling it Normal is not
+// enough.
+func TestAnAdoptedTargetIsNotWatchedFromTheWindowSnapshot(t *testing.T) {
+	window := map[string]*meta.DmChannel{
+		"v0": servingChannel("v0", 1),
+		"v1": servingChannel("v1", 1),
+		"v2": servingChannel("v2", 1),
+	}
+	current := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1)}
+	adopted := func(broker *meta.MockBroker) {
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(delistedSplitResp(), nil).Maybe()
+	}
+	loaded, _ := channelDiffWith(t, adopted, typeutil.NewSet("v1", "v2"), window, current, "v0")
+	assert.Empty(t, loaded, "a window target is watched only from a pull that no longer marks it")
+
+	repulled := map[string]*meta.DmChannel{"v1": servingChannel("v1", 1), "v2": servingChannel("v2", 1)}
+	loaded, _ = channelDiffWith(t, adopted, nil, repulled, current, "v0")
+	assert.ElementsMatch(t, []string{"v1", "v2"}, loaded)
+}
+
+// I2: after a querycoord restart the cache is empty, and while the coordinator
+// cannot describe the collection nothing tells a not-yet-adopted target from
+// any other channel. Nothing of the collection is watched until it can: the
+// watch itself describes the collection first, so it could not succeed anyway.
+func TestNothingIsWatchedWhileTheShardStatesAreUnknown(t *testing.T) {
+	next := map[string]*meta.DmChannel{
+		"v0": servingChannel("v0", 1),
+		"v1": servingChannel("v1", 1),
+	}
+	describeFails := func(broker *meta.MockBroker) {
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).
+			Return(nil, merr.WrapErrServiceUnavailable("rootcoord not ready")).Maybe()
+	}
+	loaded, released := channelDiffWith(t, describeFails, nil, next, nil)
+	assert.Empty(t, loaded)
 	assert.Empty(t, released)
 }
