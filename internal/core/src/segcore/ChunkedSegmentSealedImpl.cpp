@@ -5701,6 +5701,8 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                 std::vector<TextIndexEntry> entries;
                 std::vector<milvus_storage::lob_column::EncodedRef>
                     encoded_refs;
+                entries.reserve(kTextLobIndexBuildBatchSize);
+                encoded_refs.reserve(kTextLobIndexBuildBatchSize);
                 auto flush_text_entries = [&]() {
                     if (entries.empty()) {
                         return;
@@ -5713,14 +5715,19 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                                texts.size(),
                                encoded_refs.size(),
                                id_);
-                    for (const auto& entry : entries) {
-                        if (!entry.is_valid) {
-                            index->AddNullSealed(entry.offset);
-                            continue;
+                    std::vector<std::string> batch_texts(entries.size());
+                    FixedVector<bool> batch_valids(entries.size());
+                    for (size_t i = 0; i < entries.size(); ++i) {
+                        const auto& entry = entries[i];
+                        batch_valids[i] = entry.is_valid;
+                        if (entry.is_valid) {
+                            batch_texts[i] = std::move(texts[entry.text_index]);
                         }
-                        index->AddTextSealed(
-                            texts[entry.text_index], true, entry.offset);
                     }
+                    index->AddTextsSealed(entries.size(),
+                                          batch_texts.data(),
+                                          batch_valids.data(),
+                                          entries.front().offset);
                     entries.clear();
                     encoded_refs.clear();
                     CheckCancellation(
@@ -5750,12 +5757,35 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                     });
                 flush_text_entries();
             } else {
+                std::vector<std::string> texts;
+                FixedVector<bool> valids;
+                texts.reserve(kTextLobIndexBuildBatchSize);
+                valids.reserve(kTextLobIndexBuildBatchSize);
+                size_t offset_begin = 0;
+                auto flush_texts = [&]() {
+                    if (texts.empty()) {
+                        return;
+                    }
+                    index->AddTextsSealed(texts.size(),
+                                          texts.data(),
+                                          valids.data(),
+                                          offset_begin);
+                    texts.clear();
+                    valids.clear();
+                };
                 column->BulkRawStringAt(
                     nullptr,
                     [&](std::string_view value, size_t offset, bool is_valid) {
-                        index->AddTextSealed(
-                            std::string(value), is_valid, offset);
+                        if (texts.empty()) {
+                            offset_begin = offset;
+                        }
+                        texts.emplace_back(value);
+                        valids.push_back(is_valid);
+                        if (texts.size() >= kTextLobIndexBuildBatchSize) {
+                            flush_texts();
+                        }
                     });
+                flush_texts();
             }
         } else {  // fetch raw data from index.
             auto field_index_iter =
@@ -5775,13 +5805,21 @@ ChunkedSegmentSealedImpl::CreateTextIndexWithSchema(
                        "failed to create text index, field index cannot be "
                        "converted to string index");
             auto n = impl->Count();
-            for (size_t i = 0; i < n; i++) {
-                auto raw = impl->Reverse_Lookup(i);
-                if (!raw.has_value()) {
-                    index->AddNullSealed(i);
-                    continue;
+            for (size_t offset_begin = 0; offset_begin < n;
+                 offset_begin += kTextLobIndexBuildBatchSize) {
+                auto batch_size =
+                    std::min(kTextLobIndexBuildBatchSize, n - offset_begin);
+                std::vector<std::string> texts(batch_size);
+                FixedVector<bool> valids(batch_size);
+                for (size_t i = 0; i < batch_size; ++i) {
+                    auto raw = impl->Reverse_Lookup(offset_begin + i);
+                    valids[i] = raw.has_value();
+                    if (raw.has_value()) {
+                        texts[i] = std::move(raw.value());
+                    }
                 }
-                index->AddTextSealed(raw.value(), true, i);
+                index->AddTextsSealed(
+                    batch_size, texts.data(), valids.data(), offset_begin);
             }
         }
     }

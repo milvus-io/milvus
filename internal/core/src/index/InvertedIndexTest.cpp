@@ -95,6 +95,158 @@ TEST(InvertedIndex, PatternMatchPlannerPolicy) {
     EXPECT_TRUE(int_index.ShouldUseOp(proto::plan::OpType::Equal));
 }
 
+TEST(InvertedIndex, BatchBuildPreservesRowsAcrossBatchBoundary) {
+    constexpr size_t kRowCount = 4099;
+    std::vector<int64_t> values(kRowCount);
+    std::iota(values.begin(), values.end(), 0);
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 101};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::Int64);
+    storage::IndexMeta index_meta{3, 101, 4002, 4002};
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    index::InvertedIndexTantivy<int64_t> index(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+    auto field_data =
+        storage::CreateFieldData(DataType::INT64, DataType::NONE, false);
+    field_data->FillFieldData(values.data(), values.size());
+    index.BuildWithFieldData({field_data});
+    auto stats = index.Upload(Config());
+
+    index::InvertedIndexTantivy<int64_t> loaded(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+    Config load_config;
+    load_config[index::INDEX_FILES] = stats->GetIndexFiles();
+    loaded.Load(milvus::tracer::TraceContext{}, load_config);
+
+    int64_t query = kRowCount - 1;
+    auto hits = loaded.In(1, &query);
+    ASSERT_EQ(hits.size(), kRowCount);
+    EXPECT_TRUE(hits[kRowCount - 1]);
+}
+
+TEST(InvertedIndex, NonNullableStringBatchBuildPreservesRowsAndOwnsValues) {
+    constexpr size_t kFirstFieldRows = 4099;
+    constexpr size_t kRowCount = kFirstFieldRows + 3;
+    std::vector<std::string> values(kRowCount);
+    for (size_t i = 0; i < kRowCount; ++i) {
+        // Exceed the byte limit before the 4096-row limit.
+        values[i] = std::string(4096, 'x') + std::to_string(i);
+    }
+    values[0] = "";
+    values[1] = std::string("embedded\0nul", 12);
+    const std::vector<size_t> query_offsets{
+        0, 2047, 2048, 2049, 2050, 4095, 4096, 4098, 4099, 4101};
+    std::vector<std::string> queries;
+    for (auto offset : query_offsets) {
+        queries.push_back(values[offset]);
+    }
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 103};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    field_meta.field_schema.set_nullable(false);
+    storage::IndexMeta index_meta{3, 103, 4004, 4004};
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    index::InvertedIndexTantivy<std::string> index(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+    {
+        auto first =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        first->FillFieldData(values.data(), kFirstFieldRows);
+        auto empty =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        auto second =
+            storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, false);
+        second->FillFieldData(values.data() + kFirstFieldRows,
+                              kRowCount - kFirstFieldRows);
+        index.BuildWithFieldData({first, empty, second});
+    }
+    // FieldData and its strings can be released before the writer finishes.
+    values.clear();
+    auto stats = index.Upload(Config());
+
+    index::InvertedIndexTantivy<std::string> loaded(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+    Config load_config;
+    load_config[index::INDEX_FILES] = stats->GetIndexFiles();
+    loaded.Load(milvus::tracer::TraceContext{}, load_config);
+
+    auto null_bits = loaded.IsNull();
+    ASSERT_EQ(null_bits.size(), kRowCount);
+    EXPECT_EQ(null_bits.count(), 0);
+    for (size_t i = 0; i < query_offsets.size(); ++i) {
+        auto hits = loaded.In(1, &queries[i]);
+        ASSERT_EQ(hits.size(), kRowCount);
+        EXPECT_EQ(hits.count(), 1) << "row " << query_offsets[i];
+        EXPECT_TRUE(hits[query_offsets[i]]);
+    }
+    // Prefix queries preserve explicit lengths, including the embedded NUL.
+    std::string prefix("embedded\0nul", 12);
+    auto prefix_hits = loaded.PrefixMatch(prefix);
+    ASSERT_EQ(prefix_hits.size(), kRowCount);
+    EXPECT_EQ(prefix_hits.count(), 1);
+    EXPECT_TRUE(prefix_hits[1]);
+    std::string truncated = "embedded";
+    EXPECT_EQ(loaded.In(1, &truncated).count(), 0);
+}
+
+TEST(InvertedIndex, NullableStringBatchBuildCountsPayloadBytes) {
+    constexpr size_t kRowCount = 4098;
+    std::vector<std::string> values(kRowCount, std::string(2050, 'x'));
+    values[0] = "first needle";
+    values[4097] = "boundary needle";
+
+    std::vector<uint8_t> valid_bytes((kRowCount + 7) / 8, 0xff);
+    valid_bytes[4096 >> 3] &= ~(1u << (4096 & 7));
+
+    storage::FieldDataMeta field_meta{1, 2, 3, 102};
+    field_meta.field_schema.set_data_type(proto::schema::DataType::VarChar);
+    field_meta.field_schema.set_nullable(true);
+    storage::IndexMeta index_meta{3, 102, 4003, 4003};
+    auto storage_config = get_default_local_storage_config();
+    auto chunk_manager = storage::CreateChunkManager(storage_config);
+    auto fs = storage::InitArrowFileSystem(storage_config);
+    storage::FileManagerContext ctx(field_meta, index_meta, chunk_manager, fs);
+
+    index::InvertedIndexTantivy<std::string> index(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+    auto field_data =
+        storage::CreateFieldData(DataType::VARCHAR, DataType::NONE, true);
+    field_data->FillFieldData(
+        values.data(), valid_bytes.data(), values.size(), 0);
+    index.BuildWithFieldData({field_data});
+    auto stats = index.Upload(Config());
+
+    index::InvertedIndexTantivy<std::string> loaded(
+        index::TANTIVY_INDEX_LATEST_VERSION, ctx);
+    Config load_config;
+    load_config[index::INDEX_FILES] = stats->GetIndexFiles();
+    loaded.Load(milvus::tracer::TraceContext{}, load_config);
+
+    auto null_bits = loaded.IsNull();
+    ASSERT_EQ(null_bits.size(), kRowCount);
+    EXPECT_FALSE(null_bits[4095]);
+    EXPECT_TRUE(null_bits[4096]);
+
+    std::string first_query = "first needle";
+    auto first_hits = loaded.In(1, &first_query);
+    ASSERT_EQ(first_hits.size(), kRowCount);
+    EXPECT_TRUE(first_hits[0]);
+    EXPECT_FALSE(first_hits[4096]);
+
+    std::string boundary_query = "boundary needle";
+    auto boundary_hits = loaded.In(1, &boundary_query);
+    ASSERT_EQ(boundary_hits.size(), kRowCount);
+    EXPECT_TRUE(boundary_hits[4097]);
+}
+
 struct ChunkManagerWrapper {
     ChunkManagerWrapper(storage::ChunkManagerPtr cm) : cm_(cm) {
     }
@@ -941,6 +1093,7 @@ TEST(InvertedIndex, Naive) {
     test_run<int16_t, DataType::INT16>();
     test_run<int32_t, DataType::INT32>();
     test_run<int64_t, DataType::INT64>();
+    test_run<int64_t, DataType::TIMESTAMPTZ>();
 
     test_run<bool, DataType::BOOL>();
 
@@ -952,6 +1105,7 @@ TEST(InvertedIndex, Naive) {
     test_run<int16_t, DataType::INT16, DataType::NONE, true>();
     test_run<int32_t, DataType::INT32, DataType::NONE, true>();
     test_run<int64_t, DataType::INT64, DataType::NONE, true>();
+    test_run<int64_t, DataType::TIMESTAMPTZ, DataType::NONE, true>();
 
     test_run<bool, DataType::BOOL, DataType::NONE, true>();
 

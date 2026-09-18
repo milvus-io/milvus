@@ -1,6 +1,6 @@
-use core::slice;
 use std::sync::Arc;
 
+use crate::index_writer_batch::DOCUMENT_BATCH_SIZE;
 use futures::executor::block_on;
 use libc::c_char;
 use log::info;
@@ -236,8 +236,7 @@ impl IndexWriterWrapperImpl {
         self.add_document(document, offset)
     }
 
-    /// Add json key stats - adds documents one by one
-    /// Tantivy's IndexWriter has internal buffering, so external batching is unnecessary
+    /// Batch key statistics to amortize submissions to the indexing workers.
     pub fn add_json_key_stats(
         &mut self,
         keys: &[*const c_char],
@@ -245,6 +244,7 @@ impl IndexWriterWrapperImpl {
         json_offsets_len: &[usize],
     ) -> Result<()> {
         let id_field = self.id_field.unwrap();
+        let mut batch = Vec::with_capacity(DOCUMENT_BATCH_SIZE);
 
         for i in 0..keys.len() {
             let key = c_ptr_to_str(keys[i])
@@ -253,11 +253,21 @@ impl IndexWriterWrapperImpl {
             let offsets = unsafe { convert_to_rust_slice!(json_offsets[i], json_offsets_len[i]) };
 
             for offset in offsets {
-                self.index_writer.add_document(doc!(
+                batch.push(UserOperation::Add(doc!(
                     id_field => *offset,
                     self.field => key,
-                ))?;
+                )));
+                if batch.len() == DOCUMENT_BATCH_SIZE {
+                    self.index_writer.run(std::mem::replace(
+                        &mut batch,
+                        Vec::with_capacity(DOCUMENT_BATCH_SIZE),
+                    ))?;
+                }
             }
+        }
+
+        if !batch.is_empty() {
+            self.index_writer.run(batch)?;
         }
 
         Ok(())

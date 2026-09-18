@@ -14,6 +14,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
+#include <string_view>
 
 #include "index/TextMatchIndex.h"
 #include "index/InvertedIndexUtil.h"
@@ -248,25 +249,59 @@ TextMatchIndex::Load(const Config& config) {
     FinalizeSealed(/*release_null_offsets=*/true);
 }
 
-// Add text for sealed segment
 void
-TextMatchIndex::AddTextSealed(const std::string& text,
-                              const bool valid,
-                              int64_t offset) {
-    if (!valid) {
-        AddNullSealed(offset);
+TextMatchIndex::AddTextsSealed(size_t n,
+                               const std::string* texts,
+                               const bool* valids,
+                               int64_t offset_begin) {
+    if (n == 0) {
         return;
     }
-    wrapper_->add_data(&text, 1, offset);
-}
 
-// Add null for sealed segment
-void
-TextMatchIndex::AddNullSealed(int64_t offset) {
-    null_offset_.push_back(offset);
-    // still need to add null to make offset is correct
-    static const std::string empty;
-    wrapper_->add_array_data(&empty, 0, offset);
+    // The caller owns the payloads until the synchronous FFI call copies them
+    // into Tantivy documents. Only stage views here, including for nullable rows.
+    std::vector<std::string_view> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    size_t value_bytes = 0;
+    values.reserve(std::min(n, kBuildBatchRowLimit));
+    row_offsets.reserve(std::min(n, kBuildBatchRowLimit) + 1);
+    doc_ids.reserve(std::min(n, kBuildBatchRowLimit));
+
+    auto flush = [&]() {
+        if (doc_ids.empty()) {
+            return;
+        }
+        wrapper_->add_rows<std::string_view>(
+            TantivyIndexWrapper::RowBatchView<std::string_view>{
+                std::span<const std::string_view>(values.data(), values.size()),
+                row_offsets,
+                doc_ids},
+            batch_buffer);
+        values.clear();
+        row_offsets.assign(1, 0);
+        doc_ids.clear();
+        value_bytes = 0;
+    };
+
+    for (size_t i = 0; i < n; ++i) {
+        auto doc_id = offset_begin + static_cast<int64_t>(i);
+        auto valid = valids == nullptr || valids[i];
+        if (!valid) {
+            null_offset_.push_back(doc_id);
+        } else {
+            value_bytes += texts[i].size();
+            values.push_back(texts[i]);
+        }
+        row_offsets.push_back(values.size());
+        doc_ids.push_back(doc_id);
+        if (doc_ids.size() >= kBuildBatchRowLimit ||
+            value_bytes >= kBuildBatchValueLimit) {
+            flush();
+        }
+    }
+    flush();
 }
 
 // Add texts for growing segment
@@ -301,56 +336,57 @@ TextMatchIndex::BuildIndexFromFieldData(
     const std::vector<FieldDataPtr>& field_datas,
     bool nullable,
     int64_t offset_begin) {
-    int64_t offset = offset_begin;
-    if (nullable) {
-        int64_t total = 0;
-        for (const auto& data : field_datas) {
-            total += data->get_null_count();
-        }
-        {
-            std::unique_lock<folly::SharedMutex> lock(mutex_);
-            null_offset_.reserve(null_offset_.size() +
-                                 static_cast<size_t>(total));
-        }
-        for (const auto& data : field_datas) {
-            auto n = data->get_num_rows();
-            auto null_count = data->get_null_count();
-            std::vector<size_t> null_offsets;
-            null_offsets.reserve(null_count);
-            for (int i = 0; i < n; i++) {
-                if (!data->is_valid(i)) {
-                    null_offsets.push_back(offset + i);
-                }
-            }
-            if (!null_offsets.empty()) {
-                std::unique_lock<folly::SharedMutex> lock(mutex_);
-                null_offset_.insert(null_offset_.end(),
-                                    null_offsets.begin(),
-                                    null_offsets.end());
-            }
-            for (int i = 0; i < n; i++) {
-                if (!data->is_valid(i)) {
-                    // add empty array doc to register offset in tantivy,
-                    // same as AddNullSealed
-                    static const std::string empty;
-                    wrapper_->add_array_data(&empty, 0, offset);
-                } else {
-                    wrapper_->add_data(
-                        static_cast<const std::string*>(data->RawValue(i)),
-                        1,
-                        offset);
-                }
-                offset++;
-            }
-        }
-    } else {
+    if (!nullable) {
+        // Reuse the wrapper's bounded batches without copying string payloads.
+        int64_t offset = offset_begin;
         for (const auto& data : field_datas) {
             auto n = data->get_num_rows();
             wrapper_->add_data(
                 static_cast<const std::string*>(data->Data()), n, offset);
             offset += n;
         }
+        return;
     }
+
+    FixedVector<std::string> values;
+    std::vector<uintptr_t> row_offsets{0};
+    TantivyIndexWrapper::RowBatchBuffer batch_buffer;
+    std::vector<int64_t> doc_ids;
+    std::vector<size_t> null_offsets;
+    size_t value_bytes = 0;
+    values.reserve(kBuildBatchRowLimit);
+    row_offsets.reserve(kBuildBatchRowLimit + 1);
+    doc_ids.reserve(kBuildBatchRowLimit);
+    auto flush = [&]() {
+        if (!null_offsets.empty()) {
+            std::unique_lock<folly::SharedMutex> lock(mutex_);
+            null_offset_.insert(
+                null_offset_.end(), null_offsets.begin(), null_offsets.end());
+            null_offsets.clear();
+        }
+        SubmitRowBatch(values, row_offsets, doc_ids, batch_buffer);
+        value_bytes = 0;
+    };
+    int64_t offset = offset_begin;
+    for (const auto& data : field_datas) {
+        for (int64_t i = 0; i < data->get_num_rows(); ++i, ++offset) {
+            if (!data->is_valid(i)) {
+                null_offsets.push_back(offset);
+            } else {
+                const auto& value =
+                    *static_cast<const std::string*>(data->RawValue(i));
+                value_bytes += value.size();
+                values.push_back(value);
+            }
+            row_offsets.push_back(values.size());
+            doc_ids.push_back(offset);
+            if (doc_ids.size() >= kBuildBatchRowLimit ||
+                value_bytes >= kBuildBatchValueLimit) {
+                flush();
+            }
+        }
+    }
+    flush();
 }
 
 void

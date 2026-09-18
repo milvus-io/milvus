@@ -68,7 +68,6 @@ flate2 = "1.1.0"
 tar = "0.4.44"
 
 [dev-dependencies]
-rand = "0.7"
 criterion = "0.5"
 tempfile = "3.0"
 

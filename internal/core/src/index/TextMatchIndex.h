@@ -62,10 +62,10 @@ class TextMatchIndex : public InvertedIndexTantivy<std::string> {
 
  public:
     void
-    AddTextSealed(const std::string& text, const bool valid, int64_t offset);
-
-    void
-    AddNullSealed(int64_t offset);
+    AddTextsSealed(size_t n,
+                   const std::string* texts,
+                   const bool* valids,
+                   int64_t offset_begin);
 
     void
     AddTextsGrowing(size_t n,
