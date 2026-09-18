@@ -350,12 +350,39 @@ func duplicateAnsweredOffsets(resp streaming.AppendResponse) ([]int, bool, error
 // fail a request that is already partly written. A failure no retry can cure,
 // and a context that ended, end the request.
 func (f *splitFence) retryPreparation(ctx context.Context, cache Cache, collectionID int64, err error) (bool, error) {
-	if ctx.Err() != nil || merr.IsCanceledOrTimeout(err) || (merr.IsMilvusError(err) && !merr.IsRetryableErr(err)) {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		// The ambient context has already ended -- whatever err itself looks
+		// like. A plain transport or library error commonly surfaces right as a
+		// request's deadline lapses, not as context.DeadlineExceeded itself, so
+		// this is not folded into the merr.IsCanceledOrTimeout(err) check below.
+		// There is no context left to retry into, so end the request here
+		// rather than falling through to refresh(), which would evict the cache
+		// and ask for another attempt no context remains to make. Classify err
+		// exactly as refresh() classifies its cause (an uncoded failure becomes
+		// a retriable ServiceUnavailable), and fold ctxErr into the message with
+		// merr.Wrapf so the reason the request stopped here -- not just err's
+		// own text -- is still visible, never silently dropped.
+		return false, classifyUncodedCause(merr.Wrapf(err, "shard split fence retry ended: ambient context %s", ctxErr))
+	}
+	if merr.IsCanceledOrTimeout(err) || (merr.IsMilvusError(err) && !merr.IsRetryableErr(err)) {
 		return false, err
 	}
 	mlog.RatedWarn(ctx, 1, "preparing a retry after a shard split fence failed, backing off",
 		mlog.FieldCollectionID(collectionID), mlog.Err(err))
 	return f.refresh(ctx, cache, collectionID, err)
+}
+
+// classifyUncodedCause wraps cause as a retriable ServiceUnavailable when it
+// carries no Milvus code of its own -- a transport error, for instance -- and
+// returns an already-coded cause exactly as it is. Shared by refresh (the
+// normal backoff path) and retryPreparation's already-ended-context exit, so
+// every place a write's failure can reach the caller unretried classifies it
+// the same way instead of one of them leaking a raw, uncoded error.
+func classifyUncodedCause(cause error) error {
+	if cause == nil || merr.IsMilvusError(cause) {
+		return cause
+	}
+	return merr.WrapErrServiceUnavailableErr(cause, "shard split fence retry met an uncoded failure")
 }
 
 // refresh evicts the collection from the proxy's cache, so the next attempt
@@ -373,17 +400,16 @@ func (f *splitFence) refresh(ctx context.Context, cache Cache, collectionID int6
 	if cause == nil {
 		cause = merr.WrapErrServiceUnavailableMsg("the write left rows unplaced after a shard split fence")
 	}
-	if !merr.IsMilvusError(cause) {
-		// A cause with no Milvus code at all -- a transport error, as
-		// retryPreparation's doc describes -- must still fail the request as a
-		// retriable ServiceUnavailable if the deadline ends the retry before
-		// another attempt runs (see the comment atop this file). Wrapping here,
-		// once, covers both places that can surface cause unwrapped: this
-		// function's own no-deadline timeout below, and retry.Handle returning
-		// it verbatim when the context's deadline is too close for another
-		// sleep.
-		cause = merr.WrapErrServiceUnavailableErr(cause, "shard split fence retry met an uncoded failure")
-	}
+	// A cause with no Milvus code at all -- a transport error, as
+	// retryPreparation's doc describes -- must still fail the request as a
+	// retriable ServiceUnavailable if the deadline ends the retry before
+	// another attempt runs (see the comment atop this file). Classifying here,
+	// once, covers both places that can surface cause unwrapped: this
+	// function's own no-deadline timeout below, and retry.Handle returning it
+	// verbatim when the context's deadline is too close for another sleep.
+	// retryPreparation's own already-ended-context exit uses the same
+	// classifyUncodedCause so it reports a failure the same way.
+	cause = classifyUncodedCause(cause)
 	now := time.Now()
 	if f.firstRefresh.IsZero() {
 		f.firstRefresh = now
