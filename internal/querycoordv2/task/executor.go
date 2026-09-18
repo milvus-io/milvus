@@ -250,6 +250,20 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	if err != nil {
 		return err
 	}
+	// The segment is loaded by the delegator of the shard the task targets,
+	// which is the shard the target groups the segment under. The load info
+	// carries the channel datacoord's segment meta records, and the querynode
+	// picks the delegator by it. The two differ only in a shard split's lineage
+	// window, where the target groups a split target's flushed segment under
+	// the split source so that the source delegator serves it; for any other
+	// segment they are equal and this is a no-op.
+	if loadInfo.GetInsertChannel() != task.Shard() {
+		mlog.Info(ctx, "load segment through the shard the target attributes it to",
+			mlog.FieldSegmentID(action.SegmentID),
+			mlog.String("recordedChannel", loadInfo.GetInsertChannel()),
+			mlog.String("shard", task.Shard()))
+		loadInfo.InsertChannel = task.Shard()
+	}
 	req := packLoadSegmentRequest(
 		task,
 		action,
