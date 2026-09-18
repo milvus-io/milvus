@@ -3,6 +3,7 @@ package broadcast
 import (
 	"context"
 
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -37,7 +38,7 @@ func StartBroadcastWithResourceKeys(ctx context.Context, resourceKeys ...message
 	if err != nil {
 		return nil, err
 	}
-	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+	if err := b.WaitUntilVersionFeatureReady(ctx, balancer.VersionFeatureWALBasedDDL); err != nil {
 		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithResourceKeys(ctx, resourceKeys...)
@@ -55,7 +56,7 @@ func StartBroadcastWithSecondaryClusterResourceKey(ctx context.Context) (broadca
 	if err != nil {
 		return nil, err
 	}
-	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
+	if err := b.WaitUntilVersionFeatureReady(ctx, balancer.VersionFeatureWALBasedDDL); err != nil {
 		return nil, merr.Wrap(err, "failed to wait until WAL based DDL ready")
 	}
 	return broadcaster.WithSecondaryClusterResourceKey(ctx)

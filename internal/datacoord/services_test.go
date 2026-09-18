@@ -2345,7 +2345,7 @@ func TestServer_FlushAll(t *testing.T) {
 
 		// Register mock balancer for balance.GetWithContext in StartBroadcastWithResourceKeys
 		b := mock_balancer.NewMockBalancer(t)
-		b.EXPECT().WaitUntilWALbasedDDLReady(mock.Anything).Return(nil)
+		b.EXPECT().WaitUntilVersionFeatureReady(mock.Anything, balancer.VersionFeatureWALBasedDDL).Return(nil)
 		b.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, callback balancer.WatchChannelAssignmentsCallback) error {
 			<-ctx.Done()
 			return ctx.Err()
