@@ -8,8 +8,10 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -195,6 +197,15 @@ type SegmentView struct {
 	owner              ViewOwner
 }
 
+// Registered reports completion of the initial DataCoord growing registration.
+// The serial queue cannot advance its stable checkpoint past CreateSegment
+// until AllocSegment succeeds, including when recovering a newer snapshot.
+func (s *SegmentView) Registered() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.durableMeta.GetCheckpointTimeTick() >= s.createSegmentTimeTick
+}
+
 func (s *SegmentView) ID() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -358,24 +369,49 @@ func (s *SegmentView) FlushInsertChunk(ctx context.Context, targetTimeTick uint6
 		return err
 	}
 	pack := s.flushPackForTimeTickLocked(targetTimeTick)
-	s.mu.Unlock()
 	if pack == nil {
+		s.mu.Unlock()
 		return nil
 	}
-	result, err := s.packWriter.FlushInsertBuffer(ctx, pack)
-	if err != nil {
-		return err
+	result := s.pendingFlushChunkLocked(targetTimeTick).persisted
+	s.mu.Unlock()
+	if result == nil {
+		var err error
+		result, err = s.packWriter.FlushInsertBuffer(ctx, pack)
+		if err != nil {
+			return err
+		}
+		if result == nil || result.PersistedStorage == nil {
+			return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing segment pack writer returned empty persisted storage"))
+		}
+		s.mu.Lock()
+		if err := s.unrecoverableErr(); err != nil {
+			s.mu.Unlock()
+			return err
+		}
+		s.pendingFlushChunkLocked(targetTimeTick).persisted = result
+		s.mu.Unlock()
 	}
-	if result == nil || result.PersistedStorage == nil {
-		return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing segment pack writer returned empty persisted storage"))
+	// TODO: Remove after enabling queryview. Publish exactly this stable pack
+	// before exposing its recovery snapshot or releasing the Insert handles.
+	appendPersistedStorage(pack.Meta, result.PersistedStorage)
+	var start *msgpb.MsgPosition
+	if pack.Meta.GetStat().GetModifiedRows() == pack.Rows {
+		// Only the first data pack publishes StartPosition. Once its recovery
+		// snapshot exists, DataCoord already owns the position across restarts.
+		start = utility.NewMessagePosition(pack.Inserts[0], pack.VChannel)
+	}
+	checkpoint := utility.NewMessagePosition(pack.Inserts[len(pack.Inserts)-1], pack.VChannel)
+	if err := s.lifecycle.PersistGrowingSegment(ctx, pack.Meta, start, checkpoint); err != nil {
+		return err
 	}
 
 	s.mu.Lock()
-	chunk := s.pendingFlushChunkLocked(targetTimeTick)
-	if chunk == nil {
+	if err := s.unrecoverableErr(); err != nil {
 		s.mu.Unlock()
-		return retry.Unrecoverable(merr.WrapErrServiceInternalMsg("growing segment flush chunk disappeared at timetick %d", targetTimeTick))
+		return err
 	}
+	chunk := s.pendingFlushChunkLocked(targetTimeTick)
 	appendPersistedStorage(s.meta, result.PersistedStorage)
 	appendPersistedStorage(s.durableMeta, result.PersistedStorage)
 	applyInsertStat(s.durableMeta, *chunk)
@@ -463,7 +499,7 @@ func (info *SegmentView) CreateTimeTick() uint64 {
 	return info.meta.GetStat().GetCreateSegmentTimeTick()
 }
 
-// L1MaterializationBlockerTimeTick reports the inclusive TransformLog
+// L1MaterializationBlockerTimeTick reports the inclusive L0 materialization
 // materialization frontier imposed by an L1 segment whose final commit has not
 // completed yet. Lock-free by design: finalCommitDone is published atomically
 // and createSegmentTimeTick is immutable, so the vchannel module may scan every

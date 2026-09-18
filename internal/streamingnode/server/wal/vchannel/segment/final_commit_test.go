@@ -16,6 +16,7 @@ import (
 )
 
 type testSegmentLifecycle struct {
+	Lifecycle
 	err   error
 	calls int
 }
@@ -203,22 +204,10 @@ func TestBuildCommitL1SegmentRequestPreservesDurableStorageState(t *testing.T) {
 	assert.Equal(t, int64(45), req.GetStats().GetDeltaBinlogSize())
 	assert.True(t, req.GetWithFullBinlogs())
 
-	// The checkpoint position must be non-nil or DataCoord skips the update
-	// and the flushed segment drops out of channel recovery.
-	require.Len(t, req.GetCheckPoints(), 1)
-	cp := req.GetCheckPoints()[0]
-	assert.Equal(t, int64(3), cp.GetSegmentID())
-	assert.Equal(t, int64(10), cp.GetNumOfRows())
-	require.NotNil(t, cp.GetPosition())
-	assert.Equal(t, "v1", cp.GetPosition().GetChannelName())
-	assert.Equal(t, uint64(50), cp.GetPosition().GetTimestamp())
-
-	require.Len(t, req.GetStartPositions(), 1)
-	sp := req.GetStartPositions()[0]
-	assert.Equal(t, int64(3), sp.GetSegmentID())
-	require.NotNil(t, sp.GetStartPosition())
-	assert.Equal(t, "v1", sp.GetStartPosition().GetChannelName())
-	assert.Equal(t, uint64(20), sp.GetStartPosition().GetTimestamp())
+	// Data packs publish complete positions before final commit. Sealing must
+	// preserve those Coordinator-owned positions, also after SN recovery.
+	require.Empty(t, req.GetCheckPoints())
+	require.Empty(t, req.GetStartPositions())
 }
 
 // TestEnsureFinalCommitSurvivesTerminalError covers the low-1 ordering fix:

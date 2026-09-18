@@ -23,14 +23,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func (t *flushTask) Execute(ctx context.Context) error {
@@ -40,31 +36,15 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	coll2FlushTs := make(map[string]Timestamp)
 	channelCps := make(map[string]*msgpb.MsgPosition)
 
-	flushTs := t.BeginTs()
-	mlog.Info(ctx, "flushTaskByStreamingService.Execute", mlog.Int("collectionNum", len(t.CollectionNames)), mlog.Uint64("flushTs", flushTs))
-	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
+	mlog.Info(ctx, "flushTaskByStreamingService.Execute", mlog.Int("collectionNum", len(t.CollectionNames)))
 	for _, collName := range t.CollectionNames {
 		collID, err := t.GetMetaCache().GetCollectionID(t.ctx, t.DbName, collName)
 		if err != nil {
 			return err
 		}
 
-		vchannels, err := t.chMgr.GetVChannels(collID)
-		if err != nil {
-			return err
-		}
-		onFlushSegmentIDs := make([]int64, 0)
-
-		// Ask the streamingnode to flush segments.
-		for _, vchannel := range vchannels {
-			segmentIDs, err := sendManualFlushToWAL(ctx, collID, vchannel, flushTs)
-			if err != nil {
-				return err
-			}
-			onFlushSegmentIDs = append(onFlushSegmentIDs, segmentIDs...)
-		}
-
-		// Ask datacoord to get flushed segment infos.
+		// DataCoord broadcasts ManualFlush to all collection VChannels and waits
+		// for consuming-side L1 and L0 completion before returning.
 		flushReq := &datapb.FlushRequest{
 			Base: commonpbutil.UpdateMsgBase(
 				t.Base,
@@ -77,20 +57,10 @@ func (t *flushTask) Execute(ctx context.Context) error {
 			return merr.Wrap(err, "failed to call flush to data coordinator")
 		}
 
-		// Remove the flushed segments from onFlushSegmentIDs
-		flushedSegmentSet := typeutil.NewUniqueSet(resp.GetFlushSegmentIDs()...)
-		filteredSegments := make([]int64, 0, len(onFlushSegmentIDs))
-		for _, id := range onFlushSegmentIDs {
-			if !flushedSegmentSet.Contain(id) {
-				filteredSegments = append(filteredSegments, id)
-			}
-		}
-		onFlushSegmentIDs = filteredSegments
-
-		coll2Segments[collName] = &schemapb.LongArray{Data: onFlushSegmentIDs}
+		coll2Segments[collName] = &schemapb.LongArray{Data: resp.GetSegmentIDs()}
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
-		coll2SealTimes[collName] = timeOfSeal.Unix()
-		coll2FlushTs[collName] = flushTs
+		coll2SealTimes[collName] = resp.GetTimeOfSeal()
+		coll2FlushTs[collName] = resp.GetFlushTs()
 		channelCps = resp.GetChannelCps()
 	}
 	t.result = &milvuspb.FlushResponse{
@@ -103,38 +73,4 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		ChannelCps:      channelCps,
 	}
 	return nil
-}
-
-// sendManualFlushToWAL sends a manual flush message to WAL.
-func sendManualFlushToWAL(ctx context.Context, collID int64, vchannel string, flushTs uint64) ([]int64, error) {
-	logger := mlog.With(mlog.FieldCollectionID(collID), mlog.FieldVChannel(vchannel))
-	flushMsg, err := message.NewManualFlushMessageBuilderV2().
-		WithVChannel(vchannel).
-		WithHeader(&message.ManualFlushMessageHeader{
-			CollectionId: collID,
-			FlushTs:      flushTs,
-		}).
-		WithBody(&message.ManualFlushMessageBody{}).
-		BuildMutable()
-	if err != nil {
-		logger.Warn(ctx, "build manual flush message failed", mlog.Err(err))
-		return nil, err
-	}
-
-	appendResult, err := streaming.WAL().RawAppend(ctx, flushMsg, streaming.AppendOption{
-		BarrierTimeTick: flushTs,
-	})
-	if err != nil {
-		logger.Warn(ctx, "append manual flush message to wal failed", mlog.Err(err))
-		return nil, err
-	}
-
-	var flushMsgResponse message.ManualFlushExtraResponse
-	if err := appendResult.GetExtra(&flushMsgResponse); err != nil {
-		logger.Warn(ctx, "get extra from append result failed", mlog.Err(err))
-		return nil, err
-	}
-	logger.Info(ctx, "append manual flush message to wal successfully")
-
-	return flushMsgResponse.GetSegmentIds(), nil
 }

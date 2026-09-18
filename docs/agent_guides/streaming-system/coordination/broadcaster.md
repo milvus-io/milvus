@@ -4,7 +4,7 @@ Executes cross-PChannel atomic broadcast for DDL/DCL messages with resource lock
 
 ## Broadcast API
 
-Callers use `broadcast.StartBroadcastWithResourceKeys(ctx, resourceKeys...)` to obtain a `BroadcastAPI`, which acquires resource key locks and returns after WAL-based DDL is ready. The caller then constructs a `BroadcastMutableMessage` with target VChannels (must include CChannel) and calls `Broadcast()`. `Close()` releases locks if no broadcast was issued.
+Callers use `broadcast.StartBroadcastWithResourceKeys(ctx, resourceKeys...)` to obtain a `BroadcastAPI`, which acquires resource key locks and returns after WAL-based DDL is ready. The caller then constructs a `BroadcastMutableMessage` with target VChannels (include CChannel when coordinator callback ordering is required) and calls `Broadcast()`. `Close()` releases locks if no broadcast was issued.
 
 Non-primary clusters reject all broadcasts with `ErrNotPrimary`.
 
@@ -14,7 +14,7 @@ Non-primary clusters reject all broadcasts with `ErrNotPrimary`.
 2. **Persist**: Allocate BroadcastID, create task in PENDING state, persist to catalog. Once persisted, the broadcast is guaranteed to eventually complete even across crashes.
 3. **Append**: `broadcastScheduler` dispatches the task to a worker that calls `AppendMessages()` to write to all target PChannels.
 4. **FastAck**: If `AckSyncUp` is not set, the broadcaster immediately self-acks all VChannels using the append results (no need to wait for consumer-side ACK). Otherwise, waits for StreamingNode consumers to ACK each VChannel.
-5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
+5. **AckCallback**: CChannel ACK enqueues the task into `ackCallbackScheduler`; a broadcast without CChannel is enqueued when all target VChannels have ACKed. The callback executes only after all VChannels are ACKed. For tasks with conflicting ResourceKeys, callbacks execute in CChannel TimeTick order. Callbacks retry with exponential backoff until success.
 6. **Tombstone & GC**: After callbacks complete, task transitions to TOMBSTONE. `tombstoneScheduler` garbage-collects aged-out tasks from the catalog.
 
 ## Idempotent Broadcast
@@ -40,6 +40,16 @@ The index lives and dies with the task entry, so **the idempotency window a clie
 
 Replicated tasks are indexed too: the query path is unreachable on a secondary (`WithResourceKeys` rejects non-primary clusters), and indexing there lets a promoted secondary honor pre-failover keys.
 
+## Import Completion
+
+Import, CommitImport, and RollbackImport include CChannel alongside the business
+VChannels so replicated callbacks share an ordered copy. CommitImport uses
+FastAck and completes in the DataCoord callback: persist Committing to protect
+against timeout, update segment visibility with each business VChannel's own
+commit TimeTick, then persist Completed. Failures keep the broadcast task
+retryable. No StreamingNode per-channel RPC or L0 materialization is required.
+See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
+
 ## Resource Key Locking
 
 Each ResourceKey has: **Domain** (resource type), **Key** (entity identifier), **Shared** (read vs exclusive). Every broadcast automatically acquires SharedCluster.
@@ -63,3 +73,12 @@ REPLICATED → TOMBSTONE → DONE (removed from catalog)
 ## Key Packages
 
 - `internal/streamingcoord/server/broadcaster/` — `Broadcaster`, task scheduling, resource locking, ACK callbacks, singleton accessor
+
+## Collection Flush Completion
+
+DataCoord Flush broadcasts ManualFlush with AckSyncUp to the collection's business
+VChannels under shared DB and exclusive collection-name locks. It omits CChannel
+because no coordinator metadata callback needs ordering. The consuming-side Ack
+waits for both L1 and L0 completion, without waiting for global recovery checkpoint
+publication. Flush returns an empty pending segment list and preserves the existing
+flushed-segment listing. See [Flush API completion](../../../design-docs/design_docs/wal/broadcast_ack_module.md#flush-api-completion).

@@ -1,0 +1,648 @@
+package vchannel
+
+import (
+	"context"
+	"sync"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+)
+
+// ModuleConfig contains the initial state and dependencies for one vchannel
+// recovery module.
+type ModuleConfig struct {
+	PChannel string
+	VChannel string
+
+	VChannelMeta *streamingpb.VChannelMeta
+	Segments     map[int64]*streamingpb.SegmentAssignmentMeta
+
+	Runtime            moduleapi.Runtime
+	Logger             *mlog.Logger
+	SegmentLifecycle   segment.Lifecycle
+	SegmentPackWriter  segment.PackWriter
+	L0Materializer     l0materializer.Materializer
+	L0MaterializeRows  uint64
+	L0MaterializeBytes uint64
+	OnCleanup          func(*VChannelRecoveryModule)
+	OnL0Materialized   func(uint64)
+}
+
+// VChannelRecoveryModule owns all recovery_storage state for one vchannel.
+type VChannelRecoveryModule struct {
+	// mu serializes WAL observation with snapshot state transitions. In
+	// particular, segments may grow when CreateSegment is observed while the
+	// recovery background task is collecting dirty snapshots.
+	//
+	// Lock order is m.mu -> SegmentView.mu. Never take a SegmentView lock
+	// (directly or via a Locked helper) while holding another module's mu, and
+	// never call SegmentView.NotifyDataUpdated with a view lock held (it
+	// re-enters the module).
+	mu       sync.Mutex
+	pchannel string
+	vchannel string
+
+	runtime moduleapi.Runtime
+	logger  *mlog.Logger
+
+	vchannelView    *VChannelView
+	segments        map[int64]*segment.SegmentView
+	dirtyMu         sync.Mutex
+	dirtySegments   map[int64]*segment.SegmentView
+	cleanupSegments map[int64]*segment.SegmentView
+	pendingCleanup  map[int64]*segment.SegmentView
+
+	l0Materializer *l0materializer.WALMaterializer
+
+	segmentLifecycle  segment.Lifecycle
+	segmentPackWriter segment.PackWriter
+
+	removed          bool
+	onCleanup        func(*VChannelRecoveryModule)
+	onL0Materialized func(uint64)
+}
+
+// NewModule creates a single-vchannel recovery module.
+func NewModule(config ModuleConfig) (*VChannelRecoveryModule, error) {
+	return newModule(config, false)
+}
+
+func newModuleFromOwnedRecoveryState(config ModuleConfig) (*VChannelRecoveryModule, error) {
+	return newModule(config, true)
+}
+
+func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryModule, error) {
+	if config.PChannel == "" {
+		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module pchannel is empty")
+	}
+	if config.VChannel == "" {
+		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
+	}
+	module := &VChannelRecoveryModule{
+		pchannel:          config.PChannel,
+		vchannel:          config.VChannel,
+		runtime:           config.Runtime,
+		logger:            config.Logger,
+		segments:          make(map[int64]*segment.SegmentView),
+		segmentLifecycle:  config.SegmentLifecycle,
+		segmentPackWriter: config.SegmentPackWriter,
+		onCleanup:         config.OnCleanup,
+		onL0Materialized:  config.OnL0Materialized,
+	}
+	if config.VChannelMeta != nil {
+		if adoptVChannelMeta {
+			module.vchannelView = newVChannelViewFromOwnedMeta(config.VChannelMeta)
+		} else {
+			module.vchannelView = NewVChannelViewFromMeta(config.VChannelMeta)
+		}
+	}
+	for id, meta := range config.Segments {
+		if meta.GetVchannel() != config.VChannel {
+			continue
+		}
+		var schema *schemapb.CollectionSchema
+		if module.vchannelView != nil {
+			schema = module.vchannelView.CreateSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick())
+		}
+		view := segment.NewSegmentViewFromMetaWithConfig(meta, schema, module.segmentViewConfig())
+		module.segments[id] = view
+		if view.TombstonePersisted() {
+			if module.cleanupSegments == nil {
+				module.cleanupSegments = make(map[int64]*segment.SegmentView)
+			}
+			module.cleanupSegments[id] = view
+		}
+	}
+	module.l0Materializer = l0materializer.NewWALMaterializer(l0materializer.WALConfig{
+		VChannel:                  config.VChannel,
+		MaterializedTimeTick:      config.VChannelMeta.GetTransformMaterializedTimeTick(),
+		MaterializeMaxRows:        config.L0MaterializeRows,
+		MaterializeMaxBytes:       config.L0MaterializeBytes,
+		Materializer:              config.L0Materializer,
+		Runtime:                   config.Runtime,
+		OnMaterialized:            module.markL0Materialized,
+		GrowingSegmentsRegistered: module.growingSegmentsRegistered,
+	})
+	return module, nil
+}
+
+func (m *VChannelRecoveryModule) segmentViewConfig() segment.ViewConfig {
+	return segment.ViewConfig{
+		Runtime:    m.runtime,
+		Lifecycle:  m.segmentLifecycle,
+		PackWriter: m.segmentPackWriter,
+		Owner:      m,
+	}
+}
+
+// ObserveMessage returns false only when the module was concurrently removed;
+// the manager can then retry a CreateCollection against a fresh module.
+func (m *VChannelRecoveryModule) ObserveMessage(
+	ctx context.Context,
+	retained message.RetainedImmutableMessage,
+) bool {
+	if m == nil {
+		return true
+	}
+	msg := retained.Message()
+	if !m.shouldObserve(msg) {
+		return true
+	}
+	if funcutil.IsControlChannel(msg.VChannel()) && !msg.IsPChannelLevel() {
+		return true
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed {
+		return false
+	}
+	switch msg.MessageType() {
+	case message.MessageTypeCreateCollection:
+		m.handleCreateCollectionMessage(message.MustAsImmutableCreateCollectionMessageV1(msg))
+	case message.MessageTypeCreatePartition:
+		m.handleCreatePartitionMessage(message.MustAsImmutableCreatePartitionMessageV1(msg))
+	case message.MessageTypeSchemaChange:
+		m.handleSchemaChangeMessage(message.MustAsImmutableSchemaChangeMessageV2(msg))
+	case message.MessageTypeAlterCollection:
+		m.handleAlterCollectionMessage(ctx, retained)
+	case message.MessageTypeDropCollection:
+		m.handleDropCollectionMessage(ctx, retained)
+	case message.MessageTypeDropPartition:
+		m.handleDropPartitionMessage(ctx, retained)
+	case message.MessageTypeTruncateCollection:
+		m.handleTruncateCollectionMessage(ctx, retained)
+	case message.MessageTypeCreateSegment:
+		m.handleCreateSegmentMessage(ctx, message.MustAsRetainedImmutableCreateSegmentMessageV2(retained))
+	case message.MessageTypeInsert, message.MessageTypeTxn:
+		m.handleInsertMessage(ctx, retained)
+	case message.MessageTypeFlush:
+		m.handleFlushMessage(ctx, retained)
+	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL:
+		m.flushAllSegmentsCreatedBefore(ctx, retained)
+	}
+	m.l0Materializer.ObserveMessage(retained)
+	return true
+}
+
+func (m *VChannelRecoveryModule) RecoverySnapshot() *moduleapi.WritePathRecoveryModuleSnapshot {
+	snapshot := &moduleapi.WritePathRecoveryModuleSnapshot{
+		VChannels:       make(map[string]moduleapi.VChannelWritePathRecoveryState),
+		GrowingSegments: make(map[int64]moduleapi.SegmentWritePathRecoveryState),
+	}
+	if m == nil {
+		return snapshot
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.vchannelView != nil {
+		if state, ok := m.vchannelView.WritePathRecoveryState(); ok {
+			snapshot.VChannels[m.vchannel] = state
+		}
+	}
+	for id, view := range m.segments {
+		view.ResumePendingRecovery()
+		if state, ok := view.WritePathRecoveryState(); ok {
+			snapshot.GrowingSegments[id] = state
+		}
+	}
+	return snapshot
+}
+
+func (m *VChannelRecoveryModule) ConsumeDirtySnapshots() []moduleapi.DirtySnapshot {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	snapshots := make([]moduleapi.DirtySnapshot, 0)
+	if m.vchannelView != nil {
+		if meta, saveSchemas := m.vchannelView.ConsumeDirtyAndGetSnapshot(); meta != nil {
+			owner := m.vchannelView
+			snapshot := meta
+			op := moduleapi.SnapshotOpUpsertBase
+			if saveSchemas {
+				op = moduleapi.SnapshotOpUpsert
+			}
+			snapshots = append(snapshots, newDirtySnapshot(
+				moduleapi.ModuleNameVChannel,
+				moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: m.vchannel},
+				op,
+				snapshot,
+				func() { owner.MarkSnapshotPersisted(snapshot) },
+			))
+		}
+	}
+	for id, view := range m.takeDirtySegments() {
+		if meta := view.ConsumeDirtyAndGetSnapshot(); meta != nil {
+			owner := view
+			snapshot := meta
+			snapshots = append(snapshots, newDirtySnapshot(
+				moduleapi.ModuleNameSegment,
+				moduleapi.SnapshotKey{PChannel: m.pchannel, SegmentID: id},
+				moduleapi.SnapshotOpUpsert,
+				snapshot,
+				func() {
+					m.markSegmentSnapshotPersisted(id, owner, snapshot)
+				},
+			))
+		}
+	}
+	return snapshots
+}
+
+func (m *VChannelRecoveryModule) IsActive() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.vchannelView != nil && m.vchannelView.IsActive()
+}
+
+// RequestPersistThrough schedules persistence for buffered data observed by
+// this VChannel through targetTimeTick.
+func (m *VChannelRecoveryModule) RequestPersistThrough(targetTimeTick uint64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed {
+		return
+	}
+	for _, view := range m.segments {
+		view.RequestPersistThrough(targetTimeTick)
+	}
+	m.l0Materializer.RequestPersistThrough(targetTimeTick)
+}
+
+func (m *VChannelRecoveryModule) handleCreateCollectionMessage(msg message.ImmutableCreateCollectionMessageV1) {
+	if m.vchannelView == nil {
+		m.vchannelView = NewVChannelViewFromCreateCollectionMessage(msg)
+	} else {
+		replacement, _ := m.vchannelView.ObserveCreateCollectionMessageV1(msg)
+		if replacement != nil {
+			m.vchannelView = replacement
+		}
+	}
+}
+
+func (m *VChannelRecoveryModule) handleCreatePartitionMessage(msg message.ImmutableCreatePartitionMessageV1) {
+	if m.vchannelView == nil {
+		return
+	}
+	m.vchannelView.ObserveCreatePartitionMessageV1(msg)
+}
+
+func (m *VChannelRecoveryModule) handleSchemaChangeMessage(msg message.ImmutableSchemaChangeMessageV2) {
+	if m.vchannelView == nil {
+		return
+	}
+	m.vchannelView.ObserveSchemaChangeMessageV2(msg)
+}
+
+func (m *VChannelRecoveryModule) handleAlterCollectionMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := message.MustAsImmutableAlterCollectionMessageV2(owned.Message())
+	if m.vchannelView != nil {
+		m.vchannelView.ObserveAlterCollectionMessageV2(msg)
+	}
+	if messageutil.IsSchemaChange(msg.Header()) {
+		m.flushAllSegmentsCreatedBefore(ctx, owned)
+	}
+}
+
+func (m *VChannelRecoveryModule) handleDropCollectionMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := message.MustAsImmutableDropCollectionMessageV1(owned.Message())
+	if m.vchannelView != nil {
+		m.vchannelView.ObserveDropCollectionMessageV1(msg)
+	}
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
+}
+
+func (m *VChannelRecoveryModule) handleDropPartitionMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := message.MustAsImmutableDropPartitionMessageV1(owned.Message())
+	if m.vchannelView != nil {
+		m.vchannelView.ObserveDropPartitionMessageV1(msg)
+	}
+	// L0 completion is VChannel-wide, so every earlier L1 blocker must flush,
+	// including segments belonging to partitions that remain live.
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
+}
+
+func (m *VChannelRecoveryModule) handleTruncateCollectionMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := message.MustAsImmutableTruncateCollectionMessageV2(owned.Message())
+	if m.vchannelView != nil {
+		m.vchannelView.ObserveTruncateCollectionMessageV2(msg)
+	}
+	m.flushAllSegmentsCreatedBefore(ctx, owned)
+}
+
+func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
+	ctx context.Context,
+	msg message.RetainedImmutableCreateSegmentMessageV2,
+) {
+	raw := msg.Message()
+	id := raw.Header().GetSegmentId()
+	view := m.segments[id]
+	created := false
+	if view == nil {
+		var schema *schemapb.CollectionSchema
+		if m.vchannelView != nil {
+			schema = m.vchannelView.CreateSegmentSchema(raw.Header().GetPartitionId(), raw.TimeTick())
+		}
+		if schema == nil {
+			// The collection schema is unresolvable for this segment. Skipping
+			// the create-segment message silently would make every later insert
+			// of the segment disappear without a trace, so surface it.
+			mlog.Warn(ctx, "create segment message skipped: collection schema unresolvable",
+				mlog.String("pchannel", m.pchannel),
+				mlog.String("vchannel", m.vchannel),
+				mlog.Int64("segmentID", id),
+				mlog.Int64("partitionID", raw.Header().GetPartitionId()),
+				mlog.Uint64("timetick", raw.TimeTick()))
+			return
+		}
+		view = segment.NewSegmentViewFromCreateSegmentMessageWithConfig(raw, schema, m.segmentViewConfig())
+		m.segments[id] = view
+		created = true
+	}
+	if view.ObserveCreateSegmentMessageV2(ctx, msg) || created {
+		m.markSegmentUpdatedLocked(id)
+	}
+}
+
+func (m *VChannelRecoveryModule) handleInsertMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	batches, err := segment.BuildInsertBatches(owned.Message())
+	if err != nil {
+		return
+	}
+	for segmentID, batch := range batches {
+		view := m.segments[segmentID]
+		if view == nil {
+			// The insert targets a segment this module does not track (e.g.
+			// already dropped/cleaned up). Its rows are intentionally skipped,
+			// but log it so a legitimate segment is never silently starved.
+			mlog.Warn(ctx, "insert message skipped: segment view not found",
+				mlog.String("pchannel", m.pchannel),
+				mlog.String("vchannel", m.vchannel),
+				mlog.Int64("segmentID", segmentID),
+				mlog.Uint64("timetick", owned.Message().TimeTick()))
+			continue
+		}
+		if view.ObserveInsert(ctx, owned, batch) {
+			m.markSegmentUpdatedLocked(segmentID)
+		}
+	}
+}
+
+func (m *VChannelRecoveryModule) handleFlushMessage(
+	ctx context.Context,
+	owned message.RetainedImmutableMessage,
+) {
+	msg := message.MustAsImmutableFlushMessageV2(owned.Message())
+	id := msg.Header().GetSegmentId()
+	if segment := m.segments[id]; segment != nil {
+		if segment.Flush(ctx, owned) {
+			m.markSegmentUpdatedLocked(id)
+		}
+	}
+}
+
+func (m *VChannelRecoveryModule) flushAllSegmentsCreatedBefore(
+	ctx context.Context,
+	msg message.RetainedImmutableMessage,
+) {
+	for _, view := range m.segments {
+		if view.CreateTimeTick() >= msg.Message().TimeTick() {
+			continue
+		}
+		if view.Flush(ctx, msg) {
+			m.markSegmentUpdatedLocked(view.ID())
+		}
+	}
+}
+
+func (m *VChannelRecoveryModule) shouldObserve(msg message.ImmutableMessage) bool {
+	return msg.VChannel() == m.vchannel || msg.VChannel() == "" || msg.IsPChannelLevel()
+}
+
+func (m *VChannelRecoveryModule) markSegmentUpdatedLocked(segmentID int64) {
+	view := m.segments[segmentID]
+	m.markSegmentViewUpdatedLocked(segmentID, view)
+}
+
+func (m *VChannelRecoveryModule) SegmentDataUpdated(segmentID int64, view *segment.SegmentView) {
+	m.markSegmentViewUpdated(segmentID, view)
+	if m.runtime.Notifier != nil {
+		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
+	}
+}
+
+func (m *VChannelRecoveryModule) markSegmentViewUpdated(segmentID int64, view *segment.SegmentView) {
+	m.mu.Lock()
+	m.markSegmentViewUpdatedLocked(segmentID, view)
+	m.mu.Unlock()
+}
+
+func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, view *segment.SegmentView) {
+	if view == nil {
+		return
+	}
+	m.tryFinalizeSegmentLocked(segmentID, view)
+	m.markSegmentDirty(segmentID, view)
+}
+
+func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view *segment.SegmentView) bool {
+	if !view.TryFinalizeTombstone() {
+		return false
+	}
+	m.markSegmentDirty(segmentID, view)
+	return true
+}
+
+// L0 may precede L1 output, but DataCoord must know every earlier L1 so its
+// compaction policy can protect growing data. No L1 flush is requested here.
+func (m *VChannelRecoveryModule) growingSegmentsRegistered(through uint64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, view := range m.segments {
+		if view.CreateTimeTick() <= through && !view.Registered() {
+			return false
+		}
+	}
+	return true
+}
+
+// markL0Materialized mirrors a successfully registered L0 frontier into dirty
+// VChannel metadata. RecoveryStorage reports the captured frontier to Summary
+// only after the corresponding full or base-only snapshot has been persisted.
+func (m *VChannelRecoveryModule) markL0Materialized(timeTick uint64) {
+	m.mu.Lock()
+	if m.vchannelView != nil {
+		m.vchannelView.SetTransformMaterializedTimeTick(timeTick)
+	}
+	m.mu.Unlock()
+	if m.onL0Materialized != nil {
+		m.onL0Materialized(timeTick)
+	}
+	if m.runtime.Notifier != nil {
+		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+	}
+}
+
+func (m *VChannelRecoveryModule) markSegmentSnapshotPersisted(
+	segmentID int64,
+	view *segment.SegmentView,
+	snapshot *streamingpb.SegmentAssignmentMeta,
+) {
+	m.mu.Lock()
+	view.MarkSnapshotPersisted(snapshot)
+	tombstonePersisted := view.TombstonePersisted()
+	if tombstonePersisted {
+		if m.cleanupSegments == nil {
+			m.cleanupSegments = make(map[int64]*segment.SegmentView)
+		}
+		m.cleanupSegments[segmentID] = view
+	}
+	m.mu.Unlock()
+	if tombstonePersisted && m.runtime.Notifier != nil {
+		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
+	}
+}
+
+func (m *VChannelRecoveryModule) HasCleanupCandidates() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hasCleanupCandidatesLocked()
+}
+
+func (m *VChannelRecoveryModule) hasCleanupCandidatesLocked() bool {
+	return !m.removed && (len(m.cleanupSegments) > 0 || len(m.pendingCleanup) > 0 ||
+		m.vchannelView != nil && m.vchannelView.HasCleanupCandidate())
+}
+
+func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.CleanupContext) []moduleapi.DirtySnapshot {
+	m.mu.Lock()
+	if m.removed {
+		m.mu.Unlock()
+		return nil
+	}
+	vchannelChanged := m.vchannelView != nil && m.vchannelView.TryFinalizeTombstone(cleanup.PhysicalTimeTick)
+	var snapshots []moduleapi.DirtySnapshot
+	for segmentID, view := range m.cleanupSegments {
+		if !m.segmentCleanupReadyLocked(view, cleanup) {
+			continue
+		}
+		meta := view.AssignmentMeta()
+		delete(m.cleanupSegments, segmentID)
+		if m.pendingCleanup == nil {
+			m.pendingCleanup = make(map[int64]*segment.SegmentView)
+		}
+		m.pendingCleanup[segmentID] = view
+		owner := view
+		snapshots = append(snapshots, newDirtySnapshot(
+			moduleapi.ModuleNameSegment,
+			moduleapi.SnapshotKey{PChannel: m.pchannel, SegmentID: segmentID},
+			moduleapi.SnapshotOpDelete,
+			meta,
+			func() { m.completeSegmentCleanup(segmentID, owner) },
+		))
+	}
+	if m.vchannelView != nil {
+		dropSnapshot, cleanupPartitions := m.vchannelView.TombstonedCleanupPlan(
+			cleanup.PhysicalTimeTick,
+			m.vchannelView.PersistedMaterializedTimeTick(),
+		)
+		if len(cleanupPartitions) > 0 {
+			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
+		} else if dropSnapshot != nil && len(m.segments) == 0 &&
+			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) {
+			checkpointTimeTick := dropSnapshot.GetCheckpointTimeTick()
+			snapshots = append(snapshots,
+				newDirtySnapshot(
+					moduleapi.ModuleNameVChannel,
+					moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: m.vchannel},
+					moduleapi.SnapshotOpDelete,
+					dropSnapshot,
+					func() { m.completeVChannelCleanup(checkpointTimeTick) },
+				),
+			)
+		}
+	}
+	m.mu.Unlock()
+	if vchannelChanged && m.runtime.Notifier != nil {
+		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+	}
+	return snapshots
+}
+
+func (m *VChannelRecoveryModule) completeVChannelCleanup(checkpointTimeTick uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.removed || len(m.segments) > 0 || m.vchannelView == nil ||
+		m.vchannelView.VChannelDropCleanupSnapshot(checkpointTimeTick, checkpointTimeTick) == nil {
+		return
+	}
+	m.removed = true
+	if m.onCleanup != nil {
+		m.onCleanup(m)
+	}
+}
+
+func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.SegmentView, cleanup moduleapi.CleanupContext) bool {
+	return m.vchannelView != nil &&
+		view.TombstonedCleanupReady(cleanup.PhysicalTimeTick)
+}
+
+func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *segment.SegmentView) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.pendingCleanup[segmentID] != view || m.segments[segmentID] != view {
+		return
+	}
+	delete(m.pendingCleanup, segmentID)
+	delete(m.segments, segmentID)
+	m.dirtyMu.Lock()
+	delete(m.dirtySegments, segmentID)
+	m.dirtyMu.Unlock()
+}
+
+func (m *VChannelRecoveryModule) markSegmentDirty(segmentID int64, view *segment.SegmentView) {
+	m.dirtyMu.Lock()
+	if m.dirtySegments == nil {
+		m.dirtySegments = make(map[int64]*segment.SegmentView)
+	}
+	m.dirtySegments[segmentID] = view
+	m.dirtyMu.Unlock()
+}
+
+func (m *VChannelRecoveryModule) takeDirtySegments() map[int64]*segment.SegmentView {
+	m.dirtyMu.Lock()
+	dirty := m.dirtySegments
+	m.dirtySegments = nil
+	m.dirtyMu.Unlock()
+	return dirty
+}

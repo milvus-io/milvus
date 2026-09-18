@@ -18,19 +18,25 @@ package walsummary
 
 import (
 	"context"
+	"math"
 	"sort"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/idempotencyview"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
+
+// DroppedVChannelTimeTick releases all transform records after durable cleanup.
+const DroppedVChannelTimeTick = math.MaxUint64
 
 // Manager is the pchannel-scoped WALSummary runtime. A summary is one
 // contiguous dense span of the pchannel log kept in two forms:
@@ -42,75 +48,52 @@ import (
 //   - in object storage: sealed chunks, an append-only time-ordered log of
 //     per-vchannel records, indexed by the manifest.
 //
-// The summary consumes the WAL continuously: a record is durable exactly when
-// every earlier record is durable. Nothing here tracks a WAL position of its
-// own -- Persist runs inside the recovery storage's dirty persist, before the
-// consume checkpoint covering those records is saved, so the checkpoint is
-// itself the boundary between what the store holds and what the WAL still
-// holds.
-//
-// A single manager-level lock guards every piece of state: the pending
-// records, the sealed-but-unwritten chunks, the manifest and its version
-// (used as a compare-and-swap token so the object-storage write can happen
-// outside the lock), and the per-vchannel GC positions.
+// Records are copied without retaining WAL handles. LastAcked exposes the
+// continuous durable prefix that RecoveryStorage combines with its own
+// completed point before publishing a checkpoint.
+// mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
-	mu  sync.Mutex
-	cfg ManagerConfig
-
-	// pending holds the records of the current (unsealed) chunk
-	// span, in WAL order. Each record carries the built entry and the message
-	// ID; the WAL message itself is NOT retained — the summary never holds a
-	// reference, so message acknowledgement is fully decoupled from it. The
-	// lifecycle of this buffer is exactly one FlushChunk: it accumulates from
-	// the first observed message until the chunk is sealed, then starts over.
-	pending      []stagedRecord
-	pendingBytes uint64
-
-	// pendingSealed holds the chunks sealed but not yet durable end to end,
-	// in generation order. The single write task drains this queue; a chunk
-	// is popped only after its object AND its manifest record are durable.
-	pendingSealed []*SealedChunk
-
-	// manifest is the in-memory chunk index (the persistent form's index).
-	// It is only ever replaced via publishManifest, which writes the edited
-	// clone outside the lock and installs it back under the lock unless the
-	// manifestVersion moved in between (CAS).
-	manifest        *streamingpb.PChannelSummaryManifest
-	manifestVersion uint64
-	// manifestPublished records whether THIS term has a manifest object in the
-	// store. Recovery reaches a previous term's chunks by listing the manifest
-	// prefix, so a term that holds chunks without a manifest is invisible to
-	// its successor; writeOnce publishes before the first chunk to keep the
-	// listing sufficient.
-	manifestPublished bool
-
-	// publishMu serializes manifest publication. It is NOT m.mu: the object
-	// write must not hold the manager lock, but it also must not race another
-	// publisher, because Store.WriteManifest is an unconditional PUT to a fixed
-	// key with no conditional-write guard. Two publishers that clone under m.mu
-	// and then write outside it can land in either order, so the older content
-	// can overwrite the newer one on storage while the newer one won in memory.
-	publishMu      sync.Mutex
-	nextGeneration uint64
-	// latestCoveredTimeTick is the newest timetick covered by a durable chunk.
+	mu sync.Mutex
+	// Readers pin a local snapshot against physical GC. Cross-owner fencing is
+	// deliberately left to the GC design TODO.
+	readMu                sync.RWMutex
+	publishMu             sync.Mutex
+	cfg                   ManagerConfig
+	pending               []stagedRecord
+	pendingBytes          uint64
+	pendingSince          time.Time
+	pendingSealed         []*SealedChunk
+	pendingFlushTimeTick  uint64
+	nextGeneration        uint64
+	generationExhausted   bool
+	reopenedTerm          bool
+	manifest              *streamingpb.PChannelSummaryManifest
+	manifestVersion       uint64
+	publishedVersion      uint64
+	manifestPublished     bool
+	manifestTask          *manifestWriteTask
+	gcTask                *summaryGCTask
+	lastAcked             uint64
+	lastObserved          uint64
+	sealedThrough         uint64
 	latestCoveredTimeTick uint64
-	// durableFrontiers holds the newest durable record timetick per vchannel,
-	// restored from the manifest and advanced by every completed write. It is
-	// the replay filter of ObserveMessage: recovery re-observes records the
-	// manifest already covers, and they must not be staged again.
-	durableFrontiers map[string]uint64
-
-	// pendingInvalidations holds the DDL invalidation timeticks observed but
-	// not yet folded into a published manifest, per vchannel. They ride the
-	// same persist as the records: Persist folds them into the manifest it
-	// publishes, before the checkpoint that covers the DDL is saved.
-	pendingInvalidations map[string]uint64
+	readableThrough       uint64
+	readableChanged       chan struct{}
+	restoredTimeTick      uint64
+	terminalErr           error
+	gcFrontiers           map[string]uint64
+	durableFrontiers      map[string]uint64
+	pendingTransforms     map[string]*streamingpb.VChannelSummaryTransformIndex
+	materializedFrontiers map[string]uint64
 }
 
 // ManagerConfig carries the wiring of one pchannel's summary manager.
 type ManagerConfig struct {
-	PChannel string
-	Term     int64
+	Runtime moduleapi.Runtime
+	// FlushMaxBytes seals a chunk at this staging size. Zero disables size-based sealing.
+	FlushMaxBytes uint64
+	PChannel      string
+	Term          int64
 	// Store is the object storage layer of the summary store.
 	Store *Store
 	// RetentionMaxBytes is the soft budget of the retained chunk objects. GC
@@ -121,91 +104,75 @@ type ManagerConfig struct {
 	// count and the number of object reads recovery pays. Zero disables it.
 	MaxRetainedChunks int
 	Logger            *mlog.Logger
+	// RequestMaterialization routes a bounded consumption request to its VChannel.
+	RequestMaterialization func(vchannel string, through uint64)
 }
 
 // NewManager creates the summary manager of one pchannel.
 func NewManager(config ManagerConfig) *Manager {
 	return &Manager{
-		cfg:                  config,
-		manifest:             &streamingpb.PChannelSummaryManifest{},
-		durableFrontiers:     make(map[string]uint64),
-		pendingInvalidations: make(map[string]uint64),
+		gcFrontiers:           make(map[string]uint64),
+		pendingTransforms:     make(map[string]*streamingpb.VChannelSummaryTransformIndex),
+		materializedFrontiers: make(map[string]uint64),
+		cfg:                   config,
+		manifest:              &streamingpb.PChannelSummaryManifest{},
+		durableFrontiers:      make(map[string]uint64),
 	}
 }
 
-// ObserveMessage observes one WAL message at the pchannel level. It is called
-// on the WAL observation path (recovery replay and the live scanner),
-// independent of the vchannel modules, and must not block.
-//
-// Only a message carrying a client idempotency key produces a record; DDL,
-// flush and barrier messages never do. The
-// record of a delete message is built here and copied into the pending
-// buffer — the message handle is not retained, so its acknowledgement never
-// depends on the summary. Observation only stages: the staged span is sealed
-// and written by Persist. Messages without a per-vchannel record (all-channel
-// time ticks, pchannel-level broadcasts, control-channel messages) and records
-// the manifest already covers are not staged at all.
+// ObserveMessage copies one ordered WAL message into the summary without
+// retaining its source handle. Size thresholds schedule asynchronous writes.
+// DDL messages preserve the history of previously committed requests.
 func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessage) {
 	if msg == nil {
 		return
 	}
-	vchannel := msg.VChannel()
-	if funcutil.IsControlChannel(vchannel) {
-		// The control channel is the control plane: it never produces
-		// records and its progress is not summarized.
-		return
-	}
-	if vchannel == "" {
-		// All-channel messages carry no per-vchannel record, and nothing here
-		// tracks WAL progress: the recovery storage's own checkpoint does that,
-		// and the summary is written before it is saved.
-		return
-	}
-	if idempotencyview.InvalidatesIdempotencyWindow(msg.MessageType()) {
-		// The DDL produces no record, only a tombstone. It is folded into the
-		// manifest by the next Persist -- which runs before the checkpoint that
-		// covers this DDL is saved, so a restart can never come back to a
-		// checkpoint past the DDL with the tombstone missing.
-		m.invalidateVChannel(vchannel, msg.TimeTick())
-		return
-	}
-	idempotency, insert := idempotencyHalvesOf(msg)
 
+	idempotency, insert := idempotencyHalvesOf(msg)
+	var entry *streamingpb.TransformLogEntry
+	// Barriers only advance the consumer window; Summary stores Delete payloads,
+	// not payload-free BarrierEntries.
+	if messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete {
+		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
+	}
 	m.mu.Lock()
-	if idempotency == nil {
-		// Nothing to record.
-		m.mu.Unlock()
-		return
+	m.lastObserved = max(m.lastObserved, msg.TimeTick())
+	if msg.VChannel() != "" && !funcutil.IsControlChannel(msg.VChannel()) && (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
+		m.stageRecordLocked(msg, idempotency, insert, entry)
 	}
-	// Recovery re-observes what the manifest already covers. The frontier is
-	// per vchannel and not per section, which is exactly right here: both kinds
-	// are staged into the same buffer and sealed into the same chunk, so
-	// everything at or below it is durable whichever section it landed in.
-	if msg.TimeTick() <= m.durableFrontiers[vchannel] {
-		m.mu.Unlock()
-		return
-	}
-	m.stageRecordLocked(msg, idempotency, insert)
+	m.advanceReadableLocked(msg.TimeTick())
+	m.refreshLastAckedLocked()
+	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
 	m.mu.Unlock()
+	if overThreshold {
+		m.requestSeal()
+	}
 }
 
-// stageDeleteLocked appends one delete record to the pending span. Caller
+// stageRecordLocked appends one record to the pending span. Caller
 // holds m.mu. The entry is built here — the message payload is not retained,
 // so it must be copied before the message is released.
 func (m *Manager) stageRecordLocked(
 	msg message.ImmutableMessage,
 	idempotency *streamingpb.VChannelSummaryIdempotencyRecord,
 	insert *streamingpb.VChannelSummaryInsertRecord,
+	entry *streamingpb.TransformLogEntry,
 ) {
 	record := stagedRecord{
+		entry:       entry,
 		vchannel:    msg.VChannel(),
 		timeTick:    msg.TimeTick(),
 		idempotency: idempotency,
 		insert:      insert,
 	}
-	record.size = stagedRecordSize(msg, &record)
+	if len(m.pending) == 0 {
+		m.pendingSince = time.Now()
+	}
+	if entry != nil {
+		addTransformSize(m.pendingTransforms, msg.VChannel(), entry)
+	}
 	m.pending = append(m.pending, record)
-	m.pendingBytes += record.size
+	m.pendingBytes += stagedRecordSize(msg, &record)
 }
 
 // stagedRecordSize estimates what the record will cost in a chunk. It is what
@@ -221,7 +188,7 @@ func stagedRecordSize(msg message.ImmutableMessage, record *stagedRecord) uint64
 	if record.insert == nil {
 		return uint64(msg.EstimateSize())
 	}
-	size := uint64(proto.Size(record.insert)) + uint64(proto.Size(record.idempotency))
+	size := uint64(proto.Size(record.insert)) + uint64(proto.Size(record.idempotency)) + uint64(proto.Size(record.entry))
 	return size
 }
 
@@ -371,123 +338,48 @@ func messageIDProto(id message.MessageID) *commonpb.MessageID {
 	return id.IntoProto()
 }
 
-// invalidateVChannel records that everything of a vchannel at or below the
-// timetick has been made meaningless by a DDL, and forgets the records still
-// staged behind it.
-//
-// The floor is what the read path applies, so dropping the staged records is
-// an optimization rather than the mechanism: they would be filtered out on
-// every read anyway, and keeping them alive would hold memory for facts
-// nothing may serve.
-func (m *Manager) invalidateVChannel(vchannel string, timetick uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if timetick > m.pendingInvalidations[vchannel] {
-		m.pendingInvalidations[vchannel] = timetick
-	}
-	// A new slice, never a compaction in place: ReadIdempotencyEntries hands
-	// out pointers into this backing array and reads them after releasing the
-	// lock, so shifting the elements under it would make it read another
-	// record. seal() upholds the same rule by handing the array off whole.
-	kept := make([]stagedRecord, 0, len(m.pending))
-	for i := range m.pending {
-		if m.pending[i].vchannel == vchannel && m.pending[i].timeTick <= timetick {
-			m.pendingBytes -= m.pending[i].size
-			continue
-		}
-		kept = append(kept, m.pending[i])
-	}
-	m.pending = kept
-}
-
-// invalidationFloorLocked returns the timetick at or below which a vchannel's
-// records must not be served: the published tombstone or a newer one still
-// pending. Caller holds m.mu.
-func (m *Manager) invalidationFloorLocked(vchannel string) uint64 {
-	floor := m.manifest.GetInvalidatedVchannels()[vchannel]
-	if pending := m.pendingInvalidations[vchannel]; pending > floor {
-		floor = pending
-	}
-	return floor
-}
-
-// Persist writes everything staged into object storage and records it in the
-// manifest. It is the ONLY thing that writes a chunk.
-//
-// The recovery storage calls it from its dirty-snapshot persist, BEFORE the
-// consume checkpoint that covers those records is saved, and a failure here
-// fails that persist. That ordering is the whole design:
-//
-//   - the chunk covering a range is durable before the checkpoint covering the
-//     same range, so the checkpoint is itself the boundary between what the
-//     store holds and what the WAL still holds;
-//   - nothing needs a second position, nothing needs to clamp the checkpoint,
-//     and recovery needs no rewind;
-//   - batching is inherited from the checkpoint's own batching, so there is no
-//     second timer cutting chunks on its own schedule.
-//
-// The cost is deliberate: object-storage latency sits on the checkpoint persist
-// path, and an unavailable store stalls the checkpoint. That is the correct
-// outcome -- a checkpoint that advanced past a chunk which was never written
-// would leave those keys in neither the store nor the replayable WAL, and
-// nothing downstream could detect it.
-func (m *Manager) Persist(ctx context.Context) error {
-	m.seal()
-	for {
-		finished, err := m.writeOnce(ctx)
-		if err != nil {
-			return err
-		}
-		if finished {
-			break
-		}
-	}
-	// A DDL tombstone usually has nothing behind it to write -- the DDL is what
-	// destroyed the records -- so it would otherwise wait for an unrelated
-	// future chunk. Publishing it here keeps it ordered before the checkpoint
-	// that covers the DDL, which is the whole point of the tombstone.
-	m.mu.Lock()
-	pendingTombstones := len(m.pendingInvalidations) > 0
-	m.mu.Unlock()
-	if !pendingTombstones {
-		return nil
-	}
-	// publishManifest folds them in itself, so the edit is empty.
-	return m.publishManifest(ctx, func(*streamingpb.PChannelSummaryManifest) {})
-}
-
 // seal takes the pending span out under the lock, organizes the records by
 // vchannel, and enqueues the sealed chunk. The records are already built (see
 // ObserveMessage); the vchannel grouping is the only organization left.
 func (m *Manager) seal() *SealedChunk {
 	m.mu.Lock()
-	if len(m.pending) == 0 {
-		m.mu.Unlock()
+	defer m.mu.Unlock()
+	if len(m.pending) == 0 || m.terminalErr != nil {
 		return nil
 	}
-	pending := m.pending
+	if m.reopenedTerm {
+		// Read-only same-term recovery is allowed, but a writer must use a new
+		// assignment term: old objects may exist beyond the first recovered gap.
+		m.terminalErr = storeCorruptedf("summary writes after recovery require a fresh assignment term")
+		m.notifyReadersLocked()
+		return nil
+	}
+	if m.generationExhausted {
+		m.terminalErr = storeCorruptedf("summary generation exhausted")
+		m.notifyReadersLocked()
+		return nil
+	}
+	// Keep removal and queue insertion atomic: observers must never see a gap
+	// where an unwritten chunk appears to have no pending records.
+	sc := buildSealedChunk(m.nextGeneration, m.pending)
+	sc.Coverage = TimeTickRange{Start: m.sealedThrough + 1, End: m.lastObserved}
+	sc.Transforms = m.pendingTransforms
+	m.pendingTransforms = make(map[string]*streamingpb.VChannelSummaryTransformIndex)
+	m.sealedThrough = m.lastObserved
+	if m.nextGeneration == math.MaxUint64 {
+		m.generationExhausted = true
+	} else {
+		m.nextGeneration++
+	}
 	m.pending = nil
 	m.pendingBytes = 0
-	generation := m.nextGeneration
-	m.nextGeneration++
-	m.mu.Unlock()
-
-	sc := buildSealedChunk(generation, pending)
-	if len(sc.RecordsByVChannel) == 0 {
-		// No record was staged (defensive: only messages that produce a record
-		// are appended, so this cannot happen). The generation was claimed but
-		// is simply skipped.
-		return nil
-	}
-
-	m.mu.Lock()
+	m.pendingSince = time.Time{}
 	m.pendingSealed = append(m.pendingSealed, sc)
-	m.mu.Unlock()
+	m.pendingFlushTimeTick = sc.MaxTimeTick
 	return sc
 }
 
-// buildSealedChunk organizes one chunk span: it groups the already-built
-// records by vchannel. Called without the lock.
+// buildSealedChunk organizes one chunk span by grouping records by vchannel.
 func buildSealedChunk(generation uint64, pending []stagedRecord) *SealedChunk {
 	recordsByVChannel := make(map[string][]*stagedRecord)
 	var maxTimeTick uint64
@@ -505,187 +397,48 @@ func buildSealedChunk(generation uint64, pending []stagedRecord) *SealedChunk {
 	}
 }
 
-// writeOnce makes one sealed chunk durable end to end: write the chunk
-// object, publish the manifest record, then advance the durable state. It
-// reports whether the queue is drained. The generation is written
-// idempotently, so a retry after a failure rewrites the exact same object.
-func (m *Manager) writeOnce(ctx context.Context) (bool, error) {
-	m.mu.Lock()
-	if len(m.pendingSealed) == 0 {
-		// A tombstone with no chunk behind it still has to reach the manifest;
-		// publishManifest folds it in, so the edit itself is empty.
-		pendingInvalidations := len(m.pendingInvalidations) > 0
-		m.mu.Unlock()
-		if pendingInvalidations {
-			if err := m.publishManifest(ctx, func(*streamingpb.PChannelSummaryManifest) {}); err != nil {
-				return false, err
-			}
-		}
-		return true, nil
-	}
-	sc := m.pendingSealed[0]
-	m.mu.Unlock()
-
+// writeChunk uploads only this immutable chunk. Each sealed chunk has its own
+// scheduler task, so another upload may finish first.
+func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 	sections := make(map[string]*ChunkSections, len(sc.RecordsByVChannel))
 	for vchannel, staged := range sc.RecordsByVChannel {
 		cs := &ChunkSections{}
 		for _, record := range staged {
+			if record.entry != nil {
+				cs.Transform = append(cs.Transform, &streamingpb.VChannelSummaryTransformRecord{
+					TimeTick: record.timeTick, Delete: record.entry.GetDelete(),
+				})
+			}
 			if record.insert != nil {
-				// The two halves are appended together and never apart: the
-				// sections are paired by position, so a record contributing one
-				// without the other would misalign every later pair.
 				cs.Inserts = append(cs.Inserts, record.insert)
 				cs.Idempotency = append(cs.Idempotency, record.idempotency)
 			}
 		}
 		sections[vchannel] = cs
 	}
-	// A term is reachable to its successor only through its manifest object:
-	// the takeover lists the manifest prefix and probes forward on the term it
-	// adopts, so a chunk written by a term that has none is found by nobody.
-	// Recovery publishes only what it inherited, so a term that inherited
-	// nothing arrives here without one.
-	if err := m.publishManifestIfAbsent(ctx); err != nil {
-		return false, err
-	}
-	footer, objectSize, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections)
+	footer, size, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections, sc.Coverage)
 	if err != nil {
-		return false, err
-	}
-	if err := m.publishManifest(ctx, func(next *streamingpb.PChannelSummaryManifest) {
-		recordChunk(next, chunkIndexEntryFromFooter(footer, objectSize))
-	}); err != nil {
-		return false, err
-	}
-
-	m.mu.Lock()
-	for vchannel, staged := range sc.RecordsByVChannel {
-		var end uint64
-		for _, record := range staged {
-			if record.timeTick > end {
-				end = record.timeTick
-			}
-		}
-		if end > m.durableFrontiers[vchannel] {
-			m.durableFrontiers[vchannel] = end
-		}
-	}
-	if sc.MaxTimeTick > m.latestCoveredTimeTick {
-		m.latestCoveredTimeTick = sc.MaxTimeTick
-	}
-	m.pendingSealed = m.pendingSealed[1:]
-	finished := len(m.pendingSealed) == 0
-	m.mu.Unlock()
-	return finished, nil
-}
-
-// publishManifestIfAbsent publishes this term's manifest when it has none yet,
-// so the invariant recovery relies on -- a term that holds chunks always has a
-// manifest object -- holds before the first chunk of the term is written.
-//
-// It publishes what recovery inherited, which is what the manifest would carry
-// anyway; the following chunk record amends it. Only a term that inherited
-// nothing pays the extra write, and only once.
-func (m *Manager) publishManifestIfAbsent(ctx context.Context) error {
-	m.mu.Lock()
-	published := m.manifestPublished
-	m.mu.Unlock()
-	if published {
-		return nil
-	}
-	return m.publishManifest(ctx, func(*streamingpb.PChannelSummaryManifest) {})
-}
-
-// publishManifest edits the manifest, writes the edited clone to object storage
-// without holding the manager lock, and installs it back.
-//
-// Publication is serialized by publishMu so the durable manifest can only move
-// forward: the store has no conditional write, so ordering has to come from
-// here. The manager lock is still released across the object write, which is
-// the point of the separate mutex -- observation and reads keep running while a
-// publish is in flight.
-func (m *Manager) publishManifest(ctx context.Context, edit func(*streamingpb.PChannelSummaryManifest)) error {
-	// One publisher at a time, held ACROSS the object write. Without this the
-	// losing writer's older object can land after the winner's, dropping a
-	// tombstone from durable storage while the winner has already cleared it
-	// from pendingInvalidations and unpinned the frontier -- a crash before the
-	// loser's retry then recovers a manifest missing an invalidation whose DDL
-	// the checkpoint has already passed.
-	m.publishMu.Lock()
-	defer m.publishMu.Unlock()
-	m.mu.Lock()
-	next := proto.Clone(m.manifest).(*streamingpb.PChannelSummaryManifest)
-	edit(next)
-	// Every publisher carries the pending tombstones, whatever else it came
-	// to write: a tombstone must not wait for a chunk of its own.
-	//
-	// A sealed chunk that has not been written yet may still hold records
-	// below a tombstone, and the manifest cannot see them, so expiry has to
-	// wait until the queue is drained -- otherwise a tombstone published
-	// while a chunk is in flight would expire in the same breath and the
-	// chunk would land unfiltered.
-	folded := foldInvalidations(next, m.pendingInvalidations, len(m.pendingSealed) == 0)
-	m.mu.Unlock()
-	if err := m.cfg.Store.WriteManifest(ctx, next); err != nil {
 		return err
 	}
 	m.mu.Lock()
-	m.manifest = next
-	m.manifestVersion++
-	m.manifestPublished = true
-	// Only now are they durable. A vchannel invalidated again while this
-	// write was in flight keeps the newer timetick.
-	for vchannel, timetick := range folded {
-		if m.pendingInvalidations[vchannel] <= timetick {
-			delete(m.pendingInvalidations, vchannel)
-		}
-	}
-	m.mu.Unlock()
-	return nil
-}
-
-// foldInvalidations merges the pending tombstones into the manifest and, when
-// mayExpire, drops the ones no retained chunk reaches below. It returns what it
-// merged.
-//
-// A tombstone only has to outlive the records it buries. Once every chunk that
-// could hold them is released, the entry describes nothing and would otherwise
-// accumulate for the life of the pchannel -- one entry per vchannel ever
-// dropped.
-func foldInvalidations(manifest *streamingpb.PChannelSummaryManifest, pending map[string]uint64, mayExpire bool) map[string]uint64 {
-	folded := make(map[string]uint64, len(pending))
-	if len(pending) > 0 && manifest.GetInvalidatedVchannels() == nil {
-		manifest.InvalidatedVchannels = make(map[string]uint64, len(pending))
-	}
-	for vchannel, timetick := range pending {
-		if timetick > manifest.InvalidatedVchannels[vchannel] {
-			manifest.InvalidatedVchannels[vchannel] = timetick
-		}
-		folded[vchannel] = timetick
-	}
-	if mayExpire {
-		for vchannel, timetick := range manifest.GetInvalidatedVchannels() {
-			if !chunksReachBelow(manifest, vchannel, timetick) {
-				delete(manifest.InvalidatedVchannels, vchannel)
+	sc.index = chunkIndexEntryFromFooter(footer, size)
+	for len(m.pendingSealed) > 0 && m.pendingSealed[0].index != nil {
+		head := m.pendingSealed[0]
+		recordChunk(m.manifest, head.index)
+		for vchannel, records := range head.RecordsByVChannel {
+			for _, record := range records {
+				m.durableFrontiers[vchannel] = max(m.durableFrontiers[vchannel], record.timeTick)
 			}
 		}
+		m.latestCoveredTimeTick = m.manifest.GetCoverage().GetEndTimeTick()
+		m.manifestVersion++
+		m.pendingSealed[0] = nil
+		m.pendingSealed = m.pendingSealed[1:]
 	}
-	return folded
-}
-
-// chunksReachBelow reports whether any retained chunk still holds records of
-// the vchannel at or below the timetick.
-func chunksReachBelow(manifest *streamingpb.PChannelSummaryManifest, vchannel string, timetick uint64) bool {
-	for _, chunk := range manifest.GetChunks() {
-		index := vchannelChunkIndex(chunk, vchannel)
-		if index == nil {
-			continue
-		}
-		if index.GetStartTimetick() <= timetick {
-			return true
-		}
-	}
-	return false
+	m.refreshLastAckedLocked()
+	m.mu.Unlock()
+	m.scheduleManifest()
+	return nil
 }
 
 // IdempotencyVChannels returns every vchannel the summary holds idempotency
@@ -793,20 +546,11 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	// separately, a flush completing in between would pop a sealed chunk from
 	// the queue after the manifest read missed it, and its records would be in
 	// neither half.
+	m.readMu.RLock()
+	defer m.readMu.RUnlock()
 	m.mu.Lock()
-	// Everything at or below a DDL tombstone is unserveable, wherever it is
-	// stored. Raising the lower bound applies that to the chunks, the sealed
-	// queue and the staged span in one place. The floor is per vchannel, so the
-	// bound is too.
-	floors := make(map[string]uint64, len(vchannels))
 	inMemory := make(map[string][][]*stagedRecord, len(vchannels))
 	for _, vchannel := range vchannels {
-		lower := from
-		if floor := m.invalidationFloorLocked(vchannel); floor > lower {
-			lower = floor
-		}
-		floors[vchannel] = lower
-
 		tails := make([][]*stagedRecord, 0, len(m.pendingSealed)+1)
 		for _, sc := range m.pendingSealed {
 			tails = append(tails, sc.RecordsByVChannel[vchannel])
@@ -829,13 +573,11 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	}
 
 	for _, chunk := range chunks {
-		// Which vchannels this chunk can answer for. A chunk below every
-		// vchannel's lower bound, or above `to`, is never fetched.
+		if chunk.GetEndTimetick() <= from || chunk.GetStartTimeTick() > to {
+			continue
+		}
 		indexes := make(map[string]*streamingpb.VChannelSummaryChunkIndex)
 		for _, vchannel := range vchannels {
-			if chunk.GetEndTimetick() <= floors[vchannel] || chunk.GetStartTimetick() > to {
-				continue
-			}
 			index := vchannelChunkIndex(chunk, vchannel)
 			if index == nil || index.GetInserts() == nil {
 				continue
@@ -850,13 +592,12 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 			return nil, err
 		}
 		for vchannel, sections := range decoded {
-			lower := floors[vchannel]
 			hasKeys := len(sections.Idempotency) != 0
 			anyKeys[vchannel] = anyKeys[vchannel] || hasKeys
 			target := out[vchannel]
 			for i, insert := range sections.Inserts {
 				tt := insert.GetSourceTimetick()
-				if tt <= lower || tt > to {
+				if tt <= from || tt > to {
 					continue
 				}
 				target.Inserts = append(target.Inserts, insert)
@@ -872,9 +613,8 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 
 	for _, vchannel := range vchannels {
 		target := out[vchannel]
-		lower := floors[vchannel]
 		for _, records := range inMemory[vchannel] {
-			anyKeys[vchannel] = appendStagedIdempotency(target, records, lower, to) || anyKeys[vchannel]
+			anyKeys[vchannel] = appendStagedIdempotency(target, records, from, to) || anyKeys[vchannel]
 		}
 		if !anyKeys[vchannel] {
 			target.Idempotency = nil
@@ -939,6 +679,7 @@ func vchannelChunkIndex(chunk *streamingpb.PChannelSummaryChunkIndexEntry, vchan
 // stagedRecord is one staged record: the built section halves plus the WAL
 // position they came from. The message itself is not retained.
 type stagedRecord struct {
+	entry    *streamingpb.TransformLogEntry
 	vchannel string
 	timeTick uint64
 
@@ -948,18 +689,33 @@ type stagedRecord struct {
 	// idempotent insert contributes to both from one staged record.
 	idempotency *streamingpb.VChannelSummaryIdempotencyRecord
 	insert      *streamingpb.VChannelSummaryInsertRecord
-
-	// size is what this record was charged to pendingBytes. It is kept so the
-	// charge can be reversed when an invalidation drops the record before it
-	// is ever sealed.
-	size uint64
 }
 
 // SealedChunk is one chunk span taken out of the pending buffer: the records
 // are immutable once sealed, so the write task may build and rewrite the
 // object without touching the manager state.
 type SealedChunk struct {
+	task              *chunkWriteTask
+	index             *streamingpb.PChannelSummaryChunkIndexEntry
+	Coverage          TimeTickRange
+	Transforms        map[string]*streamingpb.VChannelSummaryTransformIndex
 	Generation        uint64
 	RecordsByVChannel map[string][]*stagedRecord
 	MaxTimeTick       uint64
+}
+
+// ReadTransformEntries is an uncapped convenience read over the shared store.
+// Streaming consumers should use ReadTransform and its explicit coverage.
+func (m *Manager) ReadTransformEntries(ctx context.Context, vchannel string, from, to uint64) ([]*streamingpb.TransformLogEntry, error) {
+	batch, err := m.ReadTransform(ctx, vchannel, from, to, ReadLimits{})
+	return batch.Entries, err
+}
+
+// AdvanceGCTimeTick reports a durable transform materialization or cleanup frontier.
+func (m *Manager) AdvanceGCTimeTick(vchannel string, timetick uint64) {
+	m.mu.Lock()
+	if timetick > m.gcFrontiers[vchannel] {
+		m.gcFrontiers[vchannel] = timetick
+	}
+	m.mu.Unlock()
 }

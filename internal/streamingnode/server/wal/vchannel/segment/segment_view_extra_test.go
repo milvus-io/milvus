@@ -43,6 +43,7 @@ func TestSegmentViewMetaConstructors(t *testing.T) {
 	assert.Equal(t, "v1", vch)
 	assert.Equal(t, uint64(5), view.CreateTimeTick())
 	assert.True(t, view.IsGrowing())
+	assert.True(t, view.Registered(), "recovered snapshot proves growing registration")
 	assert.Equal(t, uint64(10), view.PersistedCheckpointTimeTick(), "recovery restores the durable checkpoint as the persisted anchor")
 
 	// shouldObserveLocked is the durable-checkpoint watermark.
@@ -72,6 +73,7 @@ func TestSegmentViewFromCreateSegmentMessage(t *testing.T) {
 	require.NotNil(t, view)
 	assert.Equal(t, int64(1), view.AssignmentMeta().GetSegmentId())
 	assert.True(t, view.IsGrowing())
+	assert.False(t, view.Registered(), "observation alone does not register in DataCoord")
 }
 
 // TestShouldRetryRecoveredFinalCommit covers the legacy recovered final-commit
