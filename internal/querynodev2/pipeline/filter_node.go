@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
@@ -189,7 +192,20 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 			mlog.String("vchannel", fNode.channel),
 			mlog.Int64("splitTaskID", header.GetSplitTaskId()),
 			mlog.Int("targets", len(header.GetTargetVchannels())))
-		return fNode.delegator.ProcessSplitShard(context.Background(), header.GetTargetVchannels())
+		if err := fNode.delegator.ProcessSplitShard(context.Background(), header.GetTargetVchannels()); err != nil {
+			// Logged here, above Debug: Operate logs every filtrate error at Debug,
+			// which hides a fence that cannot be fronted. The targets stay pending
+			// on the delegator, so reads through this vchannel are refused until a
+			// child fronts each of them.
+			mlog.RatedWarn(msg.TraceCtx(), rate.Every(10*time.Second), "source vchannel failed to front its shard-split fence",
+				mlog.Int64("collectionID", header.GetCollectionId()),
+				mlog.String("vchannel", fNode.channel),
+				mlog.Int64("splitTaskID", header.GetSplitTaskId()),
+				mlog.Int("targets", len(header.GetTargetVchannels())),
+				mlog.Err(err))
+			return err
+		}
+		return nil
 	default:
 		return merr.WrapErrParameterInvalid("msgType is Insert or Delete", "not")
 	}
