@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zilliztech/woodpecker/common/config"
@@ -244,4 +246,25 @@ func TestSetCustomWpConfigStorageType(t *testing.T) {
 			assert.Equal(t, tc.isService, wpConfig.Woodpecker.Storage.IsStorageService())
 		})
 	}
+}
+
+// TestGetWpConfigFailsClosedWhenRefreshFails pins that a failed linearizable refresh aborts
+// the build instead of falling back to the last polled snapshot: that snapshot may be the
+// stale one the refresh exists to replace, and a build from it could select the embedded
+// client for the life of the process. The opener is only cached on success, so the failure
+// is retried on the next WAL open.
+func TestGetWpConfigFailsClosedWhenRefreshFails(t *testing.T) {
+	refreshErr := errors.New("etcd leader changed")
+	mocker := mockey.Mock((*paramtable.BaseTable).RefreshRemoteConfigsLinearizable).Return(false, refreshErr).Build()
+	defer mocker.UnPatch()
+
+	_, err := (&builderImpl{}).getWpConfig()
+	require.Error(t, err)
+	assert.ErrorIs(t, err, refreshErr)
+
+	// Once the refresh succeeds again the same build goes through: the failure is
+	// retryable rather than a permanent verdict.
+	mocker.UnPatch()
+	_, err = (&builderImpl{}).getWpConfig()
+	require.NoError(t, err)
 }
