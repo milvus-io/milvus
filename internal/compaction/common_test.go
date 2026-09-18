@@ -24,6 +24,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -410,6 +411,66 @@ func (s *CommonSuite) createBaseManifest(basePath string, storageConfig *indexpb
 	require.NoError(t, err)
 
 	return manifestPath
+}
+
+func (s *CommonSuite) TestComposeDeleteFromSegments() {
+	ctx := context.Background()
+
+	blobA := s.createTestDeltaLog(schemapb.DataType_Int64, []int64{1, 2}, []int64{1000, 1001})
+	// pk 2 again, with a LATER timestamp, and a pk only this segment deletes.
+	blobB := s.createTestDeltaLog(schemapb.DataType_Int64, []int64{2, 3}, []int64{2000, 2001})
+	blobs := map[string][]byte{"/test/a.bin": blobA.Value, "/test/b.bin": blobB.Value}
+	options := []storage.RwOption{
+		storage.WithVersion(storage.StorageV1),
+		storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+			result := make([][]byte, len(paths))
+			for i, path := range paths {
+				result[i] = blobs[path]
+			}
+			return result, nil
+		}),
+	}
+	segmentOf := func(path string) *datapb.CompactionSegmentBinlogs {
+		return &datapb.CompactionSegmentBinlogs{
+			Deltalogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogPath: path}}}},
+		}
+	}
+
+	s.Run("the union of every segment, latest timestamp per pk", func() {
+		pk2Ts, err := ComposeDeleteFromSegments(ctx, schemapb.DataType_Int64,
+			[]*datapb.CompactionSegmentBinlogs{segmentOf("/test/a.bin"), segmentOf("/test/b.bin")}, options...)
+		s.NoError(err)
+		s.Equal(3, len(pk2Ts))
+		s.Equal(typeutil.Timestamp(1000), pk2Ts[int64(1)])
+		s.Equal(typeutil.Timestamp(2000), pk2Ts[int64(2)])
+		s.Equal(typeutil.Timestamp(2001), pk2Ts[int64(3)])
+	})
+
+	s.Run("the order of the segments does not matter", func() {
+		pk2Ts, err := ComposeDeleteFromSegments(ctx, schemapb.DataType_Int64,
+			[]*datapb.CompactionSegmentBinlogs{segmentOf("/test/b.bin"), segmentOf("/test/a.bin")}, options...)
+		s.NoError(err)
+		s.Equal(3, len(pk2Ts))
+		s.Equal(typeutil.Timestamp(2000), pk2Ts[int64(2)])
+	})
+
+	s.Run("no segment at all", func() {
+		pk2Ts, err := ComposeDeleteFromSegments(ctx, schemapb.DataType_Int64, nil, options...)
+		s.NoError(err)
+		s.Empty(pk2Ts)
+	})
+
+	s.Run("a failing read is surfaced, not skipped", func() {
+		failing := []storage.RwOption{
+			storage.WithVersion(storage.StorageV1),
+			storage.WithDownloader(func(ctx context.Context, paths []string) ([][]byte, error) {
+				return nil, errors.New("download failed")
+			}),
+		}
+		_, err := ComposeDeleteFromSegments(ctx, schemapb.DataType_Int64,
+			[]*datapb.CompactionSegmentBinlogs{segmentOf("/test/a.bin")}, failing...)
+		s.Error(err)
+	})
 }
 
 func (s *CommonSuite) TestComposeDeleteFromDeltalogsV2() {
