@@ -461,6 +461,7 @@ func (s *Server) initObserver() {
 	s.leaderCacheObserver = observers.NewLeaderCacheObserver(
 		s.proxyClientManager,
 	)
+	s.targetObserver.SetShardLeaderInvalidator(s.leaderCacheObserver.RegisterEvent)
 
 	if s.fileResourceObserver != nil {
 		s.fileResourceObserver.InitQueryCoord(s.nodeMgr, s.cluster)

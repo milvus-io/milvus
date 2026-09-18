@@ -722,3 +722,59 @@ func TestRehomedSegmentReachesTheSplitTargetView(t *testing.T) {
 	assert.Len(t, onSource, 1, "only the untouched segment stays on the source")
 	assert.Equal(t, untouched, onSource[0].GetID())
 }
+
+// M1: a proxy caches a collection's shard leaders, and a split source it still
+// has cached is released once the current target flips past it. A read routed
+// to the released source fails with ErrChannelNotFound, which the proxy does not
+// retry. The release of a delegator therefore invalidates the collection's
+// shard leader cache, in a full report and in a delta alike.
+func TestDelegatorRemovalInvalidatesShardLeaders(t *testing.T) {
+	ctx := context.Background()
+	nodeID := time.Now().UnixNano()%1000000 + 1000000
+	collectionID := int64(11)
+	nodeManager := session.NewNodeManager()
+	nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID, Address: "localhost:19530", Hostname: "localhost"}))
+	target := meta.NewMockTargetManager(t)
+	target.EXPECT().GetDmChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	handler := &distHandler{
+		nodeID:      nodeID,
+		nodeManager: nodeManager,
+		dist:        meta.NewDistributionManager(nodeManager),
+		target:      target,
+	}
+	defer metrics.QueryCoordLastHeartbeatTimeStamp.DeleteLabelValues(fmt.Sprint(nodeID))
+
+	report := func(ts int64, delta bool, removed []string, channels ...string) *querypb.GetDataDistributionResponse {
+		resp := &querypb.GetDataDistributionResponse{
+			Status: merr.Success(), NodeID: nodeID, LastModifyTs: ts, IsDelta: delta,
+			RemovedChannelNames: removed, TotalChannelCount: int64(len(channels)),
+		}
+		for _, channel := range channels {
+			resp.Channels = append(resp.Channels, &querypb.ChannelVersionInfo{Channel: channel, Collection: collectionID, Version: 1})
+			resp.LeaderViews = append(resp.LeaderViews, &querypb.LeaderView{
+				Collection: collectionID, Channel: channel, Status: &querypb.LeaderViewStatus{Serviceable: true},
+			})
+		}
+		return resp
+	}
+	handler.handleDistResp(ctx, report(1, false, nil, "v0", "v1", "v2"))
+
+	var notified []int64
+	handler.SetNotifyFunc(func(collectionIDs ...int64) {
+		notified = append(notified, collectionIDs...)
+	})
+
+	// a full report without v0: the source was released.
+	handler.handleDistResp(ctx, report(2, false, nil, "v1", "v2"))
+	assert.Equal(t, []int64{collectionID}, notified)
+
+	// a delta naming v1 as removed.
+	notified = nil
+	handler.handleDistResp(ctx, report(3, true, []string{"v1"}))
+	assert.Equal(t, []int64{collectionID}, notified)
+
+	// nothing removed, nothing newly serviceable: no invalidation.
+	notified = nil
+	handler.handleDistResp(ctx, report(4, false, nil, "v2"))
+	assert.Empty(t, notified)
+}
