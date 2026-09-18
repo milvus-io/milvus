@@ -77,7 +77,10 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
-	children := sd.frontingChildren()
+	children, err := sd.frontingFamily()
+	if err != nil {
+		return nil, err
+	}
 	scope := frontingSourceScope(children)
 	results, err := sd.searchInternal(ctx, req, scope)
 	if err != nil {
@@ -152,7 +155,10 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
-	children := sd.frontingChildren()
+	children, err := sd.frontingFamily()
+	if err != nil {
+		return nil, err
+	}
 	scope := frontingSourceScope(children)
 	results, err := sd.queryInternal(ctx, req, scope)
 	if err != nil {
@@ -175,7 +181,10 @@ func (sd *shardDelegator) QueryStream(ctx context.Context, req *querypb.QueryReq
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("request channels %v", req.GetDmlChannels()))
 	}
-	children := sd.frontingChildren()
+	children, err := sd.frontingFamily()
+	if err != nil {
+		return err
+	}
 	scope := frontingSourceScope(children)
 	if err := sd.queryStreamInternal(ctx, req, srv, scope); err != nil {
 		return err
@@ -194,7 +203,10 @@ func (sd *shardDelegator) GetStatistics(ctx context.Context, req *querypb.GetSta
 	if !funcutil.SliceContain(req.GetDmlChannels(), sd.vchannelName) {
 		return nil, merr.WrapErrChannelMisrouted(sd.vchannelName, fmt.Sprintf("GetStatistics channels %v", req.GetDmlChannels()))
 	}
-	children := sd.frontingChildren()
+	children, err := sd.frontingFamily()
+	if err != nil {
+		return nil, err
+	}
 	scope := frontingSourceScope(children)
 	results, err := sd.getStatisticsInternal(ctx, req, scope)
 	if err != nil {
@@ -405,6 +417,81 @@ func (sd *shardDelegator) SplitChildVChannels() []string {
 func (sd *shardDelegator) frontingChildren() []*shardDelegator {
 	sd.childMut.Lock()
 	defer sd.childMut.Unlock()
+	return sd.frontingChildrenLocked()
+}
+
+// frontingFamily takes the one snapshot of fronted children a public read fans
+// out to, and refuses the read while a child spawn is in flight.
+//
+// A spawn is in flight from the moment the source consumes the fence until the
+// child is published. Over that gap the split key range's new writes already
+// land on the target vchannels, but no child fronts them, so the source's view
+// alone would miss target inserts and target deletes of rows the source holds.
+// The spawn usually finishes within milliseconds but can block for seconds on
+// the target's recovery info, so the read is refused at once with a retriable
+// System error for the proxy to retry, rather than held on the source.
+func (sd *shardDelegator) frontingFamily() ([]*shardDelegator, error) {
+	sd.childMut.Lock()
+	defer sd.childMut.Unlock()
+	if err := sd.refuseWhileSpawningLocked(); err != nil {
+		return nil, err
+	}
+	return sd.frontingChildrenLocked(), nil
+}
+
+// checkReadFamily re-checks, once a source read has waited for its read
+// timestamp, that the children snapshot it took still covers that timestamp.
+//
+// A read that found no spawn at entry can be overtaken by the fence. Every write
+// acknowledged before the read began is at or below the read timestamp, and a
+// target write is only acknowledged after the fence, so once the source's tsafe
+// reaches the read timestamp it has consumed any fence those writes depend on
+// (the filter node spawns before the delete node advances tsafe). If that
+// started a spawn, or published a child the snapshot lacks, the read is refused
+// like one that met the spawn at entry. A child detached since the snapshot is
+// fine: the read still covers it. A fronted child's own read is not re-checked;
+// its source's read covers it.
+func (sd *shardDelegator) checkReadFamily(scope splitReadScope) error {
+	if scope.asChild {
+		return nil
+	}
+	sd.childMut.Lock()
+	defer sd.childMut.Unlock()
+	if err := sd.refuseWhileSpawningLocked(); err != nil {
+		return err
+	}
+	for vchannel, child := range sd.children {
+		concrete, ok := child.(*shardDelegator)
+		if !ok {
+			continue // not frontable, see frontingChildrenLocked
+		}
+		covered := false
+		for _, snapshotted := range scope.family {
+			if snapshotted == concrete {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return merr.WrapErrServiceUnavailable("shard-split child published during the read",
+				fmt.Sprintf("source %s, child %s", sd.vchannelName, vchannel))
+		}
+	}
+	return nil
+}
+
+// refuseWhileSpawningLocked returns the retriable refusal for a read through a
+// source with a child spawn in flight. The caller holds childMut.
+func (sd *shardDelegator) refuseWhileSpawningLocked() error {
+	if len(sd.spawning) == 0 {
+		return nil
+	}
+	return merr.WrapErrServiceUnavailable("shard-split children are still being spawned",
+		fmt.Sprintf("source %s, %d target(s) not yet fronted", sd.vchannelName, len(sd.spawning)))
+}
+
+// frontingChildrenLocked is frontingChildren for a caller holding childMut.
+func (sd *shardDelegator) frontingChildrenLocked() []*shardDelegator {
 	if len(sd.children) == 0 {
 		return nil
 	}
