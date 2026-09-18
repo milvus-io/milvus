@@ -320,19 +320,13 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema is unavailable during import admission")
 	}
 	current := proto.Clone(coll.GetSchema()).(*schemapb.CollectionSchema)
+	// Proxy caches omit system fields.
 	current.Fields = lo.Filter(current.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
 		return field.GetFieldID() >= common.StartOfUserFieldID
 	})
-	// Proxy caches omit system fields; legacy callers also leave Version unset.
-	// Normalize only the comparison clone, never the authoritative metadata.
-	if schema.GetVersion() == 0 {
-		current.Version = 0
-	}
 	if !proto.Equal(schema, current) || !slices.Equal(vchannels, coll.GetVirtualChannelNames()) {
 		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema or channels changed during import admission")
 	}
-	schema = proto.Clone(schema).(*schemapb.CollectionSchema)
-	schema.Version = coll.GetSchema().GetVersion()
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
