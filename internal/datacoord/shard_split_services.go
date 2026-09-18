@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -222,12 +223,7 @@ func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *
 	}
 
 	task := proto.Clone(existing).(*datapb.SplitShardTask)
-	// validateCommitShardSplit has already refused a request whose one source
-	// disagrees with the recorded one, so the request's source either IS the
-	// recorded source or the record has none yet (a task written before its
-	// fence was planned). Either way the request's entry, with the tick the
-	// fence actually landed on, is the one to keep.
-	task.Sources = cloneSplitSources(req.GetSources())
+	task.Sources = mergeCommittedSplitSources(task.GetSources(), req.GetSources())
 	if len(task.GetTargets()) == 0 {
 		task.Targets = cloneSplitTargets(req.GetTargets())
 	}
@@ -241,6 +237,34 @@ func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
 	}
 	return task
+}
+
+// mergeCommittedSplitSources merges a commit's sources into the recorded ones.
+//
+// validateCommitShardSplit has already refused a request whose one source
+// disagrees with the recorded one, so the request's source either IS the
+// recorded source or the record has none yet (a task written before its fence
+// was planned). The request is the authority for exactly one field of it, the
+// tick the fence actually landed on. Everything else the recorded source holds
+// is kept: the commit carries only the source's name and tick, and replacing
+// the entry wholesale would erase the fields other writers of the record own
+// on every redelivery, and the fields a newer build wrote that this one does
+// not know.
+func mergeCommittedSplitSources(recorded, committed []*datapb.SplitShardTaskSource) []*datapb.SplitShardTaskSource {
+	merged := make([]*datapb.SplitShardTaskSource, 0, len(committed))
+	for _, source := range committed {
+		idx := slices.IndexFunc(recorded, func(r *datapb.SplitShardTaskSource) bool {
+			return r.GetVchannel() == source.GetVchannel()
+		})
+		if idx < 0 {
+			merged = append(merged, proto.Clone(source).(*datapb.SplitShardTaskSource))
+			continue
+		}
+		kept := proto.Clone(recorded[idx]).(*datapb.SplitShardTaskSource)
+		kept.SwitchTimeTick = source.GetSwitchTimeTick()
+		merged = append(merged, kept)
+	}
+	return merged
 }
 
 // markSplitTargetsAdded gives each target vchannel the channel-added mark a

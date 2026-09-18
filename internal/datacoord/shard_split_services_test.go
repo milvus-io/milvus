@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -1262,4 +1264,39 @@ func TestSplitSourceFenceRecorded(t *testing.T) {
 	recorded, err = registry.IsAppendFirstReplicaRecorded(ctx, splitTestSource)
 	require.NoError(t, err)
 	assert.True(t, recorded)
+}
+
+// A redelivered CommitShardSplit carries the source exactly as the SplitShard
+// broadcast named it: a vchannel and its tick, nothing else. Whatever else the
+// recorded source holds -- fields another writer of the record owns, or fields
+// a newer build wrote that this one does not even know -- must survive the
+// merge, or every redelivery silently erases them.
+func TestCommitShardSplitRedeliveryKeepsTheRecordedSourceFields(t *testing.T) {
+	svr := newShardSplitTestServer(t)
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	// A field this build does not know, set on the recorded source the way a
+	// newer writer would leave it (field 99, varint 7).
+	recorded, ok := svr.shardSplitTasks.get(200)
+	require.True(t, ok)
+	withUnknown := proto.Clone(recorded).(*datapb.SplitShardTask)
+	unknown := protowire.AppendVarint(protowire.AppendTag(nil, 99, protowire.VarintType), 7)
+	withUnknown.GetSources()[0].ProtoReflect().SetUnknown(unknown)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, withUnknown))
+
+	// The redelivery also carries the tick the fence landed on; it stays the
+	// authority for that one field.
+	req := splitTestCommitRequest()
+	req.Sources[0].SwitchTimeTick = 2500
+	status, err = svr.CommitShardSplit(context.Background(), req)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+
+	merged, ok := svr.shardSplitTasks.get(200)
+	require.True(t, ok)
+	require.Len(t, merged.GetSources(), 1)
+	assert.Equal(t, splitTestSource, merged.GetSources()[0].GetVchannel())
+	assert.Equal(t, uint64(2500), merged.GetSources()[0].GetSwitchTimeTick())
+	assert.Equal(t, unknown, []byte(merged.GetSources()[0].ProtoReflect().GetUnknown()),
+		"the redelivery erased a field of the recorded source it does not carry")
 }
