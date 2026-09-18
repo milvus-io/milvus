@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -282,7 +281,7 @@ func drawAutoIDs(t *testing.T, n int, base int64, route *writeRoute) []int64 {
 		next += int64(count)
 		return begin, next, nil
 	}
-	require.NoError(t, reassignAutoIDByResidue(ids, schemapb.DataType_Int64, route.modulus(), 0, alloc))
+	require.NoError(t, stabilizeAutoIDs(ids, route, alloc))
 	return ids
 }
 

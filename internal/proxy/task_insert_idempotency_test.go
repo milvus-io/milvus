@@ -205,8 +205,8 @@ func TestReassignAutoIDByOffsetChannelsUsesAssignChannelsByPK(t *testing.T) {
 		nextID += int64(count)
 		return begin, nextID, nil
 	}
-	require.NoError(t, reassignAutoIDByResidue(rowIDs1, schemapb.DataType_Int64, uint64(len(channels)), 0, alloc))
-	require.NoError(t, reassignAutoIDByResidue(rowIDs2, schemapb.DataType_Int64, uint64(len(channels)), 0, alloc))
+	require.NoError(t, reassignAutoIDByResidue(rowIDs1, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0, alloc))
+	require.NoError(t, reassignAutoIDByResidue(rowIDs2, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0, alloc))
 
 	actualChannels1 := rowChannelsByPK(&schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: rowIDs1}},
