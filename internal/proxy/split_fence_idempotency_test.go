@@ -229,21 +229,24 @@ func TestKeyedInsertFailsOnAProbeErrorThatIsNotTheFence(t *testing.T) {
 	assert.Empty(t, wal.insertedRowIDs[splitTarget1])
 }
 
-// A vchannel the collection lists as fenced but that takes the probe keeps the
-// probe's row; the other rows go to their owners, and none lands twice.
-func TestKeyedInsertKeepsAProbeRowAVChannelTook(t *testing.T) {
+// A vchannel the collection lists as fenced but that takes the probe breaks
+// the invariant the probe relies on (Splitting implies fenced): the request
+// fails as a System error, and no other row is placed.
+func TestKeyedInsertFailsWhenAFencedVChannelTakesItsProbe(t *testing.T) {
 	useSingleMessageRepack(t)
 	pre, post := oneShardSplit()
 	f := newSplitFenceFixture(t, pre, post)
 	f.committed = true
 	wal := installSplitFenceTestWAL(t)
-	pks := seqPKs(8)
-	task := f.keyedInsertTask(pks, "key")
+	task := f.keyedInsertTask(seqPKs(8), "key")
 
 	require.NoError(t, task.Execute(context.Background()))
-	require.True(t, merr.Ok(task.result.GetStatus()), task.result.GetStatus().GetReason())
-	assert.Equal(t, []int64{1}, wal.insertedRowIDs[splitSource], "the probe carried the first pending row")
-	assertEveryRowLandedOnce(t, wal, len(pks))
+	st := task.result.GetStatus()
+	assert.Equal(t, merr.Code(merr.ErrServiceInternal), st.GetCode(), st.GetReason())
+	assert.False(t, st.GetRetriable())
+	assert.Len(t, wal.batches, 1, "only the probe was sent")
+	assert.Empty(t, wal.insertedRowIDs[splitTarget0])
+	assert.Empty(t, wal.insertedRowIDs[splitTarget1])
 }
 
 // A window answer that does not line up with the request -- a key reused with
