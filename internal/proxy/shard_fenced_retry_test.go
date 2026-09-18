@@ -181,10 +181,50 @@ func TestSplitFenceRefreshEvictsTheCollectionAndStaysRetriable(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
 	assert.Contains(t, err.Error(), "a is fenced")
 
+	// An uncoded cause -- a transport error carries no Milvus code, as the
+	// comment atop the file explains -- is wrapped as a retriable
+	// ServiceUnavailable, never returned bare: retry.Handle can return this
+	// value verbatim, unwrapped, if the deadline is too close for another
+	// sleep, and the file's contract is that the write then "fails with a
+	// retriable ServiceUnavailable" either way.
 	cause := errors.New("cause")
 	retryAgain, err = fence.refresh(ctx, cache, 7, cause)
 	assert.True(t, retryAgain)
-	assert.Same(t, cause, err)
+	assert.NotEqual(t, cause.Error(), err.Error(), "an uncoded cause is wrapped, not returned bare")
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	assert.True(t, merr.IsRetryableErr(err))
+	assert.ErrorIs(t, err, cause, "the original cause is preserved, not stringified")
+}
+
+// A cause that already carries a Milvus code is reported as itself: refresh
+// only classifies an uncoded cause, it never overrides an existing code.
+func TestSplitFenceRefreshLeavesACodedCauseAsItIs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cache := NewMockCache(t)
+	cache.EXPECT().RemoveCollectionsByID(mock.Anything, int64(7)).Return(nil).Once()
+
+	fence := newSplitFence()
+	cause := merr.WrapErrCollectionNotFound("c")
+	retryAgain, err := fence.refresh(ctx, cache, 7, cause)
+	assert.True(t, retryAgain)
+	assert.Equal(t, cause.Error(), err.Error(), "an already-coded cause is reported unchanged")
+	assert.Equal(t, merr.Code(cause), merr.Code(err))
+}
+
+// retryPreparation ends the request, rather than backing off, once the
+// context it is asked to retry under has already ended -- even when the error
+// that triggered it does not itself look like a context error.
+func TestRetryPreparationEndsOnAnAlreadyEndedContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cache := NewMockCache(t)
+
+	fence := newSplitFence()
+	transient := errors.New("transient, unrelated to the context")
+	retryAgain, err := fence.retryPreparation(ctx, cache, 7, transient)
+	assert.False(t, retryAgain, "an already-ended context ends the request instead of backing off")
+	assert.Same(t, transient, err)
 }
 
 // A request with no deadline stops re-routing after

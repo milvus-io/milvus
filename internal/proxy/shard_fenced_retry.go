@@ -350,7 +350,7 @@ func duplicateAnsweredOffsets(resp streaming.AppendResponse) ([]int, bool, error
 // fail a request that is already partly written. A failure no retry can cure,
 // and a context that ended, end the request.
 func (f *splitFence) retryPreparation(ctx context.Context, cache Cache, collectionID int64, err error) (bool, error) {
-	if merr.IsCanceledOrTimeout(err) || (merr.IsMilvusError(err) && !merr.IsRetryableErr(err)) {
+	if ctx.Err() != nil || merr.IsCanceledOrTimeout(err) || (merr.IsMilvusError(err) && !merr.IsRetryableErr(err)) {
 		return false, err
 	}
 	mlog.RatedWarn(ctx, 1, "preparing a retry after a shard split fence failed, backing off",
@@ -372,6 +372,17 @@ func (f *splitFence) refresh(ctx context.Context, cache Cache, collectionID int6
 	}
 	if cause == nil {
 		cause = merr.WrapErrServiceUnavailableMsg("the write left rows unplaced after a shard split fence")
+	}
+	if !merr.IsMilvusError(cause) {
+		// A cause with no Milvus code at all -- a transport error, as
+		// retryPreparation's doc describes -- must still fail the request as a
+		// retriable ServiceUnavailable if the deadline ends the retry before
+		// another attempt runs (see the comment atop this file). Wrapping here,
+		// once, covers both places that can surface cause unwrapped: this
+		// function's own no-deadline timeout below, and retry.Handle returning
+		// it verbatim when the context's deadline is too close for another
+		// sleep.
+		cause = merr.WrapErrServiceUnavailableErr(cause, "shard split fence retry met an uncoded failure")
 	}
 	now := time.Now()
 	if f.firstRefresh.IsZero() {
