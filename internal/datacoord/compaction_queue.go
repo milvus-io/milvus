@@ -201,8 +201,7 @@ var (
 			// Ahead of every other type within one schedule pass: a shard
 			// split's rewrite is considered for selection first, since its
 			// source is frozen for every other compaction. It does not jump the
-			// global scheduler's slot queue, which is ordered by plan ID, nor
-			// the one mix-family plan per channel the pass admits.
+			// global scheduler's slot queue, which is ordered by plan ID.
 			return 0
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 1
@@ -223,8 +222,7 @@ var (
 			// Ahead of every other type within one schedule pass: a shard
 			// split's rewrite is considered for selection first, since its
 			// source is frozen for every other compaction. It does not jump the
-			// global scheduler's slot queue, which is ordered by plan ID, nor
-			// the one mix-family plan per channel the pass admits.
+			// global scheduler's slot queue, which is ordered by plan ID.
 			return 0
 		case datapb.CompactionType_Level0DeleteCompaction:
 			return 10
