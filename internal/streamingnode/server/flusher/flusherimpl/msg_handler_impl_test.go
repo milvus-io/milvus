@@ -64,6 +64,67 @@ func TestFlushMsgHandler_HandleFlush(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestFlushMsgHandler_HandleSplitShard(t *testing.T) {
+	vchannel := "ch-0"
+
+	m, err := message.NewSplitShardMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.SplitShardMessageHeader{
+			CollectionId:      100,
+			FlushedSegmentIds: []int64{1, 2},
+		}).
+		WithBody(&message.SplitShardMessageBody{}).
+		BuildMutable()
+	assert.NoError(t, err)
+
+	id := mock_message.NewMockMessageID(t)
+	id.EXPECT().String().Return("1").Maybe()
+	// The fence's own time tick is what the flush timestamp is set to, so the
+	// message has to carry one here exactly as it does off the WAL.
+	im, err := message.AsImmutableSplitShardMessageV2(m.WithTimeTick(1000).IntoImmutableMessage(id))
+	assert.NoError(t, err)
+
+	// every growing segment of the source vchannel is sealed, not only the ids
+	// the header names: a re-driven fence record carries none, and a segment
+	// created by an append that reported an error is not among them.
+	wbMgr := writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, vchannel).Return(errors.New("mock err"))
+	handler := newMsgHandler(wbMgr)
+	assert.Error(t, handler.HandleSplitShard(context.Background(), im))
+
+	// a failing channel flush fails the handler too: without it the L0 delete
+	// buffer keeps the source checkpoint pinned before T_switch.
+	wbMgr = writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, vchannel).Return(nil)
+	wbMgr.EXPECT().FlushChannel(mock.Anything, vchannel, mock.Anything).Return(errors.New("mock err"))
+	handler = newMsgHandler(wbMgr)
+	assert.Error(t, handler.HandleSplitShard(context.Background(), im))
+
+	// test normal: the fence seals everything and sets a flush timestamp at its
+	// own tick, so the flush-ts policy pushes out every buffer.
+	wbMgr = writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, vchannel).Return(nil)
+	wbMgr.EXPECT().FlushChannel(mock.Anything, vchannel, uint64(1000)).Return(nil)
+	handler = newMsgHandler(wbMgr)
+	assert.NoError(t, handler.HandleSplitShard(context.Background(), im))
+	wbMgr.AssertNotCalled(t, "SealSegments", mock.Anything, mock.Anything, mock.Anything)
+
+	// a re-driven fence record carrying no ids seals the same way.
+	reFence, err := message.NewSplitShardMessageBuilderV2().
+		WithVChannel(vchannel).
+		WithHeader(&message.SplitShardMessageHeader{CollectionId: 100}).
+		WithBody(&message.SplitShardMessageBody{}).
+		BuildMutable()
+	assert.NoError(t, err)
+	reFenceIm, err := message.AsImmutableSplitShardMessageV2(reFence.WithTimeTick(1200).IntoImmutableMessage(id))
+	assert.NoError(t, err)
+	wbMgr = writebuffer.NewMockBufferManager(t)
+	wbMgr.EXPECT().SealAllSegments(mock.Anything, vchannel).Return(nil)
+	wbMgr.EXPECT().FlushChannel(mock.Anything, vchannel, uint64(1200)).Return(nil)
+	handler = newMsgHandler(wbMgr)
+	assert.NoError(t, handler.HandleSplitShard(context.Background(), reFenceIm))
+}
+
 func TestFlushMsgHandler_HandleManualFlush(t *testing.T) {
 	vchannel := "ch-0"
 
