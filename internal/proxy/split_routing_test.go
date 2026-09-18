@@ -442,8 +442,16 @@ func TestAutoIDBucketingAllocatesByTheOwnersShare(t *testing.T) {
 	require.NoError(t, stabilizeAutoIDs(rowIDs, route, alloc))
 
 	t.Logf("allocated %d ids, sum of 1/share over the rows is %.0f", allocated, expected)
-	assert.Less(t, float64(allocated), 2*expected)
-	assert.Less(t, allocated, rows*int(route.modulus())/4)
+	// expected is a loose upper bound (it assumes every row still needs a fresh
+	// draw, ignoring the free candidates the rowIDs above already supply), so
+	// allocated is normally well under it. The bound below is tighter than that
+	// slack on purpose: a mutant that drops the /share divisor in allocCount --
+	// charging a short owner the full modulus per missing row instead of
+	// modulus/share -- inflates this run's allocation from 140 to 256 ids
+	// (owners with share > 1 no longer draw at a discount), which this bound
+	// catches while leaving the correct implementation's 140 comfortably inside
+	// it.
+	assert.Less(t, float64(allocated), expected/4)
 	for i, id := range rowIDs {
 		owner, err := route.table.VChannelOfPK(id)
 		require.NoError(t, err)
