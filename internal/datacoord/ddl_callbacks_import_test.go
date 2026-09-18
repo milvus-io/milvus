@@ -309,7 +309,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to fail (called in startImportBroadcast)
+	// Mock broker.DescribeCollectionInternal to fail (called in startBroadcastWithCollectionID)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(nil, errors.New("collection not found"))
 
@@ -358,7 +358,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return dbName (called in startImportBroadcast)
+	// Mock broker.DescribeCollectionInternal to return dbName (called in startBroadcastWithCollectionID)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection"},
@@ -428,7 +428,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: first DescribeCollectionInternal succeeds (in startImportBroadcast),
+	// Mock broker: first DescribeCollectionInternal succeeds (in startBroadcastWithCollectionID),
 	// second call returns error status (in broadcastImport after getting broadcaster)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
@@ -497,7 +497,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startImportBroadcast, second call in broadcastImport
+	// First call in startBroadcastWithCollectionID, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection"},
@@ -561,7 +561,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startImportBroadcast, second call in broadcastImport
+	// First call in startBroadcastWithCollectionID, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection"},

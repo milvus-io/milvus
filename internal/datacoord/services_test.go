@@ -5422,7 +5422,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 
 		// Bypass startBroadcast (broker not wired in test) and the new
 		// duplicate-active-job pre-check (refreshMeta is nil here).
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
@@ -5447,7 +5447,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		}
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil).Build()
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(&embeddedBroadcastAPI{}, nil, nil).Build()
 		defer mockStartBroadcast.UnPatch()
 		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
 		defer mockClose.UnPatch()
@@ -5483,7 +5483,7 @@ func TestServer_RefreshExternalCollection(t *testing.T) {
 		server.stateCode.Store(commonpb.StateCode_Healthy)
 
 		// Mock startBroadcastWithCollectionID to return error
-		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, errors.New("broadcaster failed")).Build()
+		mockStartBroadcast := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(nil, nil, errors.New("broadcaster failed")).Build()
 		defer mockStartBroadcast.UnPatch()
 
 		resp, err := server.RefreshExternalCollection(ctx, &datapb.RefreshExternalCollectionRequest{

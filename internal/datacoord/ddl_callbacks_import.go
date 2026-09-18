@@ -26,12 +26,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -303,7 +300,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, lockedCollection, err := s.startImportBroadcast(ctx, collectionID)
+	broadcaster, lockedCollection, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -480,16 +477,4 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		UpdateJobState(internalpb.ImportJobState_Failed),
 		UpdateJobReason(importJobReasonAbortedByUser),
 	)
-}
-
-// startImportBroadcast keeps the lock-name snapshot for the admission recheck.
-func (s *Server) startImportBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, *milvuspb.DescribeCollectionResponse, error) {
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return nil, nil, err
-	}
-	api, err := broadcast.StartBroadcastWithResourceKeys(ctx,
-		message.NewSharedDBNameResourceKey(coll.GetDbName()),
-		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
-	return api, coll, err
 }

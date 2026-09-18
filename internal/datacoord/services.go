@@ -2914,7 +2914,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	}
 
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
-	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
+	b, _, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to start broadcaster", mlog.Err(err))
 		return &datapb.RefreshExternalCollectionResponse{
@@ -3077,7 +3077,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	}
 
 	// Legacy jobs have no retained Begin; preserve their original locking/ACK path.
-	api, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
@@ -3126,7 +3126,7 @@ func (s *Server) broadcastRollbackImport(ctx context.Context, job ImportJob, own
 	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, msg); handled || err != nil || ownedOnly {
 		return err
 	}
-	api, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}

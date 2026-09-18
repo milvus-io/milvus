@@ -212,7 +212,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 		}).Build()
 	defer mockAssignment.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal (called once in startImportBroadcast, which will fail at StartBroadcastWithResourceKeys)
+	// Mock broker.DescribeCollectionInternal (called once in startBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
@@ -296,7 +296,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	defer mockBroadcast.UnPatch()
 
 	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startImportBroadcast, second call in broadcastImport
+	// First call in startBroadcastWithCollectionID, second call in broadcastImport
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
@@ -597,7 +597,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startImportBroadcast)
+	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startBroadcastWithCollectionID)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
