@@ -226,7 +226,7 @@ func TestFamilySpeedupKeepsTheGuaranteeWhenAChildMVCCIsUnknown(t *testing.T) {
 	source.children["v1"] = child1
 	source.children["v2"] = child2
 
-	got := source.speedupGuranteeTS(context.Background(), source.frontingChildren(), commonpb.ConsistencyLevel_Strong, guaranteeTs, 0, false)
+	got := source.speedupGuranteeTS(context.Background(), source.snapshotFamily(), commonpb.ConsistencyLevel_Strong, guaranteeTs, 0, false)
 	assert.Equal(t, guaranteeTs, got)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -252,7 +252,7 @@ func TestFamilySpeedupCoversCascadedChildren(t *testing.T) {
 	source.children["v2"] = child2
 	child1.children["v3"] = grandchild
 
-	got := source.speedupGuranteeTS(context.Background(), source.frontingChildren(), commonpb.ConsistencyLevel_Strong, 900, 0, false)
+	got := source.speedupGuranteeTS(context.Background(), source.snapshotFamily(), commonpb.ConsistencyLevel_Strong, 900, 0, false)
 	assert.Equal(t, uint64(500), got)
 }
 
@@ -381,15 +381,15 @@ func TestStrongReadCoversChildrenDetachedAfterTheFanOutSnapshot(t *testing.T) {
 
 			// detach both children right after the public read takes its fan-out
 			// snapshot, as a concurrent release would.
-			var origin func(*shardDelegator) ([]*shardDelegator, error)
+			var origin func(*shardDelegator) (*familyNode, error)
 			detached := atomic.NewBool(false)
-			snapshotMock := mockey.Mock((*shardDelegator).frontingFamily).To(func(sd *shardDelegator) ([]*shardDelegator, error) {
-				children, err := origin(sd)
+			snapshotMock := mockey.Mock((*shardDelegator).frontingFamily).To(func(sd *shardDelegator) (*familyNode, error) {
+				family, err := origin(sd)
 				if sd == source && detached.CompareAndSwap(false, true) {
 					source.DetachSplitChild("v1")
 					source.DetachSplitChild("v2")
 				}
-				return children, err
+				return family, err
 			}).Origin(&origin).Build()
 			defer snapshotMock.UnPatch()
 
