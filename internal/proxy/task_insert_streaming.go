@@ -91,6 +91,22 @@ func (it *insertTask) Execute(ctx context.Context) error {
 			mlog.Int("attempt", attempt),
 			mlog.Duration("get cache duration", getCacheDur))
 
+		// A keyed insert asks every fenced vchannel's idempotency window before
+		// it places a row anywhere else (see split_fence_idempotency.go).
+		if idempotency.enabled() {
+			probeMergeErr, err := it.probeFencedWindows(ctx, route, fence, pending, idempotency, ez)
+			if probeMergeErr != nil && mergeErr == nil {
+				mergeErr = probeMergeErr
+			}
+			if err != nil {
+				mlog.Warn(ctx, "ask the idempotency windows of fenced vchannels failed", mlog.Err(err))
+				return false, err
+			}
+			if pending.done() {
+				return false, nil
+			}
+		}
+
 		// start to repack insert data
 		var msgs []message.MutableMessage
 		var msgOffsets [][]int

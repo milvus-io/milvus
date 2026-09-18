@@ -18,11 +18,13 @@ package proxy
 
 import (
 	"context"
+	"sort"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -194,6 +196,17 @@ func (p *pendingRows) pendingSet() rowSet {
 	return p.rows
 }
 
+// first is the smallest pending offset, or -1 when nothing is pending.
+func (p *pendingRows) first() int {
+	first := -1
+	for offset := range p.rows {
+		if first < 0 || offset < first {
+			first = offset
+		}
+	}
+	return first
+}
+
 func (p *pendingRows) done() bool {
 	return len(p.rows) == 0
 }
@@ -208,10 +221,37 @@ type splitFence struct {
 	// firstRefresh is when the write first had to refresh, which is where the
 	// wait of a request with no deadline is measured from.
 	firstRefresh time.Time
+	// probed lists the fenced vchannels whose idempotency window already
+	// answered for this write's key (see probeFencedWindows).
+	probed map[string]struct{}
 }
 
 func newSplitFence() *splitFence {
-	return &splitFence{fenced: make(map[string]struct{})}
+	return &splitFence{fenced: make(map[string]struct{}), probed: make(map[string]struct{})}
+}
+
+// unprobed returns, sorted, the fenced vchannels -- the ones the route lists
+// and the ones this write learned -- whose window has not answered yet.
+func (f *splitFence) unprobed(listed []string) []string {
+	candidates := make(map[string]struct{}, len(listed)+len(f.fenced))
+	for _, vchannel := range listed {
+		candidates[vchannel] = struct{}{}
+	}
+	for vchannel := range f.fenced {
+		candidates[vchannel] = struct{}{}
+	}
+	out := make([]string, 0, len(candidates))
+	for vchannel := range candidates {
+		if _, ok := f.probed[vchannel]; !ok {
+			out = append(out, vchannel)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (f *splitFence) markProbed(vchannel string) {
+	f.probed[vchannel] = struct{}{}
 }
 
 func (f *splitFence) isFenced(vchannel string) bool {
@@ -234,8 +274,15 @@ func (f *splitFence) observe(resp streaming.AppendResponses) {
 	f.maxTimeTick = max(f.maxTimeTick, resp.MaxTimeTick())
 }
 
-// settle reads one append's responses. It returns the offsets of every message
-// that landed, which are durable now, and the first error that is not a fence.
+// settle reads one append's responses. It returns the offsets that are durable
+// now, and the first error that is not a fence.
+//
+// A message that landed makes its own offsets durable. A message an
+// idempotency window answered as a duplicate was not appended again: the
+// window answers with the offsets its key's first append wrote on that
+// vchannel, and those are durable too. The message's own offsets are settled
+// with them, because re-sending them under the same key to the same vchannel
+// would only be answered the same way.
 //
 // An error that is not a fence is not ours to retry -- the caller fails the
 // request rather than replaying rows that may already be durable. A message
@@ -262,8 +309,37 @@ func (f *splitFence) settle(resp streaming.AppendResponses, msgs []message.Mutab
 		if i < len(offsets) {
 			durable = append(durable, offsets[i]...)
 		}
+		answered, _, err := duplicateAnsweredOffsets(resp.Responses[i])
+		if err != nil {
+			if fatal == nil {
+				fatal = err
+			}
+			continue
+		}
+		durable = append(durable, answered...)
 	}
 	return durable, fatal
+}
+
+// duplicateAnsweredOffsets returns the row offsets an idempotency window
+// answered for, and whether the response is such an answer at all; a fresh
+// append carries no answer.
+func duplicateAnsweredOffsets(resp streaming.AppendResponse) ([]int, bool, error) {
+	if resp.AppendResult == nil || resp.AppendResult.Extra == nil {
+		return nil, false, nil
+	}
+	extra := &messagespb.IdempotentInsertResult{}
+	if !resp.AppendResult.Extra.MessageIs(extra) {
+		return nil, false, nil
+	}
+	if err := resp.AppendResult.GetExtra(extra); err != nil {
+		return nil, false, merr.WrapErrServiceInternalErr(err, "decode the idempotent insert result of a duplicate append")
+	}
+	offsets := make([]int, 0, len(extra.GetRowOffsets()))
+	for _, offset := range extra.GetRowOffsets() {
+		offsets = append(offsets, int(offset))
+	}
+	return offsets, true, nil
 }
 
 // refresh evicts the collection from the proxy's cache, so the next attempt

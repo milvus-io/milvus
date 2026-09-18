@@ -25,10 +25,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	streamingtypes "github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -208,4 +210,55 @@ func TestSplitFenceRefreshCapsARequestWithNoDeadline(t *testing.T) {
 func TestShardFencedErrorIsRecognised(t *testing.T) {
 	assert.True(t, status.AsStreamingError(fencedErr("a")).IsShardFenced())
 	assert.False(t, status.AsStreamingError(errors.New("x")).IsShardFenced())
+}
+
+// A message an idempotency window answered as a duplicate settles the offsets
+// the window answered for, with its own.
+func TestSplitFenceSettleCountsTheOffsetsAWindowAnsweredFor(t *testing.T) {
+	answer, err := anypb.New(streamingmessage.NewIdempotentInsertResult([]uint32{5, 7}, int64IDs(50, 70)))
+	require.NoError(t, err)
+	resp := appendResponses(nil)
+	resp.Responses[0].AppendResult.Extra = answer
+
+	durable, err := newSplitFence().settle(resp, fenceTestMessages(t, "a"), [][]int{{0}})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []int{0, 5, 7}, durable)
+}
+
+func TestDuplicateAnsweredOffsets(t *testing.T) {
+	offsets, duplicate, err := duplicateAnsweredOffsets(streaming.AppendResponse{})
+	assert.NoError(t, err)
+	assert.False(t, duplicate)
+	assert.Nil(t, offsets)
+
+	other, err := anypb.New(&messagespb.PartialUpdateCAS{ReadTs: 1})
+	require.NoError(t, err)
+	_, duplicate, err = duplicateAnsweredOffsets(streaming.AppendResponse{AppendResult: &streamingtypes.AppendResult{Extra: other}})
+	assert.NoError(t, err)
+	assert.False(t, duplicate, "an extra of another kind is no answer")
+
+	corrupt := &anypb.Any{TypeUrl: "type.googleapis.com/milvus.proto.messages.IdempotentInsertResult", Value: []byte{0xff, 0xff}}
+	_, _, err = duplicateAnsweredOffsets(streaming.AppendResponse{AppendResult: &streamingtypes.AppendResult{Extra: corrupt}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+
+	fence := newSplitFence()
+	resp := appendResponses(nil)
+	resp.Responses[0].AppendResult.Extra = corrupt
+	_, err = fence.settle(resp, fenceTestMessages(t, "a"), [][]int{{0}})
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+func TestSplitFenceUnprobedListsEveryFencedVChannelOnce(t *testing.T) {
+	fence := newSplitFence()
+	fence.markFenced("b")
+	fence.markFenced("c")
+	assert.Equal(t, []string{"a", "b", "c"}, fence.unprobed([]string{"c", "a"}))
+	fence.markProbed("b")
+	assert.Equal(t, []string{"a", "c"}, fence.unprobed([]string{"c", "a"}))
+
+	pending := newPendingRows(0, fence)
+	assert.Equal(t, -1, pending.first())
+	pending = newPendingRows(3, fence)
+	pending.settle([]int{0})
+	assert.Equal(t, 1, pending.first())
 }
