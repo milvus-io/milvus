@@ -64,8 +64,8 @@
 #include "segcore/SegmentSealed.h"
 #include "segcore/Types.h"
 #include "segcore/Utils.h"
-#include "segcore/segment_c.h"
 #include "storage/MmapManager.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/GenExprProto.h"
 #include "test_utils/SegcoreConfigUtils.h"
@@ -1109,49 +1109,65 @@ TEST(MatchExprNestedArrayExpressions, MatchFamilyGrowingAndSealed) {
     }
     auto storage_schema = Schema::ParseFrom(storage_schema_proto);
 
-    auto storage_growing =
-        CreateGrowingSegment(storage_schema, empty_index_meta, 2);
-    const auto storage_offset = storage_growing->PreInsert(row_count);
-    storage_growing->Insert(storage_offset,
-                            row_count,
-                            row_ids.data(),
-                            timestamps.data(),
-                            insert_data.get());
-
     const auto unique =
         std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto root_path = std::filesystem::temp_directory_path().string();
+    const auto leaf_path =
+        "milvus_match_nested_array_v3_" + std::to_string(unique);
     const auto segment_path =
-        (std::filesystem::temp_directory_path() /
-         ("milvus_match_nested_array_v3_" + std::to_string(unique)))
-            .string();
+        (std::filesystem::path(root_path) / leaf_path).string();
     std::filesystem::remove_all(segment_path);
     auto directory_guard = folly::makeGuard(
         [&segment_path] { std::filesystem::remove_all(segment_path); });
 
-    auto schema_blob = storage_schema_proto.SerializeAsString();
+    // Pull the per-row ScalarFieldProtos straight out of insert_data rather
+    // than rebuilding them, so this fixture cannot drift from the rows the
+    // growing-segment subjects above were given.
+    auto array_rows = [&](FieldId field_id) {
+        for (const auto& field_data : insert_data->fields_data()) {
+            if (field_data.field_id() != field_id.get()) {
+                continue;
+            }
+            std::vector<ScalarFieldProto> rows;
+            rows.reserve(field_data.scalars().array_data().data_size());
+            for (const auto& row : field_data.scalars().array_data().data()) {
+                rows.push_back(row);
+            }
+            return rows;
+        }
+        AssertInfo(false, "field {} absent from insert_data", field_id.get());
+        return std::vector<ScalarFieldProto>{};
+    };
+
+    const std::vector<int64_t> storage_row_ids(row_ids.begin(), row_ids.end());
+    const std::vector<int64_t> storage_timestamps(timestamps.begin(),
+                                                  timestamps.end());
+
+    // Column order follows storage_schema->ConvertToLoonArrowSchema():
+    // RowID, Timestamp, pk, nested ints, nested strings.
+    std::vector<std::shared_ptr<arrow::Array>> columns{
+        milvus::test::Int64ColumnFromValues(storage_row_ids),
+        milvus::test::Int64ColumnFromValues(storage_timestamps),
+        milvus::test::Int64ColumnFromValues(ids),
+        milvus::test::ArrayFromScalarFieldProtos(array_rows(nested_int_fid)),
+        milvus::test::ArrayFromScalarFieldProtos(array_rows(nested_string_fid)),
+    };
+
     const auto column_group_pattern =
         "0|1|" + std::to_string(int64_fid.get()) + "," +
         std::to_string(nested_int_fid.get()) + "," +
         std::to_string(nested_string_fid.get());
-    CFlushConfig flush_config{};
-    flush_config.segment_path = segment_path.c_str();
-    flush_config.read_version = -1;
-    flush_config.retry_limit = 3;
-    flush_config.schema_blob = schema_blob.data();
-    flush_config.schema_length = static_cast<int64_t>(schema_blob.size());
-    flush_config.schema_based_pattern = column_group_pattern.c_str();
 
-    CFlushResult flush_result{};
-    auto flush_guard =
-        folly::makeGuard([&flush_result] { FreeFlushResult(&flush_result); });
-    const auto flush_status = FlushGrowingSegmentData(
-        storage_growing.get(), 0, row_count, &flush_config, &flush_result);
-    ASSERT_EQ(flush_status.error_code, Success) << flush_status.error_msg;
-    ASSERT_EQ(flush_result.num_rows, row_count);
+    milvus::test::V3SegmentTestData v3(storage_schema,
+                                       columns,
+                                       row_count,
+                                       root_path,
+                                       leaf_path,
+                                       column_group_pattern);
+    ASSERT_EQ(v3.TotalRows(), row_count);
+    ASSERT_GT(v3.Version(), 0);
 
-    const auto manifest_path =
-        "{\"base_path\":\"" + segment_path +
-        "\",\"ver\":" + std::to_string(flush_result.committed_version) + "}";
+    const auto manifest_path = v3.ManifestPathJson();
     proto::segcore::SegmentLoadInfo load_info;
     load_info.set_collectionid(1);
     load_info.set_partitionid(2);
