@@ -568,6 +568,8 @@ type taskScheduler struct {
 	cluster   session.Cluster
 	nodeMgr   *session.NodeManager
 
+	markNextTargetStaleHandler func(collectionID, segmentID int64)
+
 	scheduleMu   sync.Mutex           // guards schedule() and RemoveByNode()
 	collKeyLock  *lock.KeyLock[int64] // guards Add()
 	tasks        *ConcurrentMap[UniqueID, struct{}]
@@ -619,6 +621,12 @@ func NewScheduler(ctx context.Context,
 }
 
 func (scheduler *taskScheduler) Start() {}
+
+// SetNextTargetStaleHandler sets the callback used to mark a next target as
+// stale. It must be configured before the scheduler starts processing tasks.
+func (scheduler *taskScheduler) SetNextTargetStaleHandler(handler func(collectionID, segmentID int64)) {
+	scheduler.markNextTargetStaleHandler = handler
+}
 
 func (scheduler *taskScheduler) Stop() {
 	scheduler.executors.Range(func(nodeID int64, executor *Executor) bool {
@@ -1254,10 +1262,20 @@ func (scheduler *taskScheduler) remove(task Task) {
 		mlog.String("status", task.Status()),
 	)
 
-	if errors.Is(task.Err(), merr.ErrSegmentNotFound) {
-		log.Info(task.Context(), "segment in target has been cleaned, trigger force update next target")
-		// Avoid using task.Ctx as it may be canceled before remove is called.
-		scheduler.targetMgr.UpdateCollectionNextTarget(scheduler.ctx, task.CollectionID())
+	var segmentID int64
+	switch typedTask := task.(type) {
+	case *SegmentTask:
+		segmentID = typedTask.SegmentID()
+	case *LeaderTask:
+		segmentID = typedTask.SegmentID()
+	}
+	if segmentID != 0 && errors.Is(task.Err(), merr.ErrSegmentNotFound) {
+		log.Info(task.Context(), "segment in target has been cleaned, mark next target as stale")
+		if scheduler.markNextTargetStaleHandler == nil {
+			log.Warn(task.Context(), "next target stale handler is not configured")
+		} else {
+			scheduler.markNextTargetStaleHandler(task.CollectionID(), segmentID)
+		}
 	}
 
 	// If task failed due to resource exhaustion (OOM, disk full, GPU OOM, etc.),

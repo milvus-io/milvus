@@ -742,7 +742,7 @@ func (suite *ServerSuite) hackServer() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.server.broker = suite.broker
 	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta)
-	suite.server.taskScheduler = task.NewScheduler(
+	taskScheduler := task.NewScheduler(
 		suite.server.ctx,
 		suite.server.meta,
 		suite.server.dist,
@@ -751,6 +751,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.cluster,
 		suite.server.nodeMgr,
 	)
+	suite.server.taskScheduler = taskScheduler
 
 	suite.server.distController = dist.NewDistController(
 		suite.server.cluster,
@@ -776,6 +777,7 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.cluster,
 		suite.server.nodeMgr,
 	)
+	taskScheduler.SetNextTargetStaleHandler(suite.server.targetObserver.MarkNextTargetStale)
 	suite.server.collectionObserver = observers.NewCollectionObserver(
 		suite.server.dist,
 		suite.server.meta,

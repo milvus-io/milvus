@@ -1249,6 +1249,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Level:               segment.GetLevel(),
 			IsSorted:            segment.GetIsSorted(),
 			IsSortedByNamespace: segment.GetIsSortedByNamespace(),
+			StorageVersion:      segment.GetStorageVersion(),
 			ManifestPath:        segment.GetManifestPath(),
 			DataVersion:         segment.GetDataVersion(),
 		})
