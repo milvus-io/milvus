@@ -2996,6 +2996,10 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
         break;
     }
 
+    const auto original_chunk_rows =
+        SegcoreConfig::default_config().get_chunk_rows();
+    std::optional<ScopedSegcoreConfigRestore> config_restore;
+    config_restore.emplace();
     // chunk_rows=1: the two physically stored rows land in separate physical
     // chunks, so the flush walk crosses a chunk boundary in compact storage
     // while the logical walk still sees three rows.
@@ -3063,6 +3067,9 @@ TEST_F(FlushGrowingSegmentTest, FlushNullableEmbListMixedRows) {
     }
 
     FreeFlushResult(&result);
+    config_restore.reset();
+    EXPECT_EQ(SegcoreConfig::default_config().get_chunk_rows(),
+              original_chunk_rows);
 }
 
 // The streaming reader decodes batches on a thread pool and delivers them on
