@@ -48,6 +48,8 @@ func TestVersionGateSwitcher_Validate(t *testing.T) {
 		{"malformed gate version", func(s *VersionGateSwitcher) { s.GateVersion = "not-a-version" }},
 		{"empty target value", func(s *VersionGateSwitcher) { s.TargetValue = "" }},
 		{"negative switch delay", func(s *VersionGateSwitcher) { s.SwitchDelay = -time.Second }},
+		{"dependency without value", func(s *VersionGateSwitcher) { s.DependsOn = "a.b" }},
+		{"dependency value without key", func(s *VersionGateSwitcher) { s.DependsOnValue = "true" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,6 +80,45 @@ func TestVersionGateSwitcher_EffectiveValue(t *testing.T) {
 		assert.Equal(t, "2.6.23", item.VersionGateSwitcher.GateVersion)
 		assert.Equal(t, "true", item.VersionGateSwitcher.TargetValue)
 		assert.Equal(t, "auto", item.DefaultValue) // default == sentinel -> auto switch by default
+	})
+
+	t.Run("split-chunk switches default to auto behind the 3.1 gate", func(t *testing.T) {
+		// The WAL payload chunking capability: streaming.splitChunkSN auto-enables
+		// once the whole cluster reaches 3.1.0; until then reads resolve the
+		// pre-switch "false" (legacy single-record path).
+		sn := &params.StreamingCfg.SplitChunkSN
+		assert.NotNil(t, sn.VersionGateSwitcher)
+		assert.Equal(t, "auto", sn.DefaultValue)
+		assert.Equal(t, "auto", sn.VersionGateSwitcher.EnableAutoSwitchValue)
+		assert.Equal(t, "false", sn.VersionGateSwitcher.PreSwitchValue)
+		assert.Equal(t, "3.1.0", sn.VersionGateSwitcher.GateVersion)
+		assert.Equal(t, "true", sn.VersionGateSwitcher.TargetValue)
+		assert.Equal(t, "false", sn.GetValue())
+		assert.False(t, sn.GetAsBool())
+
+		// The dependent switch: proxy.splitChunk's auto value keeps the
+		// pre-switch "true" (safe bridge state) until the SN gate has flipped
+		// "true" in the config center; only then does the confirmator flip it
+		// to "false" (see the WAL payload chunking design doc §7).
+		proxy := &params.ProxyCfg.SplitChunkProxy
+		assert.NotNil(t, proxy.VersionGateSwitcher)
+		assert.Equal(t, "auto", proxy.DefaultValue)
+		assert.Equal(t, "auto", proxy.VersionGateSwitcher.EnableAutoSwitchValue)
+		assert.Equal(t, "true", proxy.VersionGateSwitcher.PreSwitchValue)
+		assert.Equal(t, "3.1.0", proxy.VersionGateSwitcher.GateVersion)
+		assert.Equal(t, "false", proxy.VersionGateSwitcher.TargetValue)
+		assert.Equal(t, "streaming.splitChunkSN", proxy.VersionGateSwitcher.DependsOn)
+		assert.Equal(t, "true", proxy.VersionGateSwitcher.DependsOnValue)
+		assert.Equal(t, "true", proxy.GetValue())
+		assert.True(t, proxy.GetAsBool())
+
+		// Explicit values bypass the gate on both switches.
+		snOld := sn.SwapTempValue("true")
+		defer sn.SwapTempValue(snOld)
+		assert.True(t, sn.GetAsBool())
+		proxyOld := proxy.SwapTempValue("false")
+		defer proxy.SwapTempValue(proxyOld)
+		assert.False(t, proxy.GetAsBool())
 	})
 
 	t.Run("sentinel value -> gate not flipped, keeps pre-switch value", func(t *testing.T) {

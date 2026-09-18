@@ -622,6 +622,17 @@ func TestComponentParam(t *testing.T) {
 		Params := &params.ProxyCfg
 
 		assert.Equal(t, "proxy.splitChunk", Params.SplitChunkProxy.Key)
+		// Default "auto": the version-gated auto-switch keeps the pre-switch
+		// value "true" (legacy packing = safe bridge state), then flips to
+		// "false" once the SN gate has flipped "true" in the config center.
+		assert.Equal(t, "auto", Params.SplitChunkProxy.DefaultValue)
+		assert.False(t, Params.SplitChunkProxy.Export)
+		assert.NotNil(t, Params.SplitChunkProxy.VersionGateSwitcher)
+		assert.Equal(t, "true", Params.SplitChunkProxy.VersionGateSwitcher.PreSwitchValue)
+		assert.Equal(t, "false", Params.SplitChunkProxy.VersionGateSwitcher.TargetValue)
+		assert.Equal(t, "3.1.0", Params.SplitChunkProxy.VersionGateSwitcher.GateVersion)
+		assert.Equal(t, "streaming.splitChunkSN", Params.SplitChunkProxy.VersionGateSwitcher.DependsOn)
+		assert.Equal(t, "true", Params.SplitChunkProxy.VersionGateSwitcher.DependsOnValue)
 		assert.True(t, Params.SplitChunkProxy.GetAsBool())
 		params.Save(Params.SplitChunkProxy.Key, "false")
 		assert.False(t, Params.SplitChunkProxy.GetAsBool())
@@ -1258,6 +1269,14 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test streamingConfig", func(t *testing.T) {
 		assert.Equal(t, "streaming.splitChunkSN", params.StreamingCfg.SplitChunkSN.Key)
+		// Default "auto": before the 3.1 version gate is satisfied the effective
+		// value is the pre-switch "false" (legacy single-record path).
+		assert.Equal(t, "auto", params.StreamingCfg.SplitChunkSN.DefaultValue)
+		assert.False(t, params.StreamingCfg.SplitChunkSN.Export)
+		assert.NotNil(t, params.StreamingCfg.SplitChunkSN.VersionGateSwitcher)
+		assert.Equal(t, "false", params.StreamingCfg.SplitChunkSN.VersionGateSwitcher.PreSwitchValue)
+		assert.Equal(t, "true", params.StreamingCfg.SplitChunkSN.VersionGateSwitcher.TargetValue)
+		assert.Equal(t, "3.1.0", params.StreamingCfg.SplitChunkSN.VersionGateSwitcher.GateVersion)
 		assert.False(t, params.StreamingCfg.SplitChunkSN.GetAsBool())
 		params.Save(params.StreamingCfg.SplitChunkSN.Key, "true")
 		assert.True(t, params.StreamingCfg.SplitChunkSN.GetAsBool())
