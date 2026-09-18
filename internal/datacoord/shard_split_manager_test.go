@@ -878,3 +878,31 @@ func TestShardSplitManagerDefaultWiring(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{splitMgrV1}, vchannels)
 }
+
+// At most one split per collection is active at a time: a second plan against
+// the same collection is made from a record the first split is about to
+// change, and would wedge refused before its fence. Concurrency across
+// collections is unchanged.
+func TestShardSplitTriggerPlansOneSplitPerCollection(t *testing.T) {
+	enableShardSplit(t)
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.ShardSplitMaxConcurrentTasks.Key, "2")
+	defer params.Reset(params.DataCoordCfg.ShardSplitMaxConcurrentTasks.Key)
+	coordinator := &fakeSplitCoordinator{
+		coll: splitCollectionFromDescribe(splitTestDescribe([]string{splitMgrV0, splitMgrV3}, nil, 0), []int64{10}),
+	}
+	manager, _ := newSplitTestManager(t, coordinator)
+	addSplitTestCollection(manager.meta, splitTestSchema(false), splitMgrV0, splitMgrV3)
+	addSplitTestSegment(manager.meta, 1, splitMgrV0, 5000, 1)
+	addSplitTestSegment(manager.meta, 2, splitMgrV3, 5000, 1)
+
+	manager.detectOnce()
+	require.Len(t, manager.store.list(), 1, "two oversized shards of one collection, one split")
+	manager.detectOnce()
+	require.Len(t, manager.store.list(), 1)
+
+	first := manager.store.list()[0]
+	manager.finishTask(first, "")
+	manager.detectOnce()
+	assert.Len(t, manager.store.list(), 2, "the next split of the collection starts once the first is Done")
+}
