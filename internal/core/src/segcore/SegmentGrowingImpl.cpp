@@ -3608,11 +3608,12 @@ SegmentGrowingImpl::BuildGeometryCacheForInsert(FieldId field_id,
                                                 int64_t num_rows) {
     // Rows are written at their reserved ABSOLUTE offsets
     // (SimpleGeometryCache::AppendDataAt), matching how readers address the
-    // cache (GetByOffsetUnsafe) and how the R-Tree index path's AddGeometry
+    // cache (GetByOffset) and how the R-Tree index path's AddGeometry
     // works. This makes the write idempotent: a batch retried after a
     // mid-batch retriable failure (e.g. a transient GEOS allocation throw)
-    // overwrites its own slots instead of re-appending after the partial
-    // prefix and shifting every later row to the wrong offset. It also
+    // addresses its own slots instead of re-appending after the partial
+    // prefix and shifting every later row to the wrong offset (the slots it
+    // already published are simply skipped -- first writer wins). It also
     // removes the old tail-append ORDERING DEPENDENCY on strictly serialized,
     // in-order Insert() batches.
     try {
@@ -3695,7 +3696,7 @@ SegmentGrowingImpl::BuildGeometryCacheForLoad(
                     segment_instance_uid(), get_segment_id(), field_id);
 
         // Process each field data chunk, writing rows at their reserved
-        // absolute offsets so a retried load overwrites in place (see
+        // absolute offsets so a retried load lands on the same slots (see
         // BuildGeometryCacheForInsert).
         int64_t absolute_offset = reserved_offset;
         for (const auto& data : field_data) {
