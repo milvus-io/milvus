@@ -38,6 +38,12 @@ func (s *StructArraySuite) TestNewColumnStructArrayFromSchemaRejectsNilChild() {
 	s.EqualError(err, "struct schema contains a nil child")
 }
 
+func (s *StructArraySuite) TestNewStructArrayChildColumnRejectsNilField() {
+	column, err := newStructArrayChildColumn(nil)
+	s.Nil(column)
+	s.EqualError(err, "struct child field is required")
+}
+
 func (s *StructArraySuite) TestNewColumnStructArrayFromSchemaSupportsEveryChildType() {
 	const dim = 8
 	fields := []*entity.Field{

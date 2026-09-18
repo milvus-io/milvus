@@ -5227,6 +5227,50 @@ func TestSchemaForPathReplaceOperandsRejectsDifferentMasks(t *testing.T) {
 	assert.Contains(t, err.Error(), "does not match request mask")
 }
 
+func TestSchemaForPathReplaceOperandsRejectsInvalidStructRows(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, path, want string
+	}{
+		{"missing", `{"data":[{"id":1}]}`, "[0]", "missing or null"},
+		{"null", `{"data":[{"my_struct":null}]}`, "[0]", "missing or null"},
+		{"not array", `{"data":[{"my_struct":{}}]}`, "[0]", "exactly one object"},
+		{"empty array", `{"data":[{"my_struct":[]}]}`, "[0]", "exactly one object"},
+		{"not object", `{"data":[{"my_struct":[null]}]}`, "[0]", "exactly one object"},
+		{"empty mask", `{"data":[{"my_struct":[{}]}]}`, "[0]", "child mask must not be empty"},
+		{"unknown child", `{"data":[{"my_struct":[{"unknown":1}]}]}`, "[0][unknown]", "has no child"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := buildStructArrayTestSchema()
+			before := proto.Clone(schema)
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			got, err := schemaForPathReplaceOperands([]byte(tc.body), schema, ops)
+			require.Nil(t, got)
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, schema), "rejected operand must not narrow collection schema")
+		})
+	}
+}
+
+func TestSchemaForPathReplaceOperandsPreservesUntargetedFields(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	})
+	for _, tc := range []struct {
+		body, target string
+	}{
+		{`{"data":[]}`, "scores"},
+		{`{"data":[{}]}`, "scores"},
+		{`{"data":[{"scores":null}]}`, "scores"},
+		{`{"data":[{"scores":[null]}]}`, "other"},
+	} {
+		ops := []*schemapb.FieldPartialUpdateOp{{FieldName: tc.target, Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]"}}
+		got, err := schemaForPathReplaceOperands([]byte(tc.body), schema, ops)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(schema, got))
+	}
+}
+
 func TestSchemaForPathReplaceOperandsKeepsBracketedDynamicKeyLiteral(t *testing.T) {
 	schema := buildStructArrayTestSchema()
 	schema.EnableDynamicField = true

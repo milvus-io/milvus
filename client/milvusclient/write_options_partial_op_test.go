@@ -17,6 +17,7 @@
 package milvusclient
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/samber/lo"
@@ -230,6 +231,135 @@ func TestPartialOpForUnknownFieldStillEmitted(t *testing.T) {
 func TestBuildFieldOpsReturnsNilWhenEmpty(t *testing.T) {
 	opt := &columnBasedDataOption{}
 	assert.Nil(t, opt.buildFieldOps())
+}
+
+func TestBuildFieldOpsOmitsExplicitReplace(t *testing.T) {
+	opt := NewColumnBasedInsertOption("test")
+	opt.partialOps = map[string]*schemapb.FieldPartialUpdateOp{
+		"tags": {FieldName: "tags", Op: schemapb.FieldPartialUpdateOp_REPLACE},
+	}
+	require.Nil(t, opt.buildFieldOps())
+	opt.partialOps["scores"] = &schemapb.FieldPartialUpdateOp{
+		FieldName: "scores", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]",
+	}
+	require.Equal(t, []*schemapb.FieldPartialUpdateOp{opt.partialOps["scores"]}, opt.buildFieldOps())
+}
+
+func TestRowBasedPathReplaceRejectsInvalidOperands(t *testing.T) {
+	coll, _ := buildStructPathReplaceCollection()
+	for _, tc := range []struct {
+		name string
+		row  any
+		want string
+	}{
+		{"nil row", nil, "unsupported nil row"},
+		{"wrong row type", 1, "unsupported"},
+		{"wrong map key", map[int]any{1: 2}, "map key type"},
+		{"missing parent", map[string]any{"id": int64(1)}, "missing struct array field"},
+		{"null operand", map[string]any{"profile": nil}, "must not be null"},
+		{"non map operand", map[string]any{"profile": []int64{1}}, "must be map[string]any"},
+		{"non string child name", map[string]any{"profile": map[int]any{1: 2}}, "must be map[string]any"},
+		{"empty child mask", map[string]any{"profile": map[string]any{}}, "child mask must not be empty"},
+		{"unknown child", map[string]any{"profile": map[string]any{"unknown": []int64{1}}}, "has no child"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := NewRowBasedInsertOption(coll.Name, tc.row).
+				WithPathReplace("profile", "[0][age]").UpsertRequest(coll)
+			require.Nil(t, req)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+
+	t.Run("missing child schema", func(t *testing.T) {
+		coll, _ := buildStructPathReplaceCollection()
+		coll.Schema.Fields[1].StructSchema = nil
+		req, err := NewRowBasedInsertOption(coll.Name, map[string]any{"profile": map[string]any{"age": []int64{1}}}).
+			WithPathReplace("profile", "[0][age]").UpsertRequest(coll)
+		require.Nil(t, req)
+		require.ErrorContains(t, err, "has no child schema")
+	})
+	t.Run("deferred column construction error", func(t *testing.T) {
+		opt := NewRowBasedInsertOption(coll.Name, map[string]any{"id": int64(1)})
+		opt.WithStructArrayColumn("profile", nil, []map[string]any{{"age": []int64{18}}})
+		req, err := opt.UpsertRequest(coll)
+		require.Nil(t, req)
+		require.ErrorContains(t, err, "struct schema is required")
+	})
+	t.Run("empty rows", func(t *testing.T) {
+		req, err := NewRowBasedInsertOption(coll.Name).UpsertRequest(coll)
+		require.Nil(t, req)
+		require.ErrorContains(t, err, "0 length column")
+	})
+	t.Run("column schema mismatch", func(t *testing.T) {
+		// The legacy String type constructs a VarChar column. The row wrapper
+		// must preserve the type mismatch reported by column validation.
+		coll := &entity.Collection{Name: "legacy", Schema: entity.NewSchema().WithField(
+			entity.NewField().WithName("name").WithDataType(entity.FieldTypeString))}
+		req, err := NewRowBasedInsertOption(coll.Name, map[string]any{"name": "value"}).UpsertRequest(coll)
+		require.Nil(t, req)
+		require.ErrorContains(t, err, "collection field definition")
+	})
+}
+
+func TestPathReplaceRowFieldEmbeddedAndDuplicateNames(t *testing.T) {
+	type profileFields struct {
+		Profile map[string]any `milvus:"name:profile"`
+	}
+	type duplicateFields struct {
+		First  int `milvus:"name:profile"`
+		Second int `milvus:"name:profile"`
+	}
+	operand := map[string]any{"age": []int64{18}}
+	row := &struct {
+		profileFields
+		Ignored int `milvus:"-"`
+	}{profileFields: profileFields{Profile: operand}}
+	value, found, err := pathReplaceRowField(reflect.ValueOf(&row), "profile")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, operand, value.Interface())
+
+	for _, input := range []any{
+		duplicateFields{},
+		struct {
+			duplicateFields
+		}{},
+		struct {
+			First int `milvus:"name:profile"`
+			profileFields
+		}{},
+		struct {
+			profileFields
+			Second int `milvus:"name:profile"`
+		}{},
+	} {
+		_, _, err := pathReplaceRowField(reflect.ValueOf(input), "profile")
+		require.ErrorContains(t, err, "duplicated name")
+	}
+	_, _, err = pathReplaceRowField(reflect.ValueOf((*profileFields)(nil)), "profile")
+	require.Error(t, err)
+}
+
+func TestNewEmptyStructArrayColumnInvalidSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		schema   *entity.StructSchema
+		nullable bool
+		want     string
+	}{
+		{"missing schema", nil, false, "has no struct schema"},
+		{"unsupported child", entity.NewStructSchema().WithField(
+			entity.NewField().WithName("json").WithDataType(entity.FieldTypeJSON)), false, "unsupported struct sub-field type"},
+		{"nullable empty schema", entity.NewStructSchema(), true, "requires at least one sub-field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			field := entity.NewField().WithName("profile").WithDataType(entity.FieldTypeArray).
+				WithElementType(entity.FieldTypeStruct).WithStructSchema(tc.schema).WithNullable(tc.nullable)
+			col, err := newEmptyStructArrayColumn(field, nil)
+			require.Nil(t, col)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
 }
 
 func TestRowBasedUpsertEmitsFieldOps(t *testing.T) {
