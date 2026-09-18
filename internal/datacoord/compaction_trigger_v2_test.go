@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -218,10 +219,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 	segments := genSegmentsForMeta(s.testLabel)
-	s.meta = &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-	}
+	s.meta = &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil))}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
 	}
@@ -237,7 +235,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&metacache.CollectionInfo{}, nil)
 	s.triggerManager.handler = handler
 
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
@@ -286,7 +284,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&metacache.CollectionInfo{}, nil)
 	s.triggerManager.handler = handler
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
@@ -467,7 +465,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 	}
 
 	s.Run("all DISKANN", func() {
-		collection := &collectionInfo{
+		collection := &metacache.CollectionInfo{
 			ID: collectionID,
 			Schema: &schemapb.CollectionSchema{
 				Name:        "coll1",
@@ -522,7 +520,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 				},
 			},
 		}
-		collection := &collectionInfo{
+		collection := &metacache.CollectionInfo{
 			ID: collectionID,
 			Schema: &schemapb.CollectionSchema{
 				Name:        "coll1",
@@ -563,7 +561,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 				},
 			},
 		}
-		collection := &collectionInfo{
+		collection := &metacache.CollectionInfo{
 			ID: collectionID,
 			Schema: &schemapb.CollectionSchema{
 				Name:        "coll1",
@@ -584,7 +582,7 @@ func (s *CompactionTriggerManagerSuite) TestGetExpectedSegmentSize() {
 
 func (s *CompactionTriggerManagerSuite) TestManualTriggerL0Compaction() {
 	handler := NewNMockHandler(s.T())
-	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&metacache.CollectionInfo{}, nil)
 	s.triggerManager.handler = handler
 
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
@@ -663,7 +661,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 		}
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
-			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+			Return(&metacache.CollectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
 		s.triggerManager.handler = handler
 
 		const (
@@ -713,7 +711,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 		}
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
-			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+			Return(&metacache.CollectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
 		s.triggerManager.handler = handler
 
 		const (
@@ -753,7 +751,7 @@ func (s *CompactionTriggerManagerSuite) TestSubmitSingleViewToScheduler() {
 		}
 		handler := NewNMockHandler(s.T())
 		handler.EXPECT().GetCollection(mock.Anything, s.testLabel.CollectionID).
-			Return(&collectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
+			Return(&metacache.CollectionInfo{ID: s.testLabel.CollectionID, Schema: collectionSchema}, nil).Once()
 		s.triggerManager.handler = handler
 
 		const (

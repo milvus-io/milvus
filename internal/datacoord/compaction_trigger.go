@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -220,7 +221,7 @@ func (t *compactionTrigger) stop() {
 	t.closeWaiter.Wait()
 }
 
-func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInfo, error) {
+func (t *compactionTrigger) getCollection(collectionID UniqueID) (*metacache.CollectionInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	coll, err := t.handler.GetCollection(ctx, collectionID)
@@ -230,14 +231,7 @@ func (t *compactionTrigger) getCollection(collectionID UniqueID) (*collectionInf
 	return coll, nil
 }
 
-func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
-	if coll == nil {
-		return false
-	}
-	if coll.IsExternal() {
-		mlog.Debug(context.TODO(), "collection auto compaction disabled for external collection", mlog.FieldCollectionID(coll.ID))
-		return false
-	}
+func isCollectionAutoCompactionEnabled(coll *metacache.CollectionInfo) bool {
 	enabled, err := getCollectionAutoCompactionEnabled(coll.Properties)
 	if err != nil {
 		mlog.Warn(context.TODO(), "collection properties auto compaction not valid, returning false", mlog.Err(err))
@@ -246,7 +240,7 @@ func isCollectionAutoCompactionEnabled(coll *collectionInfo) bool {
 	return enabled
 }
 
-func getCompactTime(ts Timestamp, coll *collectionInfo) (*compactTime, error) {
+func getCompactTime(ts Timestamp, coll *metacache.CollectionInfo) (*compactTime, error) {
 	collectionTTL, err := common.GetCollectionTTLFromMap(coll.Properties)
 	if err != nil {
 		return nil, err

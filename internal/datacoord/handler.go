@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -55,7 +56,7 @@ type Handler interface {
 	GetDataVChanPositions(ch RWChannel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(ch string) bool
 	FinishDropChannel(ch string, collectionID int64) error
-	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
+	GetCollection(ctx context.Context, collectionID UniqueID) (*metacache.CollectionInfo, error)
 	GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView
 	ListLoadedSegments(ctx context.Context) ([]int64, error)
 	GenSnapshot(ctx context.Context, collectionID UniqueID) (*snapshotstorage.SnapshotData, error)
@@ -643,8 +644,16 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 		return seekPosition
 	}
 
-	log.Warn(context.TODO(), "get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
+	mlog.Warn(context.TODO(), "get channel checkpoint failed, channelCPMeta and earliestSegDMLPos and collStartPos are all invalid")
 	return nil
+}
+
+func getCollectionStartPosition(channel string, collInfo *metacache.CollectionInfo) *msgpb.MsgPosition {
+	position := toMsgPosition(channel, collInfo.StartPositions)
+	if position != nil {
+		position.Timestamp = collInfo.CreatedAt
+	}
+	return position
 }
 
 // Deprecated: use toMsgPositionWithWALNames
@@ -717,7 +726,7 @@ func (h *ServerHandler) HasCollection(ctx context.Context, collectionID UniqueID
 }
 
 // GetCollection returns collection info with specified collection id
-func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error) {
+func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID) (*metacache.CollectionInfo, error) {
 	coll := h.s.meta.GetCollection(collectionID)
 	if coll != nil {
 		return coll, nil
@@ -744,13 +753,13 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 
 // CheckShouldDropChannel returns whether specified channel is marked to be removed
 func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
-	return h.s.meta.catalog.ShouldDropChannel(h.s.ctx, channel)
+	return h.s.meta.metaStore.ShouldDropChannel(h.s.ctx, channel)
 }
 
 // FinishDropChannel cleans up the remove flag for channels
 // this function is a wrapper of server.meta.FinishDropChannel
 func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
-	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
+	err := h.s.meta.metaStore.DropChannel(h.s.ctx, channel)
 	if err != nil {
 		mlog.Warn(context.TODO(), "DropChannel failed", mlog.String("vChannel", channel), mlog.Err(err))
 		return err

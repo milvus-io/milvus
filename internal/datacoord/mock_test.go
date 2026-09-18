@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
@@ -96,9 +97,7 @@ func (mm *metaMemoryKV) CompareVersionAndSwap(ctx context.Context, key string, v
 
 func newMemoryMeta(t *testing.T) (*meta, error) {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
-	broker := broker.NewMockBroker(t)
-	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	return newMeta(context.TODO(), catalog, nil, broker)
+	return newMeta(context.TODO(), nil, metacache.NewMetaStore(catalog), catalog)
 }
 
 func newMetaWithEtcd(t *testing.T, rootPath string) (*meta, error) {
@@ -1153,12 +1152,12 @@ func (h *mockHandler) FinishDropChannel(channel string, collectionID int64) erro
 	return nil
 }
 
-func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
+func (h *mockHandler) GetCollection(_ context.Context, collectionID UniqueID) (*metacache.CollectionInfo, error) {
 	// empty schema
 	if h.meta != nil {
 		return h.meta.GetCollection(collectionID), nil
 	}
-	return &collectionInfo{ID: collectionID}, nil
+	return &metacache.CollectionInfo{ID: collectionID}, nil
 }
 
 func (h *mockHandler) GetCurrentSegmentsView(ctx context.Context, channel RWChannel, partitionIDs ...UniqueID) *SegmentsView {

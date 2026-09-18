@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -99,7 +100,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		}
 		task := &importTask{
 			alloc:      alloc,
-			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			meta:       &meta{metaStore: metacache.NewMetaStore(nil)},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
@@ -143,7 +144,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		}
 		task := &importTask{
 			alloc:      alloc,
-			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			meta:       &meta{metaStore: metacache.NewMetaStore(nil)},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
@@ -188,7 +189,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		}
 		task := &importTask{
 			alloc:      alloc,
-			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			meta:       &meta{metaStore: metacache.NewMetaStore(nil)},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
@@ -238,7 +239,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		}
 		task := &importTask{
 			alloc:      alloc,
-			meta:       &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+			meta:       &meta{metaStore: metacache.NewMetaStore(nil)},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
@@ -273,11 +274,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 			State:        datapb.ImportTaskStateV2_InProgress,
 		}
 		task := &importTask{
-			alloc: nil,
-			meta: &meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
-			},
+			alloc:      nil,
+			meta:       &meta{metaStore: metacache.NewMetaStore(nil)},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
 		}
@@ -385,8 +383,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		task := &importTask{
 			alloc: nil,
 			meta: &meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				metaStore: metacache.NewMetaStore(nil),
+				segments:  NewSegmentsInfo(metacache.NewMetaStore(nil)),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -426,8 +424,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		task := &importTask{
 			alloc: nil,
 			meta: &meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				metaStore: metacache.NewMetaStore(nil),
+				segments:  NewSegmentsInfo(metacache.NewMetaStore(nil)),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -465,7 +463,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		}, nil)
 
 		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.meta.catalog = catalog
+		task.meta.metaStore = metacache.NewMetaStore(catalog)
 
 		task.QueryTaskOnWorker(cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
@@ -503,8 +501,8 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		task := &importTask{
 			alloc: nil,
 			meta: &meta{
-				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-				segments:    NewSegmentsInfo(),
+				metaStore: metacache.NewMetaStore(nil),
+				segments:  NewSegmentsInfo(metacache.NewMetaStore(nil)),
 			},
 			importMeta: im,
 			tr:         timerecord.NewTimeRecorder(""),
@@ -543,7 +541,7 @@ func TestImportTask_QueryTaskOnWorker(t *testing.T) {
 		}, nil)
 
 		catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		task.meta.catalog = catalog
+		task.meta.metaStore = metacache.NewMetaStore(catalog)
 
 		task.QueryTaskOnWorker(cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Completed, task.GetState())

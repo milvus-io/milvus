@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -80,6 +81,10 @@ type TargetManager struct {
 	broker Broker
 	meta   *Meta
 
+	// metaView resolves segment details on demand from the shared metacache
+	// store instead of keeping full proto copies in CollectionTargets.
+	metaView metacache.MetaView
+
 	// all read segment/channel operation happens on current -> only current target are visible to outer
 	// all add segment/channel operation happens on next -> changes can only happen on next target
 	// all remove segment/channel operation happens on Both current and next -> delete status should be consistent
@@ -87,12 +92,13 @@ type TargetManager struct {
 	next    *target
 }
 
-func NewTargetManager(broker Broker, meta *Meta) *TargetManager {
+func NewTargetManager(broker Broker, meta *Meta, metaView metacache.MetaView) *TargetManager {
 	return &TargetManager{
-		broker:  broker,
-		meta:    meta,
-		current: newTarget(),
-		next:    newTarget(),
+		broker:   broker,
+		meta:     meta,
+		metaView: metaView,
+		current:  newTarget(),
+		next:     newTarget(),
 	}
 }
 
@@ -169,14 +175,11 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 	}
 
 	partitionIDs := mgr.meta.GetPartitionIDsByCollection(ctx, collectionID)
-	segments := make(map[int64]*datapb.SegmentInfo, len(segmentInfos))
-	partitionSet := make(map[int64]struct{}, len(partitionIDs))
-	for _, partitionID := range partitionIDs {
-		partitionSet[partitionID] = struct{}{}
-	}
+	segIDs := make(map[int64]struct{})
+	partitionSet := typeutil.NewUniqueSet(partitionIDs...)
 	for _, segmentInfo := range segmentInfos {
-		if _, ok := partitionSet[segmentInfo.GetPartitionID()]; ok || segmentInfo.GetPartitionID() == common.AllPartitionsID {
-			segments[segmentInfo.GetID()] = segmentInfo
+		if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
+			segIDs[segmentInfo.GetID()] = struct{}{}
 		}
 	}
 
@@ -185,13 +188,12 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		dmChannels[channelInfo.ChannelName] = DmChannelFromVChannel(channelInfo)
 	}
 
-	if len(segments) == 0 && len(dmChannels) == 0 {
+	if len(segIDs) == 0 && len(dmChannels) == 0 {
 		mlog.Debug(ctx, "skip empty next targets for collection", mlog.FieldCollectionID(collectionID), mlog.Int64s("PartitionIDs", partitionIDs))
 		return nil
 	}
 
-	allocatedTarget := NewCollectionTarget(segments, dmChannels, partitionIDs)
-
+	allocatedTarget := NewCollectionTarget(segIDs, dmChannels, partitionIDs, mgr.metaView)
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
 
 	mlog.Debug(ctx, "finish to update next targets for collection",
@@ -311,13 +313,6 @@ func (mgr *TargetManager) RemovePartitionFromNextTarget(ctx context.Context, col
 }
 
 func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *CollectionTarget, partitionSet typeutil.UniqueSet) *CollectionTarget {
-	segments := make(map[int64]*datapb.SegmentInfo)
-	for _, segment := range oldTarget.GetAllSegments() {
-		if !partitionSet.Contain(segment.GetPartitionID()) {
-			segments[segment.GetID()] = segment
-		}
-	}
-
 	// clear partition streaming segment
 	channels := make(map[string]*DmChannel)
 	for _, channel := range oldTarget.GetAllDmChannels() {
@@ -327,7 +322,13 @@ func (mgr *TargetManager) removePartitionFromCollectionTarget(oldTarget *Collect
 		return !partitionSet.Contain(partitionID)
 	})
 
-	return NewCollectionTarget(segments, channels, partitions)
+	segIDs := make(map[int64]struct{})
+	for id := range oldTarget.segmentIDs {
+		if seg, ok := oldTarget.metaView.GetSegment(id); ok && !partitionSet.Contain(seg.GetPartitionID()) {
+			segIDs[id] = struct{}{}
+		}
+	}
+	return NewCollectionTarget(segIDs, channels, partitions, oldTarget.metaView)
 }
 
 func (mgr *TargetManager) getCollectionTarget(scope TargetScope, collectionID int64) []*CollectionTarget {
@@ -503,7 +504,7 @@ func (mgr *TargetManager) GetDmChannel(ctx context.Context, collectionID int64, 
 func (mgr *TargetManager) GetSealedSegment(ctx context.Context, collectionID int64, id int64, scope TargetScope) *datapb.SegmentInfo {
 	targets := mgr.getCollectionTarget(scope, collectionID)
 	for _, t := range targets {
-		if s, ok := t.GetAllSegments()[id]; ok {
+		if s, ok := t.GetSegment(id); ok {
 			return s
 		}
 	}
@@ -581,7 +582,7 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 	}
 
 	for _, t := range targets {
-		newTarget := FromPbCollectionTarget(t)
+		newTarget := FromPbCollectionTarget(t, mgr.metaView)
 		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
 		mlog.Info(ctx, "recover current target for collection",
 			mlog.FieldCollectionID(t.GetCollectionID()),
@@ -605,13 +606,17 @@ func (mgr *TargetManager) Recover(ctx context.Context, catalog metastore.QueryCo
 // if segment isn't l0 segment, and exist in current/next target, then it can be moved
 func (mgr *TargetManager) CanSegmentBeMoved(ctx context.Context, collectionID, segmentID int64) bool {
 	current := mgr.current.getCollectionTarget(collectionID)
-	if current != nil && current.segments[segmentID] != nil {
-		return true
+	if current != nil {
+		if _, ok := current.segmentIDs[segmentID]; ok {
+			return true
+		}
 	}
 
 	next := mgr.next.getCollectionTarget(collectionID)
-	if next != nil && next.segments[segmentID] != nil {
-		return true
+	if next != nil {
+		if _, ok := next.segmentIDs[segmentID]; ok {
+			return true
+		}
 	}
 
 	return false

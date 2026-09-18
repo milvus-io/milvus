@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	broker2 "github.com/milvus-io/milvus/internal/datacoord/broker"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -379,10 +380,8 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 	)
 	return &meta{
 		ctx:          ctx,
-		catalog:      catalog,
-		collections:  nil,
+		metaStore:    metacache.NewMetaStore(catalog),
 		segments:     nil,
-		channelCPs:   newChannelCps(),
 		chunkManager: nil,
 		indexMeta: &indexMeta{
 			catalog: catalog,
@@ -531,10 +530,9 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segments:    NewSegmentsInfo(),
+		ctx:       ctx,
+		metaStore: metacache.NewMetaStore(catalog),
+		segments:  NewSegmentsInfo(metacache.NewMetaStore(catalog)),
 		indexMeta: &indexMeta{
 			catalog:          catalog,
 			segmentIndexes:   segIndexes,
@@ -542,7 +540,6 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 			keyLock:          lock.NewKeyLock[UniqueID](),
 		},
-		channelCPs:   nil,
 		chunkManager: nil,
 	}
 
@@ -862,10 +859,9 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	meta := &meta{
-		ctx:         ctx,
-		catalog:     catalog,
-		collections: nil,
-		segments:    NewSegmentsInfo(),
+		ctx:       ctx,
+		metaStore: metacache.NewMetaStore(catalog),
+		segments:  NewSegmentsInfo(metacache.NewMetaStore(catalog)),
 		indexMeta: &indexMeta{
 			catalog:        catalog,
 			segmentIndexes: segIndexes,
@@ -1446,11 +1442,6 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		mock.Anything,
 	).Return(nil).Maybe()
 
-	channelCPs := newChannelCps()
-	channelCPs.checkpoints["dmlChannel"] = &msgpb.MsgPosition{
-		Timestamp: 1000,
-	}
-
 	segments := map[UniqueID]*SegmentInfo{
 		segID: {
 			SegmentInfo: &datapb.SegmentInfo{
@@ -1634,8 +1625,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, &collectionInfo{
+	collStore := metacache.NewMetaStore(nil)
+	collStore.PutCollection(&metacache.CollectionInfo{
 		ID: collID,
 		Schema: &schemapb.CollectionSchema{
 			Name:        "",
@@ -1700,9 +1691,8 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segIndexes.Insert(segID, segIdx0)
 	segIndexes.Insert(segID+1, segIdx1)
 	m := &meta{
-		catalog:      catalog,
-		channelCPs:   channelCPs,
-		segments:     NewSegmentsInfo(),
+		metaStore: metacache.NewMetaStore(catalog),
+		segments:  NewSegmentsInfo(metacache.NewMetaStore(catalog)),
 		snapshotMeta: &snapshotMeta{},
 		indexMeta: &indexMeta{
 			keyLock:          lock.NewKeyLock[UniqueID](),
@@ -1728,8 +1718,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			},
 		},
 
-		collections: collections,
+		metaStore: collStore,
 	}
+	m.metaStore.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+		"dmlChannel": {Timestamp: 1000},
+	})
 
 	m.indexMeta.segmentBuildInfo.Add(&model.SegmentIndex{
 		SegmentID:           segID,
@@ -2076,36 +2069,22 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
+	store := metacache.NewMetaStore(catalog)
 
 	m := &meta{
-		catalog:    catalog,
-		channelCPs: newChannelCps(),
+		metaStore: store,
 	}
 
-	m.channelCPs.checkpoints = map[string]*msgpb.MsgPosition{
+	store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
 		"cluster-id-rootcoord-dm_0_123v0": nil,
 		"cluster-id-rootcoord-dm_1_123v0": nil,
 		"cluster-id-rootcoord-dm_0_124v0": nil,
-	}
+	})
 
 	broker := broker2.NewMockBroker(t)
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Twice()
 
 	gc := newGarbageCollector(m, newMockHandlerWithMeta(m), GcOption{broker: broker})
-
-	t.Run("list channel cp fail", func(t *testing.T) {
-		catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, errors.New("mock error")).Once()
-		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
-	})
-
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Unset()
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(map[string]*msgpb.MsgPosition{
-		"cluster-id-rootcoord-dm_0_123v0":                   nil,
-		"cluster-id-rootcoord-dm_1_123v0":                   nil,
-		"cluster-id-rootcoord-dm_0_invalidedCollectionIDv0": nil,
-		"cluster-id-rootcoord-dm_0_124v0":                   nil,
-	}, nil).Times(3)
 
 	catalog.EXPECT().GcConfirm(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(ctx context.Context, collectionID int64, i2 int64) bool {
@@ -2113,21 +2092,21 @@ func TestGarbageCollector_recycleChannelMeta(t *testing.T) {
 		}).Maybe()
 
 	t.Run("skip drop channel due to collection is available", func(t *testing.T) {
-		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 3, len(m.metaStore.GetChannelCheckpoints()))
 	})
 
 	broker.EXPECT().HasCollection(mock.Anything, mock.Anything).Return(false, nil).Times(4)
 	t.Run("drop channel cp fail", func(t *testing.T) {
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
-		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 3, len(m.channelCPs.checkpoints))
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 3, len(m.metaStore.GetChannelCheckpoints()))
 	})
 
 	t.Run("channel cp gc ok", func(t *testing.T) {
 		catalog.EXPECT().DropChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Twice()
-		gc.recycleChannelCPMeta(context.TODO(), nil)
-		assert.Equal(t, 1, len(m.channelCPs.checkpoints))
+		gc.recycleChannelCPMeta(context.TODO())
+		assert.Equal(t, 1, len(m.metaStore.GetChannelCheckpoints()))
 	})
 }
 

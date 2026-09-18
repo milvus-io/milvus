@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -71,7 +72,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	catalog := datacoord.NewCatalog(NewMetaMemoryKV(), "", "")
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
-	meta, err := newMeta(ctx, catalog, cm, broker)
+	meta, err := newMeta(ctx, cm, metacache.NewMetaStore(catalog), catalog)
 	s.NoError(err)
 	s.meta = meta
 
@@ -88,7 +89,7 @@ func (s *ClusteringCompactionTaskSuite) SetupTest() {
 	}).Maybe()
 
 	s.handler = NewNMockHandler(s.T())
-	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil).Maybe()
+	s.handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&metacache.CollectionInfo{}, nil).Maybe()
 	// TODO @xiaocai2333: use mock cluster
 	cluster := session.NewMockCluster(s.T())
 

@@ -42,7 +42,8 @@ import (
 	datanodeclient "github.com/milvus-io/milvus/internal/distributed/datanode/client"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
-	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
+	"github.com/milvus-io/milvus/internal/metacache"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -107,6 +108,8 @@ type Server struct {
 	kv             kv.MetaKv
 	metaRootPath   string
 	meta           *meta
+	metaStore      metacache.MetaStore
+	catalog        metastore.DataCoordCatalog
 	segmentManager Manager
 	allocator      allocator.Allocator
 	// self host id allocator, to avoid get unique id from rootcoord
@@ -200,6 +203,22 @@ func WithDataNodeCreator(creator session.DataNodeCreatorFunc) Option {
 func WithSegmentManager(manager Manager) Option {
 	return func(svr *Server) {
 		svr.segmentManager = manager
+	}
+}
+
+// WithMetaStore returns an Option to set the shared MetaStore for datacoord
+// to use as the primary segment and collection storage.
+func WithMetaStore(store metacache.MetaStore) Option {
+	return func(svr *Server) {
+		svr.metaStore = store
+	}
+}
+
+// WithCatalog returns an Option to set the DataCoordCatalog for sub-meta
+// initialization (indexMeta, analyzeMeta, importMeta, etc.).
+func WithCatalog(catalog metastore.DataCoordCatalog) Option {
+	return func(svr *Server) {
+		svr.catalog = catalog
 	}
 }
 
@@ -315,7 +334,7 @@ func (s *Server) initDataCoord() error {
 
 	s.globalScheduler = task.NewGlobalTaskScheduler(s.ctx, s.cluster2)
 
-	s.importMeta, err = NewImportMeta(s.ctx, s.meta.catalog, s.allocator, s.meta)
+	s.importMeta, err = NewImportMeta(s.ctx, s.catalog, s.allocator, s.meta)
 	if err != nil {
 		return err
 	}
@@ -636,19 +655,8 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 	}
 	reloadEtcdFn := func() error {
 		var err error
-		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), s.metaRootPath)
-		s.meta, err = newMeta(s.ctx, catalog, chunkManager, s.broker)
-		if err != nil {
-			return err
-		}
-		// Load collection information asynchronously
-		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
-		go func() {
-			_ = retry.Do(s.ctx, func() error {
-				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
-			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
-		}()
-		return nil
+		s.meta, err = newMeta(s.ctx, chunkManager, s.metaStore, s.catalog)
+		return err
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
@@ -1208,7 +1216,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	collInfo := &collectionInfo{
+	collInfo := &metacache.CollectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     partitionIDs,

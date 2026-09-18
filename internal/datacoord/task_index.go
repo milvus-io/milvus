@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	globalTask "github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -697,7 +698,7 @@ func (it *indexBuildTask) prepareJobRequest(ctx context.Context, segment *Segmen
 }
 
 // Helper method to prepare optional fields
-func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionInfo *collectionInfo,
+func (it *indexBuildTask) prepareOptionalFields(ctx context.Context, collectionInfo *metacache.CollectionInfo,
 	segment *SegmentInfo, schema *schemapb.CollectionSchema, indexType string, field *schemapb.FieldSchema,
 ) ([]*indexpb.OptionalFieldInfo, bool) {
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)

@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -128,8 +129,7 @@ func (s *analyzeTaskSuite) SetupSuite() {
 
 	s.mt = &meta{
 		analyzeMeta: analyzeMt,
-		collections: collections,
-		segments:    segments,
+		metaStore:   metacache.NewMetaStore(nil),
 	}
 }
 

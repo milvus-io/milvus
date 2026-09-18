@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/util/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -33,81 +34,88 @@ import (
 
 // CollectionTarget collection target is immutable,
 type CollectionTarget struct {
-	segments           map[int64]*datapb.SegmentInfo
-	channel2Segments   map[string][]*datapb.SegmentInfo
-	partition2Segments map[int64][]*datapb.SegmentInfo
-	dmChannels         map[string]*DmChannel
-	partitions         typeutil.Set[int64] // stores target partitions info
-	version            int64
+	segmentIDs           map[int64]struct{}
+	channel2SegmentIDs   map[string]map[int64]struct{}
+	partition2SegmentIDs map[int64]map[int64]struct{}
+	dmChannels           map[string]*DmChannel
+	partitions           typeutil.Set[int64] // stores target partitions info
+	version              int64
 
 	// record target status, if target has been save before milvus v2.4.19, then the target will lack of segment info.
 	lackSegmentInfo bool
 
 	// cache collection total row count
 	totalRowCount int64
+
+	// metaView resolves segment details on demand from the shared metacache
+	// store instead of keeping full proto copies.
+	metaView metacache.MetaView
 }
 
-func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[string]*DmChannel, partitionIDs []int64) *CollectionTarget {
-	channel2Segments := make(map[string][]*datapb.SegmentInfo, len(dmChannels))
-	partition2Segments := make(map[int64][]*datapb.SegmentInfo, len(partitionIDs))
+// NewCollectionTarget builds a CollectionTarget backed by a shared
+// metacache.MetaView: it only keeps segment IDs plus their channel/partition
+// grouping, resolving full segment protos from the store on demand.
+func NewCollectionTarget(segIDs map[int64]struct{}, dmChannels map[string]*DmChannel, partitionIDs []int64, metaView metacache.MetaView) *CollectionTarget {
+	channel2SegmentIDs := make(map[string]map[int64]struct{}, len(dmChannels))
+	partition2SegmentIDs := make(map[int64]map[int64]struct{}, len(partitionIDs))
 	totalRowCount := int64(0)
-	for _, segment := range segments {
-		channel := segment.GetInsertChannel()
-		if _, ok := channel2Segments[channel]; !ok {
-			channel2Segments[channel] = make([]*datapb.SegmentInfo, 0)
+	lackSegmentInfo := false
+
+	segs := metaView.GetSegmentsByIDs(lo.Keys(segIDs))
+	for id := range segIDs {
+		seg, ok := segs[id]
+		if !ok {
+			// segment ID is present in the target's ID set but could not be
+			// resolved from the shared store; mark the target as lacking
+			// segment info so Ready() doesn't report it as complete.
+			lackSegmentInfo = true
+			continue
 		}
-		channel2Segments[channel] = append(channel2Segments[channel], segment)
-		partitionID := segment.GetPartitionID()
-		if _, ok := partition2Segments[partitionID]; !ok {
-			partition2Segments[partitionID] = make([]*datapb.SegmentInfo, 0)
+
+		channel := seg.GetInsertChannel()
+		if channel2SegmentIDs[channel] == nil {
+			channel2SegmentIDs[channel] = make(map[int64]struct{})
 		}
-		partition2Segments[partitionID] = append(partition2Segments[partitionID], segment)
-		totalRowCount += segment.GetNumOfRows()
+		channel2SegmentIDs[channel][id] = struct{}{}
+
+		partitionID := seg.GetPartitionID()
+		if partition2SegmentIDs[partitionID] == nil {
+			partition2SegmentIDs[partitionID] = make(map[int64]struct{})
+		}
+		partition2SegmentIDs[partitionID][id] = struct{}{}
+
+		totalRowCount += seg.GetNumOfRows()
 	}
+
+	if lackSegmentInfo {
+		mlog.Info(context.TODO(), "target has lack of segment info")
+	}
+
 	return &CollectionTarget{
-		segments:           segments,
-		channel2Segments:   channel2Segments,
-		partition2Segments: partition2Segments,
-		dmChannels:         dmChannels,
-		partitions:         typeutil.NewSet(partitionIDs...),
-		version:            time.Now().UnixNano(),
-		totalRowCount:      totalRowCount,
+		segmentIDs:           segIDs,
+		channel2SegmentIDs:   channel2SegmentIDs,
+		partition2SegmentIDs: partition2SegmentIDs,
+		dmChannels:           dmChannels,
+		partitions:           typeutil.NewSet(partitionIDs...),
+		version:              time.Now().UnixNano(),
+		lackSegmentInfo:      lackSegmentInfo,
+		totalRowCount:        totalRowCount,
+		metaView:             metaView,
 	}
 }
 
-func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget {
-	segments := make(map[int64]*datapb.SegmentInfo)
+// FromPbCollectionTarget rebuilds a CollectionTarget from its persisted
+// proto form, resolving segment details from the shared metacache.MetaView
+// rather than reconstructing full segment protos from the saved target.
+func FromPbCollectionTarget(target *querypb.CollectionTarget, metaView metacache.MetaView) *CollectionTarget {
+	segmentIDs := make(map[int64]struct{})
 	dmChannels := make(map[string]*DmChannel)
-	channel2Segments := make(map[string][]*datapb.SegmentInfo)
-	partition2Segments := make(map[int64][]*datapb.SegmentInfo)
 	var partitions []int64
 
-	lackSegmentInfo := false
-	totalRowCount := int64(0)
 	for _, t := range target.GetChannelTargets() {
-		if _, ok := channel2Segments[t.GetChannelName()]; !ok {
-			channel2Segments[t.GetChannelName()] = make([]*datapb.SegmentInfo, 0)
-		}
 		for _, partition := range t.GetPartitionTargets() {
-			if _, ok := partition2Segments[partition.GetPartitionID()]; !ok {
-				partition2Segments[partition.GetPartitionID()] = make([]*datapb.SegmentInfo, 0, len(partition.GetSegments()))
-			}
 			for _, segment := range partition.GetSegments() {
-				if segment.GetNumOfRows() <= 0 {
-					lackSegmentInfo = true
-				}
-				info := &datapb.SegmentInfo{
-					ID:            segment.GetID(),
-					Level:         segment.GetLevel(),
-					CollectionID:  target.GetCollectionID(),
-					PartitionID:   partition.GetPartitionID(),
-					InsertChannel: t.GetChannelName(),
-					NumOfRows:     segment.GetNumOfRows(),
-				}
-				segments[segment.GetID()] = info
-				channel2Segments[t.GetChannelName()] = append(channel2Segments[t.GetChannelName()], info)
-				partition2Segments[partition.GetPartitionID()] = append(partition2Segments[partition.GetPartitionID()], info)
-				totalRowCount += segment.GetNumOfRows()
+				segmentIDs[segment.GetID()] = struct{}{}
 			}
 			partitions = append(partitions, partition.GetPartitionID())
 		}
@@ -117,27 +125,27 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget 
 				ChannelName:         t.GetChannelName(),
 				SeekPosition:        t.GetSeekPosition(),
 				UnflushedSegmentIds: t.GetGrowingSegmentIDs(),
-				FlushedSegmentIds:   lo.Keys(segments),
+				FlushedSegmentIds:   lo.Keys(segmentIDs),
 				DroppedSegmentIds:   t.GetDroppedSegmentIDs(),
 				DeleteCheckpoint:    t.GetDeleteCheckpoint(),
 			},
 		}
 	}
 
-	if lackSegmentInfo {
-		mlog.Info(context.TODO(), "target has lack of segment info", mlog.FieldCollectionID(target.GetCollectionID()))
-	}
+	ct := NewCollectionTarget(segmentIDs, dmChannels, partitions, metaView)
+	// preserve the persisted version instead of the freshly generated one.
+	ct.version = target.GetVersion()
+	return ct
+}
 
-	return &CollectionTarget{
-		segments:           segments,
-		channel2Segments:   channel2Segments,
-		partition2Segments: partition2Segments,
-		dmChannels:         dmChannels,
-		partitions:         typeutil.NewSet(partitions...),
-		version:            target.GetVersion(),
-		lackSegmentInfo:    lackSegmentInfo,
-		totalRowCount:      totalRowCount,
+// resolveSegments resolves a set of segment IDs into their full protos from
+// the shared metacache store.
+func (p *CollectionTarget) resolveSegments(ids map[int64]struct{}) []*datapb.SegmentInfo {
+	if len(ids) == 0 {
+		return nil
 	}
+	segs := p.metaView.GetSegmentsByIDs(lo.Keys(ids))
+	return lo.Values(segs)
 }
 
 func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
@@ -145,36 +153,26 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 		return &querypb.CollectionTarget{}
 	}
 
-	channelSegments := make(map[string][]*datapb.SegmentInfo)
-	for _, s := range p.segments {
-		if _, ok := channelSegments[s.GetInsertChannel()]; !ok {
-			channelSegments[s.GetInsertChannel()] = make([]*datapb.SegmentInfo, 0)
-		}
-		channelSegments[s.GetInsertChannel()] = append(channelSegments[s.GetInsertChannel()], s)
-	}
-
 	collectionID := int64(-1)
 	channelTargets := make(map[string]*querypb.ChannelTarget, 0)
 	for _, channel := range p.dmChannels {
 		collectionID = channel.GetCollectionID()
 		partitionTargets := make(map[int64]*querypb.PartitionTarget)
-		if infos, ok := channelSegments[channel.GetChannelName()]; ok {
-			for _, info := range infos {
-				partitionTarget, ok := partitionTargets[info.GetPartitionID()]
-				if !ok {
-					partitionTarget = &querypb.PartitionTarget{
-						PartitionID: info.PartitionID,
-						Segments:    make([]*querypb.SegmentTarget, 0),
-					}
-					partitionTargets[info.GetPartitionID()] = partitionTarget
+		for _, info := range p.resolveSegments(p.channel2SegmentIDs[channel.GetChannelName()]) {
+			partitionTarget, ok := partitionTargets[info.GetPartitionID()]
+			if !ok {
+				partitionTarget = &querypb.PartitionTarget{
+					PartitionID: info.PartitionID,
+					Segments:    make([]*querypb.SegmentTarget, 0),
 				}
-
-				partitionTarget.Segments = append(partitionTarget.Segments, &querypb.SegmentTarget{
-					ID:        info.GetID(),
-					Level:     info.GetLevel(),
-					NumOfRows: info.GetNumOfRows(),
-				})
+				partitionTargets[info.GetPartitionID()] = partitionTarget
 			}
+
+			partitionTarget.Segments = append(partitionTarget.Segments, &querypb.SegmentTarget{
+				ID:        info.GetID(),
+				Level:     info.GetLevel(),
+				NumOfRows: info.GetNumOfRows(),
+			})
 		}
 
 		channelTargets[channel.GetChannelName()] = &querypb.ChannelTarget{
@@ -195,15 +193,24 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 }
 
 func (p *CollectionTarget) GetAllSegments() map[int64]*datapb.SegmentInfo {
-	return p.segments
+	return p.metaView.GetSegmentsByIDs(lo.Keys(p.segmentIDs))
+}
+
+// GetSegment resolves a single segment by ID from the shared metacache
+// store, without materializing the full segment map.
+func (p *CollectionTarget) GetSegment(id int64) (*datapb.SegmentInfo, bool) {
+	if _, ok := p.segmentIDs[id]; !ok {
+		return nil, false
+	}
+	return p.metaView.GetSegment(id)
 }
 
 func (p *CollectionTarget) GetChannelSegments(channel string) []*datapb.SegmentInfo {
-	return p.channel2Segments[channel]
+	return p.resolveSegments(p.channel2SegmentIDs[channel])
 }
 
 func (p *CollectionTarget) GetPartitionSegments(partitionID int64) []*datapb.SegmentInfo {
-	return p.partition2Segments[partitionID]
+	return p.resolveSegments(p.partition2SegmentIDs[partitionID])
 }
 
 func (p *CollectionTarget) GetTargetVersion() int64 {
@@ -215,7 +222,7 @@ func (p *CollectionTarget) GetAllDmChannels() map[string]*DmChannel {
 }
 
 func (p *CollectionTarget) GetAllSegmentIDs() []int64 {
-	return lo.Keys(p.segments)
+	return lo.Keys(p.segmentIDs)
 }
 
 func (p *CollectionTarget) GetAllDmChannelNames() []string {
@@ -223,7 +230,7 @@ func (p *CollectionTarget) GetAllDmChannelNames() []string {
 }
 
 func (p *CollectionTarget) IsEmpty() bool {
-	return len(p.dmChannels)+len(p.segments) == 0
+	return len(p.dmChannels)+len(p.segmentIDs) == 0
 }
 
 // if target is ready, it should have all segment info
