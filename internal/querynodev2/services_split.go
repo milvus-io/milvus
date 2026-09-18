@@ -246,9 +246,15 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 	// With one splitting source the choice is forced -- every Creating target is
 	// fronted by it -- and the rebuild is exact. With several (a rehash, where
 	// every target draws from every source) it is not derivable here, and
-	// guessing would double-count rows. Refusing leaves those targets fronted by
-	// nobody until they are adopted, which reads as a channel not yet serving
-	// rather than as wrong results.
+	// guessing would double-count rows. Skipping the respawn instead (I-2;
+	// reachable only with proxy.shardSplit.maxConcurrentTasks > 1, default 1)
+	// does not refuse reads and is not visible as the vchannel "not serving": the
+	// source is up and answers every read on its own, from its own (pre-fence)
+	// view alone, exactly like frontingChildren() with an empty snapshot. What is
+	// missing is the unfronted target's rows written after the fence -- silently,
+	// not as an error -- until the target is adopted and the proxy starts routing
+	// its key range there directly. Accepted as a known gap (see doc §11); not
+	// fixed this round.
 	splittingSources := 0
 	for i := range vchannels {
 		if i < len(shardInfos) && shardInfos[i].GetState() == schemapb.ShardState_ShardSplitting {
