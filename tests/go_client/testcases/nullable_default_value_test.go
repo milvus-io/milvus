@@ -48,6 +48,16 @@ func GetNullPercents() []int {
 	return []int{0, 30}
 }
 
+func collectExpectedPKs(nb int, predicate func(int) bool) []int64 {
+	expected := make([]int64, 0, nb)
+	for i := 0; i < nb; i++ {
+		if predicate(i) {
+			expected = append(expected, int64(i))
+		}
+	}
+	return expected
+}
+
 type NullableVectorTestData struct {
 	ValidData       []bool
 	ValidCount      int
@@ -1999,10 +2009,120 @@ func TestNullableVectorWithScalarFilter(t *testing.T) {
 					// Query with scalar filter: tag is not null and int64 < 50
 					// int64 < 50 => 50 rows (pk 0-49)
 					// tag is not null => even rows only (pk 0, 2, 4, ..., 48) => 25 rows
-					queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).WithFilter("tag is not null and int64 < 50").WithOutputFields("vector", "tag"))
+					queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+						WithFilter("tag is not null and int64 < 50").
+						WithOutputFields(common.DefaultInt64FieldName, "vector", "tag"))
 					common.CheckErr(t, err, true)
 					require.EqualValues(t, 25, queryRes.ResultCount, "query should return 25 rows with tag not null and int64 < 50")
 					VerifyNullableVectorData(t, vt, queryRes, testData.PkToVecIdx, testData.OriginalVectors, "Query with tag filter")
+
+					mixedQueryCases := []struct {
+						name    string
+						filter  string
+						predict func(int) bool
+					}{
+						{
+							name:   "vector-null-and-tag-null",
+							filter: "vector is null and tag is null and int64 < 50",
+							predict: func(i int) bool {
+								return !testData.ValidData[i] && !tagValidData[i] && i < 50
+							},
+						},
+						{
+							name:   "vector-valid-and-tag-valid-and-int64-range",
+							filter: "vector is not null and tag is not null and 10 <= int64 < 50",
+							predict: func(i int) bool {
+								return testData.ValidData[i] && tagValidData[i] && i >= 10 && i < 50
+							},
+						},
+						{
+							name:   "vector-null-or-tag-null",
+							filter: "(vector is null and int64 < 50) or (tag is null and int64 < 50)",
+							predict: func(i int) bool {
+								return (i < 50 && !testData.ValidData[i]) || (i < 50 && !tagValidData[i])
+							},
+						},
+						{
+							name:   "empty-intersection",
+							filter: "vector is not null and tag is not null and int64 < 0",
+							predict: func(i int) bool {
+								return false
+							},
+						},
+					}
+
+					for _, tc := range mixedQueryCases {
+						t.Run(tc.name, func(t *testing.T) {
+							queryRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+								WithFilter(tc.filter).
+								WithOutputFields(common.DefaultInt64FieldName, "vector", "tag").
+								WithConsistencyLevel(entity.ClStrong))
+							common.CheckErr(t, err, true)
+
+							expectedPKs := collectExpectedPKs(nb, tc.predict)
+							require.EqualValues(t, len(expectedPKs), queryRes.ResultCount)
+							require.ElementsMatch(t, expectedPKs, queryRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data())
+							VerifyNullableVectorData(t, vt, queryRes, testData.PkToVecIdx, testData.OriginalVectors, "Query with mixed nullable vector filter")
+						})
+					}
+
+					searchCases := []struct {
+						name    string
+						filter  string
+						predict func(int) bool
+					}{
+						{
+							name:   "vector-valid-and-tag-valid-and-int64-range",
+							filter: "vector is not null and tag is not null and 10 <= int64 < 50",
+							predict: func(i int) bool {
+								return testData.ValidData[i] && tagValidData[i] && i >= 10 && i < 50
+							},
+						},
+						{
+							name:   "empty-intersection",
+							filter: "vector is not null and tag is not null and int64 < 0",
+							predict: func(i int) bool {
+								return false
+							},
+						},
+					}
+
+					for _, tc := range searchCases {
+						t.Run("search_"+tc.name, func(t *testing.T) {
+							searchRes, err := mc.Search(ctx, client.NewSearchOption(collName, nb, []entity.Vector{testData.SearchVec}).
+								WithANNSField("vector").
+								WithFilter(tc.filter).
+								WithOutputFields("vector", "tag").
+								WithConsistencyLevel(entity.ClStrong))
+							common.CheckErr(t, err, true)
+							require.Len(t, searchRes, 1)
+
+							expectedPKs := collectExpectedPKs(nb, tc.predict)
+							require.EqualValues(t, len(expectedPKs), searchRes[0].ResultCount)
+							if len(expectedPKs) == 0 {
+								if searchRes[0].IDs != nil {
+									require.Empty(t, searchRes[0].IDs.(*column.ColumnInt64).Data())
+								}
+							} else {
+								searchIDs := searchRes[0].IDs.(*column.ColumnInt64).Data()
+								require.ElementsMatch(t, expectedPKs, searchIDs)
+
+								vecCol := searchRes[0].GetColumn("vector")
+								require.NotNil(t, vecCol)
+								tagCol := searchRes[0].GetColumn("tag")
+								require.NotNil(t, tagCol)
+								for i, pk := range searchIDs {
+									isNull, err := vecCol.IsNull(i)
+									require.NoError(t, err)
+									require.False(t, isNull, "search vector output should not be null")
+
+									tagIsNull, err := tagCol.IsNull(i)
+									require.NoError(t, err)
+									require.Equal(t, !tagValidData[int(pk)], tagIsNull, "search tag nullness mismatch for pk %d", pk)
+								}
+							}
+						})
+					}
 				}
 
 				// clean up
@@ -2010,6 +2130,133 @@ func TestNullableVectorWithScalarFilter(t *testing.T) {
 				common.CheckErr(t, err, true)
 			})
 		}
+	}
+}
+
+func TestNullableVectorIsNullFilter(t *testing.T) {
+	t.Parallel()
+
+	vectorTypes := GetVectorTypes()
+
+	for _, vt := range vectorTypes {
+		t.Run(vt.Name, func(t *testing.T) {
+			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+
+			collName := common.GenRandomString("nullable_vec_null_filter", 5)
+			pkField := entity.NewField().WithName(common.DefaultInt64FieldName).WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)
+			vecField := entity.NewField().WithName("vector").WithDataType(vt.FieldType).WithNullable(true)
+			if vt.FieldType != entity.FieldTypeSparseVector {
+				vecField = vecField.WithDim(common.DefaultDim)
+			}
+			schema := entity.NewSchema().WithName(collName).WithField(pkField).WithField(vecField)
+
+			err := mc.CreateCollection(ctx, client.NewCreateCollectionOption(collName, schema).WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			t.Cleanup(func() {
+				_ = mc.DropCollection(context.Background(), client.NewDropCollectionOption(collName))
+			})
+
+			nb := 100
+			testData := GenerateNullableVectorTestData(t, vt, nb, 30, "vector")
+			require.Greater(t, testData.ValidCount, 0)
+			require.Less(t, testData.ValidCount, nb)
+
+			pkData := make([]int64, nb)
+			for i := range nb {
+				pkData[i] = int64(i)
+			}
+			pkColumn := column.NewColumnInt64(common.DefaultInt64FieldName, pkData)
+
+			insertRes, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(collName, pkColumn, testData.VecColumn))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, nb, insertRes.InsertCount)
+
+			flushTask, err := mc.Flush(ctx, client.NewFlushOption(collName))
+			common.CheckErr(t, err, true)
+			err = flushTask.Await(ctx)
+			common.CheckErr(t, err, true)
+
+			vecIndex := CreateNullableVectorIndex(vt)
+			indexTask, err := mc.CreateIndex(ctx, client.NewCreateIndexOption(collName, "vector", vecIndex))
+			common.CheckErr(t, err, true)
+			err = indexTask.Await(ctx)
+			common.CheckErr(t, err, true)
+
+			loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(collName))
+			common.CheckErr(t, err, true)
+			err = loadTask.Await(ctx)
+			common.CheckErr(t, err, true)
+
+			validPKs := make([]int64, 0, testData.ValidCount)
+			nullPKs := make([]int64, 0, nb-testData.ValidCount)
+			validPKSet := make(map[int64]struct{}, testData.ValidCount)
+			nullPKSet := make(map[int64]struct{}, nb-testData.ValidCount)
+			for i, valid := range testData.ValidData {
+				pk := int64(i)
+				if valid {
+					validPKs = append(validPKs, pk)
+					validPKSet[pk] = struct{}{}
+					continue
+				}
+				nullPKs = append(nullPKs, pk)
+				nullPKSet[pk] = struct{}{}
+			}
+
+			queryNullRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithFilter("vector is null").
+				WithOutputFields(common.DefaultInt64FieldName, "vector").
+				WithLimit(nb).
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, len(nullPKs), queryNullRes.ResultCount)
+			queryNullIDs := queryNullRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data()
+			require.ElementsMatch(t, nullPKs, queryNullIDs)
+			VerifyNullableVectorData(t, vt, queryNullRes, testData.PkToVecIdx, testData.OriginalVectors, "Query with vector is null")
+
+			queryNotNullRes, err := mc.Query(ctx, client.NewQueryOption(collName).
+				WithFilter("vector is not null").
+				WithOutputFields(common.DefaultInt64FieldName, "vector").
+				WithLimit(nb).
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.EqualValues(t, len(validPKs), queryNotNullRes.ResultCount)
+			queryNotNullIDs := queryNotNullRes.GetColumn(common.DefaultInt64FieldName).(*column.ColumnInt64).Data()
+			require.ElementsMatch(t, validPKs, queryNotNullIDs)
+			VerifyNullableVectorData(t, vt, queryNotNullRes, testData.PkToVecIdx, testData.OriginalVectors, "Query with vector is not null")
+
+			searchNullRes, err := mc.Search(ctx, client.NewSearchOption(collName, 10, []entity.Vector{testData.SearchVec}).
+				WithANNSField("vector").
+				WithFilter("vector is null").
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.Len(t, searchNullRes, 1)
+			require.EqualValues(t, 0, searchNullRes[0].ResultCount)
+
+			searchNotNullRes, err := mc.Search(ctx, client.NewSearchOption(collName, 10, []entity.Vector{testData.SearchVec}).
+				WithANNSField("vector").
+				WithFilter("vector is not null").
+				WithOutputFields("vector").
+				WithConsistencyLevel(entity.ClStrong))
+			common.CheckErr(t, err, true)
+			require.Len(t, searchNotNullRes, 1)
+			require.Greater(t, searchNotNullRes[0].ResultCount, 0)
+			searchIDs := searchNotNullRes[0].IDs.(*column.ColumnInt64).Data()
+			for _, id := range searchIDs {
+				_, valid := validPKSet[id]
+				require.True(t, valid, "search should only return non-null vector rows, got pk %d", id)
+				_, isNull := nullPKSet[id]
+				require.False(t, isNull, "search should not return null vector row pk %d", id)
+			}
+
+			vecCol := searchNotNullRes[0].GetColumn("vector")
+			require.NotNil(t, vecCol)
+			for i := 0; i < searchNotNullRes[0].ResultCount; i++ {
+				isNull, err := vecCol.IsNull(i)
+				require.NoError(t, err)
+				require.False(t, isNull, "search vector output should not be null")
+			}
+		})
 	}
 }
 
