@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -1952,4 +1953,31 @@ func TestApplyBoundFieldIndexesInline(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorContains(t, err, "failed to apply bound field index")
 	})
+}
+
+// AlterCollectionSchema can add a plain TEXT field too; it is refused during a
+// shard split exactly as AddCollectionField refuses it.
+func TestDDLCallbacksAlterCollectionSchemaAddTextFieldDuringShardSplit(t *testing.T) {
+	core := initStreamingSystemAndCore(t)
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().CommonCfg.UseLoonFFI.Key) })
+	paramtable.Get().Save(paramtable.Get().CommonCfg.UseLoonFFI.Key, "true")
+
+	ctx := context.Background()
+	dbName := "testDB" + funcutil.RandomString(10)
+	collectionName := "testCollection" + funcutil.RandomString(10)
+	createCollectionForTest(t, ctx, core, dbName, collectionName)
+	text := &schemapb.FieldSchema{Name: "doc", DataType: schemapb.DataType_Text, Nullable: true}
+
+	splitting := mockey.Mock(collectionHasShardSplitInFlight).Return(true).Build()
+	resp, err := core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, text, false))
+	splitting.UnPatch()
+	addErr := merr.CheckRPCCall(resp.GetAlterStatus(), err)
+	require.ErrorIs(t, addErr, merr.ErrServiceUnavailable)
+	require.ErrorContains(t, addErr, "shard split")
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 0)
+
+	// Once the split is over the same request succeeds.
+	resp, err = core.AlterCollectionSchema(ctx, buildAlterSchemaAddFieldSchemaReq(dbName, collectionName, text, false))
+	require.NoError(t, merr.CheckRPCCall(resp.GetAlterStatus(), err))
+	assertSchemaVersion(t, ctx, core, dbName, collectionName, 1)
 }

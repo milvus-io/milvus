@@ -2,6 +2,7 @@ package message
 
 import (
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -15,10 +16,11 @@ func newBroadcastHeaderFromProto(proto *messagespb.BroadcastHeader) *BroadcastHe
 		rks.Insert(NewResourceKeyFromProto(key))
 	}
 	return &BroadcastHeader{
-		BroadcastID:  proto.GetBroadcastId(),
-		VChannels:    proto.GetVchannels(),
-		ResourceKeys: rks,
-		AckSyncUp:    proto.GetAckSyncUp(),
+		BroadcastID:          proto.GetBroadcastId(),
+		VChannels:            proto.GetVchannels(),
+		ResourceKeys:         rks,
+		AckSyncUp:            proto.GetAckSyncUp(),
+		AppendFirstVChannels: proto.GetAppendFirstVchannels(),
 	}
 }
 
@@ -27,6 +29,10 @@ type BroadcastHeader struct {
 	VChannels    []string
 	ResourceKeys typeutil.Set[ResourceKey]
 	AckSyncUp    bool
+	// AppendFirstVChannels names the vchannel the broadcaster appends and
+	// persists before any other replica of the broadcast. At most one: see
+	// OptBuildBroadcastAppendFirst.
+	AppendFirstVChannels []string
 }
 
 // BroadcastResult is the result of broadcast operation.
@@ -78,4 +84,7 @@ type AppendResult struct {
 	MessageID              MessageID
 	LastConfirmedMessageID MessageID
 	TimeTick               uint64
+	// Extra is the extra append response the WAL attached to the replica (for
+	// example SplitShardExtraResponse), nil for a message type that has none.
+	Extra *anypb.Any
 }

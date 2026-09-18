@@ -1732,6 +1732,10 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 	t.result.NumPartitions = result.NumPartitions
 	t.result.UpdateTimestamp = result.UpdateTimestamp
 	t.result.UpdateTimestampStr = strconv.FormatUint(result.UpdateTimestamp, 10)
+	// Shard routing facts, reported to SDK users as-is (design §3.2).
+	t.result.ShardInfos = result.GetShardInfos()
+	t.result.RoutingModulus = result.GetRoutingModulus()
+	t.result.ShardBy = result.GetShardBy()
 
 	return nil
 }
