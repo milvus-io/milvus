@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
@@ -19,9 +20,10 @@ func NewScheduler(policyName string) Scheduler {
 		fallthrough
 	case schedulePolicyNameFIFO:
 		return newScheduler(
-			newFIFOPolicy(),
+			newRequeryPriorityPolicy(newFIFOPolicy()),
 		)
 	case schedulePolicyNameUserTaskPolling:
+		mlog.Info(context.TODO(), "requery priority lane disabled under user-task-polling")
 		return newScheduler(
 			newUserTaskPollingPolicy(),
 		)
@@ -95,12 +97,21 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// originalRequestCount is the number of pre-merge scheduler tasks represented
+	// by this queue entry. It starts at 1 and is accumulated only after a
+	// successful MergeWith.
+	originalRequestCount int
+	// requery is the immutable queue-class stamp set once during admission.
+	// It means the task was assigned to the dedicated priority lane, not merely
+	// that its request carries the requery label.
+	requery bool
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
 	return &queuedTask{
-		Task:        task,
-		enqueueTime: enqueueTime,
+		Task:                 task,
+		enqueueTime:          enqueueTime,
+		originalRequestCount: 1,
 	}
 }
 

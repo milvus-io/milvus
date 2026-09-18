@@ -318,7 +318,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "read_task_ready_len",
-			Help:      "number of ready read tasks in readyQueue",
+			Help:      "number of read tasks waiting in the scheduler across regular and requery queues",
 		}, []string{
 			nodeIDLabelName,
 		})
@@ -328,9 +328,30 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "read_task_ready_nq",
-			Help:      "total NQ of ready read tasks in scheduler queue",
+			Help:      "total NQ of read tasks waiting in the scheduler across regular and requery queues",
 		}, []string{
 			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskRequeryReadyLen = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_requery_ready_len",
+			Help:      "number of requery read tasks waiting in the scheduler, including a task staged for execution handoff",
+		}, []string{
+			nodeIDLabelName,
+		})
+
+	QueryNodeReadTaskRejectCnt = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_reject_total",
+			Help:      "number of read tasks rejected at scheduler admission because the regular or requery queue is full",
+		}, []string{
+			nodeIDLabelName,
+			laneLabelName,
 		})
 
 	QueryNodeReadTaskQueueDuration = prometheus.NewHistogramVec(
@@ -339,6 +360,21 @@ var (
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "read_task_queue_duration",
 			Help:      "duration in milliseconds that read tasks stay in scheduler policy queue",
+			Buckets:   subMsBuckets,
+		}, []string{
+			nodeIDLabelName,
+			outcomeLabelName,
+		})
+
+	// QueryNodeReadTaskRequeryQueueDuration is the requery-only subset of
+	// QueryNodeReadTaskQueueDuration, kept as a separate metric so the existing
+	// aggregate histogram preserves its label schema.
+	QueryNodeReadTaskRequeryQueueDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "read_task_requery_queue_duration",
+			Help:      "duration in milliseconds that requery read tasks stay in the scheduler requery lane",
 			Buckets:   subMsBuckets,
 		}, []string{
 			nodeIDLabelName,
@@ -1022,6 +1058,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeLoadSegmentLatency)
 	registry.MustRegister(QueryNodeReadTaskReadyLen)
 	registry.MustRegister(QueryNodeReadTaskReadyNQ)
+	registry.MustRegister(QueryNodeReadTaskRequeryReadyLen)
+	registry.MustRegister(QueryNodeReadTaskRejectCnt)
+	registry.MustRegister(QueryNodeReadTaskRequeryQueueDuration)
 	registry.MustRegister(QueryNodeReadTaskQueueDuration)
 	registry.MustRegister(QueryNodeReadTaskExecuteDuration)
 	registry.MustRegister(QueryNodeReadTaskConcurrency)
