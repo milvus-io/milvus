@@ -131,6 +131,11 @@ func (m *shardSplitManager) allocateTargets(task *datapb.SplitShardTask) (*datap
 		logger.RatedWarn(m.ctx, 30, "describe the collection to allocate split targets failed, retrying", mlog.Err(err))
 		return nil, false
 	}
+	if reason := splitRefusalReason(coll.schema); reason != "" {
+		// Changed since planning; nothing of the task is in any WAL yet.
+		m.abortTask(task, reason)
+		return nil, false
+	}
 	vchannels, err := m.vchannelAllocator.AllocVirtualChannels(m.ctx, balancer.AllocVChannelParam{
 		CollectionID:      task.GetCollectionId(),
 		Num:               len(task.GetTargets()),
