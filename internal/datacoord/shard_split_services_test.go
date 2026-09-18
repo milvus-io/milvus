@@ -238,6 +238,41 @@ func TestCommitShardSplitLeavesLaterStatesAlone(t *testing.T) {
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, task.GetState())
 }
 
+func TestCommitShardSplitRollsAnAbortedTaskForward(t *testing.T) {
+	// An abort is refused once a fence may be in the WAL, so an Aborted record
+	// meeting its fence's commit is a bug. The fence has landed all the same:
+	// the source is closed to writes, and only the split carries its rows on.
+	// The task rolls forward into the window rather than staying Aborted.
+	svr := newShardSplitTestServer(t)
+	require.NoError(t, svr.shardSplitTasks.upsert(context.Background(), svr.meta.catalog, &datapb.SplitShardTask{
+		TaskId:       200,
+		CollectionId: 100,
+		State:        datapb.SplitShardTaskState_SplitShardTaskAborted,
+		EndTime:      1234,
+		FailReason:   "the write switch was refused",
+		Sources:      []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}},
+		Targets: []*datapb.SplitShardTaskTarget{
+			{Vchannel: splitTestTarget0, Buckets: []uint64{0}},
+			{Vchannel: splitTestTarget1, Buckets: []uint64{1}},
+		},
+	}))
+
+	status, err := svr.CommitShardSplit(context.Background(), splitTestCommitRequest())
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(status))
+
+	task, _ := svr.shardSplitTasks.get(200)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, task.GetState())
+	assert.True(t, task.GetFenced())
+	assert.Equal(t, uint64(2000), task.GetSources()[0].GetSwitchTimeTick())
+	assert.Zero(t, task.GetEndTime())
+	assert.Empty(t, task.GetFailReason())
+	persisted, err := svr.meta.catalog.ListSplitShardTask(context.Background())
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, persisted[0].GetState())
+}
+
 func TestCommitShardSplitSeedsOnlyUnseededTargets(t *testing.T) {
 	// A target that already reported a checkpoint has been consuming for a
 	// while; overwriting it with the genesis position would rewind every child
