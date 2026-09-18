@@ -195,41 +195,12 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 }
 
 // frozenForShardSplit reports whether balance of the collection is frozen for a
-// shard split. Both the normal and the stopping balance queue are built through
-// readyToCheck, so the freeze holds for both.
-//
-// Moving a split source rebuilds its delegator on another node without the
-// in-process children it fronts. That is wrong for as long as reads can route
-// to the source, which is longer than the split window:
-//
-//   - while a shard is a fenced source (ShardSplitting), the source fronts its
-//     not-yet-adopted children;
-//   - after adoption the source is delisted and the freeze on Splitting alone
-//     lifts, but the current target keeps listing the source until it flips to
-//     a pull taken after the adoption, and GetShardLeaders keeps routing the
-//     source's key range to it. So balance also stays frozen while the current
-//     target lists a vchannel the collection no longer lists.
-//
-// Without a read of the shard states neither can be ruled out, so an unknown
-// state freezes too. The cache falls back to its last read on a failed refresh,
-// so that only happens before the first read of a collection succeeds, when a
-// channel move could not describe the collection to watch it anyway.
+// shard split (meta.CheckShardSplitMovable). Both the normal and the stopping
+// balance queue are built through readyToCheck, so the freeze holds for both.
 func (b *BalanceChecker) frozenForShardSplit(ctx context.Context, collectionID int64) bool {
-	if b.splitState == nil {
-		return false
-	}
-	states, ok := b.splitState.ChannelStates(ctx, collectionID)
-	if !ok {
-		mlog.RatedInfo(ctx, rate.Limit(0.1), "freeze balance: the collection's shard states are unknown",
-			mlog.FieldCollectionID(collectionID))
-		return true
-	}
-	if states.Splitting() {
-		return true
-	}
-	if retired := states.Delisted(b.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)); len(retired) > 0 {
-		mlog.RatedInfo(ctx, rate.Limit(0.1), "freeze balance: the current target still routes reads to a retired shard split source",
-			mlog.FieldCollectionID(collectionID), mlog.Strings("retiredSources", retired))
+	if err := meta.CheckShardSplitMovable(ctx, b.splitState, b.targetMgr, collectionID); err != nil {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "freeze balance for a shard split",
+			mlog.FieldCollectionID(collectionID), mlog.Err(err))
 		return true
 	}
 	return false
