@@ -303,8 +303,8 @@ func TestAddPreparing_Success(t *testing.T) {
 	require.Len(t, catalog.savedStates(), 1)
 	assert.Equal(t, viewpb.QueryViewState_QueryViewStatePreparing, catalog.savedStates()[0])
 
-	// Should sync to SN + QN1 + QN2 = 3 SyncViews, in one SyncViews call.
-	assert.Equal(t, 1, s.numSyncCalls())
+	// Should sync to SN + QN1 + QN2 = 3 SyncViews, one call per node.
+	assert.Equal(t, 3, s.numSyncCalls())
 	assert.Equal(t, 3, s.syncViewCount())
 
 	// QueryVersion should be auto-assigned to 1.
@@ -371,8 +371,8 @@ func TestAddPreparing_PreemptsPreparing(t *testing.T) {
 		viewpb.QueryViewState_QueryViewStatePreparing,
 	}, states)
 
-	// Should have synced in ONE SyncViews call.
-	assert.Equal(t, 1, s.numSyncCalls())
+	// Should have synced in one SyncViews call per node.
+	assert.Equal(t, 2, s.numSyncCalls())
 
 	// v1 should be in Dropping, v2 should be in Preparing.
 	mgr.mu.Lock()
@@ -639,9 +639,10 @@ func TestQueryNodeLost_TriggersUnrecoverable(t *testing.T) {
 	require.NoError(t, mgr.AddPreparing(context.Background(), b2))
 	ver2 := testVersion(2, 1, 1)
 
-	// Single flush: Preparing(v2) persist + Dropped(v1) sync + Preparing(v2) sync.
+	// Single flush: Preparing(v2) persist + one SyncViews call per node
+	// carrying Dropped(v1) + Preparing(v2) (SN + QN1).
 	assert.Equal(t, 1, catalog.numSaveCalls())
-	assert.Equal(t, 1, s.numSyncCalls())
+	assert.Equal(t, 2, s.numSyncCalls())
 
 	// Confirm all nodes Dropped for v1 → view removed.
 	simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateDropped)

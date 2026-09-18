@@ -31,20 +31,26 @@ import (
 )
 
 func TestRegisterMetrics(t *testing.T) {
+	// Production registers exactly one role per process, each with its own
+	// registry. QV metrics are shared by the coord, QueryNode and StreamingNode
+	// roles, so registering all roles on one registry would duplicate them.
+	roles := []func(*prometheus.Registry){
+		RegisterMixCoord,
+		RegisterDataNode,
+		RegisterProxy,
+		RegisterQueryNode,
+		RegisterMetaMetrics,
+		RegisterStorageMetrics,
+		RegisterMsgStreamMetrics,
+		RegisterCGOMetrics,
+		RegisterStreamingServiceClient,
+		RegisterStreamingNode,
+		RegisterLoggingMetrics,
+	}
 	assert.NotPanics(t, func() {
-		r := prometheus.NewRegistry()
-		// Make sure it doesn't panic.
-		RegisterMixCoord(r)
-		RegisterDataNode(r)
-		RegisterProxy(r)
-		RegisterQueryNode(r)
-		RegisterMetaMetrics(r)
-		RegisterStorageMetrics(r)
-		RegisterMsgStreamMetrics(r)
-		RegisterCGOMetrics(r)
-		RegisterStreamingServiceClient(r)
-		RegisterStreamingNode(r)
-		RegisterLoggingMetrics(r)
+		for _, role := range roles {
+			role(prometheus.NewRegistry())
+		}
 	})
 }
 
