@@ -407,3 +407,41 @@ func TestIssueShardSplitReadFailures(t *testing.T) {
 		assert.True(t, slices.Equal([]string{splitMgrV0}, coll.VirtualChannelNames))
 	})
 }
+
+// Only the check against the collection meta refuses this split: its message
+// is self-consistent, but the source is Creating in the meta -- a target of an
+// earlier split that has not been adopted yet -- and only a Normal shard may be
+// split. Refused before the fence, nothing is broadcast.
+func TestIssueShardSplitRefusedByTheCollectionMetaCheck(t *testing.T) {
+	enableShardSplit(t)
+	task := fencedTask(datapb.SplitShardTaskState_SplitShardTaskPreparing)
+	task.RoutingModulus = 4
+	task.Targets[0].Buckets = []uint64{0}
+	task.Targets[1].Buckets = []uint64{2}
+	desc := splitTestDescribe([]string{splitMgrV0, splitMgrV3}, []*schemapb.CollectionShardInfo{
+		hashInfo(splitMgrV0, schemapb.ShardState_ShardCreating, 0),
+		hashInfo(splitMgrV3, schemapb.ShardState_ShardCreating, 1),
+	}, 2)
+	svr := splitSwitchServer(t, task, desc)
+
+	// The message alone passes every check.
+	param, err := buildSplitShardParam(task, splitCollectionFromDescribe(desc, []int64{10}), splitMgrControl)
+	require.NoError(t, err)
+	require.NoError(t, param.Validate())
+
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	broadcasts := 0
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			broadcasts++
+			return &types.BroadcastAppendResult{}, nil
+		}).Maybe()
+	bapi.EXPECT().Close().Once()
+	mocker := mockSplitBroadcast(t, bapi)
+	defer mocker.UnPatch()
+
+	err = svr.issueShardSplit(context.Background(), task, splitMgrControl)
+	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.ErrorContains(t, err, "only a Normal shard may be split")
+	assert.Zero(t, broadcasts, "a split the meta check refuses must not be broadcast")
+}
