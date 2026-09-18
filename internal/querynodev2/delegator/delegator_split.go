@@ -259,10 +259,72 @@ func (n *familyNode) descendants() []*familyNode {
 	return out
 }
 
+// splitPhase is the scope a read of a shard being split gives each delegator of
+// its family. It is decided ONCE per read, from the one family-tree snapshot
+// that read took, and every delegator of that read is given the same phase, so
+// a delegator that querycoord syncs mid-read cannot leave half the family
+// reading in one phase and half in the other.
+type splitPhase int
+
+const (
+	// splitPhaseFronting: at least one delegator below the source has not taken
+	// its own vchannel over yet — it is unadopted, or adopted but not yet synced
+	// by querycoord and loaded against that sync. The source's own view is then
+	// still the shard's complete sealed picture (the datacoord attribution loads
+	// the targets' flushed segments into it), so the source reads it, and every
+	// delegator below contributes its growing segments only.
+	splitPhaseFronting splitPhase = iota
+	// splitPhaseHandover: every delegator below the source has been adopted and
+	// synced. Each one's view is then complete and, through QC2's window gating,
+	// built from a target pulled after the split drained. The source's own view,
+	// by contrast, is frozen at a target version from before the rewrite and
+	// would serve the same rows under their pre-rewrite segment IDs — a
+	// duplicate no ID exclusion can catch. So the source contributes nothing and
+	// each delegator below reads its full view.
+	splitPhaseHandover
+)
+
+// familyPhase decides the phase of one read from the family tree it took.
+//
+// The decision is over the WHOLE tree, at every depth, and it is all-or-nothing:
+// handover only when every delegator below the source has been adopted and
+// synced. A mixed family is read in the fronting phase, because the source's own
+// view is still the only complete cover of the rows a not-yet-synced delegator
+// does not hold, and reading a synced delegator's full view alongside it would
+// serve the rewritten copies of rows the source is already serving.
+//
+// Deciding it per level would have the same flaw one level down: a synced child
+// whose own child is not synced would read its full view next to the source's,
+// which is exactly the duplicate the all-or-nothing rule avoids.
+func familyPhase(family *familyNode) splitPhase {
+	descendants := family.descendants()
+	if len(descendants) == 0 {
+		return splitPhaseFronting
+	}
+	for _, node := range descendants {
+		if !node.sd.adoptedAndSynced() {
+			return splitPhaseFronting
+		}
+	}
+	return splitPhaseHandover
+}
+
+// adoptedAndSynced reports whether this fronted delegator has taken its own
+// vchannel over from the source fronting it: querycoord has adopted it
+// (WatchDmChannels on its target vchannel) and has since synced a target version
+// into it that it is fully loaded against. Until both hold, its own view is
+// incomplete and the source's is the shard's sealed picture.
+func (sd *shardDelegator) adoptedAndSynced() bool {
+	// Ordered so an unadopted delegator — which a test may build without a
+	// distribution at all — never reaches the query view.
+	return sd.adopted.Load() && sd.distribution.SyncedAndServiceable()
+}
+
 // splitReadScope is how one delegator takes part in a read of a shard that is
-// being split: the source reads its own view, then every fronted delegator
-// below it reads its own, and every segment must be counted exactly once across
-// them.
+// being split: in the fronting phase the source reads its own view and every
+// fronted delegator below it adds its growing segments; in the handover phase
+// the source reads nothing and every delegator below it reads its own full view.
+// Either way every segment must be counted exactly once across them.
 //
 // The views are disjoint while the split window is open, but not after
 // adoption: a relabeled sealed segment is synced into the adopted child's view
@@ -283,37 +345,66 @@ type splitReadScope struct {
 	// wait cover exactly that tree, even when a concurrent release detaches a
 	// delegator from it mid-read.
 	family *familyNode
+	// phase is the whole read's phase, decided once from that tree and passed
+	// down unchanged to every delegator of the read.
+	phase splitPhase
 }
 
 // frontingSourceScope is the source's scope for one read over the family tree
-// it fans out to: it records its pins only when there are fronted delegators to
-// exclude them from.
+// it fans out to: it decides the read's phase from that one tree and records its
+// pins only when there are fronted delegators to exclude them from.
 func frontingSourceScope(family *familyNode) splitReadScope {
 	if len(family.fronted()) == 0 {
 		return splitReadScope{family: family}
 	}
-	return splitReadScope{pinned: typeutil.NewUniqueSet(), family: family}
+	return splitReadScope{pinned: typeutil.NewUniqueSet(), family: family, phase: familyPhase(family)}
 }
 
 // forChild is the scope a fronted delegator, at any depth, reads under within
-// its source's read: the gate bypass, its own node of the read's family tree,
-// and the read's shared pin set, so it skips every segment a delegator read
-// before it already pinned and records its own for those read after it.
+// its source's read: the gate bypass, the read's phase as the source decided it,
+// its own node of the read's family tree, and the read's shared pin set, so it
+// skips every segment a delegator read before it already pinned and records its
+// own for those read after it.
+//
+// The pin set is threaded in both phases. In the handover phase the source pins
+// nothing, so the delegators below it start from an empty exclusion — the "no
+// exclusion" the phase calls for — while a relabeled segment held by both a
+// child and its own child is still counted once.
 func (s splitReadScope) forChild(node *familyNode) splitReadScope {
-	return splitReadScope{asChild: true, pinned: s.pinned, exclude: s.pinned, family: node}
+	return splitReadScope{asChild: true, pinned: s.pinned, exclude: s.pinned, family: node, phase: s.phase}
 }
 
-// pinReadableSegments selects the serviceability-gated pin for the source
-// delegator's own read and the gate-bypass pin when fronting a split child, then
-// applies the scope's exclusion and records the pins.
+// pinReadableSegments selects what this delegator contributes to the read:
+//   - the source (not asChild) pins its own view through the ordinary
+//     serviceability gate, and in the handover phase contributes none of it;
+//   - a fronted delegator pins through the gate bypass: its growing segments
+//     only in the fronting phase, its full readable view in the handover phase.
+//
+// It then applies the scope's exclusion and records the pins, in the order the
+// read visits the family: the source first, then each delegator below it, depth
+// first.
 func (sd *shardDelegator) pinReadableSegments(scope splitReadScope, requiredLoadRatio float64, partitions ...int64) ([]SnapshotItem, []SegmentEntry, map[int64]int64, int64, error) {
 	pin := sd.distribution.PinReadableSegments
-	if scope.asChild {
+	switch {
+	case !scope.asChild:
+		// the source reads its own view through the ordinary gate.
+	case scope.phase == splitPhaseHandover:
 		pin = sd.distribution.PinReadableSegmentsAsChild
+	default:
+		pin = sd.distribution.PinGrowingSegmentsAsChild
 	}
 	sealed, growing, sealedRowCount, version, err := pin(requiredLoadRatio, partitions...)
 	if err != nil {
 		return sealed, growing, sealedRowCount, version, err
+	}
+	if !scope.asChild && scope.phase == splitPhaseHandover {
+		// Handover: the delegators below cover the shard on their own, and this
+		// one's view is a pre-rewrite snapshot of the same rows. It still took the
+		// pin above, so the serviceability gate and the partition check answer
+		// exactly as they always did and Unpin stays symmetric, but it contributes
+		// nothing and records no ID, which is what leaves the delegators below it
+		// reading with no exclusion.
+		return nil, nil, nil, version, nil
 	}
 	if len(scope.exclude) > 0 {
 		sealed, growing = excludeSegments(sealed, growing, scope.exclude)
