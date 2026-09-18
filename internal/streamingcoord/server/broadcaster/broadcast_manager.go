@@ -92,7 +92,6 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 		mu:                 &sync.Mutex{},
 		tasks:              tasks,
 		idempotencyIndex:   idxOfKeys,
-		admissions:         make(map[string]chan struct{}),
 		resourceKeyLocker:  rkLocker,
 		metrics:            metrics,
 		broadcastScheduler: newBroadcasterScheduler(pendingTasks, logger),
@@ -115,7 +114,6 @@ type broadcastTaskManager struct {
 	lifetime           *typeutil.Lifetime
 	mu                 *sync.Mutex
 	tasks              map[uint64]*broadcastTask // map the broadcastID to the broadcastTaskState
-	admissions         map[string]chan struct{}  // idempotency scopes being prepared, not yet accepted
 	idempotencyIndex   *idempotencyIndex         // map the idempotency key to the broadcastID that owns it
 	resourceKeyLocker  *resourceKeyLocker
 	metrics            *broadcasterMetrics
@@ -516,57 +514,6 @@ func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, 
 		}
 		result[collectionID] = append(result[collectionID], id)
 		seen[id] = struct{}{}
-	}
-}
-
-// WithResourceKeysForMessage reserves an idempotency scope before waiting for
-// keys. A retry of an accepted owner waits for its ACK, not for ownership release.
-// Reservations disappear on pre-broadcast failure; they are never acceptance.
-func (bm *broadcastTaskManager) WithResourceKeysForMessage(ctx context.Context, msgType message.MessageType, key message.IdempotencyKey, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
-	scope := idempotencyScope(msgType, key)
-	if scope == "" {
-		return bm.WithResourceKeys(ctx, resourceKeys...)
-	}
-	for {
-		if err := bm.checkClusterRole(ctx); err != nil {
-			return nil, err
-		}
-		bm.mu.Lock()
-		if id, ok := bm.idempotencyIndex.Get(scope); ok {
-			if task, ok := bm.tasks[id]; ok {
-				bm.mu.Unlock()
-				return &broadcasterWithRK{scope: scope, duplicate: task}, nil
-			}
-		}
-		if preparing, ok := bm.admissions[scope]; ok {
-			bm.mu.Unlock()
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-preparing:
-				continue
-			}
-		}
-		ready := make(chan struct{})
-		bm.admissions[scope] = ready
-		bm.mu.Unlock()
-		var once sync.Once
-		release := func() {
-			once.Do(func() {
-				bm.mu.Lock()
-				delete(bm.admissions, scope)
-				close(ready)
-				bm.mu.Unlock()
-			})
-		}
-		api, err := bm.WithResourceKeys(ctx, resourceKeys...)
-		if err != nil {
-			release()
-			return nil, err
-		}
-		b := api.(*broadcasterWithRK)
-		b.scope, b.releaseAdmission = scope, release
-		return b, nil
 	}
 }
 

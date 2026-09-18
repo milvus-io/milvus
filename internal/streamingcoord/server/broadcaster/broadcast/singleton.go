@@ -77,20 +77,3 @@ func Release() {
 	}
 	singleton.Get().Close()
 }
-
-// StartBroadcastWithIdempotencyKey resolves retries before waiting for resource
-// keys retained by a paired Begin. Ordinary DDL keeps the existing entry point.
-func StartBroadcastWithIdempotencyKey(ctx context.Context, msgType message.MessageType, key message.IdempotencyKey, resourceKeys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-	bc, err := singleton.GetWithContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	balancer, err := balance.GetWithContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := balancer.WaitUntilWALbasedDDLReady(ctx); err != nil {
-		return nil, err
-	}
-	return bc.WithResourceKeysForMessage(ctx, msgType, key, resourceKeys...)
-}

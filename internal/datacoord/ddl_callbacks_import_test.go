@@ -369,8 +369,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return nil, errors.New("failed to acquire resource lock")
 		}).Build()
 	defer mockBroadcast.UnPatch()
@@ -422,8 +422,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
@@ -490,8 +490,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
 	mockBroadcastAPI.broadcastErr = errors.New("broadcast failed")
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
@@ -554,8 +554,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()

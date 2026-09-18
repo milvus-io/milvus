@@ -303,7 +303,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, lockedCollection, err := s.startImportBroadcast(ctx, collectionID, message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey))
+	broadcaster, lockedCollection, err := s.startImportBroadcast(ctx, collectionID)
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -483,13 +483,12 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 }
 
 // startImportBroadcast keeps the lock-name snapshot for the admission recheck.
-// Only Import needs to resolve idempotent retries before its long-held keys.
-func (s *Server) startImportBroadcast(ctx context.Context, collectionID int64, key message.IdempotencyKey) (broadcaster.BroadcastAPI, *milvuspb.DescribeCollectionResponse, error) {
+func (s *Server) startImportBroadcast(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, *milvuspb.DescribeCollectionResponse, error) {
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return nil, nil, err
 	}
-	api, err := broadcast.StartBroadcastWithIdempotencyKey(ctx, message.MessageTypeImport, key,
+	api, err := broadcast.StartBroadcastWithResourceKeys(ctx,
 		message.NewSharedDBNameResourceKey(coll.GetDbName()),
 		message.NewExclusiveCollectionNameResourceKey(coll.GetDbName(), coll.GetCollectionName()))
 	return api, coll, err

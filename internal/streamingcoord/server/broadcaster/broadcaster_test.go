@@ -1267,7 +1267,7 @@ func TestImportResourceOwnership(t *testing.T) {
 			begin := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
 				WithBody(&msgpb.ImportMsg{JobID: 101, CollectionID: 7}).WithIdempotencyKey(key).
 				WithBroadcast([]string{"v1"}).MustBuildBroadcast()
-			api, err := bm.WithResourceKeysForMessage(ctx, message.MessageTypeImport, key, rk)
+			api, err := bm.WithResourceKeys(ctx, rk)
 			require.NoError(t, err)
 			result, err := api.Broadcast(ctx, begin)
 			require.NoError(t, err)
@@ -1277,16 +1277,6 @@ func TestImportResourceOwnership(t *testing.T) {
 			require.Error(t, bm.DropTombstone(ctx, result.BroadcastID), "open Begin cannot be GC'd")
 			_, err = bm.resourceKeyLocker.FastLock(rk)
 			require.ErrorIs(t, err, errFastLockFailed, "Begin ACK must retain the collection lock")
-
-			// An accepted retry returns the original Begin without reacquiring its keys.
-			api, err = bm.WithResourceKeysForMessage(ctx, message.MessageTypeImport, key, rk)
-			require.NoError(t, err)
-			dup, err := api.Broadcast(ctx, begin)
-			require.NoError(t, err)
-			api.Close()
-			require.Equal(t, result.BroadcastID, dup.BroadcastID)
-			require.NotNil(t, dup.Duplicated)
-
 			var end message.BroadcastMutableMessage
 			if rollback {
 				end = message.NewRollbackImportMessageBuilderV2().WithHeader(&message.RollbackImportMessageHeader{JobId: 101}).
@@ -1327,28 +1317,6 @@ func newImportOwnerTestManager(t *testing.T) *broadcastTaskManager {
 	registry.RegisterCommitImportV2AckCallback(func(context.Context, message.BroadcastResultCommitImportMessageV2) error { return nil })
 	registry.RegisterRollbackImportV2AckCallback(func(context.Context, message.BroadcastResultRollbackImportMessageV2) error { return nil })
 	return bm
-}
-
-func TestImportAdmissionReleaseBeforeBroadcast(t *testing.T) {
-	bm := newImportOwnerTestManager(t)
-	key := message.NewCollectionScopedIdempotencyKey(7, "batch")
-	rk := message.NewExclusiveCollectionNameResourceKey("db", "coll")
-	api, err := bm.WithResourceKeysForMessage(context.Background(), message.MessageTypeImport, key, rk)
-	require.NoError(t, err)
-	defer api.Close()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	// A same-key request is still only preparing; waiting remains cancellable.
-	_, err = bm.WithResourceKeysForMessage(ctx, message.MessageTypeImport, key, rk)
-	require.ErrorIs(t, err, context.Canceled)
-	api.Close()
-	api, err = bm.WithResourceKeysForMessage(context.Background(), message.MessageTypeImport, key, rk)
-	require.NoError(t, err)
-	api.Close()
-	bm.mu.Lock()
-	require.Empty(t, bm.admissions)
-	require.Empty(t, bm.tasks, "pre-broadcast cancellation is not an accepted import")
-	bm.mu.Unlock()
 }
 
 func TestImportOwnershipRecovery(t *testing.T) {

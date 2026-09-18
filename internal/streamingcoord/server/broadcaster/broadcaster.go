@@ -22,10 +22,6 @@ func IsBroadcastTaskNotCreated(err error) bool {
 }
 
 type Broadcaster interface {
-	// WithResourceKeysForMessage resolves a retry before acquiring long-lived keys.
-	// The returned API must broadcast this message type and idempotency key.
-	WithResourceKeysForMessage(ctx context.Context, msgType message.MessageType, key message.IdempotencyKey, resourceKeys ...message.ResourceKey) (BroadcastAPI, error)
-
 	// BroadcastWithResourceKeyOwner closes a paired Begin using its held keys.
 	// handled=false means no retained owner was found for the registered pair.
 	// The caller owns fallback behavior and terminal retries after owner GC.

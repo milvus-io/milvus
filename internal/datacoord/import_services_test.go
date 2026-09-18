@@ -223,8 +223,8 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return nil, merr.WrapErrServiceUnavailable("broadcast failed")
 		}).Build()
 	defer mockBroadcast.UnPatch()
@@ -289,8 +289,8 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 
 	// Mock StartBroadcastWithResourceKeys to succeed
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	defer mockBroadcast.UnPatch()
@@ -398,8 +398,8 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 
 	mockBroadcastAPI := newMockBroadcastAPIImpl()
 	mockBroadcastAPI.broadcastResult = newDuplicatedImportBroadcastResult(originalJobID, originalPaths...)
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			return mockBroadcastAPI, nil
 		}).Build()
 	s.T().Cleanup(func() { mockBroadcast.UnPatch() })
@@ -585,8 +585,8 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 
 	// Capture the dbName passed to broadcastImport
 	var capturedDbName string
-	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithIdempotencyKey).To(
-		func(ctx context.Context, _ message.MessageType, _ message.IdempotencyKey, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+	mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+		func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
 			// Check if default db name resource key is used
 			for _, key := range keys {
 				if key.String() != "" {
