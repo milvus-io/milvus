@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func splittingCollectionResp() *milvuspb.DescribeCollectionResponse {
@@ -312,4 +313,39 @@ func TestShardStatesListingRules(t *testing.T) {
 	assert.True(t, none.Lists("v0"))
 	assert.Empty(t, none.Delisted(current))
 	assert.NoError(t, none.CheckWatchable("v0"))
+}
+
+func TestCheckShardSplitMovable(t *testing.T) {
+	ctx := context.Background()
+	check := func(t *testing.T, resp *milvuspb.DescribeCollectionResponse, describeErr error, window []string, current ...string) error {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(resp, describeErr).Maybe()
+		targetMgr := NewMockTargetManager(t)
+		var marks typeutil.Set[string]
+		if len(window) > 0 {
+			marks = typeutil.NewSet(window...)
+		}
+		targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), NextTarget).Return(marks).Maybe()
+		channels := make(map[string]*DmChannel)
+		for _, name := range current {
+			channels[name] = &DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: name}}
+		}
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), CurrentTarget).Return(channels).Maybe()
+		return CheckShardSplitMovable(ctx, NewShardSplitStateCache(broker, time.Minute), targetMgr, 1)
+	}
+	normal := &milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v0", "v9"}}
+	adopted := &milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v1", "v2", "v9"}}
+
+	assert.NoError(t, check(t, normal, nil, nil, "v0", "v9"), "a collection that is not splitting moves freely")
+	assert.NoError(t, check(t, adopted, nil, nil, "v1", "v2", "v9"), "after the flip")
+	for name, err := range map[string]error{
+		"window marks":   check(t, normal, nil, []string{"v1"}, "v0", "v9"),
+		"states unknown": check(t, nil, errors.New("coord down"), nil, "v0"),
+		"splitting":      check(t, splittingCollectionResp(), nil, nil, "v0"),
+		"retired source": check(t, adopted, nil, nil, "v0", "v9"),
+	} {
+		assert.ErrorIs(t, err, merr.ErrServiceUnavailable, name)
+		assert.True(t, merr.IsRetryableErr(err), name)
+	}
+	assert.NoError(t, CheckShardSplitMovable(ctx, nil, nil, 1), "no cache, no rule")
 }
