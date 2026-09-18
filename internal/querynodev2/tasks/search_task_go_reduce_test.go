@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/searchutil/optimizers"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/cgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -111,55 +112,88 @@ const (
 )
 
 func TestExportSearchResultsAsArrowReleasesCompletedDataFramesOnMultiSegmentError(t *testing.T) {
-	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
-	defer pool.AssertSize(t, 0)
-
-	successResult := new(segments.SearchResult)
-	failResult := new(segments.SearchResult)
-	results := []*segments.SearchResult{successResult, failResult}
-	injectedErr := errors.New("injected export failure")
-
-	makeRecord := func() arrow.Record {
-		idBuilder := array.NewInt64Builder(pool)
-		idBuilder.AppendValues([]int64{1, 2}, nil)
-		ids := idBuilder.NewArray()
-		idBuilder.Release()
-
-		scoreBuilder := array.NewFloat32Builder(pool)
-		scoreBuilder.AppendValues([]float32{0.9, 0.8}, nil)
-		scores := scoreBuilder.NewArray()
-		scoreBuilder.Release()
-
-		offsetBuilder := array.NewInt64Builder(pool)
-		offsetBuilder.AppendValues([]int64{10, 20}, nil)
-		offsets := offsetBuilder.NewArray()
-		offsetBuilder.Release()
-
-		schema := arrow.NewSchema([]arrow.Field{
-			{Name: "$id", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "$score", Type: arrow.PrimitiveTypes.Float32},
-			{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64},
-		}, nil)
-		record := array.NewRecord(schema, []arrow.Array{ids, scores, offsets}, int64(ids.Len()))
-		ids.Release()
-		scores.Release()
-		offsets.Release()
-		return record
+	testCases := []struct {
+		name      string
+		inputPlan *chain.DataFrameInputPlan
+	}{
+		{name: "system columns only"},
+		{
+			name: "function chain projection exporter",
+			inputPlan: &chain.DataFrameInputPlan{Inputs: []chain.ResolvedChainInput{
+				{LogicalName: `metadata["rank"]`, SourceFieldID: 101, DataType: schemapb.DataType_JSON, DataTypeHint: schemapb.DataType_Int64, NestedPath: []string{"rank"}},
+			}},
+		},
 	}
 
-	mocker := mockey.Mock(segcore.ExportSearchResultAsArrowRecordBatch).To(
-		func(ctx context.Context, result *segcore.SearchResult, plan *segcore.SearchPlan, extraFieldIDs []int64) (arrow.Record, []int64, error) {
-			if result == failResult {
-				return nil, nil, injectedErr
-			}
-			return makeRecord(), []int64{2}, nil
-		},
-	).Build()
-	defer mocker.UnPatch()
+	for _, test := range testCases {
+		t.Run(test.name, func(t *testing.T) {
+			pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+			defer pool.AssertSize(t, 0)
 
-	task := &SearchTask{ctx: context.Background()}
-	_, err := task.exportSearchResultsAsArrow(results, nil, nil)
-	require.ErrorIs(t, err, injectedErr)
+			successResult := new(segments.SearchResult)
+			failResult := new(segments.SearchResult)
+			results := []*segments.SearchResult{successResult, failResult}
+			injectedErr := errors.New("injected export failure")
+
+			makeRecord := func() arrow.Record {
+				idBuilder := array.NewInt64Builder(pool)
+				idBuilder.AppendValues([]int64{1, 2}, nil)
+				ids := idBuilder.NewArray()
+				idBuilder.Release()
+
+				scoreBuilder := array.NewFloat32Builder(pool)
+				scoreBuilder.AppendValues([]float32{0.9, 0.8}, nil)
+				scores := scoreBuilder.NewArray()
+				scoreBuilder.Release()
+
+				offsetBuilder := array.NewInt64Builder(pool)
+				offsetBuilder.AppendValues([]int64{10, 20}, nil)
+				offsets := offsetBuilder.NewArray()
+				offsetBuilder.Release()
+
+				schema := arrow.NewSchema([]arrow.Field{
+					{Name: "$id", Type: arrow.PrimitiveTypes.Int64},
+					{Name: "$score", Type: arrow.PrimitiveTypes.Float32},
+					{Name: "$seg_offset", Type: arrow.PrimitiveTypes.Int64},
+				}, nil)
+				record := array.NewRecord(schema, []arrow.Array{ids, scores, offsets}, int64(ids.Len()))
+				ids.Release()
+				scores.Release()
+				offsets.Release()
+				return record
+			}
+
+			blob, err := segcore.MarshalFunctionChainInputPlan(test.inputPlan)
+			require.NoError(t, err)
+			marshalCalls := 0
+			encoder := mockey.Mock(segcore.MarshalFunctionChainInputPlan).To(
+				func(plan *chain.DataFrameInputPlan) ([]byte, error) {
+					marshalCalls++
+					assert.Same(t, test.inputPlan, plan)
+					return blob, nil
+				},
+			).Build()
+			defer encoder.UnPatch()
+			defer func() { assert.Equal(t, 1, marshalCalls) }()
+			mocker := mockey.Mock(segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan).To(
+				func(ctx context.Context, result *segcore.SearchResult, plan *segcore.SearchPlan, inputPlanBlob []byte) (arrow.Record, []int64, error) {
+					assert.Equal(t, blob, inputPlanBlob)
+					if len(blob) > 0 {
+						assert.Same(t, &blob[0], &inputPlanBlob[0])
+					}
+					if result == failResult {
+						return nil, nil, injectedErr
+					}
+					return makeRecord(), []int64{2}, nil
+				},
+			).Build()
+			defer mocker.UnPatch()
+
+			task := &SearchTask{ctx: context.Background()}
+			_, err = task.exportSearchResultsAsArrow(results, nil, test.inputPlan)
+			require.ErrorIs(t, err, injectedErr)
+		})
+	}
 }
 
 // setupOpts varies the search request shape across test cases.
@@ -348,7 +382,7 @@ func runGoReducePipeline(t *testing.T, ts *testSegments) (*mergeResult, []*chain
 
 	segDFs := make([]*chain.DataFrame, 0, len(ts.searchResults))
 	for _, res := range ts.searchResults {
-		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, plan, nil)
+		record, chunkSizes, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(context.Background(), res, plan, nil)
 		require.NoError(t, err)
 		defer record.Release()
 
@@ -569,12 +603,15 @@ func TestL1RerankLateMaterializationKeepsOutputFieldsAligned(t *testing.T) {
 		ctx context.Context,
 		results []*segcore.SearchResult,
 		plan *segcore.SearchPlan,
-		fieldIDs []int64,
+		inputPlanBlob []byte,
 		segIndices []int32,
 		segOffsets []int64,
 	) (arrow.Record, error) {
 		require.NoError(t, ctx.Err())
-		require.Equal(t, []int64{int32FieldID}, fieldIDs)
+		var inputPlan cgopb.FunctionChainInputPlan
+		require.NoError(t, proto.Unmarshal(inputPlanBlob, &inputPlan))
+		require.Len(t, inputPlan.Inputs, 1)
+		require.Equal(t, int32FieldID, inputPlan.Inputs[0].GetSourceFieldId())
 		require.Len(t, segIndices, len(originalSources))
 		require.Len(t, segOffsets, len(originalSources))
 		builder := array.NewInt32Builder(defaultAllocator)
@@ -599,8 +636,8 @@ func TestL1RerankLateMaterializationKeepsOutputFieldsAligned(t *testing.T) {
 
 	task := &SearchTask{ctx: t.Context()}
 	reranked, err := task.applyL1RerankResult(reduced, ts.searchResults, ts.searchReq.Plan(), &preparedL1FunctionChain{
-		chain:         repr,
-		inputFieldIDs: []int64{int32FieldID},
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(int32FieldID, "int32Field", schemapb.DataType_Int32),
 	})
 	require.NoError(t, err)
 	defer reranked.DF.Release()
@@ -1186,7 +1223,7 @@ func TestFillOutputFieldsOrdered_NoCMemoryLeak(t *testing.T) {
 	assertNoCHeapLeak(t, retained, func() { call() })
 }
 
-func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
+func TestExportSearchResultAsArrowRecordBatchWithInputPlan_NoCMemoryLeak(t *testing.T) {
 	extraFieldIDs := []int64{103} // Int32
 
 	// Same sizing reason as TestFillOutputFieldsOrdered_NoCMemoryLeak: the
@@ -1204,6 +1241,19 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 	)
 	require.NoError(t, err)
 
+	var field *schemapb.FieldSchema
+	for _, candidate := range ts.collection.Schema().GetFields() {
+		if candidate.GetFieldID() == extraFieldIDs[0] {
+			field = candidate
+			break
+		}
+	}
+	require.NotNil(t, field)
+	inputPlanBlob, err := segcore.MarshalFunctionChainInputPlan(&chain.DataFrameInputPlan{Inputs: []chain.ResolvedChainInput{{
+		LogicalName: field.GetName(), SourceFieldID: field.GetFieldID(), DataType: field.GetDataType(),
+	}}})
+	require.NoError(t, err)
+
 	before := segcore.GetJemallocStats()
 	if !before.Success {
 		t.Skip("jemalloc stats not available on this platform")
@@ -1211,7 +1261,7 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 
 	exportOnce := func() {
 		for _, res := range ts.searchResults {
-			record, _, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, ts.searchReq.Plan(), extraFieldIDs)
+			record, _, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(context.Background(), res, ts.searchReq.Plan(), inputPlanBlob)
 			require.NoError(t, err)
 			record.Release()
 		}
@@ -1219,7 +1269,7 @@ func TestExportSearchResultAsArrowRecordBatch_NoCMemoryLeak(t *testing.T) {
 
 	var retained int64
 	for _, res := range ts.searchResults {
-		record, _, err := segcore.ExportSearchResultAsArrowRecordBatch(context.Background(), res, ts.searchReq.Plan(), extraFieldIDs)
+		record, _, err := segcore.ExportSearchResultAsArrowRecordBatchWithInputPlan(context.Background(), res, ts.searchReq.Plan(), inputPlanBlob)
 		require.NoError(t, err)
 		retained += arrowRecordCBytes(record)
 		record.Release()
@@ -1303,7 +1353,7 @@ func TestExecuteValidatesFunctionChainsBeforeANN(t *testing.T) {
 		{"unknown function", mapOpForTest(chaintypes.ScoreFieldName, "unknown_function", columnArgForTest(chaintypes.ScoreFieldName)), "unknown function"},
 		{"invalid parameter", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName,
 			map[string]*schemapb.FunctionParamValue{"mode": stringParamForTest("invalid")}, columnArgForTest(chaintypes.ScoreFieldName)), "invalid mode"},
-		{"missing field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("missing_field")), "neither a previous output nor a collection field"},
+		{"missing field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("missing_field")), "field missing_field not exist"},
 		{"unsupported field", mapOpForTest(chaintypes.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(vectorField)), "unsupported field type"},
 		{"invalid arguments", mapOpWithParamsForTest(chaintypes.ScoreFieldName, chainexpr.XGBoostFuncName,
 			map[string]*schemapb.FunctionParamValue{"model_resource": stringParamForTest("model.json")}), "expected at least one feature column"},

@@ -66,6 +66,8 @@ SimdjsonParseErrorToErrorCode(simdjson::error_code err) {
         case simdjson::UNINITIALIZED:
         case simdjson::INSUFFICIENT_PADDING:
         case simdjson::UNEXPECTED_ERROR:
+        case simdjson::PARSER_IN_USE:
+        case simdjson::OUT_OF_ORDER_ITERATION:
             return ErrorCode::UnexpectedError;  // milvus-side misuse / bug
         default:
             return ErrorCode::DataFormatBroken;  // 2024, malformed stored JSON

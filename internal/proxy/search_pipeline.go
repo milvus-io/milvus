@@ -969,16 +969,6 @@ type rerankOperator struct {
 	dbName     string
 }
 
-// getChainNeededFields returns the field names that the chain actually needs
-// from FieldsData (rerank input fields). Returns nil if no filtering is needed.
-// Note: the group-by field is imported separately via GroupByFieldValue, not FieldsData.
-func (op *rerankOperator) getChainNeededFields() []string {
-	if op.rerankMeta != nil {
-		return op.rerankMeta.GetInputFieldNames()
-	}
-	return nil
-}
-
 func resolveFieldName(schema *schemapb.CollectionSchema, fieldID int64) string {
 	for _, field := range schema.GetFields() {
 		if field.GetFieldID() == fieldID {
@@ -1091,12 +1081,13 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("rerank operator: inputs[1] must be []string, got %T", inputs[1])
 	}
+	if op.rerankMeta == nil {
+		return nil, merr.WrapErrFunctionFailedMsg(
+			"rerank operator: rerankMeta is nil, cannot build rerank chain")
+	}
 
 	alloc := memory.DefaultAllocator
-
-	// Only convert fields that the chain actually needs (rerank input fields + group-by field).
-	// Other fields are not used by chain and will be re-fetched by organize/requery later.
-	neededFields := op.getChainNeededFields()
+	inputPlan := op.rerankMeta.GetInputPlan()
 
 	// Convert all inputs to DataFrames.
 	// Note: reducedResults entries are never nil — the reduce operator always produces
@@ -1107,7 +1098,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		if result == nil || result.GetResults() == nil {
 			continue
 		}
-		df, err := chain.FromSearchResultData(result.GetResults(), alloc, neededFields)
+		df, err := chain.FromSearchResultData(result.GetResults(), alloc, inputPlan)
 		if err != nil {
 			for _, d := range dataframes {
 				d.Release()
@@ -1139,12 +1130,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			op.groupByFieldName, op.groupSize, scorer)
 	} else {
 		searchParams = chain.NewSearchParams(op.nq, op.topK, op.offset, op.roundDecimal)
-	}
-	if op.rerankMeta == nil {
-		for _, df := range dataframes {
-			df.Release()
-		}
-		return nil, merr.WrapErrFunctionFailedMsg("rerank operator: rerankMeta is nil, cannot build rerank chain")
 	}
 	searchParams.ModelExtraInfo = &models.ModelExtraInfo{
 		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),

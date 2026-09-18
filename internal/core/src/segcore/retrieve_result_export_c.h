@@ -37,6 +37,9 @@ struct ArrowArray;
 //
 // Caller owns out_schema/out_array and must release them through
 // the Arrow C Data Interface.
+// Failed calls release partial outputs. In-memory Arrow statuses are classified
+// by ArrowExportFailure; the implementation contains all C++ exceptions and
+// preserves typed storage errors at this C ABI boundary.
 CStatus
 FillRetrieveFieldsOrdered(CSegmentInterface* segments,
                           int64_t num_segments,
