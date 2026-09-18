@@ -625,6 +625,8 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		vs := make([]*storage.Value, r.Len())
+		// Bucket serializers retain partial batches across input records. Copy
+		// values so advancing the reader can safely release its Arrow buffers.
 		if err = storage.ValueDeserializerWithSchema(r, vs, t.plan.Schema, true); err != nil {
 			mlog.Warn(context.TODO(), "compact wrong, failed to deserialize data", mlog.Err(err))
 			return err
@@ -674,11 +676,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 					}
 				}
 			}
-		}
-
-		// all cluster buffers are flushed for a certain record, since the values read from the same record are references instead of copies
-		for _, buffer := range t.clusterBuffers {
-			buffer.Flush()
 		}
 	}
 

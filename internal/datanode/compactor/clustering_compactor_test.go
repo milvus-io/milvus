@@ -18,6 +18,8 @@ package compactor
 
 import (
 	"context"
+	"io"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -573,6 +575,140 @@ func (s *ClusteringCompactionTaskSuite) TestScalarCompactionPreservesImportCommi
 				s.EqualValues(commitTs, b.GetTimestampTo())
 			}
 		}
+	}
+}
+
+type clusteringBatchRecorder struct {
+	storage.BinlogRecordWriter
+	batchRows []int
+}
+
+func (w *clusteringBatchRecorder) Write(r storage.Record) error {
+	w.batchRows = append(w.batchRows, r.Len())
+	return w.BinlogRecordWriter.Write(r)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestMappingBatchesAcrossInputRecords() {
+	s.checkMappingBatchesAcrossInputRecords(storage.StorageV1)
+}
+
+func (s *ClusteringCompactionTaskSuite) TestMappingBatchesAcrossPackedInputRecords() {
+	s.checkMappingBatchesAcrossInputRecords(storage.StorageV2)
+}
+
+func (s *ClusteringCompactionTaskSuite) checkMappingBatchesAcrossInputRecords(inputVersion int64) {
+	ctx := context.Background()
+	schema := genCollectionSchema()
+	kvs := make(map[string][]byte)
+	binlogs := make(map[int64]*datapb.FieldBinlog)
+	expected := make(map[int64]map[int64]interface{})
+	// Ten small binlog groups produce multiple input records. Each record
+	// contributes only eleven rows per bucket, below the serializer batch size.
+	for chunk := 0; chunk < 10; chunk++ {
+		var values []*storage.Value
+		for i := 0; i < 22; i++ {
+			pk := int64(chunk*22 + i)
+			row := genRow(pk)
+			row[102] = strconv.FormatInt(pk, 10)
+			row[103] = []float32{float32(pk), 5, 6, 7}
+			expected[pk] = row
+			values = append(values, &storage.Value{
+				PK: storage.NewInt64PrimaryKey(pk), Timestamp: row[common.TimeStampField].(int64), Value: row,
+			})
+		}
+		var fields map[int64]*datapb.FieldBinlog
+		if inputVersion == storage.StorageV1 {
+			input, err := NewSegmentWriter(schema, 22, compactionBatchSize, 1001, PartitionID, CollectionID, nil)
+			s.Require().NoError(err)
+			for _, value := range values {
+				s.Require().NoError(input.Write(value))
+			}
+			input.FlushAndIsFull()
+			blobs, logs, err := serializeWrite(ctx, s.mockAlloc, input)
+			s.Require().NoError(err)
+			fields = logs
+			for path, data := range blobs {
+				kvs[path] = data
+			}
+		} else {
+			input, err := storage.NewBinlogRecordWriter(ctx, CollectionID, PartitionID, 1001, schema,
+				s.mockAlloc, 64<<20, 22, storage.WithVersion(storage.StorageV2),
+				storage.WithStorageConfig(s.task.compactionParams.StorageConfig), storage.WithUploader(s.mockBinlogIO.Upload))
+			s.Require().NoError(err)
+			record, err := storage.ValueSerializer(values, schema)
+			s.Require().NoError(err)
+			s.Require().NoError(input.Write(record))
+			record.Release()
+			s.Require().NoError(input.Close())
+			fields, _, _, _, _ = input.GetLogs()
+		}
+		for id, field := range fields {
+			if binlogs[id] == nil {
+				binlogs[id] = &datapb.FieldBinlog{FieldID: id}
+			}
+			binlogs[id].Binlogs = append(binlogs[id].Binlogs, field.Binlogs...)
+		}
+	}
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, paths []string) ([][]byte, error) {
+		result := make([][]byte, 0, len(paths))
+		for _, path := range paths {
+			result = append(result, kvs[path])
+		}
+		return result, nil
+	}).Maybe()
+	s.plan.Schema = schema
+	s.plan.ClusteringKeyField = 100
+	s.plan.SegmentBinlogs = []*datapb.CompactionSegmentBinlogs{{
+		CollectionID: CollectionID, PartitionID: PartitionID, SegmentID: 1001,
+		FieldBinlogs: lo.Values(binlogs), StorageVersion: inputVersion,
+	}}
+	s.Require().NoError(s.task.init())
+	defer s.task.cleanUp(ctx)
+	s.task.memoryLimit = 1 << 30
+	var writers []*clusteringBatchRecorder
+	for bucket := 0; bucket < 2; bucket++ {
+		writer, err := NewMultiSegmentWriter(ctx, s.mockBinlogIO, NewCompactionAllocator(s.mockAlloc, s.mockAlloc),
+			1<<30, schema, s.task.compactionParams, 110, PartitionID, CollectionID, "channel", 100,
+			storage.WithStorageConfig(s.task.compactionParams.StorageConfig))
+		s.Require().NoError(err)
+		s.Require().NoError(writer.rotateWriter())
+		recorder := &clusteringBatchRecorder{BinlogRecordWriter: writer.writer.BinlogRecordWriter}
+		writer.writer = storage.NewBinlogValueWriter(recorder, 100)
+		writers = append(writers, recorder)
+		s.task.clusterBuffers = append(s.task.clusterBuffers, newClusterBuffer(bucket, writer, nil))
+		defer writer.Close()
+	}
+	s.task.keyToBufferFunc = func(key interface{}) *ClusterBuffer {
+		return s.task.clusterBuffers[key.(int64)%2]
+	}
+	s.Require().NoError(s.task.mappingSegment(ctx, s.plan.SegmentBinlogs[0]))
+	for _, writer := range writers {
+		s.Equal([]int{100}, writer.batchRows, "input record boundaries must not submit partial batches")
+	}
+	s.Require().NoError(s.task.flushAll())
+	for bucket, writer := range writers {
+		s.Equal([]int{100, 10}, writer.batchRows)
+		logs, _, _, _, _ := writer.GetLogs()
+		reader, err := storage.NewBinlogRecordReader(ctx, lo.Values(logs), schema,
+			storage.WithVersion(storage.StorageV2), storage.WithStorageConfig(s.task.compactionParams.StorageConfig), storage.WithUseLoonFFI(false))
+		s.Require().NoError(err)
+		defer reader.Close()
+		seen := 0
+		for {
+			record, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
+			s.Require().NoError(err)
+			values := make([]*storage.Value, record.Len())
+			s.Require().NoError(storage.ValueDeserializerWithSchema(record, values, schema, true))
+			for _, value := range values {
+				pk := int64(bucket + seen*2)
+				s.Equal(expected[pk], value.Value, "values must survive release of earlier input records")
+				seen++
+			}
+		}
+		s.Equal(110, seen)
 	}
 }
 
