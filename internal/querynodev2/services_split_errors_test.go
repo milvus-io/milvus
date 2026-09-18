@@ -1,0 +1,220 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package querynodev2
+
+import (
+	"context"
+	"testing"
+
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+func mixCoordFuture(mc types.MixCoordClient) *syncutil.Future[types.MixCoordClient] {
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(mc)
+	return future
+}
+
+// A spawn whose source collection is gone, or whose target never gets a
+// seekable position, fails without registering anything for the target.
+func TestSpawnSplitChildFailsWithoutRegistering(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("collection released", func(t *testing.T) {
+		collections := segments.NewMockCollectionManager(t)
+		collections.EXPECT().Get(int64(1)).Return(nil)
+		node := &QueryNode{
+			ctx:        context.Background(),
+			delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+			manager:    &segments.Manager{Collection: collections},
+		}
+		_, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{CollectionID: 1, TargetVChannel: "v1"})
+		assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+		assert.False(t, node.delegators.Contain("v1"))
+	})
+
+	t.Run("no coordinator to wait on", func(t *testing.T) {
+		collections := segments.NewMockCollectionManager(t)
+		collections.EXPECT().Get(int64(1)).Return(segments.NewTestCollection(1, 0, nil))
+		node := &QueryNode{
+			ctx:        context.Background(),
+			delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+			manager:    &segments.Manager{Collection: collections},
+		}
+		_, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{CollectionID: 1, TargetVChannel: "v1"})
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.False(t, node.delegators.Contain("v1"))
+	})
+}
+
+// waitSplitTargetRecovery gives up with the last reason once its retries run
+// out. retry.Do is cut to one attempt so the test does not sit out two minutes.
+func TestWaitSplitTargetRecoveryGivesUp(t *testing.T) {
+	oneAttempt := mockey.Mock(retry.Do).To(func(ctx context.Context, fn func() error, _ ...retry.Option) error {
+		return fn()
+	}).Build()
+	defer oneAttempt.UnPatch()
+
+	t.Run("the coordinator call fails", func(t *testing.T) {
+		mc := mocks.NewMockMixCoordClient(t)
+		mc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(nil, errors.New("coordinator down"))
+		node := &QueryNode{ctx: context.Background(), mixCoord: mixCoordFuture(mc)}
+		_, err := node.waitSplitTargetRecovery(1, "v1")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "split target v1 recovery info not available")
+	})
+
+	t.Run("the target has no seekable position", func(t *testing.T) {
+		mc := mocks.NewMockMixCoordClient(t)
+		mc.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(&datapb.GetRecoveryInfoResponseV2{
+			Status: merr.Success(),
+			// the earliest-segment fallback on a target nothing has been written
+			// to: a timestamp but neither a message ID nor a WAL name.
+			Channels: []*datapb.VchannelInfo{{ChannelName: "v1", SeekPosition: &msgpb.MsgPosition{Timestamp: 42}}},
+		}, nil)
+		node := &QueryNode{ctx: context.Background(), mixCoord: mixCoordFuture(mc)}
+		_, err := node.waitSplitTargetRecovery(1, "v1")
+		assert.ErrorIs(t, err, merr.ErrChannelNotFound)
+	})
+
+	t.Run("the coordinator handle never resolves", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		node := &QueryNode{ctx: ctx, mixCoord: syncutil.NewFuture[types.MixCoordClient]()}
+		_, err := node.waitSplitTargetRecovery(1, "v1")
+		assert.Error(t, err)
+	})
+}
+
+// The recovery respawn is best effort: every failure leaves the source as it
+// is, and a source with no Creating target spawns nothing.
+func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
+	describe := func(states ...schemapb.ShardState) *milvuspb.DescribeCollectionResponse {
+		resp := &milvuspb.DescribeCollectionResponse{Status: merr.Success()}
+		for i, state := range states {
+			vchannel := []string{"src", "t1", "t2"}[i]
+			resp.VirtualChannelNames = append(resp.VirtualChannelNames, vchannel)
+			resp.ShardInfos = append(resp.ShardInfos, &schemapb.CollectionShardInfo{VchannelName: vchannel, State: state})
+		}
+		return resp
+	}
+
+	t.Run("the coordinator handle never resolves", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		node := &QueryNode{mixCoord: syncutil.NewFuture[types.MixCoordClient]()}
+		source := delegator.NewMockShardDelegator(t)
+		node.respawnSplitChildrenOnRecovery(ctx, source, 1, "src")
+	})
+
+	t.Run("describe collection fails", func(t *testing.T) {
+		mc := mocks.NewMockMixCoordClient(t)
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("coordinator down"))
+		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
+		source := delegator.NewMockShardDelegator(t)
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+	})
+
+	t.Run("every target already adopted", func(t *testing.T) {
+		mc := mocks.NewMockMixCoordClient(t)
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
+			describe(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
+		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
+		source := delegator.NewMockShardDelegator(t)
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+	})
+
+	t.Run("the source refuses the respawn", func(t *testing.T) {
+		mc := mocks.NewMockMixCoordClient(t)
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
+			describe(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil)
+		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
+		source := delegator.NewMockShardDelegator(t)
+		source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).Return(errors.New("no spawner")).Once()
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+	})
+}
+
+// Releasing a source only detaches a child QueryCoord has adopted: it keeps
+// serving its vchannel. A child no longer registered on the node is skipped.
+func TestReleaseSplitChildrenDetachesAdoptedChildren(t *testing.T) {
+	paramtable.Init()
+	node := &QueryNode{
+		ctx:        context.Background(),
+		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		manager:    segments.NewManager(),
+	}
+
+	source := delegator.NewMockShardDelegator(t)
+	source.EXPECT().MarkReleasing().Once()
+	source.EXPECT().SplitChildVChannels().Return([]string{"v1", "gone"})
+	source.EXPECT().DetachSplitChild("v1").Once()
+
+	adopted := delegator.NewMockShardDelegator(t)
+	adopted.EXPECT().IsUnadoptedSplitChild().Return(false)
+	adopted.EXPECT().SetFrontingParent(nil).Once()
+	node.delegators.Insert("v1", adopted)
+
+	node.releaseSplitChildren(context.Background(), source, 1)
+	assert.True(t, node.delegators.Contain("v1"), "an adopted child keeps serving after its source is released")
+}
+
+// A child spawned for a source that was released or stopped mid-spawn is torn
+// down entirely: unregistered, its pipeline removed, and the delegator closed.
+func TestAbortSplitChild(t *testing.T) {
+	paramtable.Init()
+	manager := segments.NewManager()
+	node := &QueryNode{
+		ctx:        context.Background(),
+		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		manager:    manager,
+	}
+	node.pipelineManager = pipeline.NewManager(manager, nil, node.delegators)
+
+	child := delegator.NewMockShardDelegator(t)
+	child.EXPECT().Close().Once()
+	node.delegators.Insert("v1", child)
+
+	node.AbortSplitChild(context.Background(), child, 1, "v1")
+	assert.False(t, node.delegators.Contain("v1"))
+}
+
+func TestSetMixCoordClient(t *testing.T) {
+	node := &QueryNode{}
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	node.SetMixCoordClient(future)
+	assert.Same(t, future, node.mixCoord)
+}
