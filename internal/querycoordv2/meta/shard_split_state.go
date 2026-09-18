@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 )
 
 // ShardSplitStateCache answers whether a collection is mid shard-split and which
@@ -123,6 +124,74 @@ func (c *ShardSplitStateCache) entryFor(ctx context.Context, collectionID int64)
 	return fetched
 }
 
+// ShardStateSnapshot is one read of a collection's per-vchannel shard states,
+// taken right before a next-target pull so the pull can mark its split window
+// targets. It is immutable.
+type ShardStateSnapshot struct {
+	entry *shardSplitEntry
+}
+
+// SplitWindowTargets returns the channels of a next-target pull that must be
+// marked as split window targets, given that this snapshot was read BEFORE the
+// pull listed pulledChannels.
+//
+// The rule is a complement: a pulled channel is marked UNLESS this read saw it
+// Normal, Splitting or Dropped. Shard states only move forward and none of those
+// three returns to Creating, so such a channel cannot be a not-yet-adopted split
+// target in the later pull. Every other pulled channel is marked:
+//   - one this read saw Creating: still Creating in the pull, or adopted in
+//     between (an over-mark);
+//   - one this read did not list at all: a target fenced after the read (the
+//     fence race), which the pull lists in the window.
+//
+// So for ANY earlier read the mark never misses a target that is still Creating
+// in the pull; the only error is an over-mark, which holds the snapshot back
+// until the window-end refresh re-pulls it. A collection that is not splitting
+// lists the same channels in both reads, all Normal, and marks nothing.
+func (s *ShardStateSnapshot) SplitWindowTargets(pulledChannels []string) []string {
+	var marked []string
+	for _, channel := range pulledChannels {
+		state, listed := s.entry.channelStates[channel]
+		if listed {
+			switch state {
+			case schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardDropped:
+				continue
+			}
+		}
+		marked = append(marked, channel)
+	}
+	return marked
+}
+
+// ReadShardStates reads the collection's shard states fresh, ignoring the TTL,
+// and stores them for later cached queries. The freshest read over-marks the
+// least, which is why it does not settle for a TTL-valid entry.
+//
+// When the fresh read fails it falls back to the last entry the cache holds for
+// the collection: SplitWindowTargets never misses a target on ANY earlier read,
+// so an old entry only over-marks (and a collection that is not splitting still
+// marks nothing). The read error is returned only when the cache holds no entry.
+func (c *ShardSplitStateCache) ReadShardStates(ctx context.Context, collectionID int64) (*ShardStateSnapshot, error) {
+	fetched, err := c.fetch(ctx, collectionID)
+	if err != nil {
+		c.mu.Lock()
+		cached, ok := c.states[collectionID]
+		c.mu.Unlock()
+		if !ok {
+			return nil, err
+		}
+		mlog.Warn(ctx, "failed to read shard states fresh, fall back to the last cached read",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Duration("cachedAge", time.Since(cached.fetchedAt)),
+			mlog.Err(err))
+		return &ShardStateSnapshot{entry: cached}, nil
+	}
+	c.mu.Lock()
+	c.states[collectionID] = fetched
+	c.mu.Unlock()
+	return &ShardStateSnapshot{entry: fetched}, nil
+}
+
 // Invalidate drops the cached state for a collection so the next query refetches
 // immediately — used to lift the freeze the moment a split completes rather than
 // waiting out the TTL.
@@ -139,11 +208,16 @@ func (c *ShardSplitStateCache) fetch(ctx context.Context, collectionID int64) (*
 	}
 	vchannels := resp.GetVirtualChannelNames()
 	states := make(map[string]schemapb.ShardState, len(vchannels))
-	// shard_infos is parallel to virtual_channel_names.
-	for i, info := range resp.GetShardInfos() {
-		if i < len(vchannels) {
-			states[vchannels[i]] = info.GetState()
+	// shard_infos is parallel to virtual_channel_names. A listed vchannel without
+	// one is a legacy shard, Normal, as rootcoord itself defaults it: it must
+	// still count as listed, or SplitWindowTargets would mark it.
+	infos := resp.GetShardInfos()
+	for i, vchannel := range vchannels {
+		state := schemapb.ShardState_ShardNormal
+		if i < len(infos) {
+			state = infos[i].GetState()
 		}
+		states[vchannel] = state
 	}
 	return &shardSplitEntry{channelStates: states, fetchedAt: time.Now()}, nil
 }

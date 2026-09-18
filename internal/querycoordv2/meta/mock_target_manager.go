@@ -686,6 +686,56 @@ func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) RunAndReturn(run 
 	return _c
 }
 
+// GetSplitWindowTargets provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetSplitWindowTargets(ctx context.Context, collectionID int64, scope int32) typeutil.Set[string] {
+	ret := _m.Called(ctx, collectionID, scope)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSplitWindowTargets")
+	}
+
+	var r0 typeutil.Set[string]
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) typeutil.Set[string]); ok {
+		r0 = rf(ctx, collectionID, scope)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(typeutil.Set[string])
+		}
+	}
+
+	return r0
+}
+
+// MockTargetManager_GetSplitWindowTargets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSplitWindowTargets'
+type MockTargetManager_GetSplitWindowTargets_Call struct {
+	*mock.Call
+}
+
+// GetSplitWindowTargets is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - scope int32
+func (_e *MockTargetManager_Expecter) GetSplitWindowTargets(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetSplitWindowTargets_Call {
+	return &MockTargetManager_GetSplitWindowTargets_Call{Call: _e.mock.On("GetSplitWindowTargets", ctx, collectionID, scope)}
+}
+
+func (_c *MockTargetManager_GetSplitWindowTargets_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetSplitWindowTargets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_GetSplitWindowTargets_Call) Return(_a0 typeutil.Set[string]) *MockTargetManager_GetSplitWindowTargets_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockTargetManager_GetSplitWindowTargets_Call) RunAndReturn(run func(context.Context, int64, int32) typeutil.Set[string]) *MockTargetManager_GetSplitWindowTargets_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTargetJSON provides a mock function with given fields: ctx, scope, collectionID
 func (_m *MockTargetManager) GetTargetJSON(ctx context.Context, scope int32, collectionID int64) string {
 	ret := _m.Called(ctx, scope, collectionID)
