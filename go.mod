@@ -70,7 +70,7 @@ require (
 	github.com/hamba/avro/v2 v2.29.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/magiconair/properties v1.8.7
-	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.2-0.20260915011724-9e4f0ebc92af
+	github.com/milvus-io/milvus-proto/go-api/v3 v3.0.2
 	github.com/milvus-io/milvus/client/v3 v3.0.0
 	github.com/milvus-io/milvus/pkg/v3 v3.0.0-beta
 	github.com/shirou/gopsutil/v4 v4.25.10
@@ -285,7 +285,7 @@ require (
 	go.uber.org/automaxprocs v1.5.3 // indirect
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/mod v0.40.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.47.0
 	golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5 // indirect
 	golang.org/x/time v0.10.0
 	golang.org/x/tools v0.49.0 // indirect
