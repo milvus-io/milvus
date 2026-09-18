@@ -170,3 +170,26 @@ func TestADelistedSourceIsReleasedOnceTheCurrentTargetDropsIt(t *testing.T) {
 	}
 	assert.Equal(t, []string{"v0"}, releasedSourcesAfter(t, delistedSplitResp(), current))
 }
+
+// C1: between adoption and the window-end re-pull the next target is still the
+// window snapshot, which lists the retired source v0 next to its targets, and
+// the current target still lists v0. If the source's node stops then, v0 drops
+// out of dist. Re-watching it would rebuild the source delegator without its
+// in-process children -- adoption delisted it, so the rebuild re-derives no
+// target to front -- and the current target would keep routing reads to that
+// childless source until the flip. A channel the collection no longer lists is
+// never watched.
+func TestADelistedSourceIsNotReWatchedAfterItsNodeStops(t *testing.T) {
+	window := map[string]*meta.DmChannel{
+		"v0": servingChannel("v0", 1),
+		"v1": servingChannel("v1", 1),
+		"v2": servingChannel("v2", 1),
+	}
+	current := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1)}
+
+	// the source's node stopped: nothing of the collection is in dist.
+	loaded, released := channelDiff(t, delistedSplitResp(), window, current)
+	assert.NotContains(t, loaded, "v0", "a delisted source must never be re-watched")
+	assert.ElementsMatch(t, []string{"v1", "v2"}, loaded)
+	assert.Empty(t, released)
+}

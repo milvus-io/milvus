@@ -27,6 +27,8 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func splittingCollectionResp() *milvuspb.DescribeCollectionResponse {
@@ -237,7 +239,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 		states, ok := cache.ChannelStates(ctx, 16)
 		assert.True(t, ok)
-		assert.Equal(t, map[string]schemapb.ShardState{
+		assert.Equal(t, ShardStates{
 			"v0": schemapb.ShardState_ShardSplitting,
 			"v1": schemapb.ShardState_ShardCreating,
 			"v2": schemapb.ShardState_ShardCreating,
@@ -278,4 +280,32 @@ func TestShardSplitStateCache(t *testing.T) {
 		cache.Invalidate(4)
 		assert.False(t, cache.IsShardSplitting(ctx, 4))
 	})
+}
+
+func TestShardStatesListingRules(t *testing.T) {
+	adopted := ShardStatesOf(&milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v1", "v2"},
+		ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
+	})
+	// a listed vchannel without a shard info is a legacy Normal shard.
+	assert.Equal(t, ShardStates{"v1": schemapb.ShardState_ShardNormal, "v2": schemapb.ShardState_ShardNormal}, adopted)
+	assert.False(t, adopted.Splitting())
+	assert.True(t, ShardStatesOf(splittingCollectionResp()).Splitting())
+
+	assert.True(t, adopted.Lists("v1"))
+	assert.False(t, adopted.Lists("v0"), "adoption delisted the source")
+	assert.NoError(t, adopted.CheckWatchable("v1"))
+	assert.ErrorIs(t, adopted.CheckWatchable("v0"), merr.ErrChannelNotFound)
+
+	current := map[string]*DmChannel{
+		"v0": {VchannelInfo: &datapb.VchannelInfo{ChannelName: "v0"}},
+		"v1": {VchannelInfo: &datapb.VchannelInfo{ChannelName: "v1"}},
+	}
+	assert.Equal(t, []string{"v0"}, adopted.Delisted(current))
+
+	// no listing at all carries no routing information: nothing is delisted.
+	var none ShardStates
+	assert.True(t, none.Lists("v0"))
+	assert.Empty(t, none.Delisted(current))
+	assert.NoError(t, none.CheckWatchable("v0"))
 }

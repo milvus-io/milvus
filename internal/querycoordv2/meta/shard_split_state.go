@@ -21,8 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ShardSplitStateCache answers whether a collection is mid shard-split and which
@@ -45,7 +47,7 @@ type shardSplitEntry struct {
 	// State is all querycoord needs, and all the collection meta carries: which
 	// sources a target was carved from is provenance with the split task's
 	// lifetime, and lives there rather than on the collection.
-	channelStates map[string]schemapb.ShardState
+	channelStates ShardStates
 	fetchedAt     time.Time
 }
 
@@ -69,11 +71,10 @@ func NewShardSplitStateCache(broker Broker, ttl time.Duration) *ShardSplitStateC
 }
 
 // IsShardSplitting reports whether a shard of the collection is a fenced split
-// source (ShardSplitting). Balance stays frozen for the whole window so the
-// balancer never moves a source channel mid-handoff, which would tear down its
-// in-process children or re-spawn orphan ones on another node. The freeze lifts
-// at adoption, which delists the source in the same commit that makes its
-// targets Normal.
+// source (ShardSplitting), i.e. whether a split window is open. It is not the
+// whole balance freeze: adoption ends the window, but the freeze holds until the
+// current target stops listing the retired source (see
+// BalanceChecker.frozenForShardSplit).
 func (c *ShardSplitStateCache) IsShardSplitting(ctx context.Context, collectionID int64) bool {
 	return len(c.SplittingSourceChannels(ctx, collectionID)) > 0
 }
@@ -118,12 +119,12 @@ func (c *ShardSplitStateCache) CreatingTargetChannelsAsOf(ctx context.Context, c
 // -- which two separate queries cannot answer, because a TTL refresh may land
 // between them and split the answer across two different reads. The map is a
 // copy, so a caller may hold it.
-func (c *ShardSplitStateCache) ChannelStates(ctx context.Context, collectionID int64) (map[string]schemapb.ShardState, bool) {
+func (c *ShardSplitStateCache) ChannelStates(ctx context.Context, collectionID int64) (ShardStates, bool) {
 	entry := c.entryFor(ctx, collectionID)
 	if entry == nil {
 		return nil, false
 	}
-	states := make(map[string]schemapb.ShardState, len(entry.channelStates))
+	states := make(ShardStates, len(entry.channelStates))
 	for channel, state := range entry.channelStates {
 		states[channel] = state
 	}
@@ -245,8 +246,18 @@ func (c *ShardSplitStateCache) fetch(ctx context.Context, collectionID int64) (*
 	if err != nil {
 		return nil, err
 	}
+	return &shardSplitEntry{channelStates: ShardStatesOf(resp), fetchedAt: time.Now()}, nil
+}
+
+// ShardStates maps each vchannel a collection lists to its shard state, as one
+// DescribeCollection answered it.
+type ShardStates map[string]schemapb.ShardState
+
+// ShardStatesOf reads the per-vchannel shard states off a DescribeCollection
+// response.
+func ShardStatesOf(resp *milvuspb.DescribeCollectionResponse) ShardStates {
 	vchannels := resp.GetVirtualChannelNames()
-	states := make(map[string]schemapb.ShardState, len(vchannels))
+	states := make(ShardStates, len(vchannels))
 	// shard_infos is parallel to virtual_channel_names. A listed vchannel without
 	// one is a legacy shard, Normal, as rootcoord itself defaults it: it must
 	// still count as listed, or SplitWindowTargets would mark it.
@@ -258,5 +269,63 @@ func (c *ShardSplitStateCache) fetch(ctx context.Context, collectionID int64) (*
 		}
 		states[vchannel] = state
 	}
-	return &shardSplitEntry{channelStates: states, fetchedAt: time.Now()}, nil
+	return states
+}
+
+// Lists reports whether the collection lists the vchannel.
+//
+// A collection is never described with no vchannel at all, so an empty listing
+// carries no routing information -- a caller built without one, such as a test
+// double -- and is read as listing everything.
+func (s ShardStates) Lists(vchannel string) bool {
+	if len(s) == 0 {
+		return true
+	}
+	_, listed := s[vchannel]
+	return listed
+}
+
+// Splitting reports whether one of the listed vchannels is a fenced split
+// source.
+func (s ShardStates) Splitting() bool {
+	for _, state := range s {
+		if state == schemapb.ShardState_ShardSplitting {
+			return true
+		}
+	}
+	return false
+}
+
+// Delisted returns the given channels the collection no longer lists. Among the
+// channels of a collection's target these are shard split sources retired by an
+// adoption the target predates: delisting is the only way a shard leaves the
+// collection (see routing.CheckNoListedDroppedShard).
+func (s ShardStates) Delisted(channels map[string]*DmChannel) []string {
+	var out []string
+	for name := range channels {
+		if !s.Lists(name) {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// CheckWatchable refuses a watch of a vchannel the collection no longer lists.
+//
+// Such a vchannel is a shard split source that an adoption retired. The next
+// target pulled inside the split window still lists it until the window-end
+// re-pull, and the current target until the flip, so a checker working from
+// either would re-watch it the moment its delegator is gone. The rebuilt
+// delegator would serve the source's key range without the in-process children
+// that carry the targets' writes: adoption delisted the source, so its rebuild
+// re-derives no target to front. The flip releases it instead.
+//
+// The refusal is a System error: nothing in any request forces it, and it is
+// the stale target that has to catch up.
+func (s ShardStates) CheckWatchable(vchannel string) error {
+	if !s.Lists(vchannel) {
+		return merr.WrapErrChannelNotFound(vchannel,
+			"the collection no longer lists it: a retired shard split source is released at the flip, never re-watched")
+	}
+	return nil
 }
