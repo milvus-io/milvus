@@ -169,8 +169,14 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(ctx context.Context, collec
 		// Read the shard states BEFORE the pull: the mark is the complement of
 		// what this read saw settled (ShardStateSnapshot.SplitWindowTargets),
 		// which never misses a target the later pull still has in the window.
-		// A failed fresh read falls back to the last cached one, which is just
-		// as sound; only with nothing cached is the read retried with the pull.
+		// A failed fresh read falls back to the last cached one: for marking
+		// that fallback is just as sound, since a stale entry only ever
+		// over-marks, never misses. That entry's fetchedAt stays the stale one
+		// too, and TargetObserver.isSplitWindowOver compares it against this
+		// pull's own timestamp, so a run of failed reads defers the window-end
+		// refresh to NextTargetSurviveTime instead of declaring the window over
+		// on a read that predates the pull. Only with nothing cached at all is
+		// the read retried with the pull.
 		if mgr.splitStates != nil {
 			shardStates, err = mgr.readShardStates(ctx, collectionID)
 			if err != nil {

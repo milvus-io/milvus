@@ -91,6 +91,24 @@ func (c *ShardSplitStateCache) CreatingTargetChannels(ctx context.Context, colle
 	return c.channelsInState(ctx, collectionID, schemapb.ShardState_ShardCreating)
 }
 
+// CreatingTargetChannelsAsOf reports the collection's not-yet-adopted split
+// target vchannels (ShardState_ShardCreating), as read no earlier than after.
+// ok is false when the freshest entry the cache can produce -- including a
+// fallback (entryFor, ReadShardStates) -- was fetched before after: such an
+// entry predates whatever after marks (typically a next-target pull) and
+// cannot speak to the state at or after it, so its "nothing Creating" must not
+// be read as "adoption already happened". Callers needing a liveness check on
+// a specific pull must use this instead of CreatingTargetChannels, which
+// answers from whatever entry is cached regardless of its age relative to any
+// pull.
+func (c *ShardSplitStateCache) CreatingTargetChannelsAsOf(ctx context.Context, collectionID int64, after time.Time) (channels []string, ok bool) {
+	entry := c.entryFor(ctx, collectionID)
+	if entry == nil || entry.fetchedAt.Before(after) {
+		return nil, false
+	}
+	return entry.channelsInState(schemapb.ShardState_ShardCreating), true
+}
+
 // channelsInState returns the collection's vchannels in the given shard state.
 func (c *ShardSplitStateCache) channelsInState(ctx context.Context, collectionID int64, state schemapb.ShardState) []string {
 	if entry := c.entryFor(ctx, collectionID); entry != nil {
