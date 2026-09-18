@@ -403,6 +403,31 @@ var (
 			Buckets:   subMsBuckets, // unit: ms
 		}, []string{nodeIDLabelName, functionLabelName})
 
+	ProxyDQLBackpressureConcurrency = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "dql_backpressure_concurrency",
+			Help:      "DQL task dispatch concurrency controlled by proxy backpressure",
+		}, []string{nodeIDLabelName, "state"})
+
+	ProxyDQLBackpressureEventsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "dql_backpressure_events_total",
+			Help:      "Total number of proxy DQL backpressure events",
+		}, []string{nodeIDLabelName, "event", "reason"})
+
+	ProxyDQLBackpressureWaitDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "dql_backpressure_wait_duration",
+			Help:      "duration in milliseconds that DQL tasks wait for proxy backpressure admission",
+			Buckets:   subMsBuckets,
+		}, []string{nodeIDLabelName})
+
 	MaxInsertRate = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -549,6 +574,9 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySlowQueryCount)
 	registry.MustRegister(ProxyReportValue)
 	registry.MustRegister(ProxyReqInQueueLatency)
+	registry.MustRegister(ProxyDQLBackpressureConcurrency)
+	registry.MustRegister(ProxyDQLBackpressureEventsTotal)
+	registry.MustRegister(ProxyDQLBackpressureWaitDuration)
 
 	registry.MustRegister(MaxInsertRate)
 	registry.MustRegister(ProxyRetrySearchCount)
