@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	io_prometheus_client "github.com/prometheus/client_model/go"
 	"github.com/samber/lo"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type TargetObserverSuite struct {
@@ -542,6 +544,7 @@ func TestShouldUpdateCurrentTarget_ReplicaReadiness(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	// no split window: the next target marks no window targets.
 	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, collectionID, meta.NextTarget).Return(nil).Maybe()
+	targetMgr.EXPECT().GetSplitWindowExclusions(mock.Anything, collectionID, meta.NextTarget).Return(nil, true).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
 	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
@@ -669,6 +672,7 @@ func TestShouldUpdateCurrentTarget_OnlyReadyDelegatorsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	// no split window: the next target marks no window targets.
 	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, collectionID, meta.NextTarget).Return(nil).Maybe()
+	targetMgr.EXPECT().GetSplitWindowExclusions(mock.Anything, collectionID, meta.NextTarget).Return(nil, true).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	// Return a segment in target - this will be checked by CheckDelegatorDataReady
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
@@ -826,6 +830,7 @@ func TestShouldUpdateCurrentTarget_AllChannelsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	// no split window: the next target marks no window targets.
 	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, collectionID, meta.NextTarget).Return(nil).Maybe()
+	targetMgr.EXPECT().GetSplitWindowExclusions(mock.Anything, collectionID, meta.NextTarget).Return(nil, true).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(targetSegments2).Maybe()
@@ -968,6 +973,7 @@ func TestShouldUpdateCurrentTarget_PartialChannelsSynced(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	// no split window: the next target marks no window targets.
 	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, collectionID, meta.NextTarget).Return(nil).Maybe()
+	targetMgr.EXPECT().GetSplitWindowExclusions(mock.Anything, collectionID, meta.NextTarget).Return(nil, true).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments1).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-2", mock.Anything).Return(targetSegments2).Maybe()
@@ -1080,6 +1086,7 @@ func TestShouldUpdateCurrentTarget_NoReadyDelegators(t *testing.T) {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.NextTarget).Return(channelNames).Maybe()
 	// no split window: the next target marks no window targets.
 	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, collectionID, meta.NextTarget).Return(nil).Maybe()
+	targetMgr.EXPECT().GetSplitWindowExclusions(mock.Anything, collectionID, meta.NextTarget).Return(nil, true).Maybe()
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, collectionID, meta.NextTarget).Return(newVersion).Maybe()
 	targetMgr.EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, "channel-1", mock.Anything).Return(targetSegments).Maybe()
 	targetMgr.EXPECT().GetGrowingSegmentsByChannel(mock.Anything, collectionID, mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -1617,4 +1624,146 @@ func TestIsSplitWindowOver(t *testing.T) {
 		ob := NewTargetObserverWithSplitState(nil, targetMgr, nil, broker, nil, nil, meta.NewShardSplitStateCache(broker, 0))
 		assert.False(t, ob.isSplitWindowOver(ctx, collectionID))
 	})
+}
+
+// TestSplitWindowCurrentTargetServesTheSource pins Task 17: a collection loaded
+// for the first time INSIDE a split window reaches a usable current target --
+// the source alone -- instead of waiting out the window. The hold-back is
+// unchanged: the window targets are still never synced, and never appear in the
+// current target GetShardLeaders enumerates.
+func TestSplitWindowCurrentTargetServesTheSource(t *testing.T) {
+	f := newSplitHandoffFixture(t)
+	ctx, collectionID := f.ctx, f.collectionID
+	const segO1, segO2 = int64(11), int64(12)
+
+	// the fence lands before the load: the first target this collection ever has
+	// is a window snapshot, with the outputs attributed to the listed source.
+	f.setShards([]string{"src", "t1", "t2"},
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
+
+	// only the source has a delegator: the unadopted children are hidden from
+	// GetDataDistribution for the whole window.
+	f.setDist(map[string][]int64{"src": {segO1, segO2}})
+	f.synced = nil
+	assert.True(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID),
+		"the source is loaded and synced, so the collection is serviceable")
+	assert.Equal(t, []string{"src"}, f.synced, "a window target is never synced")
+
+	f.observer.updateCurrentTarget(ctx, collectionID)
+	assert.Equal(t, []string{"src"}, f.currentChannels(), "a window target is never routed to")
+	assert.True(t, f.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID))
+	windowVersion := f.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget)
+	// both outputs are served, through the source they are attributed to.
+	assert.ElementsMatch(t, []int64{segO1, segO2},
+		lo.Keys(f.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)))
+
+	// the next target is kept, so the window targets stay in a target: the
+	// channel checker releases exactly the channels that are in neither.
+	assert.True(t, f.targetMgr.IsNextTargetExist(ctx, collectionID))
+	assert.ElementsMatch(t, []string{"src", "t1", "t2"},
+		lo.Keys(f.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTarget)))
+	assert.False(t, f.observer.shouldUpdateNextTarget(ctx, collectionID))
+
+	// a second round re-promotes nothing and leaves everything where it is.
+	f.synced = nil
+	assert.True(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	f.observer.updateCurrentTarget(ctx, collectionID)
+	assert.Equal(t, windowVersion, f.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget))
+	assert.Equal(t, []string{"src"}, f.currentChannels())
+
+	// adoption: the targets turn Normal and are in dist, empty and data-ready
+	// against the window snapshot. They must still not be synced or promoted,
+	// and the current target must stay on the source.
+	f.setShards([]string{"t1", "t2"}, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal)
+	f.setDist(map[string][]int64{"src": {segO1, segO2}, "t1": {}, "t2": {}})
+	f.synced = nil
+	assert.False(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	assert.Equal(t, []string{"src"}, f.synced)
+	assert.Equal(t, []string{"src"}, f.currentChannels())
+	assert.Equal(t, windowVersion, f.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget))
+
+	// the window is over: the ordinary refresh and flip take it from here.
+	assert.True(t, f.observer.shouldUpdateNextTarget(ctx, collectionID))
+	f.refreshAfterDelistingAndFlip(segO1, segO2)
+}
+
+// TestSplitWindowCurrentTargetAdvancesAnAlreadyLoadedCollection pins the other
+// entry into the window: the collection was already serving when the fence
+// landed, so a current target exists. The window snapshot still advances it --
+// same channel, now carrying the outputs attributed to the source.
+func TestSplitWindowCurrentTargetAdvancesAnAlreadyLoadedCollection(t *testing.T) {
+	f := newSplitHandoffFixture(t)
+	ctx, collectionID := f.ctx, f.collectionID
+	const segS, segO1, segO2 = int64(1), int64(11), int64(12)
+
+	preFenceVersion := f.serveBeforeSplit(segS)
+
+	f.setShards([]string{"src", "t1", "t2"},
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segO1: "src", segO2: "src"})
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	f.setDist(map[string][]int64{"src": {segO1, segO2}})
+
+	f.synced = nil
+	assert.True(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	assert.Equal(t, []string{"src"}, f.synced)
+	f.observer.updateCurrentTarget(ctx, collectionID)
+	assert.Equal(t, []string{"src"}, f.currentChannels())
+	assert.Greater(t, f.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.CurrentTarget), preFenceVersion)
+	assert.ElementsMatch(t, []int64{segO1, segO2},
+		lo.Keys(f.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)))
+
+	f.setShards([]string{"t1", "t2"}, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal)
+	assert.True(t, f.observer.shouldUpdateNextTarget(ctx, collectionID))
+	f.refreshAfterDelistingAndFlip(segO1, segO2)
+}
+
+// TestSplitWindowCurrentTargetRefusesAnEmptyServingSet pins the defense in
+// depth in shouldUpdateCurrentTarget: the exclusion rule guarantees a fenced
+// source stays, so an exclusion covering every channel cannot happen -- but
+// lo.Every over an empty list is vacuously true, so if it ever did, the current
+// target would advance to no channel at all. It must refuse instead.
+func TestSplitWindowCurrentTargetRefusesAnEmptyServingSet(t *testing.T) {
+	f := newSplitHandoffFixture(t)
+	ctx, collectionID := f.ctx, f.collectionID
+
+	f.setShards([]string{"src", "t1", "t2"},
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{11: "src"})
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	f.setDist(map[string][]int64{"src": {11}})
+
+	everything := typeutil.NewSet("src", "t1", "t2")
+	mockExclusions := mockey.Mock((*meta.TargetManager).GetSplitWindowExclusions).
+		Return(everything, true).Build()
+	defer mockExclusions.UnPatch()
+
+	assert.False(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	assert.Empty(t, f.currentChannels())
+}
+
+// TestSplitWindowCurrentTargetRefusedWhenTheSourceIsGone pins the guard on a
+// state read that is behind the pull: the states still call "src" a fenced
+// source, but the pull no longer lists it, so the targets ARE the servers now.
+// Excluding them would advance the current target to nothing and report a
+// collection ready that serves no row of the split key range.
+func TestSplitWindowCurrentTargetRefusedWhenTheSourceIsGone(t *testing.T) {
+	f := newSplitHandoffFixture(t)
+	ctx, collectionID := f.ctx, f.collectionID
+	const segO1, segO2 = int64(11), int64(12)
+
+	f.setShards([]string{"src", "t1", "t2"},
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.setRecovery([]string{"t1", "t2"}, map[int64]string{segO1: "t1", segO2: "t2"})
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
+
+	f.setDist(map[string][]int64{"t1": {segO1}, "t2": {segO2}})
+	f.synced = nil
+	assert.False(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	assert.Empty(t, f.synced, "the marked targets are still held back from sync")
+	assert.Empty(t, f.currentChannels())
 }

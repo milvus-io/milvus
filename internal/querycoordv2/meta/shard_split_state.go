@@ -109,6 +109,27 @@ func (c *ShardSplitStateCache) CreatingTargetChannelsAsOf(ctx context.Context, c
 	return entry.channelsInState(schemapb.ShardState_ShardCreating), true
 }
 
+// ChannelStates returns the collection's per-vchannel shard states as one cached
+// read, refreshing past the TTL like every other query on this cache. ok is
+// false only when the cache holds nothing for the collection and cannot read it.
+//
+// It exists for callers that must reason about two states together -- "is this
+// channel still a not-yet-adopted target AND is its fenced source still listed"
+// -- which two separate queries cannot answer, because a TTL refresh may land
+// between them and split the answer across two different reads. The map is a
+// copy, so a caller may hold it.
+func (c *ShardSplitStateCache) ChannelStates(ctx context.Context, collectionID int64) (map[string]schemapb.ShardState, bool) {
+	entry := c.entryFor(ctx, collectionID)
+	if entry == nil {
+		return nil, false
+	}
+	states := make(map[string]schemapb.ShardState, len(entry.channelStates))
+	for channel, state := range entry.channelStates {
+		states[channel] = state
+	}
+	return states, true
+}
+
 // channelsInState returns the collection's vchannels in the given shard state.
 func (c *ShardSplitStateCache) channelsInState(ctx context.Context, collectionID int64, state schemapb.ShardState) []string {
 	if entry := c.entryFor(ctx, collectionID); entry != nil {

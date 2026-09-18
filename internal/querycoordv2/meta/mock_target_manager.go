@@ -686,6 +686,66 @@ func (_c *MockTargetManager_GetSealedSegmentsByPartition_Call) RunAndReturn(run 
 	return _c
 }
 
+// GetSplitWindowExclusions provides a mock function with given fields: ctx, collectionID, scope
+func (_m *MockTargetManager) GetSplitWindowExclusions(ctx context.Context, collectionID int64, scope int32) (typeutil.Set[string], bool) {
+	ret := _m.Called(ctx, collectionID, scope)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetSplitWindowExclusions")
+	}
+
+	var r0 typeutil.Set[string]
+	var r1 bool
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) (typeutil.Set[string], bool)); ok {
+		return rf(ctx, collectionID, scope)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64, int32) typeutil.Set[string]); ok {
+		r0 = rf(ctx, collectionID, scope)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(typeutil.Set[string])
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64, int32) bool); ok {
+		r1 = rf(ctx, collectionID, scope)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockTargetManager_GetSplitWindowExclusions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetSplitWindowExclusions'
+type MockTargetManager_GetSplitWindowExclusions_Call struct {
+	*mock.Call
+}
+
+// GetSplitWindowExclusions is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+//   - scope int32
+func (_e *MockTargetManager_Expecter) GetSplitWindowExclusions(ctx interface{}, collectionID interface{}, scope interface{}) *MockTargetManager_GetSplitWindowExclusions_Call {
+	return &MockTargetManager_GetSplitWindowExclusions_Call{Call: _e.mock.On("GetSplitWindowExclusions", ctx, collectionID, scope)}
+}
+
+func (_c *MockTargetManager_GetSplitWindowExclusions_Call) Run(run func(ctx context.Context, collectionID int64, scope int32)) *MockTargetManager_GetSplitWindowExclusions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64), args[2].(int32))
+	})
+	return _c
+}
+
+func (_c *MockTargetManager_GetSplitWindowExclusions_Call) Return(_a0 typeutil.Set[string], _a1 bool) *MockTargetManager_GetSplitWindowExclusions_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockTargetManager_GetSplitWindowExclusions_Call) RunAndReturn(run func(context.Context, int64, int32) (typeutil.Set[string], bool)) *MockTargetManager_GetSplitWindowExclusions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSplitWindowTargets provides a mock function with given fields: ctx, collectionID, scope
 func (_m *MockTargetManager) GetSplitWindowTargets(ctx context.Context, collectionID int64, scope int32) typeutil.Set[string] {
 	ret := _m.Called(ctx, collectionID, scope)
