@@ -125,7 +125,12 @@ func (c *Core) broadcastAlterCollectionForAddField(ctx context.Context, req *mil
 	return nil
 }
 
-// refuseTextFieldDuringShardSplit refuses to add a TEXT field while a shard
+// refuseTextFieldDuringShardSplit is asked by every path that can add a
+// field: AddCollectionField and AlterCollectionSchema's add action. (A struct
+// sub-field is an Array or ArrayOfVector, never TEXT, and AlterCollectionField
+// never changes a field's type.)
+//
+// It refuses to add a TEXT field while a shard
 // split of the collection is in flight: any shard of it is Splitting or
 // Creating. A split moves the source's data by rewriting it, and the rewrite
 // does not carry TEXT fields (LOB references), so a TEXT field added mid-split
