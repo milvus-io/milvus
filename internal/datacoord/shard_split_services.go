@@ -48,8 +48,10 @@ import (
 // first fence, which a redelivery reports again -- and a redelivery reporting
 // another one is logged, not applied. The
 // state only ever moves forward: Preparing/Fencing advance to Redistributing,
-// and a task already Adopting or beyond is left where it is, because a
+// and a task already Adopting or Done is left where it is, because a
 // redelivered callback must not drag a split back into a window it has left.
+// An Aborted task -- which a fenced split can only be through a bug -- is
+// logged at Error and rolled forward to Redistributing: the fence has landed.
 //
 // Errors are System: the blame for a catalog write failure, a checkpoint write
 // failure or a malformed callback never lies with the request's content, and the
@@ -233,10 +235,23 @@ func (s *Server) mergeCommittedShardSplit(ctx context.Context, req *datapb.Commi
 		task.RoutingModulus = req.GetRoutingModulus()
 	}
 	task.Fenced = true
-	if task.GetState() == datapb.SplitShardTaskState_SplitShardTaskUnknown ||
-		task.GetState() == datapb.SplitShardTaskState_SplitShardTaskPreparing ||
-		task.GetState() == datapb.SplitShardTaskState_SplitShardTaskFencing {
+	switch task.GetState() {
+	case datapb.SplitShardTaskState_SplitShardTaskUnknown,
+		datapb.SplitShardTaskState_SplitShardTaskPreparing,
+		datapb.SplitShardTaskState_SplitShardTaskFencing:
 		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+	case datapb.SplitShardTaskState_SplitShardTaskAborted:
+		// An abort is refused once a write switch may be in the WAL, so this
+		// is a bug. The fence has landed all the same: the source takes no
+		// more writes, and only the split carries its rows on. A fenced split
+		// rolls forward, never stays Aborted.
+		mlog.Error(ctx, "a fenced shard split commit found its task aborted, rolling it forward",
+			mlog.Int64("splitTaskID", req.GetSplitTaskId()),
+			mlog.FieldCollectionID(req.GetCollectionId()),
+			mlog.String("abortReason", task.GetFailReason()))
+		task.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+		task.EndTime = 0
+		task.FailReason = ""
 	}
 	return task
 }
