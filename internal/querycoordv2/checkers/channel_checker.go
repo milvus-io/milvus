@@ -382,6 +382,8 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	}
 	groups := make(map[string]*channelGroup)
 	groupKeys := make([]string, 0)
+	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
+	affinity := c.splitSourceAffinity(ctx, replica)
 	for _, ch := range channels {
 		var rwNodes []int64
 		if streamingutil.UseStreamingQueryNodeAsDelegator() {
@@ -390,6 +392,10 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 			if rwNodes = replica.GetChannelRWNodes(ch.GetChannelName()); len(rwNodes) == 0 {
 				rwNodes = replica.GetRWNodes()
 			}
+		}
+		if node, ok := affinity(ch.GetChannelName(), rwNodes); ok {
+			plans = append(plans, assign.ChannelAssignPlan{Channel: ch, From: -1, To: node})
+			continue
 		}
 		key := nodesGroupKey(rwNodes)
 		group, ok := groups[key]
@@ -401,7 +407,6 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		group.channels = append(group.channels, ch)
 	}
 
-	plans := make([]assign.ChannelAssignPlan, 0, len(channels))
 	for _, key := range groupKeys {
 		group := groups[key]
 		plans = append(plans, c.assignPolicy.AssignChannel(ctx, replica.GetCollectionID(), group.channels, group.nodes, true)...)
@@ -416,6 +421,74 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	// consistently exceeds ChannelTaskTimeout never converges: killed and
 	// rebuilt with the same budget every check tick, no backoff or retry cap.
 	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
+}
+
+// splitSourceAffinity returns where a newly adopted shard split target of the
+// replica must be watched, if anywhere in particular: on the node serving its
+// retired source, as long as the current target still lists that source.
+//
+// The source's delegator still fronts the target's in-process child there, and
+// a watch on that node converts the child in place: it is adopted with the
+// growing data it has consumed since the fence. A watch anywhere else builds a
+// fresh delegator that reloads the target's half of the shard, while the child
+// is never adopted and the source's reads never reach the handover.
+//
+// Which source fronts which target is the split task's provenance and is not in
+// the collection meta. A target not yet in the current target, while the
+// current target lists a retired source, is such a target; with every retired
+// source served by one node in the replica, that node is its fronting source's.
+// With retired sources on several nodes (concurrent splits, which
+// dataCoord.shardSplit.maxConcurrentTasks=1 rules out by default) the pairing
+// is not derivable here, and nothing is pinned.
+//
+// The affinity also yields to the normal placement when that node is not a
+// read-write node of the replica, or not a Normal node; the target is then
+// watched fresh, which is correct, only slower.
+func (c *ChannelChecker) splitSourceAffinity(ctx context.Context, replica *meta.Replica) func(channel string, rwNodes []int64) (int64, bool) {
+	none := func(string, []int64) (int64, bool) { return 0, false }
+	if c.splitState == nil {
+		return none
+	}
+	collectionID := replica.GetCollectionID()
+	states, ok := c.splitState.ChannelStates(ctx, collectionID)
+	if !ok {
+		return none
+	}
+	current := c.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget)
+	retired := states.Delisted(current)
+	if len(retired) == 0 {
+		return none
+	}
+	hosts := typeutil.NewUniqueSet()
+	for _, source := range retired {
+		if leader := c.dist.ChannelDistManager.GetShardLeader(source, replica); leader != nil {
+			hosts.Insert(leader.Node)
+		}
+	}
+	if hosts.Len() != 1 {
+		if hosts.Len() > 1 {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "retired shard split sources are served by several nodes; adopted targets are placed normally",
+				mlog.FieldCollectionID(collectionID), mlog.Int64("replicaID", replica.GetID()),
+				mlog.Strings("retiredSources", retired), mlog.Int64s("nodes", hosts.Collect()))
+		}
+		return none
+	}
+	host := hosts.Collect()[0]
+	return func(channel string, rwNodes []int64) (int64, bool) {
+		if _, inCurrent := current[channel]; inCurrent {
+			return 0, false
+		}
+		info := c.nodeMgr.Get(host)
+		if !lo.Contains(rwNodes, host) || info == nil || info.GetState() != session.NodeStateNormal {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "the retired split source's node cannot take the adopted target; place it normally",
+				mlog.FieldCollectionID(collectionID), mlog.String("channel", channel), mlog.Int64("sourceNode", host))
+			return 0, false
+		}
+		mlog.Info(ctx, "place an adopted split target on its fronting source's node, to convert the in-process child in place",
+			mlog.FieldCollectionID(collectionID), mlog.Int64("replicaID", replica.GetID()),
+			mlog.String("channel", channel), mlog.Int64("node", host))
+		return host, true
+	}
 }
 
 // nodesGroupKey returns an order-insensitive key of a node set.
