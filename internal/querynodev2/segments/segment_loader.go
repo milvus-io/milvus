@@ -2260,6 +2260,10 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
 		info = typeutil.Clone(info)
+		info.IndexInfos = lo.Filter(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) bool {
+			indexType, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.GetIndexParams())
+			return !ok || !vecindexmgr.GetVecIndexMgrInstance().IsNoTrainIndex(indexType)
+		})
 		// remain binlog paths whose field id is in index infos to estimate resource usage correctly
 		indexFields := typeutil.NewSet(lo.Map(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) int64 { return indexInfo.GetFieldID() })...)
 		var binlogPaths []*datapb.FieldBinlog
@@ -2273,7 +2277,8 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 		info.Statslogs = nil
 		return info
 	})
-	requestResourceResult, err := loader.requestResource(ctx, indexInfo...)
+	resourceInfo := lo.Filter(indexInfo, func(info *querypb.SegmentLoadInfo, _ int) bool { return len(info.GetIndexInfos()) > 0 })
+	requestResourceResult, err := loader.requestResource(ctx, resourceInfo...)
 	if err != nil {
 		return err
 	}
@@ -2285,7 +2290,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context,
 
 	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
 	defer metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	for _, loadInfo := range infos {
+	for _, loadInfo := range indexInfo {
 		for _, info := range loadInfo.GetIndexInfos() {
 			if len(info.GetIndexFilePaths()) == 0 {
 				log.Warn("failed to add index for segment, index file list is empty, the segment may be too small")
