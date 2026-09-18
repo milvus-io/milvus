@@ -532,13 +532,16 @@ func (sd *shardDelegator) SplitChildVChannels() []string {
 // until it is detached at source release — NOT until the child first becomes
 // serviceable. A child becomes serviceable the moment querycoord syncs it the
 // NEXT-target version (delegator.SyncTargetVersion), which happens strictly
-// before querycoord promotes the target into the CURRENT target and the proxy
-// re-routes the split key range onto it. Dropping the child from fronting at the
-// earlier serviceable flip would leave the range served by neither the source
-// nor the (not-yet-routed) target for that window — lost rows. Fronting until
-// release closes that window; the proxy routes each key range to exactly one
-// vchannel (the empty-range source is excluded from a range-tiled fan-out once
-// the targets cover the space), so there is no double-serve in the overlap.
+// before querycoord promotes the target into the CURRENT target: the source
+// keeps being synced through every next target, so the current target -- and
+// with it GetShardLeaders' fan-out -- stays exactly the source until every
+// target has synced, then flips to the targets in one step (design doc QC2).
+// Dropping the child from fronting at the earlier serviceable flip would leave
+// the source's still-current reads unable to see that target's rows for the
+// window between the two flips — lost rows. Fronting until release closes
+// that window; because the current target is one membership list the fan-out
+// reads as a whole, never source-and-targets at once, there is no double-serve
+// either.
 func (sd *shardDelegator) frontingChildren() []*shardDelegator {
 	sd.childMut.Lock()
 	defer sd.childMut.Unlock()
