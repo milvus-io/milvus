@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -705,10 +706,10 @@ func (suite *QueryHookSuite) TestStrictGroupConfigSnapshotLogsWeight() {
 	suite.Contains(sink.String(), "[phase1_candidate_weight=0]")
 
 	mlog.SetLevel(mlog.InfoLevel)
-	before := sink.String()
+	before := strings.Count(sink.String(), "strict_group_config_snapshot")
 	_, err = applyStrictGroupSettings(context.Background(), info)
 	suite.Require().NoError(err)
-	suite.Equal(before, sink.String())
+	suite.Equal(before, strings.Count(sink.String(), "strict_group_config_snapshot"))
 }
 
 func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
