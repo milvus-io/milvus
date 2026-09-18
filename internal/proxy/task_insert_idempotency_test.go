@@ -177,11 +177,10 @@ func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	cache := newInsertTaskIdempotencyMockCache(t, schema, true)
-	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	channels := []string{"ch0", "ch1", "ch2"}
+	cache := newInsertTaskIdempotencyMockCache(t, schema, true, channels...)
+	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	chMgr := channelmgr.NewMockChannelsMgr(t)
-	chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(channels, nil)
 
 	task := newInsertTaskForIdempotencyAutoIDTest(cache, idAllocator, chMgr)
 	require.NoError(t, task.PreExecute(ctx))
@@ -470,7 +469,9 @@ func TestPrepareAutoIdempotencyKeySeparatesPartitions(t *testing.T) {
 	require.NotEqual(t, keyOf("p1"), keyOf("p2"))
 }
 
-func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled bool) *MockCache {
+// newInsertTaskIdempotencyMockCache is the cache of collection 100; vchannels
+// is its channel list, which the write path reads with its routing.
+func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled bool, vchannels ...string) *MockCache {
 	t.Helper()
 
 	properties := []*commonpb.KeyValuePair(nil)
@@ -487,6 +488,7 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled
 		DBName:     "db",
 		Schema:     schema,
 		Properties: properties,
+		VChannels:  vchannels,
 	}, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil)
 	return cache

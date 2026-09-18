@@ -97,31 +97,24 @@ func splitRoutingOf(info *collectionInfo) (*metacache.SplitRouting, error) {
 	return info.SplitRouting, nil
 }
 
-// resolveWriteRoute reads the route of one write attempt. legacyChannels
-// supplies the channel list of a collection that has never been split, which
-// the write paths have always read from the channel manager.
-func resolveWriteRoute(
-	ctx context.Context,
-	cache Cache,
-	dbName string,
-	collectionName string,
-	collectionID int64,
-	legacyChannels func() ([]string, error),
-) (*writeRoute, error) {
+// resolveWriteRoute reads the route of one write attempt. The verdict -- split
+// or never split -- and the channel list come from one cache lookup: a routing
+// commit that lands between two lookups would otherwise run the legacy modulo
+// over the list the split has grown.
+func resolveWriteRoute(ctx context.Context, cache Cache, dbName string, collectionName string, collectionID int64) (*writeRoute, error) {
 	info, err := cache.GetCollectionInfo(ctx, dbName, collectionName, collectionID)
 	if err != nil {
 		return nil, err
+	}
+	if info == nil || len(info.VChannels) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("collection %d has no vchannel in its cached meta", collectionID)
 	}
 	split, err := splitRoutingOf(info)
 	if err != nil {
 		return nil, err
 	}
 	if split == nil {
-		channels, err := legacyChannels()
-		if err != nil {
-			return nil, err
-		}
-		return legacyWriteRoute(channels), nil
+		return legacyWriteRoute(info.VChannels), nil
 	}
 	return newSplitWriteRoute(info.VChannels, split), nil
 }
