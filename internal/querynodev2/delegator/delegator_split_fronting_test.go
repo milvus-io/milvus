@@ -87,7 +87,7 @@ func TestFrontedReadSkipsSegmentsTheSourceAlreadyPinned(t *testing.T) {
 	defer source.distribution.Unpin(version)
 	assert.ElementsMatch(t, []int64{shared, sharedGrowing}, pinnedIDs(sealed, growing))
 
-	childScope := sourceScope.forChild()
+	childScope := sourceScope.forChild(nil)
 	sealed, growing, _, version, err = child.pinReadableSegments(childScope, 1.0)
 	require.NoError(t, err)
 	defer child.distribution.Unpin(version)
@@ -116,21 +116,27 @@ func TestFrontingSourceScope(t *testing.T) {
 	assert.Nil(t, plain.pinned)
 	assert.False(t, plain.asChild)
 
-	children := []*shardDelegator{{vchannelName: "v1"}}
-	fronting := frontingSourceScope(children)
+	assert.Nil(t, plain.family.fronted())
+
+	leaf := &familyNode{sd: &shardDelegator{vchannelName: "v0"}}
+	assert.Nil(t, frontingSourceScope(leaf).pinned, "a read with no fronted delegator allocates no pin set")
+
+	grandchild := &familyNode{sd: &shardDelegator{vchannelName: "v3"}}
+	child := &familyNode{sd: &shardDelegator{vchannelName: "v1"}, children: []*familyNode{grandchild}}
+	sibling := &familyNode{sd: &shardDelegator{vchannelName: "v2"}}
+	root := &familyNode{sd: &shardDelegator{vchannelName: "v0"}, children: []*familyNode{child, sibling}}
+	fronting := frontingSourceScope(root)
 	assert.NotNil(t, fronting.pinned)
 	assert.False(t, fronting.asChild)
+	assert.Same(t, root, fronting.family)
+	assert.Equal(t, []*familyNode{child, grandchild, sibling}, root.descendants(), "depth first, grandchildren included")
 
-	child := fronting.forChild()
-	assert.True(t, child.asChild)
-	assert.Nil(t, child.pinned)
-
-	// the source's read covers the snapshot it took, even after its children
-	// change; a fronted child covers whatever it fronts in turn.
-	source := &shardDelegator{vchannelName: "v0", children: map[string]ShardDelegator{}}
-	assert.Nil(t, plain.readFamily(source))
-	assert.Equal(t, children, fronting.readFamily(source))
-	grandchild := &shardDelegator{vchannelName: "v3"}
-	children[0].children = map[string]ShardDelegator{"v3": grandchild}
-	assert.Equal(t, []*shardDelegator{grandchild}, child.readFamily(children[0]))
+	childScope := fronting.forChild(child)
+	assert.True(t, childScope.asChild)
+	assert.Same(t, child, childScope.family)
+	// every delegator of the read shares one pin set: each skips what any
+	// delegator read before it pinned, and records its own pins for the rest.
+	childScope.pinned.Insert(7)
+	assert.True(t, fronting.pinned.Contain(7))
+	assert.True(t, childScope.exclude.Contain(7))
 }
