@@ -53,25 +53,26 @@
 namespace milvus {
 namespace exec {
 
-#define JSON_TYPE_CASE(OutputType, TargetType, JSON_INNER_TYPE, CastExpr)     \
-    if constexpr (std::is_same_v<OutputType, TargetType>) {                   \
-        auto result = json_val.at<JSON_INNER_TYPE>(this->json_path_.value()); \
-        if (result.error() == simdjson::SUCCESS) {                            \
-            return CastExpr;                                                  \
-        }                                                                     \
-        if (this->strict_cast_) {                                             \
-            ThrowInfo(UnexpectedError,                                        \
-                      "failed to cast json value to " #TargetType             \
-                      ", wrong json data inner type");                        \
-        }                                                                     \
-        return std::nullopt;                                                  \
+#define JSON_TYPE_CASE(OutputType, TargetType, JSON_INNER_TYPE, CastExpr)    \
+    if constexpr (std::is_same_v<OutputType, TargetType>) {                  \
+        auto result =                                                        \
+            json_val.template at<JSON_INNER_TYPE>(this->json_path_.value()); \
+        if (result.error() == simdjson::SUCCESS) {                           \
+            return CastExpr;                                                 \
+        }                                                                    \
+        if (this->strict_cast_) {                                            \
+            ThrowInfo(UnexpectedError,                                       \
+                      "failed to cast json value to " #TargetType            \
+                      ", wrong json data inner type");                       \
+        }                                                                    \
+        return std::nullopt;                                                 \
     }
 
 #define JSON_STRING_CASE(OutputType)                                          \
     if constexpr (std::is_same_v<OutputType, std::string>) {                  \
         if (this->specific_json_type_) {                                      \
-            auto str_result =                                                 \
-                json_val.at<std::string_view>(this->json_path_.value());      \
+            auto str_result = json_val.template at<std::string_view>(         \
+                this->json_path_.value());                                    \
             if (str_result.error() == simdjson::SUCCESS) {                    \
                 return std::string(str_result.value());                       \
             }                                                                 \
@@ -188,14 +189,51 @@ class SealedDataGetter : public DataGetter<OutputType> {
     const segcore::SegmentSealed& segment_;
     const FieldId field_id_;
     bool from_data_;
+    bool from_vortex_column_ = false;
+    std::shared_ptr<ChunkedColumnInterface> column_;
 
-    // Thread-safety contract: string_chunk_pins_ is mutable and accessed
-    // without locks inside Get(). Each getter belongs to one SearchGroupBy
-    // invocation on one segment and is used on a single Driver thread.
-    // Sharing a getter across threads would require synchronizing this cache.
+    // Thread-safety contract: these caches are mutable and accessed without
+    // locks inside Get(). Each getter belongs to one SearchGroupBy invocation
+    // on one segment and is used on a single Driver thread. Sharing a getter
+    // across threads would require synchronizing them.
     mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> string_chunk_pins_;
+    mutable std::unordered_map<int64_t, OwnedTakeData> vortex_file_data_;
 
     PinWrapper<const index::IndexBase*> index_ptr_;
+
+    template <typename T>
+    const OwnedTakeData&
+    GetVortexFile(int64_t chunk_id) const {
+        auto cached = vortex_file_data_.find(chunk_id);
+        if (cached != vortex_file_data_.end()) {
+            return cached->second;
+        }
+
+        const auto start = column_->GetNumRowsUntilChunk(chunk_id);
+        const auto rows = column_->chunk_row_nums(chunk_id);
+        std::vector<int64_t> offsets(rows);
+        for (int64_t i = 0; i < rows; ++i) {
+            offsets[i] = start + i;
+        }
+        auto take = column_->Take(
+            op_ctx_,
+            TakeOptions{OffsetView::From(offsets.data(), offsets.size()),
+                        TargetTypeOf<T>()});
+        AssertInfo(take != nullptr,
+                   "Vortex group-by field {} does not support target {}",
+                   field_id_.get(),
+                   static_cast<int>(TargetTypeOf<T>()));
+        auto owned = take->GetOwn();
+        AssertInfo(owned.size == rows,
+                   "Vortex group-by field {} returned {} rows for file {}, "
+                   "expected {}",
+                   field_id_.get(),
+                   owned.size,
+                   chunk_id,
+                   rows);
+        return vortex_file_data_.emplace(chunk_id, std::move(owned))
+            .first->second;
+    }
 
     // VARCHAR and raw JSON share StringChunk storage. Keep visited chunks
     // pinned for the getter's lifetime and construct only the requested view.
@@ -204,11 +242,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
     GetStringRow(int64_t chunk_id, int64_t inner_offset) const {
         auto it = string_chunk_pins_.find(chunk_id);
         if (it == string_chunk_pins_.end()) {
-            auto column = segment_.GetChunkedColumn(field_id_);
-            AssertInfo(column != nullptr,
-                       "group-by field {} has no raw string column",
-                       field_id_.get());
-            auto pin = column->GetChunk(op_ctx_, chunk_id);
+            auto pin = column_->GetChunk(op_ctx_, chunk_id);
             it = string_chunk_pins_.emplace(chunk_id, std::move(pin)).first;
         }
         const auto* chunk = static_cast<const StringChunk*>(it->second.get());
@@ -227,7 +261,14 @@ class SealedDataGetter : public DataGetter<OutputType> {
                      bool strict_cast)
         : op_ctx_(op_ctx), segment_(segment), field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
-        if (!from_data_) {
+        if (from_data_) {
+            column_ = segment_.GetChunkedColumn(field_id_);
+            AssertInfo(column_ != nullptr,
+                       "group-by field {} has no loaded column",
+                       field_id_.get());
+            from_vortex_column_ = column_->GetLocalFormat() ==
+                                  ChunkedColumnInterface::LocalFormat::Vortex;
+        } else {
             auto index = segment_.PinIndex(op_ctx_, field_id_);
             if (index.empty()) {
                 ThrowInfo(
@@ -247,9 +288,43 @@ class SealedDataGetter : public DataGetter<OutputType> {
     std::optional<OutputType>
     Get(int64_t idx) const {
         if (from_data_) {
-            auto id_offset_pair = segment_.get_chunk_by_offset(field_id_, idx);
+            auto id_offset_pair = column_->GetChunkIDByOffset(idx);
             auto chunk_id = id_offset_pair.first;
             auto inner_offset = id_offset_pair.second;
+            if (from_vortex_column_) {
+                if constexpr (std::is_same_v<InnerRawType, std::string>) {
+                    const auto& data =
+                        GetVortexFile<std::string_view>(chunk_id);
+                    if (data.validity && !data.validity[inner_offset]) {
+                        return std::nullopt;
+                    }
+                    return std::string(data.values.template data_as<
+                                       std::string_view>()[inner_offset]);
+                } else if constexpr (std::is_same_v<InnerRawType,
+                                                    milvus::Json>) {
+                    const auto& data = GetVortexFile<milvus::Json>(chunk_id);
+                    if (data.validity && !data.validity[inner_offset]) {
+                        return std::nullopt;
+                    }
+                    const auto& json_val =
+                        data.values
+                            .template data_as<milvus::Json>()[inner_offset];
+                    JSON_TYPE_CASES(OutputType)
+                    JSON_STRING_CASE(OutputType)
+                    return std::nullopt;
+                } else {
+                    static_assert(
+                        std::is_same_v<OutputType, InnerRawType>,
+                        "OutputType and InnerRawType must be the same for "
+                        "non-json/string field group by");
+                    const auto& data = GetVortexFile<InnerRawType>(chunk_id);
+                    if (data.validity && !data.validity[inner_offset]) {
+                        return std::nullopt;
+                    }
+                    return data.values
+                        .template data_as<InnerRawType>()[inner_offset];
+                }
+            }
             if constexpr (std::is_same_v<InnerRawType, std::string>) {
                 auto row = GetStringRow(chunk_id, inner_offset);
                 if (!row.has_value()) {

@@ -136,16 +136,16 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         segcore::ChunkDataAccessor right_by_offsets;
         if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
             auto offsets = OffsetView::From(input->data(), real_batch_size);
-            if (expr_->left_data_type_ == DataType::VARCHAR) {
-                left_by_offsets =
-                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        left_field_, offsets, left_pinned_index);
-            }
-            if (expr_->right_data_type_ == DataType::VARCHAR) {
-                right_by_offsets =
-                    segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        right_field_, offsets, right_pinned_index);
-            }
+            left_by_offsets = segment_chunk_reader_.GetDataAccessorByOffsets(
+                expr_->left_data_type_,
+                left_field_,
+                offsets,
+                left_pinned_index);
+            right_by_offsets = segment_chunk_reader_.GetDataAccessorByOffsets(
+                expr_->right_data_type_,
+                right_field_,
+                offsets,
+                right_pinned_index);
         }
         for (auto i = 0; i < real_batch_size; ++i) {
             auto offset = (*input)[i];
@@ -216,7 +216,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             left_current_chunk_pos_,
             LeftPinnedIndexForRawLookup(),
             real_batch_size,
-            &left_string_scan_state_);
+            &left_column_scan_state_);
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
             expr_->right_data_type_,
             expr_->right_field_id_,
@@ -224,7 +224,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             right_current_chunk_pos_,
             RightPinnedIndexForRawLookup(),
             real_batch_size,
-            &right_string_scan_state_);
+            &right_column_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
             auto left_value = left(), right_value = right();
             if (!left_value.has_value() || !right_value.has_value()) {
