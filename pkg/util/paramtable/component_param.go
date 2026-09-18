@@ -6089,6 +6089,7 @@ type dataCoordConfig struct {
 	ShardSplitMaxShardRows       ParamItem `refreshable:"true"`
 	ShardSplitMaxConcurrentTasks ParamItem `refreshable:"true"`
 	ShardSplitMinSiblingRatio    ParamItem `refreshable:"true"`
+	ShardSplitRewriteBatchSize   ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -6555,6 +6556,17 @@ half is smaller than this fraction of it, and warns instead. Set to 0 to disable
 		Export: false,
 	}
 	p.ShardSplitMinSiblingRatio.Init(base.mgr)
+
+	p.ShardSplitRewriteBatchSize = ParamItem{
+		Key:          "dataCoord.shardSplit.rewriteBatchSize",
+		Version:      "3.0.0",
+		DefaultValue: "64",
+		Doc: `The largest number of rewrite plans one shard split keeps in flight. A split rewrites its
+source one flushed segment per plan; each plan holds its input segment as compacting until it
+commits, and the compaction scheduler's slots bound how many actually run at once.`,
+		Export: false,
+	}
+	p.ShardSplitRewriteBatchSize.Init(base.mgr)
 
 	p.EnableAutoCompaction = ParamItem{
 		Key:          "dataCoord.compaction.enableAutoCompaction",

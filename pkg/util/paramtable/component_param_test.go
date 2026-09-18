@@ -1085,6 +1085,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(2048), Params.ShardSplitMaxShardSize.GetAsInt64())
 		assert.Equal(t, int64(500000000), Params.ShardSplitMaxShardRows.GetAsInt64())
 		assert.Equal(t, 1, Params.ShardSplitMaxConcurrentTasks.GetAsInt())
+		assert.Equal(t, 64, Params.ShardSplitRewriteBatchSize.GetAsInt())
 		assert.Equal(t, 0.05, Params.ShardSplitMinSiblingRatio.GetAsFloat())
 		params.Save(Params.ShardSplitMaxShardRows.Key, "2000")
 		assert.Equal(t, int64(2000), Params.ShardSplitMaxShardRows.GetAsInt64())
