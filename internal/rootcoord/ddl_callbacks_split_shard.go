@@ -123,8 +123,9 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 	// Read-only assertions, BEFORE anything is committed: the very checks
 	// SplitShardParam.Validate ran before the broadcast, on the same message,
 	// from the same function -- names, tiling, modulus, the source Splitting and
-	// the targets Creating, namespace admission. A message that got here failing
-	// them did not come through the builder. Retrying cannot clear it, but
+	// the targets Creating, namespace admission, the namespace-collection
+	// deferral (design §1.3). A message that got here failing them did not come
+	// through the builder. Retrying cannot clear it, but
 	// neither can the broadcast be abandoned with a fenced source behind it, so
 	// it is logged naming the wedge and returned as a System error; CommitShardSplit
 	// is not called, so no task is recorded for a message that can never commit.

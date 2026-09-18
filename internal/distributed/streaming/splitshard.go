@@ -69,7 +69,8 @@ type SplitShardParam struct {
 	// (and their schema history) starts from it. Its Properties must carry the
 	// collection's properties: the namespace admission check (§3.1) reads
 	// namespace.sharding.enabled and namespace.mode from them, both before the
-	// broadcast and in the ack callback.
+	// broadcast and in the ack callback. Its EnableNamespace must be the
+	// collection's too: a namespace collection is refused (§1.3).
 	Schema *schemapb.CollectionSchema
 	// PartitionIDs is the current partition snapshot of the collection,
 	// registered on every target's genesis.
@@ -220,7 +221,9 @@ func (p *SplitShardParam) body() *message.SplitShardMessageBody {
 //   - namespace admission (§3.1): a hash($namespace_id) post-image only for a
 //     collection whose genesis properties say its rows were placed by namespace,
 //     at a modulus that divides its partition-key buckets (the header's
-//     partition snapshot), so the split relabels whole buckets.
+//     partition snapshot), so the split relabels whole buckets;
+//   - namespace deferral (§1.3): no split of a collection whose genesis schema
+//     has enable_namespace set, whatever its shard_by.
 //
 // The header carries only names; the residues and the modulus exist once, in
 // the post-image, so there is no second copy to cross-check.
@@ -334,6 +337,19 @@ func ValidateSplitShardMessage(header *message.SplitShardMessageHeader, body *me
 	}
 	if err := routing.CheckNamespaceRelabelGranularity(postImage.GetShardBy(), postImage.GetRoutingModulus(), len(header.GetPartitionIds())); err != nil {
 		return merr.Wrap(err, "split shard routing post-image")
+	}
+	// Namespace collections are not split yet (design §1.3), under any shard_by
+	// and in either namespace.mode: until the namespace layout supports
+	// relabel, splitting one would take a rewrite of every row. Checked last,
+	// so every refusal above keeps its own message. It reads the genesis
+	// schema, which carries enable_namespace like the collection meta and is
+	// immutable after creation, so it answers the same way before the fence
+	// (SplitShardParam.Validate, CheckSplitShardAgainstCollection) and in the
+	// ack callback, both of which run this function on the same message.
+	if body.GetGenesis().GetCollectionSchema().GetEnableNamespace() {
+		return merr.WrapErrServiceInternalMsg(
+			"split shard of collection %d: namespace collections are not split until the namespace layout supports relabel (design §1.3)",
+			header.GetCollectionId())
 	}
 	return nil
 }

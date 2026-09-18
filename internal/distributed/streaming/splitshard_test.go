@@ -492,10 +492,14 @@ func namespacePlacedProperties() []*commonpb.KeyValuePair {
 }
 
 // withNamespaceRouting turns the param into a namespace split: shard_by is the
-// namespace key, the genesis schema carries properties, and the collection has
-// buckets partition-key partitions.
+// namespace key, the genesis schema is a namespace collection's
+// (enable_namespace set) carrying properties, and the collection has buckets
+// partition-key partitions. Namespace collections are not split yet (§1.3), so
+// such a param is refused; the admission and granularity checks run first and
+// keep their own refusals.
 func withNamespaceRouting(param streaming.SplitShardParam, buckets int, properties []*commonpb.KeyValuePair) streaming.SplitShardParam {
 	param.Routing.ShardBy = routing.NamespaceShardBy
+	param.Schema.EnableNamespace = true
 	param.Schema.Properties = properties
 	param.PartitionIDs = make([]int64, 0, buckets)
 	for i := 0; i < buckets; i++ {
@@ -521,12 +525,11 @@ func assertSplitShardParamRefused(t *testing.T, param streaming.SplitShardParam,
 // collection's DDL queued behind it.
 func TestSplitShardParamRefusesWhatTheApplyWouldRefuseAfterTheFence(t *testing.T) {
 	enableShardSplit(t)
-	t.Run("a valid namespace split passes", func(t *testing.T) {
+	// Admission and granularity pass, and the split is still refused: namespace
+	// collections are not split yet (§1.3).
+	t.Run("a namespace split that passes admission is deferred", func(t *testing.T) {
 		param := withNamespaceRouting(newSplitShardParam(), 16, namespacePlacedProperties())
-		require.NoError(t, param.Validate())
-		msg, err := streaming.NewSplitShardBroadcastMessage(param)
-		require.NoError(t, err)
-		require.NotNil(t, msg)
+		assertSplitShardParamRefused(t, param, namespaceDeferral)
 	})
 
 	t.Run("namespace admission (§3.1)", func(t *testing.T) {
@@ -601,9 +604,10 @@ func TestSplitShardParamRefusesWhatTheApplyWouldRefuseAfterTheFence(t *testing.T
 // namespace split moves data by relabeling whole partition-key buckets, which
 // is possible only when the modulus divides the bucket count.
 func TestSplitShardParamNamespaceModulusMustDivideTheBuckets(t *testing.T) {
-	// Modulus 2 over 16 buckets: every bucket lies on one residue.
-	valid := withNamespaceRouting(newSplitShardParam(), 16, namespacePlacedProperties())
-	require.NoError(t, valid.Validate())
+	// Modulus 2 over 16 buckets: every bucket lies on one residue, so the
+	// granularity check passes and only the namespace deferral (§1.3) refuses.
+	divides := withNamespaceRouting(newSplitShardParam(), 16, namespacePlacedProperties())
+	assertSplitShardParamRefused(t, divides, namespaceDeferral)
 
 	// Modulus 3: the post-image still tiles (an untouched shard owns residue 2),
 	// but 3 does not divide 16.
@@ -647,6 +651,61 @@ func TestSplitShardParamNamespaceModulusMustDivideTheBuckets(t *testing.T) {
 	pk := three()
 	pk.Routing.ShardBy = "hash(pk)"
 	require.NoError(t, pk.Validate())
+}
+
+// namespaceDeferral is what the refusal of a namespace collection's split says.
+const namespaceDeferral = "namespace collections are not split"
+
+// TestSplitShardRefusesANamespaceCollection (§1.3): no split is issued for a
+// collection whose schema has enable_namespace set, in either namespace.mode,
+// even under a hash(pk) post-image that every other check accepts. The refusal
+// is made by ValidateSplitShardMessage, so the builder, the planner's check and
+// the ack callback's re-run all make it from the same message, before and after
+// the fence alike.
+func TestSplitShardRefusesANamespaceCollection(t *testing.T) {
+	enableShardSplit(t)
+	for _, tc := range []struct {
+		name       string
+		properties []*commonpb.KeyValuePair
+	}{
+		{name: "partition_key mode", properties: namespacePlacedProperties()},
+		{
+			name: "partition mode",
+			properties: []*commonpb.KeyValuePair{
+				{Key: common.NamespaceShardingEnabledKey, Value: "false"},
+				{Key: common.NamespaceModeKey, Value: common.NamespaceModePartition},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The same hash(pk) split of a collection without namespaces passes.
+			plain := newSplitShardParam()
+			plain.Schema.Properties = tc.properties
+			require.NoError(t, plain.Validate())
+
+			param := newSplitShardParam()
+			param.Schema.EnableNamespace = true
+			param.Schema.Properties = tc.properties
+			assertSplitShardParamRefused(t, param, namespaceDeferral)
+
+			err := streaming.ValidateSplitShardMessage(splitShardMessageOf(param))
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.False(t, merr.IsRetryableErr(err))
+			assert.ErrorContains(t, err, "collection 1")
+
+			coll := &model.Collection{
+				CollectionID:        1,
+				Name:                "col",
+				VirtualChannelNames: []string{param.SourceVChannel},
+				EnableNamespace:     true,
+				Properties:          tc.properties,
+			}
+			header, body := splitShardMessageOf(param)
+			err = streaming.CheckSplitShardAgainstCollection(coll, header, body)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			assert.ErrorContains(t, err, namespaceDeferral)
+		})
+	}
 }
 
 // TestSplitShardTargetBuckets: the post-image is the only copy of a target's
@@ -796,11 +855,14 @@ func TestCheckSplitShardAgainstCollection(t *testing.T) {
 		requireRefused(t, check(legacy(), param), "disagree with the collection meta")
 	})
 
+	// Admission agrees with the meta and passes; the namespace deferral (§1.3)
+	// still refuses, before the fence.
 	t.Run("namespace admission against the meta", func(t *testing.T) {
 		param := withNamespaceRouting(newSplitShardParam(), 16, namespacePlacedProperties())
 		coll := legacy()
+		coll.EnableNamespace = true
 		coll.Properties = namespacePlacedProperties()
-		require.NoError(t, check(coll, param))
+		requireRefused(t, check(coll, param), namespaceDeferral)
 	})
 }
 
