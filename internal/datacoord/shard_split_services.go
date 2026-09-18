@@ -41,10 +41,12 @@ import (
 // outright, already in Redistributing, because the fence it acknowledges has
 // by definition already landed.
 //
-// For a task that IS present, the request's T_switch wins over whatever the
-// task carries. The primary wrote its task before it broadcast, so its tick is
-// at best a placeholder; the tick the broadcast actually landed on is the one
-// the write path fenced at, and the drain must wait for exactly that one. The
+// For a task that IS present, the request's T_switch fills a tick the task
+// does not carry yet: the primary wrote its task before it broadcast, with no
+// tick, and the tick the broadcast landed on is the one the write path fenced
+// at. A tick already recorded is kept -- T_switch is the tick of the task's
+// first fence, which a redelivery reports again -- and a redelivery reporting
+// another one is logged, not applied. The
 // state only ever moves forward: Preparing/Fencing advance to Redistributing,
 // and a task already Adopting or beyond is left where it is, because a
 // redelivered callback must not drag a split back into a window it has left.
@@ -78,7 +80,7 @@ func (s *Server) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSp
 		return merr.Status(err), nil
 	}
 
-	task := s.mergeCommittedShardSplit(req)
+	task := s.mergeCommittedShardSplit(ctx, req)
 	if err := s.shardSplitTasks.upsert(ctx, s.meta.catalog, task); err != nil {
 		logger.Warn(ctx, "persist the committed shard split task failed", mlog.Err(err))
 		return merr.Status(shardSplitStoreError(err, "persist the committed shard split task %d", req.GetSplitTaskId())), nil
@@ -204,7 +206,7 @@ func splitTargetVChannels(targets []*datapb.SplitShardTaskTarget) typeutil.Set[s
 
 // mergeCommittedShardSplit produces the task record the request implies,
 // without touching the store.
-func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *datapb.SplitShardTask {
+func (s *Server) mergeCommittedShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest) *datapb.SplitShardTask {
 	existing, ok := s.shardSplitTasks.get(req.GetSplitTaskId())
 	if !ok {
 		return &datapb.SplitShardTask{
@@ -223,7 +225,7 @@ func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *
 	}
 
 	task := proto.Clone(existing).(*datapb.SplitShardTask)
-	task.Sources = mergeCommittedSplitSources(task.GetSources(), req.GetSources())
+	task.Sources = mergeCommittedSplitSources(ctx, req.GetSplitTaskId(), task.GetSources(), req.GetSources())
 	if len(task.GetTargets()) == 0 {
 		task.Targets = cloneSplitTargets(req.GetTargets())
 	}
@@ -244,13 +246,18 @@ func (s *Server) mergeCommittedShardSplit(req *datapb.CommitShardSplitRequest) *
 // validateCommitShardSplit has already refused a request whose one source
 // disagrees with the recorded one, so the request's source either IS the
 // recorded source or the record has none yet (a task written before its fence
-// was planned). The request is the authority for exactly one field of it, the
-// tick the fence actually landed on. Everything else the recorded source holds
-// is kept: the commit carries only the source's name and tick, and replacing
-// the entry wholesale would erase the fields other writers of the record own
-// on every redelivery, and the fields a newer build wrote that this one does
-// not know.
-func mergeCommittedSplitSources(recorded, committed []*datapb.SplitShardTaskSource) []*datapb.SplitShardTaskSource {
+// was planned). Everything the recorded source holds is kept: the commit
+// carries only the source's name and tick, and replacing the entry wholesale
+// would erase the fields other writers of the record own on every
+// redelivery, and the fields a newer build wrote that this one does not know.
+//
+// That includes its switch time tick once one is recorded. T_switch is the
+// tick of the task's first fence (design doc §6.1 step 3): a same-task
+// re-fence reports that tick again, and the drain and the flush-state checks
+// may already have been answered against it. A redelivery that reports
+// another tick is therefore logged and not applied. A recorded tick of zero --
+// the planner's record, written before its broadcast -- takes the request's.
+func mergeCommittedSplitSources(ctx context.Context, taskID int64, recorded, committed []*datapb.SplitShardTaskSource) []*datapb.SplitShardTaskSource {
 	merged := make([]*datapb.SplitShardTaskSource, 0, len(committed))
 	for _, source := range committed {
 		idx := slices.IndexFunc(recorded, func(r *datapb.SplitShardTaskSource) bool {
@@ -261,7 +268,16 @@ func mergeCommittedSplitSources(recorded, committed []*datapb.SplitShardTaskSour
 			continue
 		}
 		kept := proto.Clone(recorded[idx]).(*datapb.SplitShardTaskSource)
-		kept.SwitchTimeTick = source.GetSwitchTimeTick()
+		switch {
+		case kept.GetSwitchTimeTick() == 0:
+			kept.SwitchTimeTick = source.GetSwitchTimeTick()
+		case source.GetSwitchTimeTick() != kept.GetSwitchTimeTick():
+			mlog.Warn(ctx, "a redelivered shard split commit reports another switch time tick, keeping the first one",
+				mlog.Int64("splitTaskID", taskID),
+				mlog.String("source", kept.GetVchannel()),
+				mlog.Uint64("recordedSwitchTimeTick", kept.GetSwitchTimeTick()),
+				mlog.Uint64("redeliveredSwitchTimeTick", source.GetSwitchTimeTick()))
+		}
 		merged = append(merged, kept)
 	}
 	return merged
