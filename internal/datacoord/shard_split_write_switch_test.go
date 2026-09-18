@@ -455,3 +455,128 @@ func TestIssueShardSplitRefusedByTheCollectionMetaCheck(t *testing.T) {
 	assert.ErrorContains(t, err, "only a Normal shard may be split")
 	assert.Zero(t, broadcasts, "a split the meta check refuses must not be broadcast")
 }
+
+// issueThroughServer is a split coordinator whose write switch is the real
+// datacoord one, over the server's own task store.
+type issueThroughServer struct {
+	*fakeSplitCoordinator
+	server *Server
+}
+
+func (c *issueThroughServer) issueShardSplit(ctx context.Context, task *datapb.SplitShardTask, controlChannel string) error {
+	return c.server.issueShardSplit(ctx, task, controlChannel)
+}
+
+// newAllocatedPreparingCase is a manager over svr's task store holding a
+// Preparing task whose targets are already allocated and persisted, as after
+// the tick that allocated them.
+func newAllocatedPreparingCase(t *testing.T, descs ...*milvuspb.DescribeCollectionResponse) (*shardSplitManager, *Server, *mock_broadcaster.MockBroadcastAPI) {
+	enableShardSplit(t)
+	task := fencedTask(datapb.SplitShardTaskState_SplitShardTaskPreparing)
+	svr := splitSwitchServer(t, task, descs...)
+	bapi := mock_broadcaster.NewMockBroadcastAPI(t)
+	bapi.EXPECT().Close().Maybe()
+	mocker := mockSplitBroadcast(t, bapi)
+	t.Cleanup(func() { mocker.UnPatch() })
+	coordinator := &issueThroughServer{
+		fakeSplitCoordinator: &fakeSplitCoordinator{coll: splitCollectionFromDescribe(descs[0], []int64{10})},
+		server:               svr,
+	}
+	manager := newShardSplitManager(context.Background(), svr.meta, newMockAllocator(t), svr.shardSplitTasks, coordinator)
+	manager.controlChannel = func() string { return splitMgrControl }
+	return manager, svr, bapi
+}
+
+// A TEXT field added after the targets were allocated: the write switch is
+// refused under the collection's keys, before anything is broadcast, and the
+// source is not fenced anywhere. The task aborts and frees its slot, instead
+// of retrying a refusal that cannot change.
+func TestShardSplitAbortsAPreparingTaskWhoseWriteSwitchIsRefused(t *testing.T) {
+	desc := splitTestDescribe([]string{splitMgrV0}, nil, 0)
+	desc.Schema = splitTestSchemaWithText()
+	manager, _, _ := newAllocatedPreparingCase(t, desc)
+	require.Equal(t, 1, manager.activeTaskCount())
+
+	manager.advanceTasks()
+	task := mustTask(t, manager, 100)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAborted, task.GetState())
+	assert.Contains(t, task.GetFailReason(), "TEXT")
+	assert.NotZero(t, task.GetEndTime())
+	assert.Zero(t, manager.activeTaskCount(), "the concurrency slot is freed")
+	assert.False(t, manager.IsVChannelSplitting(splitMgrV0), "the freeze lifts")
+}
+
+// A retriable refusal is the collection passing through a transient state:
+// the task keeps its targets and retries next tick.
+func TestShardSplitRetriesARetriableWriteSwitchRefusal(t *testing.T) {
+	renamed := splitTestDescribe([]string{splitMgrV0}, nil, 0)
+	renamed.CollectionName = "renamed"
+	manager, _, _ := newAllocatedPreparingCase(t, splitTestDescribe([]string{splitMgrV0}, nil, 0), renamed)
+
+	manager.advanceTasks()
+	task := mustTask(t, manager, 100)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPreparing, task.GetState())
+	assert.Equal(t, 1, manager.activeTaskCount())
+}
+
+// A failed broadcast may have landed: never abort on it, whatever its class.
+func TestShardSplitNeverAbortsAfterABroadcastAttempt(t *testing.T) {
+	manager, _, bapi := newAllocatedPreparingCase(t, splitTestDescribe([]string{splitMgrV0}, nil, 0))
+	bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternalMsg("append failed")).Once()
+
+	manager.advanceTasks()
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPreparing, mustTask(t, manager, 100).GetState())
+}
+
+// The abort re-checks the record under the task's lock: a record that shows the
+// source fenced, or that has moved on, is never aborted.
+func TestShardSplitRefusedAbortKeepsAFencedRecord(t *testing.T) {
+	refused := markRefusedBeforeBroadcast(merr.WrapErrOperationNotSupportedMsg("refused"))
+	for name, mutate := range map[string]func(*datapb.SplitShardTask){
+		"fenced":   func(t *datapb.SplitShardTask) { t.Fenced = true },
+		"T_switch": func(t *datapb.SplitShardTask) { t.Sources[0].SwitchTimeTick = 2000 },
+		"moved on": func(t *datapb.SplitShardTask) { t.State = datapb.SplitShardTaskState_SplitShardTaskFencing },
+	} {
+		t.Run(name, func(t *testing.T) {
+			manager, coordinator, _ := newPreparingCase(t)
+			coordinator.issueErr = refused
+			coordinator.onIssue = func(*datapb.SplitShardTask) {
+				_, err := manager.store.modify(context.Background(), manager.catalog, 100, func(t *datapb.SplitShardTask) bool {
+					mutate(t)
+					return true
+				})
+				require.NoError(t, err)
+			}
+			manager.advanceTasks()
+			assert.NotEqual(t, datapb.SplitShardTaskState_SplitShardTaskAborted, mustTask(t, manager, 100).GetState())
+		})
+	}
+}
+
+func TestIssueShardSplitMarksOnlyRefusalsBeforeTheBroadcast(t *testing.T) {
+	ctx := context.Background()
+	t.Run("a TEXT refusal is marked", func(t *testing.T) {
+		desc := splitTestDescribe([]string{splitMgrV0}, nil, 0)
+		desc.Schema = splitTestSchemaWithText()
+		manager, svr, _ := newAllocatedPreparingCase(t, desc)
+		err := svr.issueShardSplit(ctx, mustTask(t, manager, 100), splitMgrControl)
+		assert.True(t, errors.Is(err, errSplitRefusedBeforeBroadcast))
+		assert.ErrorIs(t, err, merr.ErrOperationNotSupported, "the mark keeps the code")
+		assert.False(t, merr.IsRetryableErr(err))
+	})
+
+	t.Run("a refusal of a switch the meta already shows applied is not marked", func(t *testing.T) {
+		// Targets listed: the write switch landed; only the callback's record
+		// is missing. Never abort that.
+		desc := splitTestDescribe([]string{splitMgrV0, splitMgrV1, splitMgrV2}, []*schemapb.CollectionShardInfo{
+			hashInfo(splitMgrV0, schemapb.ShardState_ShardSplitting),
+			hashInfo(splitMgrV1, schemapb.ShardState_ShardCreating, 0),
+			hashInfo(splitMgrV2, schemapb.ShardState_ShardCreating, 1),
+		}, 2)
+		desc.Schema = splitTestSchemaWithText()
+		manager, svr, _ := newAllocatedPreparingCase(t, desc)
+		err := svr.issueShardSplit(ctx, mustTask(t, manager, 100), splitMgrControl)
+		assert.Error(t, err)
+		assert.False(t, errors.Is(err, errSplitRefusedBeforeBroadcast))
+	})
+}
