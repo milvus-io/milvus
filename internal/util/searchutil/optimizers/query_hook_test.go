@@ -589,9 +589,7 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 	paramtable.Init()
 	cfg := paramtable.Get()
 	sKey := cfg.QueryNodeCfg.StrictGroupStrategy.Key
-	dKey := cfg.QueryNodeCfg.StrictGroupDebug.Key
 	defer cfg.Reset(sKey)
-	defer cfg.Reset(dKey)
 	defer cfg.Reset(cfg.AutoIndexConfig.Enable.Key)
 	makeRequest := func(strict bool, raw string) *querypb.SearchRequest {
 		p := &planpb.PlanNode{Node: &planpb.PlanNode_VectorAnns{VectorAnns: &planpb.VectorANNS{
@@ -611,7 +609,7 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 		suite.Require().NoError(json.Unmarshal([]byte(p.GetVectorAnns().GetQueryInfo().GetSearchParams()), &values))
 		return values
 	}
-	raw := `{"large":9007199254740993,"text":"0.5","strict_group_strategy":"invalid-client","strict_group_debug":"invalid-client"}`
+	raw := `{"large":9007199254740993,"text":"0.5","strict_group_strategy":"invalid-client"}`
 	// Exercise no hook, AutoIndex disabled, a hook dropping all caller keys,
 	// and a hook injecting conflicting/invalid values.
 	for _, enabled := range []string{"false", "true"} {
@@ -628,30 +626,24 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 				hook = h
 			}
 			cfg.Save(sKey, "per_group")
-			cfg.Save(dKey, "true")
 			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1, false, nil, "")
 			suite.Require().NoError(err)
 			values := readParams(req)
 			suite.Equal(`"per_group"`, string(values[common.StrictGroupStrategyKey]))
-			suite.Equal("true", string(values[common.StrictGroupDebugKey]))
 			suite.Equal("9007199254740993", string(values["large"]))
 			suite.Equal(`"0.5"`, string(values["text"]))
 			// Updating config affects a later request, not the serialized snapshot.
 			cfg.Save(sKey, "original")
-			cfg.Save(dKey, "false")
 			next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, false, nil, "")
 			suite.Require().NoError(err)
 			suite.Equal(`"original"`, string(readParams(next)[common.StrictGroupStrategyKey]))
 			suite.Equal(`"per_group"`, string(readParams(req)[common.StrictGroupStrategyKey]))
-			suite.Equal("false", string(readParams(next)[common.StrictGroupDebugKey]))
-			suite.Equal("true", string(readParams(req)[common.StrictGroupDebugKey]))
 		}
 	}
 	cfg.Reset(sKey)
 	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, false, nil, "")
 	suite.Require().NoError(err)
 	suite.Equal(`"per_group"`, string(readParams(defaultReq)[common.StrictGroupStrategyKey]))
-	suite.Equal("false", string(readParams(defaultReq)[common.StrictGroupDebugKey]))
 	// Both strategies are server controlled.
 	for _, strategy := range []string{"per_group", "original"} {
 		cfg.Save(sKey, strategy)
@@ -664,10 +656,8 @@ func (suite *QueryHookSuite) checkStrictGroupServerSettings(singular int64, plur
 	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1, false, nil, "")
 	suite.Require().NoError(err)
 	suite.NotContains(readParams(plain), common.StrictGroupStrategyKey)
-	suite.NotContains(readParams(plain), common.StrictGroupDebugKey)
 	for key, badValues := range map[string][]string{
 		sKey: {"", "PER_GROUP", "other", "1", "sampling", "filtered_iterator"},
-		dKey: {"", "other", "0.5"},
 	} {
 		for _, value := range badValues {
 			cfg.Save(key, value)
@@ -686,23 +676,24 @@ func (suite *QueryHookSuite) TestStrictGroupConfigSnapshotLogsWeight() {
 	paramtable.Init()
 	cfg := paramtable.Get()
 	weightKey := cfg.QueryNodeCfg.StrictGroupPhase1CandidateWeight.Key
-	debugKey := cfg.QueryNodeCfg.StrictGroupDebug.Key
 	defer cfg.Reset(weightKey)
-	defer cfg.Reset(debugKey)
 	sink := mlog.CaptureGlobalLogs(suite.T(), &mlog.Config{Level: "info"})
 	info := &planpb.QueryInfo{
 		Topk: 50, GroupByFieldId: 101, GroupSize: 3, StrictGroupSize: true,
+		SearchParams: `{"private_payload":"must-not-be-logged"}`,
 	}
 	suite.Require().NoError(cfg.Save(weightKey, "50"))
-	suite.Require().NoError(cfg.Save(debugKey, "false"))
 	_, err := applyStrictGroupSettings(context.Background(), info)
 	suite.Require().NoError(err)
 	suite.NotContains(sink.String(), "strict_group_config_snapshot")
 
-	suite.Require().NoError(cfg.Save(debugKey, "true"))
+	mlog.SetLevel(mlog.DebugLevel)
 	_, err = applyStrictGroupSettings(context.Background(), info)
 	suite.Require().NoError(err)
 	suite.Contains(sink.String(), "strict_group_config_snapshot")
+	suite.Contains(sink.String(), "[DEBUG]")
+	suite.NotContains(sink.String(), "private_payload")
+	suite.NotContains(sink.String(), "search_params")
 	// The Go snapshot contains the configured weight, not the effective
 	// candidate limit (50 * 3 * 50 = 7500) computed later in C++.
 	suite.Contains(sink.String(), "[phase1_candidate_weight=50]")
@@ -712,6 +703,12 @@ func (suite *QueryHookSuite) TestStrictGroupConfigSnapshotLogsWeight() {
 	_, err = applyStrictGroupSettings(context.Background(), info)
 	suite.Require().NoError(err)
 	suite.Contains(sink.String(), "[phase1_candidate_weight=0]")
+
+	mlog.SetLevel(mlog.InfoLevel)
+	before := sink.String()
+	_, err = applyStrictGroupSettings(context.Background(), info)
+	suite.Require().NoError(err)
+	suite.Equal(before, sink.String())
 }
 
 func (suite *QueryHookSuite) TestStrictGroupPhase1AndRefineSettings() {
