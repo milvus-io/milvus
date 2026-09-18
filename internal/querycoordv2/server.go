@@ -107,6 +107,9 @@ type Server struct {
 
 	// Checkers
 	checkerController *checkers.CheckerController
+	// splitState is the one view of the collections' shard split states, shared
+	// by every querycoord component that reasons about a split window.
+	splitState *meta.ShardSplitStateCache
 
 	// Observers
 	collectionObserver   *observers.CollectionObserver
@@ -342,13 +345,15 @@ func (s *Server) initQueryCoord() error {
 
 	// Init checker controller
 	mlog.Info(s.ctx, "init checker controller")
-	s.checkerController = checkers.NewCheckerController(
+	s.splitState = checkers.NewSplitStateCache(s.broker)
+	s.checkerController = checkers.NewCheckerControllerWithSplitState(
 		s.meta,
 		s.dist,
 		s.targetMgr,
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
+		s.splitState,
 	)
 
 	// Init observers
