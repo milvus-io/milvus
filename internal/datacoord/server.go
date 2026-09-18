@@ -743,6 +743,9 @@ func (s *Server) initCompaction() {
 		// and preempts what is already compacting its source.
 		cph.setChannelSplittingChecker(s.shardSplitManager.IsVChannelSplitting)
 		s.shardSplitManager.setCompactionPreempter(cph)
+		// A split redistributes its source by rewrite plans the inspector runs.
+		s.shardSplitManager.setRedistributor(newHashSplitRewriter(s.shardSplitManager,
+			newInspectorRewriteDispatcher(s.ctx, s.meta, cph, s.meta, s.allocator)))
 	}
 	cph.loadMeta()
 	s.compactionInspector = cph
