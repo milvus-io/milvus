@@ -352,20 +352,6 @@ ScalarIndexSort<T>::SetupMmapFromData(
     const uint8_t* data,
     size_t size,
     milvus::proto::common::LoadPriority priority) {
-    WriteMmapIndexData(data, size, priority);
-    try {
-        MapIndexData();
-    } catch (...) {
-        remove(mmap_filepath_.c_str());
-        throw;
-    }
-}
-
-template <typename T>
-void
-ScalarIndexSort<T>::WriteMmapIndexData(const uint8_t* data,
-                                       size_t size,
-                                       proto::common::LoadPriority priority) {
     // Setup mmap file path
     mmap_filepath_ = disk_file_manager_ != nullptr
                          ? disk_file_manager_->GetLocalIndexObjectPrefix() +
@@ -396,23 +382,24 @@ ScalarIndexSort<T>::WriteMmapIndexData(const uint8_t* data,
 
     mmap_size_ = aligned_size + SCALAR_SORT_MMAP_INDEX_PADDING;
     data_size_ = size;
-}
+    try {
+        // mmap the file
+        auto file = File::Open(mmap_filepath_, O_RDONLY);
+        mmap_data_ = static_cast<char*>(mmap(
+            NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
 
-template <typename T>
-void
-ScalarIndexSort<T>::MapIndexData() {
-    // mmap the file
-    auto file = File::Open(mmap_filepath_, O_RDONLY);
-    mmap_data_ = static_cast<char*>(
-        mmap(NULL, mmap_size_, PROT_READ, MAP_PRIVATE, file.Descriptor(), 0));
+        if (mmap_data_ == MAP_FAILED) {
+            file.Close();
+            ThrowInfo(ErrorCode::UnexpectedError,
+                      "failed to mmap: {}",
+                      strerror(errno));
+        }
 
-    if (mmap_data_ == MAP_FAILED) {
         file.Close();
-        ThrowInfo(
-            ErrorCode::UnexpectedError, "failed to mmap: {}", strerror(errno));
+    } catch (...) {
+        remove(mmap_filepath_.c_str());
+        throw;
     }
-
-    file.Close();
 }
 
 template <typename T>

@@ -278,9 +278,11 @@ outlive one slice remain request-local reservations. StringSort and Bitmap
 validity bits, and FMIndex null bits, are read directly into zero-initialized
 final bitmaps and moved into the index after CRC validation. Their async loads
 need no separate packed-byte sidecar; synchronous loads still reserve one.
-Scalar estimates use the larger compatible path cost and sum the directory's
-possible slice scratch before global limits are applied, so a later
-admission-limit expansion does not rely on a smaller fixed per-load estimate.
+Scalar estimates follow the translator's pinned `use_async_load` mode, using
+only the synchronous or asynchronous path's resource model. For async loads,
+the estimate sums the directory's possible slice scratch before global limits
+are applied, so a later admission-limit expansion does not rely on a smaller
+fixed per-load estimate.
 
 Eligible async memory overhead shares
 `LoadMemoryOverheadController::GetInstance().GetOrCreate()` with async field loading.

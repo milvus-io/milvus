@@ -230,13 +230,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
  private:
-    // Write and close the legacy file before mapping/restoring it.
-    void
-    WriteMmapIndexData(const uint8_t* data,
-                       size_t size,
-                       proto::common::LoadPriority priority);
-    void
-    MapIndexData();
     /**
      * Write data to mmap file and setup mmap pointers.
      * Sets mmap_data_, mmap_size_, data_size_.

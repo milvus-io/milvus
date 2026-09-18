@@ -52,7 +52,6 @@ ResolvePackedHybridIndexType(const nlohmann::json& metadata,
 template <typename T>
 class HybridScalarIndex : public ScalarIndex<T> {
  public:
-    using ScalarIndex<T>::Load;
     explicit HybridScalarIndex(
         uint32_t tantivy_index_version,
         const storage::FileManagerContext& file_manager_context =

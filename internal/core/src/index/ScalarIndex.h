@@ -121,7 +121,6 @@ class ScalarIndex : public IndexBase {
     };
 
     using IndexBase::Build;
-    using IndexBase::Load;
 
     virtual ScalarIndexType
     GetIndexType() const = 0;

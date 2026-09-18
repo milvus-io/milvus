@@ -28,6 +28,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -301,12 +302,10 @@ ValidatePlan(const IndexEntryDirectory& directory,
              const std::vector<EntryLoadPlan>& entries) {
     struct TargetWriteRange {
         std::string_view entry_name;
-        const MemoryEntryTarget* memory{nullptr};
-        const FileEntryTarget* mmap{nullptr};
-        uintptr_t memory_begin{0};
-        uintptr_t memory_end{0};
-        size_t mmap_begin{0};
-        size_t mmap_end{0};
+        // Empty paths identify memory ranges; file paths are nonempty and normalized.
+        std::filesystem::path path;
+        uintmax_t begin;
+        uintmax_t end;
     };
 
     std::unordered_set<std::string_view> names;
@@ -337,14 +336,13 @@ ValidatePlan(const IndexEntryDirectory& directory,
                     std::numeric_limits<uintptr_t>::max() - begin,
                 "Memory target range for Entry '{}' overflows address space",
                 entry.name);
-            target_ranges.push_back(
-                TargetWriteRange{entry.name,
-                                 memory,
-                                 nullptr,
-                                 begin,
-                                 begin + directory_entry.plaintext_size,
-                                 0,
-                                 0});
+            if (directory_entry.plaintext_size != 0) {
+                target_ranges.push_back(
+                    {entry.name,
+                     {},
+                     begin,
+                     begin + directory_entry.plaintext_size});
+            }
         } else {
             const auto& mmap = std::get<FileEntryTarget>(entry.target);
             AssertInfo(mmap.staging != nullptr,
@@ -363,41 +361,32 @@ ValidatePlan(const IndexEntryDirectory& directory,
                 mmap.offset + mmap.bytes,
                 mmap.staging->path,
                 mmap.staging->file_size);
-            target_ranges.push_back(TargetWriteRange{entry.name,
-                                                     nullptr,
-                                                     &mmap,
-                                                     0,
-                                                     0,
-                                                     mmap.offset,
-                                                     mmap.offset + mmap.bytes});
+            if (mmap.bytes != 0) {
+                target_ranges.push_back(
+                    {entry.name,
+                     std::filesystem::path(mmap.staging->path)
+                         .lexically_normal(),
+                     mmap.offset,
+                     mmap.offset + mmap.bytes});
+            }
         }
     }
 
-    for (size_t i = 0; i < target_ranges.size(); ++i) {
-        for (size_t j = i + 1; j < target_ranges.size(); ++j) {
-            const auto& left = target_ranges[i];
-            const auto& right = target_ranges[j];
-            bool overlaps = false;
-            if (left.memory != nullptr && right.memory != nullptr) {
-                overlaps = left.memory_begin < right.memory_end &&
-                           right.memory_begin < left.memory_end;
-            } else if (left.mmap != nullptr && right.mmap != nullptr) {
-                const auto& left_staging = left.mmap->staging;
-                const auto& right_staging = right.mmap->staging;
-                const auto same_file =
-                    left_staging == right_staging ||
-                    std::filesystem::path(left_staging->path)
-                            .lexically_normal() ==
-                        std::filesystem::path(right_staging->path)
-                            .lexically_normal();
-                overlaps = same_file && left.mmap_begin < right.mmap_end &&
-                           right.mmap_begin < left.mmap_end;
-            }
-            AssertInfo(!overlaps,
-                       "Entry targets '{}' and '{}' overlap",
-                       left.entry_name,
-                       right.entry_name);
-        }
+    // Nonempty ranges sorted by file/address need only adjacent comparisons.
+    // Normalize each file path once, keeping validation O(N log N) in entry count.
+    std::sort(target_ranges.begin(),
+              target_ranges.end(),
+              [](const auto& left, const auto& right) {
+                  return std::tie(left.path, left.begin) <
+                         std::tie(right.path, right.begin);
+              });
+    for (size_t i = 1; i < target_ranges.size(); ++i) {
+        const auto& left = target_ranges[i - 1];
+        const auto& right = target_ranges[i];
+        AssertInfo(left.path != right.path || left.end <= right.begin,
+                   "Entry targets '{}' and '{}' overlap",
+                   left.entry_name,
+                   right.entry_name);
     }
 }
 

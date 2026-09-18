@@ -1049,6 +1049,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         IndexEntryDirectStreamWriter writer(output);
         writer.WriteEntry("a", data_a.data(), data_a.size());
         writer.WriteEntry("b", data_b.data(), data_b.size());
+        writer.WriteEntry("empty", data_a.data(), 0);
         writer.Finish();
     }
 
@@ -1067,6 +1068,10 @@ TEST_F(AsyncIndexEntryReaderTest,
         MemoryEntryTarget{
             target, target->data() + entry_size / 2, entry_size}});
 
+    entries.push_back(
+        {"empty",
+         MemoryEntryTarget{target, target->data() + entry_size / 4, 0}});
+    std::reverse(entries.begin(), entries.end());
     EXPECT_THROW(folly::coro::blockingWait(ReadEntriesForTest(
                      *reader,
                      std::move(entries),
@@ -1090,6 +1095,7 @@ TEST_F(AsyncIndexEntryReaderTest,
         IndexEntryDirectStreamWriter writer(output);
         writer.WriteEntry("a", data_a.data(), data_a.size());
         writer.WriteEntry("b", data_b.data(), data_b.size());
+        writer.WriteEntry("empty", data_a.data(), 0);
         writer.Finish();
     }
 
@@ -1103,9 +1109,15 @@ TEST_F(AsyncIndexEntryReaderTest,
     std::vector<EntryLoadPlan> entries;
     entries.push_back(
         EntryLoadPlan{"a", FileEntryTarget{staging, 0, entry_size}});
-    entries.push_back(EntryLoadPlan{
-        "b", FileEntryTarget{staging, entry_size / 2, entry_size}});
+    auto alias = std::make_shared<IndexFileTarget>(
+        GetRootPath() + "/./materialize_mmap_overlap.mmap",
+        2 * entry_size,
+        false);
+    entries.push_back(
+        EntryLoadPlan{"b", FileEntryTarget{alias, entry_size / 2, entry_size}});
+    entries.push_back({"empty", FileEntryTarget{staging, entry_size / 4, 0}});
 
+    std::reverse(entries.begin(), entries.end());
     EXPECT_THROW(folly::coro::blockingWait(ReadEntriesForTest(
                      *reader,
                      std::move(entries),
@@ -1113,6 +1125,50 @@ TEST_F(AsyncIndexEntryReaderTest,
                  milvus::SegcoreError);
     EXPECT_TRUE(direct_file->DirectReadCalls().empty());
     EXPECT_FALSE(std::filesystem::exists(staging_path));
+}
+
+TEST_F(AsyncIndexEntryReaderTest, ReadEntriesAcceptsDisjointAndEmptyTargets) {
+    milvus::test::ScopedLoadTransientBudget budget(0);
+    const auto size = kStreamSliceAlignment;
+    const auto data = GeneratePattern(size);
+    const auto path = kV3FilePath + "_disjoint_targets";
+    {
+        IndexEntryDirectStreamWriter writer(CreateOutputStream(path));
+        for (const auto* name : {"a", "b", "c", "d", "e"}) {
+            writer.WriteEntry(name, data.data(), data.size());
+        }
+        writer.WriteEntry("empty_memory", data.data(), 0);
+        writer.WriteEntry("empty_file", data.data(), 0);
+        writer.Finish();
+    }
+    auto reader = OpenAsyncReader(CreateInputStream(path));
+    auto memory = std::make_shared<std::vector<uint8_t>>(2 * size);
+    auto file = std::make_shared<IndexFileTarget>(
+        GetRootPath() + "/first", 2 * size, false);
+    auto other = std::make_shared<IndexFileTarget>(
+        GetRootPath() + "/second", size, false);
+    // Reverse offsets, distinct files at the same offset, and empty ranges
+    // inside nonempty ranges must all be accepted without reordering the plan.
+    std::vector<EntryLoadPlan> entries{
+        {"e", FileEntryTarget{other, 0, size}},
+        {"d", FileEntryTarget{file, size, size}},
+        {"b", MemoryEntryTarget{memory, memory->data() + size, size}},
+        {"empty_file", FileEntryTarget{file, size / 2, 0}},
+        {"empty_memory",
+         MemoryEntryTarget{memory, memory->data() + size / 2, 0}},
+        {"c", FileEntryTarget{file, 0, size}},
+        {"a", MemoryEntryTarget{memory, memory->data(), size}}};
+    auto plan = folly::coro::blockingWait(
+        ReadEntriesForTest(*reader,
+                           std::move(entries),
+                           milvus::proto::common::LoadPriority::HIGH));
+    auto doubled = data;
+    doubled.insert(doubled.end(), data.begin(), data.end());
+    EXPECT_EQ(*memory, doubled);
+    EXPECT_EQ(ReadLocalFileBytes(file->path), doubled);
+    EXPECT_EQ(ReadLocalFileBytes(other->path), data);
+    EXPECT_EQ(plan.entries.front().name, "e");
+    EXPECT_EQ(plan.entries.back().name, "a");
 }
 
 TEST_F(AsyncIndexEntryReaderTest,
