@@ -28,8 +28,10 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -142,4 +144,74 @@ func TestFilterNodeSplitShardOnlySourceSpawns(t *testing.T) {
 	}
 
 	assert.Equal(t, map[string]int{splitTestSource: 1}, spawns)
+}
+
+// TestFilterNodeSplitShardHeaderShape pins the fence the replicated SplitShard
+// broadcast carries: one source_vchannel and the target vchannel names. The
+// residues and the modulus live only in the body's routing post-image, which
+// the querynode never reads, so an empty body still fronts both targets, in
+// the header's order.
+func TestFilterNodeSplitShardHeaderShape(t *testing.T) {
+	var got []string
+	mockDelegator := delegator.NewMockShardDelegator(t)
+	mockDelegator.EXPECT().ProcessSplitShard(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, targets []string) error {
+			got = targets
+			return nil
+		}).Once()
+
+	fNode := newFilterNode(splitTestCollectionID, splitTestSource, nil, mockDelegator, 8)
+	tsMsg := buildSplitShardTsMsg(t, splitTestCollectionID, splitTestSource, splitTestSource, splitTestTarget2, splitTestTarget1)
+	header := tsMsg.(*adaptor.SplitShardMessageBody).SplitShardMessage.Header()
+	require.Equal(t, splitTestSource, header.GetSourceVchannel())
+	require.Nil(t, tsMsg.(*adaptor.SplitShardMessageBody).SplitShardMessage.MustBody().GetRouting())
+
+	assert.NoError(t, fNode.filtrate(nil, tsMsg))
+	assert.Equal(t, []string{splitTestTarget2, splitTestTarget1}, got)
+}
+
+// TestFilterNodeSplitShardMisrouteIsWarnedNotSpawned: the broadcast reaches
+// only the source, the targets and the control channel. A replica on any other
+// vchannel is a misroute; it passes through without spawning, and is logged
+// above Debug, unlike a target's genesis replica.
+func TestFilterNodeSplitShardMisrouteIsWarnedNotSpawned(t *testing.T) {
+	var warned []string
+	warnMock := mockey.Mock(mlog.RatedWarn).To(func(_ context.Context, _ rate.Limit, msg string, _ ...mlog.Field) {
+		warned = append(warned, msg)
+	}).Build()
+	defer warnMock.UnPatch()
+
+	for _, deliveredOn := range []string{splitTestTarget1, splitTestBystander} {
+		mockDelegator := delegator.NewMockShardDelegator(t)
+		fNode := newFilterNode(splitTestCollectionID, deliveredOn, nil, mockDelegator, 8)
+		err := fNode.filtrate(nil, buildSplitShardTsMsg(t, splitTestCollectionID, deliveredOn, splitTestSource, splitTestTarget1, splitTestTarget2))
+		assert.NoError(t, err, "replica on %s", deliveredOn)
+	}
+	assert.Len(t, warned, 1, "only the misrouted replica is warned, not the target's genesis")
+}
+
+// TestFilterNodeOperateConsumesSplitShard drives the fence through Operate, the
+// path a message takes once the delegator msgstream whitelist lets SplitShard
+// through. Before this layer the filter node's default branch dropped it; now
+// it reaches ProcessSplitShard and the message is kept without adding any
+// insert or delete to the pipeline.
+func TestFilterNodeOperateConsumesSplitShard(t *testing.T) {
+	collection := segments.NewTestCollection(splitTestCollectionID, querypb.LoadType_LoadCollection, nil)
+	collectionManager := segments.NewMockCollectionManager(t)
+	collectionManager.EXPECT().Get(splitTestCollectionID).Return(collection)
+	manager := &segments.Manager{Collection: collectionManager}
+
+	mockDelegator := delegator.NewMockShardDelegator(t)
+	mockDelegator.EXPECT().ProcessSplitShard(mock.Anything, []string{splitTestTarget1, splitTestTarget2}).Return(nil).Once()
+	mockDelegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Return()
+
+	fNode := newFilterNode(splitTestCollectionID, splitTestSource, manager, mockDelegator, 8)
+	fence := buildSplitShardTsMsg(t, splitTestCollectionID, splitTestSource, splitTestSource, splitTestTarget1, splitTestTarget2)
+	out := fNode.Operate(&msgstream.MsgPack{BeginTs: 90, EndTs: 100, Msgs: []msgstream.TsMsg{fence}})
+
+	nodeMsg, ok := out.(*insertNodeMsg)
+	require.True(t, ok)
+	assert.Empty(t, nodeMsg.insertMsgs)
+	assert.Empty(t, nodeMsg.deleteMsgs)
+	assert.NoError(t, (&insertNodeMsg{}).append(fence), "the insert node message must accept a consumed fence")
 }
