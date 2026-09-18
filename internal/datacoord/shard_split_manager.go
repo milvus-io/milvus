@@ -116,6 +116,9 @@ type shardSplitManager struct {
 	// redistributor is wired by the rewrite; nil leaves a task in its
 	// redistribution window.
 	redistributor splitRedistributor
+	// preempter is the compaction inspector, wired once it is built (it is
+	// built after the manager, because it consumes the manager's freeze).
+	preempter compactionPreempter
 
 	// controlChannel names the control channel the write switch reaches, and
 	// replicationRole reads this cluster's replication role. Functions so the

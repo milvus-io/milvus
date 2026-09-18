@@ -502,7 +502,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
-	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
+	option := GcOption{
 		cli:              cli,
 		broker:           s.broker,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
@@ -510,7 +510,12 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
-	})
+	}
+	if s.shardSplitManager != nil {
+		// A splitting channel keeps its dropped segments until the split is Done.
+		option.isChannelSplitting = s.shardSplitManager.IsVChannelSplitting
+	}
+	s.garbageCollector = newGarbageCollector(s.meta, s.handler, option)
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -698,6 +703,12 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if s.shardSplitManager != nil {
+		// A split freezes compaction on its source and targets until it is Done,
+		// and preempts what is already compacting its source.
+		cph.setChannelSplittingChecker(s.shardSplitManager.IsVChannelSplitting)
+		s.shardSplitManager.setCompactionPreempter(cph)
+	}
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
