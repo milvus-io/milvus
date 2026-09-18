@@ -78,6 +78,20 @@ func TestPKResidueParityWithHashPK2Channels(t *testing.T) {
 			}
 		}
 
+		// The per-key helpers against HashPK2Channels' index, key by key.
+		wantInt, err := typeutil.HashPK2Channels(&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ints}}}, channels)
+		require.NoError(t, err)
+		wantStr, err := typeutil.HashPK2Channels(&schemapb.IDs{IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: strs}}}, channels)
+		require.NoError(t, err)
+		for i := range ints {
+			r, err := PKResidueInt64(ints[i], uint64(n))
+			require.NoError(t, err)
+			require.EqualValues(t, wantInt[i], r, "int64 n=%d i=%d", n, i)
+			r, err = PKResidueVarChar(strs[i], uint64(n))
+			require.NoError(t, err)
+			require.EqualValues(t, wantStr[i], r, "varchar n=%d i=%d", n, i)
+		}
+
 		for i := range ints {
 			r, err := PKResidue(ints[i], uint64(n))
 			require.NoError(t, err)
