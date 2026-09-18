@@ -1336,3 +1336,40 @@ func TestCommitShardSplitRedeliveryKeepsTheRecordedSourceFields(t *testing.T) {
 	assert.Equal(t, unknown, []byte(merged.GetSources()[0].ProtoReflect().GetUnknown()),
 		"the redelivery erased a field of the recorded source it does not carry")
 }
+
+// The drain predicate and the reason a stalled split logs are one function:
+// each conjunct names itself, and the predicate holds exactly when no reason
+// is left.
+func TestSplitDrainBlockReasonNamesEachConjunct(t *testing.T) {
+	ctx := context.Background()
+	task := func(svr *Server) *datapb.SplitShardTask {
+		task, ok := svr.shardSplitTasks.get(200)
+		require.True(t, ok)
+		return task
+	}
+
+	svr := drainedTestServer(t)
+	svr.importMeta = activeImportMeta(t, splitTestSource)
+	putSourceSegment(svr, commonpb.SegmentState_Flushed)
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task(svr)), "still has a live segment 9001")
+	assert.False(t, svr.splitSourcesDrained(ctx, task(svr)))
+
+	putSourceSegment(svr, commonpb.SegmentState_Dropped)
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task(svr)), "has no channel checkpoint yet")
+	assert.Equal(t, svr.fenceFlushBlockReason(task(svr)), svr.splitDrainBlockReason(ctx, task(svr)))
+
+	require.NoError(t, svr.meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{splitTestPosition(splitTestSource, 1999)}))
+	assert.Contains(t, svr.splitDrainBlockReason(ctx, task(svr)), "checkpoint 1999 has not reached its switch time tick 2000")
+
+	require.NoError(t, svr.meta.UpdateChannelCheckpoints(ctx, []*msgpb.MsgPosition{splitTestPosition(splitTestSource, 2000)}))
+	assert.Empty(t, svr.fenceFlushBlockReason(task(svr)))
+	assert.Equal(t, "an import is still in progress on a source", svr.splitDrainBlockReason(ctx, task(svr)))
+
+	svr.importMeta = idleImportMeta(t)
+	assert.Empty(t, svr.splitDrainBlockReason(ctx, task(svr)))
+	assert.True(t, svr.splitSourcesDrained(ctx, task(svr)))
+
+	unfenced := &datapb.SplitShardTask{Sources: []*datapb.SplitShardTaskSource{{Vchannel: splitTestSource}}}
+	assert.Contains(t, svr.fenceFlushBlockReason(unfenced), "fence not recorded yet")
+	assert.False(t, svr.splitSourcesDrained(ctx, unfenced))
+}
