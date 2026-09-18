@@ -235,7 +235,26 @@ func (dh *distHandler) updateSegmentsDistribution(ctx context.Context, resp *que
 		if s.GetLevel() == datapb.SegmentLevel_L0 {
 			continue
 		}
-		segmentInfo := projectForDistribution(dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.CurrentTargetFirst))
+		segmentInfo := dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.CurrentTargetFirst)
+		// A shard split is the only operation that re-homes an already-loaded sealed
+		// segment. While the split source is listed, datacoord reports a split
+		// target's flushed segments under the source; once adoption delists the
+		// source, it reports them under the target. So the next target pulled after
+		// adoption carries the target's channel while the current target still
+		// attributes the segment to the source. This channel is what the leader
+		// checker filters dist by when it decides which segments a delegator's view
+		// is missing, so answering with the stale one starves the target delegator
+		// forever: it never becomes data-ready, and the current target only advances
+		// once every delegator is data-ready -- a cycle that never breaks. Prefer the
+		// next target whenever the two disagree; the segment itself does not move,
+		// only the routing entry the target delegator needs.
+		if segmentInfo != nil {
+			if next := dh.target.GetSealedSegment(ctx, s.GetCollection(), s.GetID(), meta.NextTarget); next != nil &&
+				next.GetInsertChannel() != segmentInfo.GetInsertChannel() {
+				segmentInfo = next
+			}
+		}
+		segmentInfo = projectForDistribution(segmentInfo)
 		if segmentInfo == nil {
 			segmentInfo = &datapb.SegmentInfo{
 				ID:            s.GetID(),
