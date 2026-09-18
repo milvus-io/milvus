@@ -230,6 +230,36 @@ func TestShardSplitStateCache(t *testing.T) {
 		assert.Nil(t, channels)
 	})
 
+	t.Run("ChannelStates returns one read of every channel's state", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(16)).Return(splittingCollectionResp(), nil).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		states, ok := cache.ChannelStates(ctx, 16)
+		assert.True(t, ok)
+		assert.Equal(t, map[string]schemapb.ShardState{
+			"v0": schemapb.ShardState_ShardSplitting,
+			"v1": schemapb.ShardState_ShardCreating,
+			"v2": schemapb.ShardState_ShardCreating,
+		}, states)
+
+		// the map is a copy: mutating it cannot corrupt the cache.
+		states["v0"] = schemapb.ShardState_ShardNormal
+		again, ok := cache.ChannelStates(ctx, 16)
+		assert.True(t, ok)
+		assert.Equal(t, schemapb.ShardState_ShardSplitting, again["v0"])
+	})
+
+	t.Run("ChannelStates reports not-known when nothing is cached", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(17)).Return(nil, errors.New("coord down")).Once()
+		cache := NewShardSplitStateCache(broker, time.Minute)
+
+		states, ok := cache.ChannelStates(ctx, 17)
+		assert.False(t, ok)
+		assert.Nil(t, states)
+	})
+
 	t.Run("Invalidate forces a refetch", func(t *testing.T) {
 		broker := NewMockBroker(t)
 		broker.EXPECT().DescribeCollection(mock.Anything, int64(4)).Return(splittingCollectionResp(), nil).Once()
