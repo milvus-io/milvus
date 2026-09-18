@@ -1311,15 +1311,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		sd.growingSegmentLock.Unlock()
 	}
 
-	if releaseErr != nil {
-		return releaseErr
-	}
-	if len(growing) > 0 && sd.growingSourceProvider != nil {
-		for _, entry := range growing {
-			sd.growingSourceProvider.ClearReleasePrepared(entry.SegmentID)
-		}
-	}
-	return nil
+	return releaseErr
 }
 
 func (sd *shardDelegator) SyncTargetVersion(action *querypb.SyncAction, partitions []int64) {

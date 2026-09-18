@@ -104,11 +104,6 @@ func (s *DelegatorSuite) TearDownSuite() {
 }
 
 func (s *DelegatorSuite) SetupTest() {
-	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key, "false")
-	s.T().Cleanup(func() {
-		paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableGrowingSourceFlush.Key)
-	})
-
 	s.collectionID = 1000
 	s.partitionIDs = []int64{500, 501}
 	s.replicaID = 65535

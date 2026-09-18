@@ -28,7 +28,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -45,10 +44,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
-	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	streamingstatus "github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -626,81 +622,6 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
 	status, err := suite.node.UnsubDmChannel(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_NotReadyServe, status.GetErrorCode())
-}
-
-func TestIsReleaseManualFlushPrepareUnavailable(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{
-			name: "nil",
-			err:  nil,
-			want: false,
-		},
-		{
-			name: "service unavailable",
-			err:  merr.WrapErrServiceUnavailable("streaming WAL is not initialized"),
-			want: true,
-		},
-		{
-			name: "channel not available",
-			err:  merr.WrapErrChannelNotAvailable("vchannel", "no local growing-source release handoff provider"),
-			want: true,
-		},
-		{
-			name: "handler client closed",
-			err:  handler.ErrClientClosed,
-			want: true,
-		},
-		{
-			name: "read only local wal",
-			err:  handler.ErrReadOnlyWAL,
-			want: true,
-		},
-		{
-			name: "no streaming node deployed",
-			err:  registry.ErrNoStreamingNodeDeployed,
-			want: true,
-		},
-		{
-			name: "no release manual flush preparer",
-			err:  registry.ErrNoReleaseManualFlushPreparer,
-			want: true,
-		},
-		{
-			name: "streaming on shutdown",
-			err:  streamingstatus.NewOnShutdownError("wal is on shutdown"),
-			want: true,
-		},
-		{
-			name: "local wal channel not exist",
-			err:  streamingstatus.NewChannelNotExist("pchannel"),
-			want: true,
-		},
-		{
-			name: "local wal channel term unmatched",
-			err:  streamingstatus.NewUnmatchedChannelTerm("pchannel", 1, 2),
-			want: true,
-		},
-		{
-			name: "generic prepare failure",
-			err:  errors.New("prepare failed"),
-			want: false,
-		},
-		{
-			name: "streaming inner failure",
-			err:  streamingstatus.NewInner("prepare failed"),
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, isReleaseManualFlushPrepareUnavailable(tt.err))
-		})
-	}
 }
 
 func (suite *ServiceSuite) genSegmentLoadInfos(schema *schemapb.CollectionSchema,
@@ -3084,7 +3005,6 @@ func TestQueryNodeService(t *testing.T) {
 	wal := mock_streaming.NewMockWALAccesser(t)
 	local := mock_streaming.NewMockLocal(t)
 	local.EXPECT().GetLatestMVCCTimestampIfLocal(mock.Anything, mock.Anything).Return(0, nil).Maybe()
-	local.EXPECT().PrepareReleaseManualFlushIfLocal(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(false, nil).Maybe()
 	local.EXPECT().GetMetricsIfLocal(mock.Anything).Return(&types.StreamingNodeMetrics{}, nil).Maybe()
 	wal.EXPECT().Local().Return(local).Maybe()
 	scanner := mock_streaming.NewMockScanner(t)
