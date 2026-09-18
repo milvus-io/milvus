@@ -11,15 +11,17 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct CFuture CFuture;
 
-typedef struct CLockedGoMutex CLockedGoMutex;
+typedef uintptr_t CFutureCallbackToken;
 
-typedef void (*CUnlockGoMutexFn)(CLockedGoMutex* mutex);
+typedef void (*CFutureReadyCallbackFn)(CFutureCallbackToken token);
 
 #ifdef __cplusplus
 }
