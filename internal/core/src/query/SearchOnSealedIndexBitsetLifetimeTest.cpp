@@ -627,7 +627,7 @@ TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
         SearchResult result;
         result.total_data_cnt_ = n;
         EXPECT_THROW(SearchOnSealedIndex(*schema,
-                                         record,
+                                         entry,
                                          info,
                                          vectors.data(),
                                          nullptr,
@@ -649,9 +649,7 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoUsesDefaultProbes) {
     auto valid = std::make_unique<bool[]>(n);
     std::fill_n(valid.get(), n, true);
     auto index = BuildNullableVectorIndex(n, kDim, valid.get(), vectors);
-    segcore::SealedIndexingRecord record;
-    record.append_field_indexing(
-        field,
+    auto entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
         CreateTestCacheIndex("strict-ivf-independent-search",
                              std::move(index)));
@@ -663,7 +661,7 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoUsesDefaultProbes) {
     SearchResult result;
     result.total_data_cnt_ = n;
     SearchOnSealedIndex(
-        *schema, record, info, vectors.data(), nullptr, 1, {}, nullptr, result);
+        *schema, entry, info, vectors.data(), nullptr, 1, {}, nullptr, result);
     ASSERT_TRUE(result.CanSearchFilteredVectors());
     auto filter = std::make_shared<TargetBitmap>(n, false);
     (*filter)[0] = true;
