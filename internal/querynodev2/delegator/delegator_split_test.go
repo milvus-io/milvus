@@ -177,8 +177,8 @@ func TestSourceServesAtMinChildTSafe(t *testing.T) {
 			distribution:               NewDistribution("child", qv),
 		}
 	}
-	// the source's own tsafe is frozen at T_switch (50) after the fence; the two
-	// children have advanced past it.
+	// the source's own tsafe (50) is not what bounds the merged shard after the
+	// fence; the two children happen to be ahead of it here.
 	source := &shardDelegator{
 		vchannelName: "v0",
 		latestTsafe:  atomic.NewUint64(50),
@@ -188,11 +188,11 @@ func TestSourceServesAtMinChildTSafe(t *testing.T) {
 		},
 	}
 
-	// the serviceable timestamp is min(child tsafes), not the source's frozen 50.
+	// the serviceable timestamp is min(child tsafes), not the source's own 50.
 	assert.Equal(t, uint64(100), source.GetTSafe())
 
 	// waiting for a guarantee below both children returns the same min, never
-	// blocking on the source's frozen tsafe.
+	// waiting on the source's own tsafe.
 	got, err := source.waitTSafe(context.Background(), 40)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(100), got)
