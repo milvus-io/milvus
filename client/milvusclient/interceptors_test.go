@@ -163,8 +163,8 @@ func TestMetadataStreamInterceptor(t *testing.T) {
 		metadataHeaders: map[string]string{
 			authorizationHeader: "base64-token",
 		},
-		currentDB:  "db1",
-		identifier: "ident1",
+		currentDB:   "db1",
+		connections: []*clientConn{{identifier: "ident1"}},
 	}
 
 	var capturedCtx context.Context
