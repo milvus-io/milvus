@@ -459,6 +459,44 @@ func TestRewriteInputIDs(t *testing.T) {
 	assert.Empty(t, c.manager.rewriteInputIDs("nonexistent"))
 }
 
+// A clustering compaction publishes its outputs invisible and drops its inputs
+// only once they are indexed, so for a while both are live on the source. The
+// inputs are the rows the view serves; rewriting the staging outputs too would
+// put every such row on the targets twice. A flushed segment awaiting its sort
+// is invisible as well, but it is no compaction output and is rewritten.
+func TestRewriteSkipsAnInvisibleCompactionStagingOutput(t *testing.T) {
+	newMeta := func(t *testing.T) *meta {
+		m := newHashRewriteMeta(t, []int64{101})
+		// 101's clustering output, not yet visible.
+		m.segments.SetSegment(107, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 107, CollectionID: splitMgrCollection, PartitionID: 10, InsertChannel: hashSrcVChannel,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L2, NumOfRows: 10,
+			IsInvisible: true, CreatedByCompaction: true, CompactionFrom: []int64{101},
+		}})
+		// Flushed, and invisible until sorted.
+		m.segments.SetSegment(108, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 108, CollectionID: splitMgrCollection, PartitionID: 10, InsertChannel: hashSrcVChannel,
+			State: commonpb.SegmentState_Flushed, Level: datapb.SegmentLevel_L1, NumOfRows: 10,
+			IsInvisible: true,
+		}})
+		return m
+	}
+
+	t.Run("the re-scan", func(t *testing.T) {
+		c := newRewriteCase(t, newMeta(t), newHashTask(nil))
+		assert.ElementsMatch(t, []int64{101, 108}, c.manager.rewriteInputIDs(hashSrcVChannel))
+		res := c.tick()
+		assert.ElementsMatch(t, []int64{101, 108}, res.dispatched)
+	})
+
+	t.Run("already on the work list", func(t *testing.T) {
+		c := newRewriteCase(t, newMeta(t), newHashTask([]int64{101, 107, 108}))
+		res := c.tick()
+		assert.ElementsMatch(t, []int64{101, 108}, res.dispatched)
+		assert.ElementsMatch(t, []int64{101, 108}, c.pending())
+	})
+}
+
 func TestRewriteNeverDispatchesL0OrUnflushedSegments(t *testing.T) {
 	// The commit drops a rewrite's input. Rewriting an L0 would drop its deletes
 	// with it, and rewriting a growing segment would compact data a writer still

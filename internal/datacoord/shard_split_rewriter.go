@@ -85,17 +85,34 @@ type rewriteRoundResult struct {
 }
 
 // isRewriteInput reports whether a segment is data a rewrite may take as its
-// input: a Flushed segment that is not L0.
+// input: a Flushed segment that is not L0 and not a compaction's invisible
+// staging output.
 //
 // The commit drops the input, so anything else must never reach a plan. An L0
 // carries deletes rather than rows, and the rewrite would drop them with it; a
 // growing, sealed or flushing segment is still being written, and joins the
 // work list once it is Flushed. Neither is lost by being left out: the drain
 // counts every live segment on the source, so the task cannot adopt past one.
+//
+// An invisible compaction output -- a clustering compaction's, published
+// before its inputs are dropped -- holds rows its still-live inputs hold too,
+// and the recovery view serves the inputs, not it (the same rule as the view's
+// own skip in GetQueryVChanPositionsOfSplitFamily). Rewriting both would put
+// those rows on the targets twice; the inputs are rewritten, and the staging
+// output is dropped by the preempted compaction's cleanup, which the drain
+// waits for. A flushed segment awaiting its sort is invisible too, but it is
+// no compaction output and is rewritten.
 func isRewriteInput(segment *SegmentInfo) bool {
 	return segment != nil &&
 		segment.GetState() == commonpb.SegmentState_Flushed &&
-		segment.GetLevel() != datapb.SegmentLevel_L0
+		segment.GetLevel() != datapb.SegmentLevel_L0 &&
+		!isCompactionStagingOutput(segment)
+}
+
+// isCompactionStagingOutput reports whether a segment is a compaction output
+// that is not visible yet.
+func isCompactionStagingOutput(segment *SegmentInfo) bool {
+	return segment.GetIsInvisible() && segment.GetCreatedByCompaction()
 }
 
 // dispatchableForRewrite reports whether a rewrite input can be dispatched this
