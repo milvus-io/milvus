@@ -3128,6 +3128,10 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 			newSegments, metricMutation, retErr = m.completeSortCompactionMutation(t, result)
 		case datapb.CompactionType_BumpSchemaVersionCompaction:
 			newSegments, metricMutation, retErr = m.completeBumpSchemaVersionCompactionMutation(t, result)
+		case datapb.CompactionType_HashSplitCompaction:
+			// Not the mix mutation: a rewrite's outputs belong to other
+			// vchannels (meta_hash_split.go).
+			newSegments, metricMutation, retErr = m.completeHashSplitCompactionMutation(t, result)
 		default:
 			retErr = merr.WrapErrIllegalCompactionPlan("illegal compaction type")
 		}
