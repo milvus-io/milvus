@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -539,4 +540,37 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	assert.NotNil(t, task)
 	assert.Equal(t, int64(123), task.GetPlanID())
 	assert.Equal(t, datapb.CompactionType_SortCompaction, task.GetCompactionType())
+}
+
+// readConcurrencySeen runs one sort compaction and returns every value the sort
+// handed to storage.WithReadConcurrency, so the test can pin that the reader is
+// opened with exactly what dataNode.compaction.sortReadConcurrency resolves to.
+func (s *SortCompactionTaskSuite) readConcurrencySeen() []int {
+	var seen []int
+	var origin func(int) storage.RwOption
+	mocker := mockey.Mock(storage.WithReadConcurrency).To(func(n int) storage.RwOption {
+		seen = append(seen, n)
+		return origin(n)
+	}).Origin(&origin).Build()
+	defer mocker.UnPatch()
+
+	s.prepareSortCompactionTask()
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	return seen
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadConcurrencyDefaultsToCPUs() {
+	s.Equal([]int{hardware.GetCPUNum()}, s.readConcurrencySeen(),
+		"under the default config the input reader must be opened with one chunk per CPU core, once")
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadConcurrencyFollowsConfig() {
+	key := paramtable.Get().DataNodeCfg.CompactionSortReadConcurrency.Key
+	paramtable.Get().Save(key, "3")
+	defer paramtable.Get().Reset(key)
+
+	s.Equal([]int{3}, s.readConcurrencySeen(),
+		"dataNode.compaction.sortReadConcurrency must reach the reader")
 }

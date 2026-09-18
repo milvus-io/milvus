@@ -147,17 +147,177 @@ func NewRecordReaderFromManifest(manifest string,
 
 var _ RecordReader = (*IterativeRecordReader)(nil)
 
+// prefetchedChunk is the outcome of opening one chunk ahead of time. It
+// carries the chunk's first record as well as its reader: for storage v2 a chunk
+// is one binlog file whose column groups are fetched by that first Next(), so
+// opening alone would overlap only the footer read, not the payload download.
+type prefetchedChunk struct {
+	reader RecordReader
+	rec    Record
+	err    error
+	// exhausted distinguishes "iterate() says there is no further chunk" from
+	// "this chunk turned out to be empty", which are both io.EOF at the source
+	// but mean different things to the consumer.
+	exhausted bool
+}
+
 type IterativeRecordReader struct {
 	cur     RecordReader
 	iterate func() (RecordReader, error)
+
+	// window is the number of chunks that may be open at once, the one being
+	// consumed included. With window <= 1 chunks are opened strictly one after
+	// another (nextSerial). With a larger window the object-storage fetch of
+	// up to window-1 further chunks overlaps the caller's processing of the
+	// current one. Chunks are still delivered in order: for storage v2 the
+	// first Next() on a chunk pulls its whole payload, so keeping the fetches
+	// concurrent is what matters, not the delivery order.
+	window int
+
+	// queue hands the per-chunk result channels from the producer to the
+	// consumer in iteration order. Its capacity (window-1) is the back
+	// pressure: the producer reserves a slot by enqueueing the channel before
+	// it opens the chunk, so it can never run more than window-1 chunks ahead.
+	queue chan chan *prefetchedChunk
+	// stop tells the producer to quit; done is closed once it has.
+	stop chan struct{}
+	done chan struct{}
+	// started records that the producer has been launched; failed remembers a
+	// terminal error so later Next calls repeat it instead of reporting EOF.
+	started bool
+	failed  error
+	drained bool
 }
 
 // Close implements RecordReader.
 func (ir *IterativeRecordReader) Close() error {
-	if ir.cur != nil {
-		return ir.cur.Close()
+	var firstErr error
+	if ir.started {
+		// Stop the producer, wait for it, then close every reader it managed
+		// to open: each channel it enqueued is guaranteed to be filled.
+		close(ir.stop)
+		<-ir.done
+		for {
+			var ch chan *prefetchedChunk
+			select {
+			case ch = <-ir.queue:
+			default:
+			}
+			if ch == nil {
+				break
+			}
+			p := <-ch
+			if p.reader != nil {
+				if err := p.reader.Close(); err != nil && firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+		ir.started = false
 	}
-	return nil
+	// A closed reader stays closed: later Next calls report EOF instead of
+	// restarting the producer and opening chunks nobody will consume.
+	ir.drained = true
+	if ir.cur != nil {
+		if err := ir.cur.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		ir.cur = nil
+	}
+	return firstErr
+}
+
+// start launches the producer that walks iterate() and opens chunks ahead of
+// the consumer. iterate() is only ever called from this one goroutine, which
+// keeps the closure's chunk cursor free of races; the first Next() of each
+// chunk, i.e. its payload download, runs in a goroutine of its own so that up
+// to window-1 downloads are in flight at the same time.
+func (ir *IterativeRecordReader) start() {
+	if ir.started {
+		return
+	}
+	ir.started = true
+	ir.queue = make(chan chan *prefetchedChunk, ir.window-1)
+	ir.stop = make(chan struct{})
+	ir.done = make(chan struct{})
+	iterate, queue, stop, done := ir.iterate, ir.queue, ir.stop, ir.done
+	go func() {
+		defer close(done)
+		for {
+			ch := make(chan *prefetchedChunk, 1)
+			// Reserve the slot first: once ch is queued the consumer relies
+			// on it being filled, so everything after this point must send.
+			select {
+			case queue <- ch:
+			case <-stop:
+				return
+			}
+			p := &prefetchedChunk{}
+			r, err := func() (r RecordReader, err error) {
+				defer func() {
+					if x := recover(); x != nil {
+						err = merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
+					}
+				}()
+				return iterate()
+			}()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					p.exhausted = true
+				} else {
+					// iterate() may hand back a typed-nil reader alongside
+					// the error (see the comment in nextSerial); do not keep
+					// it, Close() must never dereference it.
+					p.err = err
+				}
+				ch <- p
+				return
+			}
+			p.reader = r
+			go func() {
+				defer func() {
+					if x := recover(); x != nil {
+						// Keep p.reader: the consumer still has to close it.
+						p.rec = nil
+						p.err = merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
+					}
+					ch <- p
+				}()
+				p.rec, p.err = r.Next()
+			}()
+		}
+	}()
+}
+
+// nextChunk installs the next non-empty chunk and returns its first record.
+func (ir *IterativeRecordReader) nextChunk() (Record, error) {
+	if ir.failed != nil {
+		return nil, ir.failed
+	}
+	if ir.drained {
+		return nil, io.EOF
+	}
+	ir.start()
+	for {
+		p := <-<-ir.queue
+		if p.exhausted {
+			ir.drained = true
+			return nil, io.EOF
+		}
+		if p.err != nil {
+			if p.reader != nil {
+				_ = p.reader.Close()
+			}
+			if errors.Is(p.err, io.EOF) {
+				// The chunk opened but held no rows; move on to the next one.
+				continue
+			}
+			ir.failed = p.err
+			return nil, p.err
+		}
+		ir.cur = p.reader
+		return p.rec, nil
+	}
 }
 
 func (ir *IterativeRecordReader) Next() (rec Record, err error) {
@@ -166,6 +326,29 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 			rec, err = nil, merr.WrapErrServiceInternalMsg("internal error recovered: %v", x)
 		}
 	}()
+	if ir.window > 1 {
+		if ir.cur == nil {
+			return ir.nextChunk()
+		}
+		rec, err = ir.cur.Next()
+		if errors.Is(err, io.EOF) {
+			// Drop the reader before reporting its Close error: it has been
+			// closed either way, and keeping it would close it twice later.
+			closeErr := ir.cur.Close()
+			ir.cur = nil
+			if closeErr != nil {
+				return nil, closeErr
+			}
+			return ir.nextChunk()
+		}
+		return rec, err
+	}
+	return ir.nextSerial()
+}
+
+// nextSerial is the original one-chunk-at-a-time path, kept intact for the
+// readers that do not opt into prefetching.
+func (ir *IterativeRecordReader) nextSerial() (rec Record, err error) {
 	if ir.cur == nil {
 		r, err := ir.iterate()
 		if err != nil {
@@ -204,9 +387,11 @@ func newIterativePackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	readConcurrency int,
 ) *IterativeRecordReader {
 	chunk := 0
 	return &IterativeRecordReader{
+		window: readConcurrency,
 		iterate: func() (RecordReader, error) {
 			if chunk >= len(paths) {
 				return nil, io.EOF
