@@ -19,16 +19,20 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -864,4 +868,64 @@ func TestRewritePlanAlreadyCommitted(t *testing.T) {
 	assert.False(t, committed(101), "still Flushed: the plan failed")
 	assert.False(t, committed(101, 103))
 	assert.False(t, committed(), "no record to confirm against")
+}
+
+// The compaction switch gates only the policy-driven compactions. A split
+// already in the WAL is carried through on every cluster -- on a secondary it
+// was created by the replicated callback -- by rewrite plans the inspector
+// must schedule whatever the switch: otherwise the split never drains, and
+// its adoption callback waits holding the collection's keys.
+func TestShardSplitRewriteIsScheduledWithCompactionOff(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.EnableCompaction.Key, "false")
+	defer params.Reset(params.DataCoordCfg.EnableCompaction.Key)
+	params.Save(params.DataCoordCfg.CompactionScheduleInterval.Key, "10")
+	defer params.Reset(params.DataCoordCfg.CompactionScheduleInterval.Key)
+
+	m := newHashRewriteMeta(t, []int64{101})
+	c := newRewriteCase(t, m, newHashTask(nil))
+	c.manager.replicationRole = func(context.Context) (replicateutil.Role, error) { return replicateutil.RoleSecondary, nil }
+
+	alloc := newMockAllocator(t)
+	scheduler := task.NewMockGlobalScheduler(t)
+	scheduled := make(chan int64, 8)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(t task.Task) { scheduled <- t.GetTaskID() }).Return().Maybe()
+	inspector := newCompactionInspector(m, alloc, nil, scheduler, scheduler, newMockVersionManager())
+	c.manager.setRedistributor(newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, m, alloc)))
+
+	// No policy-driven compaction starts: the mocks fail on an unexpected
+	// start.
+	trigger := NewMockTrigger(t)
+	trigger.EXPECT().stop().Return().Maybe()
+	triggerManager := NewMockTriggerManager(t)
+	triggerManager.EXPECT().Stop().Return().Maybe()
+	svr := &Server{ctx: context.Background(), compactionInspector: inspector, compactionTrigger: trigger, compactionTriggerManager: triggerManager}
+	svr.startCompaction()
+	defer svr.stopCompaction()
+
+	c.manager.advanceTask(c.task())
+	dispatched := c.task().GetDispatchedPlanIds()
+	require.Len(t, dispatched, 1)
+	select {
+	case planID := <-scheduled:
+		assert.Equal(t, dispatched[0], planID)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the rewrite plan was never scheduled")
+	}
+}
+
+// With the switch on, the policy-driven triggers start next to the inspector.
+func TestStartCompactionStartsThePolicyTriggersWhenOn(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.EnableCompaction.Key, "true")
+	defer params.Reset(params.DataCoordCfg.EnableCompaction.Key)
+
+	inspector := NewMockCompactionInspector(t)
+	inspector.EXPECT().start().Return().Once()
+	trigger := NewMockTrigger(t)
+	trigger.EXPECT().start().Return().Once()
+	triggerManager := NewMockTriggerManager(t)
+	triggerManager.EXPECT().Start().Return().Once()
+	svr := &Server{ctx: context.Background(), compactionInspector: inspector, compactionTrigger: trigger, compactionTriggerManager: triggerManager}
+	svr.startCompaction()
 }
