@@ -32,8 +32,8 @@ What is checked:
 | Property | Meaning |
 | --- | --- |
 | `AnsweredAtMostOnce`, `AnsweredWhenDone` | every caller is answered exactly once |
-| `CancelledLearnTheirOwnFate` | a cancelled request is told it was cancelled |
-| `NobodyElseIsCancelled` | a request nobody cancelled is never told it was |
+| `CanceledLearnTheirOwnFate` | a canceled request is told it was canceled |
+| `NobodyElseIsCanceled` | a request nobody canceled is never told it was |
 | `CountersNeverNegative`, `CountersClearWhenIdle`, `CountersCoverTheQueue` | the scheduler's waiting counters are conserved across pruning |
 | `Termination` | every request eventually gets its answer |
 
@@ -43,12 +43,12 @@ properties can be shown to fail on that rather than only to hold on this:
 | Configuration | Result |
 | --- | --- |
 | `Isolated.cfg` | four requests, 144,771 distinct states, no error |
-| `BeforeTheFix.cfg` (`Isolation = FALSE`) | fails: a request nobody cancelled is told it was, and a cancelled member whose owner is alive is told the group's result instead of its own cancellation |
+| `BeforeTheFix.cfg` (`Isolation = FALSE`) | fails: a request nobody canceled is told it was, and a canceled member whose owner is alive is told the group's result instead of its own cancellation |
 | `CounterAccounting.cfg` (`RememberNQ = FALSE`) | fails: debiting the pruned size rather than the size the counters were credited with leaves the waiting counter above zero forever |
 
 Five requests also passes, at 3,909,257 distinct states in about three minutes.
 
-The model is not the code. It follows `Merge`, `PruneCancelled`,
+The model is not the code. It follows `Merge`, `PruneCanceled`,
 `useGroupContext` and `Done` in `internal/querynodev2/tasks/search_task.go`, and
 `setupExecListener`, `schedule` and `exec` in
 `internal/util/searchutil/scheduler/concurrent_safe_scheduler.go`. Changing
