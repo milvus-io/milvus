@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -210,6 +212,14 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 
 	vchannels := resp.GetVirtualChannelNames()
 	shardInfos := resp.GetShardInfos()
+
+	// A source the collection no longer lists was retired by an adoption: there
+	// is no target left to re-derive, and it must never serve alone.
+	if len(vchannels) > 0 && !lo.Contains(vchannels, sourceVChannel) {
+		source.RefuseReadsAsRetiredSource(ctx)
+		return
+	}
+
 	stateOf := func(vchannel string) schemapb.ShardState {
 		for i, name := range vchannels {
 			if name == vchannel && i < len(shardInfos) {
@@ -219,7 +229,7 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 		return schemapb.ShardState_ShardNormal
 	}
 
-	// only a fenced split source recovers children; a normal/dropped vchannel does not.
+	// only a fenced split source recovers children; a Normal vchannel does not.
 	if stateOf(sourceVChannel) != schemapb.ShardState_ShardSplitting {
 		return
 	}

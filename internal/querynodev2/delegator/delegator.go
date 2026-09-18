@@ -101,6 +101,7 @@ type ShardDelegator interface {
 	MarkAdopted()
 	IsUnadoptedSplitChild() bool
 	MarkReleasing()
+	RefuseReadsAsRetiredSource(ctx context.Context)
 	ProcessDeleteBatches(batches []DeleteBatch)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
@@ -251,6 +252,11 @@ type shardDelegator struct {
 	// before publishing, so a child created after the source is gone is aborted
 	// instead of orphaned.
 	releasing atomic.Bool
+	// retiredWithoutFamily flips true on a delegator watched for a vchannel the
+	// collection no longer lists: a shard split source an adoption retired. Its
+	// targets are shards of their own by then, so it fronts no family, and every
+	// public read through it is refused (RefuseReadsAsRetiredSource).
+	retiredWithoutFamily atomic.Bool
 }
 
 // getLogger returns the logger with pre-defined shard attributes.
