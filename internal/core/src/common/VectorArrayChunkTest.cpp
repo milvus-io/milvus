@@ -268,6 +268,7 @@ TEST_F(VectorArrayChunkTest, TestWriteMultipleBatches) {
                          DataType::VECTOR_FLOAT,
                          dim,
                          std::nullopt,
+                         false,
                          false);
     auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
@@ -326,6 +327,7 @@ TEST_F(VectorArrayChunkTest, TestWriteWithMmap) {
                          DataType::VECTOR_FLOAT,
                          dim,
                          std::nullopt,
+                         false,
                          false);
     auto chunk = create_chunk(field_meta, array_vec, true, temp_file);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
@@ -362,6 +364,7 @@ TEST_F(VectorArrayChunkTest, TestEmptyVectorArray) {
                          DataType::VECTOR_FLOAT,
                          dim,
                          std::nullopt,
+                         false,
                          false);
     auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());
@@ -506,6 +509,7 @@ TEST_P(VectorArrayChunkParameterizedTest, TestWriteVectorArray) {
                          param.data_type,
                          param.dim,
                          std::nullopt,
+                         false,
                          false);
     auto chunk = create_chunk(field_meta, array_vec);
     auto vector_array_chunk = static_cast<VectorArrayChunk*>(chunk.get());

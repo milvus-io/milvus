@@ -389,6 +389,7 @@ CreateNullableEmptyArrayColumn() {
                          DataType::ARRAY,
                          DataType::INT64,
                          /*nullable=*/true,
+                         /*element_nullable=*/false,
                          std::nullopt);
     auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
         std::move(translator), nullptr);
@@ -501,10 +502,11 @@ struct ChunkedVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto slot = cachinglayer::Manager::GetInstance().CreateCacheSlot<Chunk>(
             std::move(translator), nullptr);
         auto column =
@@ -534,10 +536,11 @@ struct ProxyVectorArrayColumnFactory {
         FieldMeta fm(FieldName("va"),
                      FieldId(kVectorArrayFieldId),
                      DataType::VECTOR_ARRAY,
+                     DataType::VECTOR_FLOAT,
                      kVectorArrayDim,
                      knowhere::metric::L2,
                      /*nullable=*/true,
-                     std::nullopt);
+                     /*element_nullable=*/false);
         auto column = std::make_shared<ProxyChunkColumn>(
             group, FieldId(kVectorArrayFieldId), fm);
         return {std::static_pointer_cast<ChunkedColumnInterface>(column),
@@ -1776,9 +1779,10 @@ TEST(ChunkedColumnInterfaceTest,
     ASSERT_TRUE(owned.validity);
     const auto* arrays = owned.values.data_as<ArrayView>();
     EXPECT_EQ(arrays[0].length(), 0);
-    EXPECT_EQ(arrays[0].get_element_type(), DataType::INT64);
+    EXPECT_EQ(arrays[0].output_data().data_case(), ScalarFieldProto::kLongData);
     EXPECT_NE(arrays[0].data(), nullptr);
-    EXPECT_EQ(arrays[1].get_element_type(), DataType::NONE);
+    EXPECT_EQ(arrays[1].output_data().data_case(),
+              ScalarFieldProto::DATA_NOT_SET);
     EXPECT_EQ(arrays[1].data(), nullptr);
 }
 

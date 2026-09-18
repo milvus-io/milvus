@@ -59,20 +59,9 @@ func InitEtcdServer(
 			cfg.Dir = dataDir
 			cfg.LogOutputs = []string{logPath}
 			cfg.LogLevel = logLevel
-			e, err := embed.StartEtcd(cfg)
+			e, err := startEmbeddedEtcd(cfg, 60*time.Second)
 			if err != nil {
 				mlog.Error(context.TODO(), "failed to init embedded Etcd server", mlog.Err(err))
-				initError = err
-				return
-			}
-			// embed.StartEtcd returns once the server is serving traffic, but a
-			// single-member cluster has not necessarily elected itself leader
-			// yet. Wait until etcd is ready (leader elected + member published)
-			// before returning, otherwise components starting right after would
-			// race the leader election and hit transient "etcdserver: leader
-			// changed" errors during session initialization.
-			if err := waitEtcdServerReady(e); err != nil {
-				mlog.Error(context.TODO(), "embedded Etcd server failed to become ready", mlog.Err(err))
 				initError = err
 				return
 			}
@@ -87,26 +76,37 @@ func InitEtcdServer(
 	return nil
 }
 
-func HasServer() bool {
-	return etcdServer != nil
-}
+// startEmbeddedEtcd waits for the initial Raft election before exposing the
+// server to in-process clients, which bypass the network serving readiness gate.
+func startEmbeddedEtcd(cfg *embed.Config, timeout time.Duration) (*embed.Etcd, error) {
+	e, err := embed.StartEtcd(cfg)
+	if err != nil {
+		return nil, err
+	}
 
-// waitEtcdServerReady blocks until the embedded etcd server has elected a
-// leader and published its member, i.e. it can serve linearizable requests.
-// embed.StartEtcd returns as soon as the server is serving traffic, which for
-// a single-member cluster happens before the leader election completes.
-func waitEtcdServerReady(e *embed.Etcd) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-e.Server.ReadyNotify():
-		return nil
-	case <-time.After(60 * time.Second):
-		// Close releases the client/peer listeners (2379/2380) in addition to
-		// stopping the server (Close already stops the server internally), so
-		// the ports are freed even if the process keeps running (e.g. the
-		// cmd/embedded export path).
-		e.Close()
-		return merr.WrapErrServiceInternalMsg("embedded etcd took too long to become ready")
+		return e, nil
+	case <-timer.C:
+		err = merr.WrapErrServiceUnavailableMsg("embedded etcd did not become ready within %s", timeout)
+	case <-e.Server.StopNotify():
+		err = merr.WrapErrServiceUnavailableMsg("embedded etcd stopped before becoming ready")
+	case err = <-e.Err():
+		if err == nil {
+			err = merr.WrapErrServiceUnavailableMsg("embedded etcd closed before becoming ready")
+		}
 	}
+	// Client serving goroutines wait for readiness or server shutdown. Stop the
+	// server first so Close can join them even if it never became ready.
+	e.Server.Stop()
+	e.Close()
+	return nil, err
+}
+
+func HasServer() bool {
+	return etcdServer != nil
 }
 
 // StopEtcdServer stops embedded etcd server singleton.
