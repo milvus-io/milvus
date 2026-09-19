@@ -1773,7 +1773,7 @@ Set an easy-to-identify root key prefix for Milvus if etcd service already exist
 
 	r.LRUCacheRatio = ParamItem{
 		Key:          "rocksmq.lrucacheratio",
-		DefaultValue: "0.0.6",
+		DefaultValue: "0.06",
 		Version:      "2.0.0",
 		Doc:          "rocksdb cache memory ratio",
 		Export:       true,
