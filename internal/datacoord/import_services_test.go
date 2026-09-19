@@ -249,8 +249,11 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	// Mock broker.DescribeCollectionInternal (called once in startBroadcastWithCollectionID, which will fail at StartBroadcastWithResourceKeys)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
 	}, nil)
 
 	// Mock StartBroadcastWithResourceKeys to fail
@@ -326,12 +329,14 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 		}).Build()
 	defer mockBroadcast.UnPatch()
 
-	// Mock broker: DescribeCollectionInternal is called twice
-	// First call in startBroadcastWithCollectionID, second call in broadcastImport
+	// startBroadcastWithCollectionID describes the collection before and after locking.
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
 	}, nil).Times(2)
 
 	server := &Server{
@@ -436,8 +441,11 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	// Maybe rather than Times(2): a request rejected by validateImportRequest -- the
 	// job-count limit, say -- returns before either describe call.
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "test_db",
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "test_db",
+		CollectionName:      "test_collection",
 	}, nil).Maybe()
 
 	server := &Server{
@@ -625,8 +633,11 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	// Mock broker.DescribeCollectionInternal to return empty dbName (called in startBroadcastWithCollectionID)
 	mockBroker := broker.NewMockBroker(s.T())
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
-		DbName:         "", // Empty - should use default
-		CollectionName: "test_collection",
+		Schema:              &schemapb.CollectionSchema{Name: "test_collection", DbName: "test_db"},
+		VirtualChannelNames: []string{"v1"},
+		Status:              merr.Success(),
+		DbName:              "", // Empty - should use default
+		CollectionName:      "test_collection",
 	}, nil)
 
 	server := &Server{

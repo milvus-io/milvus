@@ -3068,7 +3068,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	}
 
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
-	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
+	b, _, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to start broadcaster", mlog.Err(err))
 		return &datapb.RefreshExternalCollectionResponse{
@@ -3216,23 +3216,28 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
 	msg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{
-			CollectionId: job.GetCollectionID(),
-			JobId:        job.GetJobID(),
-		}).
+		WithHeader(&message.CommitImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
+	bc, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	// WAL ordering places later DDL after this commit fence, so owned imports can
+	// release the Begin's keys through the normal FastAck path.
+	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, msg); handled || err != nil {
+		return err
+	}
 
-	_, err = broadcaster.Broadcast(ctx, msg)
+	// Legacy jobs have no retained Begin; preserve their original locking/ACK path.
+	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+	_, err = api.Broadcast(ctx, msg)
 	return err
 }
 
@@ -3247,27 +3252,41 @@ var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels, matching the CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
+	return s.broadcastRollbackImport(ctx, job, false)
+}
+
+// closeFailedImport releases newly owned imports promptly, without adding new
+// rollback broadcasts for legacy jobs outside their existing CDC GC path.
+func (s *Server) closeFailedImport(ctx context.Context, job ImportJob) error {
+	return s.broadcastRollbackImport(ctx, job, true)
+}
+
+func (s *Server) broadcastRollbackImport(ctx context.Context, job ImportJob, ownedOnly bool) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
+		if ownedOnly {
+			return nil
+		} // legacy jobs; new Begins require data channels
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
-
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
 	msg := message.NewRollbackImportMessageBuilderV2().
-		WithHeader(&message.RollbackImportMessageHeader{
-			CollectionId: job.GetCollectionID(),
-			JobId:        job.GetJobID(),
-		}).
+		WithHeader(&message.RollbackImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
 		WithBody(&messagespb.RollbackImportMessageBody{}).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
-
-	_, err = broadcaster.Broadcast(ctx, msg)
+	bc, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, msg); handled || err != nil || ownedOnly {
+		return err
+	}
+	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+	_, err = api.Broadcast(ctx, msg)
 	return err
 }
 

@@ -18,9 +18,12 @@ package datacoord
 
 import (
 	"context"
+	"slices"
+	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -28,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -36,6 +40,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Register the stateless ownership parser before broadcaster recovery starts;
+// ACK callbacks are registered later, when the DataCoord server is initialized.
+func init() {
+	for _, typ := range []message.MessageTypeWithVersion{
+		message.MessageTypeImportV1,
+		message.MessageTypeCommitImportV2,
+		message.MessageTypeRollbackImportV2,
+	} {
+		registry.RegisterResourceKeyPair(typ, importResourceKeyPair)
+	}
+}
+
+func importResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
+	var jobID int64
+	var isOwner bool
+	switch msg.MessageTypeWithVersion() {
+	case message.MessageTypeImportV1:
+		jobID, isOwner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+	case message.MessageTypeCommitImportV2:
+		jobID = message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId()
+	case message.MessageTypeRollbackImportV2:
+		jobID = message.MustAsBroadcastRollbackImportMessageV2(msg).Header().GetJobId()
+	}
+	if jobID == 0 {
+		return "", false // Legacy messages have no recoverable pairing identity.
+	}
+	return "import/" + strconv.FormatInt(jobID, 10), isOwner
+}
 
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
@@ -93,8 +126,8 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // validateImportRequest validates the import request before broadcasting.
 // This includes all validation logic previously done in CheckCallback and Proxy.
 //
-// All of this runs before the broadcaster's idempotency lookup, which cannot happen
-// until the resource keys are held inside Broadcast. A retry therefore has to pass
+// All of this runs before the broadcaster's idempotency admission lookup.
+// A retry therefore has to pass
 // these checks again before it can resolve to its original jobID, and not all of them
 // are a pure function of the request: ValidateMaxImportJobExceed counts in-flight jobs,
 // ValidateBinlogImportRequest lists the backup files in object storage, and
@@ -267,7 +300,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
+	broadcaster, coll, err := s.startBroadcastWithCollectionID(ctx, collectionID)
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to start broadcast with collection id")
 	}
@@ -283,9 +316,16 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
 	}
 
-	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err := merr.CheckRPCCall(coll, err); err != nil {
-		return 0, false, err
+	if schema == nil || coll.GetSchema() == nil {
+		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema is unavailable during import admission")
+	}
+	current := proto.Clone(coll.GetSchema()).(*schemapb.CollectionSchema)
+	// Proxy caches omit system fields.
+	current.Fields = lo.Filter(current.GetFields(), func(field *schemapb.FieldSchema, _ int) bool {
+		return field.GetFieldID() >= common.StartOfUserFieldID
+	})
+	if !proto.Equal(schema, current) || !slices.Equal(vchannels, coll.GetVirtualChannelNames()) {
+		return 0, false, merr.WrapErrServiceUnavailableMsg("collection schema or channels changed during import admission")
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().

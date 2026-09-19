@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -67,19 +68,30 @@ func (c *DDLCallbacks) registerBatchUpdateManifestCallbacks() {
 	registry.RegisterBatchUpdateManifestV2AckCallback(c.batchUpdateManifestV2AckCallback)
 }
 
-// startBroadcastWithCollectionID starts a broadcast with collection name.
-func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, error) {
+// startBroadcastWithCollectionID starts a broadcast with collection name and
+// returns collection metadata validated after the resource keys are acquired.
+func (s *Server) startBroadcastWithCollectionID(ctx context.Context, collectionID int64) (broadcaster.BroadcastAPI, *milvuspb.DescribeCollectionResponse, error) {
+	lockKeyCollection, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
+	if err := merr.CheckRPCCall(lockKeyCollection, err); err != nil {
+		return nil, nil, err
+	}
+	dbName := lockKeyCollection.GetDbName()
+	collectionName := lockKeyCollection.GetCollectionName()
+	api, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewSharedDBNameResourceKey(dbName), message.NewExclusiveCollectionNameResourceKey(dbName, collectionName))
+	if err != nil {
+		return nil, nil, err
+	}
+
 	coll, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-	if err != nil {
-		return nil, err
+	if err := merr.CheckRPCCall(coll, err); err != nil {
+		api.Close()
+		return nil, nil, err
 	}
-	dbName := coll.GetDbName()
-	collectionName := coll.GetCollectionName()
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewSharedDBNameResourceKey(dbName), message.NewExclusiveCollectionNameResourceKey(dbName, collectionName))
-	if err != nil {
-		return nil, err
+	if lockKeyCollection.GetDbName() != coll.GetDbName() || lockKeyCollection.GetCollectionName() != coll.GetCollectionName() {
+		api.Close()
+		return nil, nil, merr.WrapErrServiceUnavailableMsg("collection metadata changed while acquiring collection resource keys")
 	}
-	return broadcaster, nil
+	return api, coll, nil
 }
 
 // startBroadcastForRestoreSnapshot starts a broadcast for restore snapshot operations.

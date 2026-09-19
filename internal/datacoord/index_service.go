@@ -167,7 +167,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
 	// Create a new broadcaster for the collection.
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+	broadcaster, _, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -417,7 +417,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		return merr.Status(err), nil
 	}
 
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+	broadcaster, _, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}
@@ -983,7 +983,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	}
 
 	// Create a new broadcaster for the collection.
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+	broadcaster, _, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
 	if err != nil {
 		return merr.Status(err), nil
 	}

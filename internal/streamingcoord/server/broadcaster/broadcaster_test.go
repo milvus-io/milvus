@@ -2,11 +2,13 @@ package broadcaster
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -40,6 +42,34 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// Supply the Import ownership declaration normally registered by DataCoord.
+func init() {
+	for _, typ := range []message.MessageTypeWithVersion{
+		message.MessageTypeImportV1,
+		message.MessageTypeCommitImportV2,
+		message.MessageTypeRollbackImportV2,
+	} {
+		registry.RegisterResourceKeyPair(typ, testImportResourceKeyPair)
+	}
+}
+
+func testImportResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
+	var jobID int64
+	var isOwner bool
+	switch msg.MessageTypeWithVersion() {
+	case message.MessageTypeImportV1:
+		jobID, isOwner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+	case message.MessageTypeCommitImportV2:
+		jobID = message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId()
+	case message.MessageTypeRollbackImportV2:
+		jobID = message.MustAsBroadcastRollbackImportMessageV2(msg).Header().GetJobId()
+	}
+	if jobID == 0 {
+		return "", false // Legacy messages have no recoverable pairing identity.
+	}
+	return fmt.Sprintf("import/%d", jobID), isOwner
+}
 
 func TestBroadcaster(t *testing.T) {
 	registry.ResetRegistration()
@@ -1223,4 +1253,153 @@ func TestDoForcePromoteFixIncompleteBroadcasts(t *testing.T) {
 			t.Fatal("timed out waiting for doForcePromoteFixIncompleteBroadcasts to exit on cancel")
 		}
 	})
+}
+
+// Exercise the same task storage through admission, ACK, End retry, and recovery.
+func TestImportResourceOwnership(t *testing.T) {
+	for _, rollback := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rollback=%t", rollback), func(t *testing.T) {
+			bm := newImportOwnerTestManager(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			key := message.NewCollectionScopedIdempotencyKey(7, "batch")
+			rk := message.NewExclusiveCollectionNameResourceKey("db", "coll")
+			begin := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+				WithBody(&msgpb.ImportMsg{JobID: 101, CollectionID: 7}).WithIdempotencyKey(key).
+				WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+			api, err := bm.WithResourceKeys(ctx, rk)
+			require.NoError(t, err)
+			result, err := api.Broadcast(ctx, begin)
+			require.NoError(t, err)
+			api.Close()
+			owner, ok := bm.getBroadcastTaskByID(result.BroadcastID)
+			require.True(t, ok)
+			require.Error(t, bm.DropTombstone(ctx, result.BroadcastID), "open Begin cannot be GC'd")
+			_, err = bm.resourceKeyLocker.FastLock(rk)
+			require.ErrorIs(t, err, errFastLockFailed, "Begin ACK must retain the collection lock")
+			var end message.BroadcastMutableMessage
+			if rollback {
+				end = message.NewRollbackImportMessageBuilderV2().WithHeader(&message.RollbackImportMessageHeader{JobId: 101}).
+					WithBody(&messagespb.RollbackImportMessageBody{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+			} else {
+				end = message.NewCommitImportMessageBuilderV2().WithHeader(&message.CommitImportMessageHeader{JobId: 101}).
+					WithBody(&messagespb.CommitImportMessageBody{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+			}
+			handled, err := bm.BroadcastWithResourceKeyOwner(ctx, end)
+			require.True(t, handled)
+			require.NoError(t, err)
+			_, released := owner.resourceKeyOwnership()
+			require.True(t, released)
+			guards, err := bm.resourceKeyLocker.FastLock(rk)
+			require.NoError(t, err)
+			defer guards.Unlock()
+			// End retry must not acquire the collection lock again or create a new End.
+			handled, err = bm.BroadcastWithResourceKeyOwner(ctx, end)
+			require.True(t, handled)
+			require.NoError(t, err)
+			bm.mu.Lock()
+			require.Len(t, bm.tasks, 2)
+			bm.mu.Unlock()
+		})
+	}
+}
+
+func newImportOwnerTestManager(t *testing.T) *broadcastTaskManager {
+	t.Helper()
+	bm := newBroadcastTaskManagerForTest(t)
+	role := mockey.Mock((*broadcastTaskManager).checkClusterRole).Return(nil).Build()
+	t.Cleanup(func() { role.UnPatch() })
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(idalloc.NewMockRootCoordClient(t))
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+	registry.RegisterCommitImportV2AckCallback(func(context.Context, message.BroadcastResultCommitImportMessageV2) error { return nil })
+	registry.RegisterRollbackImportV2AckCallback(func(context.Context, message.BroadcastResultRollbackImportMessageV2) error { return nil })
+	return bm
+}
+
+func TestImportOwnershipRecovery(t *testing.T) {
+	for _, endACKed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("endACKed=%t", endACKed), func(t *testing.T) {
+			rk := message.NewExclusiveCollectionNameResourceKey("db", "coll")
+			begin := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+				WithBody(&msgpb.ImportMsg{JobID: 101}).WithBroadcast([]string{"v1"}).MustBuildBroadcast().OverwriteBroadcastHeader(900, rk)
+			owner := createNewWaitAckBroadcastTaskFromMessage(begin, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{1})
+			owner.ResourceKeyOwnerId = 900
+			tasks := []*streamingpb.BroadcastTask{owner}
+			if endACKed {
+				end := message.NewCommitImportMessageBuilderV2().WithHeader(&message.CommitImportMessageHeader{JobId: 101}).
+					WithBody(&messagespb.CommitImportMessageBody{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast().OverwriteBroadcastHeader(901, rk)
+				task := createNewWaitAckBroadcastTaskFromMessage(end, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{1})
+				task.ResourceKeyOwnerId = 900
+				tasks = append(tasks, task)
+			}
+			meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+			meta.EXPECT().SaveBroadcastTask(mock.Anything, uint64(900), mock.MatchedBy(func(task *streamingpb.BroadcastTask) bool {
+				return task.GetResourceKeysReleased()
+			})).Return(nil).Maybe()
+			resource.InitForTest(resource.OptStreamingCatalog(meta))
+			require.NoError(t, finishRecoveredResourceKeyOwners(context.Background(), tasks))
+			require.Equal(t, endACKed, owner.GetResourceKeysReleased())
+			bm := newBroadcastTaskManagerForTest(t, tasks...)
+			guards, err := bm.resourceKeyLocker.FastLock(rk)
+			if endACKed {
+				require.NoError(t, err)
+				guards.Unlock()
+			} else {
+				require.ErrorIs(t, err, errFastLockFailed, "ACKed but open Begin must recover its lock")
+			}
+		})
+	}
+}
+
+func TestOwnedCommitWaitsForConsumerACK(t *testing.T) {
+	bm := newImportOwnerTestManager(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rk := message.NewExclusiveCollectionNameResourceKey("db", "coll")
+	begin := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{JobID: 101}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+	api, err := bm.WithResourceKeys(ctx, rk)
+	require.NoError(t, err)
+	_, err = api.Broadcast(ctx, begin)
+	require.NoError(t, err)
+	api.Close()
+	end := message.NewCommitImportMessageBuilderV2().WithHeader(&message.CommitImportMessageHeader{JobId: 101}).
+		WithBody(&messagespb.CommitImportMessageBody{}).
+		WithBroadcast([]string{"v1"}, message.OptBuildBroadcastAckSyncUp()).MustBuildBroadcast()
+	done := make(chan error, 1)
+	go func() { _, err := bm.BroadcastWithResourceKeyOwner(ctx, end); done <- err }()
+	var task *broadcastTask
+	require.Eventually(t, func() bool {
+		bm.mu.Lock()
+		defer bm.mu.Unlock()
+		for _, candidate := range bm.tasks {
+			if candidate.BroadcastMessage().MessageType() == message.MessageTypeCommitImport {
+				task = candidate
+				return true
+			}
+		}
+		return false
+	}, time.Second, time.Millisecond)
+	// Even a successful append result must not release an AckSyncUp End.
+	require.NoError(t, task.FastAck(ctx, map[string]*types.AppendResult{
+		"v1": {MessageID: walimplstest.NewTestMessageID(2), TimeTick: 100},
+	}))
+	_, err = bm.resourceKeyLocker.FastLock(rk)
+	require.ErrorIs(t, err, errFastLockFailed)
+	// The End is registered but has no consumer ACK; a conflicting End is rejected.
+	abort := message.NewRollbackImportMessageBuilderV2().WithHeader(&message.RollbackImportMessageHeader{JobId: 101}).
+		WithBody(&messagespb.RollbackImportMessageBody{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+	handled, err := bm.BroadcastWithResourceKeyOwner(ctx, abort)
+	require.True(t, handled)
+	require.Error(t, err)
+	msg := task.BroadcastMessage().SplitIntoMutableMessage()[0].WithTimeTick(100).
+		WithLastConfirmed(walimplstest.NewTestMessageID(1)).IntoImmutableMessage(walimplstest.NewTestMessageID(2))
+	require.NoError(t, bm.Ack(ctx, msg))
+	require.NoError(t, <-done)
+	guards, err := bm.resourceKeyLocker.FastLock(rk)
+	require.NoError(t, err)
+	guards.Unlock()
 }

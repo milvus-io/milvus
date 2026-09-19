@@ -8,6 +8,7 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -24,6 +25,9 @@ import (
 func RecoverBroadcaster(ctx context.Context) (Broadcaster, error) {
 	tasks, err := resource.Resource().StreamingCatalog().ListBroadcastTask(ctx)
 	if err != nil {
+		return nil, err
+	}
+	if err := finishRecoveredResourceKeyOwners(ctx, tasks); err != nil {
 		return nil, err
 	}
 	return newBroadcastTaskManager(tasks), nil
@@ -49,14 +53,15 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 	tombstoneIDs := make([]uint64, 0, len(recoveryTasks))
 	idxOfKeys := newIdempotencyIndex()
 	for _, task := range recoveryTasks {
-		switch task.task.State {
-		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
+		if task.holdsResourceKeys() {
 			guards, err := rkLocker.FastLock(task.Header().ResourceKeys.Collect()...)
 			if err != nil {
 				panic(err)
 			}
 			task.WithResourceKeyLockGuards(guards)
-
+		}
+		switch task.task.State {
+		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING, streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK:
 			if newPending := newPendingBroadcastTask(task); newPending != nil {
 				// if there's some pending messages that is not appended, it should be continued to be appended.
 				pendingTasks = append(pendingTasks, newPending)
@@ -72,7 +77,9 @@ func newBroadcastTaskManager(protos []*streamingpb.BroadcastTask) *broadcastTask
 				pendingAckCallbackTasks = append(pendingAckCallbackTasks, task)
 			}
 		case streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE:
-			tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
+			if !task.holdsResourceKeys() {
+				tombstoneIDs = append(tombstoneIDs, task.Header().BroadcastID)
+			}
 		}
 		tasks[task.Header().BroadcastID] = task
 		// Rebuild the idempotency index across EVERY state, tombstones included:
@@ -383,6 +390,9 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
+	if key, isOwner := registry.ResourceKeyPair(msg); isOwner && key != "" {
+		newIncomingTask.task.ResourceKeyOwnerId = broadcastID
+	}
 	bm.tasks[broadcastID] = newIncomingTask
 	bm.idempotencyIndex.Add(scope, broadcastID)
 	return newIncomingTask, true
@@ -505,4 +515,120 @@ func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, 
 		result[collectionID] = append(result[collectionID], id)
 		seen[id] = struct{}{}
 	}
+}
+
+func (bm *broadcastTaskManager) findResourceKeyOwner(key string) *broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	for _, task := range bm.tasks {
+		ownerKey, isOwner := registry.ResourceKeyPair(task.BroadcastMessage())
+		if !isOwner || ownerKey != key {
+			continue
+		}
+		ownerID, _ := task.resourceKeyOwnership()
+		if ownerID != 0 {
+			return task
+		}
+	}
+	return nil
+}
+
+// findExistingEndLocked returns the End already paired with ownerID.
+// The caller must hold bm.mu.
+func (bm *broadcastTaskManager) findExistingEndLocked(ownerID uint64) *broadcastTask {
+	for id, task := range bm.tasks {
+		if parent, _ := task.resourceKeyOwnership(); parent == ownerID && id != ownerID {
+			return task
+		}
+	}
+	return nil
+}
+
+// BroadcastWithResourceKeyOwner registers one End under the manager mutex and
+// borrows the Begin's keys. It must never reacquire them: an exclusive DDL may
+// already be waiting for ownership release. If no owner is retained, the
+// caller decides whether to use the ordinary broadcast path.
+func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
+	key, isOwner := registry.ResourceKeyPair(msg)
+	if isOwner || key == "" {
+		return false, merr.WrapErrServiceInternalMsg("message is not a paired broadcast End")
+	}
+	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
+		return true, merr.WrapErrServiceNotReadyMsg("broadcaster is closing")
+	}
+	defer bm.lifetime.Done()
+
+	owner := bm.findResourceKeyOwner(key)
+	if owner == nil {
+		return false, nil
+	}
+	if err := bm.checkClusterRole(ctx); err != nil {
+		return true, err
+	}
+	// The owner's callback must finish before its terminal message can execute,
+	// even if that callback makes the business operation visible before returning.
+	if _, err := owner.BlockUntilDone(ctx); err != nil {
+		return true, err
+	}
+	id, err := resource.Resource().IDAllocator().Allocate(ctx)
+	if err != nil {
+		return true, merr.Wrap(err, "allocate paired broadcast ID")
+	}
+
+	bm.mu.Lock()
+	ownerID, released := owner.resourceKeyOwnership()
+	if released {
+		bm.mu.Unlock()
+		// The owner is retained only for deduplication. Once it is GC'd,
+		// callers must handle terminal retries using their business state.
+		return true, nil
+	}
+	end := bm.findExistingEndLocked(ownerID)
+	if end != nil {
+		bm.mu.Unlock()
+		if end.BroadcastMessage().MessageTypeWithVersion() != msg.MessageTypeWithVersion() {
+			return true, merr.WrapErrServiceInternalMsg("resource key owner %s already has a different terminal broadcast", key)
+		}
+		_, err := end.BlockUntilDone(ctx)
+		return true, err
+	}
+
+	msg = msg.OverwriteBroadcastHeader(id, owner.Header().ResourceKeys.Collect()...)
+	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
+	defer span.End()
+	message.InjectTraceContext(ctx, msg)
+	end = newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
+	end.SetLogger(bm.Logger())
+	end.task.ResourceKeyOwnerId = ownerID
+	bm.tasks[id] = end
+	bm.mu.Unlock()
+
+	// InitializeRecovery persists End before append. A request timeout after
+	// registration leaves this same task responsible for finishing the End.
+	_, err = bm.broadcastScheduler.AddTask(ctx, newPendingBroadcastTask(end))
+	return true, err
+}
+
+// completeResourceKeyOwner runs after this task's ACK state is persisted. Open
+// Begins are excluded from GC; Ends first durably release their owner's keys.
+func (bm *broadcastTaskManager) completeResourceKeyOwner(ctx context.Context, task *broadcastTask) ([]uint64, error) {
+	ownerID, _ := task.resourceKeyOwnership()
+	id := task.Header().BroadcastID
+	if ownerID == 0 {
+		return []uint64{id}, nil
+	}
+	if ownerID == id {
+		return nil, nil
+	}
+	owner, ok := bm.getBroadcastTaskByID(ownerID)
+	if !ok {
+		return nil, merr.WrapErrServiceInternalMsg("resource key owner %d is missing", ownerID)
+	}
+	if err := owner.releaseResourceKeys(ctx); err != nil {
+		return nil, err
+	}
+	task.mu.Lock()
+	task.notifyDoneLocked()
+	task.mu.Unlock()
+	return []uint64{ownerID, id}, nil
 }

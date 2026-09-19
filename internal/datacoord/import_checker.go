@@ -48,6 +48,8 @@ type ImportChecker interface {
 // does not depend on *Server. A nil callback disables the corresponding behavior; tests
 // inject only the hooks they exercise.
 type importCheckerHooks struct {
+	// closeFailedImport closes retained Begin ownership, before job GC; legacy jobs are a no-op.
+	closeFailedImport func(ctx context.Context, job ImportJob) error
 	// commitImport broadcasts a CommitImport WAL message. Required in production; a nil
 	// value is a programming error only when reached on the auto_commit=true path.
 	commitImport func(ctx context.Context, job ImportJob) error
@@ -165,6 +167,21 @@ func (c *importChecker) runGCLoop() {
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				c.tryTimeoutJob(job)
+				// Re-read after timeout, including jobs whose channels never became
+				// ready; the regular state-machine loop skips those jobs.
+				job = c.importMeta.GetJob(c.ctx, job.GetJobID())
+				if job == nil {
+					continue
+				}
+				if job.GetState() == internalpb.ImportJobState_Failed && c.hooks.closeFailedImport != nil {
+					ctx, cancel := context.WithTimeout(c.ctx, 10*time.Second)
+					err := c.hooks.closeFailedImport(ctx, job)
+					cancel()
+					if err != nil {
+						mlog.Warn(c.ctx, "failed to close import resource ownership, keep job for retry", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
+						continue
+					}
+				}
 				c.checkGC(job)
 			}
 			jobsByColl := lo.GroupBy(jobs, func(job ImportJob) int64 {
@@ -314,15 +331,12 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	}
 
 	if totalRows == 0 {
-		if job.GetAutoCommit() {
-			// auto-commit: no data to import, skip Uncommitted directly to Completed
-			log.Info(c.ctx, "no data to import, auto_commit=true, transitioning directly to Completed")
-			updateJobState(internalpb.ImportJobState_Completed)
-		} else {
-			// replication cluster: surface Uncommitted so platform can observe and commit
-			log.Info(c.ctx, "no data to import, auto_commit=false, transitioning to Uncommitted")
-			updateJobState(internalpb.ImportJobState_Uncommitted)
-		}
+		// Even empty auto-commit jobs must close their retained Begin through
+		// CommitImport; checkUncommittedJob drives the existing auto-commit path.
+		// Otherwise, transitioning directly to Completed would leave no paired End
+		// to release the Begin's retained resource-key locks.
+		log.Info(c.ctx, "no data to import, transitioning to Uncommitted")
+		updateJobState(internalpb.ImportJobState_Uncommitted)
 		return
 	}
 
