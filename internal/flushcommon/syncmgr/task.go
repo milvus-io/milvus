@@ -129,11 +129,19 @@ func (t *SyncTask) HandleError(err error) {
 }
 
 // settleAction returns the metacache action that ends this task's row
-// reservation. It is safe on a task built without one (older callers that set
-// batchRows directly), and safe to apply more than once: SyncReservation.Settle
-// is guarded by sync.Once.
+// accounting. Applying it more than once is safe: SyncReservation.Settle is
+// guarded by sync.Once, and the reservation-less commit below is idempotent
+// only in the sense that each terminal path applies it at most once.
 func (t *SyncTask) settleAction(outcome metacache.SettleOutcome) metacache.SegmentAction {
 	if t.reservation == nil {
+		// A task built without a reservation, which today means the bulk-import
+		// path: it has no write buffer to reserve rows from. A commit must still
+		// record what reached storage, because importv2 reports FlushedRows()
+		// as the job's ImportedRows. Nothing was reserved, so the other two
+		// outcomes have nothing to unwind.
+		if outcome == metacache.SettleCommitted {
+			return metacache.AddFlushedRows(t.batchRows)
+		}
 		return func(*metacache.SegmentInfo) {}
 	}
 	return t.reservation.Settle(outcome)
@@ -147,7 +155,13 @@ func (t *SyncTask) settleAction(outcome metacache.SettleOutcome) metacache.Segme
 // have adjusted live on a SegmentInfo that no longer exists, so there is
 // nothing left to leak.
 func (t *SyncTask) settle(outcome metacache.SettleOutcome) {
-	if t.reservation == nil || t.metacache == nil {
+	if t.metacache == nil {
+		return
+	}
+	if t.reservation == nil && outcome != metacache.SettleCommitted {
+		// Nothing was reserved, so there is nothing for a non-commit outcome to
+		// unwind. Skip the update rather than take the metacache write lock to
+		// apply a no-op.
 		return
 	}
 	t.metacache.UpdateSegments(t.settleAction(outcome), metacache.WithSegmentIDs(t.segmentID))

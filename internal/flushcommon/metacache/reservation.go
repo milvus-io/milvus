@@ -54,9 +54,13 @@ func (o SettleOutcome) String() string {
 // SyncReservation owns one batch's row-accounting transition. Apply moves rows
 // from buffered to syncing; Settle ends the reservation exactly once.
 //
-// Every transition here is a delta. There is deliberately no absolute setter:
-// an absolute write racing a pending delta is what previously let bufferRows
-// drift, and the zero clamp then hid the drift instead of surfacing it.
+// Every transition here is a delta, and there is deliberately no absolute
+// setter. The accounting this replaces was not observably wrong: wb.mut
+// serialized its writers. It was fragile, because correctness rested on that
+// serialization plus the fact that yieldBuffer discarded the whole buffer, and
+// on every terminal path remembering to undo StartSyncing. The last of those
+// did fail: no plain SyncTask path ever called AbortSyncing, so a failed sync
+// leaked syncingRows and syncingTasks permanently.
 type SyncReservation struct {
 	segmentID int64
 	rows      int64
@@ -80,8 +84,9 @@ func (r *SyncReservation) Rows() int64 { return r.rows }
 func (r *SyncReservation) Apply() SegmentAction {
 	return func(info *SegmentInfo) {
 		if r.rows > info.bufferRows {
-			// An internal accounting bug, not drift to absorb. The previous
-			// code clamped bufferRows at zero here, which hid exactly this.
+			// An internal accounting bug, not drift to absorb. This assertion
+			// is new; the removed growing-source path clamped its own computed
+			// row count at zero instead, and the common path asserted nothing.
 			panic(fmt.Sprintf(
 				"sync reservation exceeds buffered rows: segment=%d reserve=%d buffered=%d",
 				r.segmentID, r.rows, info.bufferRows))

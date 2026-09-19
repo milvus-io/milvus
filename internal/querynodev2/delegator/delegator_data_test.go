@@ -257,7 +257,7 @@ func (s *DelegatorDataSuite) genCollectionWithFunction() {
 		}},
 	}, nil, &querypb.LoadMetaInfo{SchemaBarrierTs: 0})
 
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.NoError(err)
 	s.delegator = delegator.(*shardDelegator)
 	s.allocFunctionRunnersForTest()
@@ -276,7 +276,7 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.rootPath = s.Suite.T().Name()
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
 	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
-	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -345,7 +345,7 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 
 	s.Run("notify_new_growing_segment_once", func() {
 		var notifiedChannels []string
-		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil,
+		delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager, NewChannelQueryView(nil, nil, nil, initialTargetVersion),
 			WithLeaderViewUpdatedCallback(func(channel string) {
 				notifiedChannels = append(notifiedChannels, channel)
 			}))
@@ -1174,7 +1174,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			s.workerManager,
 			s.manager,
 			s.loader,
-			10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+			10000, nil, nil, NewChannelQueryView(nil, nil, nil, initialTargetVersion))
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())

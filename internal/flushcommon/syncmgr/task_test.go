@@ -551,6 +551,39 @@ func (s *SyncTaskSuite) TestHandleErrorRunsOnce() {
 	s.Equal(1, calls, "the failure callback must fire once per failed sync")
 }
 
+// The bulk-import path builds a SyncTask with WithBatchRows and never reserves
+// rows, because it has no write buffer to reserve them from. It still relies on
+// the commit recording flushedRows: importv2 reports segment.FlushedRows() as
+// the job's ImportedRows, and the meta writer computes NumOfRows as
+// FlushedRows() + batchRows for every later sync of the same segment.
+func (s *SyncTaskSuite) TestCommitRecordsFlushedRowsWithoutReservation() {
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, bfs, nil, metacache.NewEmptySegmentStats())
+
+	pack := new(SyncPack)
+	pack.WithBatchRows(700)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(pack)
+
+	task.settleAction(metacache.SettleCommitted)(seg)
+
+	s.EqualValues(700, seg.FlushedRows(), "a reservation-less commit must still record the rows it flushed")
+}
+
+// The same task must not invent syncing-counter movement it never reserved.
+func (s *SyncTaskSuite) TestCommitWithoutReservationLeavesSyncingCountersAlone() {
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, bfs, nil, metacache.NewEmptySegmentStats())
+
+	pack := new(SyncPack)
+	pack.WithBatchRows(700)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(pack)
+
+	task.settleAction(metacache.SettleCommitted)(seg)
+
+	s.EqualValues(700, seg.NumOfRows(),
+		"master drove syncingRows negative here, which cancelled the flushedRows gain in NumOfRows")
+}
+
 func TestSyncTask(t *testing.T) {
 	suite.Run(t, new(SyncTaskSuite))
 }

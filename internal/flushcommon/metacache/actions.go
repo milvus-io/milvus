@@ -172,7 +172,7 @@ func UpdateCheckpoint(checkpoint *msgpb.MsgPosition) SegmentAction {
 // the live accounting is delta-only, owned by SyncReservation and
 // AddBufferedRows. This exists so tests can stand up a segment that already
 // holds rows. Do not call it from production code; an absolute write here would
-// discard a pending reservation.
+// bypass the reservation.
 func UpdateNumOfRows(numOfRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows = numOfRows
@@ -193,8 +193,25 @@ func SetStorageVersion(version int64) SegmentAction {
 	}
 }
 
-// AddBufferedRows records newly buffered rows. Delta, never absolute: an
-// absolute write racing a pending SyncReservation would discard it.
+// AddFlushedRows records rows that reached storage for a task that never
+// reserved them. Only the bulk-import path needs this: it builds a SyncTask
+// straight from an InsertData with no write buffer to reserve from, yet
+// importv2 reports FlushedRows() as the job's ImportedRows and the meta writer
+// computes NumOfRows as FlushedRows() plus the batch.
+//
+// It deliberately touches nothing else. The action this replaces also
+// decremented syncingRows and syncingTasks, which for an unreserved task drove
+// both negative; the negative syncingRows then cancelled the flushedRows gain
+// inside NumOfRows.
+func AddFlushedRows(rows int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.flushedRows += rows
+	}
+}
+
+// AddBufferedRows records newly buffered rows as a delta. The absolute setter
+// it replaced was correct only while wb.mut serialized every writer and
+// yieldBuffer discarded the whole buffer; a delta needs neither invariant.
 func AddBufferedRows(rows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.bufferRows += rows

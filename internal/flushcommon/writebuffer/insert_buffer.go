@@ -126,9 +126,13 @@ func (ib *InsertBuffer) YieldStats() map[int64]*storage.BM25Stats {
 	return ib.statsBuffer.yieldBuffer()
 }
 
-// Buffer appends inData and reports the bytes and the rows it added. The row
-// count is returned rather than read back from ib.rows so the caller can record
-// a delta; an absolute write of ib.rows would discard a concurrent reservation.
+// Buffer appends inData and reports the bytes and the rows it added.
+//
+// The row count is returned rather than read back from ib.rows so the caller
+// records a delta. Writing ib.rows absolutely was also correct, but only
+// because two unstated invariants held: wb.mut serialized every writer of
+// bufferRows, and yieldBuffer discarded the whole segmentBuffer so a fresh one
+// always restarted from zero. Reporting the delta depends on neither.
 func (ib *InsertBuffer) Buffer(inData *InsertData, startPos, endPos *msgpb.MsgPosition) (bufferedSize int64, bufferedRows int64) {
 	for idx, data := range inData.data {
 		tsData := inData.tsField[idx]

@@ -383,6 +383,11 @@ func (wb *writeBufferBase) getSyncTasksLocked(ctx context.Context, segmentIDs []
 // WAL; releasing the pin would let the channel checkpoint advance past data
 // that was never written. The pin is reclaimed when the channel is torn down
 // and replayed, which is what the escalating error handler forces.
+//
+// That makes the escalation an obligation, not an implementation detail. The
+// default handler aborts the process and WithErrorHandler has no production
+// caller today, so it always holds. A handler that swallowed the error instead
+// would leave this pin in place and freeze the channel checkpoint silently.
 func (wb *writeBufferBase) settleSync(segmentID int64, startPos *msgpb.MsgPosition, outcome metacache.SettleOutcome) {
 	if startPos == nil {
 		return
