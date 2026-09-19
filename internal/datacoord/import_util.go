@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -825,6 +826,21 @@ func normalizeStorageKey(key string) string {
 	return path.Clean("/" + key)
 }
 
+// comparableStorageKey returns the form of key that the deny list compares.
+// Under local storage the read is os.Open, which follows symlinks and /proc
+// magic links such as /proc/self/root, so the key is resolved first. A key
+// that cannot be resolved is an error, which rejects the import.
+func comparableStorageKey(key string, localStorage bool) (string, error) {
+	if localStorage {
+		resolved, err := filepath.EvalSymlinks(key)
+		if err != nil {
+			return "", merr.WrapErrImportFailedMsg("cannot resolve import path %s: %v", key, err)
+		}
+		key = resolved
+	}
+	return normalizeStorageKey(key), nil
+}
+
 // ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
 // point into Milvus's own internal storage layout under the storage root path.
 //
@@ -853,7 +869,10 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 		segments = append(segments, common.LocalOnlyStorageRootSegments...)
 	}
 
-	rootPath := cm.RootPath()
+	rootPath, err := comparableStorageKey(cm.RootPath(), localStorage)
+	if err != nil {
+		return err
+	}
 	denied := make([]string, 0, len(segments))
 	for _, segment := range segments {
 		denied = append(denied, normalizeStorageKey(path.Join(rootPath, segment)))
@@ -874,7 +893,10 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 					"import path %s must be absolute under common.storageType=local", filePath)
 			}
 
-			cleaned := normalizeStorageKey(filePath)
+			cleaned, err := comparableStorageKey(filePath, localStorage)
+			if err != nil {
+				return err
+			}
 			for _, deniedPath := range denied {
 				// Boundary match, not a raw prefix match: a raw prefix would also
 				// reject a caller's own "files/insert_logs_2026/a.json".
