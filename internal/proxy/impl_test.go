@@ -618,16 +618,14 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 	mockey.PatchConvey("TestProxy_FlushAll_Success", t, func() {
 		// Mock global meta cache methods
 		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+		mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock((*MetaCache).RemoveDatabase).Return().Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
-		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return(nil).Build()
 
 		successStatus := &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}
 		mockey.Mock((*grpcmixcoordclient.Client).ListDatabases).To(func(ctx context.Context, req *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
@@ -674,16 +672,14 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 	mockey.PatchConvey("TestProxy_FlushAll_ServerAbnormal", t, func() {
 		// Mock global meta cache methods
 		globalMetaCache = &MetaCache{}
-		mockey.Mock(globalMetaCache.GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
+		mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock(globalMetaCache.RemoveDatabase).To(func(ctx context.Context, dbName string) error {
-			return nil
-		}).Build()
+		mockey.Mock((*MetaCache).RemoveDatabase).Return().Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
-		mockey.Mock((*paramtable.ComponentParam).Save).Return().Build()
+		mockey.Mock((*paramtable.ComponentParam).Save).Return(nil).Build()
 
 		// Act: Execute test
 		node := createTestProxy()

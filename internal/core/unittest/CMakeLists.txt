@@ -51,6 +51,7 @@ set(MILVUS_TEST_FILES
         test_query.cpp
         test_sealed.cpp
         test_storage.cpp
+        test_plugin_loader.cpp
         test_string_expr.cpp
         test_rust_result.cpp
         test_storage_v2_index_raw_data.cpp
