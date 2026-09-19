@@ -138,7 +138,7 @@ func (s *InsertBufferSuite) TestBuffer() {
 	s.Require().NoError(err)
 	s.Require().Len(groups, 1)
 
-	memSize := insertBuffer.Buffer(groups[0], &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
+	memSize, _ := insertBuffer.Buffer(groups[0], &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
 
 	s.EqualValues(100, insertBuffer.MinTimestamp())
 	s.EqualValues(5376, memSize)

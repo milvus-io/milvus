@@ -534,6 +534,56 @@ func (s *SyncTaskSuite) TestSyncTask_MarshalJSON() {
 	s.JSONEq(expectedJSON, string(data))
 }
 
+// Run's defer and the sync manager's submit handler both call HandleError for
+// one failure, so the failure callback and the two failure metrics used to fire
+// twice per failed sync. The deleted growing-source task had a guard for this;
+// SyncTask never did.
+func (s *SyncTaskSuite) TestHandleErrorRunsOnce() {
+	calls := 0
+	pack := new(SyncPack)
+	pack.WithErrorHandler(func(error) { calls++ })
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(pack)
+
+	err := errors.New("boom")
+	task.HandleError(err)
+	task.HandleError(err)
+
+	s.Equal(1, calls, "the failure callback must fire once per failed sync")
+}
+
+// The bulk-import path builds a SyncTask with WithBatchRows and never reserves
+// rows, because it has no write buffer to reserve them from. It still relies on
+// the commit recording flushedRows: importv2 reports segment.FlushedRows() as
+// the job's ImportedRows, and the meta writer computes NumOfRows as
+// FlushedRows() + batchRows for every later sync of the same segment.
+func (s *SyncTaskSuite) TestCommitRecordsFlushedRowsWithoutReservation() {
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, bfs, nil, metacache.NewEmptySegmentStats())
+
+	pack := new(SyncPack)
+	pack.WithBatchRows(700)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(pack)
+
+	task.settleAction(metacache.SettleCommitted)(seg)
+
+	s.EqualValues(700, seg.FlushedRows(), "a reservation-less commit must still record the rows it flushed")
+}
+
+// The same task must not invent syncing-counter movement it never reserved.
+func (s *SyncTaskSuite) TestCommitWithoutReservationLeavesSyncingCountersAlone() {
+	bfs := pkoracle.NewBloomFilterSet()
+	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1}, bfs, nil, metacache.NewEmptySegmentStats())
+
+	pack := new(SyncPack)
+	pack.WithBatchRows(700)
+	task := NewSyncTask().WithMetaCache(s.metacache).WithSyncPack(pack)
+
+	task.settleAction(metacache.SettleCommitted)(seg)
+
+	s.EqualValues(700, seg.NumOfRows(),
+		"master drove syncingRows negative here, which canceled the flushedRows gain in NumOfRows")
+}
+
 func TestSyncTask(t *testing.T) {
 	suite.Run(t, new(SyncTaskSuite))
 }

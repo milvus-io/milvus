@@ -41,7 +41,6 @@
 #include "storage/Util.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
-#include "segcore/segment_c.h"
 #include "storage/ChunkManager.h"
 #include "storage/FileManager.h"
 #include "storage/KeyRetriever.h"
@@ -59,6 +58,7 @@
 #include "storage/minio/MinioChunkManager.h"
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
+#include "test_utils/ManifestTestUtil.h"
 #include "test_utils/DataGen.h"
 
 // Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
@@ -277,158 +277,6 @@ TEST_F(StorageTest, AzureErrorClassification) {
     EXPECT_EQ(AzureExceptionToErrorCode(coded), ErrorCode::ObjectNotExist);
 }
 
-TEST_F(StorageTest, TextFieldDataFromManifestResolvesLobRefs) {
-#ifndef BUILD_VORTEX_BRIDGE
-    GTEST_SKIP() << "Vortex support is not enabled";
-#endif
-
-    std::string test_dir =
-        "/tmp/text_manifest_reader_" +
-        std::to_string(
-            std::chrono::system_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(test_dir);
-    auto cleanup = [&]() {
-        if (std::filesystem::exists(test_dir)) {
-            std::filesystem::remove_all(test_dir);
-        }
-    };
-
-    auto schema = std::make_shared<Schema>();
-    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
-    auto text_fid = schema->AddDebugField("text", DataType::TEXT, true);
-    schema->set_primary_field_id(pk_fid);
-
-    auto segment = CreateGrowingSegment(schema, empty_index_meta);
-    ASSERT_NE(segment, nullptr);
-
-    constexpr int N = 3;
-    std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
-    std::vector<int64_t> pks = {100, 101, 102};
-    std::vector<std::string> texts = {
-        "inline text for text match",
-        "",
-        std::string(70 * 1024, 'x') + " searchable-tail-token"};
-    bool text_valid[N] = {true, false, true};
-
-    auto insert_data = std::make_unique<InsertRecordProto>();
-    insert_data->set_num_rows(N);
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[pk_fid])
-            .release());
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(texts.data(), text_valid, N, (*schema)[text_fid])
-            .release());
-
-    segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
-
-    CFlushConfig config{};
-    std::string segment_path =
-        test_dir + "/collection/partition/segment_text_lob";
-    std::string text_lob_path = test_dir + "/collection/partition/lobs/" +
-                                std::to_string(text_fid.get());
-    int64_t text_field_ids[] = {text_fid.get()};
-    const char* text_lob_paths[] = {text_lob_path.c_str()};
-    config.segment_path = segment_path.c_str();
-    config.read_version = -1;
-    config.retry_limit = 3;
-    config.text_field_ids = text_field_ids;
-    config.text_lob_paths = text_lob_paths;
-    config.num_text_columns = 1;
-
-    CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
-
-    ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(result.num_rows, N);
-
-    auto properties = LoonFFIPropertiesSingleton::GetInstance().GetProperties();
-    ASSERT_NE(properties, nullptr);
-    auto field_meta = gen_field_meta(
-        1, 2, 3, text_fid.get(), DataType::TEXT, DataType::NONE, true);
-    std::string manifest_json =
-        "{\"base_path\":\"" + segment_path +
-        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
-
-    auto raw_datas = GetFieldDatasFromManifest(manifest_json,
-                                               properties,
-                                               field_meta,
-                                               DataType::TEXT,
-                                               0,
-                                               DataType::NONE);
-    ASSERT_EQ(raw_datas.size(), 1);
-    ASSERT_TRUE(raw_datas[0]->is_valid(0));
-    EXPECT_FALSE(raw_datas[0]->is_valid(1));
-    ASSERT_TRUE(raw_datas[0]->is_valid(2));
-    EXPECT_NE(*static_cast<const std::string*>(raw_datas[0]->RawValue(0)),
-              texts[0]);
-    EXPECT_NE(*static_cast<const std::string*>(raw_datas[0]->RawValue(2)),
-              texts[2]);
-
-    auto text_datas =
-        GetTextFieldDatasFromManifest(manifest_json, properties, field_meta);
-    ASSERT_EQ(text_datas.size(), 1);
-    ASSERT_TRUE(text_datas[0]->is_valid(0));
-    EXPECT_FALSE(text_datas[0]->is_valid(1));
-    ASSERT_TRUE(text_datas[0]->is_valid(2));
-    EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(0)),
-              texts[0]);
-    EXPECT_EQ(*static_cast<const std::string*>(text_datas[0]->RawValue(2)),
-              texts[2]);
-
-    // The streaming variant must deliver the same batches, in order, on the
-    // calling thread — GetFieldDatasFromManifest is a thin wrapper over it,
-    // but assert the contract directly too (decode runs on a thread pool;
-    // ordering and delivery-thread guarantees are what callers rely on).
-    std::vector<FieldDataPtr> streamed;
-    auto caller_tid = std::this_thread::get_id();
-    IterateFieldDataFromManifest(manifest_json,
-                                 properties,
-                                 field_meta,
-                                 DataType::TEXT,
-                                 0,
-                                 DataType::NONE,
-                                 std::nullopt,
-                                 [&](FieldDataPtr fd) {
-                                     EXPECT_EQ(std::this_thread::get_id(),
-                                               caller_tid);
-                                     streamed.push_back(std::move(fd));
-                                 });
-    ASSERT_EQ(streamed.size(), raw_datas.size());
-    for (size_t i = 0; i < streamed.size(); ++i) {
-        ASSERT_EQ(streamed[i]->get_num_rows(), raw_datas[i]->get_num_rows());
-        for (int64_t r = 0; r < streamed[i]->get_num_rows(); ++r) {
-            ASSERT_EQ(streamed[i]->is_valid(r), raw_datas[i]->is_valid(r));
-        }
-    }
-
-    // A throwing consumer must still leave no decode task running: for index
-    // build the consumer writes to local disk and can fail mid-stream, and
-    // the tasks live on a shared pool, so one outliving this frame would run
-    // against a destroyed stack scope. The drain guard covers this exit path
-    // (previously only ReadNext failures drained).
-    EXPECT_THROW(
-        {
-            IterateFieldDataFromManifest(
-                manifest_json,
-                properties,
-                field_meta,
-                DataType::TEXT,
-                0,
-                DataType::NONE,
-                std::nullopt,
-                [](FieldDataPtr) {
-                    throw std::runtime_error("consumer failed");
-                });
-        },
-        std::runtime_error);
-
-    FreeFlushResult(&result);
-    cleanup();
-}
-
 // milvus-storage splits a parquet row group into record-batch slices according
 // to reader.record_batch_max_rows. Those slices share backing buffers, so the
 // in-flight byte budget must charge each referenced range rather than the
@@ -502,275 +350,6 @@ TEST_F(StorageTest, RecordBatchSizeHandlesArrowViewTypes) {
         << "view-typed batch must not be charged its row count";
 }
 
-// A growing segment born while a function output field was absent from the
-// schema (add/drop-function churn) never materializes that column —
-// Reopen/FillAbsentFields skip function outputs by design. Flushing with a
-// newer schema that carries the field must skip the column instead of
-// hitting the insert_record assert (issue #51117).
-TEST_F(StorageTest, FlushGrowingSegmentSkipsNonMaterializedFunctionOutput) {
-    std::string test_dir =
-        "/tmp/flush_skip_fn_output_" +
-        std::to_string(
-            std::chrono::system_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(test_dir);
-    auto cleanup = [&]() {
-        if (std::filesystem::exists(test_dir)) {
-            std::filesystem::remove_all(test_dir);
-        }
-    };
-
-    milvus::proto::schema::CollectionSchema schema_proto;
-    schema_proto.set_name("flush_skip_fn_output");
-    // Real flush schemas always carry the RowID/Timestamp system fields;
-    // the flush validates the Timestamp column was exported.
-    auto* row_id_field = schema_proto.add_fields();
-    row_id_field->set_fieldid(0);
-    row_id_field->set_name("RowID");
-    row_id_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    auto* ts_field = schema_proto.add_fields();
-    ts_field->set_fieldid(1);
-    ts_field->set_name("Timestamp");
-    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    auto* pk_field = schema_proto.add_fields();
-    pk_field->set_fieldid(100);
-    pk_field->set_name("pk");
-    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    pk_field->set_is_primary_key(true);
-
-    auto segment_schema = Schema::ParseFrom(schema_proto);
-    auto segment = CreateGrowingSegment(segment_schema, empty_index_meta);
-    ASSERT_NE(segment, nullptr);
-
-    constexpr int N = 3;
-    std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
-    std::vector<int64_t> pks = {100, 101, 102};
-
-    auto insert_data = std::make_unique<InsertRecordProto>();
-    insert_data->set_num_rows(N);
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(
-            pks.data(), nullptr, N, (*segment_schema)[FieldId(100)])
-            .release());
-
-    segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
-
-    // Flush schema carries a function output field the segment never
-    // materialized.
-    auto flush_proto = schema_proto;
-    auto* fn_output = flush_proto.add_fields();
-    fn_output->set_fieldid(101);
-    fn_output->set_name("fn_sparse");
-    fn_output->set_data_type(
-        milvus::proto::schema::DataType::SparseFloatVector);
-    fn_output->set_is_function_output(true);
-    std::string schema_blob = flush_proto.SerializeAsString();
-
-    CFlushConfig config{};
-    std::string segment_path = test_dir + "/collection/partition/segment_fn";
-    config.segment_path = segment_path.c_str();
-    config.read_version = -1;
-    config.retry_limit = 3;
-    config.schema_blob = schema_blob.data();
-    config.schema_length = static_cast<int64_t>(schema_blob.size());
-    // Column-group config still carrying the skipped function output: the
-    // accounting loop must tolerate its absence instead of failing the flush.
-    int64_t column_group_ids[] = {0};
-    int64_t column_group_field_ids[] = {0, 1, 100, 101};
-    size_t column_group_field_counts[] = {4};
-    config.column_group_ids = column_group_ids;
-    config.column_group_field_ids = column_group_field_ids;
-    config.column_group_field_counts = column_group_field_counts;
-    config.num_column_groups = 1;
-
-    CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
-
-    ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(result.num_rows, N);
-    ASSERT_EQ(result.num_column_groups, 1u);
-    for (size_t i = 0; i < result.num_field_stats; ++i) {
-        EXPECT_NE(result.field_ids[i], 101);
-    }
-    for (size_t i = 0; i < result.num_flushed_fields; ++i) {
-        EXPECT_NE(result.flushed_field_ids[i], 101);
-    }
-
-    FreeFlushResult(&result);
-    cleanup();
-}
-
-// A regular field carried by a staler flush schema but absent from the
-// segment's own schema was dropped before the segment was created: the
-// flush must skip it instead of erroring or asserting.
-TEST_F(StorageTest, FlushGrowingSegmentSkipsFieldAbsentFromSegmentSchema) {
-    std::string test_dir =
-        "/tmp/flush_skip_dropped_field_" +
-        std::to_string(
-            std::chrono::system_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(test_dir);
-    auto cleanup = [&]() {
-        if (std::filesystem::exists(test_dir)) {
-            std::filesystem::remove_all(test_dir);
-        }
-    };
-
-    milvus::proto::schema::CollectionSchema schema_proto;
-    schema_proto.set_name("flush_skip_dropped_field");
-    auto* row_id_field = schema_proto.add_fields();
-    row_id_field->set_fieldid(0);
-    row_id_field->set_name("RowID");
-    row_id_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    auto* ts_field = schema_proto.add_fields();
-    ts_field->set_fieldid(1);
-    ts_field->set_name("Timestamp");
-    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    auto* pk_field = schema_proto.add_fields();
-    pk_field->set_fieldid(100);
-    pk_field->set_name("pk");
-    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    pk_field->set_is_primary_key(true);
-
-    auto segment_schema = Schema::ParseFrom(schema_proto);
-    auto segment = CreateGrowingSegment(segment_schema, empty_index_meta);
-    ASSERT_NE(segment, nullptr);
-
-    constexpr int N = 3;
-    std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
-    std::vector<int64_t> pks = {100, 101, 102};
-
-    auto insert_data = std::make_unique<InsertRecordProto>();
-    insert_data->set_num_rows(N);
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(
-            pks.data(), nullptr, N, (*segment_schema)[FieldId(100)])
-            .release());
-
-    segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
-
-    // Staler flush schema still carries an ordinary field the segment's own
-    // schema never had (dropped before the segment was created).
-    auto flush_proto = schema_proto;
-    auto* extra = flush_proto.add_fields();
-    extra->set_fieldid(101);
-    extra->set_name("dropped_field");
-    extra->set_data_type(milvus::proto::schema::DataType::VarChar);
-    extra->set_nullable(true);
-    auto* param = extra->add_type_params();
-    param->set_key("max_length");
-    param->set_value("64");
-    std::string schema_blob = flush_proto.SerializeAsString();
-
-    CFlushConfig config{};
-    std::string segment_path = test_dir + "/collection/partition/segment_dp";
-    config.segment_path = segment_path.c_str();
-    config.read_version = -1;
-    config.retry_limit = 3;
-    config.schema_blob = schema_blob.data();
-    config.schema_length = static_cast<int64_t>(schema_blob.size());
-
-    CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
-
-    ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(result.num_rows, N);
-    for (size_t i = 0; i < result.num_flushed_fields; ++i) {
-        EXPECT_NE(result.flushed_field_ids[i], 101);
-    }
-
-    FreeFlushResult(&result);
-    cleanup();
-}
-
-// A function-output column the ctor allocated but no insert ever filled
-// (older-era replayed inserts omit it) is not materialized: the flush must
-// skip it instead of tripping the empty-chunk assert.
-TEST_F(StorageTest, FlushGrowingSegmentSkipsEmptyFunctionOutputColumn) {
-    std::string test_dir =
-        "/tmp/flush_skip_empty_fn_output_" +
-        std::to_string(
-            std::chrono::system_clock::now().time_since_epoch().count());
-    std::filesystem::create_directories(test_dir);
-    auto cleanup = [&]() {
-        if (std::filesystem::exists(test_dir)) {
-            std::filesystem::remove_all(test_dir);
-        }
-    };
-
-    milvus::proto::schema::CollectionSchema schema_proto;
-    schema_proto.set_name("flush_skip_empty_fn_output");
-    auto* row_id_field = schema_proto.add_fields();
-    row_id_field->set_fieldid(0);
-    row_id_field->set_name("RowID");
-    row_id_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    auto* ts_field = schema_proto.add_fields();
-    ts_field->set_fieldid(1);
-    ts_field->set_name("Timestamp");
-    ts_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    auto* pk_field = schema_proto.add_fields();
-    pk_field->set_fieldid(100);
-    pk_field->set_name("pk");
-    pk_field->set_data_type(milvus::proto::schema::DataType::Int64);
-    pk_field->set_is_primary_key(true);
-    // Function output present in the segment's own schema: the ctor
-    // allocates its column, but replayed inserts never fill it.
-    auto* fn_output = schema_proto.add_fields();
-    fn_output->set_fieldid(101);
-    fn_output->set_name("fn_sparse");
-    fn_output->set_data_type(
-        milvus::proto::schema::DataType::SparseFloatVector);
-    fn_output->set_is_function_output(true);
-
-    auto segment_schema = Schema::ParseFrom(schema_proto);
-    auto segment = CreateGrowingSegment(segment_schema, empty_index_meta);
-    ASSERT_NE(segment, nullptr);
-
-    constexpr int N = 3;
-    std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
-    std::vector<int64_t> pks = {100, 101, 102};
-
-    // Insert carries no data for the function output; the consume path
-    // exempts function outputs, leaving field 101 allocated but empty.
-    auto insert_data = std::make_unique<InsertRecordProto>();
-    insert_data->set_num_rows(N);
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(
-            pks.data(), nullptr, N, (*segment_schema)[FieldId(100)])
-            .release());
-
-    segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
-
-    std::string schema_blob = schema_proto.SerializeAsString();
-
-    CFlushConfig config{};
-    std::string segment_path = test_dir + "/collection/partition/segment_ef";
-    config.segment_path = segment_path.c_str();
-    config.read_version = -1;
-    config.retry_limit = 3;
-    config.schema_blob = schema_blob.data();
-    config.schema_length = static_cast<int64_t>(schema_blob.size());
-
-    CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
-
-    ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(result.num_rows, N);
-    for (size_t i = 0; i < result.num_flushed_fields; ++i) {
-        EXPECT_NE(result.flushed_field_ids[i], 101);
-    }
-
-    FreeFlushResult(&result);
-    cleanup();
-}
-
 // A manifest column group whose only field was dropped from the segment
 // schema before recovery is a legal leftover of drop semantics: reloading
 // the growing segment must skip that group instead of failing the whole
@@ -812,52 +391,31 @@ TEST_F(StorageTest, LoadGrowingSegmentSkipsDroppedFieldColumnGroup) {
     extra_field->set_data_type(milvus::proto::schema::DataType::Int64);
 
     auto full_schema = Schema::ParseFrom(full_proto);
-    auto segment = CreateGrowingSegment(full_schema, empty_index_meta);
-    ASSERT_NE(segment, nullptr);
 
     constexpr int N = 3;
     std::vector<int64_t> row_ids = {0, 1, 2};
-    std::vector<Timestamp> timestamps = {10, 11, 12};
+    std::vector<int64_t> timestamps = {10, 11, 12};
     std::vector<int64_t> pks = {100, 101, 102};
     std::vector<int64_t> extras = {200, 201, 202};
 
-    auto insert_data = std::make_unique<InsertRecordProto>();
-    insert_data->set_num_rows(N);
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(
-            pks.data(), nullptr, N, (*full_schema)[FieldId(100)])
-            .release());
-    insert_data->mutable_fields_data()->AddAllocated(
-        CreateDataArrayFrom(
-            extras.data(), nullptr, N, (*full_schema)[FieldId(101)])
-            .release());
-
-    segment->PreInsert(N);
-    segment->Insert(0, N, row_ids.data(), timestamps.data(), insert_data.get());
-
-    std::string schema_blob = full_proto.SerializeAsString();
-
-    CFlushConfig config{};
-    std::string segment_path = test_dir + "/collection/partition/segment_lg";
-    config.segment_path = segment_path.c_str();
-    config.read_version = -1;
-    config.retry_limit = 3;
-    config.schema_blob = schema_blob.data();
-    config.schema_length = static_cast<int64_t>(schema_blob.size());
-    // Force field 101 into its own column group so that dropping the field
-    // leaves a group with no live field.
-    config.schema_based_pattern = "0|1|100,101";
-
-    CFlushResult result{};
-    auto status =
-        FlushGrowingSegmentData(segment.get(), 0, N, &config, &result);
-
-    ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(result.num_rows, N);
-    std::string manifest_json =
-        "{\"base_path\":\"" + segment_path +
-        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
-    FreeFlushResult(&result);
+    // The pattern forces field 101 into its own column group, so dropping the
+    // field later leaves a group with no live field, which is the branch this
+    // test exercises on the load path.
+    milvus::test::V3SegmentTestData v3(
+        full_schema,
+        {
+            milvus::test::Int64ColumnFromValues(row_ids),
+            milvus::test::Int64ColumnFromValues(timestamps),
+            milvus::test::Int64ColumnFromValues(pks),
+            milvus::test::Int64ColumnFromValues(extras),
+        },
+        N,
+        test_dir,
+        "collection/partition/segment_lg",
+        "0|1|100,101");
+    ASSERT_EQ(v3.TotalRows(), N);
+    ASSERT_GT(v3.Version(), 0);
+    const std::string manifest_json = v3.ManifestPathJson();
 
     // Guard against a vacuous pass: the split pattern must have produced a
     // column group holding field 101 exclusively, or the load below would

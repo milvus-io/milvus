@@ -49,9 +49,12 @@ type SyncPack struct {
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
 	batchRows     int64 // batchRows is the row number of this sync task,not the total num of rows of segment
-	dataSource    string
-	isFlush       bool
-	isDrop        bool
+	// reservation owns this batch's row accounting. The task settles it exactly
+	// once on every terminal outcome.
+	reservation *metacache.SyncReservation
+	dataSource  string
+	isFlush     bool
+	isDrop      bool
 	// metadata
 	collectionID int64
 	partitionID  int64
@@ -128,6 +131,14 @@ func (p *SyncPack) WithFlush() *SyncPack {
 
 func (p *SyncPack) WithDrop() *SyncPack {
 	p.isDrop = true
+	return p
+}
+
+// WithReservation attaches the row-accounting reservation and derives batchRows
+// from it, so the two can never disagree.
+func (p *SyncPack) WithReservation(r *metacache.SyncReservation) *SyncPack {
+	p.reservation = r
+	p.batchRows = r.Rows()
 	return p
 }
 

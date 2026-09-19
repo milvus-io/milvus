@@ -122,12 +122,6 @@ func WithLevel(level datapb.SegmentLevel) SegmentFilter {
 	})
 }
 
-func WithNoSyncingTask() SegmentFilter {
-	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.syncingTasks == 0
-	})
-}
-
 type SegmentAction func(info *SegmentInfo)
 
 func SegmentActions(actions ...SegmentAction) SegmentAction {
@@ -174,6 +168,11 @@ func UpdateCheckpoint(checkpoint *msgpb.MsgPosition) SegmentAction {
 	}
 }
 
+// UpdateNumOfRows seeds flushedRows absolutely. It has no production caller:
+// the live accounting is delta-only, owned by SyncReservation and
+// AddBufferedRows. This exists so tests can stand up a segment that already
+// holds rows. Do not call it from production code; an absolute write here would
+// bypass the reservation.
 func UpdateNumOfRows(numOfRows int64) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.flushedRows = numOfRows
@@ -194,9 +193,28 @@ func SetStorageVersion(version int64) SegmentAction {
 	}
 }
 
-func UpdateBufferedRows(bufferedRows int64) SegmentAction {
+// AddFlushedRows records rows that reached storage for a task that never
+// reserved them. Only the bulk-import path needs this: it builds a SyncTask
+// straight from an InsertData with no write buffer to reserve from, yet
+// importv2 reports FlushedRows() as the job's ImportedRows and the meta writer
+// computes NumOfRows as FlushedRows() plus the batch.
+//
+// It deliberately touches nothing else. The action this replaces also
+// decremented syncingRows and syncingTasks, which for an unreserved task drove
+// both negative; the negative syncingRows then canceled the flushedRows gain
+// inside NumOfRows.
+func AddFlushedRows(rows int64) SegmentAction {
 	return func(info *SegmentInfo) {
-		info.bufferRows = bufferedRows
+		info.flushedRows += rows
+	}
+}
+
+// AddBufferedRows records newly buffered rows as a delta. The absolute setter
+// it replaced was correct only while wb.mut serialized every writer and
+// yieldBuffer discarded the whole buffer; a delta needs neither invariant.
+func AddBufferedRows(rows int64) SegmentAction {
+	return func(info *SegmentInfo) {
+		info.bufferRows += rows
 	}
 }
 
@@ -223,30 +241,6 @@ func SetStatistics(stats *SegmentStats) SegmentAction {
 	}
 }
 
-func StartSyncing(batchSize int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.syncingRows += batchSize
-		info.bufferRows -= batchSize
-		info.syncingTasks++
-	}
-}
-
-func AbortSyncing(batchSize int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.syncingRows -= batchSize
-		info.bufferRows += batchSize
-		info.syncingTasks--
-	}
-}
-
-func FinishSyncing(batchSize int64) SegmentAction {
-	return func(info *SegmentInfo) {
-		info.flushedRows += batchSize
-		info.syncingRows -= batchSize
-		info.syncingTasks--
-	}
-}
-
 func UpdateCurrentSplit(split []storagecommon.ColumnGroup) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.currentSplit = split
@@ -262,18 +256,6 @@ func SetStartPosRecorded(flag bool) SegmentAction {
 func UpdateManifestPath(manifestPath string) SegmentAction {
 	return func(info *SegmentInfo) {
 		info.manifestPath = manifestPath
-	}
-}
-
-// SetFlushSourceMode records which subsystem owns the segment's payload at
-// flush time. The decision is sticky: once a non-Unknown mode is set, later
-// calls with a different mode are no-ops, so the source for a given segment
-// stays consistent across its lifetime.
-func SetFlushSourceMode(mode FlushSourceMode) SegmentAction {
-	return func(info *SegmentInfo) {
-		if info.flushSourceMode == FlushSourceUnknown {
-			info.flushSourceMode = mode
-		}
 	}
 }
 

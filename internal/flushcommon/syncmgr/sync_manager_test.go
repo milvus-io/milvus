@@ -254,7 +254,10 @@ func (s *SyncManagerSuite) TestSyncManager_TaskStatsJSON() {
 	syncMgr.taskStats.Add("12345-1000", task1)
 	syncMgr.taskStats.Add("67890-3000", task2)
 
-	expectedTasks := []SyncTask{*task1, *task2}
+	// Pointers, not values: SyncTask holds a sync.Once now, so copying it is
+	// both a vet error and semantically wrong. json.Marshal follows pointers,
+	// so the encoded output is identical.
+	expectedTasks := []*SyncTask{task1, task2}
 	expectedJSON, err := json.Marshal(expectedTasks)
 	s.NoError(err)
 

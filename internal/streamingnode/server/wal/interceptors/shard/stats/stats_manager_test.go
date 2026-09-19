@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/mocks/streamingnode/server/wal/interceptors/shard/mock_utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
@@ -273,26 +272,9 @@ func TestStatsManagerRuntimeFlushSizeForMemoryPressure(t *testing.T) {
 	assert.Equal(t, uint64(300), m.totalStats.Total().BinarySize)
 	assert.Equal(t, uint64(550), m.totalFlushSize)
 	assert.Equal(t, []int64{1}, m.selectSegmentsUntilLessThanLWM())
-
-	m.UpdateFlushSourceMode(1, metacache.FlushSourceWriteBuffer)
-	stat1 = m.GetStatsOfSegment(1)
-	assert.Equal(t, uint64(150), stat1.FlushSize())
-	assert.Equal(t, uint64(300), m.totalFlushSize)
-	require.NoError(t, m.AllocRows(1, ModifiedMetrics{Rows: 5, BinarySize: 50}, 300))
-	stat1 = m.GetStatsOfSegment(1)
-	assert.Equal(t, uint64(200), stat1.Modified.BinarySize)
-	assert.Equal(t, uint64(200), stat1.FlushSize())
-	assert.Equal(t, uint64(350), m.totalFlushSize)
-
-	m.UpdateFlushSourceMode(2, metacache.FlushSourceGrowing)
-	require.NoError(t, m.AllocRows(2, ModifiedMetrics{Rows: 5, BinarySize: 50}, 300))
-	stat2 = m.GetStatsOfSegment(2)
-	assert.Equal(t, uint64(200), stat2.Modified.BinarySize)
-	assert.Equal(t, uint64(450), stat2.FlushSize())
-	assert.Equal(t, uint64(650), m.totalFlushSize)
 }
 
-func TestStatsManagerRuntimeFlushSizeUnregisterAndModeCorrection(t *testing.T) {
+func TestStatsManagerRuntimeFlushSizeUnregister(t *testing.T) {
 	paramtable.Init()
 	m := NewStatsManager()
 
@@ -312,17 +294,8 @@ func TestStatsManagerRuntimeFlushSizeUnregisterAndModeCorrection(t *testing.T) {
 	}, stat)
 	assert.Equal(t, uint64(500), m.totalFlushSize)
 
-	m.UpdateFlushSourceMode(10, metacache.FlushSourceWriteBuffer)
-	assert.Equal(t, uint64(100), m.totalFlushSize)
-	assert.Equal(t, uint64(100), m.GetStatsOfSegment(10).FlushSize())
-
-	m.UpdateFlushSourceMode(10, metacache.FlushSourceGrowing)
-	assert.Equal(t, uint64(100), m.totalFlushSize)
-	assert.Equal(t, uint64(100), m.GetStatsOfSegment(10).FlushSize())
-
 	m.UnregisterSealedSegment(10)
 	assert.Equal(t, uint64(0), m.totalFlushSize)
-	assert.Empty(t, m.segmentFlushSourceModes)
 }
 
 func TestConcurrentStasManager(t *testing.T) {

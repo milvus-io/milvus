@@ -36,9 +36,6 @@ void
 SegcoreSetStorageV3Enabled(const bool);
 
 void
-SegcoreSetEnableGrowingSourceFlush(const bool);
-
-void
 SegcoreSetEnableGeometryCache(const bool);
 
 void
