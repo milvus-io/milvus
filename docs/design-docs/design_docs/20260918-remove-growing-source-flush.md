@@ -220,7 +220,7 @@ Policy for specific conditions:
   not yet observed the assignment, so the caller should retry. Swallowing it as
   success reports persistence for rows DataCoord never recorded, releases the
   pin, and lets the checkpoint advance past them.
-- **Cancelled**: `Failed`. Cancellation during shutdown must not release pins.
+- **Canceled**: `Failed`. Cancellation during shutdown must not release pins.
 - **Channel removed without drop**: the buffer is discarded with its pins, which
   is correct because the channel's metacache goes away with it.
 

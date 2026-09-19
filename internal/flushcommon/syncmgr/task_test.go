@@ -581,7 +581,7 @@ func (s *SyncTaskSuite) TestCommitWithoutReservationLeavesSyncingCountersAlone()
 	task.settleAction(metacache.SettleCommitted)(seg)
 
 	s.EqualValues(700, seg.NumOfRows(),
-		"master drove syncingRows negative here, which cancelled the flushedRows gain in NumOfRows")
+		"master drove syncingRows negative here, which canceled the flushedRows gain in NumOfRows")
 }
 
 func TestSyncTask(t *testing.T) {

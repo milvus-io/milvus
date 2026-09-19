@@ -201,7 +201,7 @@ func SetStorageVersion(version int64) SegmentAction {
 //
 // It deliberately touches nothing else. The action this replaces also
 // decremented syncingRows and syncingTasks, which for an unreserved task drove
-// both negative; the negative syncingRows then cancelled the flushedRows gain
+// both negative; the negative syncingRows then canceled the flushedRows gain
 // inside NumOfRows.
 func AddFlushedRows(rows int64) SegmentAction {
 	return func(info *SegmentInfo) {
