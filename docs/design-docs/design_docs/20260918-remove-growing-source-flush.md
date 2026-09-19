@@ -98,14 +98,26 @@ Three things in the remaining flush path are maintained in more than one place
 or decided in more than one way. Each converges to a single owner.
 
 **Row accounting.** `bufferRows` is written as an absolute value by the write
-buffer and as a delta by metacache actions applied from the sync task, so an
-absolute write silently discards a pending delta. `syncingRows` and
-`syncingTasks` are delta-only. The invariant
-`bufferRows + syncingRows + flushedRows == segment rows` is never asserted, and
-`bufferRows` is clamped at zero, which absorbs drift instead of surfacing it.
-Worse, `AbortSyncing` has no call site on the plain `SyncTask` path at all: a
-failed sync leaks `syncingRows` and `syncingTasks` permanently, and removing
-growing-source flush deletes its only remaining caller.
+buffer and as a delta by metacache actions applied from the sync task. That
+mixture is not observably wrong, because `wb.mut` serializes every writer, and
+it is stated that way here after checking rather than assumed: `bufferInsert`
+runs under `BufferData`'s lock, `getSyncTask` is reachable only through
+`getSyncTasksLocked`, and `AbortSyncing`'s single caller carries a `Locked`
+suffix. What the mixture costs is fragility. Correctness rests on that
+serialization, on `yieldBuffer` discarding the whole `segmentBuffer` so a fresh
+one restarts from zero, and on every terminal path remembering to undo
+`StartSyncing`. None of the three is asserted anywhere.
+
+The third one does fail. `AbortSyncing` has no call site on the plain
+`SyncTask` path at all, so a failed sync leaks `syncingRows` and `syncingTasks`
+permanently, and the two early returns in `Run` leak them too. Only the
+panicking default error handler keeps that from being visible. The checkpoint
+pin leaks with them: the success callback removes the candidate after an
+`if err != nil { return err }` that runs first.
+
+The zero clamp that looks like it hides this drift lives in
+`updateGrowingSourceBufferedRows`, which is growing-source code and goes away
+with the feature. The common path never clamped and never asserted.
 
 Converged design: a sync reservation. One metacache transition moves rows from
 buffered to syncing and returns a handle. The handle is settled exactly once,
@@ -189,6 +201,13 @@ exist only in the WAL. Releasing the pin would lose them, and leaking the
 accounting hides the failure. Keeping the pin and escalating is what makes a
 restart replay the missing rows, which is the behavior the panicking default
 error handler accidentally provides today.
+
+`Failed` keeping the pin makes the escalation an obligation rather than an
+implementation detail. The default write-buffer error handler aborts the
+process, and `WithErrorHandler` has no production caller, so a failed sync
+always ends in a restart that replays from the pinned position. A future
+handler that swallowed the error instead would leave the pin in place and
+freeze that channel's checkpoint with no further signal.
 
 Policy for specific conditions:
 
