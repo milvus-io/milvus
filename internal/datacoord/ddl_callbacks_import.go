@@ -55,10 +55,10 @@ func init() {
 
 func importResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
 	var jobID int64
-	var owner bool
+	var isOwner bool
 	switch msg.MessageTypeWithVersion() {
 	case message.MessageTypeImportV1:
-		jobID, owner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+		jobID, isOwner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
 	case message.MessageTypeCommitImportV2:
 		jobID = message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId()
 	case message.MessageTypeRollbackImportV2:
@@ -67,7 +67,7 @@ func importResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
 	if jobID == 0 {
 		return "", false // Legacy messages have no recoverable pairing identity.
 	}
-	return "import/" + strconv.FormatInt(jobID, 10), owner
+	return "import/" + strconv.FormatInt(jobID, 10), isOwner
 }
 
 // importV1AckCallback handles the ack callback for import messages.

@@ -56,10 +56,10 @@ func init() {
 
 func testImportResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
 	var jobID int64
-	var owner bool
+	var isOwner bool
 	switch msg.MessageTypeWithVersion() {
 	case message.MessageTypeImportV1:
-		jobID, owner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
+		jobID, isOwner = message.MustAsBroadcastImportMessageV1(msg).MustBody().GetJobID(), true
 	case message.MessageTypeCommitImportV2:
 		jobID = message.MustAsBroadcastCommitImportMessageV2(msg).Header().GetJobId()
 	case message.MessageTypeRollbackImportV2:
@@ -68,7 +68,7 @@ func testImportResourceKeyPair(msg message.BroadcastMutableMessage) (string, boo
 	if jobID == 0 {
 		return "", false // Legacy messages have no recoverable pairing identity.
 	}
-	return fmt.Sprintf("import/%d", jobID), owner
+	return fmt.Sprintf("import/%d", jobID), isOwner
 }
 
 func TestBroadcaster(t *testing.T) {

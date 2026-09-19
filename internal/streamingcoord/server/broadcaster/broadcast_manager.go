@@ -390,7 +390,7 @@ func (bm *broadcastTaskManager) getOrAddBroadcastTask(
 	newIncomingTask := newBroadcastTaskFromBroadcastMessage(msg, bm.metrics, bm.ackScheduler)
 	newIncomingTask.SetLogger(bm.Logger())
 	newIncomingTask.WithResourceKeyLockGuards(guards)
-	if key, owner := registry.ResourceKeyPair(msg); owner && key != "" {
+	if key, isOwner := registry.ResourceKeyPair(msg); isOwner && key != "" {
 		newIncomingTask.task.ResourceKeyOwnerId = broadcastID
 	}
 	bm.tasks[broadcastID] = newIncomingTask
@@ -517,13 +517,40 @@ func appendPendingFileResourceIDs(result map[int64][]int64, collectionID int64, 
 	}
 }
 
+func (bm *broadcastTaskManager) findResourceKeyOwner(key string) *broadcastTask {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	for _, task := range bm.tasks {
+		ownerKey, isOwner := registry.ResourceKeyPair(task.BroadcastMessage())
+		if !isOwner || ownerKey != key {
+			continue
+		}
+		ownerID, _ := task.resourceKeyOwnership()
+		if ownerID != 0 {
+			return task
+		}
+	}
+	return nil
+}
+
+// findExistingEndLocked returns the End already paired with ownerID.
+// The caller must hold bm.mu.
+func (bm *broadcastTaskManager) findExistingEndLocked(ownerID uint64) *broadcastTask {
+	for id, task := range bm.tasks {
+		if parent, _ := task.resourceKeyOwnership(); parent == ownerID && id != ownerID {
+			return task
+		}
+	}
+	return nil
+}
+
 // BroadcastWithResourceKeyOwner registers one End under the manager mutex and
 // borrows the Begin's keys. It must never reacquire them: an exclusive DDL may
 // already be waiting for ownership release. If no owner is retained, the
 // caller decides whether to use the ordinary broadcast path.
 func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
-	key, acquiring := registry.ResourceKeyPair(msg)
-	if acquiring || key == "" {
+	key, isOwner := registry.ResourceKeyPair(msg)
+	if isOwner || key == "" {
 		return false, merr.WrapErrServiceInternalMsg("message is not a paired broadcast End")
 	}
 	if !bm.lifetime.Add(typeutil.LifetimeStateWorking) {
@@ -531,18 +558,7 @@ func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Contex
 	}
 	defer bm.lifetime.Done()
 
-	bm.mu.Lock()
-	var owner *broadcastTask
-	for _, task := range bm.tasks {
-		if ownerKey, acquiring := registry.ResourceKeyPair(task.BroadcastMessage()); acquiring && ownerKey == key {
-			ownerID, _ := task.resourceKeyOwnership()
-			if ownerID != 0 {
-				owner = task
-				break
-			}
-		}
-	}
-	bm.mu.Unlock()
+	owner := bm.findResourceKeyOwner(key)
 	if owner == nil {
 		return false, nil
 	}
@@ -567,13 +583,7 @@ func (bm *broadcastTaskManager) BroadcastWithResourceKeyOwner(ctx context.Contex
 		// callers must handle terminal retries using their business state.
 		return true, nil
 	}
-	var end *broadcastTask
-	for id, task := range bm.tasks {
-		if parent, _ := task.resourceKeyOwnership(); parent == ownerID && id != ownerID {
-			end = task
-			break
-		}
-	}
+	end := bm.findExistingEndLocked(ownerID)
 	if end != nil {
 		bm.mu.Unlock()
 		if end.BroadcastMessage().MessageTypeWithVersion() != msg.MessageTypeWithVersion() {
