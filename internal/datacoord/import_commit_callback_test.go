@@ -107,6 +107,36 @@ func TestImportCommitCallbackRetriesSegmentPersistence(t *testing.T) {
 	require.Equal(t, internalpb.ImportJobState_Completed, callbacks.importMeta.GetJob(ctx, 1).GetState())
 }
 
+func TestImportCommitCallbackRecomputesDataView(t *testing.T) {
+	callbacks, _, result := newImportCommitCallbackTest(t)
+	ctx := context.Background()
+	callbacks.meta.dataViewManager = &recordingDataViewManager{}
+	recompute := mockey.Mock((*recordingDataViewManager).Recompute).To(func(_ *recordingDataViewManager, ctx context.Context, collectionID int64) error {
+		require.EqualValues(t, 100, collectionID)
+		// Reading ImportMeta here also checks that reconciliation is requested
+		// outside its write lock. Segment visibility must already be persisted.
+		require.NotNil(t, callbacks.importMeta.GetJob(ctx, 1))
+		projection, err := callbacks.meta.loadableProjection(ctx, collectionID)
+		require.NoError(t, err)
+		require.Len(t, projection, 3)
+		for _, id := range []int64{10, 11, 20} {
+			require.False(t, callbacks.meta.GetSegment(ctx, id).GetIsImporting())
+		}
+		return nil
+	}).Build()
+	defer recompute.UnPatch()
+	failSave := mockey.Mock((*meta).UpdateSegmentsInfo).Return(context.DeadlineExceeded).Build()
+	defer failSave.UnPatch()
+	require.ErrorIs(t, callbacks.commitImportV2AckCallback(ctx, result), context.DeadlineExceeded)
+	require.Zero(t, recompute.Times())
+	failSave.UnPatch()
+	require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
+	require.Equal(t, 1, recompute.Times())
+	// A replay of an already-completed job can retry a lost reconciliation.
+	require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
+	require.Equal(t, 2, recompute.Times())
+}
+
 func TestImportCommitCallbackRetriesCompletionAfterRestart(t *testing.T) {
 	callbacks, catalog, result := newImportCommitCallbackTest(t)
 	ctx := context.Background()

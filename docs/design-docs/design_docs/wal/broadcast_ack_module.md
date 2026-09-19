@@ -136,12 +136,15 @@ DataCoord's CommitImport callback owns the complete commit flow:
 2. For each business VChannel, set its imported segments' CommitTimestamp to
    that channel's append TimeTick and clear IsImporting. CChannel's timestamp
    and the maximum timestamp across channels must not replace this fence.
-3. Persist Completed and completion time only after segment metadata succeeds.
+3. After segment metadata succeeds, request the existing DataViewManager's
+   asynchronous reconciliation for the collection, then persist Completed and
+   completion time. Reconciliation is requested outside ImportMeta's lock.
 
 Committing is a durable protection against timeout/cleanup during a partial
 commit, not a wait for per-channel RPC acknowledgements. Failed writes return
 errors to the broadcast callback scheduler. Its persisted task retries after
-failure/restart; segment updates are idempotent and Completed replay is a no-op.
+failure/restart; segment updates are idempotent. Completed replay leaves segment
+and job metadata unchanged but repeats the DataView reconciliation request.
 The segment and job writes are ordered, not one atomic transaction.
 
 RecoveryStorage has no Import-specific RPC task, Flush request, or retained
@@ -152,8 +155,9 @@ of the coordinator-side effect. HandleCommitVchannel no longer mutates state.
 
 This branch uses the existing segment-metadata serving path: MVCC already
 tracks CommitImport's WAL position, and QueryNode uses CommitTimestamp for
-import visibility and the delete replay boundary. qv's separate DataView
-publication and Growing/Transforming MVCC frontiers are not introduced here.
+import visibility and the delete replay boundary. DataView reconciliation from
+master is preserved at the broadcast callback that now owns the segment mutation.
+Growing/Transforming MVCC frontiers are not introduced here.
 
 Validation covers per-channel timestamps including a higher CChannel tick,
 empty channels, readiness retries, segment/job persistence failures, callback
