@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1668,14 +1670,86 @@ func TestValidateImportFilePaths(t *testing.T) {
 				defer paramtable.Get().Reset(key)
 			}
 
-			cm := mocks2.NewChunkManager(t)
-			cm.EXPECT().RootPath().Return(tt.rootPath).Maybe()
+			rootPath, filePath := tt.rootPath, tt.path
+			if tt.storageType == "local" {
+				// Local keys are resolved on disk, so the root and the file must exist.
+				rootPath, filePath = materializeLocalImportPath(t, tt.rootPath, tt.path)
+			}
 
-			files := []*msgpb.ImportFile{{Paths: []string{tt.path}}}
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(rootPath).Maybe()
+
+			files := []*msgpb.ImportFile{{Paths: []string{filePath}}}
 			err := ValidateImportFilePaths(cm, files, tt.options)
 
 			if tt.wantReject {
 				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// materializeLocalImportPath moves rootPath under a temp directory and creates
+// filePath there when it is absolute. A relative filePath is returned as is.
+func materializeLocalImportPath(t *testing.T, rootPath, filePath string) (string, string) {
+	base := t.TempDir()
+	localRoot := filepath.Join(base, rootPath)
+	require.NoError(t, os.MkdirAll(localRoot, 0o755))
+	if !filepath.IsAbs(filePath) {
+		return localRoot, filePath
+	}
+	localFile := filepath.Join(base, filePath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(localFile), 0o755))
+	require.NoError(t, os.WriteFile(localFile, []byte("{}"), 0o600))
+	return localRoot, localFile
+}
+
+// Under storageType=local the datanode reads with os.Open, which follows
+// symlinks and /proc magic links. An alias of an internal directory must be
+// denied like the directory itself.
+func TestValidateImportFilePaths_LocalAliases(t *testing.T) {
+	key := paramtable.Get().CommonCfg.StorageType.Key
+	paramtable.Get().Save(key, "local")
+	defer paramtable.Get().Reset(key)
+
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+	snapshot := filepath.Join(root, "snapshots", "449", "metadata", "12.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(snapshot), 0o755))
+	require.NoError(t, os.WriteFile(snapshot, []byte("{}"), 0o600))
+
+	staging := filepath.Join(base, "staging")
+	require.NoError(t, os.MkdirAll(staging, 0o755))
+	link := filepath.Join(staging, "a.json")
+	require.NoError(t, os.Symlink(snapshot, link))
+
+	rootLink := filepath.Join(base, "data-link")
+	require.NoError(t, os.Symlink(root, rootLink))
+
+	tests := []struct {
+		name       string
+		rootPath   string
+		path       string
+		wantReject bool
+	}{
+		{"proc self root alias", root, "/proc/self/root" + snapshot, true},
+		{"staging symlink into the root", root, link, true},
+		{"symlinked root, resolved path", rootLink, snapshot, true},
+		{"missing file", root, filepath.Join(staging, "missing.json"), true},
+		{"ordinary staging file", root, filepath.Join(base, "ordinary.json"), false},
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(base, "ordinary.json"), []byte("{}"), 0o600))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(tt.rootPath).Maybe()
+
+			err := ValidateImportFilePaths(cm, []*msgpb.ImportFile{{Paths: []string{tt.path}}}, nil)
+			if tt.wantReject {
 				assert.ErrorIs(t, err, merr.ErrImportFailed)
 			} else {
 				assert.NoError(t, err)
