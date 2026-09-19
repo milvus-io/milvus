@@ -374,6 +374,42 @@ QueryNode for the execution-path counters), and a node's `GetFeatureUsage` retur
 counters: in standalone, where all roles share one process and one counter array, no slot is reported
 twice.
 
+#### One user request counts once
+
+A counter answers "how many requests used this feature", so a request must move a counter at most
+once however many times the Proxy parses or re-runs it. Two things make that true on the read paths.
+
+**The search task accumulates into a set.** `searchTask` carries a `featureusage.FeatureSet`, a
+fixed-size bitmap over the counter ids. Every hook in `PreExecute` marks into it; the set is flushed
+once, with `HitAll`, when `PreExecute` returns. This is what a set buys:
+
+- a hybrid search parses every sub-request, so `ignore_growing`, `hints` and `analyzer_name` would
+  otherwise be counted once per sub-request;
+- the same set is marked from the sub-request's `search_params` and from the request-level
+  `rank_params`, which is where `group_size`, `strict_group_size` and `rank_group_scorer` live on the
+  hybrid path — without that second scan they were never counted there at all;
+- a feature named twice in one request (two unknown rerankers folding into `function_score=_other`)
+  is one request that used it.
+
+**Only the first task built for a user request counts.** `Proxy.Search` can run `node.search` several
+times for one client call: the un-optimized re-search when `resultSizeInsufficient && isTopkReduce`
+(`autoIndex.resultLimitCheck`, default true), the ground-truth search for recall evaluation, and a
+`retry.Handle` re-entry on `ErrInconsistentRequery`. Each builds a fresh `searchTask`. A
+`countFeatures` flag, set from a closure variable that the first call clears, marks the first task
+only; `HybridSearch` does the same. Without it, N user searches were reported as 2N–3N.
+
+The flush is deferred at the top of `PreExecute`, not placed at its end: a request the Proxy rejects
+still asked for the feature, and the parse that marks a feature can be the step that fails.
+
+**The query path marks internal tasks.** The Proxy synthesizes a `queryTask` for itself in three
+places — the requery that fetches vectors after a search (`requeryOperator`), the retrieval an upsert
+does to read the rows it replaces (`retrieveByPKs`), and the retrieval a search-by-primary-key turns
+into (`handleIfSearchByPK`). Each ran the full `queryTask.PreExecute`, so one user request moved the
+query counters twice and moved counters the user never set: the synthesized request pins its own
+consistency level and output fields. Neither `QueryLabel` nor the existing `reQuery` flag separates
+all three — `handleIfSearchByPK` uses `metrics.QueryLabel`, the same value a user query carries — so
+they are marked with an explicit `internalTask` field that the counting hooks skip.
+
 #### Where the counting hooks live
 
 Every counted request feature is detected at a place that already parses it, so no second parse is
@@ -381,12 +417,14 @@ introduced:
 
 | Feature class | Hook |
 |---|---|
-| `search_params` keys (`group_by_field`, `iterator`, `search_iter_v2`, `radius` / `range_filter`) | end of `parseSearchInfo` in `internal/proxy/search_util.go` (runs once per search and once per hybrid sub-request); the query iterator flag in `parseQueryParams` in `task_query.go` |
-| Legacy `rank_params.strategy` | the legacy branch of `searchTask.PreExecute`, next to `newRerankMetaFromLegacy` |
-| Request fields (`namespace`, `search_by_primary_keys`, `highlighter.type`, `function_score`, `not_return_all_meta`, `use_default_consistency` + `consistency_level`, `travel_timestamp`) | the start of `searchTask.PreExecute` and the end of `queryTask.PreExecute`, reading the proto fields |
+| `search_params` keys (`group_by_field`, `iterator`, `search_iter_v2`, `radius` / `range_filter`, `group_size`, `strict_group_size`, `rank_group_scorer`, `hints`, `analyzer_name`, `ignore_growing`) | marked into the search task's set at the `parseSearchInfo` call site in `tryGeneratePlan`, once per sub-request, plus one scan of the request-level `search_params` in `PreExecute`. `parseSearchInfo` itself stays a pure parser: it does not know whether its caller is a user request. The query-side keys are marked at the `parseQueryParams` call site in `queryTask.PreExecute`, for the same reason |
+| Legacy `rank_params.strategy`, `norm_score` | `searchTask.PreExecute`, at the `selectHybridRerankMeta` call site, on the branch that neither `function_chains` nor `function_score` took |
+| Request fields (`namespace`, `highlighter.type`, `function_score`, `not_return_all_meta`, `use_default_consistency` + `consistency_level`, `travel_timestamp`, `output_dynamic_field`, `output_vector_field`) | the start of `searchTask.PreExecute` and the end of `queryTask.PreExecute`, reading the proto fields and the output fields `translateOutputFields` resolved |
+| `search_by_primary_keys` | `Proxy.search`, before it calls `handleIfSearchByPK`. It cannot be read in the task: that function resolves the ids into vectors and overwrites `search_input` with the placeholder group, and it returns before a task exists both when the resolution fails and when every id resolves to a null vector |
+| `auth_method=api_key` / `auth_method=password` | both entry points that authenticate, each after the credential verifies: the gRPC interceptor (`AuthenticationInterceptorWithMetaCache`) and the RESTful middleware (`authenticateWithChallenge` in `internal/distributed/proxy/service.go`), which is a separate code path with the opposite decision order |
 | Expression features (`text_match`, `json_contains`, `st_*`, `is null`, `like`, ...) and `expr_template_values` / `expr_use_json_stats` | **after** the plan is built, by one walk over the plan's predicate tree at the three plan-creation sites (`tryGeneratePlan` for search, both query plan paths, delete) — see below |
-| Import file type, compaction type (DataCoord) | where DataCoord accepts an import job (`ImportV2` in `datacoord/services.go`, after the duplicate-job check) and where it persists a compaction task (`enqueueCompaction` in `compaction_inspector.go`) |
-| QueryNode execution decisions | `two_stage_search` where the delegator takes the two-stage branch (`delegator.search`), `segment_prune` where pruning removed at least one segment (`PruneSegments`), `brute_force_search` where a search reached segments with no index (`searchSegmentsAttempt`), `run_analyzer` at the QueryNode `RunAnalyzer` RPC |
+| Import file type, compaction type (DataCoord) | where DataCoord accepts an import job (`ImportV2` in `datacoord/services.go`, after the duplicate-job check) and where it persists a compaction task (`enqueueCompaction` in `compaction_inspector.go`). The import hook counts the job's **distinct** file types once each, not once per file: one job carrying a thousand Parquet files is one use of Parquet |
+| QueryNode execution decisions | `two_stage_search` where the delegator takes the two-stage branch (`delegator.search`), `segment_prune` where pruning removed at least one segment (`PruneSegments`), `brute_force_search` from the list of index-less segments `searchSegmentsAttempt` already builds, on its first attempt only so a read-gate retry of the same group does not count again, `run_analyzer` at the QueryNode `RunAnalyzer` RPC |
 | QueryNode configuration (`config` group) | read at report time from the paramtable, not counted: `QueryNode.GetFeatureUsage` renders each boolean `queryNode.*` item as `key=true` / `key=false` |
 | Loaded state (`loaded` group) | read at report time from QueryCoord's `CollectionManager` and `ReplicaManager`, not counted |
 
@@ -419,6 +457,9 @@ fires on "field present" for such a field measures request volume, not feature u
 | `expr_template_values` counts only when the map contains a key other than `expr_use_json_stats` | The JSON-stats hint travels in the same map |
 | `travel_timestamp` counts `> 0`, and is named `deprecated_travel_timestamp` | The Proxy no longer reads it for semantics; the counter measures how many clients still send a removed field, which is what the decision to drop the proto field needs |
 | `highlighter` counts per `HighlightType` (`highlighter=Lexical`, `highlighter=Semantic`) | The two have different dependencies and adoption meaning |
+| `search_by_primary_keys` counts a non-empty `search_input.ids`, **not** the `search_by_primary_keys` bool | The proto marks that field "use search_input instead", nothing in the server sets it, and `convertHybridSearchToSearch` hard-codes it false. `handleIfSearchByPK` decides on the ids. A counter reading the flag stays at zero for every real search-by-primary-key request, which reads as "nobody uses it" |
+| `norm_score` is read from the `params` JSON of the legacy `rank_params`, and from a rerank function's params on the `function_score` path; counted on its effective value | `convertLegacyParams` recognizes only `strategy` and `params` at the top level and drops the rest, so a top-level `norm_score` key cannot change behavior and no client sends one. A substring check short-circuits the unmarshal for every request that does not ask for normalization, so this, the one hook that parses, costs nothing on the requests that do not use it |
+| `auth_method=*` counts **after** the credential verifies | Counting the attempt would turn the report into a brute-force log. Neither entry point runs at all unless `common.security.authorizationEnabled` is on, so on an instance without authentication both counters stay at zero, which is the truth about that instance |
 
 `recall_eval` is not counted; it is an internal evaluation switch, not a user feature. `sub_reqs` is
 not counted; the Proxy fills it itself when folding a `HybridSearch`, and the number of hybrid searches
@@ -455,10 +496,17 @@ Nothing in the design reads `FunctionSchema.params` values except the provider n
 
 ### Cost summary
 
+Measured on a 32-core machine with `go test ./internal/proxy/ -run XXX -bench FeatureUsage -benchmem`. The benchmarks
+are checked in, so the numbers below can be re-measured rather than trusted.
+
 | Path | Cost |
 |---|---|
-| Request hot path, per counted feature | one branch + one `atomic.Add`; plus one atomic store of the timestamp at most once per second per counter |
-| Request hot path, expressions | one walk of the parsed `planpb.Expr` |
+| Request hot path, per counted feature | one branch + one bit set in the task's `FeatureSet` |
+| Request hot path, flush when `PreExecute` returns | 281 ns, 0 allocations, for a request that used six features; 27 ns for a request that used none. The scan is over the fixed counter-id space, so it is bounded and does not grow with the number of features a request uses. Hitting the six counters directly, which cannot dedupe, measures 274 ns |
+| Request hot path, expressions | one walk of the parsed `planpb.Expr`: 3.8 ns at one term, 755 ns at a hundred, 0 allocations |
+| Request hot path, legacy `norm_score` | 19 ns and no allocation when the key is absent, which is every request that does not ask for normalization; 552 ns and 794 B when it is present and the `params` object is unmarshalled. This is the only hook that allocates |
+| Resident memory per search task | 81 bytes, the `FeatureSet`, on a struct the request already allocates |
+| Counter update itself | one `atomic.Add`, plus one atomic store of the timestamp at most once per second per counter |
 | Resident memory per Proxy | number of counters × 16 bytes (`value` + `last_used_at`); on the order of one kilobyte, constant for the life of the process |
 | `GetFeatureUsage` on a node | copy of a fixed-size counter array |
 | Static statistics | one pass over collections + one over indexes; milliseconds at thousands of collections |
@@ -643,13 +691,17 @@ set; a boolean has exactly two values, and the key is a constant in the paramtab
 
 ### QueryNode execution path (`request`)
 
-Four counters record decisions taken inside the node that neither the request nor the metadata shows:
+Four counters record decisions taken inside the node that neither the request nor the metadata shows.
+
+A QueryNode counter is per **QueryNode request**, which is not the user's request: a delegator fans one
+user search out to one request per shard, and to a separate request per segment group, since a search
+task carries a single `DataScope`. Compare these counters against each other, not against the Proxy's.
 
 | Entry | Signal |
 |---|---|
 | `two_stage_search` | the delegator took the two-stage search branch |
 | `segment_prune` | segment pruning removed at least one sealed segment from a search or query |
-| `brute_force_search` | a search reached at least one segment with no index on the search field, so it ran brute force |
+| `brute_force_search` | the segment group this request searched held at least one segment with no index on the search field. Read it together with the `config` group: a growing segment carries no vector index unless `queryNode.segcore.interimIndex.enableIndex` is on, and that is off by default, so on a collection that is being written to this tracks the search rate rather than a rare fallback. The report emits that switch, so the two readings can be told apart |
 | `run_analyzer` | the `RunAnalyzer` RPC, the one user-facing feature only a QueryNode serves |
 
 ### Request-level features (`request`) — **decision per row**
@@ -673,9 +725,11 @@ for which of them were also exercised end to end.
 | `ignore_growing` | `== true` | yes |
 | `hints` | key present | yes |
 | `analyzer_name` | key present | yes |
-| `search_by_primary_keys` | field `true` | yes |
+| `search_by_primary_keys` | `search_input` carries a non-empty `ids` | yes — not the deprecated `search_by_primary_keys` bool, which nothing sets |
 | `namespace` | field set | yes |
 | `output_dynamic_field` (named) | `translateOutputFields` resolved a dynamic field | yes |
+| `output_vector_field` (named) | `translateOutputFields` resolved at least one vector field, including a vector inside a struct array, and including the ones a `*` expands to | yes — asked for by the Cloud side: whether a read carries raw vectors back is what response size and network cost hang on |
+| `auth_method=password`, `auth_method=api_key` | the credential a request authenticated with, counted after it verifies | yes — asked for by the Cloud side, to see which authentication path clients use. Neither moves unless `common.security.authorizationEnabled` is on; `auth_method=api_key` additionally needs a hook extension that can verify a key, so in a build without one it stays at zero by construction |
 | `not_return_all_meta` | field `true` | yes |
 | `consistency_level=<level>` | `use_default_consistency == false` | yes — see bias note above |
 | `deprecated_travel_timestamp` (named) | `travel_timestamp > 0` | yes — measures clients still sending a removed field |
@@ -711,11 +765,17 @@ for which of them were also exercised end to end.
 | Entry | Signal | Recommend |
 |---|---|---|
 | `strategy=rrf`, `strategy=weighted`, `strategy=_other` | recognized `strategy` value in the legacy rank params (`RRFRanker` / `WeightedRanker`); anything else folds to `_other`; absent key counts nothing | yes |
-| `norm_score` | key present in `rank_params` | yes |
+| `norm_score` | `norm_score` true inside the `params` object of `rank_params`, or on a rerank function's params | yes — a top-level `rank_params` key is dropped before it reaches the reranker |
 | `function_score=rrf` / `weighted` / `decay` / `model` / `boost` / `_other` | recognized function name in `function_score`; anything else folds to `_other` | yes |
 | `highlighter=Lexical`, `highlighter=Semantic` | `SearchRequest.highlighter.type` | yes — **decision:** Semantic maturity; if not GA, the consumer should label it |
 | `fragment_size` / `num_of_fragments` | key present in highlighter params | optional |
 | `sub_reqs` | — | no — Proxy-internal; use `milvus_proxy_req_count` |
+
+`output_vector_field` and the two `auth_method` entries were added after the first review round, at the
+request of the Cloud side, which wanted "does this client read raw vectors" and "API key or username and
+password" per instance. The report answers both per instance; the daily and weekly shape, and any ratio,
+are the collector's to derive, since the counters are cumulative and are never reset. A collector that
+diffs two pulls has to treat a negative delta as a restart.
 
 A starting subset that covers the deprecation and migration questions currently open, at 13 counters:
 `iterator`, `search_iter_v2`, `deprecated_travel_timestamp`, `consistency_level=*`, `group_by_field`,
@@ -798,11 +858,19 @@ request fails as loudly as one that stops firing.
 | `TestGeoAndTimeExpressions` | the nine geospatial predicates and the timestamp-with-timezone comparison, on a collection with a Geometry and a Timestamptz field |
 | `TestStructArrayExpressions` | `element_filter` and `struct_match` on a struct array field |
 | `TestMoreSearchCounters` | the remaining consistency levels, the null predicates, the regex operator and the JSON-stats hint |
-| `TestRerankCounters` | both rerank client paths: the legacy `strategy` values with `norm_score`, and a `FunctionScore` naming each recognized reranker |
+| `TestRerankCounters` | both rerank client paths: the legacy `strategy` values with `norm_score` inside the `params` object, plus a negative control that a top-level `norm_score` key counts nothing, and a `FunctionScore` naming each recognized reranker |
 | `TestCompactionTypesAreCounted` | sort, level-zero delete and schema-version-bump compactions, each triggered by the user action that produces it |
 | `TestClusteringCompactionAndSegmentPrune` | clustering compaction, and the QueryNode `segment_prune` counter it makes reachable |
 | `TestBinaryImportFileTypesAreCounted` | the Parquet and Numpy import formats |
 | `TestZZCoverage` | the acceptance gate, below |
+
+`tests/integration/featureusageauth` is a second package, with its own cluster, for the two
+`auth_method` counters. They only move when `common.security.authorizationEnabled` is on, and that flag
+makes every request in a suite need a credential; turning it on for the main suite would mean rewriting
+every unrelated test method there. It pins three things: an authenticated request moves
+`auth_method=password` and leaves the API key counter alone; a wrong password moves neither, since the
+counters sit after verification; and an API key moves nothing in a build whose hook extension cannot
+verify one, which is what keeps that counter's `notDrivable` entry honest.
 
 The suite reads the report through `MixCoord.GetFeatureUsage`, the same call the
 HTTP endpoint makes; the endpoint's gate and auth are covered by a unit test
@@ -816,10 +884,14 @@ no test drove fails the run by name. This is what makes the catalog verifiable
 rather than aspirational: adding a row to the catalog without exercising it does
 not compile past CI.
 
-Three entries cannot be driven and are listed in the test with their reasons:
+Five entries are listed in the test with their reasons. The first two are driven
+end to end, only in the sibling suite that can turn authentication on; the rest
+cannot be driven at all:
 
 | Entry | Why |
 |---|---|
+| `auth_method=password` | the authentication interceptor only runs when `common.security.authorizationEnabled` is on, which would make every other request in this suite need a credential. Driven in `tests/integration/featureusageauth` |
+| `auth_method=api_key` | `VerifyAPIKey` delegates to the hook extension, and the built-in `DefaultHook` rejects every key, so no request in this tree can authenticate with one. `tests/integration/featureusageauth` pins that it stays at zero without a hook, so the day a build can verify a key, that test fails and this row moves out of the list |
 | `compaction=_other` | the fold slot for an unrecognized `CompactionType`; no request can produce one |
 | `compaction=PartitionKeySortCompaction` | no DataCoord path constructs this type. `CompactionTriggerType.GetCompactionType` emits only level-zero delete, mix, clustering, sort and schema-version bump, and a partition-key collection is sorted as a plain `SortCompaction` |
 | `compaction=ClusteringPartitionKeySortCompaction` | the same: declared in the proto and handled defensively downstream, but nothing in this tree produces it |
@@ -957,7 +1029,7 @@ full run on the same branch:
 |---|---|
 | Test methods | 19, all passing |
 | Wall clock | 155 s for the package, one cluster |
-| Counters exercised | every entry in the surface file except the three listed under "The acceptance gate" |
+| Counters exercised | every entry in the surface file except the five listed under "The acceptance gate", two of which are driven in the sibling authentication suite |
 | Groups present | all 16 |
 
 Two entries in the report need state that outlives the test that created it, so those tests deliberately
@@ -1149,7 +1221,7 @@ it is still in use"; `last_used_at` answers that without destroying data or addi
 | Config | `pkg/util/paramtable/component_param.go` — `common.security.featureUsageEnabled`, `common.featureUsage.countersEnabled`; `configs/milvus.yaml` regenerated |
 | Report surface guard | `internal/featureusage/surface_test.go` + `internal/featureusage/testdata/report_surface.golden` — `TestReportSurfaceIsStable`, regenerated with `-update-surface` |
 | Hot-path benchmarks | `internal/proxy/feature_usage_bench_test.go` — `BenchmarkFeatureUsageParseSearchInfo`, `BenchmarkFeatureUsageExprWalk` |
-| Integration suite | `tests/integration/featureusage/` — `helper_test.go` (suite, report accessors, the exact-delta assertion), `counters_test.go` and `extra_counters_test.go` (one request per Proxy counter), `expressions_test.go` (geospatial, timestamptz, struct array), `compaction_test.go` (compaction types, clustering, segment pruning), `groups_test.go` (static, loaded, config, provider, resource group, reachability), `import_files_test.go` (Parquet, Numpy), `coverage_test.go` (the acceptance gate) |
+| Integration suite | `tests/integration/featureusage/` — `helper_test.go` (suite, report accessors, the exact-delta assertion), `counters_test.go` and `extra_counters_test.go` (one request per Proxy counter), `expressions_test.go` (geospatial, timestamptz, struct array), `compaction_test.go` (compaction types, clustering, segment pruning), `groups_test.go` (static, loaded, config, provider, resource group, reachability), `import_files_test.go` (Parquet, Numpy), `coverage_test.go` (the acceptance gate). `tests/integration/featureusageauth/auth_method_test.go` is the sibling suite for the two `auth_method` counters |
 | Other tests | as in Test Plan |
 
 ## References
