@@ -1,6 +1,6 @@
 version: '3.5'
 
-x-milvus-image: &milvus-image milvusdb/milvus:v3.0.1
+x-milvus-image: &milvus-image milvusdb/milvus:v3.0.2
 
 services:
   # Remove the .milvus-volume-owner-* marker after restoring files owned by a

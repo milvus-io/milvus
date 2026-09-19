@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-MILVUS_IMAGE=milvusdb/milvus:v3.0.1
+MILVUS_IMAGE=milvusdb/milvus:v3.0.2
 
 prepare_milvus_volume() {
     local volume_dir="$(pwd)/volumes/milvus"
