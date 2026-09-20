@@ -28,7 +28,6 @@
 #include "index/BitmapIndex.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
 #include "index/JsonHybridScalarIndex.h"
 #include "index/JsonIndexBuilder.h"
 #include "index/JsonScalarIndexWrapper.h"
