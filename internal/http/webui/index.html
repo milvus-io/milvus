@@ -11,17 +11,33 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0"
     />
-    <link
-      rel="icon"
-      href="./assets/favicon-ADjA7Mb5.png"
-      type="image/png"
-    />
     <meta />
     <title>Milvus Management</title>
-    <script type="module" crossorigin src="./assets/index-nmS7rbPW.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-Cxslai7T.css">
+    <template id="webui-assets">
+      <link rel="icon" href="./assets/favicon-ADjA7Mb5.png" type="image/png" />
+      <script type="module" crossorigin src="./assets/index-nmS7rbPW.js"></script>
+      <link rel="stylesheet" crossorigin href="./assets/index-Cxslai7T.css">
+    </template>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (() => {
+        // 保留显式配置，否则从 URL 推导 WebUI 入口及反向代理前缀。
+        const match = window.location.pathname.match(/^(.*?\/webui)(?:\/|$)/);
+        const basename = window.basename || (match && match[1]) || "/webui";
+        window.basename = "/" + basename.replace(/^\/+|\/+$/g, "");
+        const baseURL = new URL(window.basename + "/", window.location.origin);
+
+        // template 中的资源不会被预加载；确定地址后再激活，避免深层链接产生错误请求。
+        const template = document.getElementById("webui-assets");
+        const assets = template.content.cloneNode(true);
+        for (const resource of assets.querySelectorAll("[src], [href]")) {
+          const attribute = resource.hasAttribute("src") ? "src" : "href";
+          resource.setAttribute(attribute, new URL(resource.getAttribute(attribute), baseURL).href);
+        }
+        template.replaceWith(assets);
+      })();
+    </script>
   </body>
 </html>

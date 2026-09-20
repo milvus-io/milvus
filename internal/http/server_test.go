@@ -332,6 +332,7 @@ func TestRegisterWebUIHandler(t *testing.T) {
 		{"/webui/", http.StatusOK, "<!doctype html>"},
 		{"/webui/index.html", http.StatusOK, "<!doctype html>"},
 		{"/webui/unknown", http.StatusOK, "<!doctype html>"},
+		{"/webui/collections/default-knowledge", http.StatusOK, "<!doctype html>"},
 	}
 
 	for _, tt := range tests {
