@@ -41,11 +41,14 @@ func OpenManager() (Manager, error) {
 
 // newManager create a wal manager.
 func newManager(opener wal.Opener) Manager {
+	openingCtx, cancelOpening := context.WithCancel(context.Background())
 	return &managerImpl{
-		lifetime: typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
-		wltMap:   typeutil.NewConcurrentMap[string, *walLifetime](),
-		opener:   opener,
-		logger:   resource.Resource().Logger().With(log.FieldComponent("wal-manager")),
+		lifetime:      typeutil.NewGenericLifetime[managerState](managerOpenable | managerRemoveable | managerGetable),
+		wltMap:        typeutil.NewConcurrentMap[string, *walLifetime](),
+		opener:        opener,
+		logger:        resource.Resource().Logger().With(log.FieldComponent("wal-manager")),
+		openingCtx:    openingCtx,
+		cancelOpening: cancelOpening,
 	}
 }
 
@@ -53,9 +56,11 @@ func newManager(opener wal.Opener) Manager {
 type managerImpl struct {
 	lifetime *typeutil.GenericLifetime[managerState]
 
-	wltMap *typeutil.ConcurrentMap[string, *walLifetime]
-	opener wal.Opener // wal allocator
-	logger *log.MLogger
+	wltMap        *typeutil.ConcurrentMap[string, *walLifetime]
+	opener        wal.Opener // wal allocator
+	logger        *log.MLogger
+	openingCtx    context.Context    // done when the manager is closing, all wal open operations are canceled.
+	cancelOpening context.CancelFunc // cancels openingCtx.
 }
 
 // Open opens a wal instance for the channel on this Manager.
@@ -138,6 +143,8 @@ func (m *managerImpl) Metrics() (*types.StreamingNodeMetrics, error) {
 // Close these manager and release all managed WAL.
 func (m *managerImpl) Close() {
 	m.lifetime.SetState(managerRemoveable)
+	// Cancel the in-progress wal open operations, so the Open calls waiting for them can return.
+	m.cancelOpening()
 	m.lifetime.Wait()
 	// close all underlying walLifetime.
 	m.wltMap.Range(func(channel string, wlt *walLifetime) bool {
@@ -158,7 +165,7 @@ func (m *managerImpl) getWALLifetime(channel string) *walLifetime {
 	}
 
 	// Perform a cas here.
-	newWLT := newWALLifetime(m.opener, channel, m.logger)
+	newWLT := newWALLifetime(m.openingCtx, m.opener, channel, m.logger)
 	wlt, loaded := m.wltMap.GetOrInsert(channel, newWLT)
 	// if loaded, lifetime is exist, close the redundant lifetime.
 	if loaded {

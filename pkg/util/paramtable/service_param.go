@@ -1015,6 +1015,10 @@ type PulsarConfig struct {
 	EnableClientMetrics ParamItem `refreshable:"false"`
 
 	BacklogAutoClearBytes ParamItem `refreshable:"false"`
+
+	ProducerAccessMode ParamItem `refreshable:"false"`
+
+	ProducerCreateTimeout ParamItem `refreshable:"true"`
 }
 
 func (p *PulsarConfig) Init(base *BaseTable) {
@@ -1163,6 +1167,29 @@ If this option is zero or negative, it will be ignored and the default value (10
 		Export: true,
 	}
 	p.BacklogAutoClearBytes.Init(base.mgr)
+
+	p.ProducerAccessMode = ParamItem{
+		Key:          "pulsar.producerAccessMode",
+		Version:      "3.0.2",
+		DefaultValue: "exclusive",
+		Doc: `The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+shared: multiple producers can write to the topic at the same time.
+exclusive access is enforced by pulsar broker 2.8.0 or later.`,
+		Export: true,
+	}
+	p.ProducerAccessMode.Init(base.mgr)
+
+	p.ProducerCreateTimeout = ParamItem{
+		Key:          "pulsar.producerCreateTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "1m",
+		Doc: `The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.`,
+		Export: true,
+	}
+	p.ProducerCreateTimeout.Init(base.mgr)
 }
 
 // --- kafka ---

@@ -7161,6 +7161,7 @@ type streamingConfig struct {
 	WALBalancerBackoffMultiplier      ParamItem `refreshable:"true"`
 	WALBalancerBackoffMaxInterval     ParamItem `refreshable:"true"`
 	WALBalancerOperationTimeout       ParamItem `refreshable:"true"`
+	WALBalancerNodeLostGracePeriod    ParamItem `refreshable:"true"`
 
 	// balancer Policy
 	WALBalancerPolicyName                               ParamItem `refreshable:"true"`
@@ -7321,6 +7322,18 @@ If the operation exceeds this timeout, it will be canceled.`,
 		Export:       true,
 	}
 	p.WALBalancerOperationTimeout.Init(base.mgr)
+
+	p.WALBalancerNodeLostGracePeriod = ParamItem{
+		Key:     "streaming.walBalancer.nodeLostGracePeriod",
+		Version: "3.0.2",
+		Doc: `The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+It gives the old streaming node time to exit before another streaming node writes to the same wal.
+It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.`,
+		DefaultValue: "5s",
+		Export:       true,
+	}
+	p.WALBalancerNodeLostGracePeriod.Init(base.mgr)
 
 	p.WALBalancerPolicyName = ParamItem{
 		Key:          "streaming.walBalancer.balancePolicy.name",
