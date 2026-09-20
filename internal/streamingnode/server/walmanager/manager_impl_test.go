@@ -15,7 +15,10 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/timetick"
 	internaltypes "github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
@@ -40,9 +43,19 @@ func TestOpenManager(t *testing.T) {
 
 func TestPartialUpdateInterceptorRunsAfterShard(t *testing.T) {
 	builders := newInterceptorBuilders()
-	assert.Len(t, builders, 7)
-	assert.IsType(t, shard.NewInterceptorBuilder(), builders[5])
-	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[6])
+	assert.Len(t, builders, 8)
+	assert.IsType(t, shard.NewInterceptorBuilder(), builders[6])
+	assert.IsType(t, partialupdate.NewInterceptorBuilder(), builders[7])
+}
+
+func TestPKIndexInterceptorRunsBetweenReplicateAndTimeTick(t *testing.T) {
+	// It may turn one append into a transaction, whose messages each need their
+	// own time tick, and it must run under the lock of the original append.
+	builders := newInterceptorBuilders()
+	require.Len(t, builders, 8)
+	assert.IsType(t, replicate.NewInterceptorBuilder(), builders[3])
+	assert.IsType(t, pkindex.NewInterceptorBuilder(), builders[4])
+	assert.IsType(t, timetick.NewInterceptorBuilder(), builders[5])
 }
 
 func TestIdempotencyInterceptorRunsOutermost(t *testing.T) {
