@@ -42,6 +42,7 @@
 #include "common/EasyAssert.h"
 #include "common/FastMem.h"
 #include "common/OpContext.h"
+#include "monitor/QueryMetrics.h"
 #include "common/Span.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
@@ -310,14 +311,20 @@ class ChunkedColumnGroup {
 
         auto& init = *lazy_init_;
         // Serialize construction; waiting for this lock is not cancellable.
+        milvus::monitor::QueryStageTimer wait_timer(
+            milvus::monitor::QueryStage::ManifestGroupWait);
         std::lock_guard<std::mutex> lock(init.mutex);
+        wait_timer.End();
         if (auto slot = GetSlotIfReady()) {
             return slot;
         }
 
         auto translator = init.factory(op_ctx);
+        milvus::monitor::QueryStageTimer cache_timer(
+            milvus::monitor::QueryStage::ManifestCacheSlot);
         auto slot = Manager::GetInstance().CreateCacheSlot(
             std::move(translator), op_ctx);
+        cache_timer.End();
         auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
             slot->meta());
         const auto materialized_num_rows =

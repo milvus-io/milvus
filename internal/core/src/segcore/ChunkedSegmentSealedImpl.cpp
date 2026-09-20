@@ -116,6 +116,7 @@
 #include "mmap/Types.h"
 #include "common/VirtualPK.h"
 #include "monitor/Monitor.h"
+#include "monitor/QueryMetrics.h"
 #include "monitor/scope_metric.h"
 #include "parquet/metadata.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -386,6 +387,8 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
                context.segment_id,
                context.original_column_group_index);
 
+    milvus::monitor::QueryStageTimer reader_timer(
+        milvus::monitor::QueryStage::ManifestReaderOpen);
     storagev2translator::ChunkReaderPtr chunk_reader;
     if (context.enable_async_load) {
         auto readers = folly::coro::blockingWait(
@@ -403,6 +406,9 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
                                            context.segment_id);
     }
 
+    reader_timer.End();
+    milvus::monitor::QueryStageTimer translator_timer(
+        milvus::monitor::QueryStage::ManifestTranslator);
     std::optional<storagev2translator::ColumnSizeEstimateResult>
         column_size_estimate;
     if (context.size_estimate_state != nullptr) {
@@ -3825,9 +3831,15 @@ ChunkedSegmentSealedImpl::prefetch_chunks_locked(milvus::OpContext* op_ctx,
                                                  FieldId field_id) const {
     auto snapshot = CapturePublishedState();
     if (auto column = get_column(snapshot->runtime, field_id)) {
+        // num_chunks may synchronously materialize a cold column group.
+        milvus::monitor::QueryStageTimer prepare_timer(
+            milvus::monitor::QueryStage::FieldPrefetchPrepare);
         auto num_chunks = column->num_chunks();
         std::vector<int64_t> ids(num_chunks);
         std::iota(ids.begin(), ids.end(), 0);
+        prepare_timer.End();
+        milvus::monitor::QueryStageTimer load_timer(
+            milvus::monitor::QueryStage::FieldPrefetchLoad);
         column->PrefetchChunks(op_ctx, ids);
     }
 }

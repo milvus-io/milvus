@@ -57,6 +57,7 @@
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
 #include "monitor/scope_metric.h"
+#include "monitor/QueryMetrics.h"
 #include "nlohmann/json.hpp"
 #include "opentelemetry/trace/span.h"
 #include "pb/schema.pb.h"
@@ -501,6 +502,8 @@ AsyncSearch(CTraceContext c_trace,
             auto target_vector_field_id =
                 plan->plan_node_->search_info_.field_id_;
 
+            milvus::monitor::QueryStageTimer prepare_timer(
+                milvus::monitor::QueryStage::SearchPrepare);
             milvus::OpContext op_ctx(cancel_token);
             segment->LazyCheckSchema(plan->schema_, &op_ctx);
             auto read_lease = AcquireSegmentReadLease(segment, cancel_token);
@@ -519,6 +522,7 @@ AsyncSearch(CTraceContext c_trace,
                                                 internal_segment,
                                                 plan->access_entries_,
                                                 skipped_manifest_fields);
+            prepare_timer.End();
             std::unique_ptr<milvus::SearchResult> search_result;
             if (!filter_only &&
                 !internal_segment->FieldAccessible(target_vector_field_id)) {
@@ -528,6 +532,8 @@ AsyncSearch(CTraceContext c_trace,
                 search_result->total_data_cnt_ = 0;
                 search_result->segment_ = internal_segment;
             } else {
+                milvus::monitor::QueryStageTimer search_timer(
+                    milvus::monitor::QueryStage::SearchExecute);
                 search_result = segment->Search(plan,
                                                 phg_ptr,
                                                 timestamp,

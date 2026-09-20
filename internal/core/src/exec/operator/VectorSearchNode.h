@@ -31,6 +31,7 @@
 #include "exec/Driver.h"
 #include "exec/QueryContext.h"
 #include "exec/operator/Operator.h"
+#include "monitor/QueryMetrics.h"
 #include "plan/PlanNode.h"
 #include "query/PlanImpl.h"
 #include "segcore/SegmentInterface.h"
@@ -83,15 +84,22 @@ class PhyVectorSearchNode : public Operator {
                       prefetch_pool) override {
         auto self =
             std::static_pointer_cast<PhyVectorSearchNode>(shared_from_this());
-        prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-            auto* op_ctx = self->query_context_->get_op_context();
-            if (op_ctx != nullptr &&
-                op_ctx->cancellation_token.isCancellationRequested()) {
-                return;
-            }
-            self->segment_->prefetch_vector(op_ctx,
-                                            self->search_info_.field_id_);
-        }));
+        const auto submitted = milvus::monitor::QueryStageClock::now();
+        prefetch_future_.emplace(
+            folly::via(prefetch_pool.get(), [self, submitted]() {
+                milvus::monitor::ObserveQueryStage(
+                    milvus::monitor::QueryStage::VectorPrefetchQueue,
+                    milvus::monitor::QueryStageClock::now() - submitted);
+                auto* op_ctx = self->query_context_->get_op_context();
+                if (op_ctx != nullptr &&
+                    op_ctx->cancellation_token.isCancellationRequested()) {
+                    return;
+                }
+                milvus::monitor::QueryStageTimer run_timer(
+                    milvus::monitor::QueryStage::VectorPrefetchRun);
+                self->segment_->prefetch_vector(op_ctx,
+                                                self->search_info_.field_id_);
+            }));
     }
 
     void
@@ -99,6 +107,8 @@ class PhyVectorSearchNode : public Operator {
         if (prefetch_future_.has_value()) {
             auto future = std::move(*prefetch_future_);
             prefetch_future_.reset();
+            milvus::monitor::QueryStageTimer wait_timer(
+                milvus::monitor::QueryStage::VectorPrefetchWait);
             std::move(future).get();
         }
     }

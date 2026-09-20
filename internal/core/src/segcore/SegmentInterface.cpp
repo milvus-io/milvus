@@ -40,6 +40,7 @@
 #include "futures/Future.h"
 #include "index/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
+#include "monitor/QueryMetrics.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
 #include "plan/PlanNodeIdGenerator.h"
@@ -61,6 +62,8 @@ void
 SegmentInternalInterface::FillPrimaryKeys(const query::Plan* plan,
                                           SearchResult& results,
                                           milvus::OpContext* op_ctx) const {
+    milvus::monitor::QueryStageTimer timer(
+        milvus::monitor::QueryStage::FillPrimaryKeys);
     std::shared_lock lck(mutex_);
     AssertInfo(plan, "empty plan");
     auto size = results.distances_.size();
