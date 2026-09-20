@@ -26,7 +26,7 @@ type allocationResult struct {
 // This is the Phase 2 "allocation" step; Phase 1 classification and Phase 3
 // exact assignment-change emission live in classify.go / policy_impl.go.
 func allocate(
-	snap *BalancerSnapshot,
+	snap balanceInput,
 	shardID qviews.ShardID,
 	baseRows map[int64]int64,
 ) *allocationResult {
@@ -48,14 +48,16 @@ func allocate(
 		segmentID   int64
 		partitionID int64
 		load        int64
+		segment     *SegmentDataView
 	}
-	entries := make([]segEntry, 0)
+	entries := make([]segEntry, 0, shardDV.SegmentCount)
 	for _, p := range shardDV.Partitions {
 		for _, segment := range p.Segments {
 			entries = append(entries, segEntry{
 				segmentID:   segment.SegmentID,
 				partitionID: p.PartitionID,
 				load:        segment.RowNum,
+				segment:     segment,
 			})
 		}
 	}
@@ -68,7 +70,7 @@ func allocate(
 
 	// Current per-node segment states for stickiness / avoidance lookup.
 	current := currentSegmentStates(snap, shardID)
-	ctx := newAllocationContext(snap.Nodes, replica.ResourceGroup, baseRows, shardTotalLoad(snap, shardID), len(entries), snap.Config)
+	ctx := newAllocationContext(snap.NodesMap(), replica.ResourceGroup, baseRows, shardTotalLoad(snap, shardID), shardDV.SegmentCount, snap.GetBalanceConfig(), snap.CandidateNodes(replica.ResourceGroup))
 	if len(ctx.eligible) == 0 && len(entries) > 0 {
 		return nil
 	}
@@ -78,7 +80,7 @@ func allocate(
 	flatAssignments := make(map[int64]int64, len(entries))
 
 	for _, e := range entries {
-		segInfo := segmentInfoFor(snap, e.segmentID, e.partitionID)
+		segInfo := e.segment
 		nodeID, ok := pickNode(ctx, segInfo, current[e.segmentID])
 		if !ok {
 			return nil
@@ -98,7 +100,7 @@ func allocate(
 		shardID.VChannel,
 	)
 	builder.SetAssignments(assignments)
-	builder.SetLoadInfoVersion(snap.LoadConfigSnapshot.ConfigVersion(desired.CollectionID))
+	builder.SetLoadInfoVersion(snap.ConfigVersion(desired.CollectionID))
 	return &allocationResult{
 		builder:     builder,
 		assignments: flatAssignments,
@@ -109,19 +111,16 @@ func allocate(
 type segmentNodeStates map[int64]map[int64]coordview.SegmentState
 
 // currentSegmentStates returns segmentID -> nodeID -> SegmentState from the
-// shard's merged stats. Empty when no placement is tracked.
-func currentSegmentStates(snap *BalancerSnapshot, shardID qviews.ShardID) segmentNodeStates {
-	stats, ok := snap.ShardStatsMap()[shardID]
-	if !ok {
+// shard's immutable merged stats. The returned node maps are read-only.
+// Empty when no placement is tracked.
+func currentSegmentStates(snap balanceInput, shardID qviews.ShardID) segmentNodeStates {
+	stats := snap.GetShardStats(shardID)
+	if stats == nil {
 		return nil
 	}
 	out := make(segmentNodeStates, len(stats.Segments))
 	for segmentID, segment := range stats.Segments {
-		states := make(map[int64]coordview.SegmentState, len(segment.Nodes))
-		for nodeID, state := range segment.Nodes {
-			states[nodeID] = state
-		}
-		out[segmentID] = states
+		out[segmentID] = segment.Nodes
 	}
 	return out
 }
@@ -130,7 +129,7 @@ func currentSegmentStates(snap *BalancerSnapshot, shardID qviews.ShardID) segmen
 // states. The best node follows
 // the same state priority as ShardStats: Up > Ready > Preparing >
 // Unrecoverable.
-func currentSegmentNodes(snap *BalancerSnapshot, shardID qviews.ShardID) map[int64]int64 {
+func currentSegmentNodes(snap balanceInput, shardID qviews.ShardID) map[int64]int64 {
 	return bestSegmentNodes(currentSegmentStates(snap, shardID))
 }
 

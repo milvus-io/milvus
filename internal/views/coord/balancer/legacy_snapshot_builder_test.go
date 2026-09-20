@@ -43,15 +43,6 @@ type rowCountLedger struct {
 	nodeRowCount     map[int64]NodeRowStats
 }
 
-// ShardRowStats maps each QueryNode to the row-count load contributed by one shard.
-type ShardRowStats map[int64]NodeRowStats
-
-// NodeRowStats splits a node's row-count load by placement state.
-type NodeRowStats struct {
-	UpRowCount      int64
-	PendingRowCount int64
-}
-
 func newRowCountLedger() rowCountLedger {
 	return rowCountLedger{
 		segmentRowCounts: make(map[int64]int64),

@@ -9,6 +9,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -22,19 +24,16 @@ type Balancer interface {
 	Trigger(scopes ...TriggerScope)
 }
 
-type snapshotSource interface {
-	build(ctx context.Context, pending triggerBatch) (*BalancerSnapshot, []qviews.ShardID)
-}
-
 // DefaultBalancer owns the trigger queue and reconcile loop. Business
-// decisions are delegated to BalancePolicy; this type only builds snapshots,
+// decisions are delegated to BalancePolicy; this type reads the cache,
 // drains dirty work, and applies the resulting BalancePlan.
 type DefaultBalancer struct {
-	snapshotBuilder snapshotSource
-	viewRegistry    *coordview.ShardViewRegistry
-	policy          BalancePolicy
-	queue           *triggerQueue
-	tickerInterval  time.Duration
+	cache          *Cache
+	reconcileMu    sync.Mutex
+	viewRegistry   *coordview.ShardViewRegistry
+	policy         BalancePolicy
+	queue          *triggerQueue
+	tickerInterval time.Duration
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -43,7 +42,7 @@ type DefaultBalancer struct {
 
 // NewDefaultBalancer constructs the standard Balancer controller.
 func NewDefaultBalancer(
-	builder *SnapshotBuilder,
+	cache *Cache,
 	registry *coordview.ShardViewRegistry,
 	policy BalancePolicy,
 ) *DefaultBalancer {
@@ -51,34 +50,20 @@ func NewDefaultBalancer(
 		policy = NewDefaultBalancePolicy()
 	}
 	interval := defaultTickerInterval
-	if builder != nil && builder.config != nil && builder.config.TickerInterval > 0 {
-		interval = builder.config.TickerInterval
-	}
-	var source snapshotSource
-	if builder != nil {
-		source = builder
+	if cache != nil && cache.GetBalanceConfig().TickerInterval > 0 {
+		interval = cache.GetBalanceConfig().TickerInterval
 	}
 	balancer := &DefaultBalancer{
-		snapshotBuilder: source,
-		viewRegistry:    registry,
-		policy:          policy,
-		queue:           newTriggerQueue(),
-		tickerInterval:  interval,
+		cache:          cache,
+		viewRegistry:   registry,
+		policy:         policy,
+		queue:          newTriggerQueue(),
+		tickerInterval: interval,
 	}
-	if builder != nil {
-		balancer.registerNodeChangedNotifier(builder.nodeProvider)
+	if cache != nil {
+		cache.SetNotifier(func(scope TriggerScope) { balancer.Trigger(scope) })
 	}
 	return balancer
-}
-
-func (b *DefaultBalancer) registerNodeChangedNotifier(provider NodeProvider) {
-	notifier, ok := provider.(NodeChangedNotifier)
-	if !ok {
-		return
-	}
-	notifier.RegisterNodeChangedNotifier(func() {
-		b.Trigger(TriggerScope{NodeChanged: true})
-	})
 }
 
 // Start launches the reconcile loop and enqueues an initial full scan.
@@ -120,8 +105,12 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 	ticker := time.NewTicker(b.tickerInterval)
 	defer ticker.Stop()
 
+	retryDelay := 100 * time.Millisecond
 	for {
 		interval := paramtable.Get().QueryCoordCfg.QueryViewFullReconsileInterval.GetAsDuration(time.Second)
+		if b.cache != nil && b.cache.GetBalanceConfig().TickerInterval > 0 {
+			interval = b.cache.GetBalanceConfig().TickerInterval
+		}
 		if interval != b.tickerInterval {
 			b.tickerInterval = interval
 			ticker.Reset(interval)
@@ -135,27 +124,43 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 			continue
 		}
 
-		_ = b.Reconcile(ctx)
+		if err := b.Reconcile(ctx); err != nil {
+			mlog.Warn(ctx, "query view balance will retry", mlog.Err(err))
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			retryDelay = min(5*time.Second, retryDelay*2)
+		} else {
+			retryDelay = 100 * time.Millisecond
+		}
 	}
 }
 
 // Reconcile runs one reconcile cycle. It is exported primarily for tests and
 // for callers that want a synchronous controller pass during startup.
 func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
-	if b.snapshotBuilder == nil || b.viewRegistry == nil || b.policy == nil {
+	b.reconcileMu.Lock()
+	defer b.reconcileMu.Unlock()
+	if b.cache == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
 	}
-	// Take this cycle's work before building the snapshot so triggers arriving
-	// during snapshot construction remain queued for the next cycle.
+	if !b.cache.Ready() {
+		return merr.WrapErrServiceNotReadyMsg("balancer cache sources have not completed initial replay")
+	}
 	pending := b.queue.takePending()
 	if pending.empty() {
 		return nil
 	}
-	snap, dirty := b.snapshotBuilder.build(ctx, pending)
+	reader := newPlanningContext(b.cache)
+	dirty := resolveCacheScope(reader, pending)
 	if len(dirty) == 0 {
 		return nil
 	}
-	plan := b.policy.Plan(snap, dirty)
+	plan := b.policy.Plan(reader, dirty)
 	return b.apply(ctx, plan)
 }
 
@@ -173,6 +178,7 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		}
 		if err := mgr.RequestRelease(ctx); err != nil {
 			errs = append(errs, err)
+			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 		}
 	}
 	for shardID, builder := range plan.Prepares {
@@ -182,7 +188,12 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		mgr := b.viewRegistry.Ensure(shardID)
 		if err := mgr.AddPreparing(ctx, builder); err != nil {
 			errs = append(errs, err)
+			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 		}
+	}
+	if len(plan.Retries) > 0 {
+		b.Trigger(TriggerScope{DirtyShards: plan.Retries})
+		errs = append(errs, merr.WrapErrServiceUnavailableMsg("balance inputs are not ready for %d shards", len(plan.Retries)))
 	}
 	var err error
 	for _, e := range errs {

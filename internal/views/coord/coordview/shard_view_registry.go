@@ -39,7 +39,9 @@ type ShardViewRegistry struct {
 	collectionShards map[int64]map[qviews.ShardID]struct{}
 	nodeShards       map[int64]map[qviews.ShardID]struct{}
 
-	statsObservers []func(qviews.ShardID, *ShardStats)
+	statsObservers       []func(qviews.ShardID, *ShardStats)
+	publicationListeners map[uint64]ShardPublicationListener
+	nextListener         uint64
 }
 
 // RecoverShardViewRegistry constructs a ShardViewRegistry and rebuilds every
@@ -103,7 +105,7 @@ func RecoverShardViewRegistry(
 		registry.stats[sid] = stats
 		registry.addCollectionShardLocked(sid)
 		registry.addNodeShardsLocked(sid, stats)
-		mgr.SetStatsObserver(registry.onShardStatsChanged)
+		mgr.SetStatsObserver(registry.statsObserver(mgr))
 		mgr.setOnEmpty(registry.removeEmptyManager)
 	}
 	// Recovery sync callbacks may update manager stats immediately. Install all
@@ -132,7 +134,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	r.mu.RUnlock()
 
 	mgr := newShardViewManager(r.ctx, shardID, r.flushScheduler, nil, r.dataViewRefs)
-	mgr.SetStatsObserver(r.onShardStatsChanged)
+	mgr.SetStatsObserver(r.statsObserver(mgr))
 	mgr.setOnEmpty(r.removeEmptyManager)
 	stats := emptyShardStats()
 
@@ -145,6 +147,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	r.shards[shardID] = mgr
 	r.stats[shardID] = stats
 	r.addCollectionShardLocked(shardID)
+	r.publishShardLocked(shardID, stats)
 	r.version++
 	r.mu.Unlock()
 	return mgr
@@ -190,6 +193,7 @@ func (r *ShardViewRegistry) removeEmptyManager(shardID qviews.ShardID, manager *
 	r.removeCollectionShardLocked(shardID)
 	delete(r.stats, shardID)
 	delete(r.shards, shardID)
+	r.publishShardLocked(shardID, nil)
 	r.version++
 }
 
@@ -298,15 +302,16 @@ func (s *ShardViewSnapshot) StatsMap() map[qviews.ShardID]*ShardStats {
 	return s.stats
 }
 
-func (r *ShardViewRegistry) onShardStatsChanged(shardID qviews.ShardID, stats *ShardStats) {
+func (r *ShardViewRegistry) onManagerStatsChanged(manager *ShardViewManager, shardID qviews.ShardID, stats *ShardStats) {
 	r.mu.Lock()
-	if _, ok := r.shards[shardID]; !ok {
+	if r.shards[shardID] != manager {
 		r.mu.Unlock()
 		return
 	}
 	r.removeNodeShardsLocked(shardID, r.stats[shardID])
 	r.stats[shardID] = stats
 	r.addNodeShardsLocked(shardID, stats)
+	r.publishShardLocked(shardID, stats)
 	r.version++
 	observers := append([]func(qviews.ShardID, *ShardStats){}, r.statsObservers...)
 	r.mu.Unlock()
@@ -385,4 +390,36 @@ func (r *ShardViewRegistry) removeNodeShardsLocked(shardID qviews.ShardID, stats
 
 func emptyShardStats() *ShardStats {
 	return &ShardStats{Segments: make(map[int64]*SegmentStats)}
+}
+
+// ShardPublicationListener consumes immutable committed statistics; nil means
+// final removal. It must not re-enter the registry/managers or perform I/O.
+type ShardPublicationListener func(qviews.ShardID, *ShardStats)
+
+// RegisterPublicationListener installs and replays under the publication lock.
+func (r *ShardViewRegistry) RegisterPublicationListener(listener ShardPublicationListener) func() {
+	r.mu.Lock()
+	if r.publicationListeners == nil {
+		r.publicationListeners = make(map[uint64]ShardPublicationListener)
+	}
+	r.nextListener++
+	id := r.nextListener
+	r.publicationListeners[id] = listener
+	for shardID, stats := range r.stats {
+		listener(shardID, stats)
+	}
+	r.mu.Unlock()
+	return func() { r.mu.Lock(); delete(r.publicationListeners, id); r.mu.Unlock() }
+}
+
+func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *ShardStats) {
+	for _, listener := range r.publicationListeners {
+		listener(shardID, stats)
+	}
+}
+
+func (r *ShardViewRegistry) statsObserver(manager *ShardViewManager) func(qviews.ShardID, *ShardStats) {
+	return func(shardID qviews.ShardID, stats *ShardStats) {
+		r.onManagerStatsChanged(manager, shardID, stats)
+	}
 }

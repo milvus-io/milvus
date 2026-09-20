@@ -346,8 +346,8 @@ from submitting new sync work after the syncer has closed.
 
 ## 6. Thread Safety
 
-The agreed [Balancer Cache refactor](balancer_cache.md) adds synchronous
-actual-state publication; that refactor is not implemented yet. At the
+The [Balancer Cache implementation](balancer_cache.md) uses
+`RegisterPublicationListener` for synchronous actual-state publication. At the
 manager's in-memory commit, its hook publishes immutable shard state and node
 contributions before returning. Registry initialization and final removal also
 publish, with source replay/readiness and manager-instance checks. The hook
@@ -358,8 +358,7 @@ persist-before-sync scheduler and does not change QueryView transitions.
 Cache readers retain immutable objects without manager locks. Node totals and
 their contribution indexes are maintained on publication, so Balancer no
 longer aggregates all placements while constructing a planning snapshot.
-Sharing the existing immutable `statsLocked()` result is an initial adapter
-option; it does not eliminate the cost of that full statistics rebuild.
+The adapter shares the existing immutable `statsLocked()` result; it does not eliminate the cost of that full statistics rebuild.
 Incremental statistics publication remains a separate optimization.
 
 - `ShardViewManager.mu` protects its state machines, fast pointers, and atomic

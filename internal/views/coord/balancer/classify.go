@@ -41,9 +41,9 @@ const (
 //  5. Current view references an unavailable node → Must (node lost)
 //  6. LoadInfoVersion differs            → Must
 //  7. Otherwise                           → MayOptimize
-func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
+func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	desired := snap.ConfigForShard(shardID)
-	stats := snap.ShardStatsMap()[shardID]
+	stats := snap.GetShardStats(shardID)
 	hasUpView := stats != nil && stats.UpVersion != nil
 	hasPreparing := stats != nil && stats.PreparingVersion != nil
 	hasAnyView := hasUpView || hasPreparing || (stats != nil && len(stats.Segments) > 0)
@@ -77,7 +77,7 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 	}
 
 	// 5. Any node in the current Up view is unavailable?
-	if hasUnavailableNode(stats, snap.Nodes) {
+	if hasUnavailableNode(stats, snap.NodesMap()) {
 		return actionMust
 	}
 
@@ -95,7 +95,7 @@ func classifyShard(snap *BalancerSnapshot, shardID qviews.ShardID) actionKind {
 // Returns false when the snapshot has no DataVersion for the collection
 // (DataView Manager hasn't reported one yet); the next reconcile cycle will
 // pick up the change.
-func dataViewVersionAdvanced(snap *BalancerSnapshot, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
+func dataViewVersionAdvanced(snap balanceInput, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
 	if stats.UpVersion == nil {
 		return false
 	}
@@ -126,14 +126,14 @@ func hasUnavailableNode(stats *coordview.ShardStats, nodes map[int64]*BalanceNod
 	return false
 }
 
-func loadInfoDiffer(snap *BalancerSnapshot, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
+func loadInfoDiffer(snap balanceInput, desired *loadmgr.LoadConfig, stats *coordview.ShardStats) bool {
 	if stats == nil {
 		return true
 	}
 	if stats.UpLoadInfoVersion == 0 {
 		return true
 	}
-	loadInfoVersion := snap.LoadConfigSnapshot.ConfigVersion(desired.CollectionID)
+	loadInfoVersion := snap.ConfigVersion(desired.CollectionID)
 	if loadInfoVersion == 0 {
 		return true
 	}

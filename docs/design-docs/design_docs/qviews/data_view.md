@@ -264,17 +264,16 @@ The current implementation exposes both consumer interfaces:
 - `qviews.DataViewRefProvider.Get` supplies exact-version references to
   `ShardViewRegistry`. Each state machine owns one acquired reference.
 - `balancer.DataViewProvider.DataViewSnapshot` and
-  `DataViewSnapshotForCollections` supply detached native snapshots for
-  planning. Nil collection selection means all collections; a non-nil empty
+  `DataViewSnapshotForCollections` remain compatibility APIs supplying detached native snapshots. Nil collection selection means all collections; a non-nil empty
   selection means none. Each collection's membership and row statistics are
   copied from the same version under its collection lock. The global manager
   lock is released before waiting for any collection lock, and the selected
   collection is revalidated against concurrent drop.
 
-The agreed [Balancer Cache design](balancer_cache.md) replaces the Balancer's
-snapshot-pull path with synchronous publication hooks; it is not implemented
-yet. At each committed publication, DataViewManager supplies a read-only
-Collection object sharing the immutable membership and matching RowNum. Each
+The [Balancer Cache implementation](balancer_cache.md) replaces the Balancer's
+snapshot-pull path with `RegisterDataViewListener` synchronous publication hooks. At each committed publication, DataViewManager supplies a read-only
+Collection object with immutable membership and matching RowNum. The native
+projection is materialized once and retained for the latest publication. Each
 desired shard also publishes `TotalRows` and `SegmentCount`, so reconciliation
 does not rescan segments for these aggregates. Indexes and summaries are built
 once per published version, not per reconcile. Existing snapshot APIs may
@@ -301,7 +300,7 @@ the latest version from SegmentMeta; retained historical versions may have
 unknown stats. Shard statistics combine the contributing retained versions,
 preferring the newest known footprint for each segment. An explicit presence
 flag distinguishes unknown from a published zero; only unknown values may
-fall back to known row statistics retained for planning. In the target cache,
+fall back to known row statistics retained for planning. In the cache,
 the fallback and affected node contributions are maintained at publication,
 rather than reconstructed by reconciliation. Fallback values can be reclaimed
 when no latest/resident view needs them.

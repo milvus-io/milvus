@@ -32,6 +32,8 @@ type LoadConfigStore struct {
 	collectionLocks *lock.KeyLock[int64]
 	catalog         metastore.QueryCoordCatalog
 	version         uint64
+	listeners       map[uint64]LoadConfigListener
+	nextListener    uint64
 
 	// configs keeps the live in-memory snapshot per collection.
 	configs  map[int64]*LoadConfig
@@ -142,6 +144,7 @@ func (s *LoadConfigStore) Put(ctx context.Context, cfg *LoadConfig) error {
 	s.replaceInMemoryLocked(cfg)
 	s.version++
 	s.versions[collectionID] = s.version
+	s.publishConfigLocked(collectionID)
 	s.mu.Unlock()
 	return nil
 }
@@ -172,6 +175,7 @@ func (s *LoadConfigStore) Remove(ctx context.Context, collectionID int64) error 
 	delete(s.configs, collectionID)
 	s.version++
 	delete(s.versions, collectionID)
+	s.publishConfigLocked(collectionID)
 	s.mu.Unlock()
 	return nil
 }
@@ -244,4 +248,31 @@ func diffInt64Set(a, b []int64) []int64 {
 		}
 	}
 	return out
+}
+
+// LoadConfigListener receives immutable committed configs; nil denotes removal.
+// It runs under the store lock and must not re-enter the store or perform I/O.
+type LoadConfigListener func(collectionID int64, config *LoadConfig, version uint64)
+
+// RegisterLoadConfigListener installs a listener and replays state atomically
+// with respect to source publications. The return value unregisters it.
+func (s *LoadConfigStore) RegisterLoadConfigListener(listener LoadConfigListener) func() {
+	s.mu.Lock()
+	if s.listeners == nil {
+		s.listeners = make(map[uint64]LoadConfigListener)
+	}
+	s.nextListener++
+	id := s.nextListener
+	s.listeners[id] = listener
+	for collectionID, config := range s.configs {
+		listener(collectionID, config, s.versions[collectionID])
+	}
+	s.mu.Unlock()
+	return func() { s.mu.Lock(); delete(s.listeners, id); s.mu.Unlock() }
+}
+
+func (s *LoadConfigStore) publishConfigLocked(collectionID int64) {
+	for _, listener := range s.listeners {
+		listener(collectionID, s.configs[collectionID], s.version)
+	}
 }

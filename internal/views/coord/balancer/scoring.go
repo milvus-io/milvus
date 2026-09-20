@@ -114,6 +114,7 @@ func newAllocationContext(
 	shardRows int64,
 	segmentCount int,
 	cfg *BalanceConfig,
+	candidates ...[]int64,
 ) *allocationContext {
 	if cfg == nil {
 		cfg = DefaultBalanceConfig()
@@ -128,7 +129,13 @@ func newAllocationContext(
 	}
 
 	var totalBaseRows int64
-	for _, nodeID := range candidateNodeIDs(nodes, resourceGroup) {
+	ids := []int64(nil)
+	if len(candidates) > 0 {
+		ids = candidates[0]
+	} else {
+		ids = candidateNodeIDs(nodes, resourceGroup)
+	}
+	for _, nodeID := range ids {
 		node := nodes[nodeID]
 		if !passHardConstraints(node, nil) {
 			continue
@@ -279,11 +286,4 @@ func segmentRows(seg *SegmentDataView) int64 {
 		return 0
 	}
 	return seg.RowNum
-}
-
-func segmentInfoFor(snap *BalancerSnapshot, segmentID, partitionID int64) *SegmentDataView {
-	if info, ok := snap.SegmentInfo(segmentID); ok && info != nil {
-		return info
-	}
-	return &SegmentDataView{SegmentID: segmentID, PartitionID: partitionID}
 }
