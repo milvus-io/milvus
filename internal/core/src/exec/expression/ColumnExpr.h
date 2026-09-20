@@ -16,15 +16,16 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
 #include <fmt/core.h>
-#include <stdint.h>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
-#include "cachinglayer/CacheSlot.h"
 #include "common/EasyAssert.h"
 #include "common/OpContext.h"
 #include "common/Schema.h"
@@ -34,8 +35,9 @@
 #include "common/type_c.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/Expr.h"
+#include "exec/expression/ValueLookupSource.h"
 #include "expr/ITypeExpr.h"
-#include "index/Index.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentInterface.h"
 
@@ -54,24 +56,17 @@ class PhyColumnExpr : public Expr {
         : Expr(expr->type(), std::move(input), name, op_ctx),
           segment_chunk_reader_(op_ctx, segment, active_count),
           batch_size_(batch_size),
-          expr_(expr) {
-        auto schema = segment->get_schema_snapshot();
-        auto& field_meta = (*schema)[expr_->GetColumn().field_id_];
-        pinned_index_ = PinIndex(op_ctx_, segment, field_meta);
-        is_indexed_ = pinned_index_.size() > 0;
-        use_index_data_ =
-            is_indexed_ &&
-            segment->HasRawData(expr_->GetColumn().field_id_.get());
+          expr_(expr),
+          value_lookup_(segment,
+                        op_ctx,
+                        expr->GetColumn().field_id_,
+                        expr->GetColumn().data_type_,
+                        active_count) {
         if (segment->is_chunked()) {
-            num_chunk_ =
-                use_index_data_
-                    ? pinned_index_.size()
-                    : segment->num_chunk_data(expr_->GetColumn().field_id_);
+            num_chunk_ = segment->num_chunk_data(expr_->GetColumn().field_id_);
         } else {
-            num_chunk_ = use_index_data_
-                             ? pinned_index_.size()
-                             : upper_div(segment_chunk_reader_.active_count_,
-                                         segment_chunk_reader_.SizePerChunk());
+            num_chunk_ = upper_div(segment_chunk_reader_.active_count_,
+                                   segment_chunk_reader_.SizePerChunk());
         }
         AssertInfo(
             batch_size_ > 0,
@@ -83,19 +78,26 @@ class PhyColumnExpr : public Expr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
     void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
+        segment_chunk_reader_.SetSnapshot(snapshot);
+    }
+
+    void
     MoveCursor() override {
         if (!has_offset_input_) {
+            if (HasValueReader()) {
+                value_lookup_current_row_ =
+                    std::min(value_lookup_current_row_ + batch_size_,
+                             segment_chunk_reader_.active_count_);
+                return;
+            }
             if (segment_chunk_reader_.segment_->is_chunked()) {
-                if (use_index_data_) {
-                    MoveCursorForIndexed();
-                } else {
-                    segment_chunk_reader_.MoveCursorForMultipleChunk(
-                        current_chunk_id_,
-                        current_chunk_pos_,
-                        expr_->GetColumn().field_id_,
-                        num_chunk_,
-                        batch_size_);
-                }
+                segment_chunk_reader_.MoveCursorForMultipleChunk(
+                    current_chunk_id_,
+                    current_chunk_pos_,
+                    expr_->GetColumn().field_id_,
+                    num_chunk_,
+                    batch_size_);
             } else {
                 segment_chunk_reader_.MoveCursorForSingleChunk(
                     current_chunk_id_,
@@ -106,31 +108,16 @@ class PhyColumnExpr : public Expr {
         }
     }
 
-    void
-    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
-        segment_chunk_reader_.SetSnapshot(snapshot);
-    }
-
-    void
-    MoveCursorForIndexed() {
-        current_chunk_pos_ = current_chunk_pos_ + batch_size_ >=
-                                     segment_chunk_reader_.active_count_
-                                 ? segment_chunk_reader_.active_count_
-                                 : current_chunk_pos_ + batch_size_;
-    }
-
  private:
     int64_t
     GetCurrentRows() const {
+        if (HasValueReader()) {
+            return value_lookup_current_row_;
+        }
         if (segment_chunk_reader_.segment_->is_chunked()) {
-            auto current_rows =
-                use_index_data_ && segment_chunk_reader_.segment_->type() ==
-                                       SegmentType::Sealed
-                    ? current_chunk_pos_
-                    : segment_chunk_reader_.NumRowsUntilChunk(
-                          expr_->GetColumn().field_id_, current_chunk_id_) +
-                          current_chunk_pos_;
-            return current_rows;
+            return segment_chunk_reader_.NumRowsUntilChunk(
+                       expr_->GetColumn().field_id_, current_chunk_id_) +
+                   current_chunk_pos_;
         } else {
             return segment_chunk_reader_.segment_->type() ==
                            SegmentType::Growing
@@ -147,6 +134,22 @@ class PhyColumnExpr : public Expr {
     template <typename T>
     VectorPtr
     DoEval(OffsetVector* input = nullptr);
+
+    template <typename T>
+    VectorPtr
+    DoEvalFromValueReader(OffsetVector* input);
+
+    bool
+    HasValueReader() const {
+        return value_lookup_.HasReader();
+    }
+
+    template <typename T>
+    bool
+    GatherFromValueReader(const int64_t* offsets,
+                          int64_t count,
+                          T* values,
+                          TargetBitmapView valid);
 
     std::string
     ToString() const override {
@@ -168,26 +171,16 @@ class PhyColumnExpr : public Expr {
         return false;
     }
 
-    segcore::PinnedIndexView
-    PinnedIndexForRawLookup() const {
-        if (!use_index_data_) {
-            return {};
-        }
-        return {pinned_index_.data(), pinned_index_.size()};
-    }
-
-    bool is_indexed_;
-    bool use_index_data_;
-
     int64_t num_chunk_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
+    int64_t value_lookup_current_row_{0};
 
     segcore::StringScanState string_scan_state_;
     const segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t batch_size_;
     std::shared_ptr<const milvus::expr::ColumnExpr> expr_;
-    std::vector<PinWrapper<const index::IndexBase*>> pinned_index_;
+    PinnedValueLookup value_lookup_;
 };
 
 }  //namespace exec

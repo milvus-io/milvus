@@ -128,11 +128,14 @@ PhyNullExpr::DetermineExecPath() {
         return;
     }
 
-    SegmentExpr::DetermineExecPath();
+    auto req = MakeIndexRequirement(RequiredReader::Null);
+    req.value_type = expr_->column_.element_level_
+                         ? expr_->column_.element_type_
+                         : expr_->column_.data_type_;
+    SelectAndPinIndex(req);
     if (PinnedIndexIsNested()) {
+        ClearSelectedIndex();
         exec_path_ = ExprExecPath::RawData;
-        pinned_index_.clear();
-        num_index_chunk_ = 0;
     }
 }
 

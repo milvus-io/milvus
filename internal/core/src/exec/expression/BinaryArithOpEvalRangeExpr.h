@@ -448,9 +448,8 @@ struct ArithOpIndexFunc {
                                int64_t,
                                T>
         HighPrecisonType;
-    using Index = index::ScalarIndex<T>;
     TargetBitmap
-    operator()(Index* index,
+    operator()(const index::IScalarValueReader<T>* index,
                size_t size,
                HighPrecisonType val,
                HighPrecisonType right_operand,
@@ -471,7 +470,7 @@ struct ArithOpIndexFunc {
             if constexpr (filter_type == FilterType::random) {
                 offset = (offsets) ? offsets[i] : i;
             }
-            auto raw = index->Reverse_Lookup(offset);
+            auto raw = index->Lookup(offset);
             if (!raw.has_value()) {
                 res[i] = false;
                 continue;
@@ -738,11 +737,6 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
     void
     DetermineExecPath() override {
-        SegmentExpr::DetermineExecPath();
-        if (exec_path_ != ExprExecPath::ScalarIndex) {
-            return;
-        }
-
         auto data_type = expr_->column_.data_type_;
         if (expr_->column_.element_level_) {
             data_type = expr_->column_.element_type_;
@@ -752,6 +746,13 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
         if (data_type == DataType::JSON || data_type == DataType::ARRAY ||
             data_type == DataType::VECTOR_ARRAY) {
             exec_path_ = ExprExecPath::RawData;
+            return;
+        }
+
+        auto req = MakeIndexRequirement(RequiredReader::ValueLookup);
+        req.value_type = data_type;
+        SelectAndPinIndex(req);
+        if (exec_path_ != ExprExecPath::ScalarIndex) {
             return;
         }
 

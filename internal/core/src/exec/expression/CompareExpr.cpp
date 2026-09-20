@@ -16,7 +16,14 @@
 
 #include "CompareExpr.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <vector>
 
 #include "boost/variant/detail/apply_visitor_binary.hpp"
 #include "common/Tracer.h"
@@ -27,6 +34,92 @@
 
 namespace milvus {
 namespace exec {
+
+bool
+PhyCompareFilterExpr::GatherValues(
+    const PinnedValueLookup& source,
+    DataType data_type,
+    const int64_t* offsets,
+    int64_t count,
+    std::vector<segcore::data_access_type>& values) const {
+    if (!source.Covers(offsets, count)) {
+        return false;
+    }
+
+    values.assign(static_cast<size_t>(count), std::nullopt);
+    std::vector<uint8_t> seen(static_cast<size_t>(count), 0);
+    const auto gather = [&]<typename T>() {
+        const auto* selected = source.Reader<T>();
+        AssertInfo(selected != nullptr,
+                   "cached value reader does not match data type {}",
+                   data_type);
+        selected->Gather(
+            offsets,
+            count,
+            [&](int64_t i, const T* value, bool valid) {
+                AssertInfo(i >= 0 && i < count,
+                           "value gather output {} exceeds batch size {}",
+                           i,
+                           count);
+                const auto pos = static_cast<size_t>(i);
+                AssertInfo(seen[pos] == 0,
+                           "value gather produced output {} twice",
+                           i);
+                seen[pos] = 1;
+                if (!valid) {
+                    return;
+                }
+                AssertInfo(value != nullptr,
+                           "value reader returned a null value for row {}",
+                           offsets[pos]);
+                if constexpr (std::is_same_v<T, std::string_view>) {
+                    values[pos] = std::string(value->data(), value->size());
+                } else {
+                    values[pos] = *value;
+                }
+            });
+    };
+    switch (data_type) {
+        case DataType::BOOL:
+            gather.template operator()<bool>();
+            break;
+        case DataType::INT8:
+            gather.template operator()<int8_t>();
+            break;
+        case DataType::INT16:
+            gather.template operator()<int16_t>();
+            break;
+        case DataType::INT32:
+            gather.template operator()<int32_t>();
+            break;
+        case DataType::INT64:
+        // #52689: TIMESTAMPTZ is stored and indexed as int64.
+        case DataType::TIMESTAMPTZ:
+            gather.template operator()<int64_t>();
+            break;
+        case DataType::FLOAT:
+            gather.template operator()<float>();
+            break;
+        case DataType::DOUBLE:
+            gather.template operator()<double>();
+            break;
+        case DataType::STRING:
+        case DataType::VARCHAR:
+        case DataType::TEXT:
+            gather.template operator()<std::string_view>();
+            break;
+        default:
+            ThrowInfo(UnexpectedError,
+                      "unsupported value lookup data type {}",
+                      data_type);
+    }
+    for (int64_t i = 0; i < count; ++i) {
+        AssertInfo(seen[static_cast<size_t>(i)] != 0,
+                   "value gather omitted row {}",
+                   offsets[i]);
+    }
+    return true;
+}
 
 bool
 PhyCompareFilterExpr::CanUseBothDataCompare() {
@@ -85,6 +178,10 @@ PhyCompareFilterExpr::GetNextBatchSize() {
 template <typename OpType>
 VectorPtr
 PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
+    if (is_left_indexed_ || is_right_indexed_) {
+        return ExecCompareWithValueLookup(op, context);
+    }
+
     // take offsets as input
     auto input = context.get_offset_input();
     if (has_offset_input_) {
@@ -124,14 +221,14 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
         // keep each column's data accessor (which pins its chunk) across
         // iterations and rebuild it only when that column's chunk id changes.
         // Safe on both sealed and growing (data and the chunked validity
-        // storage have stable per-chunk buffers). The pinned index views are
-        // chunk-independent, so they are resolved once.
-        const auto left_pinned_index = LeftPinnedIndexForRawLookup();
-        const auto right_pinned_index = RightPinnedIndexForRawLookup();
+        // storage have stable per-chunk buffers).
         int64_t cached_left_chunk_id = -1;
         int64_t cached_right_chunk_id = -1;
         segcore::ChunkDataAccessor left;
         segcore::ChunkDataAccessor right;
+        // Finite offset input uses one Take per sealed string column,
+        // preserving order, duplicates and nulls, instead of one Cell pin
+        // and view per row.
         segcore::ChunkDataAccessor left_by_offsets;
         segcore::ChunkDataAccessor right_by_offsets;
         if (segment_chunk_reader_.segment_->type() == SegmentType::Sealed) {
@@ -139,12 +236,12 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             if (expr_->left_data_type_ == DataType::VARCHAR) {
                 left_by_offsets =
                     segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        left_field_, offsets, left_pinned_index);
+                        left_field_, offsets);
             }
             if (expr_->right_data_type_ == DataType::VARCHAR) {
                 right_by_offsets =
                     segment_chunk_reader_.GetStringDataAccessorByOffsets(
-                        right_field_, offsets, right_pinned_index);
+                        right_field_, offsets);
             }
         }
         for (auto i = 0; i < real_batch_size; ++i) {
@@ -152,7 +249,6 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             auto read = [&](FieldId field,
                             DataType type,
                             int64_t raw_chunk_count,
-                            segcore::PinnedIndexView pinned_index,
                             const segcore::ChunkDataAccessor& by_offsets,
                             int64_t& cached_chunk_id,
                             segcore::ChunkDataAccessor& accessor) {
@@ -163,7 +259,7 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
                     get_chunk_id_and_offset(field, raw_chunk_count, offset);
                 if (chunk_id != cached_chunk_id) {
                     accessor = segment_chunk_reader_.GetChunkDataAccessor(
-                        type, field, chunk_id, pinned_index);
+                        type, field, chunk_id);
                     cached_chunk_id = chunk_id;
                 }
                 return accessor(chunk_offset);
@@ -171,14 +267,12 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             auto left_opt = read(left_field_,
                                  expr_->left_data_type_,
                                  left_raw_data_chunk_count,
-                                 left_pinned_index,
                                  left_by_offsets,
                                  cached_left_chunk_id,
                                  left);
             auto right_opt = read(right_field_,
                                   expr_->right_data_type_,
                                   right_raw_data_chunk_count,
-                                  right_pinned_index,
                                   right_by_offsets,
                                   cached_right_chunk_id,
                                   right);
@@ -214,7 +308,6 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             expr_->left_field_id_,
             left_current_chunk_id_,
             left_current_chunk_pos_,
-            LeftPinnedIndexForRawLookup(),
             real_batch_size,
             &left_string_scan_state_);
         auto right = segment_chunk_reader_.GetMultipleChunkDataAccessor(
@@ -222,7 +315,6 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             expr_->right_field_id_,
             right_current_chunk_id_,
             right_current_chunk_pos_,
-            RightPinnedIndexForRawLookup(),
             real_batch_size,
             &right_string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
@@ -261,13 +353,11 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
             auto left = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->left_data_type_,
                 expr_->left_field_id_,
-                chunk_id,
-                LeftPinnedIndexForRawLookup());
+                chunk_id);
             auto right = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->right_data_type_,
                 expr_->right_field_id_,
-                chunk_id,
-                RightPinnedIndexForRawLookup());
+                chunk_id);
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
@@ -296,6 +386,126 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op, EvalCtx& context) {
     }
 }
 
+template <typename OpType>
+VectorPtr
+PhyCompareFilterExpr::ExecCompareWithValueLookup(OpType op,
+                                                 EvalCtx& context) {
+    auto* input = context.get_offset_input();
+    const auto real_batch_size =
+        input != nullptr ? static_cast<int64_t>(input->size())
+                         : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    std::vector<int64_t> offsets(static_cast<size_t>(real_batch_size));
+    if (input != nullptr) {
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            offsets[static_cast<size_t>(i)] = (*input)[i];
+        }
+    } else {
+        const auto row_begin = GetCurrentRows();
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            offsets[static_cast<size_t>(i)] = row_begin + i;
+        }
+    }
+
+    std::vector<segcore::data_access_type> left_values;
+    std::vector<segcore::data_access_type> right_values;
+    const bool left_gathered = GatherValues(left_value_lookup_,
+                                            expr_->left_data_type_,
+                                            offsets.data(),
+                                            real_batch_size,
+                                            left_values);
+    const bool right_gathered = GatherValues(right_value_lookup_,
+                                             expr_->right_data_type_,
+                                             offsets.data(),
+                                             real_batch_size,
+                                             right_values);
+
+    const auto left_raw_chunk_count =
+        segment_chunk_reader_.NumChunkData(left_field_);
+    const auto right_raw_chunk_count =
+        segment_chunk_reader_.NumChunkData(right_field_);
+    int64_t cached_left_chunk_id = -1;
+    int64_t cached_right_chunk_id = -1;
+    segcore::ChunkDataAccessor left_accessor;
+    segcore::ChunkDataAccessor right_accessor;
+    const auto read_raw = [&](FieldId field_id,
+                              DataType data_type,
+                              int64_t raw_chunk_count,
+                              int64_t offset,
+                              int64_t& cached_chunk_id,
+                              segcore::ChunkDataAccessor& accessor)
+        -> segcore::data_access_type {
+        const auto [chunk_id, chunk_offset] = [&]() {
+            if (segment_chunk_reader_.segment_->type() ==
+                SegmentType::Growing) {
+                const auto chunk_size = segment_chunk_reader_.SizePerChunk();
+                return std::pair{offset / chunk_size, offset % chunk_size};
+            }
+            if (segment_chunk_reader_.segment_->is_chunked() &&
+                raw_chunk_count > 0) {
+                return segment_chunk_reader_.GetChunkByOffset(field_id, offset);
+            }
+            return std::pair<int64_t, int64_t>{0, offset};
+        }();
+        if (chunk_id != cached_chunk_id) {
+            accessor = segment_chunk_reader_.GetChunkDataAccessor(
+                data_type, field_id, chunk_id);
+            cached_chunk_id = chunk_id;
+        }
+        return accessor(chunk_offset);
+    };
+
+    auto result =
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size, false),
+                                       TargetBitmap(real_batch_size, true));
+    TargetBitmapView bits(result->GetRawData(), real_batch_size);
+    TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
+    for (int64_t i = 0; i < real_batch_size; ++i) {
+        const auto offset = offsets[static_cast<size_t>(i)];
+        segcore::data_access_type left_raw;
+        segcore::data_access_type right_raw;
+        const segcore::data_access_type* left = nullptr;
+        const segcore::data_access_type* right = nullptr;
+        if (left_gathered) {
+            left = &left_values[static_cast<size_t>(i)];
+        } else {
+            left_raw = read_raw(left_field_,
+                                expr_->left_data_type_,
+                                left_raw_chunk_count,
+                                offset,
+                                cached_left_chunk_id,
+                                left_accessor);
+            left = &left_raw;
+        }
+        if (right_gathered) {
+            right = &right_values[static_cast<size_t>(i)];
+        } else {
+            right_raw = read_raw(right_field_,
+                                 expr_->right_data_type_,
+                                 right_raw_chunk_count,
+                                 offset,
+                                 cached_right_chunk_id,
+                                 right_accessor);
+            right = &right_raw;
+        }
+        if (!left->has_value() || !right->has_value()) {
+            bits[static_cast<size_t>(i)] = false;
+            valid[static_cast<size_t>(i)] = false;
+            continue;
+        }
+        bits[static_cast<size_t>(i)] = boost::apply_visitor(
+            milvus::query::Relational<decltype(op)>{},
+            left->value(),
+            right->value());
+    }
+    // The sequential cursor (current_data_global_pos_) is advanced once per
+    // Eval by the caller, so this path must not move it again.
+    return result;
+}
+
 void
 PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     tracer::AutoSpan span(
@@ -310,8 +520,9 @@ PhyCompareFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         has_offset_input_ ? 0 : GetNextBatchSize();
     // An index without raw row values cannot serve this field-field compare;
     // keep using the Column path when both operands still come from data.
-    if (!left_use_index_data_ && !right_use_index_data_ &&
-        CanUseBothDataCompare()) {
+    // For segments where both fields have no index, this also lets SIMD run
+    // without a deep call stack in between.
+    if (!is_left_indexed_ && !is_right_indexed_ && CanUseBothDataCompare()) {
         result = ExecCompareExprDispatcherForBothDataSegment(context);
         current_data_global_pos_ += sequential_batch_size;
         return;
