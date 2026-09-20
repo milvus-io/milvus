@@ -192,6 +192,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
 		}
 		if fa.IsNull(idx) {
+			if defaultValue != nil {
+				b.Append(defaultValue.GetDoubleData())
+				return 8, nil
+			}
 			b.AppendNull()
 			return 0, nil
 		} else {
@@ -469,6 +473,23 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 		for i, builder := range b.builders {
 			f := b.fields[i]
 			col := rec.Column(f.FieldID)
+			// TEXT may be decoded UTF8 or a binary LOB reference. Preserve the
+			// reader's representation instead of treating decoded text as a ref.
+			if f.GetDataType() == schemapb.DataType_Text &&
+				(col.DataType().ID() == arrow.STRING || col.DataType().ID() == arrow.BINARY) &&
+				col.DataType().ID() != builder.Type().ID() {
+				if builder.NullN() == builder.Len() {
+					// Missing TEXT fields can have been filled with binary nulls.
+					nulls := builder.Len()
+					builder.Release()
+					builder = array.NewBuilder(memory.DefaultAllocator, col.DataType())
+					builder.AppendNulls(nulls)
+					b.builders[i] = builder
+				} else if col.IsNull(offset) {
+					builder.AppendNull()
+					continue
+				}
+			}
 			size, err := appendValueAt(builder, col, offset, f, b.defaults[i])
 			if err != nil {
 				return merr.Wrapf(err, "failed to append value at offset %d for field %s", offset, f.GetName())

@@ -54,9 +54,11 @@ import (
 type clusteringRecordObserver struct {
 	storage.BinlogRecordWriter
 	rows          []int
+	bytes         []uint64
 	values        []*storage.Value
 	captureValues bool
 	writeError    error
+	blobs         map[string][]byte
 }
 
 func (w *clusteringRecordObserver) Write(r storage.Record) error {
@@ -70,8 +72,13 @@ func (w *clusteringRecordObserver) Write(r storage.Record) error {
 		}
 		w.values = append(w.values, values...)
 	}
+	before := w.GetWrittenUncompressed()
+	if err := w.BinlogRecordWriter.Write(r); err != nil {
+		return err
+	}
 	w.rows = append(w.rows, r.Len())
-	return w.BinlogRecordWriter.Write(r)
+	w.bytes = append(w.bytes, w.GetWrittenUncompressed()-before)
+	return nil
 }
 
 func (s *ClusteringCompactionTaskSuite) TestMappingAccumulatesRecords() {
@@ -200,6 +207,8 @@ func clusteringTestRecord(t *testing.T, schema *schemapb.CollectionSchema, first
 				b.Append(int64(row))
 			case *array.Int32Builder:
 				b.Append(int32(row))
+			case *array.Float64Builder:
+				b.Append(float64(row) + 0.25)
 			case *array.StringBuilder:
 				b.Append(strings.Repeat("x", 128+row%17) + fmt.Sprint(row))
 			case *array.FixedSizeBinaryBuilder:
@@ -224,7 +233,13 @@ func newClusteringTestBuffer(t *testing.T, schema *schemapb.CollectionSchema, ba
 	params.StorageVersion = version
 	params.StorageConfig = &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
 	binlogIO := mock_util.NewMockBinlogIO(t)
-	binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+	blobs := make(map[string][]byte)
+	binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, data map[string][]byte) error {
+		for key, value := range data {
+			blobs[key] = append([]byte(nil), value...)
+		}
+		return nil
+	}).Maybe()
 	writer, err := NewMultiSegmentWriter(context.Background(), binlogIO,
 		NewCompactionAllocator(allocator.NewLocalAllocator(1, 100), allocator.NewLocalAllocator(100, 10000)),
 		1<<30, schema, params, 10000, PartitionID, CollectionID, "", 100,
@@ -236,7 +251,7 @@ func newClusteringTestBuffer(t *testing.T, schema *schemapb.CollectionSchema, ba
 		}))
 	require.NoError(t, err)
 	require.NoError(t, writer.rotateWriter())
-	observer := &clusteringRecordObserver{BinlogRecordWriter: writer.writer.BinlogRecordWriter}
+	observer := &clusteringRecordObserver{BinlogRecordWriter: writer.writer.BinlogRecordWriter, blobs: blobs}
 	writer.writer = storage.NewBinlogValueWriter(observer, 100)
 	buffer := newClusterBuffer(0, writer, nil)
 	t.Cleanup(func() { require.NoError(t, buffer.Close()) })
