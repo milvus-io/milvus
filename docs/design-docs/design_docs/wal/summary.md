@@ -600,6 +600,14 @@ establishes assignment ownership and checkpoint fencing beforehand.
    assembly, and filter by TimeTick. Other recovery modules may require earlier
    replay; the summary frontier does not replace their replay positions.
 
+When bootstrapping without manifest coverage, InitLastAcked also seeds the
+record-deduplication floor from the published global checkpoint. Physical replay
+may start earlier at LastConfirmedMessageID; records at or below this floor
+must not enter a chunk whose coverage starts after it. This floor never creates
+stored history or a manifest coverage range. Transform reads expose this initial
+boundary via FastForwardTimeTick; after publication the coverage start preserves
+it across restarts.
+
 If no manifest exists, there is no manifest-based recovery root. Chunks under
 unpublished terms do not independently authorize checkpoint advancement; rebuild
 from the safe WAL recovery position. If that WAL is unavailable, fail recovery

@@ -53,7 +53,10 @@ func (m *Manager) InitLastAcked(timetick uint64) {
 	defer m.mu.Unlock()
 	m.advanceLastAckedLocked(timetick)
 	if m.manifest.Coverage == nil && len(m.pendingSealed) == 0 {
-		m.sealedThrough = timetick
+		// Physical replay may overlap the published checkpoint. These records
+		// predate Summary's initial coverage and must not enter its first chunk.
+		m.sealedThrough = max(m.sealedThrough, timetick)
+		m.restoredTimeTick = max(m.restoredTimeTick, timetick)
 	}
 }
 

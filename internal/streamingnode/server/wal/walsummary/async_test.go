@@ -371,3 +371,38 @@ func TestSummaryRejectsCorruptMetadataBeforeConsumerRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestSummaryBootstrapSkipsCheckpointReplay(t *testing.T) {
+	ctx := context.Background()
+	m, store := newTransformTestManagerWithStore(t)
+	m.InitLastAcked(100)
+	m.InitLastAcked(50)
+	for _, tt := range []uint64{90, 100} {
+		m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", tt, 10, 1))
+		m.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", tt, "old", []int64{1}, []uint32{0}))
+	}
+	require.Empty(t, m.pending)
+	require.Nil(t, m.Manifest().Coverage, "bootstrap does not create stored history")
+	require.Equal(t, uint64(100), m.LastAcked())
+
+	m.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 101, 10, 2))
+	m.ObserveMessage(ctx, newTestIdempotentInsertMessage(t, "v1", 102, "new", []int64{2}, []uint32{0}))
+	require.NoError(t, persistSummary(ctx, m))
+	require.Nil(t, m.terminalErr)
+	require.Equal(t, uint64(101), m.Manifest().Coverage.StartTimeTick)
+	require.Equal(t, uint64(102), m.Manifest().Coverage.EndTimeTick)
+	require.Equal(t, uint64(102), m.LastAcked())
+	entries, err := m.ReadIdempotencyEntries(ctx, "v1", 0, 200)
+	require.NoError(t, err)
+	require.Len(t, entries.Idempotency, 1)
+	batch, err := m.ReadTransform(ctx, "v1", 0, 102, ReadLimits{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), batch.FastForwardTimeTick)
+	require.Len(t, batch.Entries, 1)
+	restored := newTestManager(t, nextTermStore(store), 1<<30)
+	require.NoError(t, restored.Restore(ctx))
+	batch, err = restored.ReadTransform(ctx, "v1", 0, 102, ReadLimits{})
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), batch.FastForwardTimeTick)
+	require.Len(t, batch.Entries, 1)
+}

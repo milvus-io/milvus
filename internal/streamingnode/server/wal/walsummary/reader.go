@@ -78,6 +78,13 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	batch := TransformBatch{CoveredThrough: after, ReadableThrough: m.readableThrough, Changed: m.readableChanged}
 	terminal := m.terminalErr
 	fastForward := m.manifest.GetTransformFastForwardTimeTick()[vchannel]
+	// The initial checkpoint is a replay floor, not readable stored history.
+	// Once published, coverage preserves that lower boundary across restarts.
+	if coverage := m.manifest.GetCoverage(); coverage == nil {
+		fastForward = max(fastForward, m.restoredTimeTick)
+	} else if coverage.GetStartTimeTick() > 0 {
+		fastForward = max(fastForward, coverage.GetStartTimeTick()-1)
+	}
 	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
 	// Only copy slice descriptors, never the unmaterialized payload window.
 	sealed := make([][]*stagedRecord, 0, len(m.pendingSealed))
