@@ -1,31 +1,117 @@
 #include "segcore/storagev1translator/InterimSealedIndexTranslator.h"
 
 #include <algorithm>
-#include <exception>
-#include <map>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
-#include "cachinglayer/CacheSlot.h"
 #include "common/Chunk.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
 #include "common/OffsetMapping.h"
 #include "fmt/core.h"
-#include "folly/FBVector.h"
-#include "index/Index.h"
+#include "index/Families.h"
+#include "index/IndexTypeAdapter.h"
+#include "index/Meta.h"
 #include "index/Utils.h"
-#include "index/VectorIndex.h"
-#include "index/VectorIndexValidDataUtils.h"
-#include "index/VectorMemIndex.h"
-#include "knowhere/dataset.h"
-#include "knowhere/expected.h"
-#include "knowhere/object.h"
+#include "index/contracts/build/IReaderConvertible.h"
+#include "index/vector/VectorMemBuilder.h"
+#include "index/vector/VectorTypeUtils.h"
 #include "knowhere/operands.h"
 #include "mmap/ChunkedColumnInterface.h"
-#include "nlohmann/json.hpp"
 #include "segcore/Utils.h"
 
 namespace milvus::segcore::storagev1translator {
+namespace {
+
+template <typename T>
+std::span<const typename index::VectorBuildInput<T>::value_type>
+ChunkValues(const cachinglayer::PinWrapper<Chunk*>& pin,
+            int64_t rows,
+            int64_t dim) {
+    using ValueType = typename index::VectorBuildInput<T>::value_type;
+    AssertInfo(rows >= 0, "interim vector chunk row count is negative");
+    const auto* chunk = pin.get();
+    AssertInfo(chunk != nullptr, "interim vector chunk is null");
+    AssertInfo(rows == 0 || chunk->Data() != nullptr,
+               "non-empty interim vector chunk has no data");
+    if constexpr (std::is_same_v<T, sparse_u32_f32>) {
+        return {reinterpret_cast<const ValueType*>(chunk->Data()),
+                static_cast<size_t>(rows)};
+    } else {
+        AssertInfo(dim > 0, "dense interim vector dimension is invalid");
+        AssertInfo(rows <= std::numeric_limits<int64_t>::max() / dim,
+                   "interim vector chunk value count overflows int64");
+        return {reinterpret_cast<const ValueType*>(chunk->Data()),
+                static_cast<size_t>(rows * dim)};
+    }
+}
+
+template <typename T>
+std::unique_ptr<index::IIndexReaderBase>
+BuildInterimReader(
+    const std::shared_ptr<
+        std::vector<cachinglayer::PinWrapper<Chunk*>>>& pinned_chunks,
+    int64_t logical_rows,
+    int64_t physical_rows,
+    int64_t dim,
+    ValidityView validity,
+    const std::vector<int64_t>& physical_rows_per_chunk,
+    DataType value_type,
+    const IndexType& index_type,
+    const MetricType& metric_type,
+    IndexVersion index_version,
+    const Config& build_config,
+    std::optional<knowhere::ViewDataOp> view_data) {
+    AssertInfo(pinned_chunks->size() == physical_rows_per_chunk.size(),
+               "interim vector chunk metadata size mismatch");
+    using ValueType = typename index::VectorBuildInput<T>::value_type;
+    std::vector<std::span<const ValueType>> chunks;
+    chunks.reserve(pinned_chunks->size());
+    for (size_t chunk_id = 0; chunk_id < pinned_chunks->size(); ++chunk_id) {
+        chunks.emplace_back(ChunkValues<T>((*pinned_chunks)[chunk_id],
+                                           physical_rows_per_chunk[chunk_id],
+                                           dim));
+    }
+
+    index::VectorMemBuilder<T> builder =
+        view_data.has_value() ? index::VectorMemBuilder<T>(DataType::NONE,
+                                                           index_type,
+                                                           metric_type,
+                                                           index_version,
+                                                           dim,
+                                                           build_config,
+                                                           std::move(*view_data),
+                                                           false)
+                              : index::VectorMemBuilder<T>(DataType::NONE,
+                                                           index_type,
+                                                           metric_type,
+                                                           index_version,
+                                                           dim,
+                                                           build_config,
+                                                           false);
+    index::InterimVectorBuildInput<T> input{
+        .physical_chunks = chunks,
+        .logical_rows = logical_rows,
+        .physical_rows = physical_rows,
+        .dim = dim,
+        .parent_validity = validity,
+    };
+    auto artifact = std::move(builder).Build(input);
+    auto reader = index::IReaderConvertible::FromArtifact(std::move(artifact));
+    AssertInfo(reader->ValueType() == value_type,
+               "interim vector reader type {} disagrees with field type {}",
+               reader->ValueType(),
+               value_type);
+    return reader;
+}
+
+}  // namespace
+
 InterimSealedIndexTranslator::InterimSealedIndexTranslator(
     std::shared_ptr<ChunkedColumnInterface> vec_data,
     int64_t segment_id,
@@ -57,6 +143,47 @@ InterimSealedIndexTranslator::InterimSealedIndexTranslator(
                                                   /* is_vector */ true,
                                                   /* is_index */ true),
             /* support_eviction */ false) {
+    AssertInfo(vec_data_ != nullptr, "interim vector column is null");
+    AssertInfo(vec_data_->NumRows() <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "interim vector logical row count exceeds int64");
+    AssertInfo(is_sparse_ ==
+                   IsSparseFloatVectorDataType(vec_data_type_),
+               "interim sparse flag disagrees with vector field type {}",
+               vec_data_type_);
+    AssertInfo(is_sparse_ || vec_data_type_ == DataType::VECTOR_FLOAT ||
+                   vec_data_type_ == DataType::VECTOR_FLOAT16 ||
+                   vec_data_type_ == DataType::VECTOR_BFLOAT16,
+               "unsupported interim vector field type {}",
+               vec_data_type_);
+
+    build_config_[index::METRIC_TYPE] = metric_type_;
+    build_config_[DIM_KEY] = dim_;
+    build_config_[INDEX_NUM_ROWS_KEY] =
+        static_cast<int64_t>(vec_data_->NumRows());
+    auto adapted = index::AdaptIndexType({
+        .index_type = index_type_,
+        .field_type = vec_data_type_,
+        .element_type = DataType::NONE,
+        // #52361: the interim index is built at the configured target engine
+        // version, so the adapter must classify it at the same version.
+        .index_engine_version = index_version_,
+        .params = std::move(build_config_),
+        .is_nested = false,
+        .is_text_match = false,
+    });
+    AssertInfo(adapted.family == index::families::kVectorMem,
+               "interim vector index {} is not an in-memory family",
+               index_type_);
+    build_config_ = std::move(adapted.params);
+    auto family = std::move(adapted.family);
+    const auto loader = index::LoaderRegistry::Instance().Lookup(family);
+    AssertInfo(static_cast<bool>(loader),
+               "no index loader is registered for family {}",
+               family);
+    SetReaderContract(std::move(family),
+                      vec_data_type_,
+                      loader.derive_caps(build_config_));
 }
 
 size_t
@@ -112,7 +239,7 @@ InterimSealedIndexTranslator::key() const {
 }
 
 std::vector<std::pair<milvus::cachinglayer::cid_t,
-                      std::unique_ptr<milvus::index::IndexBase>>>
+                      std::unique_ptr<milvus::index::IIndexReaderBase>>>
 InterimSealedIndexTranslator::get_cells(
     milvus::OpContext* ctx,
     const std::vector<milvus::cachinglayer::cid_t>& cids) {
@@ -120,153 +247,140 @@ InterimSealedIndexTranslator::get_cells(
     CheckCancellation(
         ctx, segment_id_, "InterimSealedIndexTranslator::get_cells()");
 
-    std::unique_ptr<index::VectorIndex> vec_index = nullptr;
-    auto num_chunk = vec_data_->num_chunks();
+    const auto num_chunks = vec_data_->num_chunks();
+    AssertInfo(num_chunks >= 0,
+               "interim vector column has a negative chunk count");
     if (vec_data_->IsNullable()) {
         vec_data_->BuildValidRowIds(ctx);
     }
     const auto& offset_mapping = vec_data_->GetOffsetMapping();
-    bool nullable = offset_mapping.IsEnabled();
-    const FixedVector<bool>* valid_data = nullptr;
+    const bool nullable = offset_mapping.IsEnabled();
+    AssertInfo(vec_data_->NumRows() <=
+                   static_cast<size_t>(std::numeric_limits<int64_t>::max()),
+               "interim vector logical row count exceeds int64");
+    const auto logical_rows = static_cast<int64_t>(vec_data_->NumRows());
+    const auto physical_rows =
+        nullable ? offset_mapping.GetValidCount() : logical_rows;
+
+    auto pinned_chunks = std::make_shared<
+        std::vector<cachinglayer::PinWrapper<Chunk*>>>(
+        vec_data_->GetAllChunks(ctx));
+    AssertInfo(pinned_chunks->size() == static_cast<size_t>(num_chunks),
+               "interim vector column returned {} pins for {} chunks",
+               pinned_chunks->size(),
+               num_chunks);
+    std::vector<int64_t> physical_rows_per_chunk;
+    physical_rows_per_chunk.reserve(num_chunks);
+    auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
+    rows_until_chunk->reserve(num_chunks + 1);
+    rows_until_chunk->push_back(0);
+    for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
+        const auto chunk_rows =
+            nullable ? vec_data_->GetValidCountInChunk(chunk_id)
+                     : vec_data_->chunk_row_nums(chunk_id);
+        AssertInfo(chunk_rows >= 0 &&
+                       chunk_rows <= std::numeric_limits<int64_t>::max() -
+                                         rows_until_chunk->back(),
+                   "interim vector chunk row count overflows int64");
+        physical_rows_per_chunk.push_back(chunk_rows);
+        rows_until_chunk->push_back(rows_until_chunk->back() + chunk_rows);
+    }
+    AssertInfo(rows_until_chunk->back() == physical_rows,
+               "interim vector chunks contain {} physical rows, expected {}",
+               rows_until_chunk->back(),
+               physical_rows);
+
+    ValidityView validity;
     if (nullable) {
-        valid_data = &vec_data_->GetValidData();
+        validity =
+            ValidityView::FromExpanded(vec_data_->GetValidData().data());
     }
 
-    if (!is_sparse_) {
-        auto rows_until_chunk = std::make_shared<std::vector<int64_t>>();
-        rows_until_chunk->reserve(num_chunk + 1);
-        rows_until_chunk->push_back(0);
-        for (int64_t chunk_id = 0; chunk_id < num_chunk; ++chunk_id) {
-            const auto chunk_rows =
-                nullable ? vec_data_->GetValidCountInChunk(chunk_id)
-                         : vec_data_->chunk_row_nums(chunk_id);
-            rows_until_chunk->push_back(rows_until_chunk->back() + chunk_rows);
-        }
-
-        knowhere::ViewDataOp view_data = [field_raw_data_ptr = vec_data_,
-                                          rows_until_chunk,
-                                          num_chunk](size_t id) {
-            auto compact_offset = static_cast<int64_t>(id);
-            auto it = std::upper_bound(rows_until_chunk->begin(),
-                                       rows_until_chunk->end(),
-                                       compact_offset);
-            AssertInfo(it != rows_until_chunk->begin(),
-                       "Compact offset {} is out of range",
-                       id);
-            const auto chunk_id =
-                std::distance(rows_until_chunk->begin(), it) - 1;
-            AssertInfo(
-                chunk_id < num_chunk, "Compact offset {} is out of range", id);
-            compact_offset -= (*rows_until_chunk)[chunk_id];
-
-            auto pw = field_raw_data_ptr->GetChunk(nullptr, chunk_id);
-            auto chunk = pw.get();
-            return static_cast<const void*>(chunk->ValueAt(compact_offset));
-        };
-
-        if (vec_data_type_ == DataType::VECTOR_FLOAT) {
-            vec_index =
-                std::make_unique<index::VectorMemIndex<float>>(DataType::NONE,
-                                                               index_type_,
-                                                               metric_type_,
-                                                               index_version_,
-                                                               view_data,
-                                                               false);
-        } else if (vec_data_type_ == DataType::VECTOR_FLOAT16) {
-            vec_index = std::make_unique<index::VectorMemIndex<knowhere::fp16>>(
-                DataType::NONE,
-                index_type_,
-                metric_type_,
-                index_version_,
-                view_data,
-                false);
-        } else if (vec_data_type_ == DataType::VECTOR_BFLOAT16) {
-            vec_index = std::make_unique<index::VectorMemIndex<knowhere::bf16>>(
-                DataType::NONE,
-                index_type_,
-                metric_type_,
-                index_version_,
-                view_data,
-                false);
-        }
+    std::unique_ptr<index::IIndexReaderBase> reader;
+    if (is_sparse_) {
+        reader = BuildInterimReader<sparse_u32_f32>(pinned_chunks,
+                                                    logical_rows,
+                                                    physical_rows,
+                                                    dim_,
+                                                    validity,
+                                                    physical_rows_per_chunk,
+                                                    vec_data_type_,
+                                                    index_type_,
+                                                    metric_type_,
+                                                    index_version_,
+                                                    build_config_,
+                                                    std::nullopt);
     } else {
-        // sparse vector case
-        vec_index = std::make_unique<index::VectorMemIndex<sparse_u32_f32>>(
-            DataType::NONE, index_type_, metric_type_, index_version_, false);
+        knowhere::ViewDataOp view_data =
+            [pinned_chunks, rows_until_chunk, num_chunks](size_t id) {
+                AssertInfo(
+                    id <= static_cast<size_t>(
+                              std::numeric_limits<int64_t>::max()),
+                    "compact interim vector offset {} exceeds int64",
+                    id);
+                auto compact_offset = static_cast<int64_t>(id);
+                AssertInfo(compact_offset < rows_until_chunk->back(),
+                           "compact interim vector offset {} is out of range",
+                           id);
+                auto it = std::upper_bound(rows_until_chunk->begin(),
+                                           rows_until_chunk->end(),
+                                           compact_offset);
+                AssertInfo(it != rows_until_chunk->begin(),
+                           "compact interim vector offset {} is out of range",
+                           id);
+                const auto chunk_id =
+                    std::distance(rows_until_chunk->begin(), it) - 1;
+                AssertInfo(chunk_id < num_chunks,
+                           "compact interim vector offset {} is out of range",
+                           id);
+                compact_offset -= (*rows_until_chunk)[chunk_id];
+                const auto* chunk = (*pinned_chunks)[chunk_id].get();
+                AssertInfo(chunk != nullptr,
+                           "interim vector chunk {} is null",
+                           chunk_id);
+                return static_cast<const void*>(
+                    chunk->ValueAt(compact_offset));
+            };
+
+        reader = index::DispatchPhysicalVectorDataType(
+            vec_data_type_,
+            [&]<typename T>() -> std::unique_ptr<index::IIndexReaderBase> {
+                if constexpr (std::is_same_v<T, float> ||
+                              std::is_same_v<T, float16> ||
+                              std::is_same_v<T, bfloat16>) {
+                    return BuildInterimReader<T>(pinned_chunks,
+                                                 logical_rows,
+                                                 physical_rows,
+                                                 dim_,
+                                                 validity,
+                                                 physical_rows_per_chunk,
+                                                 vec_data_type_,
+                                                 index_type_,
+                                                 metric_type_,
+                                                 index_version_,
+                                                 build_config_,
+                                                 std::move(view_data));
+                } else {
+                    ThrowInfo(DataTypeInvalid,
+                              "unsupported interim vector field type {}",
+                              vec_data_type_);
+                }
+            },
+            [&]() -> std::unique_ptr<index::IIndexReaderBase> {
+                ThrowInfo(DataTypeInvalid,
+                          "unsupported interim vector field type {}",
+                          vec_data_type_);
+            });
     }
 
-    int64_t total_valid_count =
-        nullable ? offset_mapping.GetValidCount() : vec_data_->NumRows();
-    if (nullable) {
-        vec_index->SetIdMapType(knowhere::IdMap::Type::GROWING);
-    }
-
-    if (total_valid_count == 0) {
-        if (nullable) {
-            auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
-            dataset->SetIsSparse(is_sparse_);
-            dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-                valid_data->data(), valid_data->size()));
-            vec_index->BuildWithDataset(dataset, build_config_);
-        }
-        std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
-            result;
-        result.emplace_back(std::make_pair(0, std::move(vec_index)));
-        return result;
-    }
-
-    bool first_build = true;
-    for (int i = 0; i < num_chunk; ++i) {
-        auto pw = vec_data_->GetChunk(ctx, i);
-        auto chunk = pw.get();
-
-        const int64_t logical_begin = vec_data_->GetNumRowsUntilChunk(i);
-        const int64_t logical_rows = vec_data_->chunk_row_nums(i);
-        int64_t actual_row_count =
-            nullable ? vec_data_->GetValidCountInChunk(i) : logical_rows;
-
-        if (actual_row_count == 0) {
-            if (nullable && !first_build) {
-                auto dataset = knowhere::GenDataSet(0, dim_, nullptr);
-                dataset->SetIsSparse(is_sparse_);
-                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-                    valid_data->data() + logical_begin,
-                    static_cast<size_t>(logical_rows)));
-                vec_index->AddWithDataset(dataset, build_config_);
-            }
-            continue;
-        }
-
-        auto dataset =
-            knowhere::GenDataSet(actual_row_count, dim_, chunk->Data());
-        dataset->SetIsOwner(false);
-        dataset->SetIsSparse(is_sparse_);
-
-        if (first_build) {
-            if (nullable) {
-                const auto logical_prefix = logical_begin + logical_rows;
-                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-                    valid_data->data(), static_cast<size_t>(logical_prefix)));
-            }
-            vec_index->BuildWithDataset(dataset, build_config_);
-            first_build = false;
-        } else {
-            if (nullable) {
-                dataset->SetIdMapData(knowhere::IdMapData::FromValidData(
-                    valid_data->data() + logical_begin,
-                    static_cast<size_t>(logical_rows)));
-            }
-            vec_index->AddWithDataset(dataset, build_config_);
-        }
-    }
-
-    std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>
+    AssertInfo(reader != nullptr, "interim vector builder returned no reader");
+    std::vector<std::pair<cid_t, std::unique_ptr<index::IIndexReaderBase>>>
         result;
-    result.emplace_back(std::make_pair(0, std::move(vec_index)));
+    result.emplace_back(std::make_pair(0, std::move(reader)));
     return result;
 }
 
-Meta*
+milvus::cachinglayer::Meta*
 InterimSealedIndexTranslator::meta() {
     return &meta_;
 }
