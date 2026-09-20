@@ -131,7 +131,8 @@ func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	if err := b.builder.Append(r, row, row+1); err != nil {
 		return err
 	}
-	if b.builder.GetSize() >= b.writer.binLogMaxSize {
+	// Split the buffering budget between row batching and the native writer.
+	if b.builder.GetSize() >= max(uint64(1), b.writer.binLogMaxSize/2) {
 		return b.writeRecord()
 	}
 	return nil
@@ -1110,7 +1111,7 @@ func (t *clusteringCompactionTask) GetStorageConfig() *indexpb.StorageConfig {
 // Includes TEXT column configs when lobContext requires REWRITE_ALL.
 func (t *clusteringCompactionTask) getWriterOpts() []storage.RwOption {
 	opts := []storage.RwOption{
-		storage.WithBufferSize(t.bufferSize),
+		storage.WithBufferSize(max(int64(1), t.bufferSize/2)),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
 		storage.WithWriterFormat(t.compactionParams.GetStorageFormat()),
