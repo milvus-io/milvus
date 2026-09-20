@@ -116,21 +116,11 @@ func (c *routedTestViewSyncServiceClient) SyncQueryView(ctx context.Context, opt
 	return c.client.SyncQueryView(contextutil.WithPickServerID(ctx, c.serverID), opts...)
 }
 
-func (c *routedTestViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
-	return c.client.SyncDataView(contextutil.WithPickServerID(ctx, c.serverID), in, opts...)
-}
-
 type capturingViewSyncServiceClient struct {
 	queryCtx context.Context
-	dataCtx  context.Context
 }
 
 func (c *capturingViewSyncServiceClient) SyncQueryView(ctx context.Context, opts ...grpc.CallOption) (viewpb.ViewSyncService_SyncQueryViewClient, error) {
 	c.queryCtx = ctx
 	return nil, nil
-}
-
-func (c *capturingViewSyncServiceClient) SyncDataView(ctx context.Context, in *viewpb.SyncDataViewRequest, opts ...grpc.CallOption) (*viewpb.SyncDataViewResponse, error) {
-	c.dataCtx = ctx
-	return &viewpb.SyncDataViewResponse{}, nil
 }

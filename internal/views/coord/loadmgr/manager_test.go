@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
@@ -117,7 +116,7 @@ func TestCollectionLoadManager_DiscoverableShardAssignments(t *testing.T) {
 
 	assignments := manager.ShardAssignmentsByPChannel()
 	require.Len(t, assignments, 1)
-	assert.Equal(t, []types.ShardAssignmentEntry{
+	assert.Equal(t, []ShardAssignmentEntry{
 		{CollectionID: 100, ShardIndex: 2, ReplicaID: 1000},
 	}, assignments["by-dev-rootcoord-dml_0"])
 	assert.Equal(t, 1, assignmentUpdates)
