@@ -1,3 +1,5 @@
+#pragma once
+
 #include <assert.h>
 #include <cmath>
 #include <sstream>
@@ -6,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <vector>
 #include <type_traits>
 
@@ -229,6 +232,30 @@ struct TantivyIndexWrapper {
                 res, "failed to load index: {}", res.result_->error);
             reader_ = res.result_->value.ptr._0;
         }
+    }
+
+    // Capture the writer's currently committed generation in an independent
+    // manual-reload reader. This does not commit the writer, and published
+    // snapshots must never call reload().
+    std::shared_ptr<TantivyIndexWrapper>
+    create_snapshot_reader(SetBitsetFn set_bitset) const {
+        AssertInfo(writer_ != nullptr,
+                   "snapshot reader requires a live Tantivy writer");
+        AssertInfo(reader_ == nullptr,
+                   "snapshot reader requires a writer-only wrapper");
+
+        // Allocate before exporting the Rust reader so a C++ allocation
+        // failure cannot leak the returned binding.
+        auto snapshot = std::make_shared<TantivyIndexWrapper>();
+        auto res = RustResultWrapper(
+            tantivy_create_snapshot_reader_from_writer(writer_, set_bitset));
+        AssertInfo(res.result_->success,
+                   "failed to create snapshot reader from writer: {}",
+                   res.result_->error);
+        snapshot->reader_ = res.result_->value.ptr._0;
+        AssertInfo(snapshot->reader_ != nullptr,
+                   "snapshot reader creation returned a null reader");
+        return snapshot;
     }
 
     ~TantivyIndexWrapper() {
@@ -678,6 +705,16 @@ struct TantivyIndexWrapper {
     }
 
     inline void
+    rollback() {
+        AssertInfo(writer_ != nullptr,
+                   "cannot rollback an index without a writer");
+        auto res = RustResultWrapper(tantivy_rollback_index(writer_));
+        AssertInfo(res.result_->success,
+                   "failed to rollback index: {}",
+                   res.result_->error);
+    }
+
+    inline void
     reload() {
         if (reader_ != nullptr) {
             auto res = RustResultWrapper(tantivy_reload_index(reader_));
@@ -748,13 +785,14 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                std::vector<const char*> views;
-                views.reserve(len);
+                std::vector<const char*> views(len);
+                std::vector<size_t> lengths(len);
                 for (uintptr_t i = 0; i < len; i++) {
-                    views.push_back(terms[i].c_str());
+                    views[i] = terms[i].data();
+                    lengths[i] = terms[i].size();
                 }
-                return tantivy_terms_query_keyword(
-                    reader_, views.data(), len, bitset);
+                return tantivy_terms_query_keyword_with_len(
+                    reader_, views.data(), lengths.data(), len, bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
@@ -775,7 +813,8 @@ struct TantivyIndexWrapper {
     RustArrayI64Wrapper
     term_query_i64(std::string term) {
         auto array = [&]() {
-            return tantivy_term_query_keyword_i64(reader_, term.c_str());
+            return tantivy_term_query_keyword_i64_with_len(
+                reader_, term.data(), term.size());
         }();
 
         auto res = RustResultWrapper(array);
@@ -813,9 +852,10 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_lower_bound_range_query_keyword(
+                return tantivy_lower_bound_range_query_keyword_with_len(
                     reader_,
-                    static_cast<std::string>(lower_bound).c_str(),
+                    lower_bound.data(),
+                    lower_bound.size(),
                     inclusive,
                     bitset);
             }
@@ -865,9 +905,10 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_upper_bound_range_query_keyword(
+                return tantivy_upper_bound_range_query_keyword_with_len(
                     reader_,
-                    static_cast<std::string>(upper_bound).c_str(),
+                    upper_bound.data(),
+                    upper_bound.size(),
                     inclusive,
                     bitset);
             }
@@ -928,13 +969,14 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_range_query_keyword(
-                    reader_,
-                    static_cast<std::string>(lower_bound).c_str(),
-                    static_cast<std::string>(upper_bound).c_str(),
-                    lb_inclusive,
-                    ub_inclusive,
-                    bitset);
+                return tantivy_range_query_keyword_with_len(reader_,
+                                                            lower_bound.data(),
+                                                            lower_bound.size(),
+                                                            upper_bound.data(),
+                                                            upper_bound.size(),
+                                                            lb_inclusive,
+                                                            ub_inclusive,
+                                                            bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
@@ -1204,8 +1246,12 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_json_term_query_keyword(
-                    reader_, json_path.c_str(), term.c_str(), bitset);
+                return tantivy_json_term_query_keyword_with_len(
+                    reader_,
+                    json_path.c_str(),
+                    term.data(),
+                    term.size(),
+                    bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
@@ -1364,10 +1410,19 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                std::vector<const char*> c_strs(n);
-                for (size_t i = 0; i < n; ++i) c_strs[i] = values[i].c_str();
-                return tantivy_json_terms_query_keyword(
-                    reader_, json_path.c_str(), c_strs.data(), n, bitset);
+                std::vector<const char*> views(n);
+                std::vector<size_t> lengths(n);
+                for (size_t i = 0; i < n; ++i) {
+                    views[i] = values[i].data();
+                    lengths[i] = values[i].size();
+                }
+                return tantivy_json_terms_query_keyword_with_len(
+                    reader_,
+                    json_path.c_str(),
+                    views.data(),
+                    lengths.data(),
+                    n,
+                    bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
@@ -1462,15 +1517,18 @@ struct TantivyIndexWrapper {
             }
 
             if constexpr (std::is_same_v<T, std::string>) {
-                return tantivy_json_range_query_keyword(reader_,
-                                                        json_path.c_str(),
-                                                        lower_bound.c_str(),
-                                                        upper_bound.c_str(),
-                                                        lb_unbounded,
-                                                        ub_unbounded,
-                                                        lb_inclusive,
-                                                        ub_inclusive,
-                                                        bitset);
+                return tantivy_json_range_query_keyword_with_len(
+                    reader_,
+                    json_path.c_str(),
+                    lower_bound.data(),
+                    lower_bound.size(),
+                    upper_bound.data(),
+                    upper_bound.size(),
+                    lb_unbounded,
+                    ub_unbounded,
+                    lb_inclusive,
+                    ub_inclusive,
+                    bitset);
             }
 
             // fmt::format returns a std::string; throwing it means catch
