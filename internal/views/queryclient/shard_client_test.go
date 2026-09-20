@@ -183,11 +183,11 @@ func TestShardSearchStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	stream, shardPlan, err := client.SearchStream(context.Background(), shardID.VChannel, request, 2)
+	stream, shardPlan, err := client.SearchStream(context.Background(), shardID.VChannel, request, 20)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
-	require.Equal(t, int64(2), queryService.searchReq.GetStreamChunkSize())
+	require.Equal(t, int64(20), queryService.searchReq.GetStreamChunkBytes())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, chunk.GetResultData().GetIds().GetIntId().GetData())
@@ -236,11 +236,11 @@ func TestShardQueryStreamReturnsPerVChannelReduceStream(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, request, 2)
+	stream, shardPlan, err := client.QueryStream(context.Background(), shardID.VChannel, request, 32)
 
 	require.NoError(t, err)
 	require.Equal(t, shardID, shardPlan.ShardID)
-	require.Equal(t, int64(2), queryService.queryReq.GetStreamChunkSize())
+	require.Equal(t, int64(32), queryService.queryReq.GetStreamChunkBytes())
 	chunk, err := stream.Recv()
 	require.NoError(t, err)
 	require.Equal(t, []int64{1, 2}, chunk.GetIds().GetIntId().GetData())
@@ -270,7 +270,7 @@ func TestShardSearchStreamCloseReleasesChildStream(t *testing.T) {
 		},
 	)
 
-	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, defaultSearchStreamChunkSize)
+	stream, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, defaultStreamChunkBytes)
 	require.NoError(t, err)
 	require.NoError(t, stream.Close())
 
@@ -300,7 +300,7 @@ func TestShardSearchClosesOpenedStreamsOnSetupFailure(t *testing.T) {
 	}
 	client := newTestShardClient(1, shardID, plan, queryService)
 
-	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, defaultSearchStreamChunkSize)
+	_, _, err := client.SearchStream(context.Background(), shardID.VChannel, request, defaultStreamChunkBytes)
 
 	require.ErrorContains(t, err, "open failed")
 	require.Equal(t, 1, openedStream.closeCount())

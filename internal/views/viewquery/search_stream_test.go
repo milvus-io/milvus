@@ -49,7 +49,7 @@ func TestSearchOnViewStreamSendsChunksAndEOF(t *testing.T) {
 	client, cleanup := startSearchStreamTestServer(t, server)
 	defer cleanup()
 	request := streamTestRequest()
-	request.StreamChunkSize = 2
+	request.StreamChunkBytes = 20
 	stream, err := searchutil.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)
 
@@ -231,8 +231,8 @@ func TestQueryOnViewStreamSendsChunksAndEOF(t *testing.T) {
 			DataVersion:  &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 2},
 			QueryVersion: 3,
 		},
-		Mvcc:            &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
-		StreamChunkSize: 2,
+		Mvcc:             &viewpb.QueryPlanMVCC{GrowingTimetick: 10},
+		StreamChunkBytes: 32,
 	}
 	stream, err := queryutil.NewGRPCReduceStream(context.Background(), client, request)
 	require.NoError(t, err)

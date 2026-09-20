@@ -34,7 +34,7 @@ func TestSplitRetrieveResult(t *testing.T) {
 	result.ReqID = 100
 	result.AllRetrieveCount = 3
 
-	chunks, err := SplitRetrieveResult(result, 2)
+	chunks, err := SplitRetrieveResult(result, queryChunkBytes(t, result, 2))
 
 	require.NoError(t, err)
 	require.Len(t, chunks, 2)
@@ -48,6 +48,32 @@ func TestSplitRetrieveResult(t *testing.T) {
 	require.Zero(t, chunks[1].GetAllRetrieveCount())
 }
 
+func TestSplitRetrieveResultAcceptsUnitThatCrossesThreshold(t *testing.T) {
+	result := newQueryTestChunk([]int64{1, 2, 3}, []int64{10, 20, 30})
+	chunkBytes := queryChunkBytes(t, result, 2) - 1
+
+	chunks, err := SplitRetrieveResult(result, chunkBytes)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	require.Equal(t, []int64{1, 2}, queryTestIDs(chunks[0]))
+	require.Equal(t, []int64{3}, queryTestIDs(chunks[1]))
+}
+
+func TestSplitRetrieveResultEmitsOversizedUnitAlone(t *testing.T) {
+	largeID := int64(1 << 56)
+	result := newQueryTestChunk([]int64{1, largeID}, []int64{10, largeID})
+	firstUnitBytes := queryChunkBytes(t, newQueryTestChunk([]int64{1}, []int64{10}), 1)
+	largeUnitBytes := queryChunkBytes(t, newQueryTestChunk([]int64{largeID}, []int64{largeID}), 1)
+	chunkBytes := firstUnitBytes + 1
+	require.Greater(t, largeUnitBytes, chunkBytes)
+
+	chunks, err := SplitRetrieveResult(result, chunkBytes)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	require.Equal(t, []int64{1}, queryTestIDs(chunks[0]))
+	require.Equal(t, []int64{largeID}, queryTestIDs(chunks[1]))
+}
+
 func TestOrderedReduceStreamMergesChildChunks(t *testing.T) {
 	childA := &queryTestStream{recv: []queryTestRecv{
 		{chunk: newQueryTestChunk([]int64{1, 3}, []int64{10, 30})},
@@ -59,7 +85,7 @@ func TestOrderedReduceStreamMergesChildChunks(t *testing.T) {
 	stream, err := NewReduceStream(
 		&internalpb.RetrieveRequest{IsIterator: true, Limit: 5},
 		[]ReduceStream{childA, childB},
-		2,
+		queryChunkBytes(t, newQueryTestChunk([]int64{1, 2}, []int64{10, 20}), 2),
 	)
 	require.NoError(t, err)
 
@@ -89,7 +115,7 @@ func TestOrderedReduceStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
 	stream, err := NewReduceStream(
 		&internalpb.RetrieveRequest{Limit: 2},
 		[]ReduceStream{child},
-		2,
+		queryChunkBytes(t, child.recv[0].chunk, 2),
 	)
 	require.NoError(t, err)
 
@@ -98,13 +124,34 @@ func TestOrderedReduceStreamAcceptsBoundedOrdinaryQuery(t *testing.T) {
 	require.Equal(t, []int64{1, 2}, queryTestIDs(chunk))
 }
 
+func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
+	largeID := int64(1 << 56)
+	result := newQueryTestChunk([]int64{1, largeID}, []int64{10, largeID})
+	child := &queryTestStream{recv: []queryTestRecv{{chunk: result}}}
+	chunkBytes := queryChunkBytes(t, newQueryTestChunk([]int64{1}, []int64{10}), 1) + 1
+	require.Greater(t, queryChunkBytes(t, newQueryTestChunk([]int64{largeID}, []int64{largeID}), 1), chunkBytes)
+
+	stream, err := NewReduceStream(
+		&internalpb.RetrieveRequest{IsIterator: true, Limit: 2},
+		[]ReduceStream{child},
+		chunkBytes,
+	)
+	require.NoError(t, err)
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{1}, queryTestIDs(first))
+	second, err := stream.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []int64{largeID}, queryTestIDs(second))
+}
+
 func TestOrderedReduceStreamRejectsDuplicatePK(t *testing.T) {
 	childA := &queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1}, []int64{10})}}}
 	childB := &queryTestStream{recv: []queryTestRecv{{chunk: newQueryTestChunk([]int64{1}, []int64{20})}}}
 	stream, err := NewReduceStream(
 		&internalpb.RetrieveRequest{IsIterator: true, Limit: 2},
 		[]ReduceStream{childA, childB},
-		2,
+		queryChunkBytes(t, newQueryTestChunk([]int64{1, 1}, []int64{10, 20}), 2),
 	)
 	require.NoError(t, err)
 
@@ -134,6 +181,17 @@ func newQueryTestChunk(ids, values []int64) *internalpb.RetrieveResults {
 			},
 		},
 	}
+}
+
+func queryChunkBytes(t *testing.T, result *internalpb.RetrieveResults, unitCount int) int {
+	t.Helper()
+	bytes := 0
+	for row := 0; row < unitCount; row++ {
+		unitBytes, err := (retrieveUnit{result: result, rowIndex: int64(row)}).reducibleByteSize()
+		require.NoError(t, err)
+		bytes += unitBytes
+	}
+	return bytes
 }
 
 func queryTestIDs(result *internalpb.RetrieveResults) []int64 {
