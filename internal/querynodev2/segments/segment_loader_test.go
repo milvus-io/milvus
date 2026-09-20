@@ -491,6 +491,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -548,6 +549,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexPreferFieldDataWhenIndexHasRaw
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,
@@ -613,6 +615,7 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndexSkipsFieldDataByDefault() {
 			suite.chunkManager,
 		)
 		suite.NoError(err)
+		indexInfo.NumRows = int64(msgLength)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
 			SegmentID:     segmentID,
 			PartitionID:   suite.partitionID,

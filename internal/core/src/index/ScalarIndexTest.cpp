@@ -30,7 +30,6 @@
 #include <memory>
 #include <random>
 #include <string>
-#include <type_traits>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
@@ -44,8 +43,6 @@
 #include "common/type_c.h"
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
-#include "index/FMIndex.h"
-#include "index/HybridScalarIndex.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
 #include "index/IndexInfo.h"
@@ -57,8 +54,6 @@
 #include "index/JsonFlatIndex.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
-#include "index/StringIndexSort.h"
-#include "index/json_stats/JsonKeyStats.h"
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalFileIOPool.h"

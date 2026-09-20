@@ -70,6 +70,8 @@ class FileWriterTest : public testing::Test {
  protected:
     void
     SetUp() override {
+        old_mode_ = FileWriter::GetMode();
+        old_buffer_size_ = FileWriter::GetBufferSize();
         test_dir_ = std::filesystem::path(TestLocalPath) / "file_writer_test";
         std::filesystem::create_directories(test_dir_);
     }
@@ -77,6 +79,8 @@ class FileWriterTest : public testing::Test {
     void
     TearDown() override {
         LocalFileIOPool::GetInstance().Configure(0);
+        FileWriter::SetMode(old_mode_);
+        FileWriter::SetBufferSize(old_buffer_size_);
         std::filesystem::remove_all(test_dir_);
         // Reset rate limiter to disabled ratios to avoid test interference
         auto& limiter = milvus::storage::io::WriteRateLimiter::GetInstance();
@@ -89,6 +93,8 @@ class FileWriterTest : public testing::Test {
     }
 
     std::filesystem::path test_dir_;
+    FileWriter::WriteMode old_mode_;
+    size_t old_buffer_size_;
     const size_t kBufferSize = 4096;  // 4KB buffer size
 };
 
