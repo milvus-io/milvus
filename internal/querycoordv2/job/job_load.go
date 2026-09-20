@@ -119,24 +119,6 @@ func (job *LoadCollectionJob) Execute() error {
 	// replica meta both of the following read.
 	incrementalExpansion := job.isIncrementalExpansion(req, replicas)
 
-	// Snapshot the resource groups that already hold a replica of this
-	// collection, for the same reason: once spawn has run, every resource group
-	// named in replicas holds one, the diff below comes back empty, and the
-	// resource group this request adds would never get an observer task.
-	//
-	// On a replay of this message the snapshot is taken AFTER the original
-	// spawn and already holds every requested group, so the replay registers
-	// no task - which is right, because the group's task is already there:
-	// the first attempt registers it before anything that can fail (below),
-	// and a restart rebuilds one for every group of a loaded collection
-	// (CollectionObserver.recoverResourceGroupTasks).
-	preSpawnRGs := typeutil.NewSet[string]()
-	if incrementalExpansion {
-		for _, replica := range job.meta.GetByCollection(job.ctx, req.GetCollectionId()) {
-			preSpawnRGs.Insert(replica.GetResourceGroup())
-		}
-	}
-
 	// 2. create replica if not exist (may also remove redundant replicas)
 	if _, err := utils.SpawnReplicasWithReplicaConfig(job.ctx, job.meta, meta.SpawnWithReplicaConfigParams{
 		CollectionID: req.GetCollectionId(),
@@ -165,48 +147,41 @@ func (job *LoadCollectionJob) Execute() error {
 	// so the collection and partition meta it would write is the meta that is
 	// already there -- except for Status and LoadPercentage, which the write
 	// would reset to Loading/0 and take the resource groups that are serving
-	// right now down with them. Skip the overwrite and register an observer
-	// task per added resource group instead.
+	// right now down with them. Skip the overwrite; the added replicas are
+	// loaded by the checkers, as an added replica is on any other path.
 	//
 	// Everything on this path is idempotent, and it has to be: the spawn
 	// above is persisted before any of it, and if this process fails or dies
 	// between the two the message is replayed. The replay finds the added
 	// replicas already in meta, the predicate still says expansion (an
 	// identical replica set on a Loaded collection is exactly a replay), and
-	// each step below either registers nothing, writes the value that is
-	// already there, or re-pulls a target that has not changed. Taking the
-	// native path on a replay instead would write the collection back to
-	// Loading/0 and make the group that is serving unreadable until the
-	// added one finishes - the incident this path exists to remove.
+	// each step below either writes the value that is already there or
+	// re-pulls a target that has not changed. Taking the native path on a
+	// replay instead would write the collection back to Loading/0 and make
+	// the group that is serving unreadable until the added one finishes - the
+	// incident this path exists to remove.
 	if incrementalExpansion {
 		// Nothing keeps this span on this path: the collection holds the
 		// LoadSpan of the load that created it, and that span is what
 		// UpdateCollectionLoadPercent ends. End this one here rather than leak
-		// it; the trace ID it carries still keys the tasks registered below.
+		// it.
 		defer sp.End()
 
 		mlog.Info(job.ctx, "incremental resource group expansion, keeping loaded collection meta",
 			mlog.Int64("collectionID", req.GetCollectionId()),
 			mlog.Int32("replicaNumber", replicaNumber))
 
-		// One task per resource group this request adds, registered FIRST:
-		// the two writes that follow can fail, and a failure after the spawn
-		// is a replay whose snapshot no longer sees the added group, so this
-		// is the one attempt that will register its task. The predicate
-		// guarantees every replica being added lives in one of these groups,
-		// so no added replica is left unobserved, and resource groups that
-		// were already there keep the state -- and the tasks -- they already
-		// had. A task registered before the next target is pulled reads an
-		// unknown percentage until it is, which pauses its clock rather than
-		// running it.
-		for _, replica := range replicas {
-			rgName := replica.GetResourceGroupName()
-			if preSpawnRGs.Contain(rgName) {
-				continue
-			}
-			preSpawnRGs.Insert(rgName)
-			job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), req.GetPartitionIds(), rgName)
-		}
+		// No observer task is registered for the added groups, deliberately.
+		// The collection stays Loaded, so there is no status to write back and
+		// no aggregate to complete; how far a group has loaded and whether it
+		// can serve are answered from the live target and distribution
+		// (utils.LoadPercentageByResourceGroup and
+		// utils.ShardLeaderReadinessByResourceGroup), and the checkers load the
+		// added replicas on their own schedule. This is what upstream's
+		// UpdateLoadConfig does when it adds a replica to a loaded collection:
+		// spawn, write the count, pull the target, and leave the loading to the
+		// checkers. A group whose replicas never load is the caller's to
+		// release, exactly as an added replica that never loads is upstream.
 
 		// The replica count is the one property of the collection this request
 		// legitimately changes; the predicate has established that everything
@@ -218,10 +193,9 @@ func (job *LoadCollectionJob) Execute() error {
 		//
 		// The number written is the replicas that exist, counted inside the
 		// collection manager's critical section (SyncReplicaNumber), rather
-		// than the request's own count: they are the same unless a resource
-		// group's teardown runs beside this ack, and then the request's count
-		// written last would stand one above the replicas there are, with the
-		// teardown's task already gone and nothing left to correct it.
+		// than the request's own count: they are the same unless a release of
+		// one of the groups runs beside this ack, and then the request's count
+		// written last would stand one above the replicas there are.
 		userSpecifiedReplicaMode := req.GetUserSpecifiedReplicaMode()
 		if _, err := job.meta.SyncReplicaNumber(job.ctx, req.GetCollectionId(), func() int32 {
 			return int32(len(job.meta.GetByCollection(job.ctx, req.GetCollectionId())))
@@ -302,11 +276,8 @@ func (job *LoadCollectionJob) Execute() error {
 		return err
 	}
 
-	// 6. register load task into collection observer. The empty resource group
-	// keeps the watcher collection-wide, which is the semantics this job has
-	// always had: it loads the collection as a whole, not one resource group of
-	// it.
-	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), incomingPartitions.Collect(), "")
+	// 6. register load task into collection observer
+	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionId(), incomingPartitions.Collect())
 
 	// 7. wait for partition released if any partition is released
 	if len(toReleasePartitions) > 0 {

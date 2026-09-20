@@ -207,73 +207,20 @@ hook in every role it runs, not only in the proxy.
   of it runs, and a message replayed after a failure finds the same replica
   set already stored. An identical replica set on a Loaded collection is
   therefore read as a replayed expansion (a request that changes nothing is
-  never broadcast), the added group's observer task is registered before the
-  two writes that can fail, and every step is idempotent.
+  never broadcast), and every step is idempotent.
 
-  A resource group added this way is watched by its own load task, which
-  judges the group on its own load percentage rather than on the collection's:
-
-  - The task's clock restarts whenever that percentage *changes*, in either
-    direction. A load can go backwards - a delegator restarts, or a freshly
-    flushed segment enters the next target - and only a percentage that does
-    not move at all for the load timeout counts as stalled and has its
-    replicas released. The consequence is deliberate: a load that keeps
-    moving is never declared stalled, so a percentage oscillating below 100
-    (50, 49, 50) refreshes forever. Keeping a loaded-count watermark of our
-    own would catch that, but it would also bring back the false regression
-    this rule removes, on a figure that legitimately moves down while the
-    collection is ingesting; a group that is still moving is left alone.
-  - A percentage is only acted on when it is *evidence*. A serving group reads
-    0 in several ordinary situations, so all of these count as "unknown"
-    rather than as a number: the read failed; the collection's target is not
-    known (the current target is persisted only on a graceful stop and the
-    next one has to be pulled from datacoord, so an ungraceful restart has no
-    target for a while); or some replica of the group owns no node that has
-    reported a channel of the collection (the group's figure is a minimum
-    across its replicas, so one pod still pending drags a loaded group to 0).
-    Unknown *pauses* the clock: the last known figure is kept and the timeout
-    is only ever measured over ticks that learned something. A task whose
-    group never becomes readable stays paused until the collection is
-    released or dropped, which removes it; once its figure has been unknown
-    for longer than the load timeout it stops counting as a load in progress,
-    so it no longer makes every tick run the checkers, which keep their own
-    intervals, and a tick that reads a figure makes it count again. A task
-    whose group no longer holds any replica of the collection - a
-    `TransferReplica` moved the last one out - has nothing left to watch and
-    is removed.
-  - Before the timeout tears anything down, the group is asked the question
-    the proxy asks of it: can its shard leaders serve every shard of the
-    collection right now (`utils.ShardLeaderReadinessByResourceGroup`,
-    measured against the *current* target). A Ready group is never released,
-    however long its percentage has sat still: the percentage is measured
-    against the *next* target and integer-truncated, so a large collection
-    under continuous flush legitimately sits at 99 for as long as the ingest
-    lasts while the group serves every query. The task is kept and asked
-    again a load timeout later; it finishes only on 100.
-  - The teardown itself has a hard limit: it may shrink an expansion that
-    never came up, and it may abandon a load that never completed, but it may
-    never take the last replicas of a *Loaded* collection or delete its load
-    meta. If that is what releasing the group would do, the task is dropped
-    and the collection keeps serving. The collection-wide path has always had
-    this property, because its timeout only runs while a collection is
-    Loading; a scoped task sits on a Loaded collection, so the rule is
-    written out. Between the three - only evidence starts the clock, a ready
-    group is never released, and the teardown can never unload a serving
-    collection - a reading that is wrong in the pessimistic direction costs
-    nothing.
-  - The task finishes only once the group carries every target *and* the
-    collection's current target has been promoted, because until then the
-    group cannot serve: shard leader readiness is measured against the current
-    target.
-  - The tasks live only in memory, so a querycoord restart rebuilds them: for
-    every loaded collection, every resource group holding a replica gets its
-    task back. Nothing extra is persisted for this, and no attempt is made to
-    guess which groups need one: the constructor runs before any QueryNode has
-    reported, so a group that has been serving for weeks and a group that
-    never came up look identical there. The task is what tells them apart
-    afterwards, on the first tick that carries evidence - a group that turns
-    out to be loaded finishes then and there.
-
+  An expansion registers no load task of its own. The collection stays
+  Loaded, so there is no status to write back and no aggregate to complete;
+  how far a group has loaded and whether it can serve are answered from the
+  live target and distribution (`utils.LoadPercentageByResourceGroup` and
+  `utils.ShardLeaderReadinessByResourceGroup`), and the checkers load the
+  added replicas on their own schedule. This is what upstream's
+  `UpdateLoadConfig` already does when it adds a replica to a loaded
+  collection: spawn, write the count, pull the target, and leave the loading
+  to the checkers. A group whose replicas never load is the caller's to
+  release - the deployment that asked for the group is the one that knows it
+  no longer wants it - exactly as an added replica that never loads is
+  upstream.
 - **Index engine version with no QueryNode session** (datacoord's version
   manager). With a form installed, datacoord answers its own compiled-in
   index engine version (knowhere's for vectors, the constant for scalars)

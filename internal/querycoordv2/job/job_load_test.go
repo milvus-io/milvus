@@ -444,9 +444,8 @@ const (
 
 // observedLoadTask is one registration the job handed to the CollectionObserver.
 type observedLoadTask struct {
-	collectionID  int64
-	partitionIDs  []int64
-	resourceGroup string
+	collectionID int64
+	partitionIDs []int64
 }
 
 // IncrementalExpansionSuite exercises LoadCollectionJob.Execute against a real
@@ -618,8 +617,8 @@ func (suite *IncrementalExpansionSuite) runJob(result message.BroadcastResultAlt
 
 	tasks := make([]observedLoadTask, 0)
 	loadMock := mockey.Mock((*observers.CollectionObserver).LoadPartitions).
-		To(func(ob *observers.CollectionObserver, ctx context.Context, collectionID int64, partitionIDs []int64, rgName string) {
-			tasks = append(tasks, observedLoadTask{collectionID, partitionIDs, rgName})
+		To(func(ob *observers.CollectionObserver, ctx context.Context, collectionID int64, partitionIDs []int64) {
+			tasks = append(tasks, observedLoadTask{collectionID, partitionIDs})
 		}).Build()
 	defer loadMock.UnPatch()
 
@@ -638,7 +637,7 @@ func (suite *IncrementalExpansionSuite) runJob(result message.BroadcastResultAlt
 // TestFirstLoadOverwritesMetaAndRegistersUnscopedTask pins the upstream path:
 // a load of a collection that is not loaded yet writes the collection meta and
 // hands the observer a task that names no resource group.
-func (suite *IncrementalExpansionSuite) TestFirstLoadOverwritesMetaAndRegistersUnscopedTask() {
+func (suite *IncrementalExpansionSuite) TestFirstLoadOverwritesMetaAndRegistersATask() {
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(replicaConfig(1, rgA)))
 	suite.NoError(err)
 	suite.Equal(1, putCalls, "a first load must store the collection meta")
@@ -650,7 +649,6 @@ func (suite *IncrementalExpansionSuite) TestFirstLoadOverwritesMetaAndRegistersU
 	suite.EqualValues(0, collection.LoadPercentage)
 
 	suite.Require().Len(tasks, 1)
-	suite.Equal("", tasks[0].resourceGroup, "an ordinary load must stay collection-wide")
 	suite.Equal(expansionCollectionID, tasks[0].collectionID)
 	suite.Equal([]int64{expansionPartitionID}, tasks[0].partitionIDs)
 }
@@ -705,8 +703,7 @@ func (suite *IncrementalExpansionSuite) TestAReplayedExpansionKeepsTheCollection
 	suite.Len(suite.meta.GetByCollection(suite.ctx, expansionCollectionID), 2, "the spawn persisted before the failure")
 	suite.Equal(querypb.LoadStatus_Loaded, suite.meta.GetCollection(suite.ctx, expansionCollectionID).GetStatus(),
 		"the failed attempt must not have touched the serving state")
-	suite.Require().Len(tasks, 1, "the attempt that added rgB is the one that registers its task")
-	suite.Equal(rgB, tasks[0].resourceGroup)
+	suite.Empty(tasks, "an expansion registers no observer task, on the first attempt or on a replay")
 
 	// The replay.
 	putCalls, tasks, err = suite.runJob(message)
@@ -739,8 +736,7 @@ func (suite *IncrementalExpansionSuite) TestReplicaNumberIncreaseInSameResourceG
 	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
 	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus())
 	suite.EqualValues(2, collection.GetReplicaNumber())
-	suite.Require().Len(tasks, 1)
-	suite.Equal("", tasks[0].resourceGroup)
+	suite.Require().Len(tasks, 1, "a load that resets the collection is watched to completion")
 }
 
 // TestReplicaNumberDecreaseOverwritesMeta covers the other direction: the
@@ -752,8 +748,7 @@ func (suite *IncrementalExpansionSuite) TestReplicaNumberDecreaseOverwritesMeta(
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(replicaConfig(1, rgA)))
 	suite.NoError(err)
 	suite.Equal(1, putCalls, "a replica-number decrease must still store the collection meta")
-	suite.Require().Len(tasks, 1)
-	suite.Equal("", tasks[0].resourceGroup)
+	suite.Require().Len(tasks, 1, "a load that resets the collection is watched to completion")
 }
 
 // TestAStockBinaryResetsTheCollectionOnAnExpansion pins master's behavior on
@@ -775,8 +770,7 @@ func (suite *IncrementalExpansionSuite) TestAStockBinaryResetsTheCollectionOnAnE
 	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus(), "master resets the collection to Loading")
 	suite.EqualValues(0, collection.LoadPercentage)
 	suite.EqualValues(2, collection.GetReplicaNumber())
-	suite.Require().Len(tasks, 1)
-	suite.Equal("", tasks[0].resourceGroup, "and watches it collection-wide")
+	suite.Require().Len(tasks, 1, "and watches it to completion")
 }
 
 // TestIncrementalExpansionKeepsLoadedResourceGroupIntact is the incident case:
@@ -805,26 +799,29 @@ func (suite *IncrementalExpansionSuite) TestIncrementalExpansionKeepsLoadedResou
 	suite.Equal(beforePartition.CreatedAt, partition.CreatedAt)
 	suite.EqualValues(2, partition.GetReplicaNumber())
 
-	suite.Require().Len(tasks, 1, "only the added resource group needs a task")
-	suite.Equal(rgB, tasks[0].resourceGroup, "the task must be scoped to the added resource group")
-	suite.Equal(expansionCollectionID, tasks[0].collectionID)
-	suite.Equal([]int64{expansionPartitionID}, tasks[0].partitionIDs)
+	suite.Empty(tasks, "the collection never left Loaded, so there is nothing for an observer task to complete")
 }
 
-// TestIncrementalExpansionRegistersOneTaskPerAddedResourceGroup checks the
-// pre-spawn snapshot: sampling the resource groups after spawn would find every
-// requested resource group already present and register nothing at all.
-func (suite *IncrementalExpansionSuite) TestIncrementalExpansionRegistersOneTaskPerAddedResourceGroup() {
+// TestIncrementalExpansionRegistersNoTask: adding two resource groups to a
+// loaded collection adds their replicas and nothing else. Upstream's
+// UpdateLoadConfig does the same when it adds a replica to a loaded
+// collection, and the checkers are what load them.
+func (suite *IncrementalExpansionSuite) TestIncrementalExpansionRegistersNoTask() {
 	suite.seedLoadedCollection(1, rgA, 1)
 
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
 		replicaConfig(1, rgA), replicaConfig(2, rgB), replicaConfig(3, rgC)))
 	suite.NoError(err)
 	suite.Equal(0, putCalls)
+	suite.Empty(tasks,
+		"an expansion leaves the collection Loaded, so there is no load status for an observer task to complete; "+
+			"the checkers load the added replicas and the per-resource-group figures report them")
 
-	suite.Require().Len(tasks, 2)
-	rgs := []string{tasks[0].resourceGroup, tasks[1].resourceGroup}
-	suite.ElementsMatch([]string{rgB, rgC}, rgs)
+	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
+	suite.Require().NotNil(collection)
+	suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus())
+	suite.EqualValues(3, collection.GetReplicaNumber(), "the added replicas are counted")
+	suite.Len(suite.meta.GetByCollection(suite.ctx, expansionCollectionID), 3)
 }
 
 // newPredicateJob builds a job over the seeded meta without executing it, so
@@ -1009,7 +1006,7 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 
 	targetObserver := &observers.TargetObserver{}
 	collectionObserver := observers.NewCollectionObserver(suite.dist, suite.meta, targetMgr,
-		targetObserver, &checkers.CheckerController{}, nil, suite.nodeMgr)
+		targetObserver, &checkers.CheckerController{}, nil)
 
 	result := suite.buildExpansionRequest(replicaConfig(1, rgA), replicaConfig(2, rgB))
 	job := NewLoadCollectionJob(suite.ctx, result, suite.dist, suite.meta, suite.broker,
