@@ -16,7 +16,6 @@ func newStatsConfig() statsConfig {
 	lwmThreshold := params.StreamingCfg.FlushGrowingSegmentBytesLwmThreshold.GetAsFloat()
 	memory := float64(hardware.GetMemoryCount())
 
-	segmentMaxBinlogFileNum := paramtable.Get().DataCoordCfg.SegmentMaxBinlogFileNumber.GetAsInt()
 	l1MaxLifetime := paramtable.Get().DataCoordCfg.SegmentMaxLifetime.GetAsDuration(time.Second)
 	l1MaxIdleTime := paramtable.Get().DataCoordCfg.SegmentMaxIdleTime.GetAsDuration(time.Second)
 	l1MinSizeFromIdleTime := paramtable.Get().DataCoordCfg.SegmentMinSizeFromIdleToSealed.GetAsInt64() * 1024 * 1024
@@ -25,7 +24,6 @@ func newStatsConfig() statsConfig {
 	blockingL0EntryNum := params.DataCoordCfg.BlockingL0EntryNum.GetAsInt64()
 	blockingL0SizeBytes := params.DataCoordCfg.BlockingL0SizeInMB.GetAsInt64() * 1024 * 1024
 	return statsConfig{
-		maxBinlogFileNum:      segmentMaxBinlogFileNum,
 		memoryThreshold:       memoryTheshold,
 		growingBytesHWM:       int64(hwmThreshold * memory),
 		growingBytesLWM:       int64(lwmThreshold * memory),
@@ -40,7 +38,6 @@ func newStatsConfig() statsConfig {
 
 // statsConfig is the configuration for the stats manager.
 type statsConfig struct {
-	maxBinlogFileNum      int
 	memoryThreshold       float64
 	growingBytesHWM       int64
 	growingBytesLWM       int64
@@ -61,7 +58,6 @@ func (c statsConfig) Validate() error {
 		c.l1MaxLifetime <= 0 ||
 		c.l1MaxIdleTime <= 0 ||
 		c.l1MinSizeFromIdleTime <= 0 ||
-		c.maxBinlogFileNum <= 0 ||
 		c.l0MaxLifetime <= 0 {
 		return status.NewInvalidArgument("invalid stats config, cfg: %+v", c)
 	}

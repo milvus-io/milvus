@@ -94,8 +94,11 @@ CreateSegment cannot invalidate a captured earlier L0 batch.
 Explicit Flush tasks on L1 and L0 execute independently. Their clones of the
 same message join through Tracker/BroadcastAck. There is no VChannel-wide L1
 creation upper bound on L0 output and no second L1 completion queue in L0.
-DropPartition keeps the existing routing that flushes all earlier VChannel
-segments while logically dropping only the requested partition.
+The shard manager's DropPartition API fences allocation for every earlier Segment
+in the Collection after successful WAL append, while the VChannel exclusive append
+lock is still held, matching its VChannel-wide persistence scope.
+Only the requested partition is logically dropped; surviving partitions allocate
+new Segments for later Inserts.
 
 ## 5. Completion and Recovery
 

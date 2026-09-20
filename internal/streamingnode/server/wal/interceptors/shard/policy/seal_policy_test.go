@@ -60,21 +60,6 @@ func TestPolicyCapacity(t *testing.T) {
 	}
 }
 
-func TestPolicyBinlogNumber(t *testing.T) {
-	binlogNumberLimit := uint64(10)
-	policy := PolicyBinlogNumber(binlogNumberLimit)
-	if policy.Policy != PolicyNameBinlogNumber {
-		t.Errorf("expected policy name %s, got %s", PolicyNameBinlogNumber, policy.Policy)
-	}
-	extra, ok := policy.Extra.(sealByBinlogFileExtraInfo)
-	if !ok {
-		t.Fatalf("expected extra to be of type sealByBinlogFileExtraInfo, got %T", policy.Extra)
-	}
-	if extra.BinLogNumberLimit != binlogNumberLimit {
-		t.Errorf("expected binlog number limit %d, got %d", binlogNumberLimit, extra.BinLogNumberLimit)
-	}
-}
-
 func TestPolicyLifetime(t *testing.T) {
 	maxLifetime := 2 * time.Hour
 	policy := PolicyLifetime(maxLifetime)

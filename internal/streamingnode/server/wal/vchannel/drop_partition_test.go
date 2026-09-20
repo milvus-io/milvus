@@ -22,6 +22,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
@@ -122,4 +123,38 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, module.segments[3].AssignmentMeta().GetState())
 		})
 	}
+}
+
+func TestWritePathRecoveryExcludesRetiredPartitions(t *testing.T) {
+	meta := &streamingpb.VChannelMeta{
+		Vchannel: "v1", State: streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+			CollectionId: 100,
+			Partitions: []*streamingpb.PartitionInfoOfVChannel{
+				{PartitionId: 1, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
+				{PartitionId: 2, State: streamingpb.PartitionState_PARTITION_STATE_NORMAL},
+				{PartitionId: 3, State: streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, CheckpointTimeTick: 50},
+			},
+		},
+	}
+	view := NewVChannelView(meta, 0, false)
+	msg := message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").
+		WithHeader(&message.DropPartitionMessageHeader{CollectionId: 100, PartitionId: 2}).
+		WithBody(&message.DropPartitionRequest{}).MustBuildMutable().WithTimeTick(100).
+		WithLastConfirmed(walimplstest.NewTestMessageID(99)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
+	require.True(t, view.ObserveDropPartitionMessageV1(message.MustAsImmutableDropPartitionMessageV1(msg)))
+	snapshot, _ := view.ConsumeDirtyAndGetSnapshot()
+	data, err := proto.Marshal(snapshot)
+	require.NoError(t, err)
+	restored := &streamingpb.VChannelMeta{}
+	require.NoError(t, proto.Unmarshal(data, restored))
+	recovered := NewVChannelView(restored, 100, false)
+	state, ok := recovered.WritePathRecoveryState()
+	require.True(t, ok)
+	require.Equal(t, []int64{1}, state.PartitionIDs)
+	// Recovery filtering must not erase metadata still needed by Summary GC.
+	partitions := recovered.AssignmentMeta().GetCollectionInfo().GetPartitions()
+	require.Len(t, partitions, 3)
+	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_DROPPED, partitions[1].GetState())
+	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, partitions[2].GetState())
 }

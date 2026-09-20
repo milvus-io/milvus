@@ -12,7 +12,6 @@ var (
 	PolicyNameFenced                 PolicyName = "fenced"
 	PolicyNameForce                  PolicyName = "force"
 	PolicyNameCapacity               PolicyName = "capacity"
-	PolicyNameBinlogNumber           PolicyName = "binlog_number"
 	PolicyNameLifetime               PolicyName = "lifetime"
 	PolicyNameIdle                   PolicyName = "idle"
 	PolicyNameGrowingSegmentBytesHWM PolicyName = "growing_bytes_hwm"
@@ -57,14 +56,6 @@ func PolicyCapacity() SealPolicy {
 	return SealPolicy{
 		Policy: PolicyNameCapacity,
 		Extra:  nil,
-	}
-}
-
-// PolicyBinlogNumber returns a SealPolicy for binlog number.
-func PolicyBinlogNumber(binlogNumberLimit uint64) SealPolicy {
-	return SealPolicy{
-		Policy: PolicyNameBinlogNumber,
-		Extra:  sealByBinlogFileExtraInfo{BinLogNumberLimit: binlogNumberLimit},
 	}
 }
 
@@ -125,11 +116,6 @@ type SealPolicy struct {
 
 type sealFenced struct {
 	TimeTick uint64
-}
-
-// sealByBinlogFileExtraInfo is the extra info of the seal by binlog file number policy.
-type sealByBinlogFileExtraInfo struct {
-	BinLogNumberLimit uint64
 }
 
 // sealByLifetimeExtraInfo is the extra info of the seal by lifetime policy.

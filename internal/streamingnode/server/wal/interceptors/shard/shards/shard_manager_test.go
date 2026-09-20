@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -25,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -250,8 +252,62 @@ func TestShardManager(t *testing.T) {
 		WithTimeTick(600).
 		WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(rmq.NewRmqID(7))
+	dropped := m.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 2}]
+	surviving := m.partitionManagers[PartitionUniqueKey{CollectionID: 1, PartitionID: 3}]
+	droppedSegment := dropped.GetSegmentManager(1001)
+	survivingSegment := surviving.GetSegmentManager(1002)
+	allocMetric := metrics.WALSegmentAllocTotal.WithLabelValues(paramtable.GetStringNodeID(), channel.Name)
+	removedMetric := metrics.WALSegmentFlushedTotal.WithLabelValues(paramtable.GetStringNodeID(), channel.Name, string(policy.PolicyNamePartitionRemoved))
+	fencedMetric := metrics.WALSegmentFlushedTotal.WithLabelValues(paramtable.GetStringNodeID(), channel.Name, string(policy.PolicyNameFenced))
+	allocBefore := testutil.ToFloat64(allocMetric)
+	removedBefore := testutil.ToFloat64(removedMetric)
+	fencedBefore := testutil.ToFloat64(fencedMetric)
 	m.DropPartition(message.MustAsImmutableDropPartitionMessageV1(dropPartitionMsg))
 	assert.ErrorIs(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 2}), ErrPartitionNotFound)
+	assert.NoError(t, m.CheckIfPartitionExists(PartitionUniqueKey{CollectionID: 1, PartitionID: 3}))
+	assert.True(t, droppedSegment.IsFlushed())
+	assert.True(t, survivingSegment.IsFlushed())
+	assert.Equal(t, policy.PolicyNamePartitionRemoved, droppedSegment.SealPolicy().Policy)
+	assert.Equal(t, policy.PolicyNameFenced, survivingSegment.SealPolicy().Policy)
+	assert.Equal(t, allocBefore-2, testutil.ToFloat64(allocMetric))
+	assert.Equal(t, removedBefore+1, testutil.ToFloat64(removedMetric))
+	assert.Equal(t, fencedBefore+1, testutil.ToFloat64(fencedMetric))
+	assert.Empty(t, dropped.segments)
+	assert.Empty(t, surviving.segments)
+	assert.Equal(t, uint64(600), surviving.fencedAssignTimeTick)
+	_, err = m.AssignSegment(&AssignSegmentRequest{CollectionID: 1, PartitionID: 3, TimeTick: 600})
+	assert.ErrorIs(t, err, ErrFencedAssign)
+	assert.False(t, m.partitionManagers[PartitionUniqueKey{CollectionID: 4, PartitionID: 5}].GetSegmentManager(1013).IsFlushed())
+
+	// Surviving partitions can accept later Inserts through a new segment.
+	surviving.onAllocating = make(chan struct{})
+	m.CreateSegment(message.MustAsImmutableCreateSegmentMessageV2(
+		message.NewCreateSegmentMessageBuilderV2().
+			WithVChannel("v1").
+			WithHeader(&message.CreateSegmentMessageHeader{
+				CollectionId: 1, PartitionId: 3, SegmentId: 1004, StorageVersion: 2, MaxSegmentSize: 150,
+			}).
+			WithBody(&message.CreateSegmentMessageBody{}).
+			MustBuildMutable().WithTimeTick(610).WithLastConfirmedUseMessageID().
+			IntoImmutableMessage(rmq.NewRmqID(8))))
+	assignment, err := m.AssignSegment(&AssignSegmentRequest{
+		CollectionID: 1, PartitionID: 3, TimeTick: 620,
+		ModifiedMetrics: stats.ModifiedMetrics{Rows: 1, BinarySize: 20},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1004), assignment.SegmentID)
+	assignment.Ack()
+
+	// A repeated drop of an absent partition still fences the surviving ones.
+	m.DropPartition(message.MustAsImmutableDropPartitionMessageV1(
+		message.NewDropPartitionMessageBuilderV1().
+			WithVChannel("v1").
+			WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 2}).
+			WithBody(&msgpb.DropPartitionRequest{}).
+			MustBuildMutable().WithTimeTick(650).WithLastConfirmedUseMessageID().
+			IntoImmutableMessage(rmq.NewRmqID(9))))
+	assert.Empty(t, surviving.segments)
+	assert.Equal(t, uint64(650), surviving.fencedAssignTimeTick)
 
 	dropCollectionMsg := message.NewDropCollectionMessageBuilderV1().
 		WithVChannel("v1").
