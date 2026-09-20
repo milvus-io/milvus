@@ -16,6 +16,8 @@
 
 add_source_at_current_directory()
 
+add_subdirectory(artifact)
+
 add_subdirectory(minio)
 add_subdirectory(aliyun)
 add_subdirectory(tencent)

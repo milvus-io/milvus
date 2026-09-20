@@ -64,7 +64,6 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
 #include "index/Meta.h"
 #include "index/SkipIndex.h"
 #include "index/StringIndexSort.h"

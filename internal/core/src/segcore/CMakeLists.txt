@@ -11,6 +11,9 @@
 
 
 add_source_at_current_directory_recursively()
+# These C API files define overlapping translation-unit-local helpers.
+set_source_files_properties(retrieve_result_export_c.cpp search_result_export_c.cpp
+    PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 add_library(milvus_segcore OBJECT ${SOURCE_FILES})
 target_link_libraries(milvus_segcore PUBLIC milvus_conan_deps)
 

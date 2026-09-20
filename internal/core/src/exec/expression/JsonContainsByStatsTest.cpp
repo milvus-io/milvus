@@ -39,7 +39,7 @@
 #include "filemanager/InputStream.h"
 #include "gtest/gtest.h"
 #include "index/IndexStats.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/metadata.h"
 #include "pb/common.pb.h"

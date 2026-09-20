@@ -14,7 +14,7 @@
 
 #include "common/protobuf_utils.h"
 #include "gtest/gtest.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/utils.h"
 
 namespace milvus::index {
 
