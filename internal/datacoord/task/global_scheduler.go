@@ -326,19 +326,13 @@ func (s *globalTaskScheduler) schedule() {
 		// Price once per round and reuse: the placement decision and the log
 		// below must agree, and a family that walks meta on a cache miss would
 		// otherwise pay for the walk twice.
-		resource, priced := task.GetTaskResource()
-		if !priced {
-			// The family could not resolve its inputs yet (a collection whose
-			// schema is still being reloaded after a restart, a job not in meta).
-			// Its answer is the floor, which every worker fits, so placing on it
-			// would put an unbounded task on a node that then books the real
-			// size once the request is built. Wait for the price instead.
-			mlog.Debug(s.ctx, "task resource not resolved yet, deferring", WrapTaskLog(task)...)
-			if !setAside(task) {
-				break
-			}
-			continue
-		}
+		//
+		// A family that cannot resolve its inputs yet answers with an upper
+		// bound, not the floor, so the task is always placeable. Waiting for an
+		// exact price instead would strand any task whose inputs are gone for
+		// good: such a task can never resolve, and CreateTaskOnWorker -- the only
+		// code that retires it -- sits behind this point.
+		resource, _ := task.GetTaskResource()
 		nodeID := picker.Pick(taskSlot, resource)
 		if nodeID == NullNodeID {
 			if picker.exhausted() {

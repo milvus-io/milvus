@@ -100,6 +100,10 @@ func TestTaskResource_IndexScalar(t *testing.T) {
 // over-estimate; at this size they are distinguishable.
 const bigFamilyRows = int64(1000000)
 
+// bigFamilySegmentSize is familySegmentSize at bigFamilyRows: the whole-segment
+// bound a family falls back to while its exact input is still resolving.
+const bigFamilySegmentSize = bigFamilyRows * (taskcommon.SystemFieldsBytesPerRow + 8 + 512 + 64)
+
 func bigFamilyMeta(t *testing.T) *meta {
 	mt := familyMeta(t)
 	seg := mt.segments.segments[3]
@@ -119,6 +123,9 @@ func bigFamilyIndexTask(mt *meta) *indexBuildTask {
 // not in the cache yet. Without a schema there is no way to tell the indexed
 // field from the rest of the segment, so a cached answer here would freeze a
 // whole-segment over-estimate on a one-field build for the task's lifetime.
+//
+// The answer is that whole-segment over-estimate, not the floor. The scheduler
+// places the task on it, so it must bound the build from above.
 func TestTaskResource_IndexSchemaCacheMiss(t *testing.T) {
 	paramtable.Init()
 	mt := bigFamilyMeta(t)
@@ -129,13 +136,16 @@ func TestTaskResource_IndexSchemaCacheMiss(t *testing.T) {
 	assert.Empty(t, mt.segments.segments[3].GetBinlogs())
 
 	priced := indexTaskResource(bigFamilyRows*128*4, true)
-	overEstimate := indexTaskResource(bigFamilyRows*(8+512+64), true)
-	assert.NotEqual(t, defaultTaskResource(), overEstimate, "the bug this test guards must be observable")
+	// The index type is unknown too while the schema is missing, so the bound
+	// takes the scalar CPU request. Only memory decides whether a worker fits.
+	bound := indexTaskResource(bigFamilySegmentSize, false)
+	assert.NotEqual(t, defaultTaskResource(), bound, "the bug this test guards must be observable")
 
 	it := bigFamilyIndexTask(mt)
-	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
-	assert.False(t, taskPriceResolved(it.GetTaskResource()), "the scheduler must be told the price did not resolve")
-	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
+	assert.Equal(t, bound, taskPrice(it.GetTaskResource()))
+	assert.False(t, taskPriceResolved(it.GetTaskResource()), "the scheduler must be told the price is not exact")
+	assert.Equal(t, bound, taskPrice(it.GetTaskResource()))
+	assert.Greater(t, bound.Memory, priced.Memory, "the fallback must err high, never low")
 
 	// Not cached: once the schema arrives the very next call reprices from meta,
 	// which proves the closure ran again instead of serving a frozen value.
@@ -156,10 +166,14 @@ func TestTaskResource_IndexEmptyIndexParams(t *testing.T) {
 	priced := indexTaskResource(bigFamilyRows*128*4, true)
 	misPriced := indexTaskResource(bigFamilyRows*128*4, false)
 	assert.NotEqual(t, defaultTaskResource(), misPriced, "the bug this test guards must be observable")
+	// The schema is known here, but the index type is not, so the price is the
+	// whole segment at the scalar CPU request until the params are read back.
+	bound := indexTaskResource(bigFamilySegmentSize, false)
 
 	it := bigFamilyIndexTask(mt)
-	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
-	assert.Equal(t, defaultTaskResource(), taskPrice(it.GetTaskResource()))
+	assert.Equal(t, bound, taskPrice(it.GetTaskResource()))
+	assert.Equal(t, bound, taskPrice(it.GetTaskResource()))
+	assert.Greater(t, bound.Memory, priced.Memory, "the fallback must err high, never low")
 
 	// Not cached: the params arriving repairs the price on the next call.
 	idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "HNSW"}}
@@ -325,15 +339,19 @@ func TestTaskResource_AnalyzeSchemaCacheMiss(t *testing.T) {
 
 	priced := analyzeTaskResource(bigFamilyRows * 128 * 4)
 	assert.NotEqual(t, defaultTaskResource(), priced, "the bug this test guards must be observable")
+	// Without the field the vectors cannot be sized, so the task is bounded by
+	// its whole input instead of by the floor.
+	bound := analyzeTaskResource(bigFamilySegmentSize)
 
 	at := newAnalyzeTask(&indexpb.AnalyzeTask{
 		CollectionID: 1, TaskID: 13, FieldID: 101,
 		FieldType: schemapb.DataType_FloatVector, SegmentIDs: []int64{3},
 	}, mt)
 	assert.Nil(t, at.schema, "the snapshot must be empty, or the test proves nothing")
-	assert.Equal(t, defaultTaskResource(), taskPrice(at.GetTaskResource()))
-	assert.False(t, taskPriceResolved(at.GetTaskResource()), "the scheduler must be told the price did not resolve")
-	assert.Equal(t, defaultTaskResource(), taskPrice(at.GetTaskResource()))
+	assert.Equal(t, bound, taskPrice(at.GetTaskResource()))
+	assert.False(t, taskPriceResolved(at.GetTaskResource()), "the scheduler must be told the price is not exact")
+	assert.Equal(t, bound, taskPrice(at.GetTaskResource()))
+	assert.Greater(t, bound.Memory, priced.Memory, "the fallback must err high, never low")
 
 	// The schema arriving repairs the price on the very next call, without the
 	// task being rebuilt.
@@ -346,17 +364,31 @@ func TestTaskResource_AnalyzeSchemaCacheMiss(t *testing.T) {
 }
 
 // TestTaskResource_AnalyzeUnknownField covers a clustering key that is not in
-// the cached schema, and a field the vector estimator cannot size.
+// the cached schema, and a field the vector estimator cannot size. Neither can
+// be sized exactly, so both are bounded by the whole input.
 func TestTaskResource_AnalyzeUnknownField(t *testing.T) {
 	paramtable.Init()
 	mt := familyMeta(t)
+	bound := analyzeTaskResource(familySegmentSize)
 
 	unknown := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 11, FieldID: 999, SegmentIDs: []int64{3}}, mt)
-	assert.Equal(t, defaultTaskResource(), taskPrice(unknown.GetTaskResource()))
+	assert.Equal(t, bound, taskPrice(unknown.GetTaskResource()))
 
 	// A scalar clustering key has no raw-vector footprint to price.
 	scalar := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 12, FieldID: 100, SegmentIDs: []int64{3}}, mt)
-	assert.Equal(t, defaultTaskResource(), taskPrice(scalar.GetTaskResource()))
+	assert.Equal(t, bound, taskPrice(scalar.GetTaskResource()))
+}
+
+// TestTaskResource_AnalyzeInputGone is the other side: an input that is gone for
+// good cannot be bounded at all, so it answers the floor. That price only has to
+// carry the task to CreateTaskOnWorker, which retires it.
+func TestTaskResource_AnalyzeInputGone(t *testing.T) {
+	paramtable.Init()
+	mt := familyMeta(t)
+
+	orphan := newAnalyzeTask(&indexpb.AnalyzeTask{CollectionID: 1, TaskID: 14, FieldID: 101, SegmentIDs: []int64{999}}, mt)
+	assert.Equal(t, defaultTaskResource(), taskPrice(orphan.GetTaskResource()))
+	assert.False(t, taskPriceResolved(orphan.GetTaskResource()))
 }
 
 func TestTaskResource_CopySegmentAndRefresh(t *testing.T) {

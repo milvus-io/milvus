@@ -102,20 +102,27 @@ func (at *analyzeTask) GetTaskResource() (taskcommon.Resource, bool) {
 			}
 		}
 		field := typeutil.GetFieldByID(schema, at.GetFieldID())
-		if field == nil {
-			return defaultTaskResource(), false
-		}
-		var rows int64
+		var rows, inputSize int64
 		for _, segID := range at.GetSegmentIDs() {
 			segment := at.meta.GetHealthySegment(context.TODO(), segID)
 			if segment == nil {
+				// The input is gone for good. CreateTaskOnWorker retires the
+				// task, so its price only has to let it get there.
 				return defaultTaskResource(), false
 			}
 			rows += segment.GetNumOfRows()
+			inputSize += estimateSegmentSize(segment, schema)
+		}
+		// Without the field, or without its dim, the vectors cannot be sized.
+		// Bound the task by its whole input instead of by the floor: the task is
+		// placed on this answer, so it must err towards refusing a worker. It is
+		// not cached, so the exact size replaces it once the schema resolves.
+		if field == nil {
+			return analyzeTaskResource(inputSize), false
 		}
 		raw := vectorFieldBytes(field, rows)
 		if raw <= 0 {
-			return defaultTaskResource(), false
+			return analyzeTaskResource(inputSize), false
 		}
 		return analyzeTaskResource(raw), true
 	})

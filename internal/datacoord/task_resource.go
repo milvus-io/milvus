@@ -39,6 +39,13 @@ import (
 // task whose inputs could not be resolved is still placed as costing
 // something, never as free.
 //
+// Every answer is placeable, including the fallbacks: the scheduler places a
+// task on whatever it gets here and never waits for a better number. So a
+// fallback errs towards refusing a worker, never towards a worker accepting
+// more than it can hold. A task whose inputs are still resolving is priced at
+// an upper bound on itself; only one whose inputs are gone for good is priced
+// at the floor, and that task is on its way to being retired.
+//
 // Every memory formula mirrors what the worker actually holds for that family
 // (the comment next to each formula names the worker-side code it mirrors),
 // and errs on the high side where the worker's behavior depends on data or on
@@ -62,8 +69,15 @@ func scaled(size int64, factor float64) int64 {
 	return int64(float64(size) * factor)
 }
 
-// defaultTaskResource is the answer when a task cannot resolve its inputs
-// (segment dropped between enqueue and dispatch, schema not cached yet).
+// defaultTaskResource is the answer when a task's inputs are gone for good: a
+// segment dropped between enqueue and dispatch, a job no longer in meta. Such
+// a task is retired by CreateTaskOnWorker, and the scheduler must reach that
+// code to retire it, so the floor is the right answer -- it fits every worker.
+//
+// It is NOT the answer for inputs that are merely still resolving (a schema
+// not cached yet after a restart). Those are priced at an upper bound on the
+// task instead, because the task is real, will run, and books on the worker
+// exactly what it was placed on. See indexBuildTask.GetTaskResource.
 func defaultTaskResource() taskcommon.Resource {
 	return taskcommon.Resource{CPU: defaultCPU(), Memory: clampTaskMemory(0)}
 }

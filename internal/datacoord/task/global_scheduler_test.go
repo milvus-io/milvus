@@ -684,11 +684,12 @@ func TestGlobalScheduler_scheduleDelayedCap(t *testing.T) {
 	assert.Positive(t, examined.Load())
 }
 
-// TestGlobalScheduler_scheduleUnpricedTask: a family that cannot resolve its
-// inputs yet answers the floor, which fits every worker. Placing on that price
-// would put an unbounded task on a node that books its real size as soon as the
-// request is built, so the scheduler must set it aside instead.
-func TestGlobalScheduler_scheduleUnpricedTask(t *testing.T) {
+// TestGlobalScheduler_scheduleInexactPrice: a family whose inputs are still
+// resolving answers with an upper bound on itself and reports the answer
+// inexact. The scheduler places it on that bound rather than waiting: the bound
+// errs towards refusing a worker, so placing on it is safe, and waiting is not.
+// See TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices.
+func TestGlobalScheduler_scheduleInexactPrice(t *testing.T) {
 	const giB = int64(1) << 30
 
 	newTask := func(taskID int64, res taskcommon.Resource, priced bool) (*MockTask, *atomic.Bool) {
@@ -718,16 +719,61 @@ func TestGlobalScheduler_scheduleUnpricedTask(t *testing.T) {
 	}).Once()
 	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
 
-	// The head of the queue prices at the floor and reports it did not resolve.
-	unpriced, unpricedDispatched := newTask(1, taskcommon.Resource{CPU: 1, Memory: 64 << 20}, false)
-	priced, pricedDispatched := newTask(2, taskcommon.Resource{CPU: 1, Memory: giB}, true)
-	scheduler.Enqueue(unpriced)
-	scheduler.Enqueue(priced)
+	// The head of the queue reports its price inexact. It is still placed.
+	inexact, inexactDispatched := newTask(1, taskcommon.Resource{CPU: 1, Memory: 2 * giB}, false)
+	exact, exactDispatched := newTask(2, taskcommon.Resource{CPU: 1, Memory: giB}, true)
+	scheduler.Enqueue(inexact)
+	scheduler.Enqueue(exact)
 
 	scheduler.schedule()
 
-	assert.False(t, unpricedDispatched.Load(), "a task whose price did not resolve must not be placed")
-	assert.True(t, pricedDispatched.Load(), "the task behind it must not be stalled")
-	assert.Equal(t, []int64{1}, scheduler.pendingTasks.TaskIDs())
+	assert.True(t, inexactDispatched.Load(), "an inexact price is an upper bound, and must not block placement")
+	assert.True(t, exactDispatched.Load(), "the task behind it must not be stalled")
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs())
+	assert.True(t, scheduler.runningTasks.Contain(1))
 	assert.True(t, scheduler.runningTasks.Contain(2))
+}
+
+// TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices guards the reason the
+// scheduler must not wait for an exact price.
+//
+// A task whose inputs are gone -- a segment dropped by compaction, by
+// drop-collection or by drop-partition -- can never price itself exactly. Only
+// CreateTaskOnWorker retires such a task, by driving it to a terminal state, and
+// it runs after placement. A scheduler that set the task aside instead would
+// re-queue it on every round for as long as datacoord runs. maxDelayedPerRound
+// of them would end every round before it placed anything at all.
+func TestGlobalScheduler_scheduleRetiresTaskThatNeverPrices(t *testing.T) {
+	const giB = int64(1) << 30
+
+	task := NewMockTask(t)
+	var state atomic.Value
+	state.Store(taskcommon.Init)
+	task.EXPECT().GetTaskID().Return(int64(1)).Maybe()
+	task.EXPECT().GetTaskType().Return(taskcommon.Index).Maybe()
+	task.EXPECT().SetTaskTime(mock.Anything, mock.Anything).Return().Maybe()
+	task.EXPECT().GetTaskSlot().Return(1).Maybe()
+	// The inputs are gone, so the family answers the floor and never resolves.
+	task.EXPECT().GetTaskResource().Return(taskcommon.Resource{CPU: 1, Memory: 64 << 20}, false).Maybe()
+	task.EXPECT().GetTaskState().RunAndReturn(func() taskcommon.State {
+		return state.Load().(taskcommon.State)
+	}).Maybe()
+	// This is what CreateTaskOnWorker does for an unhealthy segment: it marks
+	// the task terminal without ever sending it to a worker.
+	task.EXPECT().CreateTaskOnWorker(mock.Anything, mock.Anything).
+		Run(func(nodeID int64, cluster session.Cluster) {
+			state.Store(taskcommon.None)
+		}).Once()
+
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().QuerySlot().Return(map[int64]*session.WorkerSlots{
+		1: {NodeID: 1, AvailableSlots: 100, TotalCPU: 8, AvailableCPU: 8, TotalMemory: 16 * giB, AvailableMemory: 16 * giB},
+	}).Once()
+	scheduler := NewGlobalTaskScheduler(context.TODO(), cluster).(*globalTaskScheduler)
+	scheduler.Enqueue(task)
+
+	scheduler.schedule()
+
+	assert.Empty(t, scheduler.pendingTasks.TaskIDs(), "a task that can never price itself must not be re-queued forever")
+	assert.False(t, scheduler.runningTasks.Contain(1), "a terminal task must not enter runningTasks")
 }

@@ -106,8 +106,7 @@ func (it *indexBuildTask) GetTaskID() int64 {
 }
 
 // GetTaskResource prices the build by the bytes of the indexed field. It walks
-// meta once and caches; an input that is not in meta yet is priced at the floor
-// and retried next round rather than frozen.
+// meta once and caches the answer only when the answer is exact.
 //
 // The distinction that matters is transient-vs-permanent. A collection whose
 // schema is not cached yet, or an index whose params have not been read back
@@ -115,9 +114,15 @@ func (it *indexBuildTask) GetTaskID() int64 {
 // cached as a wrong answer for the task's lifetime: without a schema
 // estimateFieldSize cannot tell the indexed field from any other and charges
 // the whole segment (10-50x for one field of a wide collection), and without an
-// index type a vector build would be frozen at the scalar CPU request. A field
-// that is genuinely absent from a schema we DO have is a different thing: that
-// is a real answer, so the conservative whole-segment price is kept and cached.
+// index type a vector build would be frozen at the scalar CPU request. So those
+// two states answer with the whole segment, which bounds any one field of it,
+// and do not cache: the exact field size replaces the bound next round.
+//
+// The whole-segment bound is deliberately an over-estimate rather than the
+// floor. The task is placed on whatever this returns, so the fallback must err
+// towards refusing a worker, never towards a worker accepting more than it can
+// hold. Only an input that is gone for good answers with the floor: such a task
+// is retired by CreateTaskOnWorker, so its price only has to let it get there.
 func (it *indexBuildTask) GetTaskResource() (taskcommon.Resource, bool) {
 	return it.resource.get(func() (taskcommon.Resource, bool) {
 		segment := it.meta.GetHealthySegment(context.TODO(), it.SegmentID)
@@ -126,7 +131,7 @@ func (it *indexBuildTask) GetTaskResource() (taskcommon.Resource, bool) {
 		}
 		coll := it.meta.GetCollection(it.CollectionID)
 		if coll == nil || coll.Schema == nil {
-			return defaultTaskResource(), false
+			return indexTaskResource(estimateSegmentSize(segment, nil), false), false
 		}
 		// GetIndexType answers the invalidIndex sentinel, not "", when the params
 		// carry no index_type -- which is exactly what an index whose params have
@@ -134,7 +139,7 @@ func (it *indexBuildTask) GetTaskResource() (taskcommon.Resource, bool) {
 		indexParams := it.meta.indexMeta.GetIndexParams(it.CollectionID, it.IndexID)
 		indexType := GetIndexType(indexParams)
 		if len(indexParams) == 0 || indexType == "" || indexType == invalidIndex {
-			return defaultTaskResource(), false
+			return indexTaskResource(estimateSegmentSize(segment, coll.Schema), false), false
 		}
 		isVectorIndex := vecindexmgr.GetVecIndexMgrInstance().IsVecIndex(indexType)
 		fieldID := it.meta.indexMeta.GetFieldIDByIndexID(it.CollectionID, it.IndexID)
