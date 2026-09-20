@@ -25,4 +25,6 @@ func resetEngineLifecycleForTest() {
 	defer lifecycle.mu.Unlock()
 	lifecycle.started = false
 	lifecycle.stopped = false
+	lifecycle.entered = false
+	lifecycle.settled = nil
 }
