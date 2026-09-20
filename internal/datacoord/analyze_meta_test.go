@@ -21,9 +21,12 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	globaltask "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -134,10 +137,12 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 		s.Equal(7, len(am.GetAllTasks()))
 	})
 
-	s.Run("UpdateVersion", func() {
-		err := am.UpdateVersion(1, 1)
+	s.Run("AssignTask", func() {
+		err := am.AssignTask(1, 1)
 		s.NoError(err)
 		s.Equal(int64(1), am.GetTask(1).Version)
+		s.Equal(int64(1), am.GetTask(1).NodeID)
+		s.Equal(indexpb.JobState_JobStateInProgress, am.GetTask(1).State)
 	})
 
 	s.Run("BuildingTask", func() {
@@ -203,11 +208,11 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		s.Nil(am.GetTask(1111))
 	})
 
-	s.Run("UpdateVersion", func() {
-		err := am.UpdateVersion(777, 1)
+	s.Run("AssignTask", func() {
+		err := am.AssignTask(777, 1)
 		s.Error(err)
 
-		err = am.UpdateVersion(1, 1)
+		err = am.AssignTask(1, 1)
 		s.Error(err)
 		s.Equal(int64(0), am.GetTask(1).Version)
 	})
@@ -247,6 +252,37 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		s.True(canRecycle)
 		s.Equal(indexpb.JobState_JobStateFinished, t.GetState())
 	})
+}
+
+func TestAnalyzeInspector_RecoversActiveAndLeavesRetryTerminal(t *testing.T) {
+	const (
+		initID       = int64(1)
+		inProgressID = int64(2)
+		retryID      = int64(3)
+	)
+	mt := &meta{
+		analyzeMeta: &analyzeMeta{ctx: context.Background(), tasks: map[int64]*indexpb.AnalyzeTask{
+			initID:       {TaskID: initID, State: indexpb.JobState_JobStateInit},
+			inProgressID: {TaskID: inProgressID, Version: 7, NodeID: 99, State: indexpb.JobState_JobStateInProgress},
+			retryID:      {TaskID: retryID, Version: 7, NodeID: 99, State: indexpb.JobState_JobStateRetry},
+			4:            nil,
+		}},
+	}
+	scheduler := globaltask.NewMockGlobalScheduler(t)
+	seen := make(map[int64]*analyzeTask)
+	scheduler.EXPECT().Enqueue(mock.Anything).Run(func(scheduled globaltask.Task) {
+		task, ok := scheduled.(*analyzeTask)
+		require.True(t, ok)
+		seen[task.GetTaskID()] = task
+	}).Twice()
+
+	inspector := newAnalyzeInspector(context.Background(), mt, scheduler, NewNMockHandler(t))
+	inspector.enqueueActiveTasks()
+	require.Contains(t, seen, initID)
+	require.Contains(t, seen, inProgressID)
+	assert.Equal(t, int64(7), seen[inProgressID].GetVersion(), "legacy InProgress path marker must be preserved")
+	assert.NotContains(t, seen, retryID, "Retry belongs to the parent compaction replan")
+	assert.Equal(t, indexpb.JobState_JobStateRetry, mt.analyzeMeta.GetTask(retryID).GetState())
 }
 
 func TestAnalyzeMeta(t *testing.T) {

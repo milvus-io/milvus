@@ -214,6 +214,10 @@ message CreateStatsRequest {
   // Absent or false keeps the manifest transaction on the worker. Sort always
   // includes stats in its complete output manifest, regardless of this flag.
   bool enable_manifest_delta = 33;
+  // Write StorageV3 stats under a task-ID subdirectory. The coordinator checks
+  // the writer capability and reader compatibility before requesting this layout.
+  // False preserves the legacy layout for requests from older coordinators.
+  bool use_v3_stats_attempt_path = 34;
 }
 
 message CreateJobV2Request {

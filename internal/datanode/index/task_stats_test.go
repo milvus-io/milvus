@@ -18,6 +18,7 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -314,6 +316,47 @@ func (s *TaskStatsSuite) TestBuildIndexParams() {
 	})
 }
 
+func (s *TaskStatsSuite) TestComputeStatsBasePath() {
+	manifest := packed.MarshalManifestPath("files/insert_log/1/2/3", 7)
+	v3Request := &workerpb.CreateStatsRequest{
+		TaskID:         42,
+		TaskVersion:    9,
+		StorageVersion: storage.StorageV3,
+	}
+
+	// Older coordinators omit the flag and keep the legacy layout.
+	textPath, err := computeStatsBasePath(v3Request, manifest, "text_index", 100)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/text_index.100", textPath)
+	jsonPath, err := computeStatsBasePath(v3Request, manifest, "json_stats", 101)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/json_stats.101", jsonPath)
+
+	v3Request.UseV3StatsAttemptPath = true
+	textPath, err = computeStatsBasePath(v3Request, manifest, "text_index", 100)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/text_index.100/42", textPath)
+	jsonPath, err = computeStatsBasePath(v3Request, manifest, "json_stats", 101)
+	s.Require().NoError(err)
+	s.Equal("files/insert_log/1/2/3/_stats/json_stats.101/42", jsonPath)
+
+	// The legacy V2 layout is kept byte-for-byte compatible. Older persisted
+	// segment metadata still derives paths from both task ID and version.
+	v2Request := &workerpb.CreateStatsRequest{
+		TaskID:          42,
+		TaskVersion:     9,
+		CollectionID:    1,
+		PartitionID:     2,
+		TargetSegmentID: 3,
+		StorageVersion:  storage.StorageV2,
+		StorageConfig:   &indexpb.StorageConfig{RootPath: "files"},
+	}
+	legacyPath, err := computeStatsBasePath(v2Request, "", "json_stats", 101)
+	s.Require().NoError(err)
+	s.Equal(metautil.BuildJSONKeyStatsPrefix("files", common.JSONStatsDataFormatVersion,
+		42, 9, 1, 2, 3, 101), legacyPath)
+}
+
 func (s *TaskStatsSuite) TestJSONKeyStatsPropagatesPluginContext() {
 	const fieldID = int64(101)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -409,7 +452,9 @@ func TestStandaloneJSONKeyJobNegotiatesManifestCommit(t *testing.T) {
 			[]packed.Fragment{{FilePath: basePath + "/source.parquet", EndRow: 10, RowCount: 10}}, cfg)
 		require.NoError(t, err)
 		mgr := NewTaskManager(ctx)
-		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		// This PR fences a late writer from a replaced attempt by task version, so
+		// the seeded info must carry the version the request declares.
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{Version: 1})
 		req := &workerpb.CreateStatsRequest{
 			EnableManifestDelta:    enableDelta,
 			ClusterID:              clusterID,
@@ -465,7 +510,17 @@ func TestStandaloneJSONKeyJobNegotiatesManifestCommit(t *testing.T) {
 			require.NotEqual(t, baseManifest, info.Manifest)
 			require.NotNil(t, stats[fieldID], "worker must commit stats for legacy requests and Sort")
 			require.Equal(t, taskID, stats[fieldID].GetBuildID())
-			require.Equal(t, info.JSONKeyStatsLogs[fieldID].GetFiles(), stats[fieldID].GetFiles())
+			// This PR reports Sort's stats objects as full paths and every other
+			// sub-job's field-relative (an old DataCoord prepends the field
+			// directory itself), while the manifest resolver always hands them
+			// back field-relative. Normalize both sides to full paths -
+			// BuildStatsFilePaths is a no-op on input that already carries the
+			// prefix - so the assertion stays "the manifest holds exactly the
+			// objects the worker reported" under either representation.
+			statsPrefix := fmt.Sprintf("%s/_stats/json_stats.%d", basePath, fieldID)
+			require.Equal(t,
+				metautil.BuildStatsFilePaths(statsPrefix, info.JSONKeyStatsLogs[fieldID].GetFiles()),
+				metautil.BuildStatsFilePaths(statsPrefix, stats[fieldID].GetFiles()))
 		} else {
 			require.Equal(t, baseManifest, info.Manifest)
 			require.Empty(t, stats, "opted-in standalone jobs leave the manifest commit to DataCoord")
@@ -498,7 +553,9 @@ func TestStandaloneTextIndexJobNegotiatesManifestCommit(t *testing.T) {
 			[]packed.Fragment{{FilePath: basePath + "/source.parquet", EndRow: 10, RowCount: 10}}, cfg)
 		require.NoError(t, err)
 		mgr := NewTaskManager(ctx)
-		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{})
+		// This PR fences a late writer from a replaced attempt by task version, so
+		// the seeded info must carry the version the request declares.
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{Version: 1})
 		req := &workerpb.CreateStatsRequest{
 			EnableManifestDelta: enableDelta,
 			ClusterID:           clusterID,
@@ -567,6 +624,177 @@ func TestStandaloneTextIndexJobNegotiatesManifestCommit(t *testing.T) {
 		run(indexpb.StatsSubJob_Sort, enableDelta, false)
 	}
 	run(indexpb.StatsSubJob_TextIndexJob, false, true)
+}
+
+// TestStandaloneJSONKeyJobIsolatesAttemptStatsPath pins the attempt-scoped stats
+// layout: with UseV3StatsAttemptPath the native uploader writes under a
+// task-ID subdirectory, so a late writer from a replaced attempt cannot
+// overwrite the objects the adopted attempt published. The manifest-commit
+// negotiation itself is covered by
+// TestStandaloneJSONKeyJobNegotiatesManifestCommit.
+func TestStandaloneJSONKeyJobIsolatesAttemptStatsPath(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(500)
+	)
+	basePath := t.TempDir() + "/insert_log/1/2/103"
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+
+	run := func(sub indexpb.StatsSubJob, taskID int64, useAttempt bool) (baked bool, storedManifest string, storedFiles []string) {
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{Version: 1})
+		req := &workerpb.CreateStatsRequest{
+			EnableManifestDelta:    true,
+			ClusterID:              clusterID,
+			TaskID:                 taskID,
+			CollectionID:           1,
+			PartitionID:            2,
+			SegmentID:              103,
+			TargetSegmentID:        103,
+			TaskVersion:            1,
+			NumRows:                10,
+			StorageVersion:         storage.StorageV3,
+			UseV3StatsAttemptPath:  useAttempt,
+			SubJobType:             sub,
+			ManifestPath:           baseManifest,
+			EnableJsonKeyStats:     true,
+			JsonKeyStatsDataFormat: common.JSONStatsDataFormatVersion,
+			StorageConfig:          &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: fieldID, Name: "json", DataType: schemapb.DataType_JSON},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		// Execute() seeds manifestPath from the request; call the sub-job directly here.
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateJSONKeyStats).To(
+			func(_ context.Context, info *indexcgopb.BuildIndexInfo) (*indexcgowrapper.JSONKeyStatsResult, error) {
+				expected := basePath + "/_stats/json_stats.500"
+				if useAttempt {
+					expected += fmt.Sprintf("/%d", taskID)
+				}
+				require.Equal(t, expected, info.GetStatsBasePath(), "native uploader receives the isolated directory")
+				return &indexcgowrapper.JSONKeyStatsResult{MemSize: 10, Files: map[string]int64{"json-stats": 10}}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		bakeMock := mockey.Mock(packed.AddStatsToManifest).To(
+			func(_ string, _ *indexpb.StorageConfig, _ []packed.StatEntry) (string, error) {
+				baked = true
+				return packed.MarshalManifestPath(basePath, 2), nil
+			}).Build()
+		defer bakeMock.UnPatch()
+
+		err := st.createJSONKeyStats(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID,
+			common.JSONStatsDataFormatVersion, st.req.GetInsertLogs(), 256, 0.3, 81920)
+		require.NoError(t, err)
+		stored := mgr.GetStatsTaskInfo(clusterID, taskID)
+		return baked, stored.Manifest, stored.JSONKeyStatsLogs[fieldID].GetFiles()
+	}
+
+	baked, storedManifest, storedFiles := run(indexpb.StatsSubJob_JsonKeyIndexJob, taskID, false)
+	require.False(t, baked, "standalone JsonKeyIndexJob must not pre-bake the manifest")
+	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+	require.Equal(t, []string{"json-stats"}, storedFiles,
+		"standalone result must stay field-relative for old DataCoord compatibility")
+
+	baked, _, storedFiles = run(indexpb.StatsSubJob_Sort, taskID, false)
+	require.True(t, baked, "Sort sub-job must bake stats into the target-segment manifest inline")
+	require.Equal(t, []string{basePath + "/_stats/json_stats.500/json-stats"}, storedFiles)
+	for _, attemptID := range []int64{42, 43} {
+		baked, _, files := run(indexpb.StatsSubJob_JsonKeyIndexJob, attemptID, true)
+		require.False(t, baked)
+		require.Equal(t, []string{fmt.Sprintf("%d/json-stats", attemptID)}, files)
+		baked, _, files = run(indexpb.StatsSubJob_Sort, attemptID, true)
+		require.True(t, baked)
+		require.Equal(t, []string{fmt.Sprintf("%s/_stats/json_stats.500/%d/json-stats", basePath, attemptID)}, files)
+	}
+}
+
+// TestStandaloneTextIndexJobIsolatesAttemptStatsPath is the text-index analog of
+// TestStandaloneJSONKeyJobIsolatesAttemptStatsPath.
+func TestStandaloneTextIndexJobIsolatesAttemptStatsPath(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	const (
+		clusterID = "c1"
+		taskID    = int64(1)
+		fieldID   = int64(101)
+	)
+	basePath := t.TempDir() + "/insert_log/1/2/103"
+	baseManifest := packed.MarshalManifestPath(basePath, 1)
+
+	run := func(sub indexpb.StatsSubJob, taskID int64, useAttempt bool) (baked bool, storedManifest string) {
+		mgr := NewTaskManager(ctx)
+		mgr.LoadOrStoreStatsTask(clusterID, taskID, &StatsTaskInfo{Version: 1})
+		req := &workerpb.CreateStatsRequest{
+			EnableManifestDelta:   true,
+			ClusterID:             clusterID,
+			TaskID:                taskID,
+			CollectionID:          1,
+			PartitionID:           2,
+			SegmentID:             103,
+			TargetSegmentID:       103,
+			TaskVersion:           1,
+			NumRows:               10,
+			StorageVersion:        storage.StorageV3,
+			UseV3StatsAttemptPath: useAttempt,
+			SubJobType:            sub,
+			ManifestPath:          baseManifest,
+			StorageConfig:         &indexpb.StorageConfig{RootPath: t.TempDir(), StorageType: "local"},
+			Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:    fieldID,
+					Name:       "text",
+					DataType:   schemapb.DataType_VarChar,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "enable_match", Value: "true"}},
+				},
+			}},
+			InsertLogs: []*datapb.FieldBinlog{{FieldID: fieldID}},
+		}
+		st := NewStatsTask(ctx, nil, req, mgr, nil, nil)
+		st.manifestPath = baseManifest
+
+		buildMock := mockey.Mock(indexcgowrapper.CreateIndex).To(
+			func(_ context.Context, info *indexcgopb.BuildIndexInfo) (indexcgowrapper.CodecIndex, error) {
+				expected := basePath + "/_stats/text_index.101"
+				if useAttempt {
+					expected += fmt.Sprintf("/%d", taskID)
+				}
+				require.Equal(t, expected, info.GetStatsBasePath())
+				return statsFakeTextIndex{}, nil
+			}).Build()
+		defer buildMock.UnPatch()
+		bakeMock := mockey.Mock(packed.AddStatsToManifest).To(
+			func(_ string, _ *indexpb.StorageConfig, _ []packed.StatEntry) (string, error) {
+				baked = true
+				return packed.MarshalManifestPath(basePath, 2), nil
+			}).Build()
+		defer bakeMock.UnPatch()
+
+		err := st.createTextIndex(ctx, st.req.GetStorageConfig(), 1, 2, 103, 1, taskID, st.req.GetInsertLogs())
+		require.NoError(t, err)
+		return baked, mgr.GetStatsTaskInfo(clusterID, taskID).Manifest
+	}
+
+	baked, storedManifest := run(indexpb.StatsSubJob_TextIndexJob, taskID, false)
+	require.False(t, baked, "standalone TextIndexJob must not pre-bake the manifest")
+	require.Equal(t, baseManifest, storedManifest, "manifest must stay at the base so DataCoord can rebase")
+
+	baked, _ = run(indexpb.StatsSubJob_Sort, taskID, false)
+	require.True(t, baked, "Sort sub-job must bake text stats into the target-segment manifest inline")
+	for _, attemptID := range []int64{42, 43} {
+		baked, _ := run(indexpb.StatsSubJob_TextIndexJob, attemptID, true)
+		require.False(t, baked)
+		baked, _ = run(indexpb.StatsSubJob_Sort, attemptID, true)
+		require.True(t, baked)
+	}
 }
 
 func genCollectionSchemaWithBM25() *schemapb.CollectionSchema {

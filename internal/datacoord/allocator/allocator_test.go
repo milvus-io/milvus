@@ -21,6 +21,7 @@ import (
 	"math"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
@@ -42,12 +43,21 @@ func (s *RootCoordAllocatorSuite) SetupTest() {
 	s.allocator = NewRootCoordAllocator(s.ms)
 }
 
+func (s *RootCoordAllocatorSuite) requireBoundedContext(ctx context.Context) {
+	deadline, ok := ctx.Deadline()
+	s.Require().True(ok, "allocator RPC must always carry a deadline")
+	remaining := time.Until(deadline)
+	s.Positive(remaining)
+	s.LessOrEqual(remaining, allocatorRPCTimeout)
+}
+
 func (s *RootCoordAllocatorSuite) TestAllocTimestamp() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s.Run("normal", func() {
 		ts := rand.Uint64()
 		s.ms.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest) (*rootcoordpb.AllocTimestampResponse, error) {
+			s.requireBoundedContext(ctx)
 			s.EqualValues(1, atr.GetCount())
 			return &rootcoordpb.AllocTimestampResponse{
 				Status:    merr.Success(),
@@ -72,6 +82,7 @@ func (s *RootCoordAllocatorSuite) TestAllocID() {
 	s.Run("normal", func() {
 		id := rand.Int63n(1000000)
 		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+			s.requireBoundedContext(ctx)
 			s.EqualValues(1, ai.GetCount())
 			return &rootcoordpb.AllocIDResponse{
 				Status: merr.Success(),
@@ -109,6 +120,7 @@ func (s *RootCoordAllocatorSuite) TestAllocN() {
 		n := rand.Int63n(100) + 1
 		id := rand.Int63n(1000000)
 		s.ms.EXPECT().AllocID(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, ai *rootcoordpb.AllocIDRequest) (*rootcoordpb.AllocIDResponse, error) {
+			s.requireBoundedContext(ctx)
 			s.EqualValues(n, ai.GetCount())
 			return &rootcoordpb.AllocIDResponse{
 				Status: merr.Success(),

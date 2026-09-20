@@ -61,11 +61,19 @@ type GcOption struct {
 	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
 	broker           broker.Broker
+	importMeta       ImportMeta
+	dropIndexTask    func(nodeID, buildID int64) error
 	removeObjectPool *conc.Pool[struct{}]
 	dataViewGC       DataViewGarbageCollector
 }
 
 type DataViewGarbageCollector interface {
+	// ManagedCollections lists the Collections that hold DataView state; it
+	// is the enumeration source for the sweep. DataCoord keeps no collection
+	// cache, and the live collection list would be the wrong source anyway:
+	// it no-ops on Collections without a DataView and misses snapshots a
+	// Collection drop left behind.
+	ManagedCollections() []int64
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
@@ -371,6 +379,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 	gc.wg.Add(4)
 	go func() {
 		defer gc.wg.Done()
+		lastPartitionStatsScan := time.Now()
 		gc.runRecycleTaskWithPauser(ctx, "meta", gc.option.checkInterval, func(ctx context.Context, signal <-chan gcCmd) {
 			gc.recycleDataViews(ctx, signal)
 			gc.recycleDroppedSegments(ctx, signal)
@@ -378,6 +387,12 @@ func (gc *garbageCollector) work(ctx context.Context) {
 			gc.recycleUnusedIndexes(ctx, signal)
 			gc.recycleUnusedSegIndexes(ctx, signal)
 			gc.recycleUnusedAnalyzeFiles(ctx, signal)
+			// Keep the metadata pause barrier, but run this full object-prefix
+			// walk at the slower orphan scan cadence.
+			if time.Since(lastPartitionStatsScan) >= gc.option.scanInterval {
+				gc.recycleUnusedPartitionStatsFiles(ctx, signal)
+				lastPartitionStatsScan = time.Now()
+			}
 			gc.recycleUnusedTextIndexFiles(ctx, signal)
 			gc.recycleUnusedJSONIndexFiles(ctx, signal)
 			gc.recycleUnusedJSONStatsFiles(ctx, signal)
@@ -718,9 +733,8 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 	//
 	// Delegates to snapshotMeta.IsSegmentGCBlocked, which is O(1) and handles the
 	// fail-closed layering (unloaded RefIndex → coarse collection-level block, else
-	// point query on the pre-computed segmentReferencedByGC set). The per-call caching
-	// that used to be needed here is no longer necessary because the lookups are now
-	// direct set/map reads.
+	// point query on the pre-computed segmentReferencedByGC set). These lookups are
+	// direct set/map reads and need no per-call cache.
 	snapshotMeta := gc.meta.GetSnapshotMeta()
 	isSnapshotProtected := func(segmentID, collectionID int64) bool {
 		if snapshotMeta == nil {
@@ -849,13 +863,12 @@ func (gc *garbageCollector) recycleDataViews(ctx context.Context, signal <-chan 
 	logger.Info(ctx, "start recycleDataViews")
 	defer func() { logger.Info(ctx, "recycleDataViews done", mlog.Duration("timeCost", time.Since(start))) }()
 
-	for _, collection := range gc.meta.GetCollections() {
+	for _, collectionID := range gc.option.dataViewGC.ManagedCollections() {
 		if ctx.Err() != nil {
 			return
 		}
 		gc.ackSignal(signal)
 
-		collectionID := collection.ID
 		if gc.collectionGCPaused(collectionID) {
 			logger.Info(ctx, "skip DataView GC since collection is paused", mlog.FieldCollectionID(collectionID))
 			continue
@@ -871,9 +884,18 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	childSegment *SegmentInfo,
 	indexSet typeutil.UniqueSet,
 	cpTimestamp Timestamp,
+	collectionsWithImportJobs typeutil.UniqueSet,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
 
+	if segment.GetIsImporting() && (collectionsWithImportJobs == nil ||
+		collectionsWithImportJobs.Contain(segment.GetCollectionID())) {
+		// Keep zero-row import completion markers until every job in the
+		// collection has been removed, including terminal jobs still cleaning up.
+		// With no jobs left, a legacy is_importing flag must not prevent GC.
+		// Missing import metadata keeps the existing protection.
+		return false
+	}
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
 	}
@@ -914,6 +936,16 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 	}()
 
 	all := gc.meta.SelectSegments(ctx)
+	// Read jobs AFTER the segment snapshot: a job is persisted before its
+	// segments, so a concurrent new import cannot leave a segment in this scan
+	// without its job being observed. New jobs never adopt old dropped IDs.
+	var collectionsWithImportJobs typeutil.UniqueSet
+	if gc.option.importMeta != nil {
+		collectionsWithImportJobs = typeutil.NewUniqueSet()
+		for _, job := range gc.option.importMeta.GetJobBy(ctx) {
+			collectionsWithImportJobs.Insert(job.GetCollectionID())
+		}
+	}
 	drops := make(map[int64]*SegmentInfo, 0)
 	compactTo := make(map[int64]*SegmentInfo)
 	channels := typeutil.NewSet[string]()
@@ -996,7 +1028,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 			}
 		}
 
-		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
+		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel], collectionsWithImportJobs) {
 			continue
 		}
 
@@ -1048,6 +1080,11 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		// entry) is logged where the manifest error is classified.
 		return
 	}
+	for _, segIdx := range segIndexes {
+		if !gc.dropIndexTaskBeforeGC(ctx, segIdx) {
+			return
+		}
+	}
 
 	cloned := segment.Clone()
 	if err := gc.removeDroppedSegmentFiles(ctx, cloned, indexFiles); err != nil {
@@ -1073,6 +1110,25 @@ func (gc *garbageCollector) recycleDroppedSegment(ctx context.Context, segmentID
 		return
 	}
 	log.Info(ctx, "GC segment meta drop segment done", mlog.Int("segmentIndexes", len(segIndexes)))
+}
+
+// dropIndexTaskBeforeGC fences a persisted worker owner before GC removes the
+// SegmentIndex files or metadata that identify it. The production callback
+// first finalizes scheduler ownership, so an in-flight Assign/Create cannot
+// land after this check. A failed drop keeps the metadata as the cleanup anchor
+// for the next GC cycle.
+func (gc *garbageCollector) dropIndexTaskBeforeGC(ctx context.Context, segIdx *model.SegmentIndex) bool {
+	if segIdx == nil || gc.option.dropIndexTask == nil {
+		return true
+	}
+	if err := gc.option.dropIndexTask(segIdx.NodeID, segIdx.BuildID); err != nil && !errors.Is(err, merr.ErrNodeNotFound) {
+		mlog.Warn(ctx, "failed to drop index task before GC",
+			mlog.FieldNodeID(segIdx.NodeID),
+			mlog.FieldBuildID(segIdx.BuildID),
+			mlog.Err(err))
+		return false
+	}
+	return true
 }
 
 // gcBlockReason says why getDroppedSegmentIndexFiles refused to release a
@@ -1255,6 +1311,28 @@ func (gc *garbageCollector) removeDroppedSegmentFiles(ctx context.Context, clone
 	// survivors from (re-deleting removed keys is a no-op - removeObjectFiles
 	// swallows NotFound), and the basePath prefix goes last.
 	if cloned.GetStorageVersion() == storage.StorageV3 {
+		// A V3 segment that never committed a manifest has no base path to
+		// remove, and must not be treated as a parse failure: returning an error
+		// here stops the caller before DropSegment, so the meta entry survives
+		// forever -- and while it survives, the binlog orphan scan keeps every
+		// object under it (its insert-log checker is "the segment still exists").
+		// The pair leaks permanently. This is the normal shape of a segment
+		// abandoned before it published anything: an import or restore target
+		// that was dropped mid-flight. Skip straight to the index files and let
+		// the caller retire the meta, after which the orphan scan reclaims
+		// whatever the abandoned attempt had already written.
+		if cloned.GetManifestPath() == "" {
+			log.Info(ctx, "GC V3 segment has no manifest, leaving any written objects to the orphan scan",
+				mlog.Int("indexFiles", len(indexFiles)))
+			if len(indexFiles) == 0 {
+				return nil
+			}
+			if err := gc.removeObjectFiles(ctx, indexFiles); err != nil {
+				log.Warn(ctx, "GC V3 segment remove index files failed", mlog.Err(err))
+				return err
+			}
+			return nil
+		}
 		basePath, _, err := packed.UnmarshalManifestPath(cloned.GetManifestPath())
 		if err != nil {
 			log.Warn(ctx, "GC V3 segment failed to parse manifest path",
@@ -1653,6 +1731,11 @@ func (gc *garbageCollector) recycleUnusedSegIndexesForSegment(ctx context.Contex
 				mlog.Int64("buildID", segIdx.BuildID))
 			continue
 		}
+		// Fence the persisted worker owner before this record's files or
+		// metadata are removed; a failed drop leaves it for the next cycle.
+		if !gc.dropIndexTaskBeforeGC(ctx, segIdx) {
+			continue
+		}
 		items = append(items, segmentIndexGCItem{segIdx: segIdx, files: gc.getAllIndexFilesOfIndex(segIdx)})
 	}
 	if len(items) == 0 {
@@ -1916,6 +1999,9 @@ func (gc *garbageCollector) recycleUnusedIndexFilesV0(ctx context.Context) {
 					mlog.Int64("buildID", segIdx.BuildID))
 				return true
 			}
+		}
+		if !gc.dropIndexTaskBeforeGC(ctx, segIdx) {
+			return true
 		}
 
 		filesMap := gc.getAllIndexFilesOfIndex(segIdx)
@@ -2204,6 +2290,193 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles(ctx context.Context, signa
 		}
 		mlog.Info(ctx, "analyze stats files recycle success", mlog.Int64("taskID", taskID))
 	}
+}
+
+// recycleUnusedPartitionStatsFiles removes clustering-compaction partition-stats
+// objects that no metadata references any more.
+//
+// Layout: {rootPath}/part_stats/{collectionID}/{partitionID}/{vchannel}/{version},
+// where version is the planID of the clustering attempt that wrote it.
+//
+// This is the only reclaim path these objects have:
+//
+//   - the binlog orphan scan cannot cover them, because it resolves a segment ID
+//     out of the path and this layout carries none;
+//   - compactionInspector.cleanPartitionStats only walks versions that reached
+//     meta, and a PartitionStatsInfo is persisted on completion only. An attempt
+//     can therefore upload an object without publishing a durable owner.
+//
+// The delete rule mirrors the orphan scan: a version with no durable owner is
+// garbage, subject to the same missingTolerance grace so an object still being
+// written is never taken. Owners are the clustering attempt that may still
+// publish the version, a PartitionStatsInfo, or a segment whose pruning version
+// points at it.
+type partitionStatsGCCandidate struct {
+	file         string
+	key          string
+	collectionID int64
+	partitionID  int64
+	vchannel     string
+	version      int64
+}
+
+func partitionStatsKey(collectionID, partitionID int64, vchannel string, version int64) string {
+	return fmt.Sprintf("%d/%d/%s/%d", collectionID, partitionID, vchannel, version)
+}
+
+// clusteringTaskOwnsPartitionStats reports whether a durable task record still
+// owns the partition-stats object keyed by its planID. Terminal attempts keep
+// ownership until Clean reaches cleaned: failed/retrying tasks can still have
+// worker output to classify, and completed tasks hand ownership to partition
+// stats/segment metadata before cleanup retires the task record.
+func clusteringTaskOwnsPartitionStats(task *datapb.CompactionTask) bool {
+	if task == nil || task.GetType() != datapb.CompactionType_ClusteringCompaction {
+		return false
+	}
+	return !isCompactionTaskCleaned(task)
+}
+
+// snapshotPartitionStatsOwners takes an ownership-consistent snapshot.
+//
+// The task record is the upstream owner: it is durable before the worker can
+// write the object, and SaveCompactionTask moves it to cleaned only after the
+// successful path has persisted the downstream PartitionStatsInfo/segment
+// owners, or the failed path has made the object reclaimable. Keep the task-meta
+// read lock while snapshotting both downstream sources. Consequently the
+// snapshot observes either the task owner or the owner it handed off to, never
+// neither. Once this snapshot finds no owner, globally unique plan IDs mean no
+// future attempt can acquire that object's key, so deletion cannot race a later
+// publication.
+func (gc *garbageCollector) snapshotPartitionStatsOwners(ctx context.Context) typeutil.Set[string] {
+	owners := typeutil.NewSet[string]()
+
+	taskMeta := gc.meta.GetCompactionTaskMeta()
+	if taskMeta != nil {
+		taskMeta.RLock()
+		defer taskMeta.RUnlock()
+		for _, tasks := range taskMeta.compactionTasks {
+			for _, task := range tasks {
+				if clusteringTaskOwnsPartitionStats(task) {
+					owners.Insert(partitionStatsKey(task.GetCollectionID(), task.GetPartitionID(),
+						task.GetChannel(), task.GetPlanID()))
+				}
+			}
+		}
+	}
+
+	if statsMeta := gc.meta.GetPartitionStatsMeta(); statsMeta != nil {
+		for _, info := range statsMeta.ListAllPartitionStatsInfos() {
+			owners.Insert(partitionStatsKey(info.GetCollectionID(), info.GetPartitionID(),
+				info.GetVChannel(), info.GetVersion()))
+		}
+	}
+	for _, segment := range gc.meta.SelectSegments(ctx, SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return info.GetPartitionStatsVersion() != 0
+	})) {
+		owners.Insert(partitionStatsKey(segment.GetCollectionID(), segment.GetPartitionID(),
+			segment.GetInsertChannel(), segment.GetPartitionStatsVersion()))
+	}
+	return owners
+}
+
+func (gc *garbageCollector) recycleUnusedPartitionStatsFiles(ctx context.Context, signal <-chan gcCmd) {
+	start := time.Now()
+	logger := mlog.With(mlog.String("gcName", "recycleUnusedPartitionStatsFiles"), mlog.Time("startAt", start))
+	logger.Info(ctx, "start recycleUnusedPartitionStatsFiles...")
+	total, removed := 0, atomic.NewInt32(0)
+	defer func() {
+		logger.Info(ctx, "recycleUnusedPartitionStatsFiles done",
+			mlog.Int("total", total),
+			mlog.Int32("removed", removed.Load()),
+			mlog.Duration("timeCost", time.Since(start)))
+	}()
+
+	prefix := path.Join(gc.option.cli.RootPath(), common.PartitionStatsPath) + "/"
+	candidates := make([]partitionStatsGCCandidate, 0)
+	err := gc.option.cli.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *storage.ChunkObjectInfo) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		total++
+		gc.ackSignal(signal)
+
+		if time.Since(chunkInfo.ModifyTime) <= gc.option.missingTolerance {
+			return true
+		}
+
+		collectionID, partitionID, vchannel, version, err := parsePartitionStatsPath(prefix, chunkInfo.FilePath)
+		if err != nil {
+			logger.RatedWarn(ctx, rate.Limit(1), "garbageCollector recycleUnusedPartitionStatsFiles parse path failed",
+				mlog.String("filePath", chunkInfo.FilePath), mlog.Err(err))
+			return true
+		}
+		candidates = append(candidates, partitionStatsGCCandidate{
+			file:         chunkInfo.FilePath,
+			key:          partitionStatsKey(collectionID, partitionID, vchannel, version),
+			collectionID: collectionID,
+			partitionID:  partitionID,
+			vchannel:     vchannel,
+			version:      version,
+		})
+		return true
+	})
+	if err != nil {
+		logger.Warn(ctx, "garbageCollector recycleUnusedPartitionStatsFiles walk failed", mlog.Err(err))
+	}
+
+	// Snapshot after the walk, immediately before deciding what to delete. The
+	// ordered task -> downstream-owner snapshot closes the handoff race described
+	// in snapshotPartitionStatsOwners; taking it after the potentially slow
+	// object listing also avoids making deletion decisions from stale metadata.
+	owners := gc.snapshotPartitionStatsOwners(ctx)
+	futures := make([]*conc.Future[struct{}], 0, len(candidates))
+	for _, candidate := range candidates {
+		if gc.collectionGCPaused(candidate.collectionID) || owners.Contain(candidate.key) {
+			continue
+		}
+		futures = append(futures, gc.option.removeObjectPool.Submit(func() (struct{}, error) {
+			if err := gc.option.cli.Remove(ctx, candidate.file); err != nil {
+				logger.RatedWarn(ctx, rate.Limit(1), "garbageCollector recycleUnusedPartitionStatsFiles remove file failed",
+					mlog.String("file", candidate.file), mlog.Err(err))
+				return struct{}{}, err
+			}
+			logger.RatedInfo(ctx, rate.Limit(1), "garbageCollector recycleUnusedPartitionStatsFiles removed unreferenced partition stats",
+				mlog.String("file", candidate.file),
+				mlog.FieldCollectionID(candidate.collectionID),
+				mlog.FieldPartitionID(candidate.partitionID),
+				mlog.FieldVChannel(candidate.vchannel),
+				mlog.Int64("version", candidate.version))
+			removed.Inc()
+			return struct{}{}, nil
+		}))
+	}
+	if err := conc.BlockOnAll(futures...); err != nil {
+		logger.Warn(ctx, "some task failure in remove object pool", mlog.Err(err))
+	}
+}
+
+// parsePartitionStatsPath splits {prefix}{collectionID}/{partitionID}/{vchannel}/{version}.
+// A vchannel never contains a slash, so the shape is exact and anything else is
+// rejected rather than guessed at -- this function decides what gets deleted.
+func parsePartitionStatsPath(prefix, filePath string) (collectionID, partitionID int64, vchannel string, version int64, err error) {
+	rel := strings.TrimPrefix(filePath, prefix)
+	if rel == filePath {
+		return 0, 0, "", 0, merr.WrapErrServiceInternalMsg("path %s is not under %s", filePath, prefix)
+	}
+	parts := strings.Split(rel, "/")
+	if len(parts) != 4 {
+		return 0, 0, "", 0, merr.WrapErrServiceInternalMsg("unexpected partition stats path %s", filePath)
+	}
+	if collectionID, err = strconv.ParseInt(parts[0], 10, 64); err != nil {
+		return 0, 0, "", 0, err
+	}
+	if partitionID, err = strconv.ParseInt(parts[1], 10, 64); err != nil {
+		return 0, 0, "", 0, err
+	}
+	if version, err = strconv.ParseInt(parts[3], 10, 64); err != nil {
+		return 0, 0, "", 0, err
+	}
+	return collectionID, partitionID, parts[2], version, nil
 }
 
 // recycleUnusedTextIndexFiles load meta file info and compares OSS keys

@@ -7,7 +7,6 @@ import (
 
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	internalpb "github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -744,6 +743,54 @@ func (_c *MockCompactionMeta_GetSegmentInfos_Call) Return(_a0 []*SegmentInfo) *M
 }
 
 func (_c *MockCompactionMeta_GetSegmentInfos_Call) RunAndReturn(run func([]int64) []*SegmentInfo) *MockCompactionMeta_GetSegmentInfos_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ReplaceCompactionTask provides a mock function with given fields: ctx, oldTask, newTask
+func (_m *MockCompactionMeta) ReplaceCompactionTask(ctx context.Context, oldTask *datapb.CompactionTask, newTask *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, oldTask, newTask)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplaceCompactionTask")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, oldTask, newTask)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_ReplaceCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplaceCompactionTask'
+type MockCompactionMeta_ReplaceCompactionTask_Call struct {
+	*mock.Call
+}
+
+// ReplaceCompactionTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - oldTask *datapb.CompactionTask
+//   - newTask *datapb.CompactionTask
+func (_e *MockCompactionMeta_Expecter) ReplaceCompactionTask(ctx interface{}, oldTask interface{}, newTask interface{}) *MockCompactionMeta_ReplaceCompactionTask_Call {
+	return &MockCompactionMeta_ReplaceCompactionTask_Call{Call: _e.mock.On("ReplaceCompactionTask", ctx, oldTask, newTask)}
+}
+
+func (_c *MockCompactionMeta_ReplaceCompactionTask_Call) Run(run func(ctx context.Context, oldTask *datapb.CompactionTask, newTask *datapb.CompactionTask)) *MockCompactionMeta_ReplaceCompactionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask), args[2].(*datapb.CompactionTask))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_ReplaceCompactionTask_Call) Return(_a0 error) *MockCompactionMeta_ReplaceCompactionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_ReplaceCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask, *datapb.CompactionTask) error) *MockCompactionMeta_ReplaceCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -46,7 +46,7 @@ func TestMixCompactionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 	mockSave := mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
 	defer mockSave.UnPatch()
 
-	task := newMixCompactionTask(&datapb.CompactionTask{
+	task := newMixCompactionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     2,
 		CollectionID:  7,
@@ -79,7 +79,7 @@ func TestBumpSchemaVersionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 	mockSave := mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
 	defer mockSave.UnPatch()
 
-	task := newBumpSchemaVersionTask(&datapb.CompactionTask{
+	task := newBumpSchemaVersionTask(context.TODO(), &datapb.CompactionTask{
 		PlanID:        1,
 		TriggerID:     2,
 		CollectionID:  7,

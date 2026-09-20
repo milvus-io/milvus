@@ -64,7 +64,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type ServerSuite struct {
@@ -89,6 +88,20 @@ func (s *ServerSuite) SetupTest() {
 	s.testServer = newTestServer(s.T())
 	s.mockMixCoord = mocks2.NewMixCoord(s.T())
 	s.testServer.mixCoord = s.mockMixCoord
+}
+
+func (s *ServerSuite) setCollectionHandler(collections ...*collectionInfo) {
+	byID := make(map[int64]*collectionInfo, len(collections))
+	for _, collection := range collections {
+		byID[collection.ID] = collection
+	}
+	handler := &mockHandler{collectionGetter: func(_ context.Context, collectionID UniqueID) (*collectionInfo, error) {
+		return byID[collectionID], nil
+	}}
+	s.testServer.handler = handler
+	segmentManager, ok := s.testServer.segmentManager.(*SegmentManager)
+	s.Require().True(ok)
+	segmentManager.handler = handler
 }
 
 func (s *ServerSuite) TearDownTest() {
@@ -235,8 +248,6 @@ func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
-
 	segments := map[int64]commonpb.SegmentState{
 		1: commonpb.SegmentState_NotExist,
 		2: commonpb.SegmentState_Dropped,
@@ -383,7 +394,6 @@ func (s *ServerSuite) TestSaveBinlogPathRetriesDataViewPublication() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 	info := &datapb.SegmentInfo{
 		ID:             10,
 		InsertChannel:  "ch1",
@@ -442,8 +452,6 @@ func (s *ServerSuite) TestSaveBinlogPath_StorageVersionImmutable() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
-
 	segments := map[int64]commonpb.SegmentState{
 		0: commonpb.SegmentState_Flushed,
 		1: commonpb.SegmentState_Sealed,
@@ -508,15 +516,16 @@ func (s *ServerSuite) TestSaveBinlogPath_SaveDroppedSegment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
-	s.testServer.meta.AddCollection(&collectionInfo{
-		ID: 0,
+	rootCoord := broker.NewMockBroker(s.T())
+	rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(0)).Return(&milvuspb.DescribeCollectionResponse{
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 				{FieldID: 101, DataType: schemapb.DataType_Text},
 			},
 		},
-	})
+	}, nil).Maybe()
+	s.testServer.meta.broker = rootCoord
 
 	addSegment := func(segmentID int64, state commonpb.SegmentState, storageVersion int64) {
 		err := s.testServer.meta.AddSegment(context.TODO(), NewSegmentInfo(&datapb.SegmentInfo{
@@ -583,9 +592,30 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.True(merr.Ok(resp))
 }
 
-func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
+func (s *ServerSuite) TestValidateTextSegmentStorage_CollectionLookupErrors() {
+	rootCoord := broker.NewMockBroker(s.T())
+	rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).
+		Return(nil, merr.WrapErrCollectionNotFound(1)).Once()
+	rootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, int64(2)).
+		Return(nil, context.DeadlineExceeded).Once()
+	s.testServer.meta.broker = rootCoord
 
+	req := &datapb.SaveBinlogPathsRequest{
+		CollectionID:   1,
+		SegmentID:      10,
+		SegLevel:       datapb.SegmentLevel_L1,
+		StorageVersion: storage.StorageV3,
+	}
+	s.NoError(s.testServer.validateTextSegmentStorage(context.Background(), req, storage.StorageV3))
+
+	req.CollectionID = 2
+	s.ErrorIs(
+		s.testServer.validateTextSegmentStorage(context.Background(), req, storage.StorageV3),
+		context.DeadlineExceeded,
+	)
+}
+
+func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	segment := s.testServer.meta.GetHealthySegment(context.TODO(), 1)
 	s.Require().Nil(segment)
 	ctx := context.Background()
@@ -636,8 +666,6 @@ func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
-
 	segments := map[int64]int64{
 		0: 0,
 		1: 0,
@@ -941,7 +969,6 @@ func (s *ServerSuite) TestSaveBinlogPath_FlushedSegmentStaysInvisibleBeforeSortC
 		paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
 	})
 
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 100})
 	segment := NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            10,
 		CollectionID:  100,
@@ -995,7 +1022,6 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	ctx := context.Background()
 	// a Collection that predates DataView management: no persisted snapshot,
 	// the bootstrap seeds the initial (1,0,0) from SegmentMeta
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 100, VChannelNames: []string{"ch-1"}})
 	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
 		ID:            1,
 		CollectionID:  100,
@@ -1030,10 +1056,12 @@ func (s *ServerSuite) TestBootstrapDataViews() {
 	// for channels without loadable segments.
 	recoverDataViews := func() {
 		catalog := datacoordkv.NewCatalog(NewMetaMemoryKV(), "", "")
-		collectionIDs := lo.Map(s.testServer.meta.GetCollections(), func(c *collectionInfo, _ int) int64 { return c.ID })
-		collectionVChannels := lo.SliceToMap(s.testServer.meta.GetCollections(), func(c *collectionInfo) (int64, []string) {
-			return c.ID, c.VChannelNames
-		})
+		// DataCoord keeps no collection cache: initMeta reads the live
+		// Collection skeleton from RootCoord (listCollectionsFromRootCoord).
+		// Declare the same skeleton here - Collection 100 predates DataView
+		// management and has one vchannel.
+		collectionIDs := []int64{100}
+		collectionVChannels := map[int64][]string{100: {"ch-1"}}
 		var err error
 		s.testServer.dataViewManager, err = dataview.RecoverManager(ctx, catalog,
 			func(_ context.Context, _ int64) (bool, error) { return true, nil },
@@ -1075,7 +1103,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	}
 
 	schema := newTestSchema()
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
+	s.setCollectionHandler(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}, VChannelNames: []string{"channel-1"}})
 	allocations, err := s.testServer.segmentManager.AllocSegment(context.TODO(), 0, 1, "channel-1", 1, storage.StorageV1)
 	s.NoError(err)
 	s.EqualValues(1, len(allocations))
@@ -1105,6 +1133,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 }
 
 func (s *ServerSuite) TestFlush_CollectionNotExist() {
+	s.setCollectionHandler()
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Flush,
@@ -1191,7 +1220,7 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		defer s.TearDownTest()
 
 		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
+		s.setCollectionHandler(&collectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -1242,7 +1271,7 @@ func (s *ServerSuite) TestAssignSegmentID() {
 		defer s.TearDownTest()
 
 		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
+		s.setCollectionHandler(&collectionInfo{
 			ID:         collID,
 			Schema:     schema,
 			Partitions: []int64{},
@@ -1274,8 +1303,8 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("test meta non exist", func(t *testing.T) {
-		s := &Server{meta: &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}}
+	t.Run("healthy server acknowledges notification", func(t *testing.T) {
+		s := &Server{}
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		req := &datapb.AlterCollectionRequest{
@@ -1284,32 +1313,8 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
 		}
 		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
+		assert.True(t, merr.Ok(resp))
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
-	})
-
-	t.Run("test update meta", func(t *testing.T) {
-		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-		collections.Insert(1, &collectionInfo{ID: 1})
-		s := &Server{meta: &meta{collections: collections}}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-		ctx := context.Background()
-		req := &datapb.AlterCollectionRequest{
-			CollectionID: 1,
-			PartitionIDs: []int64{1},
-			Properties:   []*commonpb.KeyValuePair{{Key: "k", Value: "v"}},
-		}
-
-		coll, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
-		assert.Nil(t, coll.Properties)
-		resp, err := s.BroadcastAlteredCollection(ctx, req)
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-		coll, ok = s.meta.collections.Get(1)
-		assert.True(t, ok)
-		assert.NotNil(t, coll.Properties)
 	})
 }
 
@@ -1394,8 +1399,9 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1494,9 +1500,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1560,13 +1567,17 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		binlogReq := &datapb.SaveBinlogPathsRequest{
@@ -1634,9 +1645,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
-
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1654,13 +1662,17 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		assert.EqualValues(t, 0, len(resp.GetSegments()[0].GetBinlogs()))
 	})
 	t.Run("test data version propagated to querycoord", func(t *testing.T) {
+		paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "false")
+		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
+
 		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.mixCoordCreator = func(ctx context.Context) (types.MixCoord, error) {
 			return newMockMixCoord(), nil
 		}
-		svr.meta.AddCollection(&collectionInfo{
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		const expectedDataVersion int32 = 7
@@ -1701,9 +1713,6 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		paramtable.Get().Save(Params.DataCoordCfg.EnableSortCompaction.Key, "false")
-		defer paramtable.Get().Reset(Params.DataCoordCfg.EnableSortCompaction.Key)
-
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -1731,9 +1740,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1771,9 +1781,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1810,9 +1821,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -1850,9 +1862,10 @@ func TestGetRecoveryInfoV2(t *testing.T) {
 			return newMockMixCoord(), nil
 		}
 
-		svr.meta.AddCollection(&collectionInfo{
-			ID:     0,
-			Schema: newTestSchema(),
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
+			ID:            0,
+			Schema:        newTestSchema(),
+			VChannelNames: []string{"vchan1"},
 		})
 
 		err := svr.meta.UpdateChannelCheckpoint(context.TODO(), "vchan1", &msgpb.MsgPosition{
@@ -2273,9 +2286,8 @@ func createTestFlushAllServer() *Server {
 		allocator: mockAlloc,
 		broker:    mockBroker,
 		meta: &meta{
-			collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
-			channelCPs:  newChannelCps(),
-			segments:    NewSegmentsInfo(),
+			channelCPs: newChannelCps(),
+			segments:   NewSegmentsInfo(),
 		},
 		// handler will be set to a mock in individual tests when needed
 	}
@@ -2702,7 +2714,7 @@ func TestGetSegmentInfo_WithCompaction(t *testing.T) {
 			closeTestServer(t, svr)
 		})
 
-		svr.meta.AddCollection(&collectionInfo{
+		svr.mixCoord.(*mockMixCoord).addCollection(&collectionInfo{
 			ID:         collID,
 			Partitions: []int64{partID},
 		})
@@ -6426,14 +6438,25 @@ func TestCommitImport_HappyPath(t *testing.T) {
 		ImportJob: &datapb.ImportJob{
 			JobID:        1001,
 			CollectionID: 200,
+			Vchannels:    []string{"ch0"},
 			State:        internalpb.ImportJobState_Uncommitted,
 			AutoCommit:   false,
 		},
+		tr: timerecord.NewTimeRecorder("test"),
 	}
 
+	ddlLockAcquired := false
 	importMetaMock := NewMockImportMeta(t)
-	// GetJob is called twice: once before lock and once after lock.
-	importMetaMock.EXPECT().GetJob(mock.Anything, int64(1001)).Return(job).Times(2)
+	// GetJob is called before/after the request lock and once after the durable
+	// commit-intent write.
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(1001)).Return(job).Times(3)
+	importMetaMock.EXPECT().UpdateJob(mock.Anything, int64(1001), mock.Anything).
+		Run(func(_ context.Context, _ int64, actions ...UpdateJobAction) {
+			assert.True(t, ddlLockAcquired, "collection DDL lock must precede the Committing write")
+			for _, action := range actions {
+				action(job)
+			}
+		}).Return(nil).Once()
 
 	server := &Server{
 		importMeta:    importMetaMock,
@@ -6441,14 +6464,95 @@ func TestCommitImport_HappyPath(t *testing.T) {
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
-	// Mock broadcastCommitImportMessage to succeed.
-	broadcastMock := mockey.Mock((*Server).broadcastCommitImportMessage).
-		Return(nil).Build()
-	defer broadcastMock.UnPatch()
+	broadcastAPI := newMockBroadcastAPIImpl()
+	startBroadcastMock := mockey.Mock((*Server).startBroadcastWithCollectionID).
+		To(func(*Server, context.Context, int64) (broadcaster.BroadcastAPI, error) {
+			ddlLockAcquired = true
+			return broadcastAPI, nil
+		}).Build()
+	defer startBroadcastMock.UnPatch()
 
 	resp, err := server.CommitImport(ctx, &datapb.CommitImportRequest{JobId: 1001})
 	assert.NoError(t, err)
 	assert.True(t, merr.Ok(resp))
+	assert.Equal(t, internalpb.ImportJobState_Committing, job.GetState())
+}
+
+func TestCommitImport_NoVchannelsDoesNotEnterCommitting(t *testing.T) {
+	ctx := context.Background()
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:      1002,
+			State:      internalpb.ImportJobState_Uncommitted,
+			AutoCommit: false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	importMetaMock := NewMockImportMeta(t)
+	importMetaMock.EXPECT().GetJob(mock.Anything, int64(1002)).Return(job).Times(2)
+	server := &Server{
+		importMeta:    importMetaMock,
+		importJobLock: lock.NewKeyLock[int64](),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+
+	resp, err := server.CommitImport(ctx, &datapb.CommitImportRequest{JobId: 1002})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp))
+	assert.ErrorIs(t, merr.Error(resp), merr.ErrImportSysFailed)
+	assert.Equal(t, internalpb.ImportJobState_Uncommitted, job.GetState())
+}
+
+func TestCommitImport_AmbiguousWriteFailsStopWhileRequestCanceled(t *testing.T) {
+	const jobID = int64(1003)
+	requestCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	writeErr := errors.New("ambiguous catalog response")
+	job := &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID:        jobID,
+			CollectionID: 200,
+			Vchannels:    []string{"ch0"},
+			State:        internalpb.ImportJobState_Uncommitted,
+			AutoCommit:   false,
+		},
+		tr: timerecord.NewTimeRecorder("test"),
+	}
+
+	importMeta := NewMockImportMeta(t)
+	importMeta.EXPECT().GetJob(mock.Anything, jobID).Return(job).Times(2)
+	importMeta.EXPECT().UpdateJob(mock.Anything, jobID, mock.Anything).Return(writeErr).Once()
+
+	fatalCalled := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	server := &Server{
+		ctx:           context.Background(),
+		importMeta:    importMeta,
+		importJobLock: lock.NewKeyLock[int64](),
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	broadcastAPI := newMockBroadcastAPIImpl()
+	ddlLockAcquired := false
+	startBroadcastMock := mockey.Mock((*Server).startBroadcastWithCollectionID).
+		To(func(*Server, context.Context, int64) (broadcaster.BroadcastAPI, error) {
+			ddlLockAcquired = true
+			return broadcastAPI, nil
+		}).Build()
+	defer startBroadcastMock.UnPatch()
+
+	resp, err := server.CommitImport(requestCtx, &datapb.CommitImportRequest{JobId: jobID})
+	assert.NoError(t, err)
+	assert.Error(t, merr.Error(resp))
+	assert.Contains(t, merr.Error(resp).Error(), writeErr.Error())
+	assert.True(t, ddlLockAcquired, "request cancellation must not skip the collection DDL lock")
+	assert.True(t, fatalCalled, "request cancellation must not suppress fail-stop while DataCoord is alive")
 }
 
 func TestAbortImport_HappyPath(t *testing.T) {
@@ -7003,9 +7107,9 @@ func TestAbortImport_CommittingRejected(t *testing.T) {
 	assert.False(t, merr.Ok(resp))
 }
 
-// TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet pins a pre-existing gap
-// that this PR does not close: the fence derives its bound from the segment's
-// binlog arrays, and a V3 (manifest-backed) segment never persists those --
+// TestHandleCommitVchannelRPC_V3SegmentIsNotFencedYet pins an existing gap: the
+// fence derives its bound from the segment's binlog arrays, and a V3
+// (manifest-backed) segment never persists those --
 // buildAlterSegmentsKvs skips the per-FieldBinlog KVs for it and the SegmentInfo
 // is written without them -- so a V3 segment reloaded after a DataCoord restart
 // compares against 0 and admits any commit timestamp, however low.

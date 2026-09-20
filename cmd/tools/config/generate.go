@@ -177,7 +177,8 @@ func (m *YamlMarshaller) writeContent(key, value, comment string, level int) {
 	if strings.Contains(comment, "\n") {
 		multilines := strings.Split(comment, "\n")
 		for _, line := range multilines {
-			io.WriteString(m.writer, fmt.Sprintf("%s# %s\n", strings.Repeat(" ", level*2), line))
+			commentLine := strings.TrimRight("# "+line, " \t")
+			io.WriteString(m.writer, fmt.Sprintf("%s%s\n", strings.Repeat(" ", level*2), commentLine))
 		}
 		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
 	} else if comment != "" {

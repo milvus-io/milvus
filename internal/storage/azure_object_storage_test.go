@@ -31,6 +31,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
+	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -297,6 +298,34 @@ func TestStartOrResumeAzureCopy(t *testing.T) {
 		err := startOrResumeAzureCopy(context.Background(), client, "source", "dst")
 		require.NoError(t, err)
 		assert.Equal(t, 1, startCalls)
+	})
+}
+
+func TestAzureObjectStorageRemoveObject(t *testing.T) {
+	client, err := service.NewClientWithNoCredential("https://account.blob.core.windows.net", nil)
+	require.NoError(t, err)
+	objectStorage := &AzureObjectStorage{Client: client}
+
+	t.Run("missing blob is already removed", func(t *testing.T) {
+		patch := mockey.Mock((*blockblob.Client).Delete).To(
+			func(_ *blockblob.Client, _ context.Context, _ *blob.DeleteOptions) (blob.DeleteResponse, error) {
+				return blob.DeleteResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.BlobNotFound)}
+			}).Build()
+		defer patch.UnPatch()
+
+		err := objectStorage.RemoveObject(context.Background(), "container", "missing")
+		require.NoError(t, err)
+	})
+
+	t.Run("container not found remains an error", func(t *testing.T) {
+		patch := mockey.Mock((*blockblob.Client).Delete).To(
+			func(_ *blockblob.Client, _ context.Context, _ *blob.DeleteOptions) (blob.DeleteResponse, error) {
+				return blob.DeleteResponse{}, &azcore.ResponseError{ErrorCode: string(bloberror.ContainerNotFound)}
+			}).Build()
+		defer patch.UnPatch()
+
+		err := objectStorage.RemoveObject(context.Background(), "missing-container", "object")
+		require.ErrorIs(t, err, merr.ErrIoBucketNotFound)
 	})
 }
 
