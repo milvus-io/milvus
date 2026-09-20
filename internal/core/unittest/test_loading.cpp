@@ -276,8 +276,12 @@ static const auto kIndexLoadTestValues = ::testing::Values(
     std::pair<std::map<std::string, std::string>, LoadResourceRequest>(
         {{"index_type", "BITMAP"}, {"mmap", "true"}, {"field_type", "array"}},
         // Input, decoded Roaring, and two overlapping frozen output buffers.
+        // Unknown row count reserves all 2^16 containers (64 bytes each),
+        // plus the Roaring object rounded up to the 32-byte frozen alignment.
         {4UL * 1024 * 1024 * 1024 +
-             2 * milvus::index::BITMAP_FROZEN_BATCH_BYTES,
+             2 * milvus::index::BITMAP_FROZEN_BATCH_BYTES +
+             3 * ((1UL << 16) * 64 +
+                  ((sizeof(roaring::Roaring) + 31) / 32) * 32),
          2UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
