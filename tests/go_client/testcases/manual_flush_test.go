@@ -9,6 +9,7 @@ import (
 
 	"github.com/milvus-io/milvus/client/v3/entity"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
 )
@@ -46,6 +47,14 @@ func TestManualFlushSharedWAL(t *testing.T) {
 		flushCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		task, err := mc.Flush(flushCtx, client.NewFlushOption(target.CollectionName))
+		for err != nil && client.ErrorCode(err) == merr.Code(merr.ErrServiceRateLimit) {
+			select {
+			case <-flushCtx.Done():
+				require.NoError(t, flushCtx.Err())
+			case <-time.After(time.Second):
+			}
+			task, err = mc.Flush(flushCtx, client.NewFlushOption(target.CollectionName))
+		}
 		require.NoError(t, err)
 		pending, flushed, flushTs, _ := task.GetFlushStats()
 		require.Empty(t, pending)
