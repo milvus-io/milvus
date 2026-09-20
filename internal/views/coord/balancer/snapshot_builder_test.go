@@ -4,10 +4,13 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/dataview"
+	datacatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
@@ -127,8 +130,20 @@ func emptyLoadConfigStore(t *testing.T) *loadmgr.LoadConfigStore {
 // emptyRegistry returns a fresh ShardViewRegistry backed by stub catalog/syncer.
 func emptyRegistry(t *testing.T) *coordview.ShardViewRegistry {
 	t.Helper()
-	reg, err := coordview.RecoverShardViewRegistry(context.Background(), &stubCatalog{}, &stubSyncer{})
+	// Existing placement fixtures use collection 1 at (1,0) or (1,1).
+	// Back their references with a real Manager; row estimates are supplied
+	// separately by each test's snapshot provider.
+	patch := mockey.Mock((*datacatalog.Catalog).ListAllDataViews).Return([]*viewpb.DataViewOfCollection{
+		{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1}},
+		{CollectionId: 1, DataVersion: &viewpb.DataVersion{StreamingVersion: 1, CompactVersion: 1}},
+	}, nil).Build()
+	refs, err := dataview.RecoverManager(t.Context(), datacatalog.NewCatalog(nil, "", ""),
+		func(context.Context, int64) (bool, error) { return true, nil }, nil, nil, nil)
+	patch.UnPatch()
 	require.NoError(t, err)
+	reg, err := coordview.RecoverShardViewRegistry(t.Context(), &stubCatalog{}, &stubSyncer{}, refs)
+	require.NoError(t, err)
+	t.Cleanup(reg.Close)
 	return reg
 }
 
@@ -251,9 +266,9 @@ func TestSnapshotBuilder_AggregatePerNodeRowLoad(t *testing.T) {
 	})
 
 	segInfos := map[int64]*SegmentDataView{
-		101: {SegmentID: 101, MemSize: 100, RowNum: 10},
-		102: {SegmentID: 102, MemSize: 200, RowNum: 20},
-		201: {SegmentID: 201, MemSize: 50, RowNum: 5},
+		101: {SegmentID: 101, RowNum: 10},
+		102: {SegmentID: 102, RowNum: 20},
+		201: {SegmentID: 201, RowNum: 5},
 	}
 
 	nodes := map[int64]*NodeInfo{
@@ -297,7 +312,7 @@ func TestSnapshotBuilder_AggregatePerNodeRowCount(t *testing.T) {
 			1: {NodeID: 1, Alive: true},
 		}},
 		providerWithGlobalSegments(1, []int64{101}, map[int64]*SegmentDataView{
-			101: {SegmentID: 101, MemSize: 1_000_000, RowNum: 10},
+			101: {SegmentID: 101, RowNum: 10},
 		}),
 		&BalanceConfig{},
 	)
@@ -333,9 +348,9 @@ func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T
 	}
 
 	segInfos := map[int64]*SegmentDataView{
-		101: {SegmentID: 101, MemSize: 100, RowNum: 10},
-		102: {SegmentID: 102, MemSize: 200, RowNum: 20},
-		103: {SegmentID: 103, MemSize: 300, RowNum: 30},
+		101: {SegmentID: 101, RowNum: 10},
+		102: {SegmentID: 102, RowNum: 20},
+		103: {SegmentID: 103, RowNum: 30},
 	}
 
 	builder := NewSnapshotBuilder(
@@ -351,7 +366,6 @@ func TestSnapshotBuilder_CollectsSegmentsFromDataViewsAndPlacements(t *testing.T
 	// longer materializes a segment map.
 	info, ok := snap.SegmentInfo(103)
 	require.True(t, ok)
-	assert.Equal(t, int64(300), info.MemSize)
 	assert.Equal(t, int64(30), info.RowNum)
 
 	// The native snapshot embeds the shard's segments inline; the lookup

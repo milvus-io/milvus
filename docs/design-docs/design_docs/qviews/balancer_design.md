@@ -163,12 +163,13 @@ The DataView provider exposes both full and collection-scoped reads:
 ```go
 DataViewSnapshot(ctx context.Context) *DataViewSnapshot
 DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *DataViewSnapshot
-SegmentSnapshot(ctx context.Context, segmentIDs []int64) SegmentSnapshot
 ```
 
 A nil collection set selects all collections; a non-nil empty set selects none.
-`SegmentSnapshot` supplies metadata for placement segments that need not belong
-to the latest visible DataViews in the planning scope.
+The native snapshot embeds each segment's `RowNum`. Placement segments that no
+longer belong to the latest DataView retain their statistics through the
+corresponding QueryView's exact-version `DataViewRef`; no separate SegmentMeta
+lookup is required. See [DataView consumer interfaces](data_view.md#view-consumer-interfaces).
 
 #### External System Integration
 
@@ -310,7 +311,7 @@ func RecoverShardViewRegistry(
     ctx context.Context,
     catalog queryview.QueryViewCatalog,
     syncer syncer.ReliableSyncer,
-    dataViewReferences ...qviews.DataViewReferenceManager,
+    dataViewRefs qviews.DataViewRefProvider,
 ) (*ShardViewRegistry, error)
 func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager
 func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager
@@ -805,11 +806,10 @@ const (
 // When multiple views mention the same (segmentID, nodeID), states are merged
 // by priority: Up > Ready > Preparing > Unrecoverable.
 
-// SegmentInfo carries the minimum metadata the Balancer needs per segment.
-type SegmentInfo struct {
+// SegmentDataView carries the minimum metadata the Balancer needs per segment.
+type SegmentDataView struct {
     SegmentID   int64
     PartitionID int64
-    MemSize     int64  // retained for compatibility and diagnostics; not scored
     RowNum      int64  // sole balance load metric
 }
 
@@ -850,7 +850,7 @@ type BalanceConfig struct {
 
 **Notes**:
 - The current policy assumes QueryNodes are homogeneous, so absolute assigned row count is comparable across nodes.
-- `RowNum` is the only load signal used by allocation, scoring, shard ordering, stickiness, and fanout-budget calculation. `MemSize` remains in the snapshot only for compatibility and diagnostics.
+- `RowNum` is the only load signal used by allocation, scoring, shard ordering, stickiness, and fanout-budget calculation. The native snapshot does not carry `MemSize`.
 - `SegmentCount` is not a node-load score. The desired shard's segment count is used only to cap `FanoutBudget` because fanout cannot exceed the number of segments.
 - The three weights must be non-negative and at least one must be positive. `StickyRowsScale` and `TargetRowsPerShardNode` must be positive.
 - `SegmentCountWeight`, `BaselineSegmentRows`, `BalanceThreshold`, and `CostEfficiencyThreshold` are not part of the normalized design.
@@ -895,10 +895,12 @@ row count contributes zero load. Zero-row segments are placed using
 stickiness, fanout, and deterministic tie-breaking; no global segment-count
 bonus is added to the node score.
 
-The ledger caches known row counts by SegmentID. Incremental refresh batches
-cache misses through `SegmentSnapshot`; missing metadata contributes zero and
-is not cached, so a later stats update or periodic full reconcile may look it
-up again.
+The ledger caches row counts from the native planning snapshot by SegmentID.
+Each placed segment also carries `RowNum` and `HasRowNum` from the retained
+DataViewRefs. Known reference statistics take precedence over the cache,
+including a known zero; missing reference statistics fall back to the cache.
+A segment missing from both sources contributes zero. Retained versions may
+lack statistics after recovery because row statistics are not persisted.
 
 `TransformStartAfterTimetick` from DataView is passed through to QueryView metadata but is NOT consumed by the allocation algorithm.
 

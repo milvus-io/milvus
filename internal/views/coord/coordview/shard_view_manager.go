@@ -8,7 +8,13 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// DataViewRefProvider acquires DataViewRefs for QueryViews. The DataView
+// Manager (internal/dataview.Manager) satisfies it directly, so the wiring
+// layer injects the Manager as-is.
+type DataViewRefProvider = qviews.DataViewRefProvider
 
 // ShardViewManager manages multiple QueryViews for a single shard (vchannel)
 // within a single replica on the Coord side.
@@ -46,8 +52,15 @@ type ShardViewManager struct {
 	pendingSyncs    []syncEntry
 	pendingRemovals []*CoordQueryViewStateMachine
 
-	dataViewReferences qviews.DataViewReferenceManager
-	pinnedReferences   map[qviews.QueryViewVersion]struct{}
+	// dataViewRefs acquires DataViewRefs for resident QueryViews so the
+	// published per-segment RowNum footprint stays visible while a view is
+	// alive (lifetime(QueryView) < lifetime(DataView)).
+	//
+	// PRECONDITION (non-nil): the wiring layer always injects a working
+	// provider; methods rely on it without nil checks. A provider whose Get
+	// returns a nil ref expresses "version does not exist": new plans must
+	// retry, while recovered views enter terminal cleanup.
+	dataViewRefs DataViewRefProvider
 }
 
 // syncEntry pairs a state machine with its per-node views for deferred event submission.
@@ -69,22 +82,22 @@ func newShardViewManager(
 	shardID qviews.ShardID,
 	eventSubmitter dirtyViewEventSubmitter,
 	recoveredViews []*viewpb.QueryViewOfShard,
-	dataViewReferences ...qviews.DataViewReferenceManager,
+	dataViewRefs DataViewRefProvider,
 ) *ShardViewManager {
-	refs := dataViewReferenceManagerOrNoop(dataViewReferences)
 	m := &ShardViewManager{
-		ctx:                ctx,
-		shardID:            shardID,
-		eventSubmitter:     eventSubmitter,
-		views:              make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
-		dataViewReferences: refs,
-		pinnedReferences:   make(map[qviews.QueryViewVersion]struct{}),
+		ctx:            ctx,
+		shardID:        shardID,
+		eventSubmitter: eventSubmitter,
+		views:          make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
+		dataViewRefs:   dataViewRefs,
 	}
 
-	// Recover state machines from persisted views.
+	// Recover state machines from persisted views. Unlike
+	// RecoverShardViewManager, this simple path does not re-acquire DataView
+	// refs (used by Ensure with no recovered views, and by tests).
 	recovered := make([]*CoordQueryViewStateMachine, 0, len(recoveredViews))
 	for _, view := range recoveredViews {
-		sm := RecoverCoordQueryViewStateMachine(view)
+		sm := RecoverCoordQueryViewStateMachine(view, nil)
 		recovered = append(recovered, sm)
 		m.views[sm.Version()] = sm
 	}
@@ -111,35 +124,33 @@ func RecoverShardViewManager(
 	ctx context.Context,
 	shardID qviews.ShardID,
 	eventSubmitter dirtyViewEventSubmitter,
-	dataViewReferences qviews.DataViewReferenceManager,
+	dataViewRefs DataViewRefProvider,
 	recoveredViews []*viewpb.QueryViewOfShard,
 ) (*ShardViewManager, error) {
 	m := &ShardViewManager{
-		ctx:                ctx,
-		shardID:            shardID,
-		eventSubmitter:     eventSubmitter,
-		views:              make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
-		dataViewReferences: dataViewReferenceManagerOrNoop([]qviews.DataViewReferenceManager{dataViewReferences}),
-		pinnedReferences:   make(map[qviews.QueryViewVersion]struct{}),
+		ctx:            ctx,
+		shardID:        shardID,
+		eventSubmitter: eventSubmitter,
+		views:          make(map[qviews.QueryViewVersion]*CoordQueryViewStateMachine, len(recoveredViews)),
+		dataViewRefs:   dataViewRefs,
 	}
 
 	recovered := make([]*CoordQueryViewStateMachine, 0, len(recoveredViews))
 	for _, view := range recoveredViews {
 		version := qviews.FromProtoQueryViewVersion(view.GetMeta().GetVersion())
-		pinned, err := m.dataViewReferences.RecoverDataViewReference(
-			ctx,
-			view.GetMeta().GetCollectionId(),
-			version.DataVersion,
-		)
+
+		// Re-acquire the ref the crashed process held (the DataView version
+		// outlives the QueryView) and bind it at construction. nil ref = the
+		// version no longer exists (already GC'd) -> prepare terminal
+		// recovery; error = provider failure -> abort recovery.
+		ref, err := m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), version.DataVersion.IntoProto())
 		if err != nil {
-			m.unpinAllReferences()
+			m.releaseAllRefs()
 			return nil, err
 		}
 
-		sm := RecoverCoordQueryViewStateMachine(view)
-		if pinned {
-			m.pinnedReferences[version] = struct{}{}
-		} else {
+		sm := RecoverCoordQueryViewStateMachine(view, ref)
+		if ref == nil {
 			m.prepareTerminalRecovery(sm)
 		}
 		recovered = append(recovered, sm)
@@ -155,25 +166,6 @@ func RecoverShardViewManager(
 	m.advanceUnrecoverableToDropping()
 	m.submitDirtyEvent(m.consumeDirtyEventLocked())
 	return m, nil
-}
-
-type noopDataViewReferenceManager struct{}
-
-func (noopDataViewReferenceManager) PinDataView(context.Context, int64, qviews.DataVersion) error {
-	return nil
-}
-
-func (noopDataViewReferenceManager) RecoverDataViewReference(context.Context, int64, qviews.DataVersion) (bool, error) {
-	return true, nil
-}
-
-func (noopDataViewReferenceManager) UnpinDataView(int64, qviews.DataVersion) {}
-
-func dataViewReferenceManagerOrNoop(references []qviews.DataViewReferenceManager) qviews.DataViewReferenceManager {
-	if len(references) == 0 || references[0] == nil {
-		return noopDataViewReferenceManager{}
-	}
-	return references[0]
 }
 
 func (m *ShardViewManager) SetStatsObserver(observer func(qviews.ShardID, *ShardStats)) {
@@ -231,7 +223,34 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 		fillSegments(stats.Segments, sm.View().GetQueryNode(), baseState, sm.QNReadySegments())
 	}
 
+	m.fillShardRows(stats)
 	return stats
+}
+
+// fillShardRows attaches the published RowNum of each placed segment, read
+// lock-free from the retained DataViewRefs. Each version has its own segment
+// membership and stats. Prefer the newest contributing view with known stats,
+// falling back to older views for segments no longer in the latest version.
+// Recovered versions may have no stats; preserve that distinction from zero.
+func (m *ShardViewManager) fillShardRows(stats *ShardStats) {
+	views := make([]*CoordQueryViewStateMachine, 0, len(m.views))
+	for _, sm := range m.views {
+		if _, contributes := segmentStateFromViewState(sm.State()); contributes && sm.Ref() != nil {
+			views = append(views, sm)
+		}
+	}
+	sort.Slice(views, func(i, j int) bool {
+		return views[i].Version().GT(views[j].Version())
+	})
+	for segmentID, segment := range stats.Segments {
+		for _, sm := range views {
+			if segmentStats, ok := sm.Ref().Stats(segmentID); ok {
+				segment.RowNum = segmentStats.RowNum
+				segment.HasRowNum = true
+				break
+			}
+		}
+	}
 }
 
 func segmentStateFromViewState(state qviews.QueryViewState) (SegmentState, bool) {
@@ -321,16 +340,23 @@ func (m *ShardViewManager) AddPreparing(ctx context.Context, builder *qviews.Que
 	}
 
 	// Assign and build the new view before mutating any existing state. The
-	// DataView pin is the linearization point against collection-scoped GC.
+	// DataView ref acquisition is the linearization point against
+	// collection-scoped GC; the acquired ref is bound to the state machine
+	// at construction. A snapshot used for planning does not itself pin the
+	// version, so GC may have collected it before this acquisition.
 	qv := m.nextQueryVersion(newDV)
 	builder.SetQueryVersion(qv)
 	view := builder.Build()
-	sm := NewCoordQueryViewStateMachine(view)
-	if err := m.dataViewReferences.PinDataView(ctx, view.GetMeta().GetCollectionId(), newDV); err != nil {
+	ref, err := m.dataViewRefs.Get(ctx, view.GetMeta().GetCollectionId(), newDV.IntoProto())
+	if err != nil {
 		m.mu.Unlock()
 		return err
 	}
-	m.pinnedReferences[sm.Version()] = struct{}{}
+	if ref == nil {
+		m.mu.Unlock()
+		return merr.WrapErrServiceUnavailableMsg("DataView %s of collection %d is no longer available; replan the QueryView", newDV.String(), view.GetMeta().GetCollectionId())
+	}
+	sm := NewCoordQueryViewStateMachine(view, ref)
 
 	// Preempt existing Preparing/Ready view.
 	if m.preparingView != nil {
@@ -594,10 +620,6 @@ func (m *ShardViewManager) keyForStateMachine(sm *CoordQueryViewStateMachine) qv
 	}
 }
 
-func (m *ShardViewManager) collectionIDForStateMachine(sm *CoordQueryViewStateMachine) int64 {
-	return sm.View().GetMeta().GetCollectionId()
-}
-
 func resourceReadyPercent(report qviews.QueryViewAtWorkNode) int64 {
 	if _, ok := report.WorkNode().(qviews.StreamingNode); !ok {
 		return 0
@@ -639,7 +661,7 @@ func (m *ShardViewManager) finalizeRemoval(target *CoordQueryViewStateMachine) {
 		return
 	}
 	m.removeView(target)
-	m.unpinReference(target)
+	target.ReleaseRef()
 	m.publishStatsLocked()
 	empty := len(m.views) == 0
 	onEmpty := m.onEmpty
@@ -659,22 +681,11 @@ func (m *ShardViewManager) hasPendingRemoval(target *CoordQueryViewStateMachine)
 	return false
 }
 
-func (m *ShardViewManager) unpinReference(sm *CoordQueryViewStateMachine) {
-	version := sm.Version()
-	if _, ok := m.pinnedReferences[version]; !ok {
-		return
-	}
-	delete(m.pinnedReferences, version)
-	m.dataViewReferences.UnpinDataView(m.collectionIDForStateMachine(sm), version.DataVersion)
-}
-
-func (m *ShardViewManager) unpinAllReferences() {
-	for version := range m.pinnedReferences {
-		sm := m.views[version]
-		if sm != nil {
-			m.dataViewReferences.UnpinDataView(m.collectionIDForStateMachine(sm), version.DataVersion)
-		}
-		delete(m.pinnedReferences, version)
+// releaseAllRefs releases every resident QueryView's DataView ref (recovery
+// abort path). Must be called with m.mu held.
+func (m *ShardViewManager) releaseAllRefs() {
+	for _, sm := range m.views {
+		sm.ReleaseRef()
 	}
 }
 

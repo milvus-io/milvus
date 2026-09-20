@@ -5,8 +5,8 @@ import "github.com/milvus-io/milvus/internal/views/qviews"
 // DataViewSnapshot is the immutable DataView Manager output consumed by
 // SnapshotBuilder and BalancePolicy. It is a native in-memory structure that
 // is decoupled from the viewpb wire format: every segment of every included
-// DataView carries its RowNum/MemSize inline, so the Balancer never needs a
-// separate segment-metadata lookup during computation.
+// DataView carries its RowNum inline, so the Balancer never needs a separate
+// segment-metadata lookup during computation.
 type DataViewSnapshot struct {
 	version     uint64
 	collections map[int64]*CollectionDataView
@@ -29,20 +29,19 @@ type ShardDataView struct {
 
 // PartitionDataView is one partition's segment list within a shard. The
 // segments are embedded (not IDs plus an external lookup), so traversal
-// paths read RowNum/MemSize directly.
+// paths read RowNum directly.
 type PartitionDataView struct {
 	PartitionID int64
 	Segments    []*SegmentDataView
 }
 
 // SegmentDataView carries the per-segment metadata the Balancer needs. RowNum
-// and MemSize are maintained by the DataView manager and never enter the
-// viewpb wire format.
+// is maintained by the DataView manager and never enters the viewpb wire
+// format.
 type SegmentDataView struct {
 	SegmentID   int64
 	PartitionID int64
 	RowNum      int64
-	MemSize     int64
 }
 
 // NewDataViewSnapshot builds an immutable snapshot from the supplied native

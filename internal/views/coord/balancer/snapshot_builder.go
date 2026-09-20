@@ -242,8 +242,15 @@ func (l *rowCountLedger) replaceShardRowStats(shardID qviews.ShardID, stats *coo
 	}
 
 	rowStats := make(ShardRowStats)
-	for segmentID, segment := range stats.Segments {
-		rows := l.segmentRowCounts[segmentID]
+	for _, segment := range stats.Segments {
+		// Row-count priority: the published per-version footprint embedded in
+		// SegmentStats (read from a resident QueryView's DataViewRef) first —
+		// then the DataView snapshot cache, then zero (not yet estimated).
+		// A published zero must not be replaced by another version's estimate.
+		rows := segment.RowNum
+		if !segment.HasRowNum {
+			rows = l.segmentRowCounts[segment.SegmentID]
+		}
 		for nodeID, state := range segment.Nodes {
 			nodeRows := rowStats[nodeID]
 			switch state {

@@ -268,7 +268,7 @@ func TestDirtyViewFlushSchedulerPersistsBeforeSync(t *testing.T) {
 
 func TestShardViewManagerSubmitsOneShardScopedDirtyEvent(t *testing.T) {
 	submitter := &capturedDirtyViewEventSubmitter{}
-	manager := newShardViewManager(context.Background(), testShardID, submitter, nil)
+	manager := newShardViewManager(context.Background(), testShardID, submitter, nil, stubDataViewRefProvider{})
 
 	require.NoError(t, manager.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
 	events := submitter.snapshot()

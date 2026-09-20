@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -37,7 +39,7 @@ func (*immediateLostRecoverySyncer) Close() error { return nil }
 // an empty catalog.
 func newTestRegistry(t *testing.T, catalog *mockCatalog, s *mockSyncer) *ShardViewRegistry {
 	t.Helper()
-	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s)
+	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s, stubDataViewRefProvider{})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	return reg
@@ -143,7 +145,7 @@ func TestRegistry_RecoverWithPersistedViews(t *testing.T) {
 	// we need to populate the listed views manually.
 	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
 
-	reg, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer())
+	reg, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 
@@ -181,7 +183,7 @@ func TestRegistry_RecoveryPublishesImmediateQueryNodeLoss(t *testing.T) {
 	catalog.listed = []*viewpb.QueryViewOfShard{view}
 	s := &immediateLostRecoverySyncer{}
 
-	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s)
+	reg, err := RecoverShardViewRegistry(context.Background(), catalog, s, stubDataViewRefProvider{})
 	require.NoError(t, err)
 	t.Cleanup(reg.Close)
 	require.Equal(t, int64(1), s.lostCallbacks.Load())
@@ -284,11 +286,17 @@ func TestRecoverShardViewRegistryRebuildsReferences(t *testing.T) {
 	catalog := newMockCatalog()
 	view := buildTestViewWithVersion(1, 3, 1, 2)
 	catalog.listed = []*viewpb.QueryViewOfShard{view}
-	refs := &testDataViewReferences{recoverPin: true}
 
-	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), refs)
+	var acquired []qviews.DataVersion
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		acquired = append(acquired, qviews.FromProtoDataVersion(version))
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
 	require.NoError(t, err)
-	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 3, CompactVersion: 1}}, refs.recovered)
+	require.Equal(t, []qviews.DataVersion{{StreamingVersion: 3, CompactVersion: 1}}, acquired)
 }
 
 func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
@@ -296,17 +304,25 @@ func TestRecoverShardViewRegistryAllowsTerminalCleanup(t *testing.T) {
 	view := buildTestViewWithVersion(1, 3, 1, 2)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
 	catalog.listed = []*viewpb.QueryViewOfShard{view}
-	refs := &testDataViewReferences{recoverPin: false}
-	s := newMockSyncer()
 
-	registry, err := RecoverShardViewRegistry(context.Background(), catalog, s, refs)
+	// RefAt reports the referenced DataView version is gone (nil ref): the
+	// recovered view must advance terminally, with no ref released.
+	derefs := 0
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, _ *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		return nil, nil
+	}).Build()
+	mockey.Mock((stubDataViewRef).Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
+	defer mockey.UnPatchAll()
+
+	s := newMockSyncer()
+	registry, err := RecoverShardViewRegistry(context.Background(), catalog, s, stubDataViewRefProvider{})
 	require.NoError(t, err)
 	manager := registry.Get(qviews.NewShardIDFromQVMeta(view.GetMeta()))
 	require.NotNil(t, manager)
 	manager.mu.Lock()
 	require.Equal(t, qviews.QueryViewStateDropping, manager.views[testVersion(3, 1, 2)].State())
 	manager.mu.Unlock()
-	require.Empty(t, refs.unpins)
+	require.Zero(t, derefs)
 
 	version := testVersion(3, 1, 2)
 	simulateNodeResponse(t, s, testSN, version, qviews.QueryViewStateDropped)
@@ -324,11 +340,22 @@ func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
 	viewB.Meta.ReplicaId = 2
 	viewB.Meta.Vchannel = "v1"
 	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
-	refs := &testDataViewReferences{recoverPin: true, failRecoverAfter: 1}
 
-	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), refs)
+	// viewA acquires a ref; viewB's acquisition fails, which must release the
+	// already-acquired ref exactly once (no leak, no double-release).
+	derefs := 0
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		if qviews.FromProtoDataVersion(version).EQ(qviews.DataVersion{StreamingVersion: 4, CompactVersion: 1}) {
+			return nil, errors.New("recover failed")
+		}
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	mockey.Mock((stubDataViewRef).Deref).To(func(_ stubDataViewRef) { derefs++ }).Build()
+	defer mockey.UnPatchAll()
+
+	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
 	require.EqualError(t, err, "recover failed")
-	require.Len(t, refs.unpins, 1)
+	require.Equal(t, 1, derefs)
 }
 
 func TestRegistry_SnapshotStatsForMultipleShards(t *testing.T) {

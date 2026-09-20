@@ -144,7 +144,7 @@ func consumePendingSyncForTest(sm *CoordQueryViewStateMachine) []qviews.QueryVie
 // Verifies both State() and Consume outputs at every step.
 func TestNormalFlow_SingleQN(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	// --- Initial: Preparing ---
 	assert.Equal(t, qviews.QueryViewStatePreparing, sm.State())
@@ -204,7 +204,7 @@ func TestNormalFlow_SingleQN(t *testing.T) {
 // requires ALL QNs to report Ready, and verifies Consume at each step.
 func TestNormalFlow_MultipleQN(t *testing.T) {
 	view := buildTestView(3)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// QN1 Ready — no transition, no pending
@@ -234,7 +234,7 @@ func TestNormalFlow_MultipleQN(t *testing.T) {
 // needs ALL nodes (SN + all QNs) to report Dropped.
 func TestNormalFlow_DroppingRequiresAllNodesDropped(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Fast-forward to Dropping state
@@ -269,7 +269,7 @@ func TestNormalFlow_DroppingRequiresAllNodesDropped(t *testing.T) {
 
 func TestQueryNodeLost_DroppingCountsAsDropped(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Fast-forward to Dropping state.
@@ -309,7 +309,7 @@ func TestQueryNodeLost_DroppingCountsAsDropped(t *testing.T) {
 // reports Up while Coord is still in Preparing. Fast-forward to Up.
 func TestPreparing_SNAlreadyUp_FastForward(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// QN1 Ready, SN Up → fast-forward to Up
@@ -327,7 +327,7 @@ func TestPreparing_SNAlreadyUp_FastForward(t *testing.T) {
 // happens after ALL QNs are also Ready.
 func TestPreparing_SNUpBeforeQNReady_WaitsForQN(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// SN reports Up but QNs not ready — no transition, no pending
@@ -356,7 +356,7 @@ func TestPreparing_SNUpBeforeQNReady_WaitsForQN(t *testing.T) {
 // pendingPersist=Unrecoverable, no sync.
 func TestPreparing_SNUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUnrecoverable))
@@ -368,7 +368,7 @@ func TestPreparing_SNUnrecoverable(t *testing.T) {
 // TestPreparing_QNUnrecoverable: Preparing → Unrecoverable via QN.
 func TestPreparing_QNUnrecoverable(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
@@ -382,7 +382,7 @@ func TestPreparing_QNUnrecoverable(t *testing.T) {
 
 func TestUnrecoverableClearsPendingPreparingSync(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	// The initial Preparing flush has not been consumed when the target QN is
 	// lost, so the Unrecoverable transition must cancel that stale sync.
@@ -396,7 +396,7 @@ func TestUnrecoverableClearsPendingPreparingSync(t *testing.T) {
 
 func TestUnrecoverableClearsPendingUpSync(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Reaching Ready queues an Up sync. A later Unrecoverable report must
@@ -415,7 +415,7 @@ func TestUnrecoverableClearsPendingUpSync(t *testing.T) {
 // TestReady_SNUnrecoverable: Ready → Unrecoverable via SN.
 func TestReady_SNUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Ready
@@ -433,7 +433,7 @@ func TestReady_SNUnrecoverable(t *testing.T) {
 // TestReady_QNUnrecoverable: Ready → Unrecoverable via QN.
 func TestReady_QNUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Ready
@@ -451,7 +451,7 @@ func TestReady_QNUnrecoverable(t *testing.T) {
 // TestUp_SNUnrecoverable: Up → Unrecoverable via SN.
 func TestUp_SNUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Up
@@ -471,7 +471,7 @@ func TestUp_SNUnrecoverable(t *testing.T) {
 // TestUp_QNUnrecoverable: Up → Unrecoverable via QN.
 func TestUp_QNUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Up
@@ -492,7 +492,7 @@ func TestUp_QNUnrecoverable(t *testing.T) {
 // Unrecoverable → Dropping. pendingSync=Dropped, no persist.
 func TestUnrecoverable_EnterDropping_ToDropping(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUnrecoverable))
@@ -508,7 +508,7 @@ func TestUnrecoverable_EnterDropping_ToDropping(t *testing.T) {
 // Unrecoverable → Dropping → Dropped with Consume checks at every step.
 func TestUnrecoverable_FullCleanupCycle(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// → Unrecoverable
@@ -584,7 +584,7 @@ func TestIdempotency_EnterDown_NotInUp(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			view := buildTestView(1)
-			sm := NewCoordQueryViewStateMachine(view)
+			sm := NewCoordQueryViewStateMachine(view, nil)
 			drainPending(sm)
 			tc.setup(sm, view)
 			assert.Equal(t, tc.state, sm.State())
@@ -646,7 +646,7 @@ func TestIdempotency_EnterDropping_NotInUnrecoverable(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			view := buildTestView(1)
-			sm := NewCoordQueryViewStateMachine(view)
+			sm := NewCoordQueryViewStateMachine(view, nil)
 			drainPending(sm)
 			tc.setup(sm, view)
 			assert.Equal(t, tc.state, sm.State())
@@ -663,7 +663,7 @@ func TestIdempotency_EnterDropping_NotInUnrecoverable(t *testing.T) {
 // node report multiple times produces no spurious pending operations.
 func TestIdempotency_DuplicateNodeReports(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Report QN Ready three times — each time no transition, no pending
@@ -689,7 +689,7 @@ func TestIdempotency_DuplicateNodeReports(t *testing.T) {
 // TestIdempotency_EnterDown_CalledTwice verifies second EnterDown is no-op.
 func TestIdempotency_EnterDown_CalledTwice(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Up
@@ -714,7 +714,7 @@ func TestIdempotency_EnterDown_CalledTwice(t *testing.T) {
 // TestIdempotency_EnterDropping_CalledTwice verifies second EnterDropping is no-op.
 func TestIdempotency_EnterDropping_CalledTwice(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUnrecoverable))
@@ -741,7 +741,7 @@ func TestRecovery_Preparing(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 	assert.Equal(t, qviews.QueryViewStatePreparing, sm.State())
 	assertNoPendingPersist(t, sm)
 	assertPendingSyncState(t, sm, qviews.QueryViewStatePreparing)
@@ -761,7 +761,7 @@ func TestRecovery_Up(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 	assert.Equal(t, qviews.QueryViewStateUp, sm.State())
 	assertNoPending(t, sm)
 
@@ -777,7 +777,7 @@ func TestRecovery_Down(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateDown
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 	assert.Equal(t, qviews.QueryViewStateDown, sm.State())
 	assertNoPendingPersist(t, sm)
 	assertPendingSyncState(t, sm, qviews.QueryViewStateDown)
@@ -794,7 +794,7 @@ func TestRecovery_Unrecoverable(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUnrecoverable
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 	assert.Equal(t, qviews.QueryViewStateUnrecoverable, sm.State())
 	assertNoPending(t, sm)
 
@@ -819,7 +819,7 @@ func TestRecovery_InvalidState(t *testing.T) {
 			view := buildTestView(1)
 			view.Meta.State = state
 			assert.Panics(t, func() {
-				RecoverCoordQueryViewStateMachine(view)
+				RecoverCoordQueryViewStateMachine(view, nil)
 			}, "recovery from %s should panic", state)
 		})
 	}
@@ -831,7 +831,7 @@ func TestRecovery_Preparing_ThenUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStatePreparing
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUnrecoverable))
@@ -846,7 +846,7 @@ func TestRecovery_Up_ThenUnrecoverable(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateUnrecoverable))
 	assert.Equal(t, qviews.QueryViewStateUnrecoverable, sm.State())
@@ -868,7 +868,7 @@ func TestCoordQueryViewStateMachineExposesOnlyAtomicFlush(t *testing.T) {
 
 func TestConsumeFlush_CoalescesUnflushedTransitions(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	// None of these intermediate transitions has been externalized yet.
 	sm.EnterUnrecoverable()
@@ -888,7 +888,7 @@ func TestConsumeFlush_CoalescesUnflushedTransitions(t *testing.T) {
 
 func TestConsumeFlush_ConsumeOnce(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	flush := sm.ConsumeFlush()
 	require.NotNil(t, flush.Persist)
@@ -904,7 +904,7 @@ func TestConsumeFlush_ConsumeOnce(t *testing.T) {
 // TestPendingPersist_Dropped_MeansDelete: Dropped persist signals ETCD delete.
 func TestPendingPersist_Dropped_MeansDelete(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Drive to Dropped
@@ -925,7 +925,7 @@ func TestPendingPersist_Dropped_MeansDelete(t *testing.T) {
 // consumes, the last pending value wins.
 func TestPendingOverwrite_LastWins(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Ready — sets pendingSync=Up
@@ -948,7 +948,7 @@ func TestPendingOverwrite_LastWins(t *testing.T) {
 // TestReady_SNNotUpYet_RePushUp: SN reports non-Up in Ready → re-push Up.
 func TestReady_SNNotUpYet_RePushUp(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Ready
@@ -967,7 +967,7 @@ func TestReady_SNNotUpYet_RePushUp(t *testing.T) {
 // TestReady_SNReportsPreparing_RePushUp: SN reports Preparing in Ready → re-push Up.
 func TestReady_SNReportsPreparing_RePushUp(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Ready
@@ -985,7 +985,7 @@ func TestReady_SNReportsPreparing_RePushUp(t *testing.T) {
 // TestDown_SNNotDownYet_RePushDown: SN reports non-Down in Down → re-push Down.
 func TestDown_SNNotDownYet_RePushDown(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Down
@@ -1008,7 +1008,7 @@ func TestDown_SNNotDownYet_RePushDown(t *testing.T) {
 // (e.g., Coord crash recovery regressed from Dropping to Down) → skip to Dropping.
 func TestDown_SNDropped_FastForwardToDropping(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Down
@@ -1031,7 +1031,7 @@ func TestDown_SNDropped_FastForwardToDropping(t *testing.T) {
 // Dropping → re-push Dropped.
 func TestDropping_NodeNotDropped_RePushDropped(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Drive to Dropping
@@ -1051,7 +1051,7 @@ func TestDropping_NodeNotDropped_RePushDropped(t *testing.T) {
 // Dropping → re-push Dropped.
 func TestDropping_QNNotDropped_RePushDropped(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Drive to Dropping
@@ -1075,7 +1075,7 @@ func TestDropping_QNNotDropped_RePushDropped(t *testing.T) {
 // and no spurious pending operations are generated.
 func TestUnrecoverable_IgnoresNodeReports(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUnrecoverable))
@@ -1108,7 +1108,7 @@ func TestUnrecoverable_IgnoresNodeReports(t *testing.T) {
 // and no pending operations.
 func TestDown_QNReportIgnored(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Down
@@ -1139,7 +1139,7 @@ func TestDown_QNReportIgnored(t *testing.T) {
 // don't trigger transitions or pending operations.
 func TestReady_QNReportIgnored(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Ready
@@ -1162,7 +1162,7 @@ func TestReady_QNReportIgnored(t *testing.T) {
 // reports produce no state change and no pending operations.
 func TestUp_NormalReports_NoPending(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Up
@@ -1194,7 +1194,7 @@ func TestUp_NormalReports_NoPending(t *testing.T) {
 // reported by QNs are tracked and no spurious pending is generated.
 func TestQNReadySegments_TrackedDuringPreparing(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady, 100, 101))
@@ -1210,7 +1210,7 @@ func TestQNReadySegments_TrackedDuringPreparing(t *testing.T) {
 // TestQNReadySegments_UpdatedOnReReport validates re-reports update segments.
 func TestQNReadySegments_UpdatedOnReReport(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady, 100))
@@ -1227,7 +1227,7 @@ func TestQNReadySegments_UpdatedOnReReport(t *testing.T) {
 // TestView_ReturnsSameReference ensures View() returns the original proto.
 func TestView_ReturnsSameReference(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	assert.Equal(t, view, sm.View())
 }
 
@@ -1238,7 +1238,7 @@ func TestView_ReturnsSameReference(t *testing.T) {
 // TestNewStateMachine_InitialState validates all initial properties and pending.
 func TestNewStateMachine_InitialState(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	assert.Equal(t, qviews.QueryViewStatePreparing, sm.State())
 	assert.Equal(t, view, sm.View())
@@ -1260,7 +1260,7 @@ func TestNewStateMachine_InitialState(t *testing.T) {
 // TestNoQN_NormalFlow validates state machine with zero query nodes.
 func TestNoQN_NormalFlow(t *testing.T) {
 	view := buildTestView(0)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// SN Ready → all ready (no QNs to wait for) → Ready
@@ -1279,7 +1279,7 @@ func TestNoQN_NormalFlow(t *testing.T) {
 // TestNoQN_DroppingOnlySN validates zero QN Dropping→Dropped needs only SN.
 func TestNoQN_DroppingOnlySN(t *testing.T) {
 	view := buildTestView(0)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Fast path to Dropping
@@ -1299,7 +1299,7 @@ func TestNoQN_DroppingOnlySN(t *testing.T) {
 // pending until SN is Ready.
 func TestPreparing_QNReportsBeforeSN(t *testing.T) {
 	view := buildTestView(3)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	for i := 1; i <= 3; i++ {
@@ -1318,7 +1318,7 @@ func TestPreparing_QNReportsBeforeSN(t *testing.T) {
 // so SN Unrecoverable triggers re-push Down (not Unrecoverable transition).
 func TestDown_UnrecoverableFromSN(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Down
@@ -1339,7 +1339,7 @@ func TestDown_UnrecoverableFromSN(t *testing.T) {
 
 func TestDown_UnrecoverableFromQN(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Advance to Down
@@ -1362,7 +1362,7 @@ func TestDown_UnrecoverableFromQN(t *testing.T) {
 // reports produce no pending until last node completes.
 func TestDropping_PartialDropped_StaysDropping(t *testing.T) {
 	view := buildTestView(3)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUnrecoverable))
@@ -1393,7 +1393,7 @@ func TestDropping_PartialDropped_StaysDropping(t *testing.T) {
 // TestPendingSync_PreservesMeta validates pending sync views preserve metadata.
 func TestPendingSync_PreservesMeta(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	views := consumePendingSyncForTest(sm)
 	require.NotEmpty(t, views)
@@ -1406,7 +1406,7 @@ func TestPendingSync_PreservesMeta(t *testing.T) {
 // TestPendingPersist_PreservesMeta validates pending persist views preserve metadata.
 func TestPendingPersist_PreservesMeta(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	persist := consumePendingPersistForTest(sm)
 	require.NotNil(t, persist)
@@ -1418,7 +1418,7 @@ func TestPendingPersist_PreservesMeta(t *testing.T) {
 // TestViewWithState_IsClone verifies returned views are clones, not references.
 func TestViewWithState_IsClone(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 
 	persist := consumePendingPersistForTest(sm)
 	require.NotNil(t, persist)
@@ -1435,7 +1435,7 @@ func TestViewWithState_IsClone(t *testing.T) {
 // fails during Preparing, Consume verified at every step.
 func TestCompleteLifecycle_3QN_ErrorRecovery(t *testing.T) {
 	view := buildTestView(3)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// QN1 Ready — no transition
@@ -1477,7 +1477,7 @@ func TestCompleteLifecycle_UpThenRecovery(t *testing.T) {
 	view := buildTestView(2)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
 
-	sm := RecoverCoordQueryViewStateMachine(view)
+	sm := RecoverCoordQueryViewStateMachine(view, nil)
 	assert.Equal(t, qviews.QueryViewStateUp, sm.State())
 	assertNoPending(t, sm)
 
@@ -1512,7 +1512,7 @@ func TestCompleteLifecycle_UpThenRecovery(t *testing.T) {
 // TestDropped_IsTerminal: no operations produce state change or pending.
 func TestDropped_IsTerminal(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	// Drive to Dropped
@@ -1552,7 +1552,7 @@ func TestDropped_IsTerminal(t *testing.T) {
 // TestPreparing_SNPreparing_NoTransition: SN Preparing does not advance.
 func TestPreparing_SNPreparing_NoTransition(t *testing.T) {
 	view := buildTestView(1)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
@@ -1570,7 +1570,7 @@ func TestPreparing_SNPreparing_NoTransition(t *testing.T) {
 // TestPreparing_SNReadyBeforeAllQN: SN Ready arrives first.
 func TestPreparing_SNReadyBeforeAllQN(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
@@ -1591,7 +1591,7 @@ func TestPreparing_SNReadyBeforeAllQN(t *testing.T) {
 // TestPreparing_AllQNReadyThenSNReady: all QNs Ready before SN.
 func TestPreparing_AllQNReadyThenSNReady(t *testing.T) {
 	view := buildTestView(2)
-	sm := NewCoordQueryViewStateMachine(view)
+	sm := NewCoordQueryViewStateMachine(view, nil)
 	drainPending(sm)
 
 	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))

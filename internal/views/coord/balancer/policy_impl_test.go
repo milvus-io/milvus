@@ -86,8 +86,8 @@ func TestDefaultBalancePolicy_MandatoryInitialLoadAllocatesLargestRowCountFirst(
 	snap := baseSnap(cfg, shardID)
 	snap.Config = policyTestConfig()
 	setTestDataSnapshot(snap, collectionID, qviews.DataVersion{StreamingVersion: 1}, newMapSegmentSnapshot(map[int64]*SegmentDataView{
-		101: {SegmentID: 101, PartitionID: 1, MemSize: 800, RowNum: 100_000},
-		102: {SegmentID: 102, PartitionID: 1, MemSize: 100, RowNum: 800_000},
+		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
+		102: {SegmentID: 102, PartitionID: 1, RowNum: 800_000},
 	}), shardDataView("v0", 1, 101, 102))
 	snap.Nodes = map[int64]*BalanceNode{
 		1: {NodeID: 1, Alive: true, ResourceGroup: "rg1"},
