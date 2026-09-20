@@ -272,12 +272,15 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		storage.WithDownloader(t.binlogIO.Download),
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithCollectionID(t.collectionID),
-		// The sort below keeps every input record until it has written its
-		// output, so reading the chunks whole and ahead of the sort costs no
-		// extra peak memory; readers that stream their input must not do this.
+		// The sort below keeps every decoded input record until it has written
+		// its output, so decoding chunks ahead of it adds nothing to the peak;
+		// readers that stream their input must not do this. What reading ahead
+		// does add is the raw bytes of the rounds in flight, bounded by
+		// sortReadConcurrency * sortReadBufferSize.
 		storage.WithParallelChunkRead(
 			paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt(),
 			paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize()),
+		storage.WithBufferSize(paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize()),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))

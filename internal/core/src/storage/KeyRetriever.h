@@ -35,9 +35,11 @@ GetArrowReaderProperties();
 // The configured properties read lazily: arrow fetches a coalesced range only
 // when the decoder first touches it, so one file has one request in flight.
 // With eager_range_size_bytes > 0 the ranges are instead cut at that size and
-// all submitted to arrow's IO pool when the read starts. The bytes a read
-// holds are the same either way; only the number of requests carrying them
-// changes. eager_range_size_bytes <= 0 returns the configured properties
+// all submitted to arrow's IO pool when the read starts. Arrow's read cache
+// never evicts within a read, lazy or not, so a read ends up holding the raw
+// bytes of all its row groups either way; what bounds that is how many row
+// groups the caller puts into one read (the packed reader's buffer size), not
+// this setting. eager_range_size_bytes <= 0 returns the configured properties
 // unchanged.
 parquet::ArrowReaderProperties
 GetArrowReaderProperties(int64_t eager_range_size_bytes);

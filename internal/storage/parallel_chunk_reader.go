@@ -48,11 +48,12 @@ var _ RecordReader = (*parallelChunkRecordReader)(nil)
 // path, which is the difference from IterativeRecordReader, where the consumer
 // opens every chunk and triggers every read itself.
 //
-// Workers do not wait for the consumer. Up to the whole input can be resident
+// Workers do not wait for the consumer. Up to the whole input can be decoded
 // before the first record is consumed, so this reader is only for callers that
-// materialize their input anyway (a sort), for which reading ahead moves the
-// memory peak earlier without raising it. Callers that stream must keep using
-// IterativeRecordReader.
+// materialize their input anyway (a sort); callers that stream must keep using
+// IterativeRecordReader. What the reader adds on top of the decoded input is
+// the state of the chunk readers still open, at most concurrency of them, and
+// it is open's job to bound each one.
 type parallelChunkRecordReader struct {
 	ctx         context.Context
 	numChunks   int

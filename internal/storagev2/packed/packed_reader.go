@@ -54,11 +54,13 @@ type readerOptions struct {
 	eagerRangeSize int64
 }
 
-// WithEagerRangeSize makes every read fetch all of its byte ranges at once,
-// cut at rangeSize bytes, instead of one coalesced range at a time. A read
-// holds the same bytes either way, so this trades request count for latency,
-// not memory. It pays off together with a large buffer size, where one read
-// spans many ranges. rangeSize <= 0 keeps the default lazy reads.
+// WithEagerRangeSize makes every read round fetch all of its byte ranges at
+// once, cut at rangeSize bytes, instead of one coalesced range at a time. The
+// raw bytes of a round stay cached until the next round either way (arrow's
+// read cache never evicts within a round), so for a given buffer size this
+// changes how many requests are in flight, not how much a round holds. The
+// buffer size is what bounds that memory. rangeSize <= 0 keeps the default lazy
+// reads.
 func WithEagerRangeSize(rangeSize int64) ReaderOption {
 	return func(o *readerOptions) {
 		o.eagerRangeSize = rangeSize

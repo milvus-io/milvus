@@ -138,16 +138,23 @@ func WithBufferSize(bufferSize int64) RwOption {
 	}
 }
 
-// WithParallelChunkRead makes a StorageV2/V3 binlog reader read its chunks
-// whole and up to concurrency of them at once, still delivering records in
-// order. Within a chunk every byte range is fetched concurrently, cut at
-// rangeSize bytes (<= 0 keeps one coalesced range at a time).
+// WithParallelChunkRead makes a StorageV2/V3 binlog reader read up to
+// concurrency chunks at once, still delivering records in order. Within a read
+// round every byte range is fetched concurrently, cut at rangeSize bytes;
+// rangeSize <= 0 fetches one coalesced range at a time, which changes the
+// request pattern only, not the memory described below.
 //
-// The reader does not wait for the caller: up to the whole input may be in
-// memory before the first record is consumed, and WithBufferSize is ignored.
-// Use it only when the caller materializes its input anyway, such as a sort.
-// concurrency <= 1 keeps the serial, memory-bounded reader. Segments read
-// through a manifest are not affected.
+// Memory, on top of what the caller keeps:
+//   - Decoded records: the reader does not wait for the caller, so up to the
+//     whole input may be decoded before the first record is consumed. Use this
+//     option only when the caller materializes its input anyway, such as a sort.
+//   - Raw file bytes: each in-flight chunk holds one read round, which is at
+//     most WithBufferSize, until the round is replaced or the chunk is closed.
+//     The total is up to concurrency * WithBufferSize, where the serial reader
+//     holds one round.
+//
+// concurrency <= 1 keeps the serial reader and is the way to switch this off.
+// Segments read through a manifest are not affected.
 func WithParallelChunkRead(concurrency int, rangeSize int64) RwOption {
 	return func(options *rwOptions) {
 		options.chunkReadConcurrency = concurrency

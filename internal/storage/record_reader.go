@@ -200,8 +200,9 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 }
 
 // newPackedChunksRecordReader reads the packed chunks at paths in order. Callers
-// that opted into WithParallelChunkRead get every chunk read whole and several
-// at once; everyone else gets the serial, memory-bounded reader.
+// that opted into WithParallelChunkRead get several chunks read at once;
+// everyone else gets the serial reader. Either way an open chunk reader loads
+// at most options.bufferSize per read round.
 func newPackedChunksRecordReader(
 	ctx context.Context,
 	paths [][]string,
@@ -213,9 +214,7 @@ func newPackedChunksRecordReader(
 		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader)
 	}
 	return newParallelChunkRecordReader(ctx, len(paths), options.chunkReadConcurrency, func(chunk int) (RecordReader, error) {
-		// The whole chunk is kept anyway, so bounding the read buffer would
-		// only split its download into rounds that run one after another.
-		reader, err := newPackedRecordReader(paths[chunk], schema, packed.UnlimitedReadBufferSize, options.storageConfig,
+		reader, err := newPackedRecordReader(paths[chunk], schema, options.bufferSize, options.storageConfig,
 			storagePluginContext, options.externalReader, packed.WithEagerRangeSize(options.chunkReadRangeSize))
 		if err != nil {
 			return nil, err

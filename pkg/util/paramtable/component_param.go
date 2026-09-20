@@ -44,6 +44,11 @@ import (
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
 	DefaultIndexSliceSize = 16
+	// defaultSortReadConcurrencyCap caps dataNode.compaction.sortReadConcurrency
+	// when it is derived from the CPU count: each chunk read at once keeps one
+	// read round of raw bytes resident, and 8 chunks already keep far more
+	// requests queued than arrow's IO pool serves at a time.
+	defaultSortReadConcurrencyCap = 8
 	// Load admission defaults apply only when async loading is enabled and the
 	// corresponding parameter is absent. Explicit values, including 0, win.
 	DefaultLoadTransientBudgetBytes = 2 * 1024 * 1024 * 1024
@@ -8139,6 +8144,7 @@ type dataNodeConfig struct {
 	MaxCompactionConcurrency ParamItem `refreshable:"true"`
 	SortReadConcurrency      ParamItem `refreshable:"true"`
 	SortReadRangeSize        ParamItem `refreshable:"true"`
+	SortReadBufferSize       ParamItem `refreshable:"true"`
 	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
@@ -8645,15 +8651,19 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Version: "3.0.2",
 		Doc: "How many input chunks (one chunk is the set of binlog files written by one sync) a sort compaction reads at the same time. " +
 			"Each chunk is opened, read to its end and closed on its own, so neither opening a chunk nor any of its reads waits " +
-			"for the chunks before it; records are still delivered in order. A sort holds its whole input in memory regardless, " +
-			"so reading ahead moves the memory peak earlier without raising it. 1 reads the chunks strictly one after another. " +
-			"Values <= 0 mean the number of CPU cores. The requests actually in flight are further capped by arrow's IO thread " +
-			"pool (common.arrow.ioThreadPoolCoefficient). Segments read through a manifest are not affected.",
+			"for the chunks before it; records are still delivered in order. " +
+			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. " +
+			"Every chunk being read additionally holds the raw bytes of one read round, so the read phase adds up to " +
+			"sortReadConcurrency * sortReadBufferSize on top of the input, per sort task. " +
+			"1 reads the chunks strictly one after another with a single round resident, and is the way to switch this off. " +
+			"Values <= 0 mean the number of CPU cores, capped at 8 to keep that product small by default. " +
+			"The requests actually in flight are further capped by arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient). " +
+			"Segments read through a manifest are not affected.",
 		DefaultValue: "0",
 		Formatter: func(v string) string {
 			n, err := strconv.Atoi(v)
 			if err != nil || n <= 0 {
-				return strconv.Itoa(hardware.GetCPUNum())
+				return strconv.Itoa(min(hardware.GetCPUNum(), defaultSortReadConcurrencyCap))
 			}
 			return v
 		},
@@ -8665,13 +8675,26 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Key:     "dataNode.compaction.sortReadRangeSize",
 		Version: "3.0.2",
 		Doc: "Target size of one object-storage request when a sort compaction reads a chunk with sortReadConcurrency > 1. " +
-			"All byte ranges of a chunk file are cut at this size and fetched concurrently instead of one coalesced range at a time. " +
+			"All byte ranges of a read round are cut at this size and fetched concurrently instead of one coalesced range at a time. " +
 			"Smaller values give more concurrency but more requests, which object stores bill for and may throttle. " +
-			"0 keeps one range at a time. Accepts a byte count or a size such as 8m.",
+			"0 fetches one range at a time; this changes the request pattern only, not memory " +
+			"(see sortReadConcurrency and sortReadBufferSize for that). Accepts a byte count or a size such as 8m.",
 		DefaultValue: "8m",
 		Export:       false,
 	}
 	p.SortReadRangeSize.Init(base.mgr)
+
+	p.SortReadBufferSize = ParamItem{
+		Key:     "dataNode.compaction.sortReadBufferSize",
+		Version: "3.0.2",
+		Doc: "Size of one read round of a chunk when a sort compaction reads with sortReadConcurrency > 1. A chunk larger than this " +
+			"is read in several rounds, one after another; the raw bytes of a round stay resident until the next round or the end " +
+			"of the chunk. It bounds the memory a chunk being read adds (see sortReadConcurrency) and, divided by " +
+			"sortReadRangeSize, how many requests one chunk keeps in flight. Accepts a byte count or a size such as 64m.",
+		DefaultValue: "64m",
+		Export:       false,
+	}
+	p.SortReadBufferSize.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
