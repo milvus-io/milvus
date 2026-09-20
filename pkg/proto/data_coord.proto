@@ -1497,6 +1497,7 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
 }
 
 enum ImportTaskStateV2 {

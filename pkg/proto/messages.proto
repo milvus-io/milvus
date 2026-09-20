@@ -322,7 +322,10 @@ message RollbackTxnMessageHeader {}
 // Just do nothing now.
 message TxnMessageHeader {}
 
-message ImportMessageHeader {}
+message ImportMessageHeader {
+    // Absent on legacy jobs, whose commit is completed by per-channel RPCs.
+    bool commit_by_coordinator = 1;
+}
 
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.
 message SchemaChangeMessageHeader{
@@ -722,6 +725,7 @@ message RefreshExternalCollectionMessageBody {}
 message CommitImportMessageHeader {
     int64 collection_id = 1;
     int64 job_id        = 2;
+    bool commit_by_coordinator = 3; // Inherited from the Import job; false for legacy WAL messages.
 }
 
 // CommitImportMessageBody is the body of commit import message.

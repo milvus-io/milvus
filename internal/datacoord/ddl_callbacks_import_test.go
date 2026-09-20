@@ -946,7 +946,7 @@ func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 
 func buildCommitImportBroadcastResult(jobID int64) message.BroadcastResultCommitImportMessageV2 {
 	broadcastMsg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
+		WithHeader(&message.CommitImportMessageHeader{JobId: jobID, CommitByCoordinator: true}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
 		MustBuildBroadcast()
@@ -1273,6 +1273,22 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 // CommitImport targets business channels and CChannel for the unified callback.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
+}
+
+func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	defer streaming.SetWALForTest(previous)
+	capture := &captureBroadcastAPI{}
+	patch := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(capture, nil).Build()
+	defer patch.UnPatch()
+	for _, coordinator := range []bool{false, true} {
+		job := &importJob{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, CommitByCoordinator: coordinator}}
+		err := (&Server{}).broadcastCommitImportMessage(context.Background(), job)
+		assert.NoError(t, err)
+		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.captured)
+		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+	}
 }
 
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the

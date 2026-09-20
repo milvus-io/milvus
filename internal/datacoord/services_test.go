@@ -6337,14 +6337,15 @@ func TestAbortImport_UserAbortedJobIsIdempotent(t *testing.T) {
 	assert.True(t, merr.Ok(resp))
 }
 
-func TestHandleCommitVchannelRPCIsNoOp(t *testing.T) {
-	server := &Server{}
+func TestHandleCommitVchannelRPCIsNoOpForCoordinatorOwnedJob(t *testing.T) {
+	callbacks, _, _ := newImportCommitCallbackTest(t)
+	server := callbacks.Server
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 	for _, ts := range []uint64{0, 300, 500} {
 		resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{
-			JobId: 3001, Vchannel: "vchan-0", CommitTimestamp: ts,
+			JobId: 1, Vchannel: "vchan-0", CommitTimestamp: ts,
 		})
-		require.NoError(t, merr.CheckRPCCall(resp, err), "no job or segment metadata is accessed")
+		require.NoError(t, merr.CheckRPCCall(resp, err), "old nodes must not commit coordinator-owned jobs")
 	}
 	server.stateCode.Store(commonpb.StateCode_Abnormal)
 	resp, err := server.HandleCommitVchannel(context.Background(), &datapb.HandleCommitVchannelRequest{})

@@ -2116,7 +2116,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 // on job-not-found). Instead the job is created directly in Failed state — a
 // terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
 // and the failure stays visible via GetImportProgress.
-func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
 			Status: merr.Status(err),
@@ -2185,21 +2185,22 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:          jobID,
-			CollectionID:   in.GetCollectionID(),
-			CollectionName: in.GetCollectionName(),
-			PartitionIDs:   in.GetPartitionIDs(),
-			Vchannels:      importCollectionInfo.VChannelNames,
-			Schema:         in.GetSchema(),
-			TimeoutTs:      timeoutTs,
-			CleanupTs:      math.MaxUint64,
-			State:          internalpb.ImportJobState_Pending,
-			Files:          files,
-			Options:        in.GetOptions(),
-			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels: in.GetChannelNames(),
-			DataTs:         in.GetDataTimestamp(),
-			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+			JobID:               jobID,
+			CollectionID:        in.GetCollectionID(),
+			CollectionName:      in.GetCollectionName(),
+			PartitionIDs:        in.GetPartitionIDs(),
+			Vchannels:           importCollectionInfo.VChannelNames,
+			Schema:              in.GetSchema(),
+			TimeoutTs:           timeoutTs,
+			CleanupTs:           math.MaxUint64,
+			State:               internalpb.ImportJobState_Pending,
+			Files:               files,
+			Options:             in.GetOptions(),
+			CreateTime:          createTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels:      in.GetChannelNames(),
+			DataTs:              in.GetDataTimestamp(),
+			AutoCommit:          importutilv2.IsAutoCommit(in.GetOptions()),
+			CommitByCoordinator: commitByCoordinator,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -3180,8 +3181,9 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
-			CollectionId: job.GetCollectionID(),
-			JobId:        job.GetJobID(),
+			CollectionId:        job.GetCollectionID(),
+			JobId:               job.GetJobID(),
+			CommitByCoordinator: job.GetCommitByCoordinator(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast(vchannels).
@@ -3380,11 +3382,34 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 	)
 }
 
-// HandleCommitVchannel is retained for existing callers. Import visibility and
-// completion are owned by commitImportV2AckCallback, not per-channel RPCs.
+// HandleCommitVchannel completes legacy Import commits. New jobs are committed
+// by the WAL callback; old StreamingNodes may still send this RPC for them.
 func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
+	}
+	job := s.importMeta.GetJob(ctx, req.GetJobId())
+	if job != nil && job.GetCommitByCoordinator() {
+		return merr.Success(), nil
+	}
+	// Fetch IDs before importMeta takes its write lock. The callback must not
+	// reenter importMeta while updating segment visibility.
+	ids := s.getImportSegmentIDsByVchannel(ctx, req.GetJobId(), req.GetVchannel())
+	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
+		ops := make([]UpdateOperator, 0, len(ids)*2)
+		for _, id := range ids {
+			ops = append(ops, UpdateCommitTimestamp(id, req.GetCommitTimestamp()), UpdateIsImporting(id, false))
+		}
+		if len(ops) == 0 {
+			return nil
+		}
+		return s.meta.UpdateSegmentsInfo(ctx, ops...)
+	})
+	if err != nil {
+		return merr.Status(err), nil
+	}
+	if job != nil && s.meta != nil {
+		s.meta.recomputeDataView(ctx, job.GetCollectionID())
 	}
 	return merr.Success(), nil
 }

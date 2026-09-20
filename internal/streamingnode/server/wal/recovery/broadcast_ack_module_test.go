@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,9 +14,64 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
+
+func TestBroadcastAckLegacyImportRetriesBeforeAck(t *testing.T) {
+	scheduler := &recordingAckTaskScheduler{}
+	module := newBroadcastAckModule(moduleapi.Runtime{Scheduler: scheduler})
+	t.Cleanup(module.Close)
+	module.retryDelay = time.Millisecond
+	var events []string
+	attempt := 0
+	patch := mockey.Mock(commitLegacyImportVChannel).To(func(_ context.Context, req *datapb.HandleCommitVchannelRequest) error {
+		require.EqualValues(t, 42, req.GetJobId())
+		require.Equal(t, "v1", req.GetVchannel())
+		require.EqualValues(t, 100, req.GetCommitTimestamp())
+		events = append(events, "rpc")
+		attempt++
+		if attempt == 1 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	module.ack = func(context.Context, message.ImmutableMessage) error {
+		events = append(events, "ack")
+		return nil
+	}
+	msg := newBroadcastAckMessageWith(t, message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{JobId: 42}).
+		WithBody(&message.CommitImportMessageBody{}).WithBroadcast([]string{"v1"}), 1, 100)
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	owner := tracker.Track(msg)
+	module.Accept(owner)
+	require.NoError(t, scheduler.waitTask(t).Execute(context.Background()))
+	require.Equal(t, []string{"rpc"}, events)
+	require.Zero(t, tracker.CompletedPoint().TimeTick)
+	require.Same(t, msg, owner.Message())
+	require.NoError(t, scheduler.waitTaskAfter(t, 1).Execute(context.Background()))
+	require.Equal(t, []string{"rpc", "rpc", "ack"}, events)
+	require.EqualValues(t, 100, tracker.CompletedPoint().TimeTick)
+}
+
+func TestBroadcastAckSkipsLegacyRPCForNewImportAndControl(t *testing.T) {
+	patch := mockey.Mock(commitLegacyImportVChannel).Return(context.DeadlineExceeded).Build()
+	defer patch.UnPatch()
+	for _, test := range []struct {
+		channel     string
+		coordinator bool
+	}{{"v1", true}, {funcutil.GetControlChannel("test"), false}} {
+		msg := newBroadcastAckMessage(t, message.NewCommitImportMessageBuilderV2().
+			WithHeader(&message.CommitImportMessageHeader{JobId: 42, CommitByCoordinator: test.coordinator}).
+			WithBody(&message.CommitImportMessageBody{}).WithBroadcast([]string{test.channel}))
+		require.NoError(t, ackLegacyCommitImport(context.Background(), msg))
+	}
+	require.Zero(t, patch.Times())
+}
 
 func TestBroadcastAckHoldsOwnerUntilExclusiveAndAckSucceeds(t *testing.T) {
 	scheduler := &recordingAckTaskScheduler{}

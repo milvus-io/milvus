@@ -47,7 +47,11 @@ VChannels so replicated callbacks share an ordered copy. CommitImport uses
 FastAck and completes in the DataCoord callback: persist Committing to protect
 against timeout, update segment visibility with each business VChannel's own
 commit TimeTick, then persist Completed. Failures keep the broadcast task
-retryable. No StreamingNode per-channel RPC or L0 materialization is required.
+retryable. New Import jobs persist `commit_by_coordinator=true`; no StreamingNode
+per-channel RPC or L0 materialization is required for these jobs. Absent/false
+flags retain legacy completion: BroadcastAckModule calls HandleCommitVchannel
+before Ack on each business VChannel, and the checker completes the job after
+all channel commits. The RPC is a no-op for new jobs when sent by old nodes.
 See [Import commit ownership](../../../design-docs/design_docs/wal/broadcast_ack_module.md#8-import-commit-ownership).
 
 ## Resource Key Locking

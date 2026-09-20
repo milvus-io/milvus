@@ -7,9 +7,16 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 const broadcastAckRetryInterval = 200 * time.Millisecond
@@ -188,6 +195,10 @@ type broadcastAckTask struct {
 }
 
 func (t *broadcastAckTask) Execute(ctx context.Context) error {
+	if err := ackLegacyCommitImport(ctx, t.owner.Message()); err != nil {
+		t.module.retry(t)
+		return nil
+	}
 	if err := t.module.ack(ctx, t.owner.Message()); err != nil {
 		t.module.retry(t)
 		return nil
@@ -232,3 +243,30 @@ func broadcastAckResourceKeysConflict(left, right []message.ResourceKey) bool {
 }
 
 var _ nodescheduler.Task = (*broadcastAckTask)(nil)
+
+// ackLegacyCommitImport preserves the old flusher's completion owner when a
+// new StreamingNode replays an old CommitImport. Keep the message owner until
+// the RPC succeeds, even when its broadcaster task has already been retired.
+func ackLegacyCommitImport(ctx context.Context, msg message.ImmutableMessage) error {
+	if msg.MessageType() != message.MessageTypeCommitImport || funcutil.IsControlChannel(msg.VChannel()) {
+		return nil
+	}
+	commit := message.MustAsImmutableCommitImportMessageV2(msg)
+	if commit.Header().GetCommitByCoordinator() {
+		return nil
+	}
+	return commitLegacyImportVChannel(ctx, &datapb.HandleCommitVchannelRequest{
+		Base:  commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+		JobId: commit.Header().GetJobId(), Vchannel: msg.VChannel(), CommitTimestamp: msg.TimeTick(),
+	})
+}
+
+func commitLegacyImportVChannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) error {
+	ctx = retry.WithMaxAttemptsContext(ctx, 3)
+	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return err
+	}
+	resp, err := coord.HandleCommitVchannel(ctx, req)
+	return merr.CheckRPCCall(resp, err)
+}

@@ -792,6 +792,9 @@ func (c *importChecker) checkUncommittedJob(job ImportJob) {
 // checkCommittingJob handles jobs in the Committing state.
 // Once all vchannels have acknowledged the commit fence, the job transitions to Completed.
 func (c *importChecker) checkCommittingJob(job ImportJob) {
+	if job.GetCommitByCoordinator() {
+		return // The durable broadcast callback owns the entire new commit.
+	}
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	// When Vchannels is empty, len == len is trivially true. This handles the degenerate
 	// case of a zero-channel import (e.g., empty collection); proceed to Completed immediately.

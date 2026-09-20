@@ -159,7 +159,9 @@ plus CChannel. Business-channel append results supply their own commit fences;
 CChannel supplies the common ordering point for replicated callbacks. These
 messages do not request AckSyncUp: durable WAL append can FastAck the broadcast.
 
-DataCoord's CommitImport callback owns the complete commit flow:
+New Import messages set `commit_by_coordinator=true` in ImportHeader. The Import
+callback persists this choice in ImportJob, and CommitImportHeader inherits it.
+DataCoord's CommitImport callback owns the complete commit flow for these jobs:
 
 1. Wait for the job to reach Uncommitted. Persist Committing before changing
    segment visibility; a replay in Committing resumes the same callback.
@@ -177,11 +179,25 @@ failure/restart; segment updates are idempotent. Completed replay leaves segment
 and job metadata unchanged but repeats the DataView reconciliation request.
 The segment and job writes are ordered, not one atomic transaction.
 
-RecoveryStorage has no Import-specific RPC task, Flush request, or retained
-completion handle. CommitImport is an ordinary Barrier for Summary/L0 window
+For these new messages, RecoveryStorage has no Import-specific RPC task, Flush
+request, or retained completion handle. CommitImport is an ordinary Barrier for Summary/L0 window
 observation; it does not force L1/L0 output. RecoveryStorage checkpoint progress
 is independent of callback completion because the broadcast task owns recovery
-of the coordinator-side effect. HandleCommitVchannel no longer mutates state.
+of the coordinator-side effect. HandleCommitVchannel returns success without
+mutating coordinator-owned jobs, including when an old StreamingNode sends the
+RPC before the callback runs. The checker never completes these jobs.
+
+During coordinator-first rolling upgrades, absent/false protocol flags retain
+the master completion path. The legacy callback only persists Committing.
+Before acknowledging a legacy CommitImport on a business VChannel,
+BroadcastAckModule calls HandleCommitVchannel using that message's original
+TimeTick. RPC failure retains the Ack handle and retries, blocking the physical
+checkpoint and conflicting broadcasts; CChannel never calls this RPC. DataCoord
+updates segment visibility before recording the committed VChannel, and the
+legacy checker completes the job after all channels have committed. This also
+works when the original broadcast task is already TOMBSTONE. No WAL scan or
+rebroadcast by the checker is needed. RPC calls may repeat after a failure or
+restart; their effects are idempotent, not exactly-once calls.
 
 This branch uses the existing segment-metadata serving path: MVCC already
 tracks CommitImport's WAL position, and QueryNode uses CommitTimestamp for

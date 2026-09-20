@@ -84,7 +84,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
-	})
+	}, result.Message.Header().GetCommitByCoordinator())
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
@@ -303,7 +303,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
+		WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
 		WithBody(&msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Import,
@@ -361,7 +361,7 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 }
 
 // commitImportV2AckCallback handles the ack callback for the CommitImport WAL message.
-// It makes all segments of the job visible (commit timestamp and is_importing=false)
+// For coordinator-owned jobs it makes all segments visible (commit timestamp and is_importing=false)
 // and transitions the job to Completed. Committing durably protects retries from
 // timeout/cleanup between these writes.
 // Concurrency safety is guaranteed by the broadcaster framework's resource key lock
@@ -410,6 +410,12 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		mlog.Info(ctx, "CommitImport: job is not ready, retry later",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
+	}
+
+	// Legacy callbacks only enter Committing. The message consumer still owns
+	// per-channel visibility and the checker observes the committed markers.
+	if !result.Message.Header().GetCommitByCoordinator() {
+		return nil
 	}
 
 	// Each business vchannel has its own WAL commit fence. Use that channel's

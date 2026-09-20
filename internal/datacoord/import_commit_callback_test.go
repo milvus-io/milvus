@@ -41,7 +41,7 @@ func newImportCommitCallbackTest(t *testing.T) (*DDLCallbacks, *datacoordkv.Cata
 	imports, err := NewImportMeta(ctx, catalog, nil, nil)
 	require.NoError(t, err)
 	require.NoError(t, imports.AddJob(ctx, &importJob{
-		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Uncommitted},
+		ImportJob: &datapb.ImportJob{JobID: 1, CollectionID: 100, Vchannels: []string{"v1", "v2"}, State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: true},
 		tr:        timerecord.NewTimeRecorder("import-commit"),
 	}))
 	segments := NewSegmentsInfo()
@@ -205,7 +205,8 @@ func TestImportCallbackExcludesControlFromJobChannels(t *testing.T) {
 	msg := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
 		WithBody(&message.ImportMsg{JobID: 1, CollectionID: 100}).
 		WithBroadcast([]string{"v1", control}).MustBuildBroadcast()
-	patch := mockey.Mock((*Server).createImportJobFromAck).To(func(_ *Server, _ context.Context, req *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+	patch := mockey.Mock((*Server).createImportJobFromAck).To(func(_ *Server, _ context.Context, req *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
+		require.False(t, commitByCoordinator)
 		require.Equal(t, []string{"v1"}, req.GetChannelNames())
 		require.Equal(t, int64(1), req.GetJobID())
 		return &internalpb.ImportResponse{Status: merr.Success()}, nil
@@ -218,4 +219,67 @@ func TestImportCallbackExcludesControlFromJobChannels(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, 1, patch.Times())
+}
+
+func TestLegacyImportCommitSurvivesRetiredBroadcast(t *testing.T) {
+	ctx := context.Background()
+	callbacks, catalog, result := newImportCommitCallbackTest(t)
+	callbacks.stateCode.Store(commonpb.StateCode_Healthy)
+	require.NoError(t, callbacks.importMeta.UpdateJob(ctx, 1, func(job ImportJob) {
+		job.(*importJob).CommitByCoordinator = false
+	}))
+	msg := message.NewCommitImportMessageBuilderV2().
+		WithHeader(&message.CommitImportMessageHeader{JobId: 1}).
+		WithBody(&message.CommitImportMessageBody{}).
+		WithBroadcast([]string{"v1", "v2"}).MustBuildBroadcast()
+	result.Message = message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](msg)
+	require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
+	require.True(t, callbacks.meta.GetSegment(ctx, 10).GetIsImporting())
+	require.Equal(t, internalpb.ImportJobState_Committing, callbacks.importMeta.GetJob(ctx, 1).GetState())
+	// The old broadcaster can now be TOMBSTONE. Recovery needs only the
+	// original per-channel WAL message, not its broadcast task.
+	restored, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	callbacks.importMeta = restored
+	checker := &importChecker{ctx: ctx, importMeta: restored}
+	request := &datapb.HandleCommitVchannelRequest{JobId: 1, Vchannel: "v1", CommitTimestamp: 200}
+	failure := mockey.Mock((*meta).UpdateSegmentsInfo).Return(context.DeadlineExceeded).Build()
+	status, err := callbacks.HandleCommitVchannel(ctx, request)
+	require.Error(t, merr.CheckRPCCall(status, err))
+	failure.UnPatch()
+	require.Empty(t, restored.GetJob(ctx, 1).GetCommittedVchannels())
+	status, err = callbacks.HandleCommitVchannel(ctx, request)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	checker.checkCommittingJob(restored.GetJob(ctx, 1))
+	require.Equal(t, internalpb.ImportJobState_Committing, restored.GetJob(ctx, 1).GetState())
+	require.False(t, callbacks.meta.GetSegment(ctx, 10).GetIsImporting())
+	require.True(t, callbacks.meta.GetSegment(ctx, 20).GetIsImporting())
+	request.CommitTimestamp = 999
+	status, err = callbacks.HandleCommitVchannel(ctx, request)
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	require.EqualValues(t, 200, callbacks.meta.GetSegment(ctx, 10).GetCommitTimestamp(), "duplicate RPC must retain original visibility")
+	status, err = callbacks.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{JobId: 1, Vchannel: "v2", CommitTimestamp: 300})
+	require.NoError(t, merr.CheckRPCCall(status, err))
+	checker.checkCommittingJob(restored.GetJob(ctx, 1))
+	require.Equal(t, internalpb.ImportJobState_Completed, restored.GetJob(ctx, 1).GetState())
+}
+
+func TestCoordinatorImportIgnoresLegacyCompletion(t *testing.T) {
+	ctx := context.Background()
+	callbacks, catalog, _ := newImportCommitCallbackTest(t)
+	callbacks.stateCode.Store(commonpb.StateCode_Healthy)
+	for _, state := range []internalpb.ImportJobState{internalpb.ImportJobState_Importing, internalpb.ImportJobState_Uncommitted, internalpb.ImportJobState_Committing} {
+		require.NoError(t, callbacks.importMeta.UpdateJob(ctx, 1, UpdateJobState(state)))
+		restored, err := NewImportMeta(ctx, catalog, nil, nil)
+		require.NoError(t, err)
+		callbacks.importMeta = restored
+		require.True(t, restored.GetJob(ctx, 1).GetCommitByCoordinator())
+		status, err := callbacks.HandleCommitVchannel(ctx, &datapb.HandleCommitVchannelRequest{JobId: 1, Vchannel: "v1", CommitTimestamp: 200})
+		require.NoError(t, merr.CheckRPCCall(status, err))
+		require.True(t, callbacks.meta.GetSegment(ctx, 10).GetIsImporting())
+		require.Empty(t, restored.GetJob(ctx, 1).GetCommittedVchannels())
+		checker := &importChecker{ctx: ctx, importMeta: restored}
+		checker.checkCommittingJob(restored.GetJob(ctx, 1))
+		require.Equal(t, state, restored.GetJob(ctx, 1).GetState())
+	}
 }

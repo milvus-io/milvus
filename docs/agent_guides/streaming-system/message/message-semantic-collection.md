@@ -45,7 +45,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. Flushes earlier L1/L0 data and uses each business channel's message position as the snapshot cut.
 - **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
-- **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. It does not require a StreamingNode Flush or per-channel commit RPC.
+- **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. New jobs carry `commit_by_coordinator=true` and do not require a StreamingNode Flush or per-channel commit RPC. Legacy messages keep the per-channel RPC before BroadcastAckModule Ack and the counter-based checker completion.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
 - **ImportIDRange**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
