@@ -891,6 +891,13 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 		legacyInsertLog := path.Join(rootPath,
 			paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath)
 		denied = append(denied, normalizeStorageKey(legacyInsertLog))
+	} else {
+		// Explore planning manifests live at the bucket root on remote storage,
+		// outside minio.rootPath (external_collection_refresh_manager.go
+		// exploreDirForChunkManager), so no root-anchored entry can reach them.
+		// They are milvus-table-explore.json, which the import extension
+		// whitelist accepts, so nothing else bounds them either.
+		denied = append(denied, normalizeStorageKey(common.ExploreTempRootPath))
 	}
 
 	for _, file := range files {

@@ -1620,6 +1620,13 @@ func TestValidateImportFilePaths(t *testing.T) {
 		// is denied under the root only when the storage type is local.
 		{"local root, explore temp dir", "/var/lib/milvus/data", "/var/lib/milvus/data/__explore_temp__/coord_1/attempt_1/manifest.json", nil, true, "local"},
 		{"remote root, explore-named dir", "files", "files/__explore_temp__/mine.json", nil, false, "remote"},
+		// On remote storage the manifests themselves live at the bucket root,
+		// outside minio.rootPath, so no root-anchored entry reaches them.
+		{"remote root, explore temp at bucket root", "files", "__explore_temp__/coord_1/attempt_1/milvus-table-explore.json", nil, true, "remote"},
+
+		// External refresh task results are root-anchored on both storage types.
+		{"remote root, external refresh results", "files", "files/external_refresh_results/1/2/3/4/a.json", nil, true, "remote"},
+		{"local root, external refresh results", "/var/lib/milvus/data", "/var/lib/milvus/data/external_refresh_results/1/2/3/4/a.json", nil, true, "local"},
 
 		// Legacy StorageV3 segments keep living under <root>/<minio.rootPath>/insert_log
 		// after an upgrade of a local deployment, so that directory is internal too.

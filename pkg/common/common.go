@@ -241,6 +241,12 @@ const (
 	// minio.rootPath, which is why this is a local-only segment.
 	ExploreTempRootPath = "__explore_temp__"
 
+	// ExternalRefreshResultsRootPath storage path const for external collection
+	// refresh task results, written under the ChunkManager root on every
+	// storage type.
+	// Layout: {rootPath}/external_refresh_results/{collectionID}/{jobID}/{taskID}/{version}/{checksum}.pb
+	ExternalRefreshResultsRootPath = "external_refresh_results"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -282,6 +288,7 @@ var InternalStorageRootSegments = []string{
 	JSONStatsPath,
 	SnapshotRootPath,
 	WoodpeckerRootPath,
+	ExternalRefreshResultsRootPath,
 }
 
 // LocalOnlyStorageRootSegments lists top-level directories that are rooted at
