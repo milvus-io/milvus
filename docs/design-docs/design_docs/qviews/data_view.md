@@ -259,7 +259,7 @@ before enabling DataView GC; that wiring is outside this PR.
 
 ### View consumer interfaces
 
-The same Manager implements both consumer interfaces:
+The current implementation exposes both consumer interfaces:
 
 - `qviews.DataViewRefProvider.Get` supplies exact-version references to
   `ShardViewRegistry`. Each state machine owns one acquired reference.
@@ -271,10 +271,29 @@ The same Manager implements both consumer interfaces:
   lock is released before waiting for any collection lock, and the selected
   collection is revalidated against concurrent drop.
 
-Native planning snapshots do not pin DataVersions. The exact-version `Get`
-performed by `AddPreparing` is the acquisition point against GC. A snapshot
-may remain readable after GC has collected its version, but such a snapshot
-cannot be used to create a new QueryView.
+The agreed [Balancer Cache design](balancer_cache.md) replaces the Balancer's
+snapshot-pull path with synchronous publication hooks; it is not implemented
+yet. At each committed publication, DataViewManager supplies a read-only
+Collection object sharing the immutable membership and matching RowNum. Each
+desired shard also publishes `TotalRows` and `SegmentCount`, so reconciliation
+does not rescan segments for these aggregates. Indexes and summaries are built
+once per published version, not per reconcile. Existing snapshot APIs may
+remain compatibility interfaces for other callers.
+
+The hook covers create/bootstrap, recompute publication, successful flush
+commit, recovery footprint initialization, and logical collection drop. Abort
+does not publish a prepared DataView. Membership, DataVersion, RowNum, and shard
+summaries must belong to one publication; later recovery footprint fills must
+replace published read objects even if DataVersion is unchanged. The hook does
+not perform I/O or re-enter the manager. Registration and initial replay must
+not leave a missing-update window.
+
+Neither native planning snapshots nor cache read objects pin DataVersions.
+The exact-version `Get` performed by `AddPreparing` remains the acquisition
+point against GC. An old read object may remain readable after GC has collected
+its version, but it cannot then be used to create a new QueryView; the caller
+must replan. Do not expose mutable reference counters/tombstones through the
+cache object or call the copying `DataViewRef.DataView()` on its read path.
 
 `DataViewRef.Stats(segmentID)` exposes the reference's per-version RowNum map.
 Stats are immutable after publication and are not persisted. Recovery fills
@@ -282,7 +301,10 @@ the latest version from SegmentMeta; retained historical versions may have
 unknown stats. Shard statistics combine the contributing retained versions,
 preferring the newest known footprint for each segment. An explicit presence
 flag distinguishes unknown from a published zero; only unknown values may
-fall back to the Balancer's planning snapshot cache.
+fall back to known row statistics retained for planning. In the target cache,
+the fallback and affected node contributions are maintained at publication,
+rather than reconstructed by reconciliation. Fallback values can be reclaimed
+when no latest/resident view needs them.
 
 Because DataVersion and DataViewRef are Collection-scoped while QueryView is
 Shard-scoped, one Shard can otherwise keep an old complete Collection snapshot

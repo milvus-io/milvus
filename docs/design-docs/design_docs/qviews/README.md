@@ -314,7 +314,7 @@ design when that resource module is picked.
 | Coord | Resource Group Manager | Resource Group partitioning, generating QueryNode-ResourceGroup grouping relationships |
 | Coord | Replica Manager | Replica assignment, generating Replica-to-available-Node relationships |
 | DataCoord (inside MixCoord) | DataView Manager | Maintaining immutable Collection snapshots and DataViewRefs |
-| Coord | Sealed Segment Balancer | Gathering information from all Managers, generating and distributing QueryViews |
+| Coord | Sealed Segment Balancer | Reading published state through BalancerCache, batch-planning and distributing QueryViews (cache refactor pending implementation) |
 | Coord | QueryView Manager | View state machine transitions, syncing view information to all Nodes |
 | Streaming Node | PChannel Query Resource Manager | Preparing vchannel resources from versioned load info, latest schema, SegmentModule views, TransformLog, and BM25 resource RPC |
 | Streaming Node | QueryView Manager | Listening for view state machine changes, checking prepared view resources, and publishing the required DataVersion watermark for SN-only eviction |
@@ -323,6 +323,14 @@ design when that resource module is picked.
 | Query Node | QueryView Manager | Listening for view state machine changes, applying to Sealed Segments |
 | Query Node | Sealed Segment Manager | Historical data management, maintaining Sealed Segment lifecycle |
 | Query Node | Pure Delete Stream Manager | Acting as subscription client, applying Delete data to each Segment. TODO(../wal/transform_log_view_module.md): add the TransformLog view module design. |
+
+The agreed [Balancer design](balancer_design.md) preserves batch allocation
+while replacing per-reconcile snapshot construction with a resident
+[Balancer Cache](balancer_cache.md). Upstream hooks synchronously publish
+immutable Node/Collection objects and actual-load aggregates. Reconcile uses
+Get and maintains only its private predicted loads; it does not require a
+globally consistent snapshot. This cache refactor and production runtime wiring
+are not implemented by the current code.
 
 ### 11.3 SyncQueryView RPC
 
