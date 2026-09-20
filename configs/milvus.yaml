@@ -973,29 +973,21 @@ dataCoord:
     # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
     manifestIndexBackfill:
-      # Whether DataCoord migrates historical finished StorageV3 SegmentIndex rows from etcd into segment manifests. OFF by default and inert unless writeSegmentIndexToManifest is also true.
-      # Each eligible row is retired by the same catalog transaction that publishes its manifest entry and sets manifest_has_index. There is no separate index-prune phase, and mixed historical placement remains safe while this optional migration is incomplete.
-      # Enable only after every DataCoord replica that can become leader supports manifest-index reload. Once a row is migrated, rolling DataCoord back to an older version is unsupported because disabling this switch does not recreate the row.
-      # This switch is read at startup. Watch milvus_datacoord_manifest_index_backfill_pending_records; zero means no eligible historical row remains.
+      # Whether DataCoord migrates historical finished StorageV3 SegmentIndex catalog rows into segment manifests. This is an operator-controlled, restart-scoped migration and is inert unless dataCoord.index.writeSegmentIndexToManifest is also true.
+      # Each eligible record is moved through the ordinary segment manifest commit: the new manifest pointer, manifest_has_index marker, and deletion of the old catalog row land in one transaction. No separate index-prune phase is required. Failed, in-flight, fake-finished, deleted, StorageV1/V2, and L0 records remain on their existing lifecycle paths.
+      # Enable only after every DataCoord replica that can become leader supports manifest-index reload. Migrated rows are not recreated when this switch is disabled, so rolling DataCoord back to an older version is unsupported after migration starts.
+      # Watch milvus_datacoord_manifest_index_backfill_pending_records. Zero means no eligible historical catalog row remains; mixed manifest and etcd placement is safe while the migration is still running.
       enabled: false
-      # Interval in seconds between in-memory backlog scans.
-      interval: 60
-      # Maximum number of SegmentIndex rows migrated per scan. The pending gauge counts the full backlog.
-      batchSize: 1000
-      # Number of segments processed in parallel. Records belonging to one segment are committed sequentially under its manifest lock.
-      concurrency: 16
+      interval: 60 # Interval in seconds between manifest index backfill scans.
+      batchSize: 1000 # Maximum number of SegmentIndex catalog records migrated per scan; the pending gauge always counts the full backlog.
+      concurrency: 16 # Number of segments whose manifest index backfill may run in parallel; records of one segment are committed sequentially.
     manifestIndexRollback:
-      # Restore manifest index records to etcd and atomically remove manifest entries. Index files keep their current paths.
-      # This restart-scoped switch overrides writeSegmentIndexToManifest and forward backfill; new completions use etcd.
-      # Wait for milvus_datacoord_manifest_index_rollback_ready=1, then disable both forward switches before downgrading.
-      # The target version must support StorageV3 and the existing index artifact layouts. Unfinished copy tasks also block readiness.
+      # Restore StorageV3 manifest index records to etcd and remove their manifest entries atomically, preserving artifact files. This restart-scoped switch overrides forward manifest publication and backfill; new index completions use etcd.
+      # Wait for milvus_datacoord_manifest_index_rollback_ready=1 before downgrading to a version that supports StorageV3 and the existing index path layouts. Pending copy tasks and retained Dropped segments must also converge. Set the forward switches to false before downgrading: older versions do not understand this override.
       enabled: false
-      # Seconds between scans. Nonpositive durations use 60 seconds.
-      interval: 60
-      # Maximum segments visited per scan; each visit restores at most maxEtcdTxnNum-1 indexes in one transaction.
-      batchSize: 1000
-      # Concurrent segments, clamped to [1, 256].
-      concurrency: 8
+      interval: 60 # Seconds between rollback scans. Nonpositive durations use 60 seconds.
+      batchSize: 1000 # Maximum segments visited per rollback scan. Each visit restores at most maxEtcdTxnNum-1 indexes atomically.
+      concurrency: 8 # Maximum segments processed concurrently during rollback, clamped to [1, 256].
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.
