@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -30,7 +31,6 @@
 #include "AckResponder.h"
 #include "ConcurrentVector.h"
 #include "DeletedRecord.h"
-#include "FieldIndexing.h"
 #include "InsertRecord.h"
 #include "NamedType/underlying_functionalities.hpp"
 #include "SegmentGrowing.h"
@@ -64,7 +64,7 @@
 #include "folly/FBVector.h"
 #include "geos_c.h"
 #include "google/protobuf/message.h"
-#include "index/Index.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "milvus-storage/column_groups.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
@@ -74,6 +74,7 @@
 #include "query/PlanImpl.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentInterface.h"
+#include "segcore/indexing/GrowingIndexSet.h"
 #include "storage/MmapChunkManager.h"
 #include "storage/MmapManager.h"
 
@@ -91,7 +92,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
            int64_t size,
            const int64_t* row_ids,
            const Timestamp* timestamps,
-           InsertRecordProto* insert_record_proto) override;
+           std::shared_ptr<InsertRecordProto> insert_record_proto) override;
 
     bool
     Contain(const PkType& pk) const override {
@@ -135,21 +136,21 @@ class SegmentGrowingImpl : public SegmentGrowing {
     load_column_group_data_internal(const LoadFieldDataInfo& load_info);
 
     void
+    // `reserved_offset` is the logical offset PreInsert reserved for this
+    // batch. Every structure this function writes -- column data, validity,
+    // pk2offset_, the growing indexes, array offsets -- addresses the batch by
+    // it rather than by "wherever I currently am" (#52637).
     load_field_data_common(FieldId field_id,
                            size_t reserved_offset,
                            const std::vector<FieldDataPtr>& field_data,
                            FieldId primary_field_id,
-                           size_t num_rows);
-
-    void
-    BuildTextIndexFromTextLobRefs(FieldId field_id,
-                                  const std::vector<FieldDataPtr>& field_data,
-                                  size_t reserved_offset,
-                                  const FieldMeta& field_meta);
+                           size_t num_rows,
+                           bool text_is_remote_lob_ref = false);
 
     // Test-only: inject TEXT LOB base path.
     void
     SetTextLobPathForTesting(FieldId field_id, std::string lob_base_path) {
+        std::unique_lock lock(text_lob_mutex_);
         text_lob_paths_[field_id] = std::move(lob_base_path);
     }
 
@@ -203,11 +204,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_;
     }
 
-    const IndexingRecord&
-    get_indexing_record() const {
-        return indexing_record_;
-    }
-
     Timestamp
     get_max_timestamp() const override {
         return insert_record_.timestamp_index_.get_max_timestamp();
@@ -228,26 +224,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return primary_key_data_type_;
     }
 
-    // return count of index that has index, i.e., [0, num_chunk_index) have built index
-    int64_t
-    num_chunk_index(FieldId field_id) const {
-        return indexing_record_.get_finished_ack();
-    }
-
     // count of chunk that has raw data
     int64_t
     num_chunk_data(FieldId field_id) const final {
         auto size = get_insert_record().ack_responder_.GetAck();
         return upper_div(size, segcore_config_.get_chunk_rows());
-    }
-
-    // deprecated
-    PinWrapper<const index::IndexBase*>
-    chunk_index_impl(FieldId field_id, int64_t chunk_id) const {
-        return PinWrapper<const index::IndexBase*>(
-            indexing_record_.get_field_indexing(field_id)
-                .get_chunk_indexing(chunk_id)
-                .get());
     }
 
     int64_t
@@ -272,7 +253,9 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    try_remove_chunks(FieldId fieldId, const Schema& schema);
+    try_remove_chunks(FieldId fieldId,
+                      const Schema& schema,
+                      int64_t covered_row_end);
 
     void
     search_batch_pks(
@@ -436,8 +419,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
           index_meta_(indexMeta),
           insert_record_(
               *schema_, segcore_config.get_chunk_rows(), mmap_descriptor_),
-          indexing_record_(
-              *schema_, index_meta_, segcore_config_, &insert_record_),
           id_(segment_id),
           deleted_record_(
               &insert_record_,
@@ -448,7 +429,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
                   this->search_batch_pks(pks, timestamps, false, callback);
               },
               segment_id) {
-        this->CreateTextIndexes();
+        growing_indexes_.Initialize(
+            *schema_, index_meta_, segcore_config_, id_, insert_record_);
         this->InitializeTextLobSpillovers();
         this->InitializeArrayOffsets();
         this->UpdateResourceTracking();
@@ -510,52 +492,22 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!schema->has_field(field_id)) {
             return false;
         }
-        auto& field_meta = schema->operator[](field_id);
-        if ((IsVectorDataType(field_meta.get_data_type()) ||
-             IsGeometryType(field_meta.get_data_type())) &&
-            indexing_record_.SyncDataWithIndex(field_id)) {
-            return true;
-        }
-
-        return false;
+        return growing_indexes_.Has(field_id);
     }
 
-    std::vector<PinWrapper<const index::IndexBase*>>
-    PinIndex(milvus::OpContext* op_ctx,
-             FieldId field_id,
-             bool include_ngram = false) const override {
-        auto schema = get_schema_snapshot();
-        if (!schema->has_field(field_id)) {
-            return {};
-        }
+    FieldIndexCapability
+    IndexCapability(FieldId field_id) const override {
+        return growing_indexes_.Capability(field_id);
+    }
 
-        auto& field_meta = schema->operator[](field_id);
-        if (!(IsVectorDataType(field_meta.get_data_type()) ||
-              IsGeometryType(field_meta.get_data_type())) ||
-            !indexing_record_.SyncDataWithIndex(field_id)) {
-            return {};
-        }
+    IndexPin
+    PinIndex(milvus::OpContext*, const IndexKey&) const override {
+        return {};
+    }
 
-        // For geometry fields, return segment-level index (RTree doesn't use chunks)
-        if (IsGeometryType(field_meta.get_data_type())) {
-            auto segment_index = indexing_record_.get_field_indexing(field_id)
-                                     .get_segment_indexing();
-            if (segment_index.get() != nullptr) {
-                // Convert from PinWrapper<index::IndexBase*> to PinWrapper<const index::IndexBase*>
-                return {
-                    PinWrapper<const index::IndexBase*>(segment_index.get())};
-            } else {
-                return {};
-            }
-        }
-
-        // For vector fields, return chunk-level indexes
-        auto num_chunk = num_chunk_index(field_id);
-        std::vector<PinWrapper<const index::IndexBase*>> indexes;
-        for (int64_t i = 0; i < num_chunk; i++) {
-            indexes.push_back(chunk_index_impl(field_id, i));
-        }
-        return indexes;
+    index::GrowingIndexSnapshotPin
+    PinGrowingIndex(FieldId field_id) const override {
+        return growing_indexes_.PinSnapshot(field_id);
     }
 
     bool
@@ -566,32 +518,58 @@ class SegmentGrowingImpl : public SegmentGrowing {
         if (!insert_record_.is_data_exist(field_id)) {
             return false;
         }
-        return !insert_record_.get_data_base(field_id)->empty();
+        if (!insert_record_.get_data_base(field_id)->empty()) {
+            return true;
+        }
+        return IsVectorDataType(
+                   get_schema_snapshot()->operator[](field_id).get_data_type()) &&
+               HasRawData(field_id.get());
     }
 
     bool
     HasRawData(int64_t field_id) const override {
-        //growing index hold raw data when
-        // 1. growing index enabled and it holds raw data
-        // 2. growing index disabled then raw data held by chunk
-        // 3. growing index enabled and it not holds raw data, then raw data held by chunk
-        if (indexing_record_.is_in(FieldId(field_id))) {
-            if (indexing_record_.HasRawData(FieldId(field_id))) {
-                // 1. growing index enabled and it holds raw data
-                return true;
-            } else {
-                // 3. growing index enabled and it not holds raw data, then raw data held by chunk
-                return insert_record_.get_data_base(FieldId(field_id))
-                           ->num_chunk() > 0;
-            }
+        const auto id = FieldId(field_id);
+        const auto* raw = insert_record_.get_data_base(id);
+        if (raw != nullptr && !raw->acquire_chunks().empty()) {
+            return true;
         }
-        // 2. growing index disabled then raw data held by chunk
-        return true;
+        if (!growing_indexes_.Has(id)) {
+            return true;
+        }
+        auto pin = growing_indexes_.PinSnapshot(id);
+        if (!pin) {
+            // Below threshold an all-null compact column has no chunks and no
+            // engine, but validity alone is a complete materialization.
+            return insert_record_.is_valid_data_exist(id) &&
+                   !insert_record_.get_valid_data(id)->empty();
+        }
+        const auto* reader =
+            dynamic_cast<const index::IVectorReader*>(&pin.Reader());
+        return reader != nullptr && reader->HasRawData();
     }
 
     bool
     CanReadRawVectorFromIndex(FieldId field_id) const {
-        return indexing_record_.HasRawData(field_id);
+        auto pin = growing_indexes_.PinSnapshot(field_id);
+        if (!pin) {
+            return false;
+        }
+        const auto* reader =
+            dynamic_cast<const index::IVectorReader*>(&pin.Reader());
+        return reader != nullptr && reader->HasRawData();
+    }
+
+    bool
+    HasFieldIndexMeta(FieldId field_id) const {
+        return index_meta_ != nullptr && index_meta_->HasField(field_id);
+    }
+
+    std::map<std::string, std::string>
+    GetFieldIndexParams(FieldId field_id) const {
+        AssertInfo(HasFieldIndexMeta(field_id),
+                   "field {} has no growing index metadata",
+                   field_id.get());
+        return index_meta_->GetFieldIndexMeta(field_id).GetIndexParams();
     }
 
     std::pair<std::vector<OffsetMap::OffsetType>, bool>
@@ -634,6 +612,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     bool
     HasTextLobSpillover(FieldId field_id) const {
+        std::shared_lock lock(text_lob_mutex_);
         return text_lob_spillovers_.find(field_id) !=
                text_lob_spillovers_.end();
     }
@@ -644,6 +623,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     TextLobSpillover*
     GetTextLobSpillover(FieldId field_id) const {
+        std::shared_lock lock(text_lob_mutex_);
         auto it = text_lob_spillovers_.find(field_id);
         if (it != text_lob_spillovers_.end()) {
             return it->second.get();
@@ -776,7 +756,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     }
 
     void
-    fill_empty_field(const FieldMeta& field_meta);
+    fill_empty_field(const FieldMeta& field_meta, int64_t total_row_num);
 
     void
     EnsureArrayOffsetsForStructField(const FieldMeta& field_meta,
@@ -806,17 +786,37 @@ class SegmentGrowingImpl : public SegmentGrowing {
 
  private:
     void
-    AddTexts(FieldId field_id,
-             const std::string* texts,
-             const bool* texts_valid_data,
-             size_t n,
-             int64_t offset_begin);
+    CompleteGrowingRawRange(int64_t row_begin,
+                            int64_t row_end,
+                            bool require_index_flush);
 
     void
-    CreateTextIndexes();
+    PublishGrowingIndexesThroughRawReady();
 
-    std::unique_ptr<index::TextMatchIndex>
-    BuildTextIndexForMeta(const FieldMeta& field_meta);
+    void
+    FeedGrowingIndexRange(const FieldMeta& field_meta,
+                          int64_t row_begin,
+                          int64_t row_end,
+                          GrowingIndexSet::Appender* staged = nullptr);
+
+    void
+    StageInsertVectorInput(
+        int64_t row_begin,
+        int64_t row_end,
+        const std::shared_ptr<InsertRecordProto>& insert_record,
+        const std::unordered_map<FieldId, int64_t>& field_offsets);
+
+    void
+    StageLoadedVectorInput(FieldId field_id,
+                           int64_t row_begin,
+                           int64_t row_end,
+                           const std::vector<FieldDataPtr>& field_data);
+
+    void
+    FillAbsentFieldsThrough(int64_t row_end);
+
+    void
+    EnsureTextLobSpillover(FieldId field_id);
 
     /**
      * @brief Initialize TEXT LOB spillover files for each TEXT field
@@ -841,6 +841,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
      */
     bool
     HasTextLobPath(FieldId field_id) const {
+        std::shared_lock lock(text_lob_mutex_);
         return text_lob_paths_.find(field_id) != text_lob_paths_.end();
     }
 
@@ -892,8 +893,38 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // collection out and lets the last pin holder free it. Reclamation and
     // reads no longer exclude each other in either direction.
 
-    // small indexes for every chunk
-    IndexingRecord indexing_record_;
+    GrowingIndexSet growing_indexes_;
+    AckResponder growing_raw_ready_;
+    mutable std::mutex growing_index_feed_mutex_;
+    int64_t growing_index_feed_cursor_{0};
+    std::optional<int64_t> growing_index_pending_feed_end_;
+    // A load range must not become query-visible until every owner has
+    // synchronously published through this row end. Keep the boundary across
+    // failures so a later Insert retries the flush before publishing rows.
+    std::optional<int64_t> growing_index_required_flush_end_;
+
+    struct PendingVectorInput {
+        struct FieldLocation {
+            // Number of valid physical rows before each fixed-size logical
+            // block. This bounds nullable input location work per feed window
+            // without retaining a per-row map.
+            std::vector<int64_t> valid_prefix;
+            std::vector<FieldDataPtr> loaded_fields;
+            // Loaded inputs may consist of multiple FieldData objects. These
+            // cumulative ends locate both the logical part and its compact
+            // physical payload without rescanning earlier objects.
+            std::vector<int64_t> loaded_row_ends;
+            std::vector<int64_t> loaded_physical_ends;
+        };
+
+        int64_t row_end{0};
+        std::shared_ptr<InsertRecordProto> insert_record;
+        std::unordered_map<FieldId, int64_t> insert_field_offsets;
+        std::unordered_map<FieldId, FieldLocation> field_locations;
+    };
+    // Keyed by Segment row begin. Entries retain the original typed payload
+    // until all owners accept and the main visibility ACK advances.
+    std::map<int64_t, PendingVectorInput> pending_vector_inputs_;
 
     // deleted pks
     mutable DeletedRecord<false> deleted_record_;
@@ -933,11 +964,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     // LOBReferences in ConcurrentVector are resolved at query time via TextColumnCache
     std::unordered_map<FieldId, std::string> text_lob_paths_;
 
-    // Boundary between loaded data and inserted data for TEXT fields.
-    // [0, text_loaded_row_count_): loaded via load paths (raw text or LOBReference)
-    // [text_loaded_row_count_, total): inserted via Insert() (spillover LOBRef)
-    // Query path uses this to determine resolution strategy.
-    int64_t text_loaded_row_count_ = 0;
+    // Per-field boundary between remote V3 LOB references and locally written
+    // spillover references. A TEXT field introduced by Reopen has no remote
+    // prefix even when older TEXT fields do.
+    std::unordered_map<FieldId, int64_t> text_loaded_row_counts_;
+    mutable std::shared_mutex text_lob_mutex_;
 };
 
 inline SegmentGrowingPtr
