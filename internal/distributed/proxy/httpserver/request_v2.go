@@ -618,6 +618,7 @@ type SubSearchReq struct {
 	SearchParams      map[string]interface{} `json:"params"`
 	ExprParams        map[string]interface{} `json:"exprParams"`
 	SearchAggregation *SearchAggregationReq  `json:"searchAggregation"`
+	FunctionChains    []FunctionChainReq     `json:"functionChains"`
 }
 
 type HybridSearchReq struct {

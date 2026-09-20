@@ -19,11 +19,13 @@ package tasks
 import (
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/util/function/chain"
 	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -52,7 +54,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		plan := &planpb.PlanNode{
 			QuerynodeFunctionChains: []*schemapb.FunctionChain{
 				l0FunctionChainForTest(
-					mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("ts"), columnArgForTest("tag")),
+					mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("ts"), columnArgForTest("tag")),
 				),
 			},
 		}
@@ -67,7 +69,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	t.Run("readable system inputs do not become extra fields", func(t *testing.T) {
 		plan := &planpb.PlanNode{
 			QuerynodeFunctionChains: []*schemapb.FunctionChain{
-				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest(types.ScoreFieldName), columnArgForTest(types.IDFieldName))),
+				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName), columnArgForTest(types.IDFieldName))),
 			},
 		}
 
@@ -80,7 +82,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	t.Run("internal system input is not readable", func(t *testing.T) {
 		plan := &planpb.PlanNode{
 			QuerynodeFunctionChains: []*schemapb.FunctionChain{
-				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest(types.SegOffsetFieldName))),
+				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.SegOffsetFieldName))),
 			},
 		}
 
@@ -92,7 +94,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	t.Run("unknown system input is not readable", func(t *testing.T) {
 		plan := &planpb.PlanNode{
 			QuerynodeFunctionChains: []*schemapb.FunctionChain{
-				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("$unknown"))),
+				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("$unknown"))),
 			},
 		}
 
@@ -105,7 +107,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		plan := &planpb.PlanNode{
 			QuerynodeFunctionChains: []*schemapb.FunctionChain{
 				l0FunctionChainForTest(
-					mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("ts"), columnArgForTest("ts")),
+					mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("ts"), columnArgForTest("ts")),
 				),
 			},
 		}
@@ -141,7 +143,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		plan := &planpb.PlanNode{
 			Scorers: []*planpb.ScoreFunction{{}},
 			QuerynodeFunctionChains: []*schemapb.FunctionChain{
-				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest(types.ScoreFieldName))),
+				l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName))),
 			},
 		}
 
@@ -178,7 +180,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 
 	t.Run("l0 and l1 inputs are planned separately", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
-			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("ts"))),
+			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("ts"))),
 			l1FunctionChainForTest(mapOpWithParamsForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, map[string]*schemapb.FunctionParamValue{types.NumCombineParamMode: stringParamForTest(types.NumCombineModeSum)}, columnArgForTest("ts"), columnArgForTest("tag"))),
 		}}
 
@@ -194,8 +196,8 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 
 	t.Run("duplicate stage is rejected before preparing singleton state", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
-			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest(types.ScoreFieldName))),
-			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest(types.ScoreFieldName))),
+			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName))),
+			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName))),
 		}}
 
 		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
@@ -333,7 +335,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 		assert.Empty(t, prepared.l1.inputFieldIDs)
 	})
 
-	t.Run("l1 rejects function not runnable at stage", func(t *testing.T) {
+	t.Run("l1 accepts xgboost", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
 			l1FunctionChainForTest(mapOpWithParamsForTest(
 				types.ScoreFieldName,
@@ -345,9 +347,10 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 			)),
 		}}
 
-		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "does not support stage \"L1_rerank\"")
+		prepared, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+		require.NoError(t, err)
+		require.NotNil(t, prepared.l1)
+		assert.Equal(t, []int64{101}, prepared.l1.inputFieldIDs)
 	})
 
 	t.Run("l1 internal system input is not readable", func(t *testing.T) {
@@ -391,7 +394,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 
 	t.Run("only score is writable system output", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
-			l0FunctionChainForTest(mapOpForTest(types.IDFieldName, "expr", columnArgForTest(types.ScoreFieldName))),
+			l0FunctionChainForTest(mapOpForTest(types.IDFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName))),
 		}}
 
 		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
@@ -401,7 +404,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 
 	t.Run("l0 collection fields are writable", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
-			l0FunctionChainForTest(mapOpForTest("ts", "expr", columnArgForTest(types.ScoreFieldName))),
+			l0FunctionChainForTest(mapOpForTest("ts", chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName))),
 		}}
 
 		prepared, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
@@ -413,8 +416,8 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 	t.Run("l0 temporary outputs are writable", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
 			l0FunctionChainForTest(
-				mapOpForTest("temporary_score", "expr", columnArgForTest("ts")),
-				mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("temporary_score")),
+				mapOpForTest("temporary_score", chainexpr.NumCombineFuncName, columnArgForTest("ts")),
+				mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("temporary_score")),
 			),
 		}}
 
@@ -426,7 +429,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 
 	t.Run("unknown input field", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
-			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("unknown"))),
+			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("unknown"))),
 		}}
 
 		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
@@ -437,7 +440,7 @@ func TestPrepareQueryNodeFunctionChainsFromPlan(t *testing.T) {
 
 	t.Run("unsupported input field type", func(t *testing.T) {
 		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{
-			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, "expr", columnArgForTest("vec"))),
+			l0FunctionChainForTest(mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest("vec"))),
 		}}
 
 		_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
@@ -450,6 +453,37 @@ func l0FunctionChainForTest(ops ...*schemapb.FunctionChainOp) *schemapb.Function
 	return &schemapb.FunctionChain{
 		Stage: schemapb.FunctionChainStage_FunctionChainStageL0Rerank,
 		Ops:   ops,
+	}
+}
+
+func TestPrepareQueryNodeMapFunctionStageAndErrors(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	for _, stage := range []schemapb.FunctionChainStage{schemapb.FunctionChainStage_FunctionChainStageL0Rerank, schemapb.FunctionChainStage_FunctionChainStageL1Rerank} {
+		plan := &planpb.PlanNode{QuerynodeFunctionChains: []*schemapb.FunctionChain{{
+			Stage: stage,
+			Ops:   []*schemapb.FunctionChainOp{mapOpForTest(types.ScoreFieldName, chainexpr.NumCombineFuncName, columnArgForTest(types.ScoreFieldName))},
+		}}}
+		t.Run(stage.String()+"/unsupported function stage", func(t *testing.T) {
+			fn, err := chainexpr.NewNumCombineExpr(chainexpr.ModeSum, nil)
+			require.NoError(t, err)
+			fn.BaseExpr = *chainexpr.NewBaseExpr(fn.Name(), []string{types.StageL2Rerank})
+			factory := mockey.Mock(chain.FunctionFromReprWithContext).Return(fn, nil).Build()
+			defer factory.UnPatch()
+			_, err = prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "does not support stage")
+		})
+		t.Run(stage.String()+"/preserve factory error", func(t *testing.T) {
+			factoryErr := merr.WrapErrServiceUnavailableMsg("function dependency unavailable")
+			factory := mockey.Mock(chain.FunctionFromReprWithContext).Return(nil, factoryErr).Build()
+			defer factory.UnPatch()
+			_, err := prepareQueryNodeFunctionChainsFromPlan(plan, schema)
+			require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+			assert.Equal(t, merr.Status(factoryErr).GetCode(), merr.Status(err).GetCode())
+			assert.Equal(t, merr.Status(factoryErr).GetRetriable(), merr.Status(err).GetRetriable())
+		})
 	}
 }
 

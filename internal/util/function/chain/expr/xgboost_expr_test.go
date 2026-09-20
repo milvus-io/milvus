@@ -41,8 +41,8 @@ func TestNewXGBoostExprFromParams(t *testing.T) {
 	assert.Equal(t, "rank_model", xgb.modelResource)
 	assert.Equal(t, xgboostOutputRaw, xgb.output)
 	assert.True(t, xgb.IsRunnable(types.StageL0Rerank))
-	assert.False(t, xgb.IsRunnable(types.StageL1Rerank))
-	assert.False(t, xgb.IsRunnable(types.StageL2Rerank))
+	assert.True(t, xgb.IsRunnable(types.StageL1Rerank))
+	assert.True(t, xgb.IsRunnable(types.StageL2Rerank))
 }
 
 func TestNewXGBoostExprFromParamsDefaults(t *testing.T) {

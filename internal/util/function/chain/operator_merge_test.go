@@ -56,6 +56,53 @@ func TestMergeHelperTestSuite(t *testing.T) {
 	suite.Run(t, new(MergeHelperTestSuite))
 }
 
+func TestValidateMergeOpRepr(t *testing.T) {
+	rrfWithoutWeights := &OperatorRepr{
+		Type: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			MergeParamStrategy: stringParam(string(MergeStrategyRRF)),
+		},
+	}
+	rrfWithWeights := &OperatorRepr{
+		Type: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			MergeParamStrategy: stringParam(string(MergeStrategyRRF)),
+			MergeParamWeights:  arrayParam(doubleParam(0.7), doubleParam(0.3)),
+		},
+	}
+	weighted := &OperatorRepr{
+		Type: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			MergeParamStrategy: stringParam(string(MergeStrategyWeighted)),
+			MergeParamWeights:  arrayParam(doubleParam(0.7), doubleParam(0.3)),
+		},
+	}
+
+	require.NoError(t, ValidateMergeOpRepr(rrfWithoutWeights, 2))
+	require.NoError(t, ValidateMergeOpRepr(rrfWithWeights, 2))
+
+	err := ValidateMergeOpRepr(rrfWithWeights, 3)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "weights count 2 does not match search input count 3")
+
+	require.NoError(t, ValidateMergeOpRepr(weighted, 2))
+
+	err = ValidateMergeOpRepr(weighted, 3)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "weights count 2 does not match search input count 3")
+
+	err = ValidateMergeOpRepr(&OperatorRepr{
+		Type: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			MergeParamStrategy: stringParam("unsupported"),
+		},
+	}, 2)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+}
+
 // helper to create a simple DF with $id (int64), $score (float32), and optionally a field column
 func (s *MergeHelperTestSuite) createDF(ids []int64, scores []float32, chunkSizes []int64) *DataFrame {
 	builder := NewDataFrameBuilder()
