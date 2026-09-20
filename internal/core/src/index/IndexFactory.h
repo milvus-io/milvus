@@ -67,6 +67,19 @@ class IndexFactory {
                       int64_t num_rows,
                       int64_t dim);
 
+    // Includes persisted legacy payloads and request-owned load buffers.
+    LoadResourceRequest
+    IndexLoadResource(DataType field_type,
+                      DataType element_type,
+                      IndexVersion index_version,
+                      uint64_t index_size_in_bytes,
+                      const std::map<std::string, std::string>& index_params,
+                      bool mmap_enable,
+                      int64_t num_rows,
+                      int64_t dim,
+                      const std::vector<std::string>& index_files,
+                      const storage::FileManagerContext& file_manager_context);
+
     LoadResourceRequest
     VecIndexLoadResource(DataType field_type,
                          DataType element_type,
