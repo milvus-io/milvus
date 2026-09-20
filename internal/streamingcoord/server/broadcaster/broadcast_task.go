@@ -504,6 +504,9 @@ func (b *broadcastTask) DropTombstone(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if b.task.GetResourceKeyOwnerId() == b.header().BroadcastID && !b.task.GetResourceKeysReleased() {
+		return merr.WrapErrServiceNotReadyMsg("broadcast still owns resource keys")
+	}
 	b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_DONE
 	b.dirty = true
 	return b.saveTaskIfDirty(ctx, b.Logger())
@@ -534,7 +537,6 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 	defer b.mu.Unlock()
 	if b.task.State != streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
 		b.task.State = streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE
-		close(b.done)
 		b.dirty = true
 	}
 
@@ -542,11 +544,14 @@ func (b *broadcastTask) MarkAckCallbackDone(ctx context.Context) error {
 		return err
 	}
 
-	if b.guards != nil {
-		// release the resource key lock if done.
-		// if the broadcast task is recovered from the remote cluster by replication,
-		// it doesn't hold the resource key lock, so skip it.
+	ownerID := b.task.GetResourceKeyOwnerId()
+	if ownerID == 0 && b.guards != nil {
 		b.guards.Unlock()
+	}
+	// Begin returns after its own callback but keeps its resource guards. End
+	// returns only after completeResourceKeyOwner persists the owner's release.
+	if ownerID == 0 || ownerID == b.header().BroadcastID {
+		b.notifyDoneLocked()
 	}
 	return nil
 }
@@ -565,7 +570,51 @@ func (b *broadcastTask) saveTaskIfDirty(ctx context.Context, logger *mlog.Logger
 		}
 		return err
 	}
-	b.ObserveStateChanged(b.task.State)
+	// Persisting owner release does not transition the ACKed Begin a second time.
+	if b.taskMetricsGuard.state != b.task.State {
+		b.ObserveStateChanged(b.task.State)
+	}
 	logger.Info(ctx, "save broadcast task done")
 	return nil
+}
+
+func (b *broadcastTask) resourceKeyOwnership() (uint64, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.task.GetResourceKeyOwnerId(), b.task.GetResourceKeysReleased()
+}
+
+// ownsUnreleasedResourceKeys reports whether this task's guards must remain held or be restored.
+func (b *broadcastTask) ownsUnreleasedResourceKeys() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if ownerID := b.task.GetResourceKeyOwnerId(); ownerID != 0 {
+		return ownerID == b.header().BroadcastID && !b.task.GetResourceKeysReleased()
+	}
+	return b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING ||
+		b.task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_WAIT_ACK
+}
+
+func (b *broadcastTask) releaseResourceKeys(ctx context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.task.GetResourceKeysReleased() {
+		b.task.ResourceKeysReleased = true
+		b.dirty = true
+	}
+	if err := b.saveTaskIfDirty(ctx, b.Logger()); err != nil {
+		return err
+	}
+	if b.guards != nil {
+		b.guards.Unlock()
+	}
+	return nil
+}
+
+func (b *broadcastTask) notifyDoneLocked() {
+	select {
+	case <-b.done:
+	default:
+		close(b.done)
+	}
 }

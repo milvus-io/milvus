@@ -101,6 +101,11 @@ message BroadcastTask {
     BroadcastTaskState state = 2;    // state of the task.
     bytes acked_vchannel_bitmap = 3 [deprecated = true]; // deprecated, use acked_checkpoints instead.
     repeated AckedCheckpoint acked_checkpoints = 4; // given vchannels that have been acked, the size of bitmap is same with message.BroadcastHeader().VChannels.
+    // Zero preserves the legacy single-broadcast lifecycle. A paired Begin owns
+    // itself; its End references that Begin's broadcast ID and borrows its keys.
+    uint64 resource_key_owner_id = 5;
+    // Only meaningful on the owner; persisted before unlocking or allowing GC.
+    bool resource_keys_released = 6;
 }
 
 // AckedResult is the result of the ack.

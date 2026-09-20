@@ -1296,7 +1296,7 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() 
 		s.NoError(err)
 	}
 
-	// auto_commit=true (the default), so job should go directly to Completed.
+	// Empty auto-commit imports still enter Uncommitted so Commit closes Begin ownership.
 	s.manuallyUpdateJob(s.jobID, func(job ImportJob) {
 		job.(*importJob).AutoCommit = true
 	})
@@ -1304,5 +1304,50 @@ func (s *ImportCheckerSuite) TestCheckPreImporting_EmptyImport_AutoCommitTrue() 
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	s.checker.checkPreImportingJob(s.importMeta.GetJob(context.TODO(), s.jobID))
 
-	s.Equal(internalpb.ImportJobState_Completed, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+	s.Equal(internalpb.ImportJobState_Uncommitted, s.importMeta.GetJob(context.TODO(), s.jobID).GetState())
+	committed := false
+	s.checker.hooks.commitImport = func(ctx context.Context, job ImportJob) error {
+		committed = true
+		return nil
+	}
+	s.checker.checkUncommittedJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+	s.True(committed, "empty import must execute its terminal broadcast")
+}
+
+func (s *ImportCheckerSuite) TestFailedOwnershipMustCloseBeforeGC() {
+	params := paramtable.Get()
+	old := params.DataCoordCfg.ImportCheckIntervalLow.SwapTempValue("0.01")
+	defer params.DataCoordCfg.ImportCheckIntervalLow.SwapTempValue(old)
+	s.setupGCReadyFailedJob()
+	catalog := s.importMeta.(*importMeta).catalog.(*mocks.DataCoordCatalog)
+	catalog.EXPECT().DropImportTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropImportJob(mock.Anything, mock.Anything).Return(nil)
+	s.checker.broker.(*broker2.MockBroker).EXPECT().HasCollection(mock.Anything, mock.Anything).Return(true, nil).Maybe()
+	// This loop must close even jobs skipped by the readiness-gated state machine.
+	s.manuallyUpdateJob(s.jobID, func(job ImportJob) { job.(*importJob).ReadyVchannels = nil })
+	entered := make(chan struct{}, 1)
+	allowClose := make(chan struct{})
+	s.checker.hooks.closeFailedImport = func(ctx context.Context, job ImportJob) error {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-allowClose:
+			return nil
+		default:
+			return merr.WrapErrServiceUnavailableMsg("retry terminal broadcast")
+		}
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); s.checker.runGCLoop() }()
+	defer func() { s.checker.Close(); <-done }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		s.FailNow("failed owner was not closed")
+	}
+	s.NotNil(s.importMeta.GetJob(context.Background(), s.jobID), "failed End must retain the job for retry")
+	close(allowClose)
+	s.Eventually(func() bool { return s.importMeta.GetJob(context.Background(), s.jobID) == nil }, 5*time.Second, time.Millisecond)
 }

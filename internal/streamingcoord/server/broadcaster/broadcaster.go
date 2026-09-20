@@ -22,6 +22,11 @@ func IsBroadcastTaskNotCreated(err error) bool {
 }
 
 type Broadcaster interface {
+	// BroadcastWithResourceKeyOwner closes a paired Begin using its held keys.
+	// handled=false means no retained owner was found for the registered pair.
+	// The caller owns fallback behavior and terminal retries after owner GC.
+	BroadcastWithResourceKeyOwner(ctx context.Context, msg message.BroadcastMutableMessage) (handled bool, err error)
+
 	// WithResourceKeys sets the resource keys of the broadcast operation.
 	// It will acquire locks of the resource keys and return the broadcast api.
 	// Once the broadcast api is returned, the Close() method of the broadcast api should be called to release the resource safely.

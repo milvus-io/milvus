@@ -3068,7 +3068,7 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 	}
 
 	// Start broadcaster with resource lock (shared DB + exclusive collection)
-	b, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
+	b, _, err := s.startBroadcastWithCollectionID(ctx, req.GetCollectionId())
 	if err != nil {
 		mlog.Warn(context.TODO(), "failed to start broadcaster", mlog.Err(err))
 		return &datapb.RefreshExternalCollectionResponse{
@@ -3216,23 +3216,24 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 	if len(vchannels) == 0 {
 		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID())
 	}
-
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
-	if err != nil {
-		return err
-	}
-	defer broadcaster.Close()
-
 	msg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{
-			CollectionId: job.GetCollectionID(),
-			JobId:        job.GetJobID(),
-		}).
+		WithHeader(&message.CommitImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
+	// WAL ordering places later DDL after this commit fence, so owned imports can
+	// release the Begin's keys through the normal FastAck path.
+	if handled, err := s.tryBroadcastWithRetainedOwner(ctx, msg); handled || err != nil {
+		return err
+	}
 
-	_, err = broadcaster.Broadcast(ctx, msg)
+	// Legacy jobs have no retained Begin; preserve their original locking/ACK path.
+	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	if err != nil {
+		return err
+	}
+	defer api.Close()
+	_, err = api.Broadcast(ctx, msg)
 	return err
 }
 
@@ -3251,24 +3252,46 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	if len(vchannels) == 0 {
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
+	msg := buildRollbackImportMessage(job)
+	if handled, err := s.tryBroadcastWithRetainedOwner(ctx, msg); handled || err != nil {
+		return err
+	}
 
-	broadcaster, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
+	// Legacy jobs have no retained Begin; preserve their original locking/ACK path.
+	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
 	}
-	defer broadcaster.Close()
-
-	msg := message.NewRollbackImportMessageBuilderV2().
-		WithHeader(&message.RollbackImportMessageHeader{
-			CollectionId: job.GetCollectionID(),
-			JobId:        job.GetJobID(),
-		}).
-		WithBody(&messagespb.RollbackImportMessageBody{}).
-		WithBroadcast(vchannels).
-		MustBuildBroadcast()
-
-	_, err = broadcaster.Broadcast(ctx, msg)
+	defer api.Close()
+	_, err = api.Broadcast(ctx, msg)
 	return err
+}
+
+// closeFailedImport releases newly owned imports promptly, without adding new
+// rollback broadcasts for legacy jobs outside their existing CDC GC path.
+func (s *Server) closeFailedImport(ctx context.Context, job ImportJob) error {
+	if len(job.GetVchannels()) == 0 {
+		// Legacy jobs may have no data channels; new retained Begins cannot.
+		return nil
+	}
+	_, err := s.tryBroadcastWithRetainedOwner(ctx, buildRollbackImportMessage(job))
+	return err
+}
+
+func buildRollbackImportMessage(job ImportJob) message.BroadcastMutableMessage {
+	return message.NewRollbackImportMessageBuilderV2().
+		WithHeader(&message.RollbackImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
+		WithBody(&messagespb.RollbackImportMessageBody{}).
+		WithBroadcast(job.GetVchannels()).
+		MustBuildBroadcast()
+}
+
+func (s *Server) tryBroadcastWithRetainedOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
+	bc, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	return bc.BroadcastWithResourceKeyOwner(ctx, msg)
 }
 
 // validateAndExecuteImportAction handles the boilerplate for commit/abort import operations:
