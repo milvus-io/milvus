@@ -34,6 +34,9 @@ packages:
   github.com/milvus-io/milvus/internal/streamingcoord/client/broadcast:
     interfaces:
       Watcher:
+  github.com/milvus-io/milvus/internal/pkindex/authority:
+    interfaces:
+      Authority:
   github.com/milvus-io/milvus/internal/streamingnode/client/manager:
     interfaces:
       ManagerClient:
