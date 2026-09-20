@@ -22,9 +22,13 @@
 #include <unordered_map>
 #include <tuple>
 
-#include "index/json_stats/utils.h"
+#include "cachinglayer/Utils.h"
+#include "segcore/json_stats/utils.h"
 #include "common/EasyAssert.h"
-#include "index/IndexStats.h"
+#include "storage/DiskFileManagerImpl.h"
+#include "storage/FileManager.h"
+#include "storage/artifact/ArtifactStats.h"
+#include "tantivy-wrapper.h"
 
 namespace milvus::index {
 
@@ -62,7 +66,7 @@ class BsonInvertedIndex {
               milvus::proto::common::LoadPriority priority,
               bool load_in_mmap);
 
-    IndexStatsPtr
+    storage::ArtifactStats
     UploadIndex();
 
     void
@@ -89,7 +93,7 @@ class BsonInvertedIndex {
     // key -> encoded([row_id, offset]) map cache for building index
     std::map<std::string, std::vector<int64_t>> inverted_index_map_;
     // tantivy index wrapper
-    std::shared_ptr<TantivyIndexWrapper> wrapper_;
+    std::shared_ptr<milvus::tantivy::TantivyIndexWrapper> wrapper_;
     std::shared_ptr<milvus::storage::DiskFileManagerImpl> disk_file_manager_;
 };
 
