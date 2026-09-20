@@ -332,13 +332,17 @@ func estimateFieldSize(segment *SegmentInfo, schema *schemapb.CollectionSchema, 
 	if size := taskcommon.EstimateFieldSize(field, rows, container); size > 0 {
 		return size
 	}
-	// Neither bound is known (an unbounded type in a segment without size
-	// statistics, i.e. an external collection): the schema's per-row estimate.
-	if size := rows * fieldBytesPerRow(field); size > 0 {
-		mlog.Warn(context.TODO(), "field has neither a schema bound nor a known container, estimated per row",
-			mlog.FieldSegmentID(segment.GetID()), mlog.FieldFieldID(fieldID), mlog.Int64("estimatedSize", size))
-		return size
-	}
+	// Neither bound is known: a text or geometry field (neither has a limit the
+	// write path enforces) in a segment without size statistics, i.e. an
+	// external collection. The whole segment is the only bound left.
+	//
+	// The per-row estimate that used to sit here is deliberately gone. It came
+	// from EstimateSizePerRecord, whose value for these types is the dynamic
+	// field AVERAGE, not a bound. Pricing a task on an average under-prices
+	// every field above it, and the worker books that number while reading the
+	// real column, so the memory filter admits a task the node cannot hold.
+	mlog.Warn(context.TODO(), "field has neither a schema bound nor a known container, pricing on the whole segment",
+		mlog.FieldSegmentID(segment.GetID()), mlog.FieldFieldID(fieldID))
 	return estimateSegmentSize(segment, schema)
 }
 
@@ -374,16 +378,6 @@ func vectorFieldBytes(field *schemapb.FieldSchema, rows int64) int64 {
 		return 0
 	}
 	return rows * taskcommon.FixedFieldWidth(field)
-}
-
-// fieldBytesPerRow reuses EstimateSizePerRecord on a one-field schema, the
-// estimator the rest of DataCoord uses, for a field no bound applies to.
-func fieldBytesPerRow(field *schemapb.FieldSchema) int64 {
-	n, err := typeutil.EstimateSizePerRecord(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
-	if err != nil {
-		return 0
-	}
-	return int64(n)
 }
 
 // resourceCache memoizes a task's requirement so what the scheduler placed and

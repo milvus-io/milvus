@@ -301,13 +301,20 @@ func TestEstimateFieldSize(t *testing.T) {
 	assert.Equal(t, int64(0), estimateFieldSize(nil, schema, 101))
 	assert.Equal(t, int64(0), estimateFieldSize(&SegmentInfo{}, schema, 101))
 
-	// No bound and no container: the per-row estimate, else the segment size.
+	// No container: a JSON field is bounded by the per-value limit the proxy
+	// enforces, never by the dynamic-field average. The average would under-price
+	// every row above it, and the worker books what it was priced at.
 	jsonSchema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 103, Name: "meta", DataType: schemapb.DataType_JSON},
 	}}
-	jsonPerRow := fieldBytesPerRow(jsonSchema.Fields[0])
-	assert.Greater(t, jsonPerRow, int64(0))
-	assert.Equal(t, rows*jsonPerRow, estimateFieldSize(external, jsonSchema, 103))
+	jsonBound := rows * (Params.CommonCfg.JSONMaxLength.GetAsInt64() + 4)
+	assert.Greater(t, jsonBound, int64(0))
+	assert.Equal(t, jsonBound, estimateFieldSize(external, jsonSchema, 103))
+
+	// A type with no enforced limit at all still has no bound: text and geometry
+	// are not length-checked on insert, and neither is a dim-less vector or a
+	// varchar without max_length. Those fall back to the whole segment, which is
+	// zero for an external segment carrying no statistics.
 	dimless := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector},
 	}}
@@ -315,7 +322,6 @@ func TestEstimateFieldSize(t *testing.T) {
 	unsizable := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 102, Name: "str", DataType: schemapb.DataType_VarChar},
 	}}
-	assert.Equal(t, int64(0), fieldBytesPerRow(unsizable.Fields[0]))
 	assert.Equal(t, int64(0), estimateFieldSize(external, unsizable, 102))
 
 	// vectorFieldBytes refuses sparse vectors: they have no dim to multiply.

@@ -22,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -30,15 +31,21 @@ import (
 // derived from the same size.
 //
 // A field's size is the smaller of two upper bounds:
-//   - the schema's: rows x width for a fixed-width type, rows x (max_length +
-//     offset) for a varchar, since the proxy rejects a varchar longer than
-//     max_length bytes;
+//   - the schema's: rows x width for a fixed-width type, and for a variable-width
+//     one rows x whatever per-row limit the write path enforces -- max_length for
+//     a varchar, common.JSONMaxLength for a JSON value, max_capacity x element
+//     width for an array. Text and geometry have no such limit, so they have no
+//     schema bound;
 //   - the container's: the memory size of the binlogs that hold the field. In
 //     storage v2/v3 a binlog holds a whole column group, so this bounds the
 //     field by everything it shares the group with.
 //
 // Neither bound alone is the field: the schema cannot see that a varchar is
 // short, and a column group cannot tell its fields apart.
+//
+// Both are bounds, never averages. A caller prices a task on this size and the
+// worker books that price while reading the real column, so an average here
+// under-prices every field above it and admits a task the node cannot hold.
 
 const (
 	// SystemFieldsBytesPerRow is RowID plus Timestamp, both int64. Every
@@ -50,9 +57,18 @@ const (
 
 // SchemaFieldSize returns the schema's upper bound on the bytes that rows
 // values of field occupy. exact is true for a fixed-width type, whose bound is
-// its size. ok is false when the schema does not bound the type (json, text,
-// array, geometry, sparse and array-of-vector fields, a varchar without
-// max_length, a vector without dim).
+// its size. ok is false when the schema does not bound the type (text,
+// geometry, sparse and array-of-vector fields, a varchar without max_length, an
+// array without max_capacity, a vector without dim).
+//
+// Every bound here is one the write path enforces, so it holds for data already
+// in a segment. It is never an average: an average that a caller mistakes for a
+// bound under-prices a task, and the worker books the under-priced number while
+// reading the real column.
+//
+// Text and geometry have no bound. proxy.maxTextLength is not applied on insert
+// (checkTextFieldData returns without a length check), and geometry is only
+// checked for WKB convertibility, so neither limit can be relied on here.
 func SchemaFieldSize(field *schemapb.FieldSchema, rows int64) (size int64, exact bool, ok bool) {
 	if field == nil || rows <= 0 {
 		return 0, false, false
@@ -64,14 +80,55 @@ func SchemaFieldSize(field *schemapb.FieldSchema, rows int64) (size int64, exact
 	if width := FixedFieldWidth(field); width > 0 {
 		return rows*width + validity, true, true
 	}
-	if field.GetDataType() == schemapb.DataType_VarChar {
+	switch field.GetDataType() {
+	case schemapb.DataType_VarChar:
 		maxLength := typeParamInt(field, common.MaxLengthKey)
 		if maxLength <= 0 {
 			return 0, false, false
 		}
 		return rows*(maxLength+varCharOffsetBytes) + validity, false, true
+	case schemapb.DataType_JSON:
+		// The proxy rejects a JSON value longer than common.JSONMaxLength
+		// (validate_util.go checkJSONFieldData), so that is a real per-row bound.
+		maxLength := jsonMaxLength()
+		if maxLength <= 0 {
+			return 0, false, false
+		}
+		return rows*(maxLength+varCharOffsetBytes) + validity, false, true
+	case schemapb.DataType_Array:
+		// The proxy rejects an array longer than max_capacity
+		// (validate_util.go verifyCapacityPerRow), so capacity times the widest
+		// element bounds one row.
+		element := arrayElementWidth(field)
+		capacity := typeParamInt(field, common.MaxCapacityKey)
+		if element <= 0 || capacity <= 0 {
+			return 0, false, false
+		}
+		return rows*capacity*element + validity, false, true
 	}
 	return 0, false, false
+}
+
+// jsonMaxLength is the per-value limit the proxy enforces on a JSON field. It
+// reads paramtable, so it answers 0 before paramtable is initialized, and the
+// caller then reports the field as unbounded rather than as free.
+func jsonMaxLength() int64 {
+	return paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
+}
+
+// arrayElementWidth is the bytes of one array element: its fixed width, or the
+// varchar bound for a varchar element. 0 when the element type has no bound.
+func arrayElementWidth(field *schemapb.FieldSchema) int64 {
+	switch field.GetElementType() {
+	case schemapb.DataType_VarChar:
+		maxLength := typeParamInt(field, common.MaxLengthKey)
+		if maxLength <= 0 {
+			return 0
+		}
+		return maxLength + varCharOffsetBytes
+	default:
+		return FixedFieldWidth(&schemapb.FieldSchema{DataType: field.GetElementType()})
+	}
 }
 
 // FixedFieldWidth returns the bytes per row of a fixed-width field, or 0 for

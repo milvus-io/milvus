@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func sizedField(dataType schemapb.DataType, params ...string) *schemapb.FieldSchema {
@@ -72,13 +73,42 @@ func TestSchemaFieldSize(t *testing.T) {
 	assert.False(t, exact)
 	assert.True(t, ok)
 
-	// Types the schema does not bound.
+	// A JSON value is bounded by the per-value limit the proxy enforces. It must
+	// never be sized by the dynamic-field average: an average under-prices every
+	// row above it, and the worker books whatever it was priced at.
+	paramtable.Init()
+	jsonMax := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
+	assert.Positive(t, jsonMax)
+	size, exact, ok = SchemaFieldSize(sizedField(schemapb.DataType_JSON), 1000)
+	assert.Equal(t, 1000*(jsonMax+4), size)
+	assert.False(t, exact)
+	assert.True(t, ok)
+
+	// An array is bounded by max_capacity times its element width.
+	arr := sizedField(schemapb.DataType_Array, "max_capacity", "4")
+	arr.ElementType = schemapb.DataType_Int32
+	size, exact, ok = SchemaFieldSize(arr, 1000)
+	assert.Equal(t, int64(1000*4*4), size)
+	assert.False(t, exact)
+	assert.True(t, ok)
+
+	// A varchar element uses its own max_length.
+	arrStr := sizedField(schemapb.DataType_Array, "max_capacity", "4", "max_length", "16")
+	arrStr.ElementType = schemapb.DataType_VarChar
+	size, _, ok = SchemaFieldSize(arrStr, 1000)
+	assert.Equal(t, int64(1000*4*(16+4)), size)
+	assert.True(t, ok)
+
+	// Types the schema does not bound. Text and geometry have no limit the write
+	// path enforces: checkTextFieldData skips the length check outright, and
+	// geometry is only checked for WKB convertibility.
 	for _, field := range []*schemapb.FieldSchema{
 		sizedField(schemapb.DataType_VarChar),
 		sizedField(schemapb.DataType_VarChar, "max_length", "junk"),
-		sizedField(schemapb.DataType_JSON),
 		sizedField(schemapb.DataType_Text),
-		sizedField(schemapb.DataType_Array, "max_capacity", "4"),
+		sizedField(schemapb.DataType_Geometry),
+		sizedField(schemapb.DataType_Array, "max_capacity", "4"), // no element type
+		sizedField(schemapb.DataType_Array),                      // no capacity
 		sizedField(schemapb.DataType_SparseFloatVector),
 		sizedField(schemapb.DataType_FloatVector),
 	} {
@@ -110,9 +140,12 @@ func TestColumnGroupSize(t *testing.T) {
 }
 
 func TestEstimateFieldSize(t *testing.T) {
+	paramtable.Init()
 	int64Field := sizedField(schemapb.DataType_Int64)
 	varChar := sizedField(schemapb.DataType_VarChar, "max_length", "256")
 	jsonField := sizedField(schemapb.DataType_JSON)
+	// Text is the unbounded case: no limit the write path enforces.
+	textField := sizedField(schemapb.DataType_Text)
 
 	// An Int64 sharing a 150MB short column group is its own 8 bytes a row.
 	assert.Equal(t, int64(8000), EstimateFieldSize(int64Field, 1000, 150<<20))
@@ -124,7 +157,13 @@ func TestEstimateFieldSize(t *testing.T) {
 	assert.Equal(t, int64(1000*260), EstimateFieldSize(varChar, 1000, 1<<30))
 	// Unknown container: the schema bound alone.
 	assert.Equal(t, int64(8000), EstimateFieldSize(int64Field, 1000, 0))
-	// An unbounded type: the container alone, or nothing.
+	// A JSON field sharing a small group: the group wins over the per-value limit.
 	assert.Equal(t, int64(12345), EstimateFieldSize(jsonField, 1000, 12345))
-	assert.Equal(t, int64(0), EstimateFieldSize(jsonField, 1000, 0))
+	// With no container the per-value limit still bounds it, so the caller is
+	// never handed an average dressed up as a bound.
+	jsonMax := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
+	assert.Equal(t, 1000*(jsonMax+4), EstimateFieldSize(jsonField, 1000, 0))
+	// A genuinely unbounded type: the container alone, or nothing.
+	assert.Equal(t, int64(12345), EstimateFieldSize(textField, 1000, 12345))
+	assert.Equal(t, int64(0), EstimateFieldSize(textField, 1000, 0))
 }
