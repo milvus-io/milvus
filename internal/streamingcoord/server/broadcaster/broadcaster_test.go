@@ -43,18 +43,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Supply the Import ownership declaration normally registered by DataCoord.
+// Supply the Import long-lock ownership declaration normally registered by DataCoord.
 func init() {
 	for _, typ := range []message.MessageTypeWithVersion{
 		message.MessageTypeImportV1,
 		message.MessageTypeCommitImportV2,
 		message.MessageTypeRollbackImportV2,
 	} {
-		registry.RegisterResourceKeyPair(typ, testImportResourceKeyPair)
+		registry.RegisterLongLockOwnershipKeyParser(typ, parseImportLongLockOwnershipKeyForTest)
 	}
 }
 
-func testImportResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
+func parseImportLongLockOwnershipKeyForTest(msg message.BroadcastMutableMessage) (string, bool) {
 	var jobID int64
 	var isOwner bool
 	switch msg.MessageTypeWithVersion() {

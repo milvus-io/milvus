@@ -41,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-// Register the stateless ownership parser before broadcaster recovery starts;
+// Register the stateless long-lock ownership-key parser before broadcaster recovery starts;
 // ACK callbacks are registered later, when the DataCoord server is initialized.
 func init() {
 	for _, typ := range []message.MessageTypeWithVersion{
@@ -49,11 +49,11 @@ func init() {
 		message.MessageTypeCommitImportV2,
 		message.MessageTypeRollbackImportV2,
 	} {
-		registry.RegisterResourceKeyPair(typ, importResourceKeyPair)
+		registry.RegisterLongLockOwnershipKeyParser(typ, parseImportLongLockOwnershipKey)
 	}
 }
 
-func importResourceKeyPair(msg message.BroadcastMutableMessage) (string, bool) {
+func parseImportLongLockOwnershipKey(msg message.BroadcastMutableMessage) (string, bool) {
 	var jobID int64
 	var isOwner bool
 	switch msg.MessageTypeWithVersion() {

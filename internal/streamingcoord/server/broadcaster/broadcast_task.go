@@ -584,7 +584,8 @@ func (b *broadcastTask) resourceKeyOwnership() (uint64, bool) {
 	return b.task.GetResourceKeyOwnerId(), b.task.GetResourceKeysReleased()
 }
 
-func (b *broadcastTask) holdsResourceKeys() bool {
+// ownsUnreleasedResourceKeys reports whether this task's guards must remain held or be restored.
+func (b *broadcastTask) ownsUnreleasedResourceKeys() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if ownerID := b.task.GetResourceKeyOwnerId(); ownerID != 0 {
@@ -616,33 +617,4 @@ func (b *broadcastTask) notifyDoneLocked() {
 	default:
 		close(b.done)
 	}
-}
-
-// finishRecoveredResourceKeyOwners closes the crash window between durable End
-// ACK and durable owner release, before restoring locks or starting GC. Without
-// this pass a later DDL's PENDING record could conflict with a completed owner.
-func finishRecoveredResourceKeyOwners(ctx context.Context, tasks []*streamingpb.BroadcastTask) error {
-	completed := make(map[uint64]struct{})
-	for _, task := range tasks {
-		msg := message.NewBroadcastMutableMessageBeforeAppend(task.Message.Payload, task.Message.Properties)
-		ownerID := task.GetResourceKeyOwnerId()
-		if ownerID != 0 && ownerID != msg.BroadcastHeader().BroadcastID && task.State == streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE {
-			completed[ownerID] = struct{}{}
-		}
-	}
-	for _, task := range tasks {
-		ownerID := task.GetResourceKeyOwnerId()
-		if _, ok := completed[ownerID]; !ok || task.GetResourceKeysReleased() {
-			continue
-		}
-		msg := message.NewBroadcastMutableMessageBeforeAppend(task.Message.Payload, task.Message.Properties)
-		if ownerID != msg.BroadcastHeader().BroadcastID {
-			continue
-		}
-		task.ResourceKeysReleased = true
-		if err := resource.Resource().StreamingCatalog().SaveBroadcastTask(ctx, ownerID, task); err != nil {
-			return err
-		}
-	}
-	return nil
 }
