@@ -39,6 +39,13 @@ type CoordQueryViewStateMachine struct {
 	// Pending external effects, atomically drained through ShardViewManager by
 	// the Coordinator flush scheduler.
 	pending queryViewFlush
+
+	// ref is the acquired DataView reference backing this view's row stats.
+	// It is bound at construction (New/Recover) by the Manager, which
+	// acquires it from the DataViewRefProvider, and released exactly once at
+	// durable removal (finalizeRemoval). Nil when the version no longer
+	// exists (already GC'd) or the caller passes no ref.
+	ref qviews.DataViewRef
 }
 
 // queryViewFlush is the latest unflushed external effect of a state machine.
@@ -56,12 +63,18 @@ func (f queryViewFlush) Empty() bool {
 // NewCoordQueryViewStateMachine creates a state machine for a freshly
 // generated query view.
 //
+// ref is the DataView reference acquired by the Manager for this view's
+// version (nil when the version does not exist); the state machine holds it
+// (lifetime(QueryView) < lifetime(DataView)) until ReleaseRef at durable
+// removal.
+//
 // After construction, the pending flush contains the Preparing view for
 // write-ahead persistence and the Preparing targets for all work nodes.
-func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryViewStateMachine {
+func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
 	sm := &CoordQueryViewStateMachine{
 		state:           qviews.QueryViewStatePreparing,
 		view:            view,
+		ref:             ref,
 		snState:         qviews.QueryViewStateNil,
 		qnStates:        make(map[int64]qviews.QueryViewState, len(view.QueryNode)),
 		qnReadySegments: make(map[int64][]int64, len(view.QueryNode)),
@@ -77,16 +90,21 @@ func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryVie
 // RecoverCoordQueryViewStateMachine reconstructs a state machine from a view
 // loaded from ETCD during Coordinator crash recovery.
 //
+// ref is the DataView reference the Manager re-acquired for the persisted
+// version (nil when the version no longer exists, e.g. already GC'd); the
+// caller then decides terminal recovery based on that.
+//
 // Recovery behavior by persisted state:
 //   - Preparing:     re-push Preparing to all nodes.
 //   - Up:            no pending (wait for events).
 //   - Down:          re-push Down to SN.
 //   - Unrecoverable: stays Unrecoverable, waits for Manager to call EnterDropping.
-func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryViewStateMachine {
+func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard, ref qviews.DataViewRef) *CoordQueryViewStateMachine {
 	recoveredState := qviews.QueryViewState(view.Meta.State)
 	sm := &CoordQueryViewStateMachine{
 		state:           recoveredState,
 		view:            view,
+		ref:             ref,
 		snState:         qviews.QueryViewStateNil,
 		qnStates:        make(map[int64]qviews.QueryViewState, len(view.QueryNode)),
 		qnReadySegments: make(map[int64][]int64, len(view.QueryNode)),
@@ -126,6 +144,22 @@ func (sm *CoordQueryViewStateMachine) View() *viewpb.QueryViewOfShard {
 // Version returns the parsed QueryViewVersion of this view.
 func (sm *CoordQueryViewStateMachine) Version() qviews.QueryViewVersion {
 	return qviews.FromProtoQueryViewVersion(sm.view.Meta.Version)
+}
+
+// ReleaseRef releases the DataView reference bound at construction.
+// Idempotent: each acquirer must release exactly once, so a second call is a
+// no-op.
+func (sm *CoordQueryViewStateMachine) ReleaseRef() {
+	if sm.ref != nil {
+		sm.ref.Deref()
+		sm.ref = nil
+	}
+}
+
+// Ref returns the attached DataView reference, or nil when the DataView
+// layer is not wired or the version no longer exists.
+func (sm *CoordQueryViewStateMachine) Ref() qviews.DataViewRef {
+	return sm.ref
 }
 
 // QNReadySegments returns the ready segment IDs reported by each QN.

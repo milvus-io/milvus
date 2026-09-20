@@ -59,7 +59,7 @@ func TestHardConstraintsRejectUnavailableNodes(t *testing.T) {
 }
 
 func TestSegmentRowsUsesRowNumInsteadOfMemSize(t *testing.T) {
-	seg := &SegmentDataView{MemSize: 1_000_000, RowNum: 10}
+	seg := &SegmentDataView{RowNum: 10}
 	assert.Equal(t, int64(10), segmentRows(seg))
 }
 

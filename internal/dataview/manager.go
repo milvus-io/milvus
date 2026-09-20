@@ -24,6 +24,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -74,6 +75,17 @@ type Manager interface {
 	Latest(ctx context.Context, collectionID int64) (DataViewRef, error)
 	Get(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (DataViewRef, error)
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
+
+	// DataViewSnapshot returns a native (non-proto) snapshot of the latest
+	// DataView for every Collection tracked by the Manager. The snapshot is
+	// immutable and decoupled from the viewpb wire format; per-segment RowNum
+	// is the per-version published footprint (entry.stats) embedded inline,
+	// so the Balancer never needs a separate segment-metadata lookup.
+	DataViewSnapshot(ctx context.Context) *api.DataViewSnapshot
+	// DataViewSnapshotForCollections returns the same native snapshot scoped
+	// to the supplied Collection IDs. A nil set selects every Collection;
+	// a non-nil empty set selects none.
+	DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *api.DataViewSnapshot
 }
 
 // DataViewRef is the read-only reference to one DataView version shared out
@@ -610,6 +622,111 @@ func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64
 		delete(state.versions, candidate.key)
 	}
 	return nil
+}
+
+// DataViewSnapshot returns a native (non-proto) snapshot of the latest
+// DataView for every tracked Collection.
+func (m *dataViewManager) DataViewSnapshot(ctx context.Context) *api.DataViewSnapshot {
+	return m.DataViewSnapshotForCollections(ctx, nil)
+}
+
+// DataViewSnapshotForCollections builds a native (non-proto) snapshot of the
+// latest DataView for the requested Collections (all when collectionIDs is
+// nil; a non-nil empty set selects none). Each Collection's DataView is
+// materialized under its Collection lock from the latest version entry:
+// the view membership and published RowNum footprint (entry.stats) come from the
+// same snapshot point, so RowNum is the immutable footprint of that DataView
+// version. The result is fully independent of the Manager — a consumer that
+// wants to outlive the snapshot simply retains (or copies) the returned
+// native structures, no Manager handle is held.
+func (m *dataViewManager) DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *api.DataViewSnapshot {
+	m.mu.RLock()
+	var states []*collectionState
+	if collectionIDs == nil {
+		states = make([]*collectionState, 0, len(m.states))
+		for _, state := range m.states {
+			states = append(states, state)
+		}
+	} else {
+		states = make([]*collectionState, 0, len(collectionIDs))
+		for collectionID := range collectionIDs {
+			if state := m.states[collectionID]; state != nil {
+				states = append(states, state)
+			}
+		}
+	}
+	m.mu.RUnlock()
+
+	// Follow the mutation lock order: never wait for a Collection while
+	// holding the manager lock. Flush/recompute may hold state.mu and need
+	// m.mu.RLock to revalidate the Collection against a concurrent drop.
+	collections := make([]*api.CollectionDataView, 0, len(states))
+	for _, state := range states {
+		coll := m.collectionDataView(state)
+		if coll != nil {
+			collections = append(collections, coll)
+		}
+	}
+	return api.NewDataViewSnapshot(0, collections)
+}
+
+// collectionDataView materializes the native DataView of one Collection by
+// copying its latest version entry and merging that version's published
+// footprint (entry.stats) under the Collection lock, so the membership and
+// the RowNum come from the same immutable snapshot point.
+func (m *dataViewManager) collectionDataView(state *collectionState) *api.CollectionDataView {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
+	m.mu.RLock()
+	current := m.states[state.id] == state
+	m.mu.RUnlock()
+	if !current {
+		return nil
+	}
+
+	entry := state.latest
+	if entry == nil || entry.isTombstone {
+		return nil
+	}
+	view := entry.view
+
+	coll := &api.CollectionDataView{
+		CollectionID: view.GetCollectionId(),
+		DataVersion:  qviews.FromProtoDataVersion(view.GetDataVersion()),
+		Shards:       make([]*api.ShardDataView, 0, len(view.GetShards())),
+	}
+	for _, shard := range view.GetShards() {
+		if shard == nil {
+			continue
+		}
+		nativeShard := &api.ShardDataView{
+			VChannel:   shard.GetVchannel(),
+			Partitions: make([]*api.PartitionDataView, 0, len(shard.GetPartitions())),
+		}
+		for _, partition := range shard.GetPartitions() {
+			if partition == nil {
+				continue
+			}
+			segments := make([]*api.SegmentDataView, 0, len(partition.GetSegmentIds()))
+			for _, segmentID := range partition.GetSegmentIds() {
+				segment := &api.SegmentDataView{
+					SegmentID:   segmentID,
+					PartitionID: partition.GetPartitionId(),
+				}
+				if stats, ok := entry.stats[segmentID]; ok {
+					segment.RowNum = stats.RowNum
+				}
+				segments = append(segments, segment)
+			}
+			nativeShard.Partitions = append(nativeShard.Partitions, &api.PartitionDataView{
+				PartitionID: partition.GetPartitionId(),
+				Segments:    segments,
+			})
+		}
+		coll.Shards = append(coll.Shards, nativeShard)
+	}
+	return coll
 }
 
 // persistLocked persists a snapshot and loads it into memory. A nil stats

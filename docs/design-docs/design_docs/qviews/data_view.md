@@ -29,6 +29,7 @@ type LoadableSegment struct {
     VChannel        string
     PartitionID     int64
     ManifestVersion int64
+    RowNum          int64 // in-memory published footprint, not persisted
 }
 ```
 
@@ -247,11 +248,41 @@ bug (see the precondition on the type).
 the exact requested version. An unknown Collection, a nil version, or a version
 that has already been collected returns `(nil, nil)`.
 
-When QueryView integration is introduced, a QueryView must retain its exact
+The coordview interface integration retains each QueryView's exact
 `DataViewRef` through Preparing, Ready, Up, Down, Unrecoverable, and Dropping,
-and release it only after reaching Dropped. Recovered QueryViews must reacquire
-their persisted DataVersion before GC is enabled. This lifecycle integration is
-outside the current PR.
+and releases it only after the Dropped deletion has been persisted. New views
+acquire their reference before preempting existing views; a missing version
+returns a retriable system error so the caller can rebuild its plan. Recovered
+QueryViews reacquire their persisted DataVersion; a genuinely missing version
+enters terminal cleanup. Production runtime wiring must complete this recovery
+before enabling DataView GC; that wiring is outside this PR.
+
+### View consumer interfaces
+
+The same Manager implements both consumer interfaces:
+
+- `qviews.DataViewRefProvider.Get` supplies exact-version references to
+  `ShardViewRegistry`. Each state machine owns one acquired reference.
+- `balancer.DataViewProvider.DataViewSnapshot` and
+  `DataViewSnapshotForCollections` supply detached native snapshots for
+  planning. Nil collection selection means all collections; a non-nil empty
+  selection means none. Each collection's membership and row statistics are
+  copied from the same version under its collection lock. The global manager
+  lock is released before waiting for any collection lock, and the selected
+  collection is revalidated against concurrent drop.
+
+Native planning snapshots do not pin DataVersions. The exact-version `Get`
+performed by `AddPreparing` is the acquisition point against GC. A snapshot
+may remain readable after GC has collected its version, but such a snapshot
+cannot be used to create a new QueryView.
+
+`DataViewRef.Stats(segmentID)` exposes the reference's per-version RowNum map.
+Stats are immutable after publication and are not persisted. Recovery fills
+the latest version from SegmentMeta; retained historical versions may have
+unknown stats. Shard statistics combine the contributing retained versions,
+preferring the newest known footprint for each segment. An explicit presence
+flag distinguishes unknown from a published zero; only unknown values may
+fall back to the Balancer's planning snapshot cache.
 
 Because DataVersion and DataViewRef are Collection-scoped while QueryView is
 Shard-scoped, one Shard can otherwise keep an old complete Collection snapshot
@@ -358,7 +389,7 @@ recognizes the CollectionMeta tombstone and removes the remaining DataView keys.
 
 The manager no longer owns `SegmentStore`, loadability checks, resident/visible
 split, temporary flush snapshots, SegmentMeta-derived delete-frontier
-projection, event-driven repair, Balancer snapshots, Segment reference queries,
+projection, event-driven repair, Balancer policy, Segment reference queries,
 or caller-supplied protected-version lists. The event API is reduced to
 Create/Bootstrap/PrepareFlush/Recompute/Drop; membership is a materialized view
 of SegmentMeta rather than an event-accumulated log. The delete frontier remains

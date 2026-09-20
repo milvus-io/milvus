@@ -26,6 +26,8 @@ type ShardStats struct {
 	// Segments lists every segment currently placed for this shard, keyed by
 	// segmentID. The value is node-level state: the same segment may appear on
 	// multiple nodes while views overlap, but one node has at most one state.
+	// Each segment also carries the published RowNum footprint (see
+	// SegmentStats.RowNum).
 	//
 	// Down view placements are reported as Ready because QueryNodes do not
 	// receive Down and the loaded segments are still more reusable than
@@ -65,4 +67,10 @@ type SegmentStats struct {
 	// on multiple nodes while views overlap, but one node only has one state for
 	// a given segment.
 	Nodes map[int64]SegmentState
+
+	// RowNum is the published per-segment row-count footprint, read from a
+	// resident QueryView's DataViewRef. HasRowNum distinguishes an unknown
+	// footprint (for example after recovery) from a published zero row count.
+	RowNum    int64
+	HasRowNum bool
 }
