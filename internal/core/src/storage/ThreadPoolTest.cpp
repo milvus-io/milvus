@@ -25,6 +25,7 @@
 #include <folly/ScopeGuard.h>
 #include "gtest/gtest.h"
 #include "storage/LoadOverheadController.h"
+#include "storage/LoadAdmissionController.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 
@@ -170,23 +171,23 @@ TEST_F(ThreadPoolTest, DynamicMaxThreadsSizeUpdate) {
 TEST_F(ThreadPoolTest, LoadFileOverheadControllerIsLazyAndStable) {
     auto& file_owner = storage::LoadFileOverheadController::GetInstance();
     auto& memory_owner = storage::LoadMemoryOverheadController::GetInstance();
-    auto executor_workers = ThreadPools::GetLoadExecutorWorkers();
-    auto cleanup = folly::makeGuard([&file_owner, executor_workers]() {
-        EXPECT_TRUE(file_owner.UpdateExecutorWorkers(executor_workers));
-    });
+    auto& admission = storage::LoadAdmissionController::GetInstance();
+    const auto slots = admission.CapacitySlots();
+    auto cleanup = folly::makeGuard(
+        [&admission, slots]() { admission.SetCapacitySlots(slots); });
 
-    EXPECT_TRUE(file_owner.UpdateExecutorWorkers(/*workers=*/4));
-    auto file_group = file_owner.GetOrCreate(/*executor_workers=*/4);
-    auto same_file_group = file_owner.GetOrCreate(/*executor_workers=*/4);
-    auto memory_group = memory_owner.GetOrCreate(executor_workers);
+    admission.SetCapacitySlots(4);
+    auto file_group = file_owner.GetOrCreate();
+    auto same_file_group = file_owner.GetOrCreate();
+    auto memory_group = memory_owner.GetOrCreate();
 
     ASSERT_NE(file_group, nullptr);
     EXPECT_EQ(file_group, same_file_group);
     ASSERT_NE(memory_group, nullptr);
     EXPECT_NE(file_group, memory_group);
 
-    EXPECT_TRUE(file_owner.UpdateExecutorWorkers(/*workers=*/8));
-    EXPECT_EQ(file_group, file_owner.GetOrCreate(/*executor_workers=*/8));
+    admission.SetCapacitySlots(8);
+    EXPECT_EQ(file_group, file_owner.GetOrCreate());
 }
 
 TEST_F(ThreadPoolTest, WorkerSpawnFailureDoesNotFailQueuedTask) {

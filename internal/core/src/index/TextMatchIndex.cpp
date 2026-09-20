@@ -185,7 +185,7 @@ TextMatchIndex::UploadUnified(const Config& config) {
 }
 
 void
-TextMatchIndex::Load(const Config& config) {
+TextMatchIndex::Load(const Config& config, milvus::OpContext* op_ctx) {
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -199,7 +199,7 @@ TextMatchIndex::Load(const Config& config) {
         if (filename.size() > 3 &&
             filename.substr(filename.size() - 3) == ".v3") {
             LOG_INFO("TextMatchIndex::Load V3 format detected: {}", file);
-            InvertedIndexTantivy<std::string>::LoadUnified(config);
+            InvertedIndexTantivy<std::string>::LoadUnified(config, op_ctx);
             return;
         }
     }
