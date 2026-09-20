@@ -3098,35 +3098,16 @@ var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
 // Targets the job's data vchannels, matching the CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
-	return s.broadcastRollbackImport(ctx, job, false)
-}
-
-// closeFailedImport releases newly owned imports promptly, without adding new
-// rollback broadcasts for legacy jobs outside their existing CDC GC path.
-func (s *Server) closeFailedImport(ctx context.Context, job ImportJob) error {
-	return s.broadcastRollbackImport(ctx, job, true)
-}
-
-func (s *Server) broadcastRollbackImport(ctx context.Context, job ImportJob, ownedOnly bool) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
-		if ownedOnly {
-			return nil
-		} // legacy jobs; new Begins require data channels
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
-	msg := message.NewRollbackImportMessageBuilderV2().
-		WithHeader(&message.RollbackImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
-		WithBody(&messagespb.RollbackImportMessageBody{}).
-		WithBroadcast(vchannels).
-		MustBuildBroadcast()
-	bc, err := broadcast.GetWithContext(ctx)
-	if err != nil {
+	msg := buildRollbackImportMessage(job)
+	if handled, err := s.tryBroadcastRollbackToRetainedOwner(ctx, msg); handled || err != nil {
 		return err
 	}
-	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, msg); handled || err != nil || ownedOnly {
-		return err
-	}
+
+	// Legacy jobs have no retained Begin; preserve their original locking/ACK path.
 	api, _, err := s.startBroadcastWithCollectionID(ctx, job.GetCollectionID())
 	if err != nil {
 		return err
@@ -3134,6 +3115,33 @@ func (s *Server) broadcastRollbackImport(ctx context.Context, job ImportJob, own
 	defer api.Close()
 	_, err = api.Broadcast(ctx, msg)
 	return err
+}
+
+// closeFailedImport releases newly owned imports promptly, without adding new
+// rollback broadcasts for legacy jobs outside their existing CDC GC path.
+func (s *Server) closeFailedImport(ctx context.Context, job ImportJob) error {
+	if len(job.GetVchannels()) == 0 {
+		// Legacy jobs may have no data channels; new retained Begins cannot.
+		return nil
+	}
+	_, err := s.tryBroadcastRollbackToRetainedOwner(ctx, buildRollbackImportMessage(job))
+	return err
+}
+
+func buildRollbackImportMessage(job ImportJob) message.BroadcastMutableMessage {
+	return message.NewRollbackImportMessageBuilderV2().
+		WithHeader(&message.RollbackImportMessageHeader{CollectionId: job.GetCollectionID(), JobId: job.GetJobID()}).
+		WithBody(&messagespb.RollbackImportMessageBody{}).
+		WithBroadcast(job.GetVchannels()).
+		MustBuildBroadcast()
+}
+
+func (s *Server) tryBroadcastRollbackToRetainedOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
+	bc, err := broadcast.GetWithContext(ctx)
+	if err != nil {
+		return false, err
+	}
+	return bc.BroadcastWithResourceKeyOwner(ctx, msg)
 }
 
 // validateAndExecuteImportAction handles the boilerplate for commit/abort import operations:
