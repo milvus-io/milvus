@@ -267,49 +267,6 @@ HybridInternalIndexTypeToIndexType(ScalarIndexType type) {
     }
 }
 
-// Inspect the legacy standalone type file. An unavailable or invalid type
-// preserves the historical fallback to the generic HYBRID estimate.
-IndexType
-ResolveLegacyHybridIndexType(const std::vector<std::string>& index_files,
-                             const storage::FileManagerContext& context) {
-    if (!context.Valid()) {
-        return {};
-    }
-    const auto file =
-        std::find_if(index_files.begin(), index_files.end(), [](const auto& f) {
-            return std::string_view(f).substr(f.find_last_of('/') + 1) ==
-                   INDEX_TYPE;
-        });
-    if (file == index_files.end()) {
-        return {};
-    }
-    try {
-        storage::MemFileManagerImpl manager(context);
-        auto data = manager.LoadIndexToMemory(
-            {*file}, proto::common::LoadPriority::HIGH);
-        BinarySet binary_set;
-        AssembleIndexDatas(data, binary_set);
-        const auto type = binary_set.GetByName(INDEX_TYPE);
-        if (type == nullptr || type->data == nullptr ||
-            type->size != sizeof(uint8_t)) {
-            LOG_WARN(
-                "invalid legacy hybrid index_type file {}, fallback to hybrid "
-                "estimate",
-                *file);
-            return {};
-        }
-        return HybridInternalIndexTypeToIndexType(
-            static_cast<ScalarIndexType>(type->data[0]));
-    } catch (const std::exception& e) {
-        LOG_WARN(
-            "failed to resolve legacy hybrid internal index type from {}, "
-            "fallback to hybrid estimate: {}",
-            *file,
-            e.what());
-        return {};
-    }
-}
-
 }  // namespace
 
 bool
@@ -989,22 +946,6 @@ IndexFactory::ScalarIndexFileLoadResource(
     const bool use_async_load = context.use_async_load.value_or(
         segcore::storagev2translator::StorageV2AsyncLoadEnabled());
     if (version < 3 && index_params.at(INDEX_TYPE) != FMINDEX_INDEX_TYPE) {
-        if (is_index_file) {
-            auto resolved_params = index_params;
-            if (resolved_params.at(INDEX_TYPE) == HYBRID_INDEX_TYPE) {
-                auto type = ResolveLegacyHybridIndexType(index_files, context);
-                if (!type.empty()) {
-                    resolved_params[INDEX_TYPE] = std::move(type);
-                }
-            }
-            return {ScalarIndexLoadResource(field_type,
-                                            0,
-                                            index_size,
-                                            resolved_params,
-                                            mmap_enable,
-                                            num_rows),
-                    std::nullopt};
-        }
         return {ScalarIndexLegacyLoadResource(field_type,
                                               index_size,
                                               index_params,

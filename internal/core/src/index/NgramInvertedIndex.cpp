@@ -319,6 +319,20 @@ NgramInvertedIndex::LoadIndexMetas(const std::vector<std::string>& index_files,
 }
 
 void
+NgramInvertedIndex::LoadIndexMetas(const BinarySet& metadata,
+                                   const Config& config) {
+    InvertedIndexTantivy<std::string>::LoadIndexMetas(metadata, config);
+    avg_row_size_ = kDefaultAvgRowSize;
+    if (const auto average = metadata.GetByName(NGRAM_AVG_ROW_SIZE_FILE_NAME)) {
+        if (average->size != sizeof(avg_row_size_)) {
+            ThrowInfo(DataFormatBroken,
+                      "Invalid legacy Ngram average row size");
+        }
+        std::memcpy(&avg_row_size_, average->data.get(), sizeof(avg_row_size_));
+    }
+}
+
+void
 NgramInvertedIndex::RetainTantivyIndexFiles(
     std::vector<std::string>& index_files) {
     // Call parent to filter null_offset

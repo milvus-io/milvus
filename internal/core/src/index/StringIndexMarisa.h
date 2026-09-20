@@ -28,6 +28,8 @@ namespace milvus::index {
 
 class StringIndexMarisa : public StringIndex {
  public:
+    using ScalarIndex<std::string>::Load;
+
     explicit StringIndexMarisa(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
@@ -171,7 +173,17 @@ class StringIndexMarisa : public StringIndex {
     folly::coro::Task<void>
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
+ protected:
+    folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token) override;
+
  private:
+    // Rebuild legacy string IDs and CSR after the trie has been opened.
+    void
+    FinishLegacyLoad(const BinarySet& binary);
+
     Config config_;
     marisa::Trie trie_;
 

@@ -125,9 +125,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
-    virtual folly::coro::Task<void>
+    folly::coro::Task<void>
     LoadLegacyAsync(const Config& config,
-                    folly::CancellationToken token);
+                    folly::CancellationToken token) override;
 
     /*
      * deprecated.

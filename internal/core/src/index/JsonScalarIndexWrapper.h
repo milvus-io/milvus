@@ -231,6 +231,14 @@ class JsonScalarIndexWrapper : public BaseIndex {
         BuildExistsBitset(this->Count());
     }
 
+    // Restores wrapper state after the base coroutine has finalized its reader.
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override {
+        co_await BaseIndex::LoadLegacyAsync(config, token);
+        BuildExistsBitset(this->Count());
+    }
+
     JsonCastType
     GetCastType() const override {
         return cast_type_;
@@ -325,6 +333,29 @@ class JsonScalarIndexWrapper : public BaseIndex {
 
             // Fallback: v2.5.x data — use null_offset_ as non_exist_offsets_
             non_exist_offsets_ = this->null_offset_;
+        }
+    }
+
+    // The legacy fallback must run before Tantivy releases null_offset_.
+    void
+    LoadIndexMetas(const BinarySet& metadata, const Config& config) {
+        if constexpr (kIsInverted) {
+            InvertedIndexTantivy<T>::LoadIndexMetas(metadata, config);
+            if (const auto offsets =
+                    metadata.GetByName(INDEX_NON_EXIST_OFFSET_FILE_NAME)) {
+                if (offsets->size % sizeof(size_t) != 0) {
+                    ThrowInfo(DataFormatBroken,
+                              "Invalid legacy JSON non-exist offsets size");
+                }
+                non_exist_offsets_.resize(offsets->size / sizeof(size_t));
+                if (offsets->size != 0) {
+                    std::memcpy(non_exist_offsets_.data(),
+                                offsets->data.get(),
+                                offsets->size);
+                }
+            } else {
+                non_exist_offsets_ = this->null_offset_;
+            }
         }
     }
 

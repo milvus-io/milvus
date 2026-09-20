@@ -87,8 +87,14 @@ SealedIndexTranslator::SealedIndexTranslator(
     const bool use_async_load = file_manager_context_.use_async_load.value_or(
         storagev2translator::StorageV2AsyncLoadEnabled());
     file_manager_context_.use_async_load = use_async_load;
+    const auto version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
     const bool is_vector = IsVectorDataType(index_load_info_.field_type);
-    const bool inspect_legacy = is_vector;
+    const bool inspect_legacy =
+        is_vector || (version < 3 && index_info_.index_type !=
+                                         milvus::index::FMINDEX_INDEX_TYPE);
     if (inspect_legacy && file_manager_context_.Valid() &&
         !index_load_info_.index_files.empty()) {
         auto files = index_load_info_.index_files;

@@ -80,6 +80,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
 
+    using ScalarIndex<T>::Load;
+
+    // Materializes legacy slices into the existing Sort input representation.
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override;
+
     int64_t
     Count() override {
         return total_num_rows_;
@@ -204,6 +211,13 @@ class ScalarIndexSort : public ScalarIndex<T> {
     folly::coro::Task<void>
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
+ protected:
+    folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token) override;
+
+ public:
     // zero-cost data acess api
     ALWAYS_INLINE const IndexStructure<T>&
     operator[](size_t idx) const {
@@ -230,6 +244,17 @@ class ScalarIndexSort : public ScalarIndex<T> {
     }
 
  private:
+    // Write and close the legacy file before mapping/restoring it.
+    void
+    WriteMmapIndexData(const uint8_t* data,
+                       size_t size,
+                       proto::common::LoadPriority priority);
+    void
+    MapIndexData();
+    // Rebuild metadata and query state from prepared memory/mapping.
+    void
+    FinishLegacyLoad(const BinarySet& binary);
+
     /**
      * Write data to mmap file and setup mmap pointers.
      * Sets mmap_data_, mmap_size_, data_size_.
