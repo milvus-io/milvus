@@ -175,8 +175,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceCarriesPartialUpdateCASIn
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-	extracted, err := streamingmessage.ExtractPartialUpdateCAS(msgs[0])
-	require.NoError(t, err)
+	extracted := partialUpdateCASOf(t, msgs[0])
 	require.True(t, proto.Equal(meta, extracted))
 
 	bodyProperties := streamingmessage.MustAsMutableInsertMessageV1(msgs[0]).MustBody().GetBase().GetProperties()
