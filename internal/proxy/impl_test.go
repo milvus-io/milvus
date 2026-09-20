@@ -621,7 +621,7 @@ func TestProxy_FlushAll_Success(t *testing.T) {
 		mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock((*MetaCache).RemoveDatabase).Return().Build()
+		mockey.Mock((*MetaCache).RemoveDatabase).Return(nil).Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
@@ -675,7 +675,7 @@ func TestProxy_FlushAll_ServerAbnormal(t *testing.T) {
 		mockey.Mock((*MetaCache).GetCollectionID).To(func(ctx context.Context, dbName, collectionName string) (UniqueID, error) {
 			return UniqueID(0), nil
 		}).Build()
-		mockey.Mock((*MetaCache).RemoveDatabase).Return().Build()
+		mockey.Mock((*MetaCache).RemoveDatabase).Return(nil).Build()
 
 		// Mock paramtable initialization
 		mockey.Mock(paramtable.Init).Return().Build()
@@ -1127,7 +1127,7 @@ func TestProxyDropDatabase(t *testing.T) {
 		cacheBak := globalMetaCache
 		defer func() { globalMetaCache = cacheBak }()
 		cache := NewMockCache(t)
-		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return()
+		cache.EXPECT().RemoveDatabase(mock.Anything, mock.AnythingOfType("string")).Return(nil)
 		globalMetaCache = cache
 
 		ctx := context.Background()

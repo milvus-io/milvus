@@ -112,7 +112,7 @@ func (c *DDLCallback) createCollectionV1AckCallback(ctx context.Context, result 
 		ce.OptLPCMDBName(body.DbName),
 		ce.OptLPCMCollectionName(body.CollectionName),
 		ce.OptLPCMCollectionID(header.CollectionId),
-		ce.OptLPCMMsgType(commonpb.MsgType_DropCollection)))
+		ce.OptLPCMMsgType(commonpb.MsgType_CreateCollection)))
 }
 
 func (c *DDLCallback) createCollectionShard(ctx context.Context, header *message.CreateCollectionMessageHeader, body *message.CreateCollectionRequest, vchannel string, appendResult *message.AppendResult) error {

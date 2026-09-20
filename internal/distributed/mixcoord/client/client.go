@@ -1982,3 +1982,14 @@ func (c *Client) BackupEzk(ctx context.Context, req *internalpb.BackupEzkRequest
 		return client.BackupEzk(ctx, req)
 	})
 }
+
+func (c *Client) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client MixCoordClient) (*rootcoordpb.GetRLSMetadataResponse, error) {
+		return client.GetRLSMetadata(ctx, req, opts...)
+	})
+}

@@ -91,7 +91,7 @@ type Cache interface {
 
 	// RemoveAlias removes a cached alias entry.
 	RemoveAlias(ctx context.Context, database, alias string)
-	RemoveDatabase(ctx context.Context, database string)
+	RemoveDatabase(ctx context.Context, database string) []int64
 	HasDatabase(ctx context.Context, database string) bool
 	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
@@ -1105,13 +1105,18 @@ func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID Uniqu
 	return collNames
 }
 
-func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
+func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) []int64 {
 	log.Ctx(ctx).Debug("remove database", zap.String("name", database))
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	collectionIDs := make([]int64, 0, len(m.collInfo[database]))
+	for _, collection := range m.collInfo[database] {
+		collectionIDs = append(collectionIDs, collection.collID)
+	}
 	delete(m.collInfo, database)
 	delete(m.dbInfo, database)
 	delete(m.aliasInfo, database)
+	m.mu.Unlock()
+	return collectionIDs
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
