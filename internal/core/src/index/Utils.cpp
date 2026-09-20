@@ -35,16 +35,13 @@
 #include "common/EasyAssert.h"
 #include "common/FieldData.h"
 #include "common/FieldDataInterface.h"
-#include "common/QueryInfo.h"
-#include "common/RangeSearchHelper.h"
 #include "common/Slice.h"
 #include "common/Utils.h"
 #include "fmt/core.h"
+#include "index/Families.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
 #include "index/Utils.h"
 #include "storage/IndexData.h"
-#include "knowhere/comp/index_param.h"
 #include "storage/Util.h"
 
 namespace milvus::index {
@@ -54,47 +51,6 @@ get_file_size(int fd) {
     struct stat s;
     fstat(fd, &s);
     return s.st_size;
-}
-
-// TODO caiyd: should list supported list
-std::vector<std::tuple<IndexType, MetricType>>
-unsupported_index_combinations() {
-    static std::vector<std::tuple<IndexType, MetricType>> ret{
-        std::make_tuple(knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT,
-                        knowhere::metric::L2),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                        knowhere::metric::L2),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                        knowhere::metric::COSINE),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                        knowhere::metric::HAMMING),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                        knowhere::metric::JACCARD),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                        knowhere::metric::SUBSTRUCTURE),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX,
-                        knowhere::metric::SUPERSTRUCTURE),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
-                        knowhere::metric::L2),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
-                        knowhere::metric::COSINE),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
-                        knowhere::metric::HAMMING),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
-                        knowhere::metric::JACCARD),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
-                        knowhere::metric::SUBSTRUCTURE),
-        std::make_tuple(knowhere::IndexEnum::INDEX_SPARSE_WAND,
-                        knowhere::metric::SUPERSTRUCTURE),
-    };
-    return ret;
-}
-
-bool
-is_unsupported(const IndexType& index_type, const MetricType& metric_type) {
-    return is_in_list<std::tuple<IndexType, MetricType>>(
-        std::make_tuple(index_type, metric_type),
-        unsupported_index_combinations);
 }
 
 bool
@@ -171,26 +127,40 @@ GetBitmapCardinalityLimitFromConfig(const Config& config) {
     }
 }
 
-ScalarIndexType
-GetHybridLowCardinalityIndexTypeFromConfig(const Config& config) {
-    auto index_type = GetValueFromConfig<std::string>(
-        config, index::HYBRID_LOW_CARDINALITY_INDEX_TYPE);
-    if (index_type.has_value()) {
-        return FromString(index_type.value());
+std::string
+GetLowCardinalityFamilyFromConfig(const Config& config) {
+    auto type = GetValueFromConfig<std::string>(
+        config, HYBRID_LOW_CARDINALITY_INDEX_TYPE);
+    if (!type.has_value()) {
+        return families::kBitmap;
     }
-    // Default to BITMAP for low cardinality
-    return ScalarIndexType::BITMAP;
+    if (*type == "BITMAP") {
+        return families::kBitmap;
+    }
+    if (*type == "STLSORT" || *type == ASCENDING_SORT) {
+        return families::kSort;
+    }
+    if (*type == "MARISA" || *type == MARISA_TRIE ||
+        *type == MARISA_TRIE_UPPER) {
+        return families::kMarisa;
+    }
+    if (*type == "INVERTED" || *type == INVERTED_INDEX_TYPE) {
+        return families::kInverted;
+    }
+    AssertInfo(false, "unsupported hybrid scalar index type: {}", *type);
+    return {};
 }
 
-ScalarIndexType
-GetHybridHighCardinalityIndexTypeFromConfig(const Config& config) {
-    auto index_type = GetValueFromConfig<std::string>(
-        config, index::HYBRID_HIGH_CARDINALITY_INDEX_TYPE);
-    if (index_type.has_value()) {
-        return FromString(index_type.value());
+std::string
+GetHighCardinalityFamilyFromConfig(const Config& config) {
+    auto type = GetValueFromConfig<std::string>(
+        config, HYBRID_HIGH_CARDINALITY_INDEX_TYPE);
+    if (!type.has_value()) {
+        return families::kSort;
     }
-    // Default to STLSORT for high cardinality
-    return ScalarIndexType::STLSORT;
+    Config copy = config;
+    copy[HYBRID_LOW_CARDINALITY_INDEX_TYPE] = *type;
+    return GetLowCardinalityFamilyFromConfig(copy);
 }
 
 Config
@@ -432,40 +402,6 @@ ReadDataFromFD(int fd, void* buf, size_t size, size_t chunk_size) {
         buf = static_cast<char*>(buf) + size_read;
         size -= static_cast<std::size_t>(size_read);
     }
-}
-
-bool
-CheckAndUpdateKnowhereRangeSearchParam(const SearchInfo& search_info,
-                                       const int64_t topk,
-                                       const MetricType& metric_type,
-                                       knowhere::Json& search_config) {
-    const auto radius =
-        index::GetValueFromConfig<float>(search_info.search_params_, RADIUS);
-    if (!radius.has_value()) {
-        return false;
-    }
-
-    search_config[RADIUS] = radius.value();
-    // `range_search_k` is only used as one of the conditions for iterator early termination.
-    // not gurantee to return exactly `range_search_k` results, which may be more or less.
-    // set it to -1 will return all results in the range.
-    search_config[knowhere::meta::RANGE_SEARCH_K] = topk;
-
-    const auto range_filter =
-        GetValueFromConfig<float>(search_info.search_params_, RANGE_FILTER);
-    if (range_filter.has_value()) {
-        search_config[RANGE_FILTER] = range_filter.value();
-        CheckRangeSearchParam(
-            search_config[RADIUS], search_config[RANGE_FILTER], metric_type);
-    }
-
-    const auto page_retain_order =
-        GetValueFromConfig<bool>(search_info.search_params_, PAGE_RETAIN_ORDER);
-    if (page_retain_order.has_value()) {
-        search_config[knowhere::meta::RETAIN_ITERATOR_ORDER] =
-            page_retain_order.value();
-    }
-    return true;
 }
 
 }  // namespace milvus::index
