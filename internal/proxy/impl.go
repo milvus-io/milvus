@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -117,6 +118,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if request == nil {
+		return merr.Status(merr.WrapErrServiceInternalMsg("invalidate collection meta cache request is nil")), nil
+	}
 	ctx = logutil.WithModule(ctx, moduleName)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
@@ -147,6 +151,24 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		if collectionID != UniqueID(0) {
 			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
 		}
+	}
+
+	switch msgType {
+	case commonpb.MsgType_CreateRowPolicy,
+		commonpb.MsgType_UpdateRowPolicy,
+		commonpb.MsgType_DropRowPolicy:
+		rls.InvalidatePolicies(collectionID, request.GetBase().GetTimestamp())
+		log.Info("complete to invalidate RLS policy snapshot")
+		return merr.Success(), nil
+	case commonpb.MsgType_SetRLSPrincipalTags,
+		commonpb.MsgType_DeleteRLSPrincipalTags:
+		principalName := request.GetBase().GetProperties()[common.RLSPrincipalNameKey]
+		if principalName == "" {
+			return merr.Status(merr.WrapErrServiceInternalMsg("RLS principal cache invalidation is missing principal name")), nil
+		}
+		rls.InvalidatePrincipalTags(collectionID, principalName, request.GetBase().GetTimestamp())
+		log.Info("complete to invalidate RLS principal tags", zap.String("principalName", principalName))
+		return merr.Success(), nil
 	}
 
 	if globalMetaCache != nil {
@@ -188,7 +210,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			log.Info("complete to invalidate collection meta cache", zap.String("type", request.GetBase().GetMsgType().String()))
 		case commonpb.MsgType_DropDatabase:
 			node.shardMgr.RemoveDatabase(request.GetDbName())
-			fallthrough
+			for _, id := range globalMetaCache.RemoveDatabase(ctx, request.GetDbName()) {
+				rls.MarkCollectionDropped(id)
+			}
 		case commonpb.MsgType_AlterDatabase:
 			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		case commonpb.MsgType_AlterCollection, commonpb.MsgType_AlterCollectionField:
@@ -218,6 +242,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	case commonpb.MsgType_DropCollection:
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
+		rls.MarkCollectionDropped(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {

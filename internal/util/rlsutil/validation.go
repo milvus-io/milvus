@@ -83,17 +83,23 @@ func ValidatePolicyNameWithLimit(policyName string) error {
 
 // ValidatePolicy validates the structural fields of a policy definition for creation.
 func ValidatePolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string) error {
-	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyNameWithLimit)
+	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyNameWithLimit, true)
 }
 
 // ValidatePolicyForUpdate validates the structural fields of an existing policy.
 // The refreshable creation-name limit is intentionally not reapplied because
 // policy names are immutable and must remain addressable after the limit changes.
 func ValidatePolicyForUpdate(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string) error {
-	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyName)
+	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyName, true)
 }
 
-func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string, validateName func(string) error) error {
+// ValidateStoredPolicy validates persisted policy metadata without reapplying
+// refreshable write-admission limits.
+func ValidateStoredPolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string) error {
+	return validatePolicy(policyName, policyType, actions, usingExpr, checkExpr, ValidatePolicyName, false)
+}
+
+func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAction, usingExpr string, checkExpr string, validateName func(string) error, enforceExpressionLength bool) error {
 	if err := validateName(policyName); err != nil {
 		return err
 	}
@@ -113,12 +119,14 @@ func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAc
 	if usingExprEmpty && checkExprEmpty {
 		return merr.WrapErrParameterInvalidMsg("RLS policy must define using_expr or check_expr")
 	}
-	maxExpressionLength := paramtable.Get().ProxyCfg.RLSMaxExpressionLength.GetAsInt()
-	if len(usingExpr) > maxExpressionLength {
-		return merr.WrapErrParameterInvalidMsg("RLS using_expr exceeds max length %d", maxExpressionLength)
-	}
-	if len(checkExpr) > maxExpressionLength {
-		return merr.WrapErrParameterInvalidMsg("RLS check_expr exceeds max length %d", maxExpressionLength)
+	if enforceExpressionLength {
+		maxExpressionLength := paramtable.Get().ProxyCfg.RLSMaxExpressionLength.GetAsInt()
+		if len(usingExpr) > maxExpressionLength {
+			return merr.WrapErrParameterInvalidMsg("RLS using_expr exceeds max length %d", maxExpressionLength)
+		}
+		if len(checkExpr) > maxExpressionLength {
+			return merr.WrapErrParameterInvalidMsg("RLS check_expr exceeds max length %d", maxExpressionLength)
+		}
 	}
 
 	seen := make(map[PolicyAction]struct{}, len(actions))

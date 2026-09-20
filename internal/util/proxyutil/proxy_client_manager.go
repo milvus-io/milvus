@@ -40,7 +40,8 @@ import (
 )
 
 type ExpireCacheConfig struct {
-	msgType commonpb.MsgType
+	msgType    commonpb.MsgType
+	properties map[string]string
 }
 
 func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
@@ -48,6 +49,14 @@ func (c ExpireCacheConfig) Apply(req *proxypb.InvalidateCollMetaCacheRequest) {
 		req.Base = commonpbutil.NewMsgBase()
 	}
 	req.Base.MsgType = c.msgType
+	if len(c.properties) > 0 {
+		if req.Base.Properties == nil {
+			req.Base.Properties = make(map[string]string, len(c.properties))
+		}
+		for key, value := range c.properties {
+			req.Base.Properties[key] = value
+		}
+	}
 }
 
 func DefaultExpireCacheConfig() ExpireCacheConfig {
@@ -59,6 +68,15 @@ type ExpireCacheOpt func(c *ExpireCacheConfig)
 func SetMsgType(msgType commonpb.MsgType) ExpireCacheOpt {
 	return func(c *ExpireCacheConfig) {
 		c.msgType = msgType
+	}
+}
+
+func SetMsgProperty(key, value string) ExpireCacheOpt {
+	return func(c *ExpireCacheConfig) {
+		if c.properties == nil {
+			c.properties = make(map[string]string)
+		}
+		c.properties[key] = value
 	}
 }
 
