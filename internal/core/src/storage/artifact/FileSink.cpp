@@ -311,7 +311,7 @@ class V1DiskSink::Impl {
                                uintmax_t file_size) const {
         const auto slice_size = FILE_SLICE_SIZE.load();
         AssertInfo(slice_size > 0, "artifact slice size must be positive");
-        const auto disk_files = disk_manager->GetRemotePathsToFileSize();
+        const auto& disk_files = disk_manager->GetRemotePathsToFileSize();
         uintmax_t offset = 0;
         size_t slice = 0;
         while (offset < file_size) {
@@ -327,7 +327,7 @@ class V1DiskSink::Impl {
     void
     PrepareMemoryEntries() {
         milvus::Disassemble(memory_entries);
-        const auto disk_files = disk_manager->GetRemotePathsToFileSize();
+        const auto& disk_files = disk_manager->GetRemotePathsToFileSize();
         for (const auto& entry : memory_entries.binary_map_) {
             const auto remote_path = RemotePathFor(entry.first);
             AssertInfo(
@@ -361,6 +361,8 @@ class V1DiskSink::Impl {
 
     std::map<std::string, int64_t>
     PublishedDiskFiles() const {
+        // This is an independent snapshot: raw entries are folded into the
+        // returned publication view without mutating manager-owned metadata.
         auto files = disk_manager->GetRemotePathsToFileSize();
         for (const auto& [path, size] : raw_remote_files) {
             if (storage_path == ArtifactStoragePath::Index) {
@@ -377,7 +379,8 @@ class V1DiskSink::Impl {
             const auto inserted = files.emplace(path, size).second;
             AssertInfo(inserted, "duplicate artifact remote path: {}", path);
         }
-        const auto memory_files = memory_manager->GetRemotePathsToFileSize();
+        const auto& memory_files =
+            memory_manager->GetRemotePathsToFileSize();
         for (const auto& file : memory_files) {
             AssertInfo(files.find(file.first) == files.end(),
                        "duplicate artifact remote path: {}",
@@ -489,7 +492,8 @@ V1DiskSink::WriteRawEntryFromLocalFile(std::string_view name,
             "raw artifact entry must be a non-empty basename: {}",
             name);
         const auto remote_path = impl_->RemotePathFor(entry_name);
-        const auto disk_files = impl_->disk_manager->GetRemotePathsToFileSize();
+        const auto& disk_files =
+            impl_->disk_manager->GetRemotePathsToFileSize();
         impl_->AssertRemotePathAvailable(remote_path, disk_files);
 
         const auto size = StreamRawFile(
@@ -526,13 +530,26 @@ V1DiskSink::Finish() {
             ThrowInfo(FileWriteFailed,
                       "failed to upload V1/V2 artifact sidecars");
         }
-        const auto disk_files = impl_->PublishedDiskFiles();
-        auto stats = StatsFromRemoteMaps(
-            impl_->TotalSerializedSize(),
-            impl_->storage_path,
-            impl_->disk_manager->GetRemoteTextLogPrefix(),
-            disk_files,
-            impl_->memory_manager->GetRemotePathsToFileSize());
+        const auto serialized_size = impl_->TotalSerializedSize();
+        const auto& memory_files =
+            impl_->memory_manager->GetRemotePathsToFileSize();
+        auto stats = [&] {
+            if (impl_->raw_remote_files.empty()) {
+                return StatsFromRemoteMaps(
+                    serialized_size,
+                    impl_->storage_path,
+                    impl_->disk_manager->GetRemoteTextLogPrefix(),
+                    impl_->disk_manager->GetRemotePathsToFileSize(),
+                    memory_files);
+            }
+            const auto disk_files = impl_->PublishedDiskFiles();
+            return StatsFromRemoteMaps(
+                serialized_size,
+                impl_->storage_path,
+                impl_->disk_manager->GetRemoteTextLogPrefix(),
+                disk_files,
+                memory_files);
+        }();
         impl_->state = SinkState::Finished;
         return stats;
     } catch (...) {
