@@ -1758,6 +1758,15 @@ func TestValidateImportFilePaths_SymlinkedInternalDir(t *testing.T) {
 	staging := filepath.Join(base, "ordinary.json")
 	require.NoError(t, os.WriteFile(staging, []byte("{}"), 0o600))
 
+	// A registered segment that is an ordinary directory, with a symlink one
+	// level below it: <root>/snapshots/449 -> <base>/nvme-snapshots.
+	snapshotsDir := filepath.Join(root, common.SnapshotRootPath)
+	require.NoError(t, os.MkdirAll(snapshotsDir, 0o755))
+	sub := filepath.Join(base, "nvme-snapshots")
+	require.NoError(t, os.MkdirAll(filepath.Join(sub, "metadata"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "metadata", "12.json"), []byte("{}"), 0o600))
+	require.NoError(t, os.Symlink(sub, filepath.Join(snapshotsDir, "449")))
+
 	tests := []struct {
 		name       string
 		path       string
@@ -1766,6 +1775,9 @@ func TestValidateImportFilePaths_SymlinkedInternalDir(t *testing.T) {
 		{"through the root spelling", filepath.Join(root, common.LocalCacheRootPath, "1", "local_chunk", "x.parquet"), true},
 		{"through the resolved directory", chunk, true},
 		{"ordinary staging file", staging, false},
+		// The link can also sit BELOW the registered segment, where the resolved
+		// form leaves the root's namespace and no root-anchored entry matches it.
+		{"symlink below the segment", filepath.Join(root, common.SnapshotRootPath, "449", "metadata", "12.json"), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

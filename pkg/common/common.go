@@ -247,6 +247,11 @@ const (
 	// Layout: {rootPath}/external_refresh_results/{collectionID}/{jobID}/{taskID}/{version}/{checksum}.pb
 	ExternalRefreshResultsRootPath = "external_refresh_results"
 
+	// WalSummaryRootPath storage path const for WAL summary chunks and
+	// manifests, written under the ChunkManager root on every storage type.
+	// Layout: {rootPath}/walsummary/{pchannel}/{chunk|manifest}/...
+	WalSummaryRootPath = "walsummary"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -289,6 +294,7 @@ var InternalStorageRootSegments = []string{
 	SnapshotRootPath,
 	WoodpeckerRootPath,
 	ExternalRefreshResultsRootPath,
+	WalSummaryRootPath,
 }
 
 // LocalOnlyStorageRootSegments lists top-level directories that are rooted at

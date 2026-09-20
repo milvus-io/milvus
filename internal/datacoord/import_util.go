@@ -952,13 +952,28 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 				return merr.WrapErrImportFailedMsg(
 					"cannot resolve import path %s: %v", filePath, err)
 			}
+			// Compare both forms of the candidate. The resolved one catches an
+			// alias of the path as a whole -- /proc/self/root, a staging symlink
+			// into the root. The lexical one catches a symlink at any depth
+			// BELOW a registered segment: with <root>/cache/1 -> /nvme/cache-1
+			// the resolved form leaves the root's namespace entirely, so no
+			// root-anchored entry can match it, while the lexical form still
+			// reads <root>/cache/... and hits the entry. A caller who spells the
+			// relocated directory directly is out of reach of either form; that
+			// needs canonicalization at the read, see Known limitations.
+			forms := []string{cleaned}
+			if lexical := normalizeStorageKey(filePath); lexical != cleaned {
+				forms = append(forms, lexical)
+			}
 			for _, deniedPath := range denied {
-				// Boundary match, not a raw prefix match: a raw prefix would also
-				// reject a caller's own "files/insert_logs_2026/a.json".
-				if cleaned == deniedPath || strings.HasPrefix(cleaned, deniedPath+"/") {
-					return merr.WrapErrImportFailedMsg(
-						"import path %s is not allowed: %s is a Milvus internal storage directory",
-						filePath, deniedPath)
+				for _, form := range forms {
+					// Boundary match, not a raw prefix match: a raw prefix would also
+					// reject a caller's own "files/insert_logs_2026/a.json".
+					if form == deniedPath || strings.HasPrefix(form, deniedPath+"/") {
+						return merr.WrapErrImportFailedMsg(
+							"import path %s is not allowed: %s is a Milvus internal storage directory",
+							filePath, deniedPath)
+					}
 				}
 			}
 		}
