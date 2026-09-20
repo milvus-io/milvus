@@ -341,11 +341,13 @@ func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
 	viewB.Meta.Vchannel = "v1"
 	catalog.listed = []*viewpb.QueryViewOfShard{viewA, viewB}
 
-	// viewA acquires a ref; viewB's acquisition fails, which must release the
-	// already-acquired ref exactly once (no leak, no double-release).
+	// Shards are recovered in map order. Fail the second acquisition so the
+	// first acquired reference must be released regardless of that order.
+	acquisitions := 0
 	derefs := 0
 	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
-		if qviews.FromProtoDataVersion(version).EQ(qviews.DataVersion{StreamingVersion: 4, CompactVersion: 1}) {
+		acquisitions++
+		if acquisitions == 2 {
 			return nil, errors.New("recover failed")
 		}
 		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
@@ -355,6 +357,7 @@ func TestRecoverShardViewRegistryRollsBackReferencesOnFailure(t *testing.T) {
 
 	_, err := RecoverShardViewRegistry(context.Background(), catalog, newMockSyncer(), stubDataViewRefProvider{})
 	require.EqualError(t, err, "recover failed")
+	require.Equal(t, 2, acquisitions)
 	require.Equal(t, 1, derefs)
 }
 
