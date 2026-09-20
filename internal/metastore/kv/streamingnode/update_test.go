@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
@@ -83,13 +84,13 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
 	var saves map[string]string
 	var removals []string
-	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, s map[string]string, dels []string, _ ...predicates.Predicate) error {
 			saves = s
 			removals = dels
 			return nil
 		}).Once()
-	expectCheckpointFirstCreation(kv, "p1")
+	expectExistingCheckpoint(t, kv, "p1", 42)
 	catalog := NewCataLog(kv)
 
 	snapshot := &metastore.WALRecoverySnapshot{
@@ -125,10 +126,9 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
 	assert.Contains(t, saves, buildVChannelKey("p1", "vch2"))
 	assert.Contains(t, saves, buildSalvageCheckpointPath("p1", "cluster1"))
-	// The checkpoint is created by the first-creation CAS (see
-	// expectCheckpointFirstCreation), not staged into the component txn.
-	assert.NotContains(t, saves, buildConsumeCheckpointKey("p1"))
-	assert.Len(t, saves, 4)
+	// Components and the checkpoint share the guarded transaction.
+	assert.Contains(t, saves, buildConsumeCheckpointKey("p1"))
+	assert.Len(t, saves, 5)
 	assert.ElementsMatch(t, []string{
 		buildSegmentAssignmentKey("p1", 2),
 		buildVChannelKey("p1", "vch3"),
@@ -142,9 +142,9 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 func TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
-	expectCheckpointFirstCreation(kv, "p1")
+	expectExistingCheckpoint(t, kv, "p1", 1)
 	var saves map[string]string
-	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, s map[string]string, dels []string, _ ...predicates.Predicate) error {
 			saves = s
 			assert.Empty(t, dels)
@@ -159,9 +159,8 @@ func TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped(t *testing.T) {
 		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 1},
 	})
 	assert.NoError(t, err)
-	// The checkpoint is created by the first-creation CAS (see
-	// expectCheckpointFirstCreation), not staged into the component txn.
-	assert.Len(t, saves, 1)
+	// Components and the checkpoint share the guarded transaction.
+	assert.Len(t, saves, 2)
 	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
 }
 
@@ -272,21 +271,16 @@ func TestCatalog_SaveRecoverySnapshot_ConsumeCheckpointLastOnFallback(t *testing
 	// A limit of 1 forces the chunked fallback path.
 	kv.EXPECT().MaxTxnOps().Return(1).Maybe()
 	var calls []string
-	kv.EXPECT().MultiSave(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, kvs map[string]string) error {
-		for k := range kvs {
-			calls = append(calls, "save:"+k)
-		}
-		return nil
-	}).Twice()
-	// The consume checkpoint is created by the first-creation CAS, issued
-	// after the component flush: components land first, checkpoint last.
-	kv.EXPECT().Load(mock.Anything, buildConsumeCheckpointKey("p1")).
-		Return("", merr.ErrIoKeyNotFound)
-	kv.EXPECT().CompareVersionAndSwap(mock.Anything, buildConsumeCheckpointKey("p1"), int64(0), mock.Anything).
-		RunAndReturn(func(_ context.Context, _ string, _ int64, target string) (bool, error) {
-			calls = append(calls, "cas:"+buildConsumeCheckpointKey("p1"))
-			return true, nil
-		}).Once()
+	expectExistingCheckpoint(t, kv, "p1", 42)
+	write := mockey.Mock(mockey.GetMethod(kv, "MultiSaveAndRemove")).To(
+		func(_ context.Context, saves map[string]string, _ []string, preds ...predicates.Predicate) error {
+			assert.Len(t, preds, 1)
+			for key := range saves {
+				calls = append(calls, "save:"+key)
+			}
+			return nil
+		}).Build()
+	defer write.UnPatch()
 
 	catalog := NewCataLog(kv)
 	snapshot := &metastore.WALRecoverySnapshot{
@@ -302,6 +296,23 @@ func TestCatalog_SaveRecoverySnapshot_ConsumeCheckpointLastOnFallback(t *testing
 	assert.Equal(t, []string{
 		"save:" + buildSegmentAssignmentKey("p1", 1),
 		"save:" + buildSalvageCheckpointPath("p1", "cluster1"),
-		"cas:" + buildConsumeCheckpointKey("p1"),
+		"save:" + buildConsumeCheckpointKey("p1"),
 	}, calls)
+}
+
+// expectExistingCheckpoint models the read before the transaction and its
+// verification read, without mocking the transaction's actual writes.
+func expectExistingCheckpoint(t *testing.T, store *mocks.MetaKv, pchannel string, nextTick uint64) {
+	t.Helper()
+	calls := 0
+	patch := mockey.Mock(mockey.GetMethod(store, "Load")).To(func(_ context.Context, key string) (string, error) {
+		assert.Equal(t, buildConsumeCheckpointKey(pchannel), key)
+		calls++
+		tick := uint64(0)
+		if calls > 1 {
+			tick = nextTick
+		}
+		return checkpointBytesOf(t, &streamingpb.WALCheckpoint{TimeTick: tick}), nil
+	}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
 }

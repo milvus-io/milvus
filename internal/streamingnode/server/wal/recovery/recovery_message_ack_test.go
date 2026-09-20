@@ -260,6 +260,7 @@ func TestBuildRecoverySnapshotBatchesModuleMutations(t *testing.T) {
 	checkpoint := &utility.WALCheckpoint{
 		MessageID: walimplstest.NewTestMessageID(1),
 		TimeTick:  10,
+		Term:      3,
 	}
 	storage := newTestRecoveryStorage(t, checkpoint)
 	t.Cleanup(storage.metrics.Close)
@@ -277,7 +278,7 @@ func TestBuildRecoverySnapshotBatchesModuleMutations(t *testing.T) {
 
 	snapshot, err := storage.buildRecoverySnapshot(&dirtyPersistSnapshot{
 		Checkpoint:       checkpoint,
-		CheckpointDirty:  true,
+		CheckpointDirty:  false,
 		ModuleDirtySnaps: dirty,
 	})
 	require.NoError(t, err)
@@ -287,6 +288,7 @@ func TestBuildRecoverySnapshotBatchesModuleMutations(t *testing.T) {
 	assert.Contains(t, snapshot.SegmentAssignments, int64(1))
 	assert.Equal(t, []int64{2}, snapshot.RemovedSegmentIDs)
 	assert.Equal(t, checkpoint.TimeTick, snapshot.ConsumeCheckpoint.GetTimeTick())
+	assert.Equal(t, checkpoint.Term, snapshot.ConsumeCheckpoint.GetTerm())
 }
 
 func TestPersistDirtySnapshotRejectsInvalidPayloadBeforeSave(t *testing.T) {

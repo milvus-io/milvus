@@ -24,6 +24,8 @@ import (
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/pkg/v3/kv"
+	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -33,18 +35,10 @@ import (
 // the consume checkpoint - the commit point of the snapshot.
 // Nil or empty parts of the snapshot are skipped.
 //
-// The ops are staged into a txn.Builder (reusing the per-key encoders -
-// buildSegmentAssignmentKey, getRemovalAndSaveForVChannel,
-// buildSalvageCheckpointPath, buildConsumeCheckpointKey) and applied via
-// txn.Commit: atomically in a single guarded txn when the whole op set fits
-// the store's txn op limit, otherwise via the ordered chunked fallback. Either
-// way the consume checkpoint is the last write to become visible -- staged with
-// CommitSaveIfValue when it already exists, created by a version CAS after the
-// component commit on first creation -- so a crash before it lands leaves the
-// whole snapshot invisible and the next retry re-persists everything (every
-// part is an idempotent put on a deterministic key).
-//
-// Advancement is fenced by term: see the compare-and-swap below.
+// Every component transaction compares the checkpoint value captured before
+// writing, including every batch of an oversized snapshot. The final checkpoint
+// remains the last write. Initial ownership must be established with a
+// checkpoint-only snapshot before publishing components.
 func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *metastore.WALRecoverySnapshot) error {
 	if snapshot == nil {
 		return nil
@@ -124,7 +118,7 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	// The consume checkpoint is the commit point of the snapshot: staging it
 	// with CommitSave makes it the last write to become visible, after every
 	// other part of the snapshot has landed. Its advancement is additionally
-	// guarded by a value compare-and-swap (CommitSaveIfValue): the checkpoint
+	// guarded by a value comparison on every transaction: the checkpoint
 	// may only advance when the recorded term is not newer than the
 	// publisher's own term, so an older-term publisher that survived a
 	// takeover can never advance it past the successor's inherited manifest
@@ -139,21 +133,22 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	checkpointKey := buildConsumeCheckpointKey(pChannelName)
 	checkpointValue := ""
 	checkpointFirstCreation := false
+	var current string
+	var snapshotKV kv.TxnKV = c.metaKV
 	if snapshot.ConsumeCheckpoint != nil {
 		data, err := proto.Marshal(snapshot.ConsumeCheckpoint)
 		if err != nil {
 			return merr.WrapErrSerializationFailed(err, "marshal consume checkpoint at pchannel %s", pChannelName)
 		}
 		checkpointValue = string(data)
-		current, err := c.metaKV.Load(ctx, checkpointKey)
+		current, err = c.metaKV.Load(ctx, checkpointKey)
 		if err != nil && !errors.Is(err, merr.ErrIoKeyNotFound) {
 			return err
 		}
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			// No checkpoint yet (first persistence of the pchannel, or a
-			// recreated one): create it after the component commit with a
-			// version CAS on the absent key, so two concurrent first
-			// publishers cannot both succeed.
+			if len(removes)+len(vchannelSaves)+len(segmentSaves) != 0 || snapshot.SalvageCheckpoint != nil {
+				return merr.WrapErrServiceInternalMsg("initialize consume checkpoint before publishing components of pchannel %s", pChannelName)
+			}
 			checkpointFirstCreation = true
 		} else {
 			// Fast-fail on a strictly older publisher before the commit txn.
@@ -165,7 +160,11 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 					pChannelName, currentCP.GetTerm(), snapshot.ConsumeCheckpoint.GetTerm(),
 				)
 			}
-			b.CommitSaveIfValue(checkpointKey, current, checkpointValue)
+			b.CommitSave(checkpointKey, checkpointValue)
+		}
+		snapshotKV = &recoverySnapshotKV{
+			TxnKV: c.metaKV,
+			guard: predicates.ValueEqual(checkpointKey, current),
 		}
 	}
 	// A guarded commit is not retried by the kv wrapper, because its predicate
@@ -175,8 +174,10 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	// does not say whether the write landed -- only a read does. Re-read before
 	// deciding: finding our own value there means the commit applied and the
 	// error described the reply, not the write.
-	commitErr := txn.Commit(ctx, c.metaKV, b)
-	if commitErr != nil && (snapshot.ConsumeCheckpoint == nil || checkpointFirstCreation) {
+	commitErr := txn.Commit(ctx, snapshotKV, b)
+	// An unchanged checkpoint cannot prove that component writes landed.
+	// Keep the dirty snapshot and retry instead of acknowledging an uncertain write.
+	if commitErr != nil && (snapshot.ConsumeCheckpoint == nil || checkpointFirstCreation || current == checkpointValue) {
 		return commitErr
 	}
 	if commitErr != nil {
@@ -216,4 +217,24 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 		}
 	}
 	return nil
+}
+
+// recoverySnapshotKV applies the same ownership guard to every transaction,
+// including component batches before the final checkpoint commit. Other catalog
+// users retain txn.Commit's ordinary chunked behavior.
+type recoverySnapshotKV struct {
+	kv.TxnKV
+	guard predicates.Predicate
+}
+
+func (k *recoverySnapshotKV) MultiSave(ctx context.Context, saves map[string]string) error {
+	return k.MultiSaveAndRemove(ctx, saves, nil)
+}
+
+func (k *recoverySnapshotKV) MultiSaveAndRemove(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	return k.TxnKV.MultiSaveAndRemove(ctx, saves, removals, append(preds, k.guard)...)
+}
+
+func (k *recoverySnapshotKV) MultiSaveAndRemoveWithPrefix(ctx context.Context, saves map[string]string, removals []string, preds ...predicates.Predicate) error {
+	return k.TxnKV.MultiSaveAndRemoveWithPrefix(ctx, saves, removals, append(preds, k.guard)...)
 }

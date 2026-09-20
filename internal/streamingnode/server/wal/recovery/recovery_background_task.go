@@ -15,9 +15,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-// SaveRecoverySnapshot fences checkpoint publication with a term and value CAS.
-// TODO: Fence component writes as well, including batches written before the
-// final checkpoint CAS when the snapshot exceeds the catalog transaction limit.
+// SaveRecoverySnapshot fences every component batch and checkpoint publication
+// with the captured checkpoint value, including component-only progress.
 func (rs *recoveryStorageImpl) backgroundTask() {
 	ticker := time.NewTicker(rs.cfg.persistInterval)
 	defer func() {
@@ -219,9 +218,8 @@ func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnaps
 	if snapshot.SalvageCheckpoint != nil {
 		recoverySnapshot.SalvageCheckpoint = snapshot.SalvageCheckpoint.IntoProto()
 	}
-	if snapshot.CheckpointDirty {
-		recoverySnapshot.ConsumeCheckpoint = snapshot.Checkpoint.IntoProto()
-	}
+	// Even component-only progress belongs to this publisher's term.
+	recoverySnapshot.ConsumeCheckpoint = snapshot.Checkpoint.IntoProto()
 	return recoverySnapshot, nil
 }
 

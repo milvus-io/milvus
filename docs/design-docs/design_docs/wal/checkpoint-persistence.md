@@ -176,15 +176,22 @@ exactly-once object creation. Orphan object collection belongs to GC/Defrag.
 
 ### 5.1 Checkpoint publication is fenced by term
 
-Recovery claims the consume checkpoint with the assignment term before probing
-summary storage. Every later checkpoint carries that term. Catalog publication
-rejects an older publisher, uses a value CAS on an existing checkpoint, and a
-version-zero CAS for first creation. Read-back verification detects a lost CAS.
-The checkpoint remains the final commit marker after component writes.
+Recovery claims the consume checkpoint with the assignment term before reading
+component state or probing summary storage. Initial ownership is established
+with a checkpoint-only version-zero CAS before component publication.
 
-This fences checkpoint publication. Component writes made by the chunked
-transaction fallback before its final CAS are not individually fenced; complete
-cross-owner component fencing remains separate work.
+Every dirty snapshot carries its frozen checkpoint, including component-only
+progress that does not advance the global TimeTick. Catalog publication rejects
+an older publisher and compares the captured checkpoint value in every component
+transaction, including each chunk and deletion of an oversized snapshot. The
+checkpoint remains the last write; an old owner cannot modify components after
+a successor has claimed ownership.
+
+If a transaction returns an uncertain error and the checkpoint changed, read-back
+of the new checkpoint can prove the final commit landed. An unchanged checkpoint
+cannot prove its accompanying component writes landed: retain the dirty snapshot
+and retry under the ownership guard. Only confirmed persistence permits
+MarkPersisted callbacks or WAL truncation.
 
 ## 6. Dirty Snapshot Stability
 

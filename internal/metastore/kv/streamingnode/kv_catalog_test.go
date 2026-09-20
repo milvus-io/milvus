@@ -825,6 +825,10 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	pchannel := "p1"
 
+	require.NoError(t, catalog.SaveRecoverySnapshot(ctx, pchannel, &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 1, Term: 1},
+	}))
+
 	err := catalog.SaveRecoverySnapshot(ctx, pchannel, &metastore.WALRecoverySnapshot{
 		SegmentAssignments: map[int64]*streamingpb.SegmentAssignmentMeta{
 			1: {SegmentId: 1, State: streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING},
@@ -848,6 +852,7 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 		SalvageCheckpoint: &commonpb.ReplicateCheckpoint{ClusterId: "cluster-a", Pchannel: "p1-rootcoord-dml_0"},
 		ConsumeCheckpoint: &streamingpb.WALCheckpoint{
 			TimeTick: 42,
+			Term:     1,
 			// Latest control state and its own applied frontier persist together.
 			ControlCheckpointTimeTick: 55,
 			AlterWalState:             &streamingpb.AlterWALState{Stage: streamingpb.AlterWALStage_FLUSHING},

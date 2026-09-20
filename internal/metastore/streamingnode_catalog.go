@@ -49,9 +49,9 @@ type StreamingNodeCataLog interface {
 	// On the atomic path the whole delta becomes visible together. On the
 	// fallback path non-commit parts may become visible before the checkpoint;
 	// their component checkpoints make replay from the old global checkpoint
-	// idempotent. A CAS
-	// single-point commit (see the recovery background-task TODO) is the
-	// durable fix.
+	// idempotent. Recovery publishers must include their frozen ConsumeCheckpoint
+	// even when it does not advance; every batch is guarded by its captured
+	// ownership value. Initialize ownership with a checkpoint-only snapshot.
 	SaveRecoverySnapshot(ctx context.Context, pChannelName string, snapshot *WALRecoverySnapshot) error
 }
 
