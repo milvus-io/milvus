@@ -325,6 +325,37 @@ DrainFuture(std::future<T>& future) noexcept {
     }
 }
 
+// Normal control flow for bounded field-data visitors. Stop is not
+// cancellation and is never represented by an exception.
+enum class VisitControl {
+    Continue,
+    Stop,
+};
+
+enum class VisitOutcome {
+    Exhausted,
+    Stopped,
+    // The requested field is absent from the source inventory. This differs
+    // from a present field that legitimately contains zero rows.
+    FieldMissing,
+};
+
+using FieldDataVisitor = std::function<VisitControl(FieldDataPtr)>;
+
+// Visits storage-v2 data on the calling thread in file/row-group order. Stop
+// takes effect after the current row group: no later row group is read, but a
+// row group is not a fixed byte bound and may itself be large. Producer work
+// for the current row group is complete before the visitor is called.
+VisitOutcome
+VisitFieldDataFromStorageV2(
+    const std::vector<std::vector<std::string>>& remote_files,
+    int64_t field_id,
+    DataType data_type,
+    DataType element_type,
+    int64_t dim,
+    milvus_storage::ArrowFileSystemPtr fs,
+    const FieldDataVisitor& visitor);
+
 std::vector<FieldDataPtr>
 GetFieldDatasFromStorageV2(std::vector<std::vector<std::string>>& remote_files,
                            int64_t field_id,
@@ -361,6 +392,23 @@ constexpr int64_t kStreamingInflightBytes = 512LL << 20;
 // source arrow batches held alive by in-flight decode futures; a few batches
 // are enough to keep fetch and decode overlapped.
 constexpr int64_t kAccumulatingInflightBytes = 64LL << 20;
+
+// Visits manifest data on the calling thread in source order. Stop prevents
+// further ReadNext calls, decode submissions, and callbacks. Decode work
+// already submitted within the bounded input-byte window is still joined via
+// future::get(); a real failure there takes precedence over a normal Stopped
+// outcome. The window does not bound decoded/external-normalization expansion.
+VisitOutcome
+VisitFieldDataFromManifest(
+    const std::string& manifest_path,
+    const std::shared_ptr<milvus_storage::api::Properties>& loon_ffi_properties,
+    const FieldDataMeta& field_meta,
+    std::optional<DataType> data_type,
+    int64_t dim,
+    std::optional<DataType> element_type,
+    std::optional<StorageColumnMapping> storage_column_mapping,
+    const FieldDataVisitor& visitor,
+    int64_t max_inflight_bytes = kStreamingInflightBytes);
 
 void
 IterateFieldDataFromManifest(

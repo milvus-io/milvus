@@ -26,9 +26,11 @@
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
+#include "filemanager/InputStream.h"
 #include "folly/CancellationToken.h"
-#include "storage/ThreadPools.h"
+#include "folly/coro/Task.h"
 #include "storage/LoadAdmissionController.h"
+#include "storage/ThreadPools.h"
 
 namespace milvus::storage {
 
@@ -66,6 +68,15 @@ ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
         ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
     }
 }
+
+// Drain issued I/O before checking cancellation so the stream and the
+// caller-owned destination remain alive through completion and retries.
+folly::coro::Task<void>
+ReadInputStreamExactlyAsync(milvus::InputStream& input,
+                            uint64_t offset,
+                            uint8_t* destination,
+                            size_t bytes,
+                            folly::CancellationToken token);
 
 // A slice read from a V3 entry. `error` carries an exception captured in the
 // producer task so the consumer can rethrow instead of hanging.
