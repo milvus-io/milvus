@@ -19,11 +19,13 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <memory>
 #include <unordered_map>
 
 #include "storage/IndexData.h"
+#include "storage/LegacyIndexLoader.h"
 #include "storage/FileManager.h"
 #include "storage/ChunkManager.h"
 #include "storage/Types.h"
@@ -59,6 +61,33 @@ class MemFileManagerImpl : public FileManagerImpl {
     std::map<std::string, std::unique_ptr<DataCodec>>
     LoadIndexToMemory(const std::vector<std::string>& remote_files,
                       milvus::proto::common::LoadPriority priority);
+
+    // Streams decoded legacy slices directly into the assembled BinarySet.
+    // Concurrent slices copy into disjoint offsets. Returned buffers are
+    // request-local input memory; admitted scratch is released after each copy.
+    // An optional entry name reads only that entry and its slice metadata.
+    [[nodiscard]] folly::coro::Task<BinarySet>
+    LoadIndexBinarySetAsync(const std::vector<std::string>& remote_files,
+                            proto::common::LoadPriority priority,
+                            folly::CancellationToken token = {},
+                            std::string_view entry_name = {});
+
+    // Validate legacy slice metadata and group source objects by logical entry.
+    // Destinations are selected separately using the existing EntryTarget types.
+    folly::coro::Task<std::map<std::string, std::vector<LegacyIndexFile>>>
+    InspectIndexEntriesAsync(const std::vector<std::string>& remote_files,
+                             proto::common::LoadPriority priority,
+                             folly::CancellationToken token = {},
+                             std::string_view entry_name = {});
+
+    // Fill destinations selected by the index, retaining file ownership for
+    // the caller's IndexLoadPlan through engine finalization.
+    folly::coro::Task<void>
+    ReadIndexEntriesAsync(
+        const std::map<std::string, std::vector<LegacyIndexFile>>& sources,
+        std::span<const EntryLoadPlan> targets,
+        proto::common::LoadPriority priority,
+        folly::CancellationToken token = {});
 
     std::vector<FieldDataPtr>
     CacheRawDataToMemory(const Config& config);

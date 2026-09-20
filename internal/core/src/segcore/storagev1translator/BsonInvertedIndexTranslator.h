@@ -77,6 +77,9 @@ class BsonInvertedIndexTranslator : public milvus::cachinglayer::Translator<
     milvus::storage::FileManagerContext file_manager_context_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
+    // Stable across async worker, admission and writer-buffer configuration
+    // changes between planning and a subsequent cache reload.
+    int64_t stream_memory_overhead_{0};
 };
 
 }  // namespace milvus::segcore::storagev1translator

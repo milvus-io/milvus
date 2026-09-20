@@ -31,6 +31,12 @@
 #include "storage/LocalChunkManager.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Types.h"
+#include "folly/coro/BlockingWait.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
+#include "index/IndexLoadPlan.h"
+#include "storage/LocalFileIOPool.h"
 
 namespace milvus::index {
 
@@ -116,24 +122,105 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
         // index_files are absolute remote paths (basePath already prepended by caller)
         disk_file_manager_->CacheJsonStatsSharedIndexToDisk(index_files,
                                                             priority);
-        if (!(tantivy_index_exist(path_.c_str()))) {
-            ThrowInfo(
-                ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
-        }
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(
-            path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
+        FinishLegacyLoad(load_in_mmap);
         if (!load_in_mmap) {
             // the index is loaded in ram, so we can remove files in advance
             disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
         }
-        load_in_mmap_ = load_in_mmap;
-        LOG_INFO(
-            "load json shared key index done for field id:{} with dir:{}, "
-            "load_in_mmap:{}",
-            field_id_,
-            path_,
-            load_in_mmap);
     }
+}
+
+void
+BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
+                             milvus::proto::common::LoadPriority priority,
+                             bool load_in_mmap,
+                             milvus::OpContext* ctx) {
+    const bool use_async_load =
+        disk_file_manager_->GetAsyncLoadEnabled().value_or(
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    if (!use_async_load) {
+        LoadIndex(index_files, priority, load_in_mmap);
+        return;
+    }
+    if (!is_load_) {
+        return;
+    }
+    const auto token =
+        ctx ? ctx->cancellation_token : folly::CancellationToken{};
+    auto load = [&]() -> folly::coro::Task<void> {
+        IndexLoadPlan load_plan;
+        std::exception_ptr failure;
+        try {
+            storage::ThrowIfCancelled(token, "BsonInvertedIndex::Load");
+            // This manager owns a unique generated directory. The streamer
+            // drains reads and writes before either opening or removing it.
+            load_plan.entries =
+                co_await disk_file_manager_->CacheIndexToDiskAsync(
+                    index_files, path_, priority, token, load_in_mmap);
+            storage::ThrowIfCancelled(token, "BsonInvertedIndex::Open");
+            // Synchronous engine work resumes on the shared async worker,
+            // after file closure and release of all slice admission.
+            FinishLegacyLoad(load_in_mmap);
+            storage::ThrowIfCancelled(token, "BsonInvertedIndex::Publish");
+        } catch (...) {
+            failure = std::current_exception();
+        }
+        if (failure) {
+            wrapper_.reset();
+        }
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                if (!failure) {
+                    load_plan.Commit();
+                }
+                // Destroy the plan on the file executor after engine finalization.
+                auto completed = std::move(load_plan);
+            },
+            priority);
+        if (failure || !load_in_mmap) {
+            // Remove empty parent directories; preserve the original failure.
+            try {
+                co_await storage::RunLocalFileIOAsync(
+                    [&] {
+                        disk_file_manager_->RemoveJsonStatsSharedIndexFiles();
+                    },
+                    priority);
+            } catch (...) {
+                if (!failure)
+                    throw;
+                LOG_WARN("failed to clean BSON shared-key load directory {}",
+                         path_);
+            }
+        }
+        if (failure)
+            std::rethrow_exception(failure);
+    };
+    try {
+        // Only the synchronous cache caller blocks; children are co_awaited.
+        folly::coro::blockingWait(
+            load().scheduleOn(storage::ResolveAsyncLoadExecutor({}, priority)));
+    } catch (const std::bad_alloc& error) {
+        throw SegcoreError(MemAllocateFailed, error.what());
+    } catch (const folly::OperationCancelled& error) {
+        throw SegcoreError(FollyCancel, error.what());
+    }
+}
+
+void
+BsonInvertedIndex::FinishLegacyLoad(bool load_in_mmap) {
+    if (!tantivy_index_exist(path_.c_str())) {
+        ThrowInfo(
+            ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
+    }
+    wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
+    load_in_mmap_ = load_in_mmap;
+    LOG_INFO(
+        "load json shared key index done for field id:{} with dir:{}, "
+        "load_in_mmap:{}",
+        field_id_,
+        path_,
+        load_in_mmap);
 }
 
 IndexStatsPtr

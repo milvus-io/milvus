@@ -131,24 +131,8 @@ AsyncIndexEntryReader::ReadExactlyAsync(uint64_t offset,
                                         uint8_t* destination,
                                         size_t bytes,
                                         folly::CancellationToken token) const {
-    ThrowIfCancelled(token, "AsyncIndexEntryReader::ReadExactly");
-    if (bytes == 0) {
-        co_return;
-    }
-    // Cancellation stops new slices, but must not release this destination or
-    // its admission lease until the stream operation (including retries) drains.
-    auto result =
-        co_await folly::coro::co_awaitTry(folly::coro::co_withCancellation(
-            folly::CancellationToken{},
-            input_->ReadAtAsync(destination, offset, bytes)));
-    ThrowIfCancelled(token, "AsyncIndexEntryReader::ReadExactly");
-    const auto n = std::move(result).value();
-    if (!(n == bytes)) {
-        ThrowInfo(ErrorCode::FileReadFailed,
-                  "Short async stream read: expected {}, got {}",
-                  bytes,
-                  n);
-    }
+    co_await ReadInputStreamExactlyAsync(
+        *input_, offset, destination, bytes, token);
 }
 
 folly::coro::Task<void>

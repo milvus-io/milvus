@@ -44,6 +44,7 @@
 #include "storage/RemoteOutputStream.h"
 #include "pb/index_coord.pb.h"
 #include "storage/Types.h"
+#include "storage/LegacyIndexLoader.h"
 
 namespace milvus::storage {
 
@@ -121,6 +122,7 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    std::shared_ptr<const LegacyIndexFileInfos> legacy_index_files;
     // Cache translators pin the mode used by their resource estimate. Other
     // callers leave it unset and select the global mode when loading starts.
     std::optional<bool> use_async_load;
@@ -409,6 +411,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::shared_ptr<const LegacyIndexFileInfos> legacy_index_files_;
     std::optional<bool> use_async_load_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;

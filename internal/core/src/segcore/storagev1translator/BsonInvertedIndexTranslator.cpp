@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -31,6 +32,13 @@
 #include "segcore/CacheMetricAttribution.h"
 #include "segcore/Utils.h"
 #include "storage/DiskFileManagerImpl.h"
+#include "common/Utils.h"
+#include "folly/coro/BlockingWait.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/LegacyIndexLoader.h"
+#include "storage/EntryStreamUtils.h"
+#include "storage/FileWriter.h"
 
 namespace milvus::segcore::storagev1translator {
 
@@ -53,6 +61,53 @@ BsonInvertedIndexTranslator::BsonInvertedIndexTranslator(
             /* support_eviction */ true,
             std::nullopt,
             milvus::segcore::MetricAttributionFromShard(load_info_.shard)) {
+    const bool use_async_load = file_manager_context_.use_async_load.value_or(
+        storagev2translator::StorageV2AsyncLoadEnabled());
+    file_manager_context_.use_async_load = use_async_load;
+    if (load_info_.index_files.empty()) {
+        return;
+    }
+    // Keep the existing final-size estimate (which can include other JSON
+    // stats), but never reserve less than the decoded shared-key files.
+    auto inspect = [&]() -> folly::coro::Task<void> {
+        size_t payload_bytes = 0;
+        size_t scratch = 0;
+        size_t max_file_scratch = 0;
+        const auto priority =
+            static_cast<proto::common::LoadPriority>(load_info_.load_priority);
+        file_manager_context_.legacy_index_files =
+            co_await storage::InspectLegacyIndexFilesAsync(
+                load_info_.index_files,
+                file_manager_context_.chunkManagerPtr,
+                file_manager_context_.fs,
+                priority);
+        for (const auto& file : load_info_.index_files) {
+            const auto& info =
+                file_manager_context_.legacy_index_files->at(file);
+            payload_bytes = SaturatingAdd(payload_bytes, info.payload_bytes);
+            const auto file_scratch = info.TotalTransientBytes(use_async_load);
+            scratch = SaturatingAdd(scratch, file_scratch);
+            max_file_scratch = std::max(max_file_scratch, file_scratch);
+        }
+        constexpr auto max_size = std::numeric_limits<int64_t>::max();
+        load_info_.index_size = std::max(
+            load_info_.index_size,
+            static_cast<int64_t>(std::min<size_t>(payload_bytes, max_size)));
+        stream_memory_overhead_ = static_cast<int64_t>(std::min<size_t>(
+            SaturatingAdd(storage::LegacyIndexLoadTransientBytes(
+                              scratch, max_file_scratch, use_async_load),
+                          storage::FileWriter::MAX_BUFFER_SIZE),
+            max_size));
+    };
+    if (use_async_load) {
+        folly::coro::blockingWait(
+            inspect().scheduleOn(storage::ResolveAsyncLoadExecutor(
+                {},
+                static_cast<proto::common::LoadPriority>(
+                    load_info_.load_priority))));
+    } else {
+        folly::coro::blockingWait(inspect());
+    }
 }
 
 size_t
@@ -72,10 +127,12 @@ BsonInvertedIndexTranslator::estimated_byte_size_of_cell(
     // ignore the cid checking, because there is only one cell
     if (load_info_.enable_mmap) {
         // loaded: on disk; overhead: temp memory for download buffer
-        return {{0, load_info_.index_size}, {load_info_.index_size, 0}};
+        return {{0, load_info_.index_size},
+                {std::max(load_info_.index_size, stream_memory_overhead_), 0}};
     } else {
         // loaded: in memory; overhead: temp disk for local file before loading
-        return {{load_info_.index_size, 0}, {0, load_info_.index_size}};
+        return {{load_info_.index_size, 0},
+                {stream_memory_overhead_, load_info_.index_size}};
     }
 }
 
@@ -120,7 +177,8 @@ BsonInvertedIndexTranslator::get_cells(
         index->LoadIndex(load_info_.index_files,
                          static_cast<milvus::proto::common::LoadPriority>(
                              load_info_.load_priority),
-                         load_info_.enable_mmap);
+                         load_info_.enable_mmap,
+                         ctx);
     }
 
     LOG_INFO("load bson inverted index success for field:{} of segment:{}",

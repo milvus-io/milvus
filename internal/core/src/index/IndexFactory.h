@@ -181,6 +181,18 @@ class IndexFactory {
  private:
     FRIEND_TEST(StringIndexMarisaTest, Reverse);
 
+    // File-aware legacy estimates follow the cache entry's loading mode.
+    LoadResourceRequest
+    ScalarIndexLegacyLoadResource(
+        DataType field_type,
+        uint64_t index_size,
+        const std::map<std::string, std::string>& index_params,
+        bool mmap_enable,
+        int64_t num_rows,
+        const std::vector<std::string>& index_files,
+        const storage::FileManagerContext& context,
+        bool use_async_load);
+
     // Shared representation costs, parameterized by the reader's transient bytes.
     LoadResourceRequest
     ScalarIndexLoadResourceWithOverhead(

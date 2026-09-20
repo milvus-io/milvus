@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 
+#include "filemanager/InputStream.h"
+#include "folly/coro/Task.h"
 #include "common/Common.h"
 #include "common/EasyAssert.h"
 #include "common/Utils.h"
@@ -66,6 +68,15 @@ ThrowIfCancelled(const folly::CancellationToken& cancellation_token,
         ThrowInfo(ErrorCode::FollyCancel, "{} cancelled", operation);
     }
 }
+
+// Shared packed/legacy exact read boundary. Drain issued I/O before checking
+// cancellation so the stream and caller-owned destination remain alive.
+folly::coro::Task<void>
+ReadInputStreamExactlyAsync(milvus::InputStream& input,
+                            uint64_t offset,
+                            uint8_t* destination,
+                            size_t bytes,
+                            folly::CancellationToken token);
 
 // A slice read from a V3 entry. `error` carries an exception captured in the
 // producer task so the consumer can rethrow instead of hanging.

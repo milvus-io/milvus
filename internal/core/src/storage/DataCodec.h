@@ -141,12 +141,15 @@ class DataCodec {
     //the shared ptr to keep the original input data alive for zero-copy target
 };
 
-// Deserialize the data stream of the file obtained from remote or local
+// Deserialize the data stream of the file obtained from remote or local.
+// A supplied index payload size enables strict index-event bounds/size checks.
+// The streaming caller has already validated the descriptor under admission.
 std::unique_ptr<DataCodec>
 DeserializeFileData(
     const std::shared_ptr<uint8_t[]> input,
     int64_t length,
     bool is_field_data = true,
-    std::optional<proto::schema::TypeSchema> array_type = std::nullopt);
+    std::optional<proto::schema::TypeSchema> array_type = std::nullopt,
+    std::optional<int64_t> expected_index_payload_bytes = std::nullopt);
 
 }  // namespace milvus::storage
