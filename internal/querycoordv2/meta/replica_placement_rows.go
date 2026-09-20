@@ -19,6 +19,7 @@ package meta
 import (
 	"context"
 	"reflect"
+	"slices"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -30,7 +31,7 @@ import (
 
 // refreshRows caches a complete recovery-view row snapshot for a loaded scope.
 // The caller holds the group recovery lock; RPCs hold no metadata locks.
-func (g *collectionGroup) refreshRows(ctx context.Context, broker Broker, scope map[int64][]int64) error {
+func (g *replicaPlacement) refreshRows(ctx context.Context, broker Broker, scope map[int64][]int64) error {
 	// All triggers share a complete successful row snapshot. Slow RPCs hold only
 	// this group's scheduling lock, never replica/collection/resource metadata locks.
 	var refreshErr error
@@ -38,24 +39,35 @@ func (g *collectionGroup) refreshRows(ctx context.Context, broker Broker, scope 
 		// Spawn precedes load metadata registration. Keep fault recovery active,
 		// but do not optimize with an unknown scope mistaken for empty data.
 		if len(parts) == 0 {
-			refreshErr = merr.WrapErrServiceUnavailable("collection group load scope is not registered yet")
+			refreshErr = merr.WrapErrServiceUnavailable("replica placement load scope is not registered yet")
 			break
 		}
 	}
 	if !reflect.DeepEqual(scope, g.scope) || time.Since(g.refreshed) >= 30*time.Second {
 		rows := make(map[int64]int64, len(scope))
-		for _, id := range g.members {
+		ids := make([]int64, 0, len(scope))
+		for id := range scope {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		singleShard := make(map[int64]bool, len(scope))
+		for _, id := range ids {
 			if refreshErr != nil {
 				break
 			}
-			parts, ok := scope[id]
-			if !ok {
-				continue
-			}
-			_, segments, err := broker.GetRecoveryInfoV2(ctx, id, parts...)
+			parts := scope[id]
+			channels, segments, err := broker.GetRecoveryInfoV2(ctx, id, parts...)
 			if err != nil {
 				refreshErr = err
 				break
+			}
+			if len(channels) == 0 {
+				refreshErr = merr.WrapErrServiceUnavailable("replica placement recovery view has no channels")
+				break
+			}
+			singleShard[id] = len(channels) == 1
+			if !singleShard[id] {
+				continue
 			}
 			partitions := typeutil.NewSet(parts...)
 			for _, segment := range segments {
@@ -72,9 +84,9 @@ func (g *collectionGroup) refreshRows(ctx context.Context, broker Broker, scope 
 			}
 		}
 		if refreshErr != nil {
-			mlog.RatedWarn(ctx, 1, "collection group row refresh failed; retain last complete snapshot", mlog.String("group", g.name), mlog.Err(refreshErr))
+			mlog.RatedWarn(ctx, 1, "replica placement row refresh failed; retain last complete snapshot", mlog.String("resourceGroup", g.name), mlog.Err(refreshErr))
 		} else {
-			g.rows, g.scope, g.refreshed = rows, scope, time.Now()
+			g.rows, g.scope, g.singleShard, g.refreshed = rows, scope, singleShard, time.Now()
 		}
 	}
 

@@ -3437,7 +3437,6 @@ Disabled if the value is less or equal to 0.`,
 // /////////////////////////////////////////////////////////////////////////////
 // --- querycoord ---
 type queryCoordConfig struct {
-	ReplicaPlacementCollectionGroups       ParamItem `refreshable:"true"`
 	ReplicaPlacementResourceGroupAllowlist ParamItem `refreshable:"true"`
 	// Deprecated: Since 2.2.0
 	RetryNum ParamItem `refreshable:"true"`
@@ -3931,15 +3930,9 @@ If this parameter is set false, Milvus simply searches the growing segments with
 	}
 	p.CheckNodeInReplicaInterval.Init(base.mgr)
 
-	p.ReplicaPlacementCollectionGroups = ParamItem{
-		Key: "queryCoord.replicaPlacement.collectionGroups", Version: "3.0.0", DefaultValue: "{}",
-		Doc:    "JSON map of group names to collection ID arrays for joint QueryNode allocation.",
-		Export: false,
-	}
-	p.ReplicaPlacementCollectionGroups.Init(base.mgr)
 	p.ReplicaPlacementResourceGroupAllowlist = ParamItem{
 		Key: "queryCoord.replicaPlacement.resourceGroupAllowlist", Version: "3.0.0", DefaultValue: "",
-		Doc:    "Resource group allowlist for collection groups; exact names, * matches all, empty disables.",
+		Doc:    "Resource groups jointly assigning QueryNodes to single-shard collections; exact names, * matches all, empty disables.",
 		Export: false,
 	}
 	p.ReplicaPlacementResourceGroupAllowlist.Init(base.mgr)

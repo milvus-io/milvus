@@ -25,9 +25,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-const collectionGroupNodeShareDeadband = 0.1
+const replicaPlacementNodeShareDeadband = 0.1
 
-func groupPlanKey(replicas []*Replica, nodes []int64) string {
+func placementPlanKey(replicas []*Replica, nodes []int64) string {
 	type member struct{ ID, Collection int64 }
 	members := make([]member, 0, len(replicas))
 	for _, r := range replicas {
@@ -44,7 +44,7 @@ func groupPlanKey(replicas []*Replica, nodes []int64) string {
 // Keep small row fluctuations from exchanging the last remainder node. Compare
 // against the accepted plan, not the last sample, so gradual growth accumulates.
 // Uniform growth does not change shares. Topology changes bypass this deadband.
-func groupRowSharesChanged(replicas []*Replica, nodes int, before, after map[int64]int64) bool {
+func placementRowSharesChanged(replicas []*Replica, nodes int, before, after map[int64]int64) bool {
 	var oldTotal, newTotal float64
 	for _, r := range replicas {
 		oldTotal += float64(max(before[r.GetCollectionID()], 1))
@@ -54,16 +54,16 @@ func groupRowSharesChanged(replicas []*Replica, nodes int, before, after map[int
 		id := r.GetCollectionID()
 		oldShare := float64(max(before[id], 1)) / oldTotal
 		newShare := float64(max(after[id], 1)) / newTotal
-		if float64(nodes)*math.Abs(newShare-oldShare) >= collectionGroupNodeShareDeadband {
+		if float64(nodes)*math.Abs(newShare-oldShare) >= replicaPlacementNodeShareDeadband {
 			return true
 		}
 	}
 	return false
 }
 
-// groupNodeCounts apportions a node budget proportional to each replica's data.
+// placementNodeCounts apportions a node budget proportional to each replica's data.
 // The minimum of one can oversubscribe across collections, never within one.
-func groupNodeCounts(replicas []*Replica, nodeCount int, rows map[int64]int64) map[int64]int {
+func placementNodeCounts(replicas []*Replica, nodeCount int, rows map[int64]int64) map[int64]int {
 	counts := make(map[int64]int)
 	perCollection := make(map[int64]int)
 	total := float64(0)
@@ -92,8 +92,8 @@ func groupNodeCounts(replicas []*Replica, nodeCount int, rows map[int64]int64) m
 			d := ideal - float64(counts[r.GetID()])
 			retain := r.RWNodesCount() > counts[r.GetID()]
 			bestRetains := best != nil && best.RWNodesCount() > counts[best.GetID()]
-			if best == nil || d > deficit+collectionGroupNodeShareDeadband || (retain == bestRetains && d > deficit) ||
-				(math.Abs(d-deficit) <= collectionGroupNodeShareDeadband && retain && !bestRetains) {
+			if best == nil || d > deficit+replicaPlacementNodeShareDeadband || (retain == bestRetains && d > deficit) ||
+				(math.Abs(d-deficit) <= replicaPlacementNodeShareDeadband && retain && !bestRetains) {
 				best, deficit = r, d
 			}
 		}
@@ -116,10 +116,10 @@ func groupNodeCounts(replicas []*Replica, nodeCount int, rows map[int64]int64) m
 	return counts
 }
 
-// assignCollectionGroup computes node eligibility only. Existing balancers still
+// assignReplicaPlacement computes node eligibility only. Existing balancers still
 // choose and move the individual segments. Different collections may share nodes.
-func assignCollectionGroup(replicas []*Replica, nodes []int64, rows map[int64]int64) map[int64][]int64 {
-	counts := groupNodeCounts(replicas, len(nodes), rows)
+func assignReplicaPlacement(replicas []*Replica, nodes []int64, rows map[int64]int64) map[int64][]int64 {
+	counts := placementNodeCounts(replicas, len(nodes), rows)
 	result := make(map[int64][]int64)
 	used := make(map[int64]typeutil.Set[int64])
 	load := make(map[int64]float64)
@@ -156,7 +156,7 @@ func assignCollectionGroup(replicas []*Replica, nodes []int64, rows map[int64]in
 	return result
 }
 
-func applyCollectionGroupPlan(replica *Replica, siblings []*Replica, nodes []int64, plan map[int64][]int64) *Replica {
+func applyReplicaPlacementPlan(replica *Replica, siblings []*Replica, nodes []int64, plan map[int64][]int64) *Replica {
 	available := typeutil.NewSet(nodes...)
 	blocked := typeutil.NewSet[int64]()
 	reserved := typeutil.NewSet[int64]()
@@ -229,4 +229,27 @@ func applyCollectionGroupPlan(replica *Replica, siblings []*Replica, nodes []int
 		mutable.SetWaitRGReadyAt(time.Time{})
 	}
 	return mutable.IntoReplica()
+}
+
+// Preserve existing eligibility while an added/releasing member has unknown
+// rows. Only completely new replicas bootstrap with ordinary per-collection
+// capacity. applyReplicaPlacementPlan still replaces failed nodes and respects
+// siblings' RW/RO ownership across RGs.
+func conservativePlacement(replicas []*Replica, nodes []int64) map[int64][]int64 {
+	plan := make(map[int64][]int64)
+	byCollection := make(map[int64][]*Replica)
+	for _, r := range replicas {
+		byCollection[r.GetCollectionID()] = append(byCollection[r.GetCollectionID()], r)
+	}
+	for _, rs := range byCollection {
+		initial := assignReplicaPlacement(rs, nodes, nil)
+		for _, r := range rs {
+			if r.RWNodesCount() == 0 && r.RONodesCount() == 0 {
+				plan[r.GetID()] = initial[r.GetID()]
+			} else {
+				plan[r.GetID()] = slices.Clone(r.GetRWNodes())
+			}
+		}
+	}
+	return plan
 }
