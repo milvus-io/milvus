@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/idempotency"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/lock"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/partialupdate"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/pkindex"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/redo"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/replicate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard"
@@ -37,12 +38,17 @@ func OpenManager() (Manager, error) {
 // Idempotency sits outermost, ahead of redo: a duplicate must be answered from
 // the window before anything downstream can retry it, or a retry of a write
 // that already landed would be redone as a second write.
+//
+// The primary key index interceptor sits between replicate and timetick: it may
+// turn one append into a transaction, whose messages each need their own time tick,
+// and it must run under the lock acquired for the original append.
 func newInterceptorBuilders() []interceptors.InterceptorBuilder {
 	return []interceptors.InterceptorBuilder{
 		idempotency.NewInterceptorBuilder(),
 		redo.NewInterceptorBuilder(),
 		lock.NewInterceptorBuilder(),
 		replicate.NewInterceptorBuilder(),
+		pkindex.NewInterceptorBuilder(),
 		timetick.NewInterceptorBuilder(),
 		shard.NewInterceptorBuilder(),
 		partialupdate.NewInterceptorBuilder(),
