@@ -2293,6 +2293,15 @@ FlushGrowingSegmentData(CSegmentInterface c_segment,
                                       PROPERTY_WRITER_FORMAT,
                                       writer_format.c_str());
 
+        auto properties_error = milvus_storage::api::ConvertFFIProperties(
+            writer_config.properties, config->writer_properties);
+        if (properties_error) {
+            // Do not include property values: writer configuration may contain keys.
+            return milvus::FailureCStatus(
+                milvus::UnexpectedError,
+                "invalid growing flush writer properties");
+        }
+
         // add TEXT column configs
         for (size_t i = 0; i < config->num_text_columns; i++) {
             milvus_storage::lob_column::LobColumnConfig text_config;

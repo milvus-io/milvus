@@ -34,7 +34,7 @@ import (
 )
 
 type CommitTimestampSuite struct {
-	integration.MiniClusterSuite
+	importSuite
 }
 
 // TestImport_CommitTimestampSetAfterCompletion verifies that all segments produced

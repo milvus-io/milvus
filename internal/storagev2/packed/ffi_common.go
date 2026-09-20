@@ -223,6 +223,22 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		}
 	}
 
+	return makeProperties(keys, values)
+}
+
+// MakeProperties creates FFI properties without adding filesystem defaults.
+// Call FreeProperties after the native caller finishes using them.
+func MakeProperties(kvs map[string]string) (*C.LoonProperties, error) {
+	keys := make([]string, 0, len(kvs))
+	values := make([]string, 0, len(kvs))
+	for key, value := range kvs {
+		keys = append(keys, key)
+		values = append(values, value)
+	}
+	return makeProperties(keys, values)
+}
+
+func makeProperties(keys, values []string) (*C.LoonProperties, error) {
 	// Convert to C arrays
 	cKeys := make([]*C.char, len(keys))
 	cValues := make([]*C.char, len(values))
