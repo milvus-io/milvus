@@ -439,7 +439,7 @@ message SearchOnViewRequest {
     SegmentSelection segment_selection = 5;
     repeated SegmentSelection sub_selections = 6;
     SearchExecutionOptions execution_options = 7;
-    int64 stream_chunk_size = 8;
+    int64 stream_chunk_bytes = 8;
 }
 
 message SearchOnViewResponse {
@@ -471,7 +471,7 @@ message QueryOnViewRequest {
     QueryViewVersion version = 3;
     QueryPlanMVCC mvcc = 4;
     SegmentSelection segment_selection = 5;
-    int64 stream_chunk_size = 6;
+    int64 stream_chunk_bytes = 6;
 }
 
 message QueryOnViewResponse {

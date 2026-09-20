@@ -526,9 +526,9 @@ proxy:
     size: 10 # the size for shardleader(querynode) client pool
   queryView:
     enableSearchStreaming: false # Route supported Search requests through Streaming Reduce.
-    searchStreamChunkSize: 1024 # Maximum number of Units in each Search stream Chunk.
+    searchStreamChunkBytes: 262144 # Reducible-payload byte threshold for each Search stream Chunk.
     enableQueryStreaming: false # Route supported Query requests through Streaming Reduce.
-    queryStreamChunkSize: 1024 # Maximum number of Units in each Query stream Chunk.
+    queryStreamChunkBytes: 262144 # Reducible-payload byte threshold for each Query stream Chunk.
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server

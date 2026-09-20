@@ -74,7 +74,7 @@ func TestLegacyClientSearchReducesIteratorVChannelStreams(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableSearchStreaming: true, SearchStreamChunkSize: 2},
+		ViewQueryClientConfig{MaxRetries: 1, EnableSearchStreaming: true, SearchStreamChunkBytes: 20},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacySearchPlan(shardA, queryNode),
 			shardB.VChannel: legacySearchPlan(shardB, queryNode),
@@ -259,20 +259,21 @@ func TestLegacyClientSearchRetriesIteratorBeforeFirstFinalChunk(t *testing.T) {
 func TestLegacyClientSearchDoesNotRetryIteratorAfterFirstFinalChunk(t *testing.T) {
 	shardID := qviews.ShardID{ReplicaID: 1, VChannel: "by-dev-rootcoord-dml_0_100v0"}
 	queryNode := qviews.NewQueryNode(11)
-	ids := make([]int64, defaultSearchStreamChunkSize)
-	scores := make([]float32, defaultSearchStreamChunkSize)
+	const unitCount = 1
+	ids := make([]int64, unitCount)
+	scores := make([]float32, unitCount)
 	for i := range ids {
 		ids[i] = int64(i)
-		scores[i] = float32(defaultSearchStreamChunkSize - i)
+		scores[i] = float32(unitCount - i)
 	}
 	childStream := &fakeSearchStream{recv: []fakeSearchStreamRecv{
-		{chunk: newTestSearchChunk(int64(defaultSearchStreamChunkSize+1), ids, scores)},
+		{chunk: newTestSearchChunk(unitCount+1, ids, scores)},
 		{err: errors.New("receive failed after output")},
 	}}
 	openCount := 0
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 2, EnableSearchStreaming: true},
+		ViewQueryClientConfig{MaxRetries: 2, EnableSearchStreaming: true, SearchStreamChunkBytes: 1},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardID.VChannel: legacySearchPlan(shardID, queryNode),
 		}},
@@ -291,7 +292,7 @@ func TestLegacyClientSearchDoesNotRetryIteratorAfterFirstFinalChunk(t *testing.T
 		CollectionID:     100,
 		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
 		Nq:               1,
-		Topk:             int64(defaultSearchStreamChunkSize + 1),
+		Topk:             unitCount + 1,
 		MetricType:       "IP",
 		IsIterator:       true,
 	}})
@@ -352,7 +353,7 @@ func TestLegacyClientQueryReducesIteratorVChannelStreams(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableQueryStreaming: true, QueryStreamChunkSize: 2},
+		ViewQueryClientConfig{MaxRetries: 1, EnableQueryStreaming: true, QueryStreamChunkBytes: 32},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
 			shardB.VChannel: legacyQueryPlan(shardB, queryNode),
@@ -394,7 +395,7 @@ func TestLegacyClientQueryReducesBoundedOrdinaryVChannelStreams(t *testing.T) {
 	queryNode := qviews.NewQueryNode(11)
 
 	client := NewLegacyViewQueryClient(
-		ViewQueryClientConfig{MaxRetries: 1, EnableQueryStreaming: true, QueryStreamChunkSize: 2},
+		ViewQueryClientConfig{MaxRetries: 1, EnableQueryStreaming: true, QueryStreamChunkBytes: 32},
 		&legacyPlanClient{plans: map[string]*viewpb.QueryPlan{
 			shardA.VChannel: legacyQueryPlan(shardA, queryNode),
 			shardB.VChannel: legacyQueryPlan(shardB, queryNode),

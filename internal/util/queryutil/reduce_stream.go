@@ -52,6 +52,17 @@ func (u retrieveUnit) pk() any {
 	return typeutil.GetPK(u.result.GetIds(), u.rowIndex)
 }
 
+func (u retrieveUnit) reducibleByteSize() (int, error) {
+	chunk, err := buildRetrieveChunk([]retrieveUnit{u})
+	if err != nil {
+		return 0, err
+	}
+	return proto.Size(&internalpb.RetrieveResults{
+		Ids:        chunk.GetIds(),
+		FieldsData: chunk.GetFieldsData(),
+	}), nil
+}
+
 type orderedChildBuffer struct {
 	chunk  *internalpb.RetrieveResults
 	cursor int64
@@ -102,11 +113,11 @@ type OrderedReduceStream struct {
 	childDrained         []bool
 	childRecvCompletions chan childRecvCompletion
 
-	limit     int64
-	chunkSize int
-	emitted   int64
-	hasLastPK bool
-	lastPK    any
+	limit      int64
+	chunkBytes int
+	emitted    int64
+	hasLastPK  bool
+	lastPK     any
 
 	metadata        *internalpb.RetrieveResults
 	metadataEmitted bool
@@ -117,7 +128,7 @@ type OrderedReduceStream struct {
 }
 
 // NewReduceStream creates the bounded Plain Query OrderedReduceStream.
-func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceStream, chunkSize int) (ReduceStream, error) {
+func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
 	if request == nil {
 		return nil, merr.WrapErrServiceInternalMsg("NewReduceStream requires a Query request")
 	}
@@ -128,8 +139,8 @@ func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceS
 	if request.GetLimit() <= 0 {
 		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires a positive limit, got %d", request.GetLimit())
 	}
-	if chunkSize <= 0 {
-		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires a positive Chunk size, got %d", chunkSize)
+	if chunkBytes <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("Query ReduceStream requires positive Chunk bytes, got %d", chunkBytes)
 	}
 	for i, childStream := range childStreams {
 		if childStream == nil {
@@ -144,7 +155,7 @@ func NewReduceStream(request *internalpb.RetrieveRequest, childStreams []ReduceS
 		childDrained:         make([]bool, len(childStreams)),
 		childRecvCompletions: make(chan childRecvCompletion, max(1, len(childStreams))),
 		limit:                request.GetLimit(),
-		chunkSize:            chunkSize,
+		chunkBytes:           chunkBytes,
 	}, nil
 }
 
@@ -156,9 +167,9 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		return nil, io.ErrClosedPipe
 	}
 
-	capacity := min(s.chunkSize, int(s.limit-s.emitted))
-	outputBuffer := make([]retrieveUnit, 0, capacity)
-	for len(outputBuffer) < capacity {
+	outputBuffer := make([]retrieveUnit, 0)
+	outputBytes := 0
+	for outputBytes < s.chunkBytes && s.emitted < s.limit {
 		readyBuffers, err := s.getReadyBuffers()
 		if err != nil {
 			return nil, s.fail(err)
@@ -172,6 +183,15 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 			if comparePK(candidate.front().pk(), winner.front().pk()) < 0 {
 				winner = candidate
 			}
+		}
+
+		selected := winner.front()
+		unitBytes, err := selected.reducibleByteSize()
+		if err != nil {
+			return nil, s.fail(err)
+		}
+		if unitBytes > s.chunkBytes && outputBytes > 0 {
+			break
 		}
 
 		unit := winner.pop()
@@ -188,6 +208,7 @@ func (s *OrderedReduceStream) Recv() (*internalpb.RetrieveResults, error) {
 		s.hasLastPK = true
 		s.emitted++
 		outputBuffer = append(outputBuffer, unit)
+		outputBytes += unitBytes
 	}
 
 	if len(outputBuffer) == 0 {
@@ -320,26 +341,51 @@ func buildRetrieveChunk(units []retrieveUnit) (*internalpb.RetrieveResults, erro
 	return chunk, nil
 }
 
-// SplitRetrieveResult splits one materialized Query result into Unit-count Chunks.
-func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkSize int) ([]*internalpb.RetrieveResults, error) {
+// SplitRetrieveResult splits one materialized Query result into byte-threshold Chunks.
+func SplitRetrieveResult(result *internalpb.RetrieveResults, chunkBytes int) ([]*internalpb.RetrieveResults, error) {
 	if result == nil {
 		return nil, merr.WrapErrServiceInternalMsg("cannot split a nil Query result")
 	}
-	if chunkSize <= 0 {
-		return nil, merr.WrapErrServiceInternalMsg("Query Chunk size must be positive, got %d", chunkSize)
+	if chunkBytes <= 0 {
+		return nil, merr.WrapErrServiceInternalMsg("Query Chunk bytes must be positive, got %d", chunkBytes)
 	}
 	rowCount := typeutil.GetSizeOfIDs(result.GetIds())
 	if rowCount == 0 {
 		return []*internalpb.RetrieveResults{proto.Clone(result).(*internalpb.RetrieveResults)}, nil
 	}
 
-	chunks := make([]*internalpb.RetrieveResults, 0, (rowCount+chunkSize-1)/chunkSize)
-	for start := 0; start < rowCount; start += chunkSize {
-		end := min(start+chunkSize, rowCount)
-		units := make([]retrieveUnit, 0, end-start)
-		for row := start; row < end; row++ {
-			units = append(units, retrieveUnit{result: result, rowIndex: int64(row)})
+	chunks := make([]*internalpb.RetrieveResults, 0)
+	units := make([]retrieveUnit, 0)
+	accumulatedBytes := 0
+	for row := 0; row < rowCount; row++ {
+		unit := retrieveUnit{result: result, rowIndex: int64(row)}
+		unitBytes, err := unit.reducibleByteSize()
+		if err != nil {
+			return nil, err
 		}
+		if unitBytes > chunkBytes && accumulatedBytes > 0 {
+			chunk, err := buildRetrieveChunk(units)
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, chunk)
+			units = nil
+			accumulatedBytes = 0
+		}
+		units = append(units, unit)
+		accumulatedBytes += unitBytes
+		if accumulatedBytes < chunkBytes {
+			continue
+		}
+		chunk, err := buildRetrieveChunk(units)
+		if err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunk)
+		units = nil
+		accumulatedBytes = 0
+	}
+	if len(units) > 0 {
 		chunk, err := buildRetrieveChunk(units)
 		if err != nil {
 			return nil, err
