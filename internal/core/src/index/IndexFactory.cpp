@@ -171,15 +171,31 @@ ValidityBitmapBytes(int64_t num_rows) {
 uint64_t
 BitmapMmapFrozenBufferBytes(int64_t num_rows, uint64_t index_size_in_bytes) {
     constexpr uint64_t kBitmapFrozenAlignment = 32;
-    auto dense_bitmap_bytes =
-        AlignUp(BitsetBytes(num_rows), kBitmapFrozenAlignment);
+    constexpr uint64_t kValuesPerContainer = uint64_t{1} << 16;
+    constexpr uint64_t kMaxValues = uint64_t{1} << 32;
+    // CRoaring 3.0: array/bitset payloads need at most two bytes per row;
+    // even unoptimized run containers have at most ceil(rows / 2) four-byte
+    // runs. Use the full uint32 domain when the caller has no row count.
+    const auto rows =
+        num_rows > 0 ? std::min(static_cast<uint64_t>(num_rows), kMaxValues)
+                     : kMaxValues;
+    const auto containers =
+        (rows + kValuesPerContainer - 1) / kValuesPerContainer;
+    const auto payload_bytes =
+        std::min(index_size_in_bytes, 2 * AlignUp(rows, 2));
+    // Per-container pointers, keys, typecodes, headers and small run-container
+    // capacity slack fit in 64 bytes; frozen metadata is smaller still.
+    constexpr uint64_t kContainerOverhead = 64;
+    const auto posting_bytes =
+        AlignUp(SaturatingAdd(
+                    payload_bytes,
+                    sizeof(roaring::Roaring) + containers * kContainerOverhead),
+                kBitmapFrozenAlignment);
     // Decoded Roaring and frozen output coexist. Growing the reusable output
     // can briefly retain its old allocation too; each output allocation holds
     // at most one batch prefix plus the largest bitmap.
-    return SaturatingAdd(
-        SaturatingMultiply(std::max(dense_bitmap_bytes, index_size_in_bytes),
-                           uint64_t{3}),
-        uint64_t{2 * BITMAP_FROZEN_BATCH_BYTES});
+    return SaturatingAdd(SaturatingMultiply(posting_bytes, uint64_t{3}),
+                         uint64_t{2 * BITMAP_FROZEN_BATCH_BYTES});
 }
 
 uint64_t
@@ -910,19 +926,34 @@ IndexFactory::ScalarIndexFileLoadResource(
                                                 file_stream,
                                                 legacy_stream);
     uint64_t staging_bytes = 0;
+    uint64_t bitmap_resident_bytes = 0;
     if ((type == INVERTED_INDEX_TYPE || type == NGRAM_INDEX_TYPE) &&
         directory.HasEntry(INDEX_NULL_OFFSET_FILE_NAME)) {
         // The whole sidecar survives until FinalizeSealed builds validity.
         staging_bytes =
             directory.At(INDEX_NULL_OFFSET_FILE_NAME).plaintext_size;
     } else if (type == BITMAP_INDEX_TYPE) {
-        const bool loads_to_mmap =
-            mmap_enable &&
-            ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_LENGTH) >
-                DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+        const auto cardinality =
+            ReadRequiredIndexMeta<size_t>(metadata, BITMAP_INDEX_LENGTH);
+        num_rows =
+            ReadRequiredIndexMeta<int64_t>(metadata, BITMAP_INDEX_NUM_ROWS);
+        const auto validity_bytes = ValidityBitmapBytes(num_rows);
+        const bool uses_bitsets =
+            cardinality <= DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+        const bool loads_to_mmap = mmap_enable && !uses_bitsets;
         if (!loads_to_mmap) {
             staging_bytes = directory.At(BITMAP_INDEX_DATA).plaintext_size;
             mmap_enable = false;
+            // Keep the existing serialized-size allowance for keys/postings.
+            // Validity and low-cardinality dense postings are additional resident
+            // allocations, even when a non-nullable file has no validity entry.
+            bitmap_resident_bytes = validity_bytes;
+            if (uses_bitsets) {
+                bitmap_resident_bytes = SaturatingAdd(
+                    bitmap_resident_bytes,
+                    SaturatingMultiply(validity_bytes,
+                                       static_cast<uint64_t>(cardinality)));
+            }
         }
         if (!use_async_load && directory.HasEntry(BITMAP_INDEX_VALID_BITSET)) {
             staging_bytes = SaturatingAdd(
@@ -949,6 +980,8 @@ IndexFactory::ScalarIndexFileLoadResource(
                                                        mmap_enable,
                                                        num_rows,
                                                        read_peak);
+    request.final_memory_cost =
+        SaturatingAdd(request.final_memory_cost, bitmap_resident_bytes);
     if (type == BITMAP_INDEX_TYPE && mmap_enable) {
         request.max_memory_cost = SaturatingAdd(
             request.max_memory_cost, storage::FileWriter::MAX_BUFFER_SIZE);

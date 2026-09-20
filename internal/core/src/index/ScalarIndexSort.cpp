@@ -903,7 +903,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
 
     std::vector<IndexStructure<T>> new_index_data;
     std::vector<int32_t> new_offsets;
-    TargetBitmap new_valid_bitset(context->total_num_rows, false);
+    TargetBitmap new_valid_bitset;
 
     if (context->is_mmap) {
         AssertInfo(context->index_data_file != nullptr &&
@@ -959,6 +959,7 @@ ScalarIndexSort<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
             new_offsets = std::move(*context->offsets);
         }
     } else {
+        new_valid_bitset = TargetBitmap(context->total_num_rows, false);
         new_offsets.resize(context->total_num_rows);
         auto* index_data =
             context->is_mmap

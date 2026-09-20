@@ -706,7 +706,9 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
             ctx);
     const auto& request = resources.request;
 
-    EXPECT_EQ(request.final_memory_cost, index_size);
+    EXPECT_EQ(request.final_memory_cost,
+              index_size + (this->cardinality_ + 1) *
+                               TargetBitmap(this->nb_).size_in_bytes());
     EXPECT_EQ(request.final_disk_cost, 0);
     EXPECT_GE(request.max_memory_cost, 2 * index_size);
     EXPECT_FALSE(resources.overhead.has_value());
@@ -752,6 +754,7 @@ TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
         writer.PutMeta(INDEX_TYPE,
                        static_cast<uint8_t>(ScalarIndexType::BITMAP));
         writer.PutMeta(BITMAP_INDEX_LENGTH, 1);
+        writer.PutMeta(BITMAP_INDEX_NUM_ROWS, this->nb_);
         writer.Finish();
     }
 
@@ -792,7 +795,8 @@ TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
         std::max(2 * index_size,
                  index_size + static_cast<uint64_t>(total_transient_bytes));
     ASSERT_LT(bounded_max_memory, full_stream_max_memory);
-    EXPECT_EQ(request.final_memory_cost, index_size);
+    EXPECT_GE(request.final_memory_cost,
+              index_size + 2 * TargetBitmap(this->nb_).size_in_bytes());
     EXPECT_GE(request.max_memory_cost, full_stream_max_memory);
     EXPECT_FALSE(resources.overhead.has_value());
 }

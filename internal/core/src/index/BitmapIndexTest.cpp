@@ -192,6 +192,111 @@ TEST(BitmapIndexV3AsyncLoadTest, MemoryPathUsesBufferedPlannedLoad) {
     EXPECT_TRUE(hits[6]);
 }
 
+TEST(BitmapIndexLoadResourceTest, BitsetFallbackReservesDecodedState) {
+    BitmapAsyncLoadFixture fixture("bitmap_bitset_resources");
+    fixture.field_meta.field_schema.set_nullable(false);
+    fixture.ctx = storage::FileManagerContext(fixture.field_meta,
+                                              fixture.index_meta,
+                                              fixture.chunk_manager,
+                                              fixture.fs);
+    constexpr size_t rows = 100003;
+    constexpr size_t cardinality = DEFAULT_BITMAP_INDEX_BUILD_MODE_BOUND;
+    std::vector<int32_t> data(rows);
+    for (size_t i = 0; i < rows; ++i) {
+        data[i] = i % cardinality;
+    }
+    ExposedBitmapIndex built(fixture.ctx);
+    built.Build(rows, data.data());
+    const auto stats = built.UploadUnified({});
+    AsyncTrackingRandomAccessFile* remote_file = nullptr;
+    auto reader = milvus::test::OpenAsyncIndexEntryReader(
+        milvus::test::ReadPackedIndexBytes(fixture.ctx, stats->GetIndexFiles()),
+        &remote_file);
+    ASSERT_FALSE(reader->Directory().HasEntry(BITMAP_INDEX_VALID_BITSET));
+    const auto dense_bytes =
+        (cardinality + 1) * TargetBitmap(rows).size_in_bytes();
+    ASSERT_GT(dense_bytes, 16 * stats->GetSerializedSize());
+    const auto raw_bytes =
+        reader->Directory().At(BITMAP_INDEX_DATA).plaintext_size;
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    for (const bool async : {false, true}) {
+        fixture.ctx.use_async_load = async;
+        for (const bool mmap : {false, true}) {
+            SCOPED_TRACE(fmt::format("async={}, mmap={}", async, mmap));
+            const auto resources =
+                index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                    DataType::INT32,
+                    stats->GetSerializedSize(),
+                    params,
+                    mmap,
+                    rows,
+                    stats->GetIndexFiles(),
+                    fixture.ctx);
+            EXPECT_GE(resources.request.final_memory_cost, dense_bytes);
+            EXPECT_GE(resources.request.max_memory_cost,
+                      resources.request.final_memory_cost + raw_bytes);
+            EXPECT_EQ(resources.request.final_disk_cost, 0);
+            EXPECT_FALSE(resources.overhead.has_value());
+        }
+    }
+
+    ExposedBitmapIndex loaded(fixture.ctx);
+    Config config;
+    config[MMAP_FILE_PATH] = fixture.root_path + "/mmap/index";
+    loaded.LoadPlannedForTest(*reader, config);
+    EXPECT_FALSE(loaded.is_mmap_);
+    const int32_t key = 17;
+    const auto hits = loaded.In(1, &key);
+    ASSERT_EQ(hits.size(), rows);
+    for (size_t i = 0; i < rows; ++i) {
+        ASSERT_EQ(hits[i], data[i] == key) << i;
+    }
+}
+
+TEST(BitmapIndexLoadResourceTest, FrozenScratchDoesNotScaleWithObjectSize) {
+    // Keep the read-buffer reservation constant so the comparison isolates
+    // conversion scratch, without allocating either large serialized object.
+    milvus::test::ScopedLoadTransientBudget budget_guard(1);
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    const auto estimate = [&](uint64_t bytes) {
+        return index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            DataType::INT32, 0, bytes, params, true, 1000000);
+    };
+    constexpr uint64_t MiB = 1024 * 1024;
+    const auto small = estimate(64 * MiB);
+    const auto large = estimate(256 * MiB);
+    EXPECT_EQ(small.max_memory_cost, large.max_memory_cost);
+    EXPECT_LT(large.max_memory_cost, 64 * MiB);
+    EXPECT_EQ(large.final_disk_cost, 256 * MiB);
+}
+
+TEST(BitmapIndexLoadResourceTest, FrozenScratchCoversUnoptimizedRuns) {
+    milvus::test::ScopedLoadTransientBudget budget_guard(1);
+    constexpr uint32_t rows = 1 << 16;
+    roaring::Roaring posting;
+    posting.addRange(0, rows);
+    posting.runOptimize();
+    // Removing alternating values preserves the run representation. This valid
+    // input needs far more space than rows / 8 until optimized again.
+    for (uint32_t i = 0; i < rows; i += 2) {
+        posting.remove(i);
+    }
+    const auto frozen_bytes = posting.getFrozenSizeInBytes();
+    ASSERT_GT(frozen_bytes, rows / 8);
+    constexpr uint64_t index_bytes = 64 * 1024 * 1024;
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, BITMAP_INDEX_TYPE}, {SCALAR_INDEX_ENGINE_VERSION, "3"}};
+    const auto request =
+        index::IndexFactory::GetInstance().ScalarIndexLoadResource(
+            DataType::INT32, 0, index_bytes, params, true, rows);
+    const auto read_bytes = storage::EntryStreamMaxTransientBytes(
+        index_bytes, storage::MaxEntryStreamTaskBytes());
+    EXPECT_GE(request.max_memory_cost - request.final_memory_cost - read_bytes,
+              2 * BITMAP_FROZEN_BATCH_BYTES + 3 * frozen_bytes);
+}
+
 TEST(BitmapIndexV3AsyncLoadTest, MmapPathUsesBufferedPlannedLoad) {
     milvus::test::ScopedLoadTransientBudget budget_guard(0);
     BitmapAsyncLoadFixture fixture("bitmap_async_mmap");
