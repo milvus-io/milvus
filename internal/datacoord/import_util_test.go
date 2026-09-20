@@ -44,6 +44,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -1735,6 +1736,69 @@ func materializeLocalImportPath(t *testing.T, rootPath, filePath string) (string
 // Under storageType=local the datanode reads with os.Open, which follows
 // symlinks and /proc magic links. An alias of an internal directory must be
 // denied like the directory itself.
+// An internal directory can itself be a symlink -- moving the cache subtree
+// onto another disk is the ordinary reason. Both spellings must be denied: the
+// one under the storage root, and the directory it resolves to.
+func TestValidateImportFilePaths_SymlinkedInternalDir(t *testing.T) {
+	key := paramtable.Get().CommonCfg.StorageType.Key
+	paramtable.Get().Save(key, "local")
+	defer paramtable.Get().Reset(key)
+
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+
+	// <root>/cache -> <base>/nvme-cache, holding one segcore chunk file.
+	elsewhere := filepath.Join(base, "nvme-cache")
+	chunk := filepath.Join(elsewhere, "1", "local_chunk", "x.parquet")
+	require.NoError(t, os.MkdirAll(filepath.Dir(chunk), 0o755))
+	require.NoError(t, os.WriteFile(chunk, []byte("x"), 0o600))
+	require.NoError(t, os.Symlink(elsewhere, filepath.Join(root, common.LocalCacheRootPath)))
+
+	staging := filepath.Join(base, "ordinary.json")
+	require.NoError(t, os.WriteFile(staging, []byte("{}"), 0o600))
+
+	tests := []struct {
+		name       string
+		path       string
+		wantReject bool
+	}{
+		{"through the root spelling", filepath.Join(root, common.LocalCacheRootPath, "1", "local_chunk", "x.parquet"), true},
+		{"through the resolved directory", chunk, true},
+		{"ordinary staging file", staging, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(root).Maybe()
+
+			err := ValidateImportFilePaths(cm, []*msgpb.ImportFile{{Paths: []string{tt.path}}}, nil)
+			if tt.wantReject {
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// An unresolvable storage root is an operator-side fault, not a bad caller
+// path: it must not be bucketed as an InputError, which also stops retry.
+func TestValidateImportFilePaths_UnresolvableRootIsSystemError(t *testing.T) {
+	key := paramtable.Get().CommonCfg.StorageType.Key
+	paramtable.Get().Save(key, "local")
+	defer paramtable.Get().Reset(key)
+
+	missing := filepath.Join(t.TempDir(), "mount-dropped")
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return(missing).Maybe()
+
+	err := ValidateImportFilePaths(cm,
+		[]*msgpb.ImportFile{{Paths: []string{filepath.Join(missing, "a.json")}}}, nil)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+	assert.NotErrorIs(t, err, merr.ErrImportFailed)
+}
+
 func TestValidateImportFilePaths_LocalAliases(t *testing.T) {
 	key := paramtable.Get().CommonCfg.StorageType.Key
 	paramtable.Get().Save(key, "local")

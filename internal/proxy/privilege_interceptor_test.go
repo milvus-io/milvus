@@ -1096,3 +1096,61 @@ func TestCheckClusterPrivilege_GrantedUserIsAllowed(t *testing.T) {
 	assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted,
 		"a user without the grant must still be refused")
 }
+
+// TestClusterPrivilegePathsAgree pins the two cluster-privilege entry points to
+// the same decision. CheckClusterPrivilege repeats the preconditions of
+// enforceClusterPrivilege rather than sharing them (they differ only in error
+// shape, ctx write-back and the audit report), so a condition added to one and
+// not the other would silently split who is allowed in. The shared
+// implementation belongs in its own change; until then this test is what
+// catches the drift.
+func TestClusterPrivilegePathsAgree(t *testing.T) {
+	paramtable.Init()
+	privilegeName := commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()
+
+	client := &MockMixCoordClientInterface{}
+	client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+		return &internalpb.ListPolicyResponse{
+			Status: merr.Success(),
+			PolicyInfos: []string{
+				funcutil.PolicyForPrivilege("role_importer", commonpb.ObjectType_Global.String(), "*",
+					privilegeName, util.AnyWord),
+			},
+			UserRoles: []string{
+				funcutil.EncodeUserRoleCache("importer", "role_importer"),
+			},
+		}, nil
+	}
+	mustInitMetaCacheForTest(context.Background(), client)
+
+	cases := []struct {
+		name          string
+		authorization string
+		rootBindRole  string
+		ctx           context.Context
+		wantAllowed   bool
+	}{
+		{"authorization disabled", "false", "false", context.Background(), true},
+		{"root bypass", "true", "false", GetContext(context.Background(), "root:123456"), true},
+		{"root bound to roles", "true", "true", GetContext(context.Background(), "root:123456"), false},
+		{"no auth info", "true", "false", context.Background(), false},
+		{"granted user", "true", "false", GetContext(context.Background(), "importer:123456"), true},
+		{"ungranted user", "true", "false", GetContext(context.Background(), "alice:123456"), false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, tt.authorization)
+			paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, tt.rootBindRole)
+			defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+			defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+
+			checkErr := CheckClusterPrivilege(tt.ctx, &internalpb.ImportRequest{},
+				milvuspb.MilvusService_Import_FullMethodName, privilegeName)
+			_, enforceErr := enforceClusterPrivilege(tt.ctx, privilegeName)
+
+			assert.Equal(t, tt.wantAllowed, checkErr == nil, "CheckClusterPrivilege")
+			assert.Equal(t, checkErr == nil, enforceErr == nil,
+				"the two cluster-privilege paths disagree on this input")
+		})
+	}
+}

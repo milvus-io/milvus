@@ -839,11 +839,38 @@ func comparableStorageKey(key string, localStorage bool) (string, error) {
 	if localStorage {
 		resolved, err := filepath.EvalSymlinks(key)
 		if err != nil {
-			return "", merr.WrapErrImportFailedMsg("cannot resolve import path %s: %v", key, err)
+			// Classified by the caller: a candidate path is caller-supplied,
+			// while the storage root is the server's own configuration.
+			return "", err
 		}
 		key = resolved
 	}
 	return normalizeStorageKey(key), nil
+}
+
+// appendDenied adds one internal directory to the deny list.
+//
+// Under local storage it adds the resolved form as well. rootPath is already
+// resolved, but a directory below it can itself be a symlink -- an operator
+// moving the cache subtree onto another disk is the ordinary case. Candidate
+// paths are compared after full resolution, so an entry that exists only in
+// its unresolved spelling would never match one. Both forms are kept: the
+// unresolved one still matches a caller who spells the alias, and a segment
+// that does not exist yet cannot be resolved and cannot be read either.
+func appendDenied(denied []string, dir string, localStorage bool) []string {
+	lexical := normalizeStorageKey(dir)
+	denied = append(denied, lexical)
+	if !localStorage {
+		return denied
+	}
+	resolved, err := filepath.EvalSymlinks(lexical)
+	if err != nil {
+		return denied
+	}
+	if key := normalizeStorageKey(resolved); key != lexical {
+		denied = append(denied, key)
+	}
+	return denied
 }
 
 // ValidateImportFilePaths rejects ordinary imports whose caller-supplied paths
@@ -876,11 +903,16 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 
 	rootPath, err := comparableStorageKey(cm.RootPath(), localStorage)
 	if err != nil {
-		return err
+		// localStorage.path is operator-owned, so an unresolvable root is a
+		// server-side fault: a dropped mount or a missing directory. Reporting
+		// it as an InputError would bucket it as a bad caller path and stop
+		// retry.Do from retrying a recoverable condition.
+		return merr.WrapErrImportSysFailedMsg(
+			"cannot resolve storage root %s: %v", cm.RootPath(), err)
 	}
-	denied := make([]string, 0, len(segments)+1)
+	denied := make([]string, 0, 2*len(segments)+2)
 	for _, segment := range segments {
-		denied = append(denied, normalizeStorageKey(path.Join(rootPath, segment)))
+		denied = appendDenied(denied, path.Join(rootPath, segment), localStorage)
 	}
 	if localStorage {
 		// Legacy StorageV3 segments stay at <localStorage.path>/<minio.rootPath>/insert_log
@@ -890,14 +922,14 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 		// <root>/insert_log entry above.
 		legacyInsertLog := path.Join(rootPath,
 			paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath)
-		denied = append(denied, normalizeStorageKey(legacyInsertLog))
+		denied = appendDenied(denied, legacyInsertLog, localStorage)
 	} else {
 		// Explore planning manifests live at the bucket root on remote storage,
 		// outside minio.rootPath (external_collection_refresh_manager.go
 		// exploreDirForChunkManager), so no root-anchored entry can reach them.
 		// They are milvus-table-explore.json, which the import extension
 		// whitelist accepts, so nothing else bounds them either.
-		denied = append(denied, normalizeStorageKey(common.ExploreTempRootPath))
+		denied = appendDenied(denied, common.ExploreTempRootPath, localStorage)
 	}
 
 	for _, file := range files {
@@ -917,7 +949,8 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 
 			cleaned, err := comparableStorageKey(filePath, localStorage)
 			if err != nil {
-				return err
+				return merr.WrapErrImportFailedMsg(
+					"cannot resolve import path %s: %v", filePath, err)
 			}
 			for _, deniedPath := range denied {
 				// Boundary match, not a raw prefix match: a raw prefix would also
