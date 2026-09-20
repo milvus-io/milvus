@@ -9264,6 +9264,10 @@ type streamingConfig struct {
 	PartialUpdateVersionIndexMaxBytes  ParamItem `refreshable:"false"`
 	PartialUpdateRecoveryDecodeTimeout ParamItem `refreshable:"true"`
 
+	// primary key index, experimental.
+	PKIndexEnabled     ParamItem `refreshable:"false"`
+	PKIndexLockStripes ParamItem `refreshable:"false"`
+
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
@@ -9676,6 +9680,26 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Doc:          "Total time budget, per WAL open, for rebuilding the write sets of pending transactions. A transaction whose bodies are not decoded within the budget is marked incomplete, and its commit is rejected and replayed. The budget is checked before each body decode, so 0 or a negative value marks every pending transaction with an insert or delete body incomplete. Larger values can delay WAL open when decoding stalls. Applies to WALs opened afterwards.",
 	}
 	p.PartialUpdateRecoveryDecodeTimeout.Init(base.mgr)
+
+	p.PKIndexEnabled = ParamItem{
+		Key:     "streaming.pkindex.enabled",
+		Version: "3.0.0",
+		Doc: `Experimental. Whether the streaming node maintains a primary key index on the write path,
+so that an insert of an existing primary key also deletes the old row.
+If the binary has no primary key index engine, enabling it makes the streaming node refuse to start.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.PKIndexEnabled.Init(base.mgr)
+
+	p.PKIndexLockStripes = ParamItem{
+		Key:          "streaming.pkindex.lockStripes",
+		Version:      "3.0.0",
+		Doc:          "Experimental. The number of lock stripes that serialize primary key index decisions of one vchannel, 256 by default. A value of 0 or less means 1 stripe, which serializes all decisions of a vchannel",
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.PKIndexLockStripes.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",
