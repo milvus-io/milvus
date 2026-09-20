@@ -200,6 +200,28 @@ Recovery is logically idempotent but not physically exactly once. A crash after
 an object write and before snapshot publication may leave an unreferenced
 object. GC/Defrag removes it later.
 
+### 6.1 Legacy Flusher Migration
+
+Migration reconciles the union of StreamingNode allocations and DataCoord
+unflushed segments. DataCoord binlogs, row counts, and DmlPosition supply the
+durable prefix; the old allocation observation checkpoint is not a persistence
+frontier. A DataCoord-only segment uses its stored SchemaVersion and first data
+position to recover the prefix. Missing DataCoord entries are queried separately
+and may be discarded only when replay is guaranteed to include CreateSegment.
+
+An unfinished segment whose allocation was retired or sealed recovers in durable
+`SEALED` state. It cannot receive new allocations, but accepts replayed Inserts
+after its durable frontier. At RecoveryBarrier it schedules the remaining packs
+and final L1 commit. Intermediate pack snapshots remain SEALED so a crash retries
+final publication without losing the seal intent. Flushing/Flushed/Dropped
+DataCoord segments require no more insert-tail recovery.
+
+Before deleting any old allocation metadata, migration persists the conservative
+physical replay checkpoint with the legacy format marker and current owner term.
+It then writes component snapshots/removals and publishes the new format marker
+last. A crash during a chunked catalog update therefore reopens at the safe cursor
+and reruns migration instead of skipping the removed allocation's creation.
+
 ## 7. Cleanup
 
 Segment deletion persists a tombstone before removing recovery metadata or

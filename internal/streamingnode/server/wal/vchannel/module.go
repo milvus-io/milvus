@@ -110,7 +110,20 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		}
 		var schema *schemapb.CollectionSchema
 		if module.vchannelView != nil {
-			schema = module.vchannelView.CreateSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick())
+			if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
+				// A DataCoord-only legacy segment has no allocation timestamp.
+				// Resolve its stored encoding version, not the schema at first data.
+				for _, version := range config.VChannelMeta.GetCollectionInfo().GetSchemas() {
+					if version.GetSchema().GetVersion() == meta.GetSchemaVersion() {
+						schema = version.GetSchema()
+					}
+				}
+				if schema == nil {
+					return nil, merr.WrapErrDataIntegrityMsg("missing schema version %d for sealed segment %d", meta.GetSchemaVersion(), id)
+				}
+			} else {
+				schema = module.vchannelView.CreateSegmentSchema(meta.GetPartitionId(), meta.GetStat().GetCreateSegmentTimeTick())
+			}
 		}
 		view := segment.NewSegmentViewFromMetaWithConfig(meta, schema, module.segmentViewConfig())
 		module.segments[id] = view

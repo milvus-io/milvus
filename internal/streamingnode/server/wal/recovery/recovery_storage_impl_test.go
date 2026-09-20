@@ -680,8 +680,8 @@ func TestMigrateLegacyRecoveryInfoUsesSafeCheckpoint(t *testing.T) {
 		_ *recoveryStorageImpl,
 		_ context.Context,
 		vchannel string,
-	) (*utility.WALCheckpoint, error) {
-		return checkpoints[vchannel].Clone(), nil
+	) (*utility.WALCheckpoint, []int64, error) {
+		return checkpoints[vchannel].Clone(), nil, nil
 	}).Build()
 	defer getCheckpointMock.UnPatch()
 	var persisted *utility.WALCheckpoint
@@ -849,11 +849,11 @@ func TestMigrateLegacyRecoveryInfoCapsGlobalCheckpointAtVChannelCheckpoint(t *te
 		*recoveryStorageImpl,
 		context.Context,
 		string,
-	) (*utility.WALCheckpoint, error) {
+	) (*utility.WALCheckpoint, []int64, error) {
 		return &utility.WALCheckpoint{
 			MessageID: walimplstest.NewTestMessageID(120),
 			TimeTick:  120,
-		}, nil
+		}, nil, nil
 	}).Build()
 	defer getCheckpointMock.UnPatch()
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).Return(nil).Build()
@@ -879,6 +879,7 @@ func TestMigrateLegacyRecoveryInfoFailsClosed(t *testing.T) {
 		"v1": newLegacyRecoveryTestVChannel("v1", 1, 10),
 	}
 	getCheckpointMock := mockey.Mock((*recoveryStorageImpl).getLegacyVChannelCheckpoint).Return(
+		nil,
 		nil,
 		merr.ErrServiceNotReady,
 	).Build()
@@ -920,6 +921,7 @@ func TestMigrateLegacyRecoveryInfoInstallsCheckpointOnlyAfterPersist(t *testing.
 			TimeTick:  20,
 		},
 		nil,
+		nil,
 	).Build()
 	defer getCheckpointMock.UnPatch()
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).Return(merr.ErrServiceNotReady).Build()
@@ -949,9 +951,9 @@ func TestMigrateLegacyRecoveryInfoSkipsCompletedMigration(t *testing.T) {
 		*recoveryStorageImpl,
 		context.Context,
 		string,
-	) (*utility.WALCheckpoint, error) {
+	) (*utility.WALCheckpoint, []int64, error) {
 		t.Fatal("completed migration must not query DataCoord")
-		return nil, nil
+		return nil, nil, nil
 	}).Build()
 	defer getCheckpointMock.UnPatch()
 
@@ -977,9 +979,9 @@ func TestMigrateLegacyRecoveryInfoWithoutActiveVChannels(t *testing.T) {
 		*recoveryStorageImpl,
 		context.Context,
 		string,
-	) (*utility.WALCheckpoint, error) {
+	) (*utility.WALCheckpoint, []int64, error) {
 		t.Fatal("dropped legacy vchannel must not query DataCoord")
-		return nil, nil
+		return nil, nil, nil
 	}).Build()
 	defer getCheckpointMock.UnPatch()
 	persistMock := mockey.Mock((*recoveryStorageImpl).persistLegacyRecoveryMigration).Return(nil).Build()

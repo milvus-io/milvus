@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -151,12 +152,12 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 		MessageID: r.checkpoint.MessageID,
 		TimeTick:  r.checkpoint.TimeTick,
 	}
-	vchannelCheckpoints := make(map[string]*utility.WALCheckpoint, len(vchannels))
+	unflushed := make(map[int64]string)
 	for vchannelName, vchannel := range vchannels {
 		if vchannel.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 			continue
 		}
-		vchannelCheckpoint, err := r.getLegacyVChannelCheckpoint(ctx, vchannelName)
+		vchannelCheckpoint, segmentIDs, err := r.getLegacyVChannelCheckpoint(ctx, vchannelName)
 		if err != nil {
 			return false, merr.Wrapf(err, "get legacy checkpoint for vchannel %s", vchannelName)
 		}
@@ -171,10 +172,12 @@ func (r *recoveryStorageImpl) migrateLegacyRecoveryInfo(
 		if vchannelCheckpoint.MessageID.LT(checkpoint.MessageID) {
 			checkpoint = vchannelCheckpoint
 		}
-		vchannelCheckpoints[vchannelName] = vchannelCheckpoint
+		for _, id := range segmentIDs {
+			unflushed[id] = vchannelName
+		}
 	}
 
-	normalizedSegments, removedSegmentIDs, err := r.rebuildLegacySegmentSnapshots(ctx, segments)
+	normalizedSegments, removedSegmentIDs, err := r.rebuildLegacySegmentSnapshots(ctx, segments, unflushed, checkpoint)
 	if err != nil {
 		return false, err
 	}
@@ -208,56 +211,110 @@ type legacyRecoveryMigration struct {
 	checkpoint        *utility.WALCheckpoint
 }
 
+// Reconcile allocation state with the old flusher's durable state. Neither
+// catalog alone contains every segment needed to replay the legacy checkpoint.
 func (r *recoveryStorageImpl) rebuildLegacySegmentSnapshots(
 	ctx context.Context,
 	legacy map[int64]*streamingpb.SegmentAssignmentMeta,
+	unflushed map[int64]string,
+	checkpoint *utility.WALCheckpoint,
 ) (map[int64]*streamingpb.SegmentAssignmentMeta, []int64, error) {
-	if len(legacy) == 0 {
-		return nil, nil, nil
+	ids := make(map[int64]struct{}, len(legacy)+len(unflushed))
+	for id := range legacy {
+		ids[id] = struct{}{}
 	}
-	segmentIDs := make([]int64, 0, len(legacy))
-	for segmentID := range legacy {
-		segmentIDs = append(segmentIDs, segmentID)
+	for id := range unflushed {
+		ids[id] = struct{}{}
+	}
+	segmentIDs := make([]int64, 0, len(ids))
+	for id := range ids {
+		segmentIDs = append(segmentIDs, id)
 	}
 	sort.Slice(segmentIDs, func(i, j int) bool { return segmentIDs[i] < segmentIDs[j] })
-
-	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	resp, err := coord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
-		SegmentIDs:       segmentIDs,
-		IncludeUnHealthy: true,
-	})
-	if err = merr.CheckRPCCall(resp, err); err != nil {
-		return nil, nil, err
-	}
-	durable := make(map[int64]*datapb.SegmentInfo, len(resp.GetInfos()))
-	for _, info := range resp.GetInfos() {
-		if _, ok := durable[info.GetID()]; ok {
-			return nil, nil, merr.WrapErrDataIntegrityMsg("duplicate DataCoord segment %d during recovery migration", info.GetID())
+	normalized := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(ids))
+	var removed []int64
+	for _, id := range segmentIDs {
+		// Query independently: an allocation not yet registered in DataCoord
+		// must not hide the durable state of every other segment in the batch.
+		info, err := r.getLegacySegmentInfo(ctx, id)
+		if err != nil {
+			return nil, nil, err
 		}
-		durable[info.GetID()] = info
-	}
-
-	normalized := make(map[int64]*streamingpb.SegmentAssignmentMeta, len(legacy))
-	removed := make([]int64, 0)
-	for _, segmentID := range segmentIDs {
-		info, ok := durable[segmentID]
-		if !ok {
-			return nil, nil, merr.WrapErrDataIntegrityMsg("legacy recovery segment %d is missing from DataCoord", segmentID)
+		allocation := legacy[id]
+		if info == nil {
+			// A logical checkpoint uses a LastConfirmedMessageID no later than
+			// its timetick. At/before creation it includes the CreateSegment and
+			// its entire insert tail, so the normal replay path can register it.
+			if allocation == nil || checkpoint.TimeTick > allocation.GetStat().GetCreateSegmentTimeTick() {
+				return nil, nil, merr.WrapErrDataIntegrityMsg("legacy segment %d missing from DataCoord beyond its replayable creation", id)
+			}
+			removed = append(removed, id)
+			continue
 		}
-		snapshot, keep, err := rebuildLegacySegmentSnapshot(legacy[segmentID], info)
+		if allocation == nil {
+			if info.GetInsertChannel() != unflushed[id] {
+				return nil, nil, merr.WrapErrDataIntegrityMsg("legacy segment %d channel mismatches recovery info", id)
+			}
+			allocation, err = legacyAllocationFromDurable(info, checkpoint.TimeTick)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		snapshot, keep, err := rebuildLegacySegmentSnapshot(allocation, info)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !keep {
-			removed = append(removed, segmentID)
+			removed = append(removed, id)
 			continue
 		}
-		normalized[segmentID] = snapshot
+		if legacy[id] == nil || info.GetState() == commonpb.SegmentState_Sealed || allocation.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+			snapshot.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED
+		}
+		normalized[id] = snapshot
 	}
 	return normalized, removed, nil
+}
+
+func (r *recoveryStorageImpl) getLegacySegmentInfo(ctx context.Context, id int64) (*datapb.SegmentInfo, error) {
+	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := coord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{SegmentIDs: []int64{id}, IncludeUnHealthy: true})
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		if errors.Is(err, merr.ErrSegmentNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(resp.GetInfos()) != 1 || resp.GetInfos()[0].GetID() != id {
+		return nil, merr.WrapErrDataIntegrityMsg("invalid DataCoord recovery response for segment %d", id)
+	}
+	return resp.GetInfos()[0], nil
+}
+
+func legacyAllocationFromDurable(info *datapb.SegmentInfo, replayTimeTick uint64) (*streamingpb.SegmentAssignmentMeta, error) {
+	// The original allocation is gone. Its first data position is a valid
+	// lifecycle anchor for the remaining tail, but is never used to reopen
+	// allocation. SchemaVersion below preserves the actual encoding schema.
+	start := info.GetStartPosition().GetTimestamp()
+	if start == 0 {
+		if info.GetNumOfRows() != 0 || len(info.GetBinlogs()) != 0 || info.GetManifestPath() != "" {
+			return nil, merr.WrapErrDataIntegrityMsg("legacy DataCoord-only segment %d has data without a start position", info.GetID())
+		}
+		// Empty allocations have no first data position. The replay floor is
+		// their empty durable baseline; later inserts still have to be replayed.
+		start = replayTimeTick
+	}
+	return &streamingpb.SegmentAssignmentMeta{
+		CollectionId: info.GetCollectionID(), PartitionId: info.GetPartitionID(),
+		SegmentId: info.GetID(), Vchannel: info.GetInsertChannel(),
+		StorageVersion: info.GetStorageVersion(), SchemaVersion: info.GetSchemaVersion(),
+		Stat: &streamingpb.SegmentAssignmentStat{
+			CreateSegmentTimeTick: start, CreateTimestamp: tsoutil.PhysicalTime(start).Unix(), Level: info.GetLevel(),
+		},
+	}, nil
 }
 
 func rebuildLegacySegmentSnapshot(
@@ -274,9 +331,9 @@ func rebuildLegacySegmentSnapshot(
 		)
 	}
 	switch durable.GetState() {
-	case commonpb.SegmentState_Flushed, commonpb.SegmentState_Dropped:
+	case commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Dropped:
 		return nil, false, nil
-	case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing:
+	case commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed:
 	default:
 		return nil, false, merr.WrapErrDataIntegrityMsg(
 			"legacy recovery segment %d has unsupported DataCoord state %s",
@@ -319,6 +376,7 @@ func rebuildLegacySegmentSnapshot(
 		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
 		Stat:               stat,
 		StorageVersion:     storageVersion,
+		SchemaVersion:      durable.GetSchemaVersion(),
 		CheckpointTimeTick: checkpointTimeTick,
 		PersistedStorage:   legacyPersistedStorage(durable, createTimeTick, checkpointTimeTick),
 	}, true, nil
@@ -395,16 +453,17 @@ func normalizeLegacyRecoveredViewMeta(
 func (r *recoveryStorageImpl) getLegacyVChannelCheckpoint(
 	ctx context.Context,
 	vchannel string,
-) (*utility.WALCheckpoint, error) {
+) (*utility.WALCheckpoint, []int64, error) {
 	coord, err := resource.Resource().MixCoordClient().GetWithContext(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	resp, err := coord.GetChannelRecoveryInfo(ctx, &datapb.GetChannelRecoveryInfoRequest{Vchannel: vchannel})
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return legacyCheckpointFromPosition(vchannel, resp.GetInfo().GetSeekPosition(), r.checkpoint.MessageID.WALName())
+	checkpoint, err := legacyCheckpointFromPosition(vchannel, resp.GetInfo().GetSeekPosition(), r.checkpoint.MessageID.WALName())
+	return checkpoint, resp.GetInfo().GetUnflushedSegmentIds(), err
 }
 
 func legacyCheckpointFromPosition(
@@ -453,6 +512,16 @@ func (r *recoveryStorageImpl) persistLegacyRecoveryMigration(
 	// into the migrated checkpoint so the migration keeps the control effects
 	// that were covered by the old checkpoint.
 	checkpoint.ApplyControl(r.pchannelControl)
+	// Rewind before deleting any allocation whose creation will be replayed.
+	// A crash between catalog batches must reopen from this safe cursor even
+	// though the final format marker has not yet been published.
+	legacyCheckpoint := checkpoint.Clone()
+	legacyCheckpoint.Magic = utility.RecoveryMagicStreamingInitialized
+	if err := resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
+		ConsumeCheckpoint: legacyCheckpoint.IntoProto(),
+	}); err != nil {
+		return err
+	}
 	return resource.Resource().StreamingNodeCatalog().SaveRecoverySnapshot(ctx, r.channel.Name, &metastore.WALRecoverySnapshot{
 		VChannels:          migration.vchannels,
 		SegmentAssignments: migration.segments,
@@ -544,6 +613,7 @@ func validateRecoveredViewMeta(
 		}
 		switch segment.GetState() {
 		case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING,
+			streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED,
 			streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
 			streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
 		default:

@@ -272,7 +272,8 @@ func (s *SegmentView) shouldObserveCreateSegmentLocked(timetick uint64) bool {
 // this predicate stays a pure lifecycle/watermark test.
 func (s *SegmentView) shouldObserveInsertLocked(timetick uint64) bool {
 	return timetick > s.meta.GetCheckpointTimeTick() &&
-		s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
+		(s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING ||
+			s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED)
 }
 
 func (s *SegmentView) ObserveInsert(
@@ -601,6 +602,15 @@ func (info *SegmentView) ResumePendingRecovery() {
 		// only fail fast (see FlushInsertChunk for the same gate).
 		info.mu.Unlock()
 		return
+	}
+	// Legacy allocation metadata can retire before the flusher finishes. Keep
+	// the recovered view sealed while replay fills its missing tail; only the
+	// recovery barrier may submit the final commit without another WAL Flush.
+	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
+		info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+		if info.newCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick()) != nil {
+			info.maybeSubmitNextLocked()
+		}
 	}
 	if shouldRetryRecoveredFinalCommit(info.meta) {
 		if task := info.newRecoveredCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick()); task != nil {

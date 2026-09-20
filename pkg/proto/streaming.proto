@@ -921,6 +921,8 @@ enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
     SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
     SEGMENT_ASSIGNMENT_STATE_TOMBSTONED = 3;
+    // No more allocation; replay the outstanding insert tail before final commit.
+    SEGMENT_ASSIGNMENT_STATE_SEALED = 4;
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.
