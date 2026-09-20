@@ -22,6 +22,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -40,11 +41,10 @@
 #include "folly/FBVector.h"
 #include "glog/logging.h"
 #include "google/protobuf/descriptor.h"
-#include "index/Index.h"
-#include "index/IndexInfo.h"
+#include "index/IndexTypeAdapter.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
 #include "index/Utils.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/sparse_utils.h"
 #include "log/Log.h"
 #include "milvus-storage/filesystem/fs.h"
@@ -1092,9 +1092,8 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
     return data_array;
 }
 
-// TODO: split scalar IndexBase with knowhere::Index
 std::unique_ptr<DataArray>
-ReverseDataFromIndex(const index::IndexBase* index,
+ReverseDataFromIndex(const index::IIndexReaderBase* index,
                      const int64_t* seg_offsets,
                      int64_t count,
                      const FieldMeta& field_meta) {
@@ -1109,204 +1108,89 @@ ReverseDataFromIndex(const index::IndexBase* index,
         valid_data.resize(count);
     }
 
+    auto gather = [&]<typename Input, typename Output = index::owned_t<Input>>() {
+        auto* reader =
+            dynamic_cast<const index::IScalarValueReader<Input>*>(index);
+        AssertInfo(reader != nullptr,
+                   "index reader for field {} does not support value lookup",
+                   field_meta.get_id().get());
+        std::vector<Output> values(count);
+        reader->Gather(
+            seg_offsets,
+            count,
+            [&](int64_t i, const Input* value, bool valid) {
+                if (nullable) {
+                    valid_data[i] = valid;
+                }
+                if (valid) {
+                    AssertInfo(value != nullptr,
+                               "index reader returned a null value for valid "
+                               "row {}",
+                               i);
+                    values[i] = *value;
+                }
+            });
+        return values;
+    };
+
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
-            using IndexType = index::ScalarIndex<bool>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<bool> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<bool>();
             auto obj = scalar_array->mutable_bool_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT8: {
-            using IndexType = index::ScalarIndex<int8_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int8_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int8_t>();
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT16: {
-            using IndexType = index::ScalarIndex<int16_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int16_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int16_t>();
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT32: {
-            using IndexType = index::ScalarIndex<int32_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int32_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int32_t>();
             auto obj = scalar_array->mutable_int_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::INT64: {
-            using IndexType = index::ScalarIndex<int64_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int64_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int64_t>();
             auto obj = scalar_array->mutable_long_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::FLOAT: {
-            using IndexType = index::ScalarIndex<float>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<float> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<float>();
             auto obj = scalar_array->mutable_float_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::DOUBLE: {
-            using IndexType = index::ScalarIndex<double>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<double> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<double>();
             auto obj = scalar_array->mutable_double_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::TIMESTAMPTZ: {
-            using IndexType = index::ScalarIndex<int64_t>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<int64_t> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<int64_t>();
             auto obj = scalar_array->mutable_timestamptz_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::VARCHAR: {
-            using IndexType = index::ScalarIndex<std::string>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<std::string> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<std::string_view>();
             auto obj = scalar_array->mutable_string_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
         }
         case DataType::GEOMETRY: {
-            using IndexType = index::ScalarIndex<std::string>;
-            auto ptr = dynamic_cast<const IndexType*>(index);
-            std::vector<std::string> raw_data(count);
-            for (int64_t i = 0; i < count; ++i) {
-                auto raw = ptr->Reverse_Lookup(seg_offsets[i]);
-                // if has no value, means nullable must be true, no need to check nullable again here
-                if (!raw.has_value()) {
-                    valid_data[i] = false;
-                    continue;
-                }
-                if (nullable) {
-                    valid_data[i] = true;
-                }
-                raw_data[i] = raw.value();
-            }
+            auto raw_data = gather.operator()<std::string_view>();
             auto obj = scalar_array->mutable_geometry_data();
             *(obj->mutable_data()) = {raw_data.begin(), raw_data.end()};
             break;
@@ -1445,28 +1329,11 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     auto field_type = load_index_info->field_type;
     auto engine_version = load_index_info->index_engine_version;
 
-    milvus::index::CreateIndexInfo index_info;
-    index_info.field_type = load_index_info->field_type;
-    index_info.field_name = load_index_info->schema.name();
-    index_info.index_engine_version = engine_version;
-
     auto config = milvus::index::ParseConfigFromIndexParams(
         load_index_info->index_params);
     auto load_priority_str = config[milvus::LOAD_PRIORITY].get<std::string>();
     auto priority_for_load = milvus::PriorityForLoad(load_priority_str);
     config[milvus::LOAD_PRIORITY] = priority_for_load;
-
-    // Config should have value for milvus::index::SCALAR_INDEX_ENGINE_VERSION for production calling chain.
-    // Use value_or(1) for unit test without setting this value
-    index_info.scalar_index_engine_version =
-        milvus::index::GetValueFromConfig<int32_t>(
-            config, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
-            .value_or(1);
-
-    index_info.tantivy_index_version =
-        milvus::index::GetValueFromConfig<int32_t>(
-            config, milvus::index::TANTIVY_INDEX_VERSION)
-            .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
 
     LOG_INFO(
         "[collection={}][segment={}][field={}][enable_mmap={}][load_"
@@ -1483,7 +1350,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     if (!(index_params.find("index_type") != index_params.end())) {
         ThrowInfo(ErrorCode::DataFormatBroken, "index type is empty");
     }
-    index_info.index_type = index_params.at("index_type");
+    const auto& index_type = index_params.at("index_type");
 
     // get metric type
     if (milvus::IsVectorDataType(field_type)) {
@@ -1491,10 +1358,9 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "metric type is empty for vector index");
         }
-        index_info.metric_type = index_params.at("metric_type");
     }
 
-    if (index_info.index_type == milvus::index::NGRAM_INDEX_TYPE) {
+    if (index_type == milvus::index::NGRAM_INDEX_TYPE) {
         if (!(index_params.find(milvus::index::MIN_GRAM) !=
               index_params.end())) {
             ThrowInfo(ErrorCode::DataFormatBroken,
@@ -1505,29 +1371,6 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             ThrowInfo(ErrorCode::DataFormatBroken,
                       "max_gram is empty for ngram index");
         }
-
-        // get min_gram and max_gram and convert to uintptr_t
-        milvus::index::NgramParams ngram_params{};
-        ngram_params.loading_index = true;
-        ngram_params.min_gram =
-            std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                           config, milvus::index::MIN_GRAM)
-                           .value());
-        ngram_params.max_gram =
-            std::stoul(milvus::index::GetValueFromConfig<std::string>(
-                           config, milvus::index::MAX_GRAM)
-                           .value());
-        index_info.ngram_params = std::make_optional(ngram_params);
-    }
-
-    if (index_info.index_type == milvus::index::FMINDEX_INDEX_TYPE) {
-        milvus::index::FMIndexParams fmindex_params{};
-        // Load-time query behavior must come from the persisted FM blob. In
-        // particular, sa_sample_rate is part of the blob format and is validated
-        // by LoadView/Deserialize; reparsing an external index param here creates
-        // a second source of truth and can fail an otherwise valid load on stale
-        // metadata. The constructor defaults are build-only placeholders.
-        index_info.fmindex_params = std::make_optional(fmindex_params);
     }
 
     // init file manager
@@ -1544,10 +1387,22 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
         load_index_info->index_store_path_version;
     config[milvus::index::INDEX_FILES] = load_index_info->index_files;
 
-    if (load_index_info->field_type == milvus::DataType::JSON) {
-        index_info.json_cast_type = milvus::JsonCastType::FromString(
-            config.at(JSON_CAST_TYPE).get<std::string>());
-        index_info.json_path = config.at(JSON_PATH).get<std::string>();
+    // Old persisted index_params need not contain a nested flag. The legacy
+    // factory derived the coordinate domain from the schema field name, so do
+    // the same at this boundary and pass one normalized config downstream.
+    if (!milvus::IsVectorDataType(field_type)) {
+        const auto schema_nested =
+            milvus::IsStructSubField(load_index_info->schema.name());
+        auto adapted = milvus::index::AdaptIndexType({
+            .index_type = index_type,
+            .field_type = field_type,
+            .element_type = load_index_info->element_type,
+            .index_engine_version = engine_version,
+            .params = std::move(config),
+            .is_nested = schema_nested,
+            .is_text_match = false,
+        });
+        config = std::move(adapted.params);
     }
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
@@ -1559,13 +1414,16 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
     file_manager_context.set_for_loading_index(true);
 
     // use cache layer to load vector/scalar index
-    std::unique_ptr<milvus::cachinglayer::Translator<milvus::index::IndexBase>>
-        translator = std::make_unique<
-            milvus::segcore::storagev1translator::SealedIndexTranslator>(
-            index_info, load_index_info, ctx, file_manager_context, config);
+    auto translator = std::make_unique<
+        milvus::segcore::storagev1translator::SealedIndexTranslator>(
+        load_index_info, ctx, file_manager_context, config);
+    load_index_info->index_family = translator->Family();
+    load_index_info->index_value_type = translator->ValueType();
+    load_index_info->index_caps = translator->Caps();
 
     load_index_info->cache_index =
-        milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+        milvus::cachinglayer::Manager::GetInstance()
+            .CreateCacheSlot<index::IIndexReaderBase>(
             std::move(translator), op_ctx);
 }
 
