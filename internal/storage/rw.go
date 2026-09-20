@@ -62,23 +62,25 @@ const (
 )
 
 type rwOptions struct {
-	version             int64
-	op                  rwOp
-	bufferSize          int64
-	downloader          downloaderFn
-	uploader            uploaderFn
-	multiPartUploadSize int64
-	columnGroups        []storagecommon.ColumnGroup
-	collectionID        int64
-	storageConfig       *indexpb.StorageConfig
-	neededFields        typeutil.Set[int64]
-	useLoonFFI          bool
-	pluginContext       *indexcgopb.StoragePluginContext
-	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
-	externalReader      packed.ExternalReaderContext
-	writerFormat        string
-	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	version              int64
+	op                   rwOp
+	bufferSize           int64
+	chunkReadConcurrency int
+	chunkReadRangeSize   int64
+	downloader           downloaderFn
+	uploader             uploaderFn
+	multiPartUploadSize  int64
+	columnGroups         []storagecommon.ColumnGroup
+	collectionID         int64
+	storageConfig        *indexpb.StorageConfig
+	neededFields         typeutil.Set[int64]
+	useLoonFFI           bool
+	pluginContext        *indexcgopb.StoragePluginContext
+	textColumnConfigs    []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary     bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	externalReader       packed.ExternalReaderContext
+	writerFormat         string
+	presentFields        map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
 }
 
 func (o *rwOptions) validate() error {
@@ -133,6 +135,23 @@ func WithVersion(version int64) RwOption {
 func WithBufferSize(bufferSize int64) RwOption {
 	return func(options *rwOptions) {
 		options.bufferSize = bufferSize
+	}
+}
+
+// WithParallelChunkRead makes a StorageV2/V3 binlog reader read its chunks
+// whole and up to concurrency of them at once, still delivering records in
+// order. Within a chunk every byte range is fetched concurrently, cut at
+// rangeSize bytes (<= 0 keeps one coalesced range at a time).
+//
+// The reader does not wait for the caller: up to the whole input may be in
+// memory before the first record is consumed, and WithBufferSize is ignored.
+// Use it only when the caller materializes its input anyway, such as a sort.
+// concurrency <= 1 keeps the serial, memory-bounded reader. Segments read
+// through a manifest are not affected.
+func WithParallelChunkRead(concurrency int, rangeSize int64) RwOption {
+	return func(options *rwOptions) {
+		options.chunkReadConcurrency = concurrency
+		options.chunkReadRangeSize = rangeSize
 	}
 }
 
@@ -373,10 +392,10 @@ func NewBinlogRecordReader(ctx context.Context, binlogs []*datapb.FieldBinlog, s
 			if ferr != nil {
 				return nil, ferr
 			}
-			rr = newIterativePackedRecordReader(paths, readSchema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newPackedChunksRecordReader(ctx, paths, readSchema, rwOptions, pluginContext)
 			rr = NewAbsentFieldFillRecordReader(rr, schema, present)
 		} else {
-			rr = newIterativePackedRecordReader(paths, schema, rwOptions.bufferSize, rwOptions.storageConfig, pluginContext, rwOptions.externalReader)
+			rr = newPackedChunksRecordReader(ctx, paths, schema, rwOptions, pluginContext)
 		}
 	default:
 		return nil, merr.WrapErrServiceInternalMsg("unsupported storage version %d", rwOptions.version)

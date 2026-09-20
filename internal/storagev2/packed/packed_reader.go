@@ -27,6 +27,7 @@ CStatus NewPackedReaderWithProperties(char** paths,
                                       int64_t num_paths,
                                       struct ArrowSchema* schema,
                                       const int64_t buffer_size,
+                                      const int64_t eager_range_size_bytes,
                                       const LoonProperties* c_properties,
                                       const char* filesystem_path,
                                       CPackedReader* c_packed_reader,
@@ -46,6 +47,24 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// ReaderOption tunes how a PackedReader fetches its files.
+type ReaderOption func(*readerOptions)
+
+type readerOptions struct {
+	eagerRangeSize int64
+}
+
+// WithEagerRangeSize makes every read fetch all of its byte ranges at once,
+// cut at rangeSize bytes, instead of one coalesced range at a time. A read
+// holds the same bytes either way, so this trades request count for latency,
+// not memory. It pays off together with a large buffer size, where one read
+// spans many ranges. rangeSize <= 0 keeps the default lazy reads.
+func WithEagerRangeSize(rangeSize int64) ReaderOption {
+	return func(o *readerOptions) {
+		o.eagerRangeSize = rangeSize
+	}
+}
+
 func NewPackedReader(filePaths []string, schema *arrow.Schema, bufferSize int64, storageConfig *indexpb.StorageConfig, storagePluginContext *indexcgopb.StoragePluginContext) (*PackedReader, error) {
 	return NewPackedReaderWithExtfs(filePaths, schema, bufferSize, storageConfig, storagePluginContext, ExternalReaderContext{})
 }
@@ -59,7 +78,12 @@ func NewPackedReaderWithExtfs(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	extfs ExternalReaderContext,
+	opts ...ReaderOption,
 ) (*PackedReader, error) {
+	options := &readerOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	var cProperties *C.LoonProperties
 	var cFilesystemPath *C.char
 	if extfs.Source != "" {
@@ -108,6 +132,7 @@ func NewPackedReaderWithExtfs(
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	cBufferSize := C.int64_t(bufferSize)
+	cEagerRangeSize := C.int64_t(options.eagerRangeSize)
 
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
@@ -124,7 +149,7 @@ func NewPackedReaderWithExtfs(
 	}
 
 	if cProperties != nil {
-		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerRangeSize, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
 	} else if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
@@ -162,9 +187,9 @@ func NewPackedReaderWithExtfs(
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cStorageConfig, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerRangeSize, cStorageConfig, &cPackedReader, pluginContextPtr)
 	} else {
-		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerRangeSize, &cPackedReader, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

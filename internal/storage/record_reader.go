@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"io"
 	"strconv"
 
@@ -75,6 +76,7 @@ func newPackedRecordReader(
 	storageConfig *indexpb.StorageConfig,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 	externalReader packed.ExternalReaderContext,
+	opts ...packed.ReaderOption,
 ) (*packedRecordReader, error) {
 	arrowSchema, err := ConvertToArrowSchema(schema, true)
 	if err != nil {
@@ -85,7 +87,7 @@ func newPackedRecordReader(
 	for i, field := range allFields {
 		field2Col[field.FieldID] = i
 	}
-	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader)
+	reader, err := packed.NewPackedReaderWithExtfs(paths, arrowSchema, bufferSize, storageConfig, storagePluginContext, externalReader, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +197,31 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 		rec, err = ir.cur.Next()
 	}
 	return rec, err
+}
+
+// newPackedChunksRecordReader reads the packed chunks at paths in order. Callers
+// that opted into WithParallelChunkRead get every chunk read whole and several
+// at once; everyone else gets the serial, memory-bounded reader.
+func newPackedChunksRecordReader(
+	ctx context.Context,
+	paths [][]string,
+	schema *schemapb.CollectionSchema,
+	options *rwOptions,
+	storagePluginContext *indexcgopb.StoragePluginContext,
+) RecordReader {
+	if options.chunkReadConcurrency <= 1 {
+		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader)
+	}
+	return newParallelChunkRecordReader(ctx, len(paths), options.chunkReadConcurrency, func(chunk int) (RecordReader, error) {
+		// The whole chunk is kept anyway, so bounding the read buffer would
+		// only split its download into rounds that run one after another.
+		reader, err := newPackedRecordReader(paths[chunk], schema, packed.UnlimitedReadBufferSize, options.storageConfig,
+			storagePluginContext, options.externalReader, packed.WithEagerRangeSize(options.chunkReadRangeSize))
+		if err != nil {
+			return nil, err
+		}
+		return reader, nil
+	})
 }
 
 func newIterativePackedRecordReader(

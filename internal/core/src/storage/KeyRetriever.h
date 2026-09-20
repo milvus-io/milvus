@@ -29,6 +29,19 @@ GetReaderProperties();
 parquet::ArrowReaderProperties
 GetArrowReaderProperties();
 
+// Reader properties for a caller that reads a whole file set at once and wants
+// every byte range of a read in flight together.
+//
+// The configured properties read lazily: arrow fetches a coalesced range only
+// when the decoder first touches it, so one file has one request in flight.
+// With eager_range_size_bytes > 0 the ranges are instead cut at that size and
+// all submitted to arrow's IO pool when the read starts. The bytes a read
+// holds are the same either way; only the number of requests carrying them
+// changes. eager_range_size_bytes <= 0 returns the configured properties
+// unchanged.
+parquet::ArrowReaderProperties
+GetArrowReaderProperties(int64_t eager_range_size_bytes);
+
 void
 ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,
                                int64_t range_size_limit_bytes);

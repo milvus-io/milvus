@@ -1241,6 +1241,21 @@ func TestComponentParam(t *testing.T) {
 
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+		assert.Equal(t, hardware.GetCPUNum(), Params.SortReadConcurrency.GetAsInt(),
+			"sort read concurrency defaults to the number of CPU cores")
+		params.Save(Params.SortReadConcurrency.Key, "3")
+		assert.Equal(t, 3, Params.SortReadConcurrency.GetAsInt())
+		params.Save(Params.SortReadConcurrency.Key, "1")
+		assert.Equal(t, 1, Params.SortReadConcurrency.GetAsInt(), "1 keeps the serial reader")
+		params.Save(Params.SortReadConcurrency.Key, "-2")
+		assert.Equal(t, hardware.GetCPUNum(), Params.SortReadConcurrency.GetAsInt(), "non-positive falls back to CPU cores")
+		params.Save(Params.SortReadConcurrency.Key, "abc")
+		assert.Equal(t, hardware.GetCPUNum(), Params.SortReadConcurrency.GetAsInt(), "garbage falls back to CPU cores")
+		params.Reset(Params.SortReadConcurrency.Key)
+		assert.Equal(t, int64(8*1024*1024), Params.SortReadRangeSize.GetAsSize())
+		params.Save(Params.SortReadRangeSize.Key, "0")
+		assert.Equal(t, int64(0), Params.SortReadRangeSize.GetAsSize(), "0 keeps one range at a time")
+		params.Reset(Params.SortReadRangeSize.Key)
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 

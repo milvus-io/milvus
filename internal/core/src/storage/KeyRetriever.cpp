@@ -56,6 +56,25 @@ GetArrowReaderProperties() {
     return arrow_reader_properties;
 }
 
+parquet::ArrowReaderProperties
+GetArrowReaderProperties(int64_t eager_range_size_bytes) {
+    auto properties = GetArrowReaderProperties();
+    if (eager_range_size_bytes <= 0) {
+        return properties;
+    }
+    auto cache_options = properties.cache_options();
+    cache_options.lazy = false;
+    cache_options.prefetch_limit = 0;
+    cache_options.range_size_limit = eager_range_size_bytes;
+    // arrow requires range_size_limit > hole_size_limit when coalescing.
+    if (cache_options.hole_size_limit >= cache_options.range_size_limit) {
+        cache_options.hole_size_limit = cache_options.range_size_limit - 1;
+    }
+    properties.set_pre_buffer(true);
+    properties.set_cache_options(cache_options);
+    return properties;
+}
+
 void
 ConfigureArrowReaderProperties(int64_t hole_size_limit_bytes,
                                int64_t range_size_limit_bytes) {
