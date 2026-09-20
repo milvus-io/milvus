@@ -628,18 +628,20 @@ func TestReplicaPlacementFirstLoadCapacity(t *testing.T) {
 			require.Equal(t, int64(300), s.m.placementGroups["rg"].rows[10])
 		})
 	}
-	mockey.PatchConvey("scope change during rows still repairs a failed node", t, func() {
+	mockey.PatchConvey("topology change during rows retries fault recovery with a fresh snapshot", t, func() {
 		s := newPlacementTestState(t, []string{"rg"})
 		s.duringRows = func() {
 			s.m.collectionPartitions[10].Insert(12)
 			s.m.groups["rg"].nodes = typeutil.NewSet[int64](5, 6, 7, 8)
 		}
 		require.ErrorIs(t, s.recoverAll(10), merr.ErrServiceUnavailable)
-		for _, id := range []int64{10} {
-			require.NotEmpty(t, s.m.Get(context.Background(), id).GetRWNodes())
-			for _, node := range s.m.Get(context.Background(), id).GetRWNodes() {
-				require.Contains(t, []int64{5, 6, 7, 8}, node)
-			}
+		require.Zero(t, s.writes)
+		require.ElementsMatch(t, []int64{1, 2, 3, 4}, s.m.Get(context.Background(), 10).GetRWNodes())
+		s.m.collectionPartitions[10] = typeutil.NewSet[int64](11)
+		require.NoError(t, s.recoverAll(10))
+		require.NotEmpty(t, s.m.Get(context.Background(), 10).GetRWNodes())
+		for _, node := range s.m.Get(context.Background(), 10).GetRWNodes() {
+			require.Contains(t, []int64{5, 6, 7, 8}, node)
 		}
 	})
 }
@@ -1043,5 +1045,64 @@ func TestReplicaPlacementSlowCollectionDoesNotBlockPeers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestReplicaPlacementConsistentResourceGroupSnapshot(t *testing.T) {
+	for _, allow := range []string{"rg", "other", "*"} {
+		for _, source := range []string{"rg", "other"} {
+			mockey.PatchConvey("node transfer from "+source+" with allowlist "+allow, t, func() {
+				s := newPlacementTestState(t, []string{allow})
+				ctx := context.Background()
+				s.m.coll2Replicas.Remove(20)
+				s.m.putReplicasInMemory(10, placementReplica(11, 10, "other", 5, 6))
+				before := s.m.GetByCollection(ctx, 10)
+				target, node, owner := "rg", int64(6), int64(11)
+				if source == "rg" {
+					target, node, owner = "other", 4, 10
+				}
+				s.duringRows = func() {
+					s.m.ResourceManager.rwmutex.Lock()
+					defer s.m.ResourceManager.rwmutex.Unlock()
+					s.m.groups[source].nodes.Remove(node)
+					s.m.groups[target].nodes.Insert(node)
+				}
+				// A legal atomic transfer invalidates the whole snapshot. It must
+				// not look like overlapping RGs or persist part of a stale plan.
+				err := s.recoverOne(10)
+				require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+				require.NotErrorIs(t, err, merr.ErrServiceInternal)
+				require.Zero(t, s.writes)
+				require.Equal(t, before, s.m.GetByCollection(ctx, 10))
+				require.NoError(t, s.recoverOne(10))
+				require.Contains(t, s.m.Get(ctx, owner).GetRONodes(), node)
+				checkIsolation := func() {
+					used := typeutil.NewSet[int64]()
+					for _, r := range s.m.GetByCollection(ctx, 10) {
+						for _, n := range append(r.GetRWNodes(), r.GetRONodes()...) {
+							require.False(t, used.Contain(n), "RW/RO ownership must remain isolated")
+							used.Insert(n)
+						}
+					}
+				}
+				checkIsolation()
+				writes := s.writes
+				require.NoError(t, s.recoverOne(10))
+				require.Equal(t, writes, s.writes, "unchanged inputs must not repeat writes")
+				// Simulate the existing observer removing the drained RO node.
+				drained := s.m.Get(ctx, owner).CopyForWrite()
+				drained.RemoveNode(node)
+				s.m.putReplicasInMemory(10, drained.IntoReplica())
+				require.NoError(t, s.recoverOne(10))
+				checkIsolation()
+				for _, r := range s.m.GetByCollection(ctx, 10) {
+					require.ElementsMatch(t, s.m.groups[r.GetResourceGroup()].GetNodes(), r.GetRWNodes())
+					require.Empty(t, r.GetRONodes())
+				}
+				writes = s.writes
+				require.NoError(t, s.recoverOne(10))
+				require.Equal(t, writes, s.writes)
+			})
+		}
 	}
 }

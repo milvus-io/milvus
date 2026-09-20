@@ -80,6 +80,8 @@ func (m *Meta) RecoverNodesInCollection(ctx context.Context, collectionID int64,
 	}
 	ordered := names.Collect()
 	slices.Sort(ordered)
+	// Capture all RGs together so a concurrent node transfer cannot give the
+	// ordinary recovery and placement plans conflicting views of node ownership.
 	currentRGs, err := m.GetResourceGroups(ctx, ordered)
 	if err != nil {
 		return err
@@ -90,12 +92,11 @@ func (m *Meta) RecoverNodesInCollection(ctx context.Context, collectionID int64,
 		if !a.matches(name) {
 			continue
 		}
-		snapshot, err := m.prepareReplicaPlacement(ctx, m.getPlacementGroup(name), a)
+		snapshot, err := m.prepareReplicaPlacement(ctx, m.getPlacementGroup(name), a, currentRGs[name])
 		if snapshot == nil {
 			return err
 		}
 		snapshots = append(snapshots, snapshot)
-		currentRGs[name] = snapshot.rg
 		if err != nil {
 			refreshErr = err
 		}
@@ -264,7 +265,7 @@ func (m *Meta) placementScope(members []int64) map[int64][]int64 {
 	return scope
 }
 
-func (m *Meta) prepareReplicaPlacement(ctx context.Context, g *replicaPlacement, a *replicaPlacementPolicy) (*replicaPlacementSnapshot, error) {
+func (m *Meta) prepareReplicaPlacement(ctx context.Context, g *replicaPlacement, a *replicaPlacementPolicy, rg *ResourceGroup) (*replicaPlacementSnapshot, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	members := m.placementMembers(ctx, g.name)
@@ -279,11 +280,8 @@ func (m *Meta) prepareReplicaPlacement(ctx context.Context, g *replicaPlacement,
 	if !a.current() {
 		return nil, merr.WrapErrServiceUnavailable("replica placement configuration changed during row refresh")
 	}
-	rgs, err := m.GetResourceGroups(ctx, []string{g.name})
-	if err != nil {
-		return nil, err
-	}
-	rg := rgs[g.name]
+	// Use the caller's joint RG snapshot even if rows were refreshed meanwhile.
+	// validateCollectionPlacement rejects topology changes before persistence.
 	nodes := rg.GetNodes()
 	slices.Sort(nodes)
 	replicas := make([]*Replica, 0)
