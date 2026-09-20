@@ -22,8 +22,9 @@
 #include "common/QueryResult.h"
 #include "common/Utils.h"
 #include "common/VectorArray.h"
+#include "exec/operator/Utils.h"
 #include "index/Utils.h"
-#include "index/VectorIndex.h"
+#include "index/vector/RangeSearchParams.h"
 #include "knowhere/expected.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "nlohmann/json.hpp"
@@ -37,7 +38,7 @@ namespace milvus::query {
 
 // For sealed segment with vector index
 CachedSearchIterator::CachedSearchIterator(
-    const milvus::index::VectorIndex& index,
+    const milvus::index::IVectorReader& reader,
     const knowhere::DataSetPtr& query_ds,
     const SearchInfo& search_info,
     const BitsetView& bitset,
@@ -63,12 +64,13 @@ CachedSearchIterator::CachedSearchIterator(
     }
     Init(search_info);
 
-    auto search_json = index.PrepareSearchParams(search_info);
+    auto search_params = milvus::exec::ProjectVectorSearchParams(search_info);
+    auto search_json = reader.PrepareSearchParams(search_params);
     index::CheckAndUpdateKnowhereRangeSearchParam(
-        search_info, batch_size_, index.GetMetricType(), search_json);
+        search_params, batch_size_, reader.Metric(), search_json);
 
-    auto expected_iterators =
-        index.VectorIterators(query_ds, search_json, bitset, op_context);
+    auto expected_iterators = reader.Iterators(
+        query_ds, search_json, bitset, op_context);
     if (expected_iterators.has_value()) {
         iterators_ = std::move(expected_iterators.value());
     } else {

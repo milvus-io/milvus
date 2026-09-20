@@ -41,8 +41,8 @@
 #include "common/VectorArray.h"
 #include "common/protobuf_utils.h"
 #include "exec/operator/Utils.h"
-#include "index/Index.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/growing/IGrowingIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/comp/index_param.h"
 #include "query/CachedSearchIterator.h"
 #include "query/SearchBruteForce.h"
@@ -51,7 +51,6 @@
 #include "query/Utils.h"
 #include "query/helper.h"
 #include "segcore/ConcurrentVector.h"
-#include "segcore/FieldIndexing.h"
 #include "segcore/InsertRecord.h"
 #include "segcore/SegmentGrowingImpl.h"
 
@@ -103,56 +102,6 @@ SetSearchOnGrowingAfterChunkSnapshotHookForTest(
     AfterChunkSnapshotHookEnabled().store(
         static_cast<bool>(AfterChunkSnapshotHookSlot()),
         std::memory_order_release);
-}
-
-void
-FloatSegmentIndexSearch(const segcore::SegmentGrowingImpl& segment,
-                        const SearchInfo& info,
-                        const void* query_data,
-                        int64_t num_queries,
-                        Timestamp timestamp,
-                        const BitsetView& bitset,
-                        milvus::OpContext* op_context,
-                        SearchResult& search_result) {
-    auto schema = segment.get_schema_snapshot();
-    auto& indexing_record = segment.get_indexing_record();
-
-    auto vecfield_id = info.field_id_;
-    auto& field = (*schema)[vecfield_id];
-    auto is_sparse = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32;
-    // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
-    auto dim = is_sparse ? 0 : field.get_dim();
-
-    AssertInfo(IsVectorDataType(field.get_data_type()),
-               "[FloatSearch]Field data type isn't VECTOR_FLOAT, "
-               "VECTOR_FLOAT16, VECTOR_BFLOAT16 or VECTOR_SPARSE_U32_F32");
-    dataset::SearchDataset search_dataset{info.metric_type_,
-                                          num_queries,
-                                          info.topk_,
-                                          info.round_decimal_,
-                                          dim,
-                                          query_data};
-    if (indexing_record.is_in(vecfield_id)) {
-        const auto& field_indexing =
-            indexing_record.get_vec_field_indexing(vecfield_id);
-
-        auto indexing = field_indexing.get_segment_indexing();
-        SearchInfo search_conf = field_indexing.get_search_params(info);
-        if (search_conf.active_count_ < 0) {
-            // Direct callers do not have a plan node to freeze this value.
-            // Resolve it before entering the index kernel so the same physical
-            // prefix bound applies to tests and legacy call sites as well.
-            search_conf.active_count_ = segment.get_active_count(timestamp);
-        }
-        auto vec_index = dynamic_cast<index::VectorIndex*>(indexing.get());
-        SearchOnIndex(search_dataset,
-                      *vec_index,
-                      search_conf,
-                      bitset,
-                      op_context,
-                      search_result,
-                      is_sparse);
-    }
 }
 
 void
@@ -218,27 +167,31 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     auto metric_type = info.metric_type_;
     auto round_decimal = info.round_decimal_;
 
-    // step 2: small indexing search
-    if (segment.get_indexing_record().SyncDataWithIndex(field.get_id())) {
-        AssertInfo(
-            data_type != DataType::VECTOR_ARRAY,
-            "vector array(embedding list) is not supported for growing segment "
-            "indexing search");
+    // Resolve the visibility boundary before pinning the raw generation. The
+    // independently published vector reader may already cover a larger range
+    // fed by another owner, but that range is not query-visible yet.
+    const int64_t plan_bound = info.active_count_ >= 0
+                                   ? info.active_count_
+                                   : segment.get_active_count(timestamp);
+    auto vec_ptr = record.get_data_base(vecfield_id);
+    const auto chunks = vec_ptr->acquire_chunks();
+    RunAfterChunkSnapshotHookForTest();
 
-        FloatSegmentIndexSearch(segment,
-                                info,
-                                query_data,
-                                num_queries,
-                                timestamp,
-                                bitset,
-                                op_context,
-                                search_result);
-    } else {
-        SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
-        // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
-        auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32
-                       ? 0
-                       : field.get_dim();
+    auto index_pin = segment.PinGrowingIndex(vecfield_id);
+    const bool index_covers_query =
+        index_pin && index_pin.CoveredRowEnd() >= plan_bound &&
+        data_type != DataType::VECTOR_ARRAY;
+    if (index_covers_query) {
+        const auto* reader =
+            dynamic_cast<const index::IVectorReader*>(&index_pin.Reader());
+        AssertInfo(reader != nullptr,
+                   "growing vector reader for field {} lacks search, metadata "
+                   "or nullable capability",
+                   vecfield_id.get());
+
+        const bool is_sparse =
+            data_type == DataType::VECTOR_SPARSE_U32_F32;
+        const auto dim = is_sparse ? 0 : field.get_dim();
         dataset::SearchDataset search_dataset{metric_type,
                                               num_queries,
                                               topk,
@@ -246,79 +199,67 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                                               dim,
                                               query_data,
                                               query_offsets};
-        int32_t current_chunk_id = 0;
+        SearchInfo search_conf = info;
+        search_conf.metric_type_ = reader->Metric();
+        search_conf.active_count_ =
+            std::min(plan_bound, index_pin.CoveredRowEnd());
 
-        // get index params for bm25 and minhash brute force.
-        // A field added by add_function_field is absent from the growing
-        // record's index_meta_ snapshot, so guard with has_field_index_meta:
-        // BM25 k1/b are delivered through the plan, MinHash falls back to
-        // defaults for the brief window before the segment is reloaded.
-        std::map<std::string, std::string> index_info;
-        if ((metric_type == knowhere::metric::BM25 ||
-             metric_type == knowhere::metric::MHJACCARD) &&
-            segment.get_indexing_record().has_field_index_meta(vecfield_id)) {
-            index_info = segment.get_indexing_record()
-                             .get_field_index_meta(vecfield_id)
-                             .GetIndexParams();
+        if (milvus::exec::UseVectorIterator(search_conf)) {
+            search_result.growing_index_pin_ =
+                std::make_shared<index::GrowingIndexSnapshotPin>(
+                    std::move(index_pin));
         }
+        SearchOnIndex(search_dataset,
+                      *reader,
+                      search_conf,
+                      bitset,
+                      op_context,
+                      search_result,
+                      is_sparse);
+        register_vector_iterator_recreator();
+        return;
+    }
 
-        // step 3: brute force search where small indexing is unavailable
-        auto vec_ptr = record.get_data_base(vecfield_id);
-
-        // Direct/legacy callers do not carry the plan-frozen active_count.
-        // Resolve their fallback BEFORE acquiring the chunk snapshot. If an
-        // insert crosses a chunk boundary and completes its ack between the
-        // two reads, either the bound sees the insert and the later snapshot
-        // contains its chunk, or the bound stays on the old prefix and the
-        // search never addresses the new chunk. Acquiring in the opposite
-        // order can pair an old snapshot with a newer bound and make both BF
-        // and iterator-v2 walk past snapshot.count.
-        const int64_t plan_bound = info.active_count_ >= 0
-                                       ? info.active_count_
-                                       : segment.get_active_count(timestamp);
-
-        // Pin the chunk generation once, up front, and read every chunk
-        // through it. try_remove_chunks may swap the column's storage out at
-        // any moment once the interim index owns the raw data; this snapshot
-        // is what keeps the buffers this scan walks -- and the buffers the
-        // brute-force iterators keep pointing into after this function
-        // returns -- alive. Which ROWS are visible is a separate question,
-        // answered by the plan-frozen bound above.
-        //
-        // The snapshot also replaces the segment-wide chunk lock this branch
-        // used to hold for its whole scan. That lock existed to keep
-        // reclamation from running between the SyncDataWithIndex check above
-        // and the scan; holding it also made try_remove_chunks' try_lock fail
-        // under query load, so reclamation was skipped and only retried on the
-        // next insert. Pinning the generation makes the scan safe on its own,
-        // and reclamation now always proceeds.
-        const auto chunks = vec_ptr->acquire_chunks();
-        RunAfterChunkSnapshotHookForTest();
-        if (chunks.empty()) {
-            // Either the column holds nothing yet, or try_remove_chunks
-            // reclaimed it after the check above. Reclamation is gated on
-            // HasRawData, which is itself gated on SyncDataWithIndex
-            // (FieldIndexing.h), so re-asking distinguishes the two -- and
-            // when it says yes, the index owns the raw data and can answer.
-            if (segment.get_indexing_record().SyncDataWithIndex(
-                    field.get_id())) {
-                AssertInfo(data_type != DataType::VECTOR_ARRAY,
-                           "vector array(embedding list) is not supported for "
-                           "growing segment indexing search");
-                FloatSegmentIndexSearch(segment,
-                                        info,
-                                        query_data,
-                                        num_queries,
-                                        timestamp,
-                                        bitset,
-                                        op_context,
-                                        search_result);
-                register_vector_iterator_recreator();
-                return;
-            }
+    // Below threshold, or if publication lags, use the raw generation pinned
+    // before the decision. Reclamation can no longer turn this fallback into
+    // an empty read between capability inspection and the chunk walk.
+    if (chunks.empty()) {
+        const auto& raw_mapping = vec_ptr->get_offset_mapping();
+        if (raw_mapping.IsEnabled() &&
+            raw_mapping.ValidCountBelow(plan_bound) == 0) {
             FillEmptySearchResult(search_result, num_queries, info.topk_);
             return;
         }
+        AssertInfo(plan_bound == 0,
+                   "growing vector field {} has neither raw data nor an index "
+                   "covering visible row end {}",
+                   vecfield_id.get(),
+                   plan_bound);
+        FillEmptySearchResult(search_result, num_queries, info.topk_);
+        return;
+    }
+
+    SubSearchResult final_qr(num_queries, topk, metric_type, round_decimal);
+    // TODO(SPARSE): see todo in PlanImpl.h::PlaceHolder.
+    auto dim = field.get_data_type() == DataType::VECTOR_SPARSE_U32_F32
+                   ? 0
+                   : field.get_dim();
+    dataset::SearchDataset search_dataset{metric_type,
+                                          num_queries,
+                                          topk,
+                                          round_decimal,
+                                          dim,
+                                          query_data,
+                                          query_offsets};
+    int32_t current_chunk_id = 0;
+
+    // get index params for bm25 and minhash brute force.
+    std::map<std::string, std::string> index_info;
+    if ((metric_type == knowhere::metric::BM25 ||
+         metric_type == knowhere::metric::MHJACCARD) &&
+        segment.HasFieldIndexMeta(vecfield_id)) {
+        index_info = segment.GetFieldIndexParams(vecfield_id);
+    }
         const auto& offset_mapping = vec_ptr->get_offset_mapping();
         const bool is_element_level_search =
             data_type == DataType::VECTOR_ARRAY &&
@@ -559,7 +500,6 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         }
         search_result.unity_topK_ = topk;
         search_result.total_nq_ = num_queries;
-    }
     register_vector_iterator_recreator();
 }
 
