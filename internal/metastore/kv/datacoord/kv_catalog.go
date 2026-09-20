@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -454,7 +455,12 @@ func buildDroppedSegmentKvs(segments []*datapb.SegmentInfo) (map[string]string, 
 		key := buildSegmentPath(s.GetCollectionID(), s.GetPartitionID(), s.GetID())
 		noBinlogsSegment, _, _, _, _ := CloneSegmentWithExcludeBinlogs(s)
 		// `s` is not mutated above. Also, `noBinlogsSegment` is a cloned version of `s`.
-		segmentutil.ReCalcRowCount(s, noBinlogsSegment)
+		// Row-count reconciliation from binlog arrays is V2-only, matching
+		// buildAlterSegmentsKvs: a V3 segment's arrays may legitimately be empty
+		// and recomputing from them would persist zero rows.
+		if !isV3Segment(s) {
+			segmentutil.ReCalcRowCount(s, noBinlogsSegment)
+		}
 		segBytes, err := marshalSegmentInfo(noBinlogsSegment)
 		if err != nil {
 			return nil, merr.WrapErrSerializationFailed(err, "marshal segment: %d", s.GetID())
@@ -498,6 +504,63 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 	}
 
 	return nil
+}
+
+func (kc *Catalog) SaveDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection) error {
+	key := buildDataViewVersionKey(
+		dataView.GetCollectionId(),
+		dataView.GetDataVersion().GetStreamingVersion(),
+		dataView.GetDataVersion().GetCompactVersion(),
+	)
+	value, err := proto.Marshal(dataView)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(ctx, key, string(value))
+}
+
+func (kc *Catalog) ListDataViews(ctx context.Context, collectionID int64) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
+}
+
+func (kc *Catalog) ListAllDataViews(ctx context.Context) ([]*viewpb.DataViewOfCollection, error) {
+	return kc.listDataViewsWithPrefix(ctx, DataViewPrefix+"/")
+}
+
+func (kc *Catalog) listDataViewsWithPrefix(ctx context.Context, prefix string) ([]*viewpb.DataViewOfCollection, error) {
+	dataViews := make([]*viewpb.DataViewOfCollection, 0)
+	applyFn := func(key []byte, value []byte) error {
+		dataView := &viewpb.DataViewOfCollection{}
+		if err := proto.Unmarshal(value, dataView); err != nil {
+			// Skip one corrupt value instead of aborting the whole walk: a
+			// single unmarshalable key would otherwise fail ListAllDataViews
+			// on every attempt and block Coordinator startup (the manager's
+			// per-view validation can only run on values that unmarshal).
+			mlog.Warn(context.TODO(), "skip unmarshalable DataView key during ListAllDataViews",
+				mlog.String("key", string(key)),
+				mlog.Err(err))
+			return nil
+		}
+		dataViews = append(dataViews, dataView)
+		return nil
+	}
+
+	if err := kc.MetaKv.WalkWithPrefix(ctx, prefix, kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return dataViews, nil
+}
+
+func (kc *Catalog) DropDataView(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) error {
+	return kc.MetaKv.Remove(ctx, buildDataViewVersionKey(
+		collectionID,
+		dataVersion.GetStreamingVersion(),
+		dataVersion.GetCompactVersion(),
+	))
+}
+
+func (kc *Catalog) DropDataViews(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, buildDataViewVersionPrefix(collectionID))
 }
 
 func (kc *Catalog) MarkChannelAdded(ctx context.Context, channel string) error {
@@ -1271,4 +1334,39 @@ func (kc *Catalog) ListExportSnapshotJobs(ctx context.Context) ([]*datapb.Export
 
 func (kc *Catalog) DropExportSnapshotJob(ctx context.Context, jobID int64) error {
 	return kc.MetaKv.Remove(ctx, buildExportSnapshotJobKey(jobID))
+}
+
+// ListSegmentChangeGroups lists all segment change groups from etcd.
+//
+// A malformed value is an ERROR, not a skip: unlike DataView snapshots (which
+// are reconstructible from the SegmentMeta projection), a group record is the
+// sole owner of its staged members' visibility — SegmentInfo has no
+// change_group_id field yet (design F4) — so silently skipping a bad key
+// orphans its members (IsInvisible=true with no owner, never published or
+// reclaimed). This matches the other 13 List methods in this file, which all
+// propagate decode errors; recovery can then fail closed on corruption.
+func (kc *Catalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
+	groups := make([]*model.SegmentChangeGroup, 0)
+	applyFn := func(key []byte, value []byte) error {
+		group, err := model.UnmarshalSegmentChangeGroup(value)
+		if err != nil {
+			// C36: identify the offending etcd key so an operator facing a
+			// fail-closed startup can locate and remove it; Validate errors on
+			// a corrupt/zero record report GroupID 0, which is not searchable.
+			return merr.Wrap(err, "failed to decode a persisted segment change group at key "+string(key))
+		}
+		groups = append(groups, group)
+		return nil
+	}
+	if err := kc.MetaKv.WalkWithPrefix(ctx, SegmentChangeGroupPrefix+"/", kc.paginationSize, applyFn); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+// DropSegmentChangeGroups removes every segment change group of one collection.
+// Used by collection drop; the per-collection prefix delete runs under the
+// caller's collection lifecycle lock.
+func (kc *Catalog) DropSegmentChangeGroups(ctx context.Context, collectionID int64) error {
+	return kc.MetaKv.RemoveWithPrefix(ctx, buildSegmentChangeGroupCollectionPrefix(collectionID))
 }

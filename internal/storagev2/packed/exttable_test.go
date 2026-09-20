@@ -73,7 +73,11 @@ func TestExploreFiles_InvalidDirectory(t *testing.T) {
 	)
 
 	assert.Error(t, err)
-	assert.ErrorIs(t, err, ErrLoonTransient)
+	// A nonexistent directory is LOON_FILE_NOT_FOUND (code 12): the FFI
+	// err_code now survives into the classification, so this is a permanent
+	// failure -- retrying a 404 cannot succeed -- not a transient one.
+	assert.ErrorIs(t, err, ErrLoonPermanent)
+	assert.NotErrorIs(t, err, ErrLoonTransient)
 	assert.Nil(t, files)
 }
 
@@ -395,7 +399,7 @@ func TestNewFragmentIDGenerator(t *testing.T) {
 
 func TestSplitFileToFragments_SmallFile(t *testing.T) {
 	gen := NewFragmentIDGenerator(0)
-	fragments := SplitFileToFragments("/data/small.parquet", 500, 1000, gen)
+	fragments := SplitFileToFragments("/data/small.parquet", 500, 1000, nil, gen)
 
 	assert.Len(t, fragments, 1)
 	assert.Equal(t, int64(0), fragments[0].FragmentID)
@@ -407,7 +411,7 @@ func TestSplitFileToFragments_SmallFile(t *testing.T) {
 
 func TestSplitFileToFragments_ExactLimit(t *testing.T) {
 	gen := NewFragmentIDGenerator(0)
-	fragments := SplitFileToFragments("/data/exact.parquet", 1000, 1000, gen)
+	fragments := SplitFileToFragments("/data/exact.parquet", 1000, 1000, nil, gen)
 
 	assert.Len(t, fragments, 1)
 	assert.Equal(t, int64(0), fragments[0].StartRow)
@@ -416,7 +420,7 @@ func TestSplitFileToFragments_ExactLimit(t *testing.T) {
 
 func TestSplitFileToFragments_LargeFile(t *testing.T) {
 	gen := NewFragmentIDGenerator(0)
-	fragments := SplitFileToFragments("/data/large.parquet", 2500, 1000, gen)
+	fragments := SplitFileToFragments("/data/large.parquet", 2500, 1000, nil, gen)
 
 	assert.Len(t, fragments, 3)
 	// Fragment 0: [0, 1000)
@@ -435,9 +439,23 @@ func TestSplitFileToFragments_LargeFile(t *testing.T) {
 	assert.Equal(t, int64(500), fragments[2].RowCount)
 }
 
+func TestSplitFileToFragments_Properties(t *testing.T) {
+	properties := map[string]string{"dataset_version": "10", "extra": "preserved"}
+	for _, tc := range []struct {
+		rows      int64
+		fragments int
+	}{{0, 1}, {500, 1}, {1000, 1}, {2500, 3}} {
+		fragments := SplitFileToFragments("/data/file.parquet", tc.rows, 1000, properties, NewFragmentIDGenerator(0))
+		require.Len(t, fragments, tc.fragments)
+		for _, fragment := range fragments {
+			assert.Equal(t, properties, fragment.Properties)
+		}
+	}
+}
+
 func TestSplitFileToFragments_FragmentIDContinuity(t *testing.T) {
 	gen := NewFragmentIDGenerator(10)
-	fragments := SplitFileToFragments("/data/f.parquet", 3000, 1000, gen)
+	fragments := SplitFileToFragments("/data/f.parquet", 3000, 1000, nil, gen)
 
 	assert.Len(t, fragments, 3)
 	assert.Equal(t, int64(10), fragments[0].FragmentID)
@@ -970,7 +988,253 @@ func TestMakePropertiesFromStorageConfig_ExtraKVsOverrideStorageFormat(t *testin
 	assert.Equal(t, "parquet", loonPropertyString(props, PropertyWriterFormat))
 }
 
-func TestNormalizeExternalPathForStorage_UsesInjectedExtfsEndpoint(t *testing.T) {
+func TestExternalFileReaders_DeclarePathForm(t *testing.T) {
+	config := &indexpb.StorageConfig{StorageType: "local"}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://minio/metadata/v1.json",
+		Spec:         `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio"}}`,
+	}
+	filePath := "s3://minio/minio/files/insert_log/1"
+	for _, tc := range []struct {
+		name string
+		read func(*indexpb.StorageConfig, string, ExternalSpecContext) ([]byte, error)
+		form externalPathForm
+	}{
+		{name: "source", read: readExternalSourceFile, form: externalPathSource},
+		{name: "resolved", read: ReadFileWithExternalSpec, form: externalPathResolved},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, readErr := range []error{nil, fmt.Errorf("backend read failed")} {
+				calls := 0
+				data := []byte("file contents")
+				patch := mockey.Mock(readFileWithExternalSpec).
+					To(func(sc *indexpb.StorageConfig, path string, context ExternalSpecContext, form externalPathForm) ([]byte, error) {
+						calls++
+						assert.Same(t, config, sc)
+						assert.Equal(t, filePath, path)
+						assert.Equal(t, extfs, context)
+						assert.Equal(t, tc.form, form)
+						return data, readErr
+					}).Build()
+				got, err := tc.read(config, filePath, extfs)
+				patch.UnPatch()
+				assert.Equal(t, 1, calls)
+				assert.Equal(t, data, got)
+				assert.Equal(t, readErr, err)
+			}
+		})
+	}
+}
+
+func TestMilvusTableSourceIngestion_EqualHostAndBucket(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		// The object key itself starts with the bucket name.
+		Source: "s3://minio/minio/metadata/v1.json",
+		Spec:   `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+	metadata := &datapb.SnapshotMetadata{
+		FormatVersion: snapshotio.SnapshotFormatVersion,
+		ManifestList:  []string{"s3://minio/minio/metadata/10.avro"},
+		Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{{
+			SegmentId: 10,
+			Manifest:  MarshalManifestPath("s3://minio/minio/files/insert_log/10", 2),
+		}},
+	}
+	metadataBytes, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(metadata)
+	require.NoError(t, err)
+	segmentBytes, err := snapshotio.MarshalSegmentManifest(&datapb.SegmentDescription{
+		SegmentId: 10, SegmentLevel: datapb.SegmentLevel_L1, NumOfRows: 100,
+	})
+	require.NoError(t, err)
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	var forms []externalPathForm
+	var keys []string
+	patch := mockey.Mock(readFileWithExternalSpec).
+		To(func(sc *indexpb.StorageConfig, path string, context ExternalSpecContext, form externalPathForm) ([]byte, error) {
+			assert.Same(t, config, sc)
+			assert.Equal(t, extfs, context)
+			lookupPath, key, err := normalizeExternalPathForFilesystemForm(path, props, context, form)
+			require.NoError(t, err)
+			assert.Equal(t, "s3://minio/minio/"+key, lookupPath)
+			forms = append(forms, form)
+			keys = append(keys, key)
+			switch key {
+			case "minio/metadata/v1.json":
+				return metadataBytes, nil
+			case "minio/metadata/10.avro":
+				return segmentBytes, nil
+			default:
+				t.Fatalf("unexpected object key: %s", key)
+				return nil, nil
+			}
+		}).Build()
+	defer patch.UnPatch()
+
+	infos, manifestPath, err := ExploreFilesReturnManifestPath(nil, "milvus-table", tmpDir, extfs.Source, config, extfs)
+	require.NoError(t, err)
+	assert.NotEmpty(t, manifestPath)
+	require.Len(t, infos, 1)
+	assert.Equal(t, MarshalManifestPath("s3://minio/minio/minio/files/insert_log/10", 2), infos[0].FilePath)
+	assert.Equal(t, int64(100), infos[0].NumRows)
+
+	gotMetadata, err := ReadMilvusTableSnapshotMetadata(extfs.Source, extfs.Spec, config, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, metadata.GetManifestList(), gotMetadata.GetManifestList())
+	assert.Equal(t, []externalPathForm{externalPathSource, externalPathResolved, externalPathSource}, forms)
+	assert.Equal(t, []string{"minio/metadata/v1.json", "minio/metadata/10.avro", "minio/metadata/v1.json"}, keys)
+}
+
+func TestNormalizeExternalSourcePath_InputBoundaries(t *testing.T) {
+	config := &indexpb.StorageConfig{StorageType: "local"}
+	for _, tc := range []struct {
+		name, path, address, spec, want string
+		wantErr                         bool
+	}{
+		{name: "malformed_uri", path: "s3://%zz/key", address: "http://minio", wantErr: true},
+		{name: "malformed_address", path: "s3://minio/key", address: "http://%zz", wantErr: true},
+		{name: "empty_address_host", path: "s3://minio/key", address: "http://", want: "s3://minio/key"},
+		{name: "invalid_persisted_spec", path: "s3://minio/key", address: "http://minio", spec: "{", wantErr: true},
+		{name: "bucket_root", path: "s3://minio", address: "http://minio", spec: `{"extfs":{"endpoint_url":"http://minio"}}`, want: "s3://minio/minio/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := ExtfsPrefixForCollection(42)
+			props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+				prefix + "address": tc.address, prefix + "bucket_name": "minio",
+			})
+			require.NoError(t, err)
+			defer FreeProperties(props)
+			got, err := normalizeExternalSourcePath(tc.path, props, ExternalSpecContext{
+				CollectionID: 42, Source: "s3://minio/metadata/v1.json", Spec: tc.spec,
+			})
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestResolveExternalSourcePath_InputBoundaries(t *testing.T) {
+	config := &indexpb.StorageConfig{StorageType: "local"}
+	for _, tc := range []struct {
+		name, source, address, bucket, want string
+		wantErr                             bool
+	}{
+		{name: "empty_source", want: "files/data"},
+		{name: "malformed_source", source: "s3://%zz/key", wantErr: true},
+		{name: "local_source", source: "/local/metadata.json", want: "files/data"},
+		{name: "missing_bucket", source: "s3://minio/metadata.json", wantErr: true},
+		{name: "malformed_address", source: "s3://minio/metadata.json", bucket: "minio", address: "http://%zz", wantErr: true},
+		{name: "bucket_source_without_address", source: "s3://minio/metadata.json", bucket: "minio", want: "s3://minio/files/data"},
+		{name: "legacy_endpoint_without_address", source: "minio://localhost:9000/minio/metadata.json", bucket: "minio", want: "minio://localhost:9000/minio/files/data"},
+		{name: "other_host_without_address", source: "s3://other/metadata.json", bucket: "minio", want: "s3://other/files/data"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			prefix := ExtfsPrefixForCollection(42)
+			props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+				prefix + "address": tc.address, prefix + "bucket_name": tc.bucket,
+			})
+			require.NoError(t, err)
+			defer FreeProperties(props)
+			extfs := ExternalSpecContext{CollectionID: 42, Source: tc.source}
+			got, err := resolveExternalSourcePath("files/data", props, extfs)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Empty(t, got)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestNormalizeExternalPathForFilesystemForm_InputBoundaries(t *testing.T) {
+	config := &indexpb.StorageConfig{StorageType: "local"}
+	extfs := ExternalSpecContext{CollectionID: 42, Source: "s3://minio/metadata.json"}
+	lookupPath, key, err := normalizeExternalPathForFilesystemForm("files/data", nil, extfs, externalPathResolved)
+	require.NoError(t, err)
+	assert.Equal(t, "files/data", lookupPath)
+	assert.Equal(t, "files/data", key)
+
+	prefix := ExtfsPrefixForCollection(42)
+	props, err := MakePropertiesFromStorageConfig(config, map[string]string{
+		prefix + "address": "http://%zz", prefix + "bucket_name": "minio",
+	})
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	for _, path := range []string{"files/data", "s3://other-bucket/data"} {
+		lookupPath, key, err = normalizeExternalPathForFilesystemForm(path, props, extfs, externalPathResolved)
+		require.Error(t, err)
+		assert.Empty(t, lookupPath)
+		assert.Empty(t, key)
+	}
+}
+
+func TestExternalFileReaders_LocalBackend(t *testing.T) {
+	tmpDir := t.TempDir()
+	config := &indexpb.StorageConfig{StorageType: "local", BucketName: tmpDir, RootPath: tmpDir}
+	path := filepath.Join(tmpDir, "metadata.json")
+	data := []byte(`{"format_version":4}`)
+	require.NoError(t, WriteFile(config, path, data))
+	got, err := ReadFile(config, path)
+	require.NoError(t, err)
+	assert.Equal(t, data, got)
+	got, err = readExternalSourceFile(config, path, ExternalSpecContext{})
+	require.NoError(t, err)
+	assert.Equal(t, data, got)
+
+	emptyPath := filepath.Join(tmpDir, "empty.json")
+	require.NoError(t, WriteFile(config, emptyPath, nil))
+	got, err = ReadFile(config, emptyPath)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+
+	_, err = ReadFile(config, filepath.Join(tmpDir, "missing.json"))
+	require.Error(t, err)
+	_, err = ReadFile(nil, path)
+	require.Error(t, err)
+	_, err = ReadFileWithExternalSpec(config, path, ExternalSpecContext{
+		CollectionID: 42, Source: "s3://minio/metadata.json",
+		Spec: `{"format":"milvus-table","extfs":{"endpoint_url":"http://user@minio"}}`,
+	})
+	require.Error(t, err)
+	patch := mockey.Mock(normalizeExternalPathForFilesystemForm).
+		Return("", "", fmt.Errorf("path normalization failed")).Build()
+	_, err = ReadFile(config, path)
+	patch.UnPatch()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "normalize external file path")
+	_, err = ReadFile(&indexpb.StorageConfig{StorageType: "unsupported"}, path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get filesystem")
+}
+
+func TestReadMilvusTableSnapshotMetadata_InputBoundaries(t *testing.T) {
+	config := &indexpb.StorageConfig{StorageType: "local"}
+	spec := `{"format":"milvus-table"}`
+	_, err := ReadMilvusTableSnapshotMetadata("metadata.avro", spec, config, ExternalSpecContext{})
+	require.Error(t, err)
+	_, err = ReadMilvusTableSnapshotMetadata("metadata.json", spec, nil, ExternalSpecContext{})
+	require.Error(t, err)
+	patch := mockey.Mock(readFileWithExternalSpec).Return([]byte("not JSON"), nil).Build()
+	defer patch.UnPatch()
+	_, err = ReadMilvusTableSnapshotMetadata("metadata.json", spec, config, ExternalSpecContext{})
+	require.Error(t, err)
+}
+
+func TestNormalizeExternalSourcePath_UsesInjectedExtfsEndpoint(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
@@ -987,11 +1251,11 @@ func TestNormalizeExternalPathForStorage_UsesInjectedExtfsEndpoint(t *testing.T)
 	defer FreeProperties(props)
 	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
 
-	got, err := normalizeExternalPathForStorage(extfs.Source, props, extfs)
+	got, err := normalizeExternalSourcePath(extfs.Source, props, extfs)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/all_types_v2/", got)
 
-	got, err = normalizeExternalPathForStorage("s3://liyiyang-test/a/b/file.parquet?versionId=1", props, extfs)
+	got, err = normalizeExternalSourcePath("s3://liyiyang-test/a/b/file.parquet?versionId=1", props, extfs)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/a/b/file.parquet?versionId=1", got)
 }
@@ -1046,7 +1310,139 @@ func TestInjectExternalSpecProperties_Boundaries(t *testing.T) {
 	require.Error(t, injectExternalSpecProperties(props, 42, "invalid", ""))
 }
 
-func TestNormalizeExternalPathForStorage_EndpointFormUnchanged(t *testing.T) {
+func TestNormalizeExternalSourcePath_UsesExplicitEndpointURL(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://iceberg-warehouse/metadata/v1.json",
+		Spec:         `{"format":"iceberg-table","extfs":{"endpoint_url":"http://rook-ceph-rgw.storage.svc:80","cloud_provider":"minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk","use_virtual_host":"false"}}`,
+	}
+
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+	assert.Equal(t, "http://rook-ceph-rgw.storage.svc:80", loonPropertyString(props, prefix+"address"))
+	assert.Equal(t, "iceberg-warehouse", loonPropertyString(props, prefix+"bucket_name"))
+	assert.Equal(t, "false", loonPropertyString(props, prefix+"use_ssl"))
+
+	got, err := normalizeExternalSourcePath(extfs.Source, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://rook-ceph-rgw.storage.svc:80/iceberg-warehouse/metadata/v1.json", got)
+
+	got, err = normalizeExternalSourcePath("s3://iceberg-warehouse/data/part-00001.parquet", props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://rook-ceph-rgw.storage.svc:80/iceberg-warehouse/data/part-00001.parquet", got)
+}
+
+func TestNormalizeExternalSourcePath_ExplicitEndpointPathForms(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	for _, test := range []struct {
+		name     string
+		source   string
+		endpoint string
+		want     string
+	}{
+		{
+			name:     "regular_key",
+			source:   "s3://minio/metadata/v1.json",
+			endpoint: "http://minio",
+			want:     "s3://minio/minio/metadata/v1.json",
+		},
+		{
+			name:     "key_starts_with_bucket",
+			source:   "s3://minio/minio/metadata/v1.json",
+			endpoint: "http://minio",
+			want:     "s3://minio/minio/minio/metadata/v1.json",
+		},
+		{
+			name:     "bucket_root",
+			source:   "s3://minio",
+			endpoint: "http://minio",
+			want:     "s3://minio/minio/",
+		},
+		{
+			name:     "bucket_root_with_slash",
+			source:   "s3://minio/",
+			endpoint: "http://minio",
+			want:     "s3://minio/minio/",
+		},
+		{
+			name:     "bucket_root_different_endpoint",
+			source:   "s3://minio",
+			endpoint: "http://storage:9000",
+			want:     "s3://storage:9000/minio/",
+		},
+		{
+			name:     "bucket_root_with_slash_different_endpoint",
+			source:   "s3://minio/",
+			endpoint: "http://storage:9000",
+			want:     "s3://storage:9000/minio/",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			extfs := ExternalSpecContext{
+				CollectionID: 42,
+				Source:       test.source,
+				Spec:         fmt.Sprintf(`{"format":"parquet","extfs":{"endpoint_url":%q,"region":"us-east-1","access_key_id":"ak","access_key_value":"sk"}}`, test.endpoint),
+			}
+			props, err := MakePropertiesFromStorageConfig(config, nil)
+			require.NoError(t, err)
+			defer FreeProperties(props)
+			require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+			prefix := ExtfsPrefixForCollection(extfs.CollectionID)
+			assert.Equal(t, test.endpoint, loonPropertyString(props, prefix+"address"))
+			assert.Equal(t, "minio", loonPropertyString(props, prefix+"bucket_name"))
+
+			got, err := normalizeExternalSourcePath(extfs.Source, props, extfs)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, got)
+
+			gotAgain, err := normalizeExternalResolvedPath(got, props, extfs)
+			require.NoError(t, err)
+			assert.Equal(t, got, gotAgain)
+		})
+	}
+}
+
+func TestNormalizeExternalSourcePath_EqualHostUsesDeclaredPathForm(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://minio/metadata/v1.json",
+		Spec:         `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	path := "s3://minio/minio/files/insert_log/1"
+	got, err := normalizeExternalSourcePath(path, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://minio/minio/minio/files/insert_log/1", got)
+
+	got, err = normalizeExternalResolvedPath(path, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, path, got)
+}
+
+func TestNormalizeExternalSourcePath_EndpointFormUnchanged(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
@@ -1064,12 +1460,12 @@ func TestNormalizeExternalPathForStorage_EndpointFormUnchanged(t *testing.T) {
 	defer FreeProperties(props)
 	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
 
-	got, err := normalizeExternalPathForStorage(source, props, extfs)
+	got, err := normalizeExternalSourcePath(source, props, extfs)
 	require.NoError(t, err)
 	assert.Equal(t, source, got)
 }
 
-func TestNormalizeExternalPathForStorage_NoRewriteCases(t *testing.T) {
+func TestNormalizeExternalSourcePath_NoRewriteCases(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
@@ -1085,11 +1481,11 @@ func TestNormalizeExternalPathForStorage_NoRewriteCases(t *testing.T) {
 
 	path := "s3://liyiyang-test/all_types_v2/"
 
-	got, err := normalizeExternalPathForStorage(path, props, ExternalSpecContext{CollectionID: 42})
+	got, err := normalizeExternalSourcePath(path, props, ExternalSpecContext{CollectionID: 42})
 	require.NoError(t, err)
 	assert.Equal(t, path, got)
 
-	got, err = normalizeExternalPathForStorage(
+	got, err = normalizeExternalSourcePath(
 		path,
 		nil,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
@@ -1097,7 +1493,7 @@ func TestNormalizeExternalPathForStorage_NoRewriteCases(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, path, got)
 
-	got, err = normalizeExternalPathForStorage(
+	got, err = normalizeExternalSourcePath(
 		"relative/path",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
@@ -1105,16 +1501,31 @@ func TestNormalizeExternalPathForStorage_NoRewriteCases(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "relative/path", got)
 
-	got, err = normalizeExternalPathForStorage(
+	got, err = normalizeExternalSourcePath(
 		"s3://other-bucket/all_types_v2/",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://other-bucket/all_types_v2/", got)
+
+	equalProps, err := MakePropertiesFromStorageConfig(config, map[string]string{
+		prefix + "address":     "http://minio",
+		prefix + "bucket_name": "minio",
+	})
+	require.NoError(t, err)
+	defer FreeProperties(equalProps)
+	legacyPath := "s3://minio/metadata/v1.json"
+	got, err = normalizeExternalSourcePath(
+		legacyPath,
+		equalProps,
+		ExternalSpecContext{CollectionID: 42, Source: legacyPath},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, legacyPath, got)
 }
 
-func TestNormalizeExternalPathForStorage_BareAddress(t *testing.T) {
+func TestNormalizeExternalSourcePath_BareAddress(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
@@ -1128,7 +1539,7 @@ func TestNormalizeExternalPathForStorage_BareAddress(t *testing.T) {
 	require.NoError(t, err)
 	defer FreeProperties(props)
 
-	got, err := normalizeExternalPathForStorage(
+	got, err := normalizeExternalSourcePath(
 		"s3://liyiyang-test/all_types_v2/",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://liyiyang-test/all_types_v2/"},
@@ -1137,7 +1548,7 @@ func TestNormalizeExternalPathForStorage_BareAddress(t *testing.T) {
 	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/liyiyang-test/all_types_v2/", got)
 }
 
-func TestResolveExternalSourceRelativePath_UsesSourceBucketRoot(t *testing.T) {
+func TestResolveExternalSourcePath_UsesSourceBucketRoot(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
@@ -1154,12 +1565,12 @@ func TestResolveExternalSourceRelativePath_UsesSourceBucketRoot(t *testing.T) {
 	defer FreeProperties(props)
 	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
 
-	got, err := resolveExternalSourceRelativePath("files/insert_log/1/2/3", props, extfs)
+	got, err := resolveExternalSourcePath("files/insert_log/1/2/3", props, extfs)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://s3.us-west-2.amazonaws.com/source-bucket/files/insert_log/1/2/3", got)
 }
 
-func TestNormalizeExternalPathForFilesystem_RemoteURI(t *testing.T) {
+func TestNormalizeExternalPathForFilesystemForm_RemoteURI(t *testing.T) {
 	config := &indexpb.StorageConfig{
 		StorageType: "local",
 		BucketName:  "/tmp",
@@ -1173,41 +1584,95 @@ func TestNormalizeExternalPathForFilesystem_RemoteURI(t *testing.T) {
 	require.NoError(t, err)
 	defer FreeProperties(props)
 
-	lookupPath, filePath, err := normalizeExternalPathForFilesystem(
+	lookupPath, filePath, err := normalizeExternalPathForFilesystemForm(
 		"s3://localhost:9000/a-bucket/files/snapshots/metadata.json",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://localhost:9000/a-bucket/files/"},
+		externalPathSource,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://localhost:9000/a-bucket/files/snapshots/metadata.json", lookupPath)
 	assert.Equal(t, "files/snapshots/metadata.json", filePath)
 
-	lookupPath, filePath, err = normalizeExternalPathForFilesystem(
+	lookupPath, filePath, err = normalizeExternalPathForFilesystemForm(
 		"s3://a-bucket/files/snapshots/metadata.json",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://a-bucket/files/"},
+		externalPathSource,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://localhost:9000/a-bucket/files/snapshots/metadata.json", lookupPath)
 	assert.Equal(t, "files/snapshots/metadata.json", filePath)
 
-	lookupPath, filePath, err = normalizeExternalPathForFilesystem(
+	lookupPath, filePath, err = normalizeExternalPathForFilesystemForm(
 		"s3://other-bucket/files/snapshots/metadata.json",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://a-bucket/files/"},
+		externalPathSource,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://other-bucket/files/snapshots/metadata.json", lookupPath)
 	assert.Equal(t, "s3://other-bucket/files/snapshots/metadata.json", filePath)
 
-	lookupPath, filePath, err = normalizeExternalPathForFilesystem(
+	lookupPath, filePath, err = normalizeExternalPathForFilesystemForm(
 		"files/source/_delta/9001",
 		props,
 		ExternalSpecContext{CollectionID: 42, Source: "s3://a-bucket/snapshots/100/metadata/200.json"},
+		externalPathSource,
 	)
 	require.NoError(t, err)
 	assert.Equal(t, "s3://localhost:9000/a-bucket/files/source/_delta/9001", lookupPath)
 	assert.Equal(t, "files/source/_delta/9001", filePath)
+}
+
+func TestNormalizeExternalPathForFilesystemForm_EqualHostUsesDeclaredPathForm(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://minio/metadata/v1.json",
+		Spec:         `{"format":"milvus-table","extfs":{"endpoint_url":"http://minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+	props, err := MakePropertiesFromStorageConfig(config, nil)
+	require.NoError(t, err)
+	defer FreeProperties(props)
+	require.NoError(t, injectExternalSpecProperties(props, extfs.CollectionID, extfs.Source, extfs.Spec))
+
+	path := "s3://minio/minio/files/insert_log/1"
+	lookupPath, filePath, err := normalizeExternalPathForFilesystemForm(path, props, extfs, externalPathSource)
+	require.NoError(t, err)
+	assert.Equal(t, "s3://minio/minio/minio/files/insert_log/1", lookupPath)
+	assert.Equal(t, "minio/files/insert_log/1", filePath)
+
+	lookupPath, filePath, err = normalizeExternalResolvedPathForFilesystem(path, props, extfs)
+	require.NoError(t, err)
+	assert.Equal(t, path, lookupPath)
+	assert.Equal(t, "files/insert_log/1", filePath)
+}
+
+func TestResolveFFIReaderFragments_EqualHostPreservesResolvedPaths(t *testing.T) {
+	config := &indexpb.StorageConfig{
+		StorageType: "local",
+		BucketName:  "/tmp",
+		RootPath:    "/tmp",
+	}
+	extfs := ExternalSpecContext{
+		CollectionID: 42,
+		Source:       "s3://minio/metadata/v1.json",
+		Spec:         `{"format":"parquet","extfs":{"endpoint_url":"http://minio","region":"us-east-1","access_key_id":"ak","access_key_value":"sk"}}`,
+	}
+	fragments := []Fragment{{
+		FilePath: "s3://minio/minio/files/insert_log/1",
+		RowCount: 1,
+	}}
+
+	resolved, err := resolveFFIReaderFragments(fragments, config, extfs)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, fragments[0].FilePath, resolved[0].FilePath)
 }
 
 // ==================== SampleExternalFieldSizes Tests ====================

@@ -127,6 +127,15 @@ ParsePlaceholderGroup(const Plan* plan,
     milvus::proto::common::PlaceholderGroup ph_group;
     auto ok = ph_group.ParseFromArray(blob, blob_len);
     Assert(ok);
+    // A zero-placeholder group parses fine (the loop body just never runs) but
+    // every consumer indexes it: GetNumOfQueries is group->at(0) and returns
+    // through a plain int64_t, so std::out_of_range would cross the C ABI and
+    // terminate the process. Reject it here, inside a CStatus channel, which
+    // fixes every downstream consumer at once.
+    if (ph_group.placeholders_size() == 0) {
+        ThrowInfo(ErrorCode::InvalidParameter,
+                  "placeholder group contains no placeholder");
+    }
     for (auto& ph : ph_group.placeholders()) {
         Placeholder element;
         element.tag_ = ph.tag();

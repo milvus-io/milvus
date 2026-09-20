@@ -1,6 +1,8 @@
 package message
 
 import (
+	"context"
+
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -191,6 +193,37 @@ type ImmutableMessage interface {
 	IntoBroadcastMutableMessage() BroadcastMutableMessage
 }
 
+// OwnedImmutableMessage owns the root reference to one immutable message.
+// Clone creates independently releasable references for consumers.
+type OwnedImmutableMessage interface {
+	Message() ImmutableMessage
+	Clone() RetainedImmutableMessage
+	RegisterExclusiveCallback(callback func())
+	Release()
+}
+
+// RetainedImmutableMessage owns one independently releasable reference.
+type RetainedImmutableMessage interface {
+	Message() ImmutableMessage
+	Clone() RetainedImmutableMessage
+	Release()
+	// PoisonedRelease marks the message poisoned (the owning segment can no
+	// longer process it, so a consumer must handle it separately) and releases
+	// this reference. Releasing is otherwise identical to Release: the
+	// reference is dropped normally and the shared message is finalized once
+	// the last reference goes away.
+	PoisonedRelease()
+	// IntoPoisoned marks the message poisoned without releasing this reference.
+	// Use it when the caller still owns the reference (e.g. an incoming observe
+	// handle that must not be released here): the mark is shared with every
+	// other handle of the same message, so a consumer holding any handle can
+	// observe the poison.
+	IntoPoisoned()
+	// IsPoisoned reports whether the message has been poisoned.
+	IsPoisoned() bool
+	retainedImmutableMessage()
+}
+
 // ImmutableTxnMessage is the read-only transaction message interface.
 // Once a transaction is committed, the wal will generate a transaction message.
 // The MessageType() is always return MessageTypeTransaction if it's a transaction message.
@@ -219,11 +252,11 @@ type SpecializedBroadcastMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body returns the message body.
-	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
-	Body() (B, error)
+	// Body decrypts and unmarshals the message body on every call.
+	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
+	Body(ctx context.Context) (B, error)
 
-	// MustBody return the message body, panic if error occurs.
+	// MustBody is Body with context.Background(), it panics on any error.
 	MustBody() B
 
 	// OverwriteHeader overwrites the message header.
@@ -244,11 +277,11 @@ type specializedMutableMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body returns the message body.
-	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
-	Body() (B, error)
+	// Body decrypts and unmarshals the message body on every call.
+	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
+	Body(ctx context.Context) (B, error)
 
-	// MustBody return the message body, panic if error occurs.
+	// MustBody is Body with context.Background(), it panics on any error.
 	MustBody() B
 
 	// OverwriteHeader overwrites the message header.
@@ -266,10 +299,52 @@ type SpecializedImmutableMessage[H proto.Message, B proto.Message] interface {
 	// Modifications to the returned header will be reflected in the message.
 	Header() H
 
-	// Body returns the message body.
-	// !!! Do these will trigger a unmarshal operation, so it should be used with caution.
-	Body() (B, error)
+	// Body decrypts and unmarshals the message body on every call.
+	// An error wrapping ErrMalformedBody means the payload was read but is not a valid body.
+	Body(ctx context.Context) (B, error)
 
-	// MustBody return the message body, panic if error occurs.
+	// MustBody is Body with context.Background(), it panics on any error.
 	MustBody() B
+}
+
+// SpecializedOwnedImmutableMessage is the owned form of a specialized
+// immutable message.
+type SpecializedOwnedImmutableMessage[H proto.Message, B proto.Message] interface {
+	Message() SpecializedImmutableMessage[H, B]
+	Clone() SpecializedRetainedImmutableMessage[H, B]
+	CloneHandle() RetainedImmutableMessage
+	Untyped() OwnedImmutableMessage
+}
+
+// SpecializedRetainedImmutableMessage is the retained form of a specialized
+// immutable message.
+type SpecializedRetainedImmutableMessage[H proto.Message, B proto.Message] interface {
+	Message() SpecializedImmutableMessage[H, B]
+	Clone() SpecializedRetainedImmutableMessage[H, B]
+	CloneHandle() RetainedImmutableMessage
+	Release()
+	PoisonedRelease()
+	IntoPoisoned()
+	IsPoisoned() bool
+}
+
+// OwnedImmutableTxnMessage owns the root reference to one assembled
+// transaction message.
+type OwnedImmutableTxnMessage interface {
+	Message() ImmutableTxnMessage
+	Clone() RetainedImmutableTxnMessage
+	CloneHandle() RetainedImmutableMessage
+	Untyped() OwnedImmutableMessage
+}
+
+// RetainedImmutableTxnMessage owns one independently releasable reference to
+// an assembled transaction message.
+type RetainedImmutableTxnMessage interface {
+	Message() ImmutableTxnMessage
+	Clone() RetainedImmutableTxnMessage
+	CloneHandle() RetainedImmutableMessage
+	Release()
+	PoisonedRelease()
+	IntoPoisoned()
+	IsPoisoned() bool
 }

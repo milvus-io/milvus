@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 )
 
 type ColumnBasedDataOptionSuite struct {
@@ -45,6 +46,36 @@ func (s *ColumnBasedDataOptionSuite) NullableCompatible() {
 	fd := req.GetFieldsData()[0]
 	s.ElementsMatch([]int64{1, 2, 3}, fd.GetScalars().GetLongData())
 	s.ElementsMatch([]bool{true, true, true}, fd.GetScalars().GetValidData())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestWithIdempotencyKey() {
+	opt := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithIdempotencyKey("key-1")
+	s.Equal("key-1", opt.IdempotencyKey())
+
+	rowOpt := NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithIdempotencyKey("key-1")
+	s.Equal("key-1", rowOpt.IdempotencyKey())
+
+	s.Empty(NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).IdempotencyKey())
+}
+
+func (s *ColumnBasedDataOptionSuite) TestUpsertRejectsIdempotencyKey() {
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64)),
+	}
+
+	_, err := NewColumnBasedInsertOption("c", column.NewColumnInt64("id", []int64{1})).
+		WithIdempotencyKey("key-1").
+		UpsertRequest(coll)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "only supported for Insert")
+
+	_, err = NewRowBasedInsertOption("c", map[string]any{"id": int64(1)}).
+		WithIdempotencyKey("key-1").
+		UpsertRequest(coll)
+	s.ErrorIs(err, merr.ErrParameterInvalid)
+	s.ErrorContains(err, "only supported for Insert")
 }
 
 func (s *ColumnBasedDataOptionSuite) TestWithStructArrayColumn() {
@@ -356,6 +387,38 @@ func (s *ColumnBasedDataOptionSuite) TestRowBasedWithNamespaceKeepsRows() {
 	s.Equal(namespace, upsertReq.GetNamespace())
 	s.EqualValues(1, upsertReq.GetNumRows())
 	s.Len(upsertReq.GetFieldsData(), 2)
+}
+
+func (s *ColumnBasedDataOptionSuite) TestRowBasedAutoIDUpsertKeepsLookupPrimaryKey() {
+	collName := "auto_id_row_upsert"
+	coll := &entity.Collection{
+		Schema: entity.NewSchema().WithName(collName).
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true).WithIsAutoID(true)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(2)),
+	}
+	rows := []any{map[string]any{
+		"id":     int64(7),
+		"vector": []float32{0.1, 0.2},
+	}}
+	opt := NewRowBasedInsertOption(collName, rows...)
+
+	insertReq, err := opt.InsertRequest(coll)
+	s.Require().NoError(err)
+	for _, field := range insertReq.GetFieldsData() {
+		s.NotEqual("id", field.GetFieldName())
+	}
+
+	upsertReq, err := opt.UpsertRequest(coll)
+	s.Require().NoError(err)
+	var primaryKey *schemapb.FieldData
+	for _, field := range upsertReq.GetFieldsData() {
+		if field.GetFieldName() == "id" {
+			primaryKey = field
+			break
+		}
+	}
+	s.Require().NotNil(primaryKey)
+	s.Equal([]int64{7}, primaryKey.GetScalars().GetLongData().GetData())
 }
 
 func TestRowBasedDataOption(t *testing.T) {

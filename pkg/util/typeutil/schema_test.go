@@ -1140,6 +1140,278 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 	return fieldData
 }
 
+func TestCreateFieldDataRangeView(t *testing.T) {
+	t.Run("scalar and compact nullable vector", func(t *testing.T) {
+		longData := []int64{10, 20, 30, 40}
+		jsonData := [][]byte{[]byte(`{"row":0}`), []byte(`{"row":1}`), []byte(`{"row":2}`), []byte(`{"row":3}`)}
+		validData := []bool{true, false, true, true}
+		floatData := []float32{1, 2, 3, 4, 5, 6}
+		src := []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_Int64,
+				FieldId: 100,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: longData}},
+				}},
+			},
+			{
+				Type:      schemapb.DataType_JSON,
+				FieldId:   101,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: jsonData}},
+				}},
+			},
+			{
+				Type:    schemapb.DataType_FloatVector,
+				FieldId: 102,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					ValidData: validData,
+					Dim:       2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: floatData},
+					},
+				}},
+			},
+		}
+
+		idxComputer := NewFieldDataIdxComputer(src)
+		dataStarts := append([]int64(nil), idxComputer.Compute(1)...)
+		dataEnds := append([]int64(nil), idxComputer.Compute(4)...)
+		view, ok := CreateFieldDataRangeView(src, 1, 4, dataStarts, dataEnds)
+		require.True(t, ok)
+
+		expected := make([]*schemapb.FieldData, len(src))
+		expectedIdxComputer := NewFieldDataIdxComputer(src)
+		for row := int64(1); row < 4; row++ {
+			fieldIdxs := expectedIdxComputer.Compute(row)
+			AppendFieldData(expected, src, row, fieldIdxs...)
+		}
+		for i := range expected {
+			assert.True(t, proto.Equal(expected[i], view[i]))
+		}
+
+		assert.True(t, &longData[1] == &view[0].GetScalars().GetLongData().Data[0])
+		assert.True(t, &jsonData[1] == &view[1].GetScalars().GetJsonData().Data[0])
+		assert.True(t, &floatData[2] == &view[2].GetVectors().GetFloatVector().Data[0])
+		assert.Nil(t, view[2].GetValidData())
+		assert.True(t, &validData[1] == &view[2].GetVectors().ValidData[0])
+	})
+
+	t.Run("recursive array", func(t *testing.T) {
+		intArray := func(values ...int32) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{Data: values},
+				},
+			}
+		}
+		array := func(values ...*schemapb.ScalarField) *schemapb.ScalarField {
+			return &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_ArrayData{
+					ArrayData: &schemapb.ArrayArray{
+						Data:        values,
+						ElementType: schemapb.DataType_Array,
+					},
+				},
+			}
+		}
+		rows := []*schemapb.ScalarField{
+			array(intArray(1)),
+			array(intArray(2), intArray(3)),
+			array(intArray(4)),
+		}
+		src := []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_Array,
+				FieldId: 100,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+						Data:        rows,
+						ElementType: schemapb.DataType_Array,
+					}},
+				}},
+			},
+		}
+
+		view, ok := CreateFieldDataRangeView(src, 1, 3, nil, nil)
+		require.True(t, ok)
+		assert.Equal(t, rows[1:3], view[0].GetScalars().GetArrayData().GetData())
+		assert.Same(t, rows[1], view[0].GetScalars().GetArrayData().GetData()[0])
+	})
+
+	t.Run("all-null vector keeps oneof unset", func(t *testing.T) {
+		src := []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_FloatVector,
+				FieldId: 100,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					ValidData: []bool{true, false, true},
+					Dim:       2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{Data: []float32{1, 2, 3, 4}},
+					},
+				}},
+			},
+		}
+		idxComputer := NewFieldDataIdxComputer(src)
+		dataStarts := append([]int64(nil), idxComputer.Compute(1)...)
+		dataEnds := append([]int64(nil), idxComputer.Compute(2)...)
+		view, ok := CreateFieldDataRangeView(src, 1, 2, dataStarts, dataEnds)
+		require.True(t, ok)
+		assert.Nil(t, view[0].GetVectors().GetData())
+		assert.Nil(t, view[0].GetValidData())
+		assert.Equal(t, []bool{false}, GetFieldDataValidData(view[0]))
+	})
+
+	t.Run("sparse vector recalculates selected dim", func(t *testing.T) {
+		rows := [][]byte{
+			CreateSparseFloatRow([]uint32{2}, []float32{1}),
+			CreateSparseFloatRow([]uint32{9}, []float32{2}),
+			CreateSparseFloatRow([]uint32{4}, []float32{3}),
+		}
+		src := []*schemapb.FieldData{
+			{
+				Type:    schemapb.DataType_SparseFloatVector,
+				FieldId: 100,
+				Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+					Dim: 10,
+					Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{
+						Contents: rows,
+						Dim:      10,
+					}},
+				}},
+			},
+		}
+		idxComputer := NewFieldDataIdxComputer(src)
+		dataStarts := append([]int64(nil), idxComputer.Compute(0)...)
+		dataEnds := append([]int64(nil), idxComputer.Compute(1)...)
+		view, ok := CreateFieldDataRangeView(src, 0, 1, dataStarts, dataEnds)
+		require.True(t, ok)
+		assert.EqualValues(t, 3, view[0].GetVectors().GetSparseFloatVector().GetDim())
+		assert.True(t, &rows[0] == &view[0].GetVectors().GetSparseFloatVector().Contents[0])
+	})
+
+	t.Run("remaining vector encodings", func(t *testing.T) {
+		cases := []struct {
+			name string
+			fd   *schemapb.FieldData
+		}{
+			{
+				name: "binary",
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_BinaryVector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  8,
+						Data: &schemapb.VectorField_BinaryVector{BinaryVector: []byte{1, 2, 3}},
+					}},
+				},
+			},
+			{
+				name: "float16",
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_Float16Vector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Float16Vector{Float16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}},
+					}},
+				},
+			},
+			{
+				name: "bfloat16",
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_BFloat16Vector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Bfloat16Vector{Bfloat16Vector: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}},
+					}},
+				},
+			},
+			{
+				name: "int8",
+				fd: &schemapb.FieldData{
+					Type: schemapb.DataType_Int8Vector, FieldId: 100,
+					Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+						Dim:  2,
+						Data: &schemapb.VectorField_Int8Vector{Int8Vector: []byte{1, 2, 3, 4, 5, 6}},
+					}},
+				},
+			},
+			{
+				name: "vector array",
+				fd:   newArrayOfVectorFieldData(100, "vectors", 1, schemapb.DataType_FloatVector, 3),
+			},
+		}
+
+		for _, test := range cases {
+			t.Run(test.name, func(t *testing.T) {
+				src := []*schemapb.FieldData{test.fd}
+				idxComputer := NewFieldDataIdxComputer(src)
+				dataStarts := append([]int64(nil), idxComputer.Compute(1)...)
+				dataEnds := append([]int64(nil), idxComputer.Compute(3)...)
+				view, ok := CreateFieldDataRangeView(src, 1, 3, dataStarts, dataEnds)
+				require.True(t, ok)
+
+				expected := make([]*schemapb.FieldData, 1)
+				expectedIdxComputer := NewFieldDataIdxComputer(src)
+				for row := int64(1); row < 3; row++ {
+					fieldIdxs := expectedIdxComputer.Compute(row)
+					AppendFieldData(expected, src, row, fieldIdxs...)
+				}
+				assert.True(t, proto.Equal(expected[0], view[0]))
+			})
+		}
+	})
+}
+
+var benchmarkFieldDataRangeViewSink []*schemapb.FieldData
+
+func BenchmarkCreateFieldDataRangeView(b *testing.B) {
+	const (
+		rows = 1024
+		dim  = 768
+	)
+	vectorData := make([]float32, rows*dim)
+	src := []*schemapb.FieldData{
+		{
+			Type:    schemapb.DataType_FloatVector,
+			FieldId: 100,
+			Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_FloatVector{
+					FloatVector: &schemapb.FloatArray{Data: vectorData},
+				},
+			}},
+		},
+	}
+
+	b.Run("range_view", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(vectorData) * 4))
+		for range b.N {
+			view, ok := CreateFieldDataRangeView(src, 0, rows, nil, nil)
+			if !ok {
+				b.Fatal("failed to create field data range view")
+			}
+			benchmarkFieldDataRangeViewSink = view
+		}
+	})
+
+	b.Run("append_rows", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(vectorData) * 4))
+		for range b.N {
+			dst := make([]*schemapb.FieldData, len(src))
+			idxComputer := NewFieldDataIdxComputer(src)
+			for row := int64(0); row < rows; row++ {
+				fieldIdxs := idxComputer.Compute(row)
+				AppendFieldData(dst, src, row, fieldIdxs...)
+			}
+			benchmarkFieldDataRangeViewSink = dst
+		}
+	})
+}
+
 func TestAppendFieldData(t *testing.T) {
 	const (
 		Dim                        = 8
@@ -2903,6 +3175,72 @@ func TestParseJsonSparseFloatRow(t *testing.T) {
 		_, err := CreateSparseFloatRowFromMap(row)
 		assert.Error(t, err)
 	})
+}
+
+func TestParseJsonSparseFloatRowDictIndexBase(t *testing.T) {
+	// The dict format documents its keys as decimal indices
+	// ({"1": 0.1, "2": 0.2}). Keys must therefore be read in base 10 only:
+	// inferring the base from the prefix silently maps "010" to index 8 and
+	// accepts non-decimal spellings such as "0x10" or "0b11".
+	type testCase struct {
+		name        string
+		row         map[string]interface{}
+		expectedErr bool
+		expected    []byte
+	}
+	cases := []testCase{
+		{
+			name:     "plain decimal key",
+			row:      map[string]interface{}{"10": 0.5},
+			expected: CreateSparseFloatRow([]uint32{10}, []float32{0.5}),
+		},
+		{
+			name:     "zero padded decimal key",
+			row:      map[string]interface{}{"010": 0.5},
+			expected: CreateSparseFloatRow([]uint32{10}, []float32{0.5}),
+		},
+		{
+			name:     "multiple zero padded decimal keys",
+			row:      map[string]interface{}{"01": 1.0, "0003": 2.0},
+			expected: CreateSparseFloatRow([]uint32{1, 3}, []float32{1.0, 2.0}),
+		},
+		{
+			name:        "hexadecimal key rejected",
+			row:         map[string]interface{}{"0x10": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "binary key rejected",
+			row:         map[string]interface{}{"0b11": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "octal key rejected",
+			row:         map[string]interface{}{"0o11": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "underscore separated key rejected",
+			row:         map[string]interface{}{"1_0": 0.5},
+			expectedErr: true,
+		},
+		{
+			name:        "non numeric key rejected",
+			row:         map[string]interface{}{"a": 0.5},
+			expectedErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := CreateSparseFloatRowFromMap(tc.row)
+			if tc.expectedErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, res)
+		})
+	}
 }
 
 func TestParseJsonSparseFloatRowBytes(t *testing.T) {

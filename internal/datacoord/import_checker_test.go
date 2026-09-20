@@ -55,6 +55,7 @@ type ImportCheckerSuite struct {
 
 func (s *ImportCheckerSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -392,6 +393,52 @@ func (s *ImportCheckerSuite) TestCheckTimeout() {
 	job := s.importMeta.GetJob(context.TODO(), s.jobID)
 	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 	s.Equal("import timeout", job.GetReason())
+}
+
+// A committing job has already broadcast its commit fence, and its per-vchannel
+// callbacks may have made segments visible to queries, so a timeout must leave it
+// alone rather than fail it and drop those segments.
+func (s *ImportCheckerSuite) TestCheckTimeoutSkipCommittingJob() {
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	s.NoError(err)
+
+	s.checker.tryTimeoutJob(s.importMeta.GetJob(context.TODO(), s.jobID))
+
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
+	s.Empty(job.GetReason())
+}
+
+// runGCLoop evaluates a snapshot taken at the start of the tick. A job that
+// entered Committing after the snapshot must still not be failed.
+func (s *ImportCheckerSuite) TestCheckTimeoutStaleSnapshotCommittingJob() {
+	err := s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Uncommitted))
+	s.NoError(err)
+	staleSnapshot := s.importMeta.GetJob(context.TODO(), s.jobID)
+
+	err = s.importMeta.UpdateJob(context.TODO(), s.jobID, UpdateJobState(internalpb.ImportJobState_Committing))
+	s.NoError(err)
+
+	s.checker.tryTimeoutJob(staleSnapshot)
+
+	// Only the state is asserted: UpdateJobReason in the same UpdateJob call still
+	// applies, and reason is surfaced to clients only for Failed jobs.
+	job := s.importMeta.GetJob(context.TODO(), s.jobID)
+	s.Equal(internalpb.ImportJobState_Committing, job.GetState())
+}
+
+func (s *ImportCheckerSuite) TestUpdateJobStateRefusesFailingCommittedJob() {
+	for _, state := range []internalpb.ImportJobState{
+		internalpb.ImportJobState_Committing,
+		internalpb.ImportJobState_Completed,
+	} {
+		job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: state}}
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		s.Equal(state, job.GetState())
+	}
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Uncommitted}}
+	UpdateJobState(internalpb.ImportJobState_Failed)(job)
+	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
 }
 
 func (s *ImportCheckerSuite) TestCheckFailure() {
@@ -849,6 +896,7 @@ func TestImportCheckerCompaction(t *testing.T) {
 
 	// prepare objects
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)

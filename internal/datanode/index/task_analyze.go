@@ -234,6 +234,15 @@ func (at *analyzeTask) GetState() indexpb.JobState {
 }
 
 func (at *analyzeTask) Reset() {
+	// Reset runs from processTask's deferred cleanup on every exit path, including
+	// the canceled one where PostExecute -- the only other place that releases the
+	// analyze object -- is skipped. Delete is idempotent.
+	if at.analyze != nil {
+		if err := at.analyze.Delete(); err != nil {
+			mlog.Warn(at.ctx, "failed to release analyze object on task reset", mlog.Err(err))
+		}
+		at.analyze = nil
+	}
 	at.ident = ""
 	at.ctx = nil
 	at.cancel = nil

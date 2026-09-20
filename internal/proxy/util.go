@@ -28,7 +28,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
@@ -653,6 +652,20 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 	return nil
 }
 
+func validateElementNullable(field *schemapb.FieldSchema) error {
+	if !field.GetElementNullable() {
+		return nil
+	}
+	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
+	}
+	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is not supported for nested Array field %s", field.GetName())
+	}
+	// TODO: temporarily disable element nullable until all parts ready
+	return merr.WrapErrParameterInvalidMsg("element_nullable is not supported yet, field name = %s", field.GetName())
+}
+
 func validateFieldType(schema *schemapb.CollectionSchema) error {
 	for _, field := range schema.GetFields() {
 		if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
@@ -722,6 +735,9 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
+	if err := validateElementNullable(field); err != nil {
+		return err
+	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
 		return err
 	}
@@ -778,6 +794,9 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	// validate field name
 	var err error
 	if err := validateFieldName(field.Name); err != nil {
+		return err
+	}
+	if err := validateElementNullable(field); err != nil {
 		return err
 	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
@@ -1549,6 +1568,22 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 	return dbNameData[0]
 }
 
+// GetIdempotencyKeyFromContext extracts the client-supplied idempotency key
+// from the incoming gRPC metadata (util.HeaderIdempotencyKey). It returns ""
+// when no key is present; when the header carries multiple values the last one
+// wins, matching the client-side overwrite semantics.
+func GetIdempotencyKeyFromContext(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	values := md.Get(util.HeaderIdempotencyKey)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[len(values)-1]
+}
+
 // GetCurDBNameFromRequestOrContext returns the database a request actually
 // operates on. It prefers the DbName carried in the request body (which is
 // what downstream handlers execute against, after DatabaseInterceptor has
@@ -1620,7 +1655,7 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 	// meanwhile, generating Sha256Password depends on raw password and encrypted password will not cache.
 	credInfo, err := privilege.GetPrivilegeCache().GetCredentialInfo(ctx, username)
 	if err != nil {
-		mlog.Error(context.TODO(), "found no credential", mlog.String("username", username), mlog.Err(err))
+		mlog.Error(ctx, "found no credential", mlog.String("username", username), mlog.Err(err))
 		return false
 	}
 
@@ -1630,9 +1665,12 @@ func passwordVerify(ctx context.Context, username, rawPwd string, privilegeCache
 		return sha256Pwd == credInfo.Sha256Password
 	}
 
-	// miss cache, verify against encrypted password from etcd
-	if err := bcrypt.CompareHashAndPassword([]byte(credInfo.EncryptedPassword), []byte(rawPwd)); err != nil {
-		mlog.Error(context.TODO(), "Verify password failed", mlog.Err(err))
+	// Miss cache: verify against the encrypted password from etcd. Shared with
+	// the management-plane verifier rather than calling bcrypt here, so the
+	// stored-credential format, the cost parameter and the "wrong password"
+	// versus "unusable hash" split cannot drift between the two.
+	if err := crypto.VerifyStoredPassword(credInfo.EncryptedPassword, rawPwd); err != nil {
+		mlog.Error(ctx, "Verify password failed", mlog.Err(err))
 		return false
 	}
 
@@ -2197,6 +2235,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								if row.GetData() == nil {
 									return 0, merr.WrapErrParameterInvalidMsg("nil array data")
 								}
+								if subFieldSchema.GetElementNullable() {
+									return len(typeutil.GetArrayElementValidData(row)), nil
+								}
 								if typeutil.IsNestedArrayTypeSchema(subFieldSchema.GetTypeSchema()) {
 									return len(row.GetArrayData().GetData()), nil
 								}
@@ -2257,6 +2298,9 @@ func checkAndFlattenStructFieldData(schema *schemapb.CollectionSchema, insertMsg
 								}
 								if payloadLen%vectorWidth != 0 {
 									return 0, merr.WrapErrParameterInvalidMsg("payload length %d is not divisible by vector width %d", payloadLen, vectorWidth)
+								}
+								if subFieldSchema.GetElementNullable() {
+									return len(typeutil.GetVectorArrayElementValidData(row)), nil
 								}
 								return payloadLen / vectorWidth, nil
 							},
@@ -2448,7 +2492,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 			}
 
 			log.Info(context.TODO(), "no corresponding fieldData pass in", mlog.String("fieldSchema", fieldSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required field %q", fieldSchema.GetName())
 		}
 	}
 	for _, structSchema := range schema.GetStructArrayFields() {
@@ -2457,7 +2501,7 @@ func LackOfFieldsDataBySchema(schema *schemapb.CollectionSchema, fieldsData []*s
 		}
 		if _, ok := dataNameMap[structSchema.GetName()]; !ok {
 			log.Info(context.TODO(), "no corresponding struct fieldData pass in", mlog.String("structFieldSchema", structSchema.GetName()))
-			return merr.WrapErrParameterInvalidMsg("structFieldSchema(%s) has no corresponding fieldData pass in", structSchema.GetName())
+			return merr.WrapErrParameterInvalidMsg("missing required struct field %q", structSchema.GetName())
 		}
 	}
 
@@ -2506,74 +2550,78 @@ func checkInputUtf8Compatiable(allFields []*schemapb.FieldSchema, insertMsg *msg
 	return nil
 }
 
+// checkUpsertPrimaryFieldData validates and returns the PKs, applying only
+// caller-allocated AutoIDs. allocatedIDs maps zero-based row offsets in the
+// supplied field data to IDs; a nil or empty map leaves the input fields unchanged.
+// A PK column is required; non-PK fields are neither validated nor filled, so
+// partial patches are accepted. When IDs are supplied, the PK column is replaced
+// only after validation, collision checking, and parsing succeed. Allocation and
+// retry state remain the caller's responsibility.
 func checkUpsertPrimaryFieldData(
-	ctx context.Context,
-	allFields []*schemapb.FieldSchema,
-	schema *schemapb.CollectionSchema,
-	insertMsg *msgstream.InsertMsg,
-	preserveAutoIDPrimaryKey bool,
-) (*schemapb.IDs, *schemapb.IDs, error) {
-	log := mlog.With(mlog.String("collectionName", insertMsg.CollectionName))
-	rowNums := uint32(insertMsg.NRows())
-	// TODO(dragondriver): in fact, NumRows is not trustable, we should check all input fields
-	if insertMsg.NRows() <= 0 {
-		return nil, nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
+	schema *schemaInfo,
+	fields []*schemapb.FieldData,
+	numRows uint64,
+	allocatedIDs map[int]int64,
+) (*schemapb.IDs, error) {
+	if numRows == 0 {
+		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(numRows), "num_rows should be greater than 0")
 	}
-
-	if err := checkFieldsDataBySchema(ctx, allFields, schema, insertMsg, false); err != nil {
-		return nil, nil, err
-	}
-
-	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(schema)
+	pkSchema, err := typeutil.GetPrimaryFieldSchema(schema.CollectionSchema)
 	if err != nil {
-		log.Error(ctx, "get primary field schema failed", mlog.FieldSchema(schema), mlog.Err(err))
-		return nil, nil, err
+		return nil, err
 	}
-	if primaryFieldSchema.GetNullable() {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
+	if pkSchema.GetNullable() {
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
 	}
-	// get primaryFieldData whether autoID is true or not
-	var primaryFieldData *schemapb.FieldData
-	var newPrimaryFieldData *schemapb.FieldData
-
-	primaryFieldID := primaryFieldSchema.FieldID
-	primaryFieldName := primaryFieldSchema.Name
-	for i, field := range insertMsg.GetFieldsData() {
-		if field.FieldId == primaryFieldID || field.FieldName == primaryFieldName {
-			primaryFieldData = field
-			if primaryFieldSchema.AutoID && !preserveAutoIDPrimaryKey {
-				// Normal AutoID upsert deletes the supplied PK and inserts a new PK.
-				newPrimaryFieldData, err = autoGenPrimaryFieldData(primaryFieldSchema, insertMsg.GetRowIDs())
-				if err != nil {
-					log.Info(ctx, "generate new primary field data failed when upsert", mlog.Err(err))
-					return nil, nil, err
-				}
-				insertMsg.FieldsData = append(insertMsg.GetFieldsData()[:i], insertMsg.GetFieldsData()[i+1:]...)
-				insertMsg.FieldsData = append(insertMsg.FieldsData, newPrimaryFieldData)
+	primaryField, err := typeutil.GetPrimaryFieldData(fields, pkSchema)
+	if err != nil {
+		return nil, err
+	}
+	pk := proto.Clone(primaryField).(*schemapb.FieldData)
+	if err := fieldvalidator.NewValidateUtil().Validate([]*schemapb.FieldData{pk}, schema.SchemaHelper, numRows); err != nil {
+		return nil, err
+	}
+	if len(allocatedIDs) > 0 {
+		ids := make([]int64, 0, len(allocatedIDs))
+		rows := make([]int64, 0, len(allocatedIDs))
+		indices := make([]int64, 0, len(allocatedIDs))
+		for row, id := range allocatedIDs {
+			if row < 0 || row >= typeutil.GetPKSize(pk) {
+				return nil, merr.WrapErrServiceInternalMsg("upsert allocated AutoID row %d is out of range", row)
 			}
-			break
+			indices = append(indices, int64(len(ids)))
+			ids = append(ids, id)
+			rows = append(rows, int64(row))
+		}
+		generated, err := autoGenPrimaryFieldData(pkSchema, ids)
+		if err != nil {
+			return nil, err
+		}
+		if err := typeutil.UpdateFieldDataByColumn(pk, generated, rows, indices); err != nil {
+			return nil, err
+		}
+		// Supplied PKs can contain arbitrary values, including a generated ID.
+		duplicate, err := CheckDuplicatePkExist(pkSchema, []*schemapb.FieldData{pk})
+		if err != nil {
+			return nil, err
+		}
+		if duplicate {
+			return nil, merr.WrapErrServiceInternalMsg("upsert: duplicate primary keys after applying allocated AutoIDs")
 		}
 	}
-	// must assign primary field data when upsert
-	if primaryFieldData == nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("must assign pk when upsert, primary field: %v", primaryFieldName)
-	}
-
-	// parse primaryFieldData to result.IDs, and as returned primary keys
-	ids, err := parsePrimaryFieldData2IDs(primaryFieldData)
+	ids, err := parsePrimaryFieldData2IDs(pk)
 	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, nil, err
+		return nil, err
 	}
-	if !primaryFieldSchema.GetAutoID() || preserveAutoIDPrimaryKey {
-		return ids, ids, nil
+	if len(allocatedIDs) > 0 {
+		for index, field := range fields {
+			if field == primaryField {
+				fields[index] = pk
+				break
+			}
+		}
 	}
-	newIDs, err := parsePrimaryFieldData2IDs(newPrimaryFieldData)
-	if err != nil {
-		log.Warn(ctx, "parse primary field data to IDs failed", mlog.Err(err))
-		return nil, nil, err
-	}
-	return newIDs, ids, nil
+	return ids, nil
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
@@ -3656,6 +3704,7 @@ func extractFieldsFromResults(results []*schemapb.FieldData, timezone string, fi
 }
 
 func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, schema *schemaInfo, partialUpdate bool) error {
+	functions := schema.GetFunctions()
 	allowNonBM25Outputs := common.GetCollectionAllowInsertNonBM25FunctionOutputs(schema.Properties)
 	fieldIDs := lo.Map(insertMsg.FieldsData, func(fieldData *schemapb.FieldData, _ int) int64 {
 		id, _ := schema.MapFieldID(fieldData.FieldName)
@@ -3663,13 +3712,13 @@ func genFunctionFields(ctx context.Context, insertMsg *msgstream.InsertMsg, sche
 	})
 
 	// Since PartialUpdate is supported, the field_data here may not be complete
-	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, schema.Functions, allowNonBM25Outputs, partialUpdate)
+	needProcessFunctions, err := typeutil.GetNeedProcessFunctions(fieldIDs, functions, allowNonBM25Outputs, partialUpdate)
 	if err != nil {
 		mlog.Warn(context.TODO(), "Check upsert field error,", mlog.String("collectionName", schema.Name), mlog.Err(err))
 		return err
 	}
 
-	if embedding.HasNonBM25AndMinHashFunctions(schema.Functions, []int64{}) {
+	if embedding.HasNonBM25AndMinHashFunctions(functions, []int64{}) {
 		ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-genFunctionFields-call-function-udf")
 		defer sp.End()
 		exec, err := embedding.NewFunctionExecutor(schema.CollectionSchema, needProcessFunctions, &models.ModelExtraInfo{ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(), DBName: insertMsg.GetDbName()})

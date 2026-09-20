@@ -28,7 +28,18 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
+
+// expectCheckpointFirstCreation mocks the first-creation path of the consume
+// checkpoint: Load reports not-found, then a version CAS on the absent key
+// creates it.
+func expectCheckpointFirstCreation(kv *mocks.MetaKv, pchannel string) {
+	kv.EXPECT().Load(mock.Anything, buildConsumeCheckpointKey(pchannel)).
+		Return("", merr.ErrIoKeyNotFound)
+	kv.EXPECT().CompareVersionAndSwap(mock.Anything, buildConsumeCheckpointKey(pchannel), int64(0), mock.Anything).
+		Return(true, nil)
+}
 
 // TestCatalog_SaveRecoverySnapshot_Nil proves a nil snapshot issues no KV
 // call (mocks.NewMetaKv with no EXPECT: any KV call fails the test).
@@ -37,6 +48,31 @@ func TestCatalog_SaveRecoverySnapshot_Nil(t *testing.T) {
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
 	catalog := NewCataLog(kv)
 	assert.NoError(t, catalog.SaveRecoverySnapshot(context.Background(), "p1", nil))
+}
+
+func TestCatalog_SaveRecoverySnapshot_CheckpointOnly(t *testing.T) {
+	checkpoint := &streamingpb.WALCheckpoint{TimeTick: 42}
+
+	t.Run("first creation", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		expectCheckpointFirstCreation(kv, "p1")
+		err := NewCataLog(kv).SaveRecoverySnapshot(context.Background(), "p1", &metastore.WALRecoverySnapshot{
+			ConsumeCheckpoint: checkpoint,
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("concurrent first creation loses the CAS", func(t *testing.T) {
+		kv := mocks.NewMetaKv(t)
+		kv.EXPECT().Load(mock.Anything, buildConsumeCheckpointKey("p1")).
+			Return("", merr.ErrIoKeyNotFound)
+		kv.EXPECT().CompareVersionAndSwap(mock.Anything, buildConsumeCheckpointKey("p1"), int64(0), mock.Anything).
+			Return(false, nil)
+		err := NewCataLog(kv).SaveRecoverySnapshot(context.Background(), "p1", &metastore.WALRecoverySnapshot{
+			ConsumeCheckpoint: checkpoint,
+		})
+		assert.Error(t, err)
+	})
 }
 
 // TestCatalog_SaveRecoverySnapshot_Atomic proves a full snapshot that fits
@@ -54,6 +90,7 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 			removals = dels
 			return nil
 		}).Once()
+	expectCheckpointFirstCreation(kv, "p1")
 	catalog := NewCataLog(kv)
 
 	snapshot := &metastore.WALRecoverySnapshot{
@@ -77,8 +114,10 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 	assert.Contains(t, saves, buildSegmentAssignmentKey("p1", 1))
 	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
 	assert.Contains(t, saves, buildSalvageCheckpointPath("p1", "cluster1"))
-	assert.Contains(t, saves, buildConsumeCheckpointKey("p1"))
-	assert.Len(t, saves, 4)
+	// The checkpoint is created by the first-creation CAS (see
+	// expectCheckpointFirstCreation), not staged into the component txn.
+	assert.NotContains(t, saves, buildConsumeCheckpointKey("p1"))
+	assert.Len(t, saves, 3)
 }
 
 // TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped proves nil/empty parts
@@ -87,6 +126,7 @@ func TestCatalog_SaveRecoverySnapshot_Atomic(t *testing.T) {
 func TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped(t *testing.T) {
 	kv := mocks.NewMetaKv(t)
 	kv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	expectCheckpointFirstCreation(kv, "p1")
 	var saves map[string]string
 	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, s map[string]string, dels []string, _ ...predicates.Predicate) error {
@@ -103,9 +143,10 @@ func TestCatalog_SaveRecoverySnapshot_EmptyPartsSkipped(t *testing.T) {
 		ConsumeCheckpoint: &streamingpb.WALCheckpoint{TimeTick: 1},
 	})
 	assert.NoError(t, err)
-	assert.Len(t, saves, 2)
+	// The checkpoint is created by the first-creation CAS (see
+	// expectCheckpointFirstCreation), not staged into the component txn.
+	assert.Len(t, saves, 1)
 	assert.Contains(t, saves, buildVChannelKey("p1", "vch1"))
-	assert.Contains(t, saves, buildConsumeCheckpointKey("p1"))
 }
 
 // TestCatalog_SaveRecoverySnapshot_FlushedSegmentIsRemoved proves a flushed
@@ -219,12 +260,14 @@ func TestCatalog_SaveRecoverySnapshot_ConsumeCheckpointLastOnFallback(t *testing
 		}
 		return nil
 	}).Twice()
-	kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, s map[string]string, dels []string, _ ...predicates.Predicate) error {
-			for k := range s {
-				calls = append(calls, "commit:"+k)
-			}
-			return nil
+	// The consume checkpoint is created by the first-creation CAS, issued
+	// after the component flush: components land first, checkpoint last.
+	kv.EXPECT().Load(mock.Anything, buildConsumeCheckpointKey("p1")).
+		Return("", merr.ErrIoKeyNotFound)
+	kv.EXPECT().CompareVersionAndSwap(mock.Anything, buildConsumeCheckpointKey("p1"), int64(0), mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int64, target string) (bool, error) {
+			calls = append(calls, "cas:"+buildConsumeCheckpointKey("p1"))
+			return true, nil
 		}).Once()
 
 	catalog := NewCataLog(kv)
@@ -241,6 +284,6 @@ func TestCatalog_SaveRecoverySnapshot_ConsumeCheckpointLastOnFallback(t *testing
 	assert.Equal(t, []string{
 		"save:" + buildSegmentAssignmentKey("p1", 1),
 		"save:" + buildSalvageCheckpointPath("p1", "cluster1"),
-		"commit:" + buildConsumeCheckpointKey("p1"),
+		"cas:" + buildConsumeCheckpointKey("p1"),
 	}, calls)
 }

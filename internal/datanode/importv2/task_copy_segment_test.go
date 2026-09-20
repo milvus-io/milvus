@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 type crossBucketCopyCall struct {
@@ -57,7 +58,15 @@ func copySegmentTaskTestDependencies(
 	t.Helper()
 	storageConfig := req.GetStorageConfig()
 	if storageConfig == nil {
-		storageConfig = &indexpb.StorageConfig{BucketName: "test-bucket"}
+		storageConfig = &indexpb.StorageConfig{BucketName: "test-bucket", RootPath: "files"}
+		req.StorageConfig = storageConfig
+	}
+	// AssembleCopySegmentRequest supplies the target storage root in production.
+	// Keep explicit empty/dot storage roots as bucket-root configurations.
+	for _, target := range req.GetTargets() {
+		if target.GetTargetRootPath() == "" {
+			target.TargetRootPath = storageConfig.GetRootPath()
+		}
 	}
 	var copier storage.CrossBucketCopier
 	if len(copiers) > 0 {
@@ -318,6 +327,7 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 		Sources:  []*datapb.CopySegmentSource{source},
 		Targets:  []*datapb.CopySegmentTarget{target},
 	}
+	req.TargetIndexes = []*datapb.CopySegmentTargetIndex{{IndexId: 777, IndexName: "shared_idx"}}
 	task := NewCopySegmentTask(
 		context.Background(),
 		req,
@@ -340,6 +350,7 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 			_ context.Context,
 			_ storage.ChunkManager,
 			_ *indexpb.StorageConfig,
+			_ *indexpb.StorageConfig,
 			_ storage.CrossBucketCopier,
 			_ string,
 			_ string,
@@ -349,7 +360,9 @@ func TestCopySegmentTask_CopySingleSegmentAllowsManifestOnlyStorageV3(t *testing
 		) (*datapb.CopySegmentResult, []string, error) {
 			called = true
 			assert.Same(t, source, gotSource)
-			assert.Same(t, target, gotTarget)
+			assert.Equal(t, target.GetSegmentId(), gotTarget.GetSegmentId())
+			assert.Equal(t, req.GetTargetIndexes(), gotTarget.GetTargetIndexes())
+			assert.Empty(t, target.GetTargetIndexes(), "shared definitions must not mutate the original target")
 			return &datapb.CopySegmentResult{SegmentId: target.GetSegmentId()}, nil, nil
 		}).Build()
 	defer mockCopy.UnPatch()
@@ -765,6 +778,7 @@ func TestCopySegmentTaskExecute_FailureWaitsForAllWorkers(t *testing.T) {
 			_ context.Context,
 			_ storage.ChunkManager,
 			_ *indexpb.StorageConfig,
+			_ *indexpb.StorageConfig,
 			_ storage.CrossBucketCopier,
 			_ string,
 			_ string,
@@ -960,7 +974,7 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 							FieldID:        100,
 							IndexID:        1001,
 							BuildID:        1002,
-							IndexFilePaths: []string{"files/index_files/111/222/333/100/1001/1002/index1"},
+							IndexFilePaths: metautil.NewIndexPathBuilder("files", indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, 111, 222, 333, 1002, 1).BuildFilePaths([]string{"index1"}),
 							SerializedSize: 5000,
 						},
 					},
@@ -1162,7 +1176,7 @@ func TestCopySegmentTaskWithIndexFiles(t *testing.T) {
 							FieldID:        100,
 							IndexID:        1001,
 							BuildID:        1002,
-							IndexFilePaths: []string{"files/index_files/111/222/333/100/1001/1002/index1"},
+							IndexFilePaths: metautil.NewIndexPathBuilder("files", indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_BUILD_ROOTED, 111, 222, 333, 1002, 1).BuildFilePaths([]string{"index1"}),
 							SerializedSize: 5000,
 						},
 					},

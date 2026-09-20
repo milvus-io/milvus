@@ -178,9 +178,11 @@ InvertedIndexTantivy<T>::Upload(const Config& config) {
         } else {
             auto file_path_str = iter->path().string();
             LOG_INFO("trying to add index file: {}", file_path_str);
-            AssertInfo(disk_file_manager_->AddFile(file_path_str),
-                       "failed to add index file: {}",
-                       file_path_str);
+            if (!(disk_file_manager_->AddFile(file_path_str))) {
+                ThrowInfo(ErrorCode::FileWriteFailed,
+                          "failed to add index file: {}",
+                          file_path_str);
+            }
             LOG_INFO("index file: {} added", file_path_str);
         }
     }
@@ -870,7 +872,8 @@ InvertedIndexTantivy<std::string>::build_index_for_array(
             output.clear();
             for (int64_t j = 0; j < array_column[i].length(); j++) {
                 output.push_back(
-                    array_column[i].template get_data<std::string>(j));
+                    array_column[i].template get_data_unchecked<std::string>(
+                        j));
             }
             auto length = data->is_valid(i) ? output.size() : 0;
             if (!inverted_index_single_segment_) {
@@ -940,7 +943,7 @@ InvertedIndexTantivy<std::string>::build_index_for_array_nested(
             output.clear();
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
-                output.push_back(array->get_data<std::string>(j));
+                output.push_back(array->get_data_unchecked<std::string>(j));
             }
             wrapper_->add_data(output.data(), length, offset);
             offset += length;
@@ -986,7 +989,11 @@ InvertedIndexTantivy<T>::WriteEntries(storage::IndexEntryWriter* writer) {
     for (const auto& file_path : files) {
         auto file_name = file_path.filename().string();
         int fd = open(file_path.c_str(), O_RDONLY | O_CLOEXEC);
-        AssertInfo(fd != -1, "failed to open file: {}", file_path.string());
+        if (!(fd != -1)) {
+            ThrowInfo(ErrorCode::FileOpenFailed,
+                      "failed to open file: {}",
+                      file_path.string());
+        }
         auto file_size = boost::filesystem::file_size(file_path);
         writer->WriteEntry(file_name, fd, file_size);
         close(fd);

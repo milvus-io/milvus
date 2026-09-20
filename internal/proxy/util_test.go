@@ -974,6 +974,17 @@ func TestValidateFieldNestedArray(t *testing.T) {
 		assert.Contains(t, err.Error(), "nullable nested array elements are not supported")
 	})
 
+	t.Run("legacy element nullable on nested array is rejected", func(t *testing.T) {
+		field := nestedField(testArrayTypeSchema(
+			leafType(schemapb.DataType_Int64),
+			&commonpb.KeyValuePair{Key: common.MaxCapacityKey, Value: "10"},
+		))
+		field.ElementNullable = true
+
+		err := ValidateField(field, schema)
+		require.ErrorContains(t, err, "element_nullable is not supported for nested Array")
+	})
+
 	t.Run("valid array of varchar array", func(t *testing.T) {
 		field := nestedField(testArrayTypeSchema(
 			leafType(schemapb.DataType_VarChar,
@@ -1413,6 +1424,24 @@ func TestGetCurDBNameFromContext(t *testing.T) {
 
 	dbName = GetCurDBNameFromContextOrDefault(metadata.NewIncomingContext(context.Background(), md))
 	assert.Equal(t, dbNameValue, dbName)
+}
+
+func TestGetIdempotencyKeyFromContext(t *testing.T) {
+	assert.Empty(t, GetIdempotencyKeyFromContext(context.Background()))
+
+	emptyCtx := metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{}))
+	assert.Empty(t, GetIdempotencyKeyFromContext(emptyCtx))
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{
+		util.HeaderIdempotencyKey: "key-1",
+	}))
+	assert.Equal(t, "key-1", GetIdempotencyKeyFromContext(ctx))
+
+	// multiple values: the last one wins, matching client overwrite semantics
+	md := metadata.New(map[string]string{})
+	md.Append(util.HeaderIdempotencyKey, "key-1", "key-2")
+	ctx = metadata.NewIncomingContext(context.Background(), md)
+	assert.Equal(t, "key-2", GetIdempotencyKeyFromContext(ctx))
 }
 
 func TestGetRole(t *testing.T) {
@@ -2416,352 +2445,52 @@ func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
 }
 
 func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
-	// num_rows(0) should be greater than 0
-	t.Run("schema is empty, though won't happen in system", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      false,
-				Fields:      []*schemapb.FieldSchema{},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					DbName:         "TestUpsertTask_checkPrimaryFieldData",
-					CollectionName: "TestUpsertTask_checkPrimaryFieldData",
-					PartitionName:  "TestUpsertTask_checkPrimaryFieldData",
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NotEqual(t, nil, err)
-	})
+	for _, autoID := range []bool{false, true} {
+		for _, tc := range []struct {
+			name     string
+			numRows  uint64
+			field    *schemapb.FieldData
+			nullable bool
+			noPK     bool
+			valid    bool
+		}{
+			{name: "preserve without non-PK fields", numRows: 1, field: partialUpdateCASPKFieldData([]int64{10}), valid: true},
+			{name: "zero rows", field: partialUpdateCASPKFieldData([]int64{10})},
+			{name: "no primary key schema", numRows: 1, noPK: true},
+			{name: "nullable primary key", numRows: 1, nullable: true},
+			{name: "missing primary key", numRows: 1},
+			{name: "missing scalar payload", numRows: 1, field: &schemapb.FieldData{FieldName: "id", Type: schemapb.DataType_Int64}},
+			{name: "empty primary key", numRows: 1, field: partialUpdateCASPKFieldData([]int64{})},
+			{name: "row count mismatch", numRows: 2, field: partialUpdateCASPKFieldData([]int64{10})},
+			{name: "wrong primary key type", numRows: 1, field: partialUpdateCASStringPKFieldData([]string{"10"})},
+		} {
+			t.Run(fmt.Sprintf("autoID=%t/%s", autoID, tc.name), func(t *testing.T) {
+				collection := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: !tc.noPK, AutoID: autoID, Nullable: tc.nullable},
+					{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int32},
+				}}
+				helper, err := typeutil.CreateSchemaHelper(collection)
+				require.NoError(t, err)
+				schema := &schemaInfo{CollectionSchema: collection, SchemaHelper: helper}
+				var fields []*schemapb.FieldData
+				if tc.field != nil {
+					fields = []*schemapb.FieldData{tc.field}
+				}
 
-	t.Run("the num of passed fields is less than needed", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:     "int64Field",
-						FieldID:  1,
-						DataType: schemapb.DataType_Int64,
-					},
-					{
-						Name:     "floatField",
-						FieldID:  2,
-						DataType: schemapb.DataType_Float,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							Type:      schemapb.DataType_Int64,
-							FieldName: "int64Field",
-						},
-					},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
+				ids, err := checkUpsertPrimaryFieldData(schema, fields, tc.numRows, nil)
+				if !tc.valid {
+					require.Error(t, err)
+					require.Nil(t, ids)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, []int64{10}, ids.GetIntId().GetData())
+				require.Len(t, fields, 1, "PK validation must not fill omitted non-PK fields")
+				require.Same(t, tc.field, fields[0])
+				require.Equal(t, []int64{10}, fields[0].GetScalars().GetLongData().GetData())
+			})
 		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NotEqual(t, nil, err)
-	})
-
-	// autoID == false, no primary field schema
-	t.Run("primary field is not found", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:     "int64Field",
-						DataType: schemapb.DataType_Int64,
-					},
-					{
-						Name:     "floatField",
-						DataType: schemapb.DataType_Float,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{},
-						{},
-					},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NotEqual(t, nil, err)
-	})
-
-	// primary field data is nil, GetPrimaryFieldData fail
-	t.Run("primary field data is nil", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "int64Field",
-						FieldID:      1,
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-						AutoID:       false,
-					},
-					{
-						Name:     "floatField",
-						FieldID:  2,
-						DataType: schemapb.DataType_Float,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{},
-						{},
-					},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NotEqual(t, nil, err)
-	})
-
-	// only support DataType Int64 or VarChar as PrimaryField
-	t.Run("primary field type wrong", func(t *testing.T) {
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      true,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "floatVectorField",
-						FieldID:      1,
-						DataType:     schemapb.DataType_FloatVector,
-						AutoID:       true,
-						IsPrimaryKey: true,
-					},
-					{
-						Name:     "floatField",
-						FieldID:  2,
-						DataType: schemapb.DataType_Float,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							Type:      schemapb.DataType_FloatVector,
-							FieldName: "floatVectorField",
-						},
-						{
-							Type:      schemapb.DataType_Int64,
-							FieldName: "floatField",
-						},
-					},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NotEqual(t, nil, err)
-	})
-
-	t.Run("upsert must assign pk", func(t *testing.T) {
-		// autoid==true
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      true,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "int64Field",
-						FieldID:      1,
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-						AutoID:       true,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "int64Field",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		_, _, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NoError(t, nil, err)
-
-		// autoid==false
-		task = insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      false,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "int64Field",
-						FieldID:      1,
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-						AutoID:       false,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "int64Field",
-							Type:      schemapb.DataType_Int64,
-						},
-					},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		assert.NoError(t, nil, err)
-	})
-
-	t.Run("handle autoid primary key modes", func(t *testing.T) {
-		// autoid==true
-		task := insertTask{
-			schema: &schemapb.CollectionSchema{
-				Name:        "TestUpsertTask_checkPrimaryFieldData",
-				Description: "TestUpsertTask_checkPrimaryFieldData",
-				AutoID:      true,
-				Fields: []*schemapb.FieldSchema{
-					{
-						Name:         "int64Field",
-						FieldID:      1,
-						DataType:     schemapb.DataType_Int64,
-						IsPrimaryKey: true,
-						AutoID:       true,
-					},
-				},
-			},
-			insertMsg: &BaseInsertTask{
-				InsertRequest: &msgpb.InsertRequest{
-					Base: &commonpb.MsgBase{
-						MsgType: commonpb.MsgType_Insert,
-					},
-					RowData: []*commonpb.Blob{
-						{},
-					},
-					FieldsData: []*schemapb.FieldData{
-						{
-							FieldName: "int64Field",
-							Type:      schemapb.DataType_Int64,
-							Field: &schemapb.FieldData_Scalars{
-								Scalars: &schemapb.ScalarField{
-									Data: &schemapb.ScalarField_LongData{
-										LongData: &schemapb.LongArray{
-											Data: []int64{2},
-										},
-									},
-								},
-							},
-						},
-					},
-					RowIDs: []int64{1},
-				},
-			},
-			result: &milvuspb.MutationResult{
-				Status: merr.Success(),
-			},
-		}
-		ids, oldIDs, err := checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, true)
-		assert.NoError(t, err)
-		assert.Equal(t, []int64{2}, task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData())
-		assert.Equal(t, []int64{2}, ids.GetIntId().GetData())
-		assert.Equal(t, []int64{2}, oldIDs.GetIntId().GetData())
-
-		_, _, err = checkUpsertPrimaryFieldData(context.TODO(), task.schema.Fields, task.schema, task.insertMsg, false)
-		newPK := task.insertMsg.FieldsData[0].GetScalars().GetLongData().GetData()
-		assert.Equal(t, newPK, task.insertMsg.RowIDs)
-		assert.NoError(t, err)
-	})
+	}
 }
 
 func Test_ParseGuaranteeTs(t *testing.T) {

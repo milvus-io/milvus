@@ -18,12 +18,14 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	internalhttp "github.com/milvus-io/milvus/internal/http"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/tikv"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	streamingcoord "github.com/milvus-io/milvus/internal/streamingcoord/server"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/pathutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -78,6 +80,10 @@ type mixCoordImpl struct {
 	metaKVCreator  func() kv.MetaKv
 	mixCoordClient types.MixCoordClient
 
+	// rootCredentialVerifier backs the management-plane HTTP basic-auth gate.
+	// Set in initInternal, unregistered in Stop.
+	rootCredentialVerifier *adminauth.CachedRootVerifier
+
 	// POSIX directory cleanup task
 	posixCleanupCancel    context.CancelFunc
 	posixCleanupWg        sync.WaitGroup
@@ -86,13 +92,18 @@ type mixCoordImpl struct {
 
 	// file resource observer
 	fileResourceObserver *FileResourceObserver
+
+	recoveryBarrier *recoveryBarrier
 }
 
 func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoordImpl, error) {
-	ctx, cancel := context.WithCancel(c)
+	ctx, cancel := context.WithCancel(c) //nolint:gosec // cancel is stored below and called in Stop
 	rootCoordServer, _ := rootcoord.NewCore(ctx, factory)
 	queryCoordServer, _ := querycoordv2.NewQueryCoord(c)
 	dataCoordServer := datacoord.CreateServer(c, factory)
+
+	recoveryBarrier := newRecoveryBarrier()
+	dataCoordServer.SetDataViewCollectionRecoveryValidator(rootCoordServer.ValidateDataViewCollectionForRecovery)
 
 	return &mixCoordImpl{
 		ctx:              ctx,
@@ -101,6 +112,7 @@ func NewMixCoordServer(c context.Context, factory dependency.Factory) (*mixCoord
 		queryCoordServer: queryCoordServer,
 		datacoordServer:  dataCoordServer,
 		factory:          factory,
+		recoveryBarrier:  recoveryBarrier,
 	}, nil
 }
 
@@ -150,7 +162,7 @@ func (s *mixCoordImpl) activateFunc() error {
 		return err
 	}
 	mlog.Info(s.ctx, "mixCoord startup success", mlog.String("address", s.session.GetAddress()))
-	s.startAndUpdateHealthy()
+	s.enableExternalAccess()
 	return err
 }
 
@@ -159,9 +171,6 @@ func (s *mixCoordImpl) initInternal() error {
 	s.datacoordServer.SetMixCoord(s)
 	s.queryCoordServer.SetMixCoord(s)
 	s.fileResourceObserver = NewFileResourceObserver(s.ctx)
-
-	// Register WAL callbacks
-	RegisterWALCallbacks(s)
 
 	if err := s.streamingCoord.Start(s.ctx, s.fileResourceObserver); err != nil {
 		mlog.Error(s.ctx, "streamCoord start failed", mlog.Err(err))
@@ -180,17 +189,25 @@ func (s *mixCoordImpl) initInternal() error {
 		return err
 	}
 
+	// Register a password verifier for /management/* HTTP basic auth: a mix
+	// coord process does not host the proxy package, where the verifier is
+	// otherwise registered, so without this the gate answers 503 to root as
+	// well as to attackers once adminAuthEnabled is on.
+	//
+	// It goes through the shared cache rather than straight to rootcoord's
+	// credential RPC, which reads the metastore on every call: the gated
+	// endpoints answer unauthenticated callers, so binding directly would let
+	// anyone who can reach port 9091 drive etcd load into the coordinator.
+	s.rootCredentialVerifier = adminauth.NewCachedRootVerifier(s.fetchRootHash)
+	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotCoordinator, s.rootCredentialVerifier.Verify)
+
 	// DataCoord and QueryCoord are independent of each other;
-	// both only depend on RootCoord being ready. Initialize and start them in parallel.
+	// both only depend on RootCoord being ready. Recover them in parallel first.
 	g, _ := errgroup.WithContext(s.ctx)
 	g.Go(func() error {
 		s.datacoordServer.SetFileResourceObserver(s.fileResourceObserver)
 		if err := s.datacoordServer.Init(); err != nil {
 			mlog.Error(s.ctx, "dataCoord init failed", mlog.Err(err))
-			return err
-		}
-		if err := s.datacoordServer.Start(); err != nil {
-			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
 			return err
 		}
 		return nil
@@ -201,6 +218,21 @@ func (s *mixCoordImpl) initInternal() error {
 			mlog.Error(s.ctx, "queryCoord init failed", mlog.Err(err))
 			return err
 		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	g, _ = errgroup.WithContext(s.ctx)
+	g.Go(func() error {
+		if err := s.datacoordServer.Start(); err != nil {
+			mlog.Error(s.ctx, "dataCoord start failed", mlog.Err(err))
+			return err
+		}
+		return nil
+	})
+	g.Go(func() error {
 		if err := s.queryCoordServer.Start(); err != nil {
 			mlog.Error(s.ctx, "queryCoord start failed", mlog.Err(err))
 			return err
@@ -213,6 +245,24 @@ func (s *mixCoordImpl) initInternal() error {
 
 	s.fileResourceObserver.Start()
 	return nil
+}
+
+func (s *mixCoordImpl) enableExternalAccess() {
+	// Register the callback dependencies before RootCoord callbacks, which may
+	// invoke DataCoord or QueryCoord callbacks while handling collection DDLs.
+	datacoord.RegisterDDLCallbacks(s.datacoordServer)
+	querycoordv2.RegisterDDLCallbacks(s.queryCoordServer)
+	rootcoord.RegisterDDLCallbacks(s.rootcoordServer)
+	RegisterWALCallbacks(s)
+
+	// Publish Healthy only after every callback is registered. The distributed
+	// server waits on the barrier below before it starts serving external RPCs.
+	s.startAndUpdateHealthy()
+	s.recoveryBarrier.Ready()
+}
+
+func (s *mixCoordImpl) WaitForRecovery(ctx context.Context) error {
+	return s.recoveryBarrier.Wait(ctx)
 }
 
 func (s *mixCoordImpl) initKVCreator() {
@@ -249,6 +299,33 @@ func (s *mixCoordImpl) IsServerActive(serverID int64) bool {
 	return s.queryCoordServer.ServerExist(serverID) ||
 		s.datacoordServer.ServerExist(serverID) ||
 		s.rootcoordServer.ServerExist(serverID)
+}
+
+// fetchRootHash reads root's stored bcrypt hash from the rootcoord embedded in
+// this mix coord.
+//
+// This is not a cheap in-process getter: Catalog.GetCredential does an
+// unconditional Txn.Load against the metastore and bumps the DDL request
+// counters, so it must never run once per request. adminauth.CachedRootVerifier
+// is what keeps that from happening.
+func (s *mixCoordImpl) fetchRootHash(ctx context.Context) (string, error) {
+	resp, err := s.rootcoordServer.GetCredential(ctx, &rootcoordpb.GetCredentialRequest{
+		Username: util.UserRoot,
+	})
+	if err != nil {
+		mlog.Warn(ctx, "fetch root credential failed", mlog.Err(err))
+		return "", merr.Wrap(err, "GetCredential failed")
+	}
+	return adminauth.RootHashFromResponse(resp)
+}
+
+func (s *mixCoordImpl) CreateCollectionDataView(ctx context.Context, collectionID int64, vchannels []string) error {
+	_, err := s.datacoordServer.CreateCollectionDataView(ctx, collectionID, vchannels)
+	return err
+}
+
+func (s *mixCoordImpl) DropCollectionDataView(ctx context.Context, collectionID int64) error {
+	return s.datacoordServer.DropCollectionDataView(ctx, collectionID)
 }
 
 func (s *mixCoordImpl) checkExpiredPOSIXDIR() {
@@ -339,6 +416,15 @@ func (s *mixCoordImpl) posixCleanupLoop(ctx context.Context) {
 
 func (s *mixCoordImpl) Stop() error {
 	mlog.Info(s.ctx, "graceful stop")
+	// Deferred, not done first: /management/* is how an operator drives a
+	// drain, and unregistering up front would make this coordinator answer 503
+	// to the very requests that are shutting it down.
+	defer func() {
+		internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotCoordinator, nil)
+		if s.rootCredentialVerifier != nil {
+			s.rootCredentialVerifier.Forget()
+		}
+	}()
 
 	s.stopPosixCleanupTask()
 
@@ -459,6 +545,10 @@ func (s *mixCoordImpl) ShowCollections(ctx context.Context, req *milvuspb.ShowCo
 
 func (s *mixCoordImpl) ShowCollectionIDs(ctx context.Context, req *rootcoordpb.ShowCollectionIDsRequest) (*rootcoordpb.ShowCollectionIDsResponse, error) {
 	return s.rootcoordServer.ShowCollectionIDs(ctx, req)
+}
+
+func (s *mixCoordImpl) GetRLSMetadata(ctx context.Context, req *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	return s.rootcoordServer.GetRLSMetadata(ctx, req)
 }
 
 func (s *mixCoordImpl) AlterCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) (*commonpb.Status, error) {
@@ -1237,8 +1327,8 @@ func (s *mixCoordImpl) AllocSegment(ctx context.Context, req *datapb.AllocSegmen
 	return s.datacoordServer.AllocSegment(ctx, req)
 }
 
-func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
-	return s.datacoordServer.NotifyDropPartition(ctx, channel, partitionIDs)
+func (s *mixCoordImpl) NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error {
+	return s.datacoordServer.NotifyDropPartition(ctx, channel, collectionID, partitionIDs)
 }
 
 // RegisterStreamingCoordGRPCService registers the grpc service of streaming coordinator.

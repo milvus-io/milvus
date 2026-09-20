@@ -108,7 +108,28 @@ TEST(CPackedTest, PackedWriterAndReader) {
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_NE(c_packed_reader, nullptr);
 
+    struct ArrowArray read_array {};
+    struct ArrowSchema read_schema {};
+    c_status = ReadNext(c_packed_reader, &read_array, &read_schema);
+    ASSERT_EQ(c_status.error_code, 0);
+    ASSERT_NE(read_array.release, nullptr);
+    ASSERT_NE(read_schema.release, nullptr);
+    auto imported = arrow::ImportRecordBatch(&read_array, &read_schema);
+    ASSERT_TRUE(imported.ok());
+    auto read_batch = imported.ValueOrDie();
+    EXPECT_TRUE(batch->Equals(*read_batch));
+    EXPECT_EQ(read_array.release, nullptr);
+    EXPECT_EQ(read_schema.release, nullptr);
+
+    // The same caller-owned structs can be reused after import; EOF leaves
+    // both outputs released without affecting the previously imported batch.
+    c_status = ReadNext(c_packed_reader, &read_array, &read_schema);
+    EXPECT_EQ(c_status.error_code, 0);
+    EXPECT_EQ(read_array.release, nullptr);
+    EXPECT_EQ(read_schema.release, nullptr);
+
     c_status = CloseReader(c_packed_reader);
     EXPECT_EQ(c_status.error_code, 0);
+    EXPECT_TRUE(batch->Equals(*read_batch));
     FreeCColumnSplits(cgs);
 }

@@ -213,15 +213,6 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return insert_record_.timestamp_index_.get_max_timestamp();
     }
 
-    const Schema&
-    get_schema() const override {
-        // Compatibility path for the legacy reference API; readers should keep
-        // a SchemaPtr from get_schema_snapshot() when they need lifetime safety.
-        thread_local SchemaPtr schema_snapshot;
-        schema_snapshot = get_schema_snapshot();
-        return *schema_snapshot;
-    }
-
     SchemaPtr
     get_schema_snapshot() const override {
         return std::atomic_load_explicit(&schema_, std::memory_order_acquire);
@@ -672,7 +663,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     struct ValidResult {
         int64_t valid_count = 0;
         std::unique_ptr<bool[]> valid_data;
-        std::vector<int64_t> valid_offsets;
+        // NULL filtering preserves logical segment offsets and their order.
+        std::vector<int64_t> valid_logical_offsets;
     };
 
     ValidResult

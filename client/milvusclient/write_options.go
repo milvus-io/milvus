@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/merr"
 	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 	"github.com/milvus-io/milvus/client/v3/row"
 )
@@ -55,6 +56,12 @@ type columnBasedDataOption struct {
 	columns       []column.Column
 	partialUpdate bool
 
+	// idempotencyKey is only honored by Insert. A non-empty option key overrides
+	// the call's existing outgoing metadata key; with no option key, Client.Insert
+	// preserves callers that set the gRPC header directly on ctx. Upsert rejects a
+	// configured option key and Delete has no way to set it.
+	idempotencyKey string
+
 	// deferredErr captures construction-time errors from builder helpers (e.g. WithStructArrayColumn)
 	// so they surface on InsertRequest/UpsertRequest rather than panicking in the chain.
 	deferredErr error
@@ -63,6 +70,20 @@ type columnBasedDataOption struct {
 	// field name. Entries with REPLACE (or nil) are treated as no-ops and are
 	// not serialized onto the wire.
 	partialOps map[string]*schemapb.FieldPartialUpdateOp
+}
+
+// errIdempotencyKeyUnsupportedForDML is a sentinel marking the "idempotency key
+// is only valid for Insert" rejection. Upsert matches it precisely so it does
+// not swallow other parameter errors that should trigger a schema retry.
+var errIdempotencyKeyUnsupportedForDML = errors.New("idempotency key is only supported for Insert")
+
+func unsupportedDMLIdempotencyKeyError(operation string) error {
+	// Keep ErrParameterInvalid for caller classification, but also mark it with
+	// the sentinel so the Upsert path can match exactly via errors.Is.
+	return errors.Mark(
+		merr.WrapErrParameterInvalid("Insert", operation, "idempotency key is only supported for Insert"),
+		errIdempotencyKeyUnsupportedForDML,
+	)
 }
 
 func (opt *columnBasedDataOption) WriteBackPKs(_ *entity.Schema, _ column.Column) error {
@@ -406,6 +427,29 @@ func (opt *columnBasedDataOption) WithPartialUpdate(partialUpdate bool) *columnB
 	return opt
 }
 
+// WithIdempotencyKey attaches an idempotency key to this insert. The key is
+// scoped to exactly this logical insert: Client.Insert derives a per-call
+// context carrying it as gRPC metadata, so the caller's context is never
+// mutated. A non-empty option key overrides an existing idempotency-key header
+// on ctx for this call; with no option key, Client.Insert preserves a header
+// that the caller set directly on ctx for compatibility. Retries of the same
+// request (schema-mismatch / rate-limit) reuse the key, which is exactly what
+// idempotent replay needs; do NOT reuse one key across different payloads or
+// collections: the server would answer the second insert with the first one's
+// IDs. Only Insert honors the key, and only when idempotent write is enabled
+// both globally (streaming.idempotency.enabled) and on the target collection;
+// Upsert rejects a configured option key.
+func (opt *columnBasedDataOption) WithIdempotencyKey(idempotencyKey string) *columnBasedDataOption {
+	opt.idempotencyKey = idempotencyKey
+	return opt
+}
+
+// IdempotencyKey exposes the configured key so Client.Insert can scope it onto
+// the call context.
+func (opt *columnBasedDataOption) IdempotencyKey() string {
+	return opt.idempotencyKey
+}
+
 // WithArrayAppend declares that the Array field `fieldName` should be merged
 // with ARRAY_APPEND semantics during an Upsert. The server implicitly enables
 // partial_update when any non-REPLACE op is present, so callers do not need
@@ -485,6 +529,9 @@ func (opt *columnBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvu
 	if opt.deferredErr != nil {
 		return nil, opt.deferredErr
 	}
+	if opt.idempotencyKey != "" {
+		return nil, unsupportedDMLIdempotencyKeyError("Upsert")
+	}
 	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
 	if err != nil {
 		return nil, err
@@ -519,8 +566,10 @@ func NewColumnBasedInsertOption(collName string, columns ...column.Column) *colu
 
 type rowBasedDataOption struct {
 	*columnBasedDataOption
-	rows         []any
-	keepAutoIDPk bool // keep user passed auto id pk field
+	rows []any
+	// keepAutoIDPk controls Insert conversion. Upsert always retains an AutoID
+	// primary key because it is the lookup key.
+	keepAutoIDPk bool
 }
 
 func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
@@ -583,7 +632,13 @@ func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb
 }
 
 func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
-	columns, err := row.AnyToColumns(opt.rows, opt.keepAutoIDPk, coll.Schema)
+	if opt.idempotencyKey != "" {
+		return nil, unsupportedDMLIdempotencyKeyError("Upsert")
+	}
+	// An AutoID primary key is a lookup key for Upsert. Unlike Insert, Upsert
+	// must always send it so the server can distinguish an update from a
+	// generated insert-on-not-found row.
+	columns, err := row.AnyToColumns(opt.rows, true, coll.Schema)
 	if err != nil {
 		return nil, err
 	}
@@ -632,6 +687,14 @@ func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Colum
 
 func (opt *rowBasedDataOption) WithKeepAutoIDPk(keepPk bool) *rowBasedDataOption {
 	opt.keepAutoIDPk = keepPk
+	return opt
+}
+
+// WithIdempotencyKey attaches an idempotency key to this insert; see
+// (*columnBasedDataOption).WithIdempotencyKey for the exact-one-logical-insert
+// contract.
+func (opt *rowBasedDataOption) WithIdempotencyKey(idempotencyKey string) *rowBasedDataOption {
+	opt.columnBasedDataOption.WithIdempotencyKey(idempotencyKey)
 	return opt
 }
 

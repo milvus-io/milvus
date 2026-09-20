@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -150,6 +151,9 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
+	if request == nil {
+		return merr.Status(merr.WrapErrServiceInternalMsg("invalidate collection meta cache request is nil")), nil
+	}
 	ctx = logutil.WithModule(ctx, moduleName)
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateCollectionMetaCache")
@@ -171,6 +175,33 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		if collectionID != UniqueID(0) {
 			node.shardMgr.InvalidateShardLeaderCache([]int64{collectionID})
 		}
+	}
+
+	switch msgType {
+	case commonpb.MsgType_CreateRowPolicy,
+		commonpb.MsgType_UpdateRowPolicy,
+		commonpb.MsgType_DropRowPolicy:
+		rls.InvalidatePolicies(collectionID, request.GetBase().GetTimestamp())
+		mlog.Info(ctx, "complete to invalidate RLS policy snapshot",
+			mlog.String("type", request.GetBase().GetMsgType().String()),
+			mlog.FieldDbName(dbName),
+			mlog.FieldCollectionName(collectionName),
+			mlog.FieldCollectionID(collectionID))
+		return merr.Success(), nil
+	case commonpb.MsgType_SetRLSPrincipalTags,
+		commonpb.MsgType_DeleteRLSPrincipalTags:
+		principalName := request.GetBase().GetProperties()[common.RLSPrincipalNameKey]
+		if principalName == "" {
+			return merr.Status(merr.WrapErrServiceInternalMsg("RLS principal cache invalidation is missing principal name")), nil
+		}
+		rls.InvalidatePrincipalTags(collectionID, principalName, request.GetBase().GetTimestamp())
+		mlog.Info(ctx, "complete to invalidate RLS principal tags",
+			mlog.String("type", request.GetBase().GetMsgType().String()),
+			mlog.FieldDbName(dbName),
+			mlog.FieldCollectionName(collectionName),
+			mlog.FieldCollectionID(collectionID),
+			mlog.String("principalName", principalName))
+		return merr.Success(), nil
 	}
 
 	if node.GetMetaCache() != nil {
@@ -237,6 +268,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
+		rls.MarkCollectionDropped(request.GetCollectionID())
 		// clean up collection level metrics
 		metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), dbName, collectionName)
 		for _, alias := range aliasName {
@@ -2523,6 +2555,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		idAllocator:     node.rowIDAllocator,
 		chMgr:           node.chMgr,
 		schemaTimestamp: request.SchemaTimestamp,
+		idempotencyKey:  GetIdempotencyKeyFromContext(ctx),
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -4338,11 +4371,19 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		return resp, nil
 	}
 
+	states := req.GetStates()
+	if len(states) == 0 {
+		states = []commonpb.SegmentState{
+			commonpb.SegmentState_Flushing,
+			commonpb.SegmentState_Flushed,
+			commonpb.SegmentState_Sealed,
+		}
+	}
 	getSegmentsByStatesResponse, err := node.mixCoord.GetSegmentsByStates(ctx, &datapb.GetSegmentsByStatesRequest{
 		CollectionID: collectionID,
 		// -1 means list all partition segemnts
 		PartitionID: -1,
-		States:      []commonpb.SegmentState{commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed, commonpb.SegmentState_Sealed},
+		States:      states,
 	})
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -4355,7 +4396,8 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			commonpbutil.WithMsgType(commonpb.MsgType_SegmentInfo),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		SegmentIDs: getSegmentsByStatesResponse.Segments,
+		SegmentIDs:       getSegmentsByStatesResponse.Segments,
+		IncludeUnHealthy: lo.Contains(states, commonpb.SegmentState_Dropped),
 	})
 	if err != nil {
 		mlog.Warn(context.TODO(), "GetPersistentSegmentInfo fail",
@@ -4371,9 +4413,13 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	mlog.Debug(context.TODO(), "GetPersistentSegmentInfo",
 		mlog.Int("len(infos)", len(infoResp.Infos)),
 		mlog.Any("status", infoResp.Status))
-	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, len(infoResp.Infos))
-	for i, info := range infoResp.Infos {
-		persistentInfos[i] = &milvuspb.PersistentSegmentInfo{
+	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, 0, len(infoResp.Infos))
+	for _, info := range infoResp.Infos {
+		// Segment state may have changed since GetSegmentsByStates selected its ID.
+		if !lo.Contains(states, info.GetState()) {
+			continue
+		}
+		persistentInfos = append(persistentInfos, &milvuspb.PersistentSegmentInfo{
 			SegmentID:      info.ID,
 			CollectionID:   info.CollectionID,
 			PartitionID:    info.PartitionID,
@@ -4382,7 +4428,9 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 			Level:          commonpb.SegmentLevel(info.Level),
 			IsSorted:       info.GetIsSorted(),
 			StorageVersion: info.GetStorageVersion(),
-		}
+			InsertChannel:  info.GetInsertChannel(),
+			CompactionFrom: info.GetCompactionFrom(),
+		})
 	}
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	resp.Infos = persistentInfos
@@ -4881,6 +4929,25 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 		return resp, nil
 	}
 
+	if req == nil {
+		req = &milvuspb.GetCompactionPlansRequest{}
+	} else {
+		req = proto.Clone(req).(*milvuspb.GetCompactionPlansRequest)
+	}
+	req.CollectionId = 0
+	if req.GetCollectionName() != "" {
+		if err := validateCollectionName(req.GetCollectionName()); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		req.CollectionId = collectionID
+	}
+
 	resp, err := node.mixCoord.GetCompactionStateWithPlans(ctx, req)
 	mlog.Debug(context.TODO(), "received GetCompactionStateWithPlans response",
 		mlog.Any("resp", resp),
@@ -5125,6 +5192,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if priCache != nil {
 		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
+	if username == util.UserRoot && node.managementRootVerifier != nil {
+		node.managementRootVerifier.Forget()
+	}
 	mlog.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
@@ -5148,7 +5218,12 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	if priCache != nil {
 		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
-	mlog.Debug(context.TODO(), "complete to update credential cache")
+	if request.Username == util.UserRoot && node.managementRootVerifier != nil {
+		// The notification carries SHA256, not the bcrypt hash this verifier
+		// needs. Revoke the old credential and fetch the current hash on demand.
+		node.managementRootVerifier.Forget()
+	}
+	mlog.Debug(ctx, "complete to update credential cache")
 
 	return merr.Success(), nil
 }
@@ -6594,12 +6669,12 @@ func DeregisterSubLabel(subLabel string) {
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
-	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView()))
+	router.GET(http.ClusterConfigsPath, getProjectedConfigs(paramtable.Get().GetConfigsView))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
 	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	router.GET(http.HookConfigsPath, getProjectedConfigs(paramtable.GetHookParams().GetAll))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))
@@ -7384,6 +7459,12 @@ func (node *Proxy) ComputePhraseMatchSlop(ctx context.Context, req *milvuspb.Com
 // =============================================================================
 
 func checkTelemetryAdmin(ctx context.Context, method string) error {
+	if username, ok := http.AuthenticatedAdminFromContext(ctx); ok {
+		if username == util.UserRoot {
+			return nil
+		}
+		return merr.WrapErrPrivilegeNotPermitted("telemetry %s requires root user", method)
+	}
 	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		return nil
 	}

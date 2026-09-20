@@ -36,3 +36,17 @@ message SerializedIndexFileInfo {
   string file_name = 1;
   int64 file_size = 2;
 }
+
+// Materialized Function Chain inputs passed from Go to segcore. This is an
+// in-process CGO payload, not a client or component RPC message.
+message FunctionChainInputPlan {
+  repeated FunctionChainInput inputs = 1;
+}
+
+message FunctionChainInput {
+  int64 source_field_id = 1;
+  schema.DataType target_data_type = 2;
+  string logical_name = 3;
+  repeated string nested_path = 4;
+  bool is_json_path = 5;
+}

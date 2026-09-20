@@ -34,11 +34,22 @@ def pytest_addoption(parser):
     parser.addoption("--password", action="store", default="Milvus", help="password for connection")
     parser.addoption("--db_name", action="store", default="default", help="database name for connection")
     parser.addoption("--secure", action="store", default=False, help="secure for connection")
-    parser.addoption("--milvus_ns", action="store", default="chaos-testing", help="milvus_ns")
+    parser.addoption(
+        "--milvus_ns",
+        action="store",
+        default=os.getenv("MILVUS_NS", os.getenv("MILVUS_HELM_NAMESPACE", "chaos-testing")),
+        help="milvus_ns",
+    )
     parser.addoption("--http_port", action="store", default=19121, help="http's port")
     parser.addoption("--handler", action="store", default="GRPC", help="handler of request")
     parser.addoption("--tag", action="store", default="all", help="only run tests matching the tag.")
     parser.addoption("--dry_run", action="store_true", default=False, help="")
+    parser.addoption(
+        "--run-compaction-integrity-serial",
+        action="store_true",
+        default=False,
+        help="run cluster-global compaction data-integrity workloads in a non-xdist stage",
+    )
     parser.addoption("--database_name", action="store", default="default", help="name of database")
     parser.addoption("--partition_name", action="store", default="partition_name", help="name of partition")
     parser.addoption("--connect_name", action="store", default="connect_name", help="name of connect")
@@ -56,6 +67,11 @@ def pytest_addoption(parser):
     parser.addoption("--replica_num", action="store", default=ct.default_replica_num, help="memory replica number")
     parser.addoption("--minio_host", action="store", default="localhost", help="minio service's ip")
     parser.addoption("--minio_bucket", action="store", default="milvus-bucket", help="minio bucket name")
+    parser.addoption("--etcd_host", action="store", default="localhost", help="etcd service host")
+    parser.addoption("--etcd_port", action="store", type=int, default=2379, help="etcd service port")
+    parser.addoption("--etcd_root_path", action="store", default="by-dev", help="Milvus root path in etcd")
+    parser.addoption("--etcd_user", action="store", default="", help="etcd authentication user")
+    parser.addoption("--etcd_password", action="store", default="", help="etcd authentication password")
     parser.addoption("--uri", action="store", default="", help="uri for milvus client")
     parser.addoption("--token", action="store", default="root:Milvus", help="token for milvus client")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
@@ -295,6 +311,31 @@ def minio_bucket(request):
 
 
 @pytest.fixture
+def etcd_host(request):
+    return request.config.getoption("--etcd_host")
+
+
+@pytest.fixture
+def etcd_port(request):
+    return request.config.getoption("--etcd_port")
+
+
+@pytest.fixture
+def etcd_root_path(request):
+    return request.config.getoption("--etcd_root_path")
+
+
+@pytest.fixture
+def etcd_user(request):
+    return request.config.getoption("--etcd_user")
+
+
+@pytest.fixture
+def etcd_password(request):
+    return request.config.getoption("--etcd_password")
+
+
+@pytest.fixture
 def uri(request):
     return request.config.getoption("--uri")
 
@@ -398,6 +439,11 @@ def pytest_configure(config):
 
 
 def pytest_runtest_setup(item):
+    if item.get_closest_marker("compaction_data_integrity_serial") is not None:
+        if not item.config.getoption("--run-compaction-integrity-serial"):
+            pytest.skip("compaction data-integrity workloads require the dedicated serial E2E stage")
+        if hasattr(item.config, "workerinput"):
+            pytest.fail("compaction data-integrity workloads must run with pytest -n 0")
     tags = list()
     for marker in item.iter_markers(name="tag"):
         for tag in marker.args:

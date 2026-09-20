@@ -124,6 +124,7 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 	alloc.EXPECT().AllocTimestamp(mock.Anything).Return(rand.Uint64(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -200,6 +201,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 	alloc.EXPECT().AllocID(mock.Anything).Return(rand.Int63(), nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -264,6 +266,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -343,6 +346,7 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -437,6 +441,7 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 	})
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -510,6 +515,7 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 
 func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
@@ -604,6 +610,7 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -701,6 +708,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	mockErr := "mock err"
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
@@ -1082,6 +1090,7 @@ func TestImportTask_MarshalJSON(t *testing.T) {
 func TestLogResultSegmentsInfo(t *testing.T) {
 	// Create mock catalog and broker
 	mockCatalog := mocks.NewDataCoordCatalog(t)
+	mockCatalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	meta := &meta{
 		segments: NewSegmentsInfo(),
 		catalog:  mockCatalog,
@@ -1226,6 +1235,64 @@ func TestImportUtil_ListBinlogImportRequestFiles(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "list binlogs failed")
 		assert.Nil(t, files)
+	})
+
+	t.Run("backup files - invalid paths take precedence over storage errors", func(t *testing.T) {
+		for _, invalidPaths := range [][]string{nil, {"insert", "delta", "extra"}} {
+			for _, invalidFirst := range []bool{false, true} {
+				t.Run(fmt.Sprintf("paths_%d/invalid_first_%t", len(invalidPaths), invalidFirst), func(t *testing.T) {
+					mockCM := mocks2.NewChunkManager(t)
+					mockCM.EXPECT().WalkWithPrefix(mock.Anything, "valid", false, mock.Anything).
+						Return(merr.WrapErrIoTooManyRequests("valid", errors.New("SlowDown"))).Maybe()
+					reqFiles := []*internalpb.ImportFile{
+						{Paths: []string{"valid"}},
+						{Paths: invalidPaths},
+					}
+					if invalidFirst {
+						reqFiles[0], reqFiles[1] = reqFiles[1], reqFiles[0]
+					}
+
+					files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles,
+						[]*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}})
+					require.Error(t, err)
+					assert.Nil(t, files)
+					assert.ErrorIs(t, err, merr.ErrImportFailed)
+					status := merr.Status(err)
+					assert.Equal(t, merr.Code(merr.ErrImportFailed), status.GetCode())
+					assert.False(t, status.GetRetriable())
+					assert.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(status)))
+					mockCM.AssertNotCalled(t, "WalkWithPrefix", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+				})
+			}
+		}
+	})
+
+	t.Run("backup files - storage errors remain retryable", func(t *testing.T) {
+		for _, test := range []struct {
+			name string
+			err  error
+		}{
+			{"untyped", errors.New("object storage unavailable")},
+			{"throttled", merr.WrapErrIoTooManyRequests("insert", errors.New("SlowDown"))},
+			{"missing object", merr.WrapErrIoKeyNotFound("insert")},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				mockCM := mocks2.NewChunkManager(t)
+				mockCM.EXPECT().WalkWithPrefix(mock.Anything, "insert", false, mock.Anything).
+					Return(test.err).Once()
+				files, err := ListBinlogImportRequestFiles(ctx, mockCM,
+					[]*internalpb.ImportFile{{Paths: []string{"insert"}}},
+					[]*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}})
+				require.Error(t, err)
+				assert.Nil(t, files)
+				assert.ErrorIs(t, err, test.err)
+				status := merr.Status(err)
+				assert.Equal(t, merr.Code(merr.ErrServiceUnavailable), status.GetCode())
+				assert.True(t, status.GetRetriable())
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(status)))
+				assert.True(t, merr.IsRetryableErr(merr.Error(status)))
+			})
+		}
 	})
 
 	t.Run("backup files - success", func(t *testing.T) {
@@ -1390,6 +1457,7 @@ func TestImportUtil_AssembleRequestCarriesPKRange(t *testing.T) {
 	task.(*importTask).task.Store(importTaskProto)
 
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()

@@ -718,7 +718,7 @@ StringIndexSort::LoadEntries(storage::IndexEntryReader& reader,
             if (mmap_meta_data_ == MAP_FAILED) {
                 meta_file.Close();
                 remove(mmap_meta_filepath_.c_str());
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(ErrorCode::MmapError,
                           "failed to mmap idx_to_offsets meta: {}",
                           strerror(errno));
             }
@@ -860,7 +860,7 @@ StringIndexSortMemoryImpl::BuildFromArrayDataNested(
             auto* array =
                 reinterpret_cast<const Array*>(field_data->RawValue(i));
             for (int64_t j = 0; j < array->length(); j++) {
-                auto value = array->get_data<std::string>(j);
+                auto value = array->get_data_unchecked<std::string>(j);
                 map[value].push_back(static_cast<int32_t>(element_id));
                 valid_bitset.set(element_id);
                 element_id++;

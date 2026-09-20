@@ -962,20 +962,11 @@ type rerankOperator struct {
 	groupByFieldName string
 	groupSize        int64
 	groupScorerStr   string
+	useRequestLimit  bool
 
 	collSchema *schemapb.CollectionSchema
 	rerankMeta rerankMeta
 	dbName     string
-}
-
-// getChainNeededFields returns the field names that the chain actually needs
-// from FieldsData (rerank input fields). Returns nil if no filtering is needed.
-// Note: the group-by field is imported separately via GroupByFieldValue, not FieldsData.
-func (op *rerankOperator) getChainNeededFields() []string {
-	if op.rerankMeta != nil {
-		return op.rerankMeta.GetInputFieldNames()
-	}
-	return nil
 }
 
 func resolveFieldName(schema *schemapb.CollectionSchema, fieldID int64) string {
@@ -1017,6 +1008,12 @@ func fillFieldNames(schema *schemapb.CollectionSchema, resultData *schemapb.Sear
 
 func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 	if t.GetIsAdvanced() {
+		useRequestLimit := false
+		if meta, ok := t.rerankMeta.(*functionChainRerankMeta); ok {
+			useRequestLimit = !lo.ContainsBy(meta.repr.Operators, func(op chain.OperatorRepr) bool {
+				return op.Type == chaintypes.OpTypeLimit
+			})
+		}
 		return &rerankOperator{
 			nq:               t.GetNq(),
 			topK:             t.rankParams.limit,
@@ -1028,6 +1025,7 @@ func newRerankOperator(t *searchTask, params map[string]any) (operator, error) {
 			collSchema:       t.schema.CollectionSchema,
 			rerankMeta:       t.rerankMeta,
 			dbName:           t.request.GetDbName(),
+			useRequestLimit:  useRequestLimit,
 		}, nil
 	}
 	return &rerankOperator{
@@ -1083,12 +1081,13 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	if !ok {
 		return nil, merr.WrapErrParameterInvalidMsg("rerank operator: inputs[1] must be []string, got %T", inputs[1])
 	}
+	if op.rerankMeta == nil {
+		return nil, merr.WrapErrFunctionFailedMsg(
+			"rerank operator: rerankMeta is nil, cannot build rerank chain")
+	}
 
 	alloc := memory.DefaultAllocator
-
-	// Only convert fields that the chain actually needs (rerank input fields + group-by field).
-	// Other fields are not used by chain and will be re-fetched by organize/requery later.
-	neededFields := op.getChainNeededFields()
+	inputPlan := op.rerankMeta.GetInputPlan()
 
 	// Convert all inputs to DataFrames.
 	// Note: reducedResults entries are never nil — the reduce operator always produces
@@ -1099,7 +1098,7 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 		if result == nil || result.GetResults() == nil {
 			continue
 		}
-		df, err := chain.FromSearchResultData(result.GetResults(), alloc, neededFields)
+		df, err := chain.FromSearchResultData(result.GetResults(), alloc, inputPlan)
 		if err != nil {
 			for _, d := range dataframes {
 				d.Release()
@@ -1132,12 +1131,6 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 	} else {
 		searchParams = chain.NewSearchParams(op.nq, op.topK, op.offset, op.roundDecimal)
 	}
-	if op.rerankMeta == nil {
-		for _, df := range dataframes {
-			df.Release()
-		}
-		return nil, merr.WrapErrFunctionFailedMsg("rerank operator: rerankMeta is nil, cannot build rerank chain")
-	}
 	searchParams.ModelExtraInfo = &models.ModelExtraInfo{
 		ClusterID: paramtable.Get().CommonCfg.ClusterPrefix.GetValue(),
 		DBName:    op.dbName,
@@ -1148,6 +1141,10 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 			df.Release()
 		}
 		return nil, err
+	}
+	if op.useRequestLimit {
+		// Hybrid L2 chains without an explicit Limit inherit the request limit and offset.
+		fc.LimitWithOffset(op.topK, op.offset)
 	}
 
 	if allEmpty {
@@ -3545,8 +3542,9 @@ func newBuiltInPipeline(t *searchTask) (*pipeline, error) {
 			// so there's some memory overhead.
 			return newPipeline(hybridSearchWithRequeryAndRerankByFieldDataPipe, t)
 		} else {
-			// Otherwise, we can rerank and limit the requery size to the limit.
-			// so the memory overhead is less than the hybridSearchWithRequeryAndRerankByFieldDataPipe.
+			// Otherwise, rerank first and requery only the rows emitted by the reranker.
+			// Hybrid Function Chains use their explicit Limit or the request limit
+			// before requery; legacy paths use their server-built limit.
 			return newPipeline(hybridSearchWithRequeryPipe, t)
 		}
 	}

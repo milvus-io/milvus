@@ -33,6 +33,29 @@ func (e *testBodyEncoder) BodyType() *msgpb.InsertRequest {
 	return nil
 }
 
+func TestReplicateMessagePreservesIdempotencyKey(t *testing.T) {
+	// A replicated message carries the SOURCE cluster's idempotency key: message
+	// properties cross the replication boundary verbatim. The idempotency
+	// interceptor and the recovery observer must therefore skip replicated
+	// messages BEFORE reading the key — otherwise a foreign key would
+	// materialize a local window entry.
+	msgID := walimplstest.NewTestMessageID(1)
+	immutableMsg := message.NewInsertMessageBuilderV1().
+		WithVChannel("v1").
+		WithHeader(&message.InsertMessageHeader{}).
+		WithBody(&msgpb.InsertRequest{}).
+		WithIdempotencyKey("key-1").
+		MustBuildMutable().
+		WithTimeTick(100).
+		WithLastConfirmed(msgID).
+		IntoImmutableMessage(msgID)
+	require.Equal(t, message.IdempotencyKey("key-1"), message.IdempotencyKeyOf(immutableMsg))
+
+	replicateMsg := message.MustNewReplicateMessage("by-dev", immutableMsg.IntoImmutableMessageProto())
+	require.NotNil(t, replicateMsg.ReplicateHeader())
+	require.Equal(t, message.IdempotencyKey("key-1"), message.IdempotencyKeyOf(replicateMsg))
+}
+
 func TestMutableBuilder(t *testing.T) {
 	b := message.NewTimeTickMessageBuilderV1().
 		WithHeader(&message.TimeTickMessageHeader{}).
@@ -94,7 +117,7 @@ func TestMutableBuilderWithBodyEncoder(t *testing.T) {
 
 	insertMsg, err := message.AsMutableInsertMessageV1(msg)
 	require.NoError(t, err)
-	actualBody, err := insertMsg.Body()
+	actualBody, err := insertMsg.Body(context.Background())
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(body, actualBody))
 }

@@ -83,6 +83,65 @@ func (_c *MixCoord_AbortImport_Call) Run(run func(_a0 context.Context, _a1 *data
 	return _c
 }
 
+// GetRLSMetadata provides a mock function with given fields: _a0, _a1
+func (_m *MixCoord) GetRLSMetadata(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetRLSMetadata")
+	}
+
+	var r0 *rootcoordpb.GetRLSMetadataResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) *rootcoordpb.GetRLSMetadataResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.GetRLSMetadataResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.GetRLSMetadataRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MixCoord_GetRLSMetadata_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRLSMetadata'
+type MixCoord_GetRLSMetadata_Call struct {
+	*mock.Call
+}
+
+// GetRLSMetadata is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.GetRLSMetadataRequest
+func (_e *MixCoord_Expecter) GetRLSMetadata(_a0 interface{}, _a1 interface{}) *MixCoord_GetRLSMetadata_Call {
+	return &MixCoord_GetRLSMetadata_Call{Call: _e.mock.On("GetRLSMetadata", _a0, _a1)}
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.GetRLSMetadataRequest)) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.GetRLSMetadataRequest))
+	})
+	return _c
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) Return(_a0 *rootcoordpb.GetRLSMetadataResponse, _a1 error) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MixCoord_GetRLSMetadata_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetRLSMetadataRequest) (*rootcoordpb.GetRLSMetadataResponse, error)) *MixCoord_GetRLSMetadata_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 func (_c *MixCoord_AbortImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MixCoord_AbortImport_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
@@ -8244,17 +8303,17 @@ func (_c *MixCoord_MarkSegmentsDropped_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
-// NotifyDropPartition provides a mock function with given fields: ctx, channel, partitionIDs
-func (_m *MixCoord) NotifyDropPartition(ctx context.Context, channel string, partitionIDs []int64) error {
-	ret := _m.Called(ctx, channel, partitionIDs)
+// NotifyDropPartition provides a mock function with given fields: ctx, channel, collectionID, partitionIDs
+func (_m *MixCoord) NotifyDropPartition(ctx context.Context, channel string, collectionID int64, partitionIDs []int64) error {
+	ret := _m.Called(ctx, channel, collectionID, partitionIDs)
 
 	if len(ret) == 0 {
 		panic("no return value specified for NotifyDropPartition")
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, []int64) error); ok {
-		r0 = rf(ctx, channel, partitionIDs)
+	if rf, ok := ret.Get(0).(func(context.Context, string, int64, []int64) error); ok {
+		r0 = rf(ctx, channel, collectionID, partitionIDs)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -8270,14 +8329,15 @@ type MixCoord_NotifyDropPartition_Call struct {
 // NotifyDropPartition is a helper method to define mock.On call
 //   - ctx context.Context
 //   - channel string
+//   - collectionID int64
 //   - partitionIDs []int64
-func (_e *MixCoord_Expecter) NotifyDropPartition(ctx interface{}, channel interface{}, partitionIDs interface{}) *MixCoord_NotifyDropPartition_Call {
-	return &MixCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", ctx, channel, partitionIDs)}
+func (_e *MixCoord_Expecter) NotifyDropPartition(ctx interface{}, channel interface{}, collectionID interface{}, partitionIDs interface{}) *MixCoord_NotifyDropPartition_Call {
+	return &MixCoord_NotifyDropPartition_Call{Call: _e.mock.On("NotifyDropPartition", ctx, channel, collectionID, partitionIDs)}
 }
 
-func (_c *MixCoord_NotifyDropPartition_Call) Run(run func(ctx context.Context, channel string, partitionIDs []int64)) *MixCoord_NotifyDropPartition_Call {
+func (_c *MixCoord_NotifyDropPartition_Call) Run(run func(ctx context.Context, channel string, collectionID int64, partitionIDs []int64)) *MixCoord_NotifyDropPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].([]int64))
+		run(args[0].(context.Context), args[1].(string), args[2].(int64), args[3].([]int64))
 	})
 	return _c
 }
@@ -8287,7 +8347,7 @@ func (_c *MixCoord_NotifyDropPartition_Call) Return(_a0 error) *MixCoord_NotifyD
 	return _c
 }
 
-func (_c *MixCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, []int64) error) *MixCoord_NotifyDropPartition_Call {
+func (_c *MixCoord_NotifyDropPartition_Call) RunAndReturn(run func(context.Context, string, int64, []int64) error) *MixCoord_NotifyDropPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }

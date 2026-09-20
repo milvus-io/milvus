@@ -18,10 +18,8 @@ from common.bulk_insert_data import (
     DataField as df,
 )
 from common.common_type import CaseLabel, CheckTasks
-from common.milvus_sys import MilvusSys
 from pymilvus import CollectionSchema, DataType, FieldSchema, Function, FunctionType
 from pymilvus.bulk_writer import BulkFileType, RemoteBulkWriter
-from utils.util_k8s import get_milvus_deploy_tool, get_milvus_instance_name, get_pod_ip_name_pairs
 from utils.util_log import test_log as log
 
 default_vec_only_fields = [df.vec_field]
@@ -130,24 +128,24 @@ def assert_text_lob_bulk_rows(actual_rows, expected_rows):
         assert len(actual_text.encode("utf-8")) == expected_meta["bytes"]
 
 
+def minio_endpoint_from_host(minio_host):
+    endpoint = minio_host or "localhost"
+    if endpoint.startswith("http://"):
+        endpoint = endpoint.removeprefix("http://")
+    elif endpoint.startswith("https://"):
+        endpoint = endpoint.removeprefix("https://")
+    if ":" not in endpoint:
+        endpoint = f"{endpoint}:9000"
+    return endpoint
+
+
 class TestcaseBaseBulkInsert(TestcaseBase):
     @pytest.fixture(scope="function", autouse=True)
-    def init_minio_client(self, host, milvus_ns):
+    def init_minio_client(self, minio_host, minio_bucket):
         Path("/tmp/bulk_insert_data").mkdir(parents=True, exist_ok=True)
         self._connect()
-        self.milvus_ns = milvus_ns
-        self.milvus_sys = MilvusSys(alias="default")
-        self.instance_name = get_milvus_instance_name(self.milvus_ns, host)
-        self.deploy_tool = get_milvus_deploy_tool(self.milvus_ns, self.milvus_sys)
-        minio_label = f"release={self.instance_name}, app=minio"
-        if self.deploy_tool == "milvus-operator":
-            minio_label = f"release={self.instance_name}-minio, app=minio"
-        minio_ip_pod_pair = get_pod_ip_name_pairs(self.milvus_ns, minio_label)
-        ms = MilvusSys()
-        minio_ip = list(minio_ip_pod_pair.keys())[0]
-        minio_port = "9000"
-        self.minio_endpoint = f"{minio_ip}:{minio_port}"
-        self.bucket_name = ms.data_nodes[0]["infos"]["system_configurations"]["minio_bucket_name"]
+        self.minio_endpoint = minio_endpoint_from_host(minio_host)
+        self.bucket_name = minio_bucket
 
     # def teardown_method(self, method):
     #     log.info(("*" * 35) + " teardown " + ("*" * 35))

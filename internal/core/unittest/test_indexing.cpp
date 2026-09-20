@@ -1559,7 +1559,8 @@ TEST(Indexing, DiskAnnEmbListBuildWithDataset) {
     int64_t partition_id = 2;
     int64_t segment_id = 3;
     int64_t field_id = 100;
-    int64_t build_id = 1000;
+    // Test shards share the remote files root, so uploads need unique IDs.
+    int64_t build_id = 5304601;
     int64_t index_version = 1;
 
     StorageConfig storage_config = get_default_local_storage_config();
@@ -1668,7 +1669,8 @@ TEST(Indexing, DiskAnnEmbListBuildFromBinlog) {
     int64_t partition_id = 2;
     int64_t segment_id = 3;
     int64_t field_id = 100;
-    int64_t build_id = 1000;
+    // Keep uploads separate from the concurrent BuildWithDataset test.
+    int64_t build_id = 5304602;
     int64_t index_version = 1;
 
     // Generate VECTOR_ARRAY field data with variable-length emb_lists

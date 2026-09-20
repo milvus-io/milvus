@@ -232,7 +232,7 @@ ScalarIndexSort<T>::BuildWithArrayDataNested(
             auto length = array->length();
             for (int64_t j = 0; j < length; j++) {
                 data_.emplace_back(
-                    IndexStructure(array->get_data<T>(j), offset));
+                    IndexStructure(array->get_data_unchecked<T>(j), offset));
                 offset++;
             }
         }
@@ -766,9 +766,8 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         if (mmap_data_ == MAP_FAILED) {
             file.Close();
             remove(mmap_filepath_.c_str());
-            ThrowInfo(ErrorCode::UnexpectedError,
-                      "failed to mmap: {}",
-                      strerror(errno));
+            ThrowInfo(
+                ErrorCode::MmapError, "failed to mmap: {}", strerror(errno));
         }
         file.Close();
     } else {
@@ -851,7 +850,7 @@ ScalarIndexSort<T>::LoadEntries(storage::IndexEntryReader& reader,
         if (mmap_meta_data_ == MAP_FAILED) {
             meta_file.Close();
             remove(mmap_meta_filepath_.c_str());
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(ErrorCode::MmapError,
                       "failed to mmap meta: {}",
                       strerror(errno));
         }

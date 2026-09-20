@@ -55,10 +55,9 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
-            auto cache_lock = geometry_cache->AcquireReadLock();                 \
             /* Cache-owned geometries share one GEOS context; drive the        \
-             * predicate on a per-thread context so concurrent read-locked      \
-             * queries never touch the same non-thread-safe context. */ \
+             * predicate on a per-thread context so concurrent lock-free        \
+             * readers never touch the same non-thread-safe context. */ \
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
@@ -67,7 +66,7 @@ namespace exec {
                 }                                                                \
                 auto absolute_offset = segment_offsets[i];                       \
                 auto cached_geometry =                                           \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
+                    geometry_cache->GetByOffset(absolute_offset);                \
                 /* nullptr = empty/corrupt placeholder row (the write paths    \
                  * keep such rows, see SimpleGeometryCache::AppendDataAt); it   \
                  * can never satisfy the predicate, so evaluate it to false     \
@@ -123,10 +122,9 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
-            auto cache_lock = geometry_cache->AcquireReadLock();                 \
             /* Cache-owned geometries share one GEOS context; drive the        \
-             * predicate on a per-thread context so concurrent read-locked      \
-             * queries never touch the same non-thread-safe context. */ \
+             * predicate on a per-thread context so concurrent lock-free        \
+             * readers never touch the same non-thread-safe context. */ \
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
@@ -135,7 +133,7 @@ namespace exec {
                 }                                                                \
                 auto absolute_offset = segment_offsets[i];                       \
                 auto cached_geometry =                                           \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
+                    geometry_cache->GetByOffset(absolute_offset);                \
                 /* nullptr = empty/corrupt placeholder row: evaluate to false  \
                  * instead of failing the query (see the comparison macro). */ \
                 if (cached_geometry == nullptr) {                                \
@@ -186,10 +184,9 @@ namespace exec {
                    "segment_offsets should not be nullptr");                     \
         auto geometry_cache = this->segment_->GetGeometryCache(field_id_);       \
         if (geometry_cache) {                                                    \
-            auto cache_lock = geometry_cache->AcquireReadLock();                 \
             /* Cache-owned geometries share one GEOS context; drive the        \
-             * predicate on a per-thread context so concurrent read-locked      \
-             * queries never touch the same non-thread-safe context. */ \
+             * predicate on a per-thread context so concurrent lock-free        \
+             * readers never touch the same non-thread-safe context. */ \
             GEOSContextHandle_t tls_ctx = GetThreadLocalGEOSContext();           \
             for (int i = 0; i < size; ++i) {                                     \
                 if (valid_data && !valid_data[i]) {                              \
@@ -198,7 +195,7 @@ namespace exec {
                 }                                                                \
                 auto absolute_offset = segment_offsets[i];                       \
                 auto cached_geometry =                                           \
-                    geometry_cache->GetByOffsetUnsafe(absolute_offset);          \
+                    geometry_cache->GetByOffset(absolute_offset);                \
                 /* nullptr = empty/corrupt placeholder row: it is not a valid  \
                  * geometry, so the unary predicate is false (see the           \
                  * comparison macro). */ \
@@ -611,12 +608,10 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
             // Get simple geometry cache for this segment+field
             auto geometry_cache = segment_->GetGeometryCache(field_id_);
             if (geometry_cache) {
-                auto cache_lock = geometry_cache->AcquireReadLock();
                 for (size_t i = 0; i < hit_offsets.size(); ++i) {
                     const auto pos = hit_offsets[i];
 
-                    auto cached_geometry =
-                        geometry_cache->GetByOffsetUnsafe(pos);
+                    auto cached_geometry = geometry_cache->GetByOffset(pos);
                     // skip invalid geometry
                     if (cached_geometry == nullptr) {
                         continue;
@@ -673,7 +668,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                             // dropping) to hold the index row count. It can
                             // never satisfy exact refinement, so skip it,
                             // mirroring the cache branch's
-                            // GetByOffsetUnsafe() == nullptr skip above.
+                            // GetByOffset() == nullptr skip above.
                             // MUST NOT throw: with the geometry cache off
                             // (the default), such rows reach refinement as
                             // R-Tree candidates whenever the query bbox
@@ -740,7 +735,7 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;
-            int64_t size = segment_->chunk_size(field_id_, i) - data_pos;
+            int64_t size = ChunkSize(field_id_, i) - data_pos;
             size = std::min(size, real_batch_size - processed_rows);
 
             if (size > 0) {
@@ -802,6 +797,13 @@ PhyGISFunctionFilterExpr::EvalForIndexSegment() {
                "expect batch size {}",
                batch_valid.size(),
                real_batch_size);
+    if (segment_->type() != SegmentType::Sealed) {
+        CommitLegacyDataProgress(processed_rows);
+        AssertInfo(current_data_global_pos_ == current_index_chunk_pos_,
+                   "growing GIS data cursor at {}, index cursor at {}",
+                   current_data_global_pos_,
+                   current_index_chunk_pos_);
+    }
     return std::make_shared<ColumnVector>(std::move(batch_result),
                                           std::move(batch_valid));
 }

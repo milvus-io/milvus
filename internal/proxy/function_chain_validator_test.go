@@ -16,6 +16,7 @@
 package proxy
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +25,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	chainexpr "github.com/milvus-io/milvus/internal/util/function/chain/expr"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestValidateFunctionChainSearchRequest(t *testing.T) {
@@ -49,19 +53,129 @@ func TestValidateFunctionChainSearchRequest(t *testing.T) {
 		assert.Contains(t, err.Error(), "function_score and function_chains cannot be used together")
 	})
 
-	t.Run("hybrid function chains", func(t *testing.T) {
+	t.Run("hybrid function chains are validated by hybrid selector", func(t *testing.T) {
 		err := validateFunctionChainSearchRequest(&milvuspb.SearchRequest{
 			FunctionChains: []*schemapb.FunctionChain{l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName)))},
 		}, true)
+		require.NoError(t, err)
+	})
+}
+
+func TestSelectHybridRerankMeta(t *testing.T) {
+	schema := newFunctionChainTestSchema()
+	mergeOp := &schemapb.FunctionChainOp{
+		Op: types.OpTypeMerge,
+		Params: map[string]*schemapb.FunctionParamValue{
+			"strategy": chainStringParam("rrf"),
+		},
+	}
+	chainPB := l2FunctionChain(mergeOp)
+	responseParams := []*commonpb.KeyValuePair{
+		{Key: LimitKey, Value: "10"},
+		{Key: OffsetKey, Value: "2"},
+		{Key: RoundDecimalKey, Value: "3"},
+	}
+	subReqs := []*milvuspb.SubSearchRequest{{}, {}}
+
+	t.Run("chain accepts response controls", func(t *testing.T) {
+		meta, err := selectHybridRerankMeta(&milvuspb.SearchRequest{
+			FunctionChains: []*schemapb.FunctionChain{chainPB},
+			SearchParams:   responseParams,
+			SubReqs:        subReqs,
+		}, schema)
+		require.NoError(t, err)
+		_, ok := meta.(*functionChainRerankMeta)
+		assert.True(t, ok)
+
+		meta, err = selectHybridRerankMeta(&milvuspb.SearchRequest{
+			FunctionChains: []*schemapb.FunctionChain{chainPB},
+			SearchParams: append(responseParams,
+				&commonpb.KeyValuePair{Key: RankTypeKey, Value: ""},
+				&commonpb.KeyValuePair{Key: ParamsKey, Value: "null"},
+			),
+			SubReqs: subReqs,
+		}, schema)
+		require.NoError(t, err)
+		_, ok = meta.(*functionChainRerankMeta)
+		assert.True(t, ok)
+	})
+
+	t.Run("chain rejects other rerank sources", func(t *testing.T) {
+		_, err := selectHybridRerankMeta(&milvuspb.SearchRequest{
+			FunctionChains: []*schemapb.FunctionChain{chainPB},
+			FunctionScore:  &schemapb.FunctionScore{},
+			SearchParams:   responseParams,
+			SubReqs:        subReqs,
+		}, schema)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "function_chains is not supported for hybrid search yet")
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "cannot be used with function_score")
+
+		for _, key := range []string{RankTypeKey, ParamsKey, strings.ToUpper(RankTypeKey)} {
+			params := append([]*commonpb.KeyValuePair{}, responseParams...)
+			params = append(params, &commonpb.KeyValuePair{Key: key, Value: "configured"})
+			_, err = selectHybridRerankMeta(&milvuspb.SearchRequest{
+				FunctionChains: []*schemapb.FunctionChain{chainPB},
+				SearchParams:   params,
+				SubReqs:        subReqs,
+			}, schema)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Contains(t, err.Error(), "rank_params strategy or params")
+		}
+	})
+
+	t.Run("preserves existing sources", func(t *testing.T) {
+		meta, err := selectHybridRerankMeta(&milvuspb.SearchRequest{SearchParams: responseParams}, schema)
+		require.NoError(t, err)
+		_, ok := meta.(*legacyRerankMeta)
+		assert.True(t, ok)
+
+		meta, err = selectHybridRerankMeta(&milvuspb.SearchRequest{
+			FunctionScore: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+				Type: schemapb.FunctionType_Rerank,
+			}}},
+		}, schema)
+		require.NoError(t, err)
+		_, ok = meta.(*funcScoreRerankMeta)
+		assert.True(t, ok)
+	})
+
+	t.Run("function score rejects nested function chains", func(t *testing.T) {
+		_, err := selectHybridRerankMeta(&milvuspb.SearchRequest{
+			FunctionScore: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+				Type: schemapb.FunctionType_Rerank,
+				Params: []*commonpb.KeyValuePair{
+					{Key: "reranker", Value: "boost"},
+					{Key: "weight", Value: "2.0"},
+				},
+			}}},
+			SubReqs: []*milvuspb.SubSearchRequest{{
+				FunctionChains: []*schemapb.FunctionChain{l0FunctionChain()},
+			}},
+		}, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "function_score cannot be used with function_chains in sub-search[0]")
+	})
+
+	t.Run("function score input planning errors propagate", func(t *testing.T) {
+		meta, err := selectHybridRerankMeta(&milvuspb.SearchRequest{
+			FunctionScore: &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{
+				Type:            schemapb.FunctionType_Rerank,
+				InputFieldNames: []string{"missing_field"},
+			}}},
+		}, schema)
+		require.Nil(t, meta)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "missing_field")
 	})
 }
 
 func TestSplitFunctionChainsByStage(t *testing.T) {
 	t.Run("split l0 l1 and l2 chains", func(t *testing.T) {
-		l0Chain := l0FunctionChain()
-		l1Chain := l1FunctionChain()
+		l0Chain := l0FunctionChain(mapOp(types.ScoreFieldName, "xgboost", columnArg("pk")))
+		l1Chain := l1FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName)))
 		l2Chain := l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName)))
 
 		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0Chain, l1Chain, l2Chain})
@@ -70,13 +184,10 @@ func TestSplitFunctionChainsByStage(t *testing.T) {
 		assert.Equal(t, []*schemapb.FunctionChain{l0Chain, l1Chain}, querynodeChains)
 	})
 
-	t.Run("l0 chain is shallow routed without op validation", func(t *testing.T) {
-		l0Chain := l0FunctionChain()
-
-		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0Chain})
-		require.NoError(t, err)
-		assert.Empty(t, l2Chains)
-		assert.Equal(t, []*schemapb.FunctionChain{l0Chain}, querynodeChains)
+	t.Run("empty l0 chain", func(t *testing.T) {
+		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l0FunctionChain()})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "function chain[0] must contain at least one op")
 	})
 
 	t.Run("nil chain", func(t *testing.T) {
@@ -87,26 +198,23 @@ func TestSplitFunctionChainsByStage(t *testing.T) {
 
 	t.Run("duplicate stage", func(t *testing.T) {
 		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{
-			l0FunctionChain(),
-			l0FunctionChain(),
+			l0FunctionChain(mapOp(types.ScoreFieldName, "xgboost", columnArg("pk"))),
+			l0FunctionChain(mapOp(types.ScoreFieldName, "xgboost", columnArg("pk"))),
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "appears more than once")
 	})
 
-	t.Run("l1 chain is shallow routed without op validation", func(t *testing.T) {
-		l1Chain := l1FunctionChain()
-
-		l2Chains, querynodeChains, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l1Chain})
-		require.NoError(t, err)
-		assert.Empty(t, l2Chains)
-		assert.Equal(t, []*schemapb.FunctionChain{l1Chain}, querynodeChains)
+	t.Run("empty l1 chain", func(t *testing.T) {
+		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{l1FunctionChain()})
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "function chain[0] must contain at least one op")
 	})
 
 	t.Run("duplicate l1 stage", func(t *testing.T) {
 		_, _, err := splitFunctionChainsByStage([]*schemapb.FunctionChain{
-			l1FunctionChain(),
-			l1FunctionChain(),
+			l1FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName))),
+			l1FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName))),
 		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "appears more than once")
@@ -130,6 +238,8 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		require.NotNil(t, meta)
 		assert.Empty(t, meta.GetInputFieldNames())
 		assert.Empty(t, meta.GetInputFieldIDs())
+		assert.NotNil(t, meta.inputPlan)
+		assert.Empty(t, meta.inputPlan.Inputs)
 		assert.Equal(t, chainPB, meta.chainPB)
 		assert.NotNil(t, meta.repr)
 	})
@@ -147,7 +257,77 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
 	})
 
-	t.Run("merge generated system outputs are not user writes", func(t *testing.T) {
+	t.Run("JSON and dynamic paths fetch physical roots", func(t *testing.T) {
+		jsonSchema := newFunctionChainJSONTestSchema()
+		op := mapOp(
+			types.ScoreFieldName,
+			"expr",
+			columnArg(`metadata["price"]`),
+			columnArg(`$meta["ctr"]`),
+		)
+		op.Params = map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: chainDataTypesParam(schemapb.DataType_Double, schemapb.DataType_Int64),
+		}
+		chainPB := l2FunctionChain(op)
+
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, jsonSchema)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Equal(t, []string{"metadata", common.MetaFieldName}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{102, 103}, meta.GetInputFieldIDs())
+		require.NotNil(t, meta.inputPlan)
+		require.Len(t, meta.inputPlan.Inputs, 2)
+		assert.Equal(t, []string{"price"}, meta.inputPlan.Inputs[0].NestedPath)
+		assert.Equal(t, []string{"ctr"}, meta.inputPlan.Inputs[1].NestedPath)
+	})
+
+	t.Run("bare dynamic input is rejected", func(t *testing.T) {
+		_, err := newFunctionChainRerankMeta(
+			[]*schemapb.FunctionChain{l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg("ctr")))},
+			newFunctionChainJSONTestSchema(),
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must use explicit $meta[...] syntax")
+	})
+
+	t.Run("JSON path data type is required", func(t *testing.T) {
+		_, err := newFunctionChainRerankMeta(
+			[]*schemapb.FunctionChain{l2FunctionChain(mapOp(
+				types.ScoreFieldName,
+				"expr",
+				columnArg(`metadata["price"]`),
+			))},
+			newFunctionChainJSONTestSchema(),
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires an explicit data_type")
+	})
+
+	t.Run("complete JSON roots are rejected", func(t *testing.T) {
+		for _, input := range []string{"metadata", common.MetaFieldName} {
+			_, err := newFunctionChainRerankMeta(
+				[]*schemapb.FunctionChain{l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(input)))},
+				newFunctionChainJSONTestSchema(),
+			)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "complete JSON root input is not supported")
+		}
+	})
+
+	t.Run("JSON data type is rejected for paths", func(t *testing.T) {
+		op := mapOp(types.ScoreFieldName, "expr", columnArg(`metadata["payload"]`))
+		op.Params = map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: chainDataTypesParam(schemapb.DataType_JSON),
+		}
+		_, err := newFunctionChainRerankMeta(
+			[]*schemapb.FunctionChain{l2FunctionChain(op)},
+			newFunctionChainJSONTestSchema(),
+		)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported JSON path data type hint JSON")
+	})
+
+	t.Run("ordinary search rejects merge", func(t *testing.T) {
 		chainPB := l2FunctionChain(&schemapb.FunctionChainOp{
 			Op: types.OpTypeMerge,
 			Params: map[string]*schemapb.FunctionParamValue{
@@ -155,10 +335,10 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 			},
 		})
 
-		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
-		require.NoError(t, err)
-		require.NotNil(t, meta)
-		assert.Empty(t, meta.GetInputFieldNames())
+		_, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "merge is not supported in ordinary search")
 	})
 
 	t.Run("group by system field is not planned as schema input", func(t *testing.T) {
@@ -201,12 +381,6 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		assert.Contains(t, err.Error(), "Array")
 	})
 
-	t.Run("nil schema", func(t *testing.T) {
-		_, _, err := getFunctionChainInputField(nil, "ts")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "neither a previous output nor a collection field")
-	})
-
 	t.Run("duplicate stage", func(t *testing.T) {
 		_, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{
 			l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName))),
@@ -241,7 +415,7 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		}, schema)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unknown")
-		assert.Contains(t, err.Error(), "neither a previous output nor a collection field")
+		assert.Contains(t, err.Error(), "field unknown not exist")
 	})
 
 	t.Run("unsupported system input", func(t *testing.T) {
@@ -249,7 +423,7 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 			l2FunctionChain(mapOp("score1", "expr", columnArg("$timestamp"))),
 		}, schema)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "system input \"$timestamp\" is not supported")
+		assert.Contains(t, err.Error(), "unsupported function chain system input \"$timestamp\"")
 	})
 
 	t.Run("unsupported system output", func(t *testing.T) {
@@ -258,6 +432,17 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		}, schema)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "system output \"$id\" is not writable")
+	})
+
+	t.Run("JSON outputs are not writable", func(t *testing.T) {
+		for _, output := range []string{"metadata", `metadata["price"]`} {
+			_, err := newFunctionChainRerankMeta(
+				[]*schemapb.FunctionChain{l2FunctionChain(mapOp(output, "expr", columnArg(types.ScoreFieldName)))},
+				newFunctionChainJSONTestSchema(),
+			)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "JSON root or path cannot be used")
+		}
 	})
 
 	t.Run("reserved temporary system output", func(t *testing.T) {
@@ -275,6 +460,24 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("xgboost supports l2 stage", func(t *testing.T) {
+		xgboostOp := mapOp(
+			types.ScoreFieldName,
+			chainexpr.XGBoostFuncName,
+			columnArg("price"),
+		)
+		xgboostOp.GetExpr().Params = map[string]*schemapb.FunctionParamValue{
+			"model_resource": chainStringParam("rank_model"),
+		}
+		chainPB := l2FunctionChain(xgboostOp)
+
+		meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Equal(t, []string{"price"}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{105}, meta.GetInputFieldIDs())
+	})
+
 	t.Run("unsupported field type", func(t *testing.T) {
 		_, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{
 			l2FunctionChain(mapOp("score1", "expr", columnArg("vec"))),
@@ -282,6 +485,145 @@ func TestNewFunctionChainRerankMeta(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unsupported field type")
 		assert.Contains(t, err.Error(), "FloatVector")
+	})
+}
+
+func TestNewHybridFunctionChainRerankMeta(t *testing.T) {
+	schema := newFunctionChainTestSchema()
+	mergeOp := func(strategy string) *schemapb.FunctionChainOp {
+		return &schemapb.FunctionChainOp{
+			Op: types.OpTypeMerge,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"strategy": chainStringParam(strategy),
+			},
+		}
+	}
+
+	t.Run("valid merge and downstream scalar input", func(t *testing.T) {
+		chainPB := l2FunctionChain(
+			mergeOp("rrf"),
+			mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName), columnArg("ts")),
+		)
+
+		meta, err := newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema, 2)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Equal(t, []string{"ts"}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{101}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("valid merge and downstream xgboost", func(t *testing.T) {
+		xgboostOp := mapOp(
+			types.ScoreFieldName,
+			chainexpr.XGBoostFuncName,
+			columnArg("price"),
+		)
+		xgboostOp.GetExpr().Params = map[string]*schemapb.FunctionParamValue{
+			"model_resource": chainStringParam("rank_model"),
+		}
+		chainPB := l2FunctionChain(mergeOp("rrf"), xgboostOp)
+
+		meta, err := newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, schema, 2)
+		require.NoError(t, err)
+		require.NotNil(t, meta)
+		assert.Equal(t, []string{"price"}, meta.GetInputFieldNames())
+		assert.Equal(t, []int64{105}, meta.GetInputFieldIDs())
+	})
+
+	t.Run("hybrid selection preserves typed JSON and dynamic inputs", func(t *testing.T) {
+		op := mapOp(types.ScoreFieldName, "expr",
+			columnArg(`metadata["price"]`), columnArg(`$meta["ctr"]`))
+		op.Params = map[string]*schemapb.FunctionParamValue{
+			types.InputDataTypesParam: chainDataTypesParam(schemapb.DataType_Double, schemapb.DataType_Int64),
+		}
+		request := &milvuspb.SearchRequest{
+			FunctionChains: []*schemapb.FunctionChain{l2FunctionChain(mergeOp("rrf"), op)},
+			SubReqs:        []*milvuspb.SubSearchRequest{{}, {}},
+		}
+		meta, err := selectHybridRerankMeta(request, newFunctionChainJSONTestSchema())
+		require.NoError(t, err)
+		require.IsType(t, &functionChainRerankMeta{}, meta)
+		assert.Equal(t, []int64{102, 103}, meta.GetInputFieldIDs())
+		require.Len(t, meta.GetInputPlan().Inputs, 2)
+		assert.Equal(t, []string{"price"}, meta.GetInputPlan().Inputs[0].NestedPath)
+		assert.Equal(t, []string{"ctr"}, meta.GetInputPlan().Inputs[1].NestedPath)
+
+		delete(op.Params, types.InputDataTypesParam)
+		_, err = selectHybridRerankMeta(request, newFunctionChainJSONTestSchema())
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "requires an explicit data_type")
+	})
+
+	t.Run("requires exactly one chain", func(t *testing.T) {
+		_, err := newHybridFunctionChainRerankMeta(nil, schema, 2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires exactly one function chain")
+
+		_, err = newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(mergeOp("rrf")),
+			l2FunctionChain(mergeOp("rrf")),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires exactly one function chain")
+	})
+
+	t.Run("requires l2 stage", func(t *testing.T) {
+		_, err := newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{{
+			Stage: schemapb.FunctionChainStage_FunctionChainStageL1Rerank,
+			Ops:   []*schemapb.FunctionChainOp{mergeOp("rrf")},
+		}}, schema, 2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "stage FunctionChainStageL1Rerank is not supported")
+	})
+
+	t.Run("requires one first merge", func(t *testing.T) {
+		_, err := newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName))),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must contain exactly one merge operator")
+
+		_, err = newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(
+				mapOp(types.ScoreFieldName, "expr", columnArg(types.ScoreFieldName)),
+				mergeOp("rrf"),
+			),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "merge operator must be first")
+
+		_, err = newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(mergeOp("rrf"), mergeOp("rrf")),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must contain exactly one merge operator")
+	})
+
+	t.Run("validates merge parameters and input count", func(t *testing.T) {
+		_, err := newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(mergeOp("unsupported")),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "unsupported strategy")
+
+		weightedOp := mergeOp("weighted")
+		weightedOp.Params["weights"] = chainArrayParam(chainDoubleParam(1))
+		_, err = newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(weightedOp),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "weights count 1 does not match search input count 2")
+
+		rrfOp := mergeOp("rrf")
+		rrfOp.Params["weights"] = chainArrayParam(chainDoubleParam(1))
+		_, err = newHybridFunctionChainRerankMeta([]*schemapb.FunctionChain{
+			l2FunctionChain(rrfOp),
+		}, schema, 2)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "weights count 1 does not match search input count 2")
 	})
 }
 
@@ -309,6 +651,20 @@ func newFunctionChainStructTestSchema() *schemaInfo {
 				Fields: []*schemapb.FieldSchema{
 					{FieldID: 201, Name: "struct_scalar_array", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int32},
 				},
+			},
+		},
+	})
+}
+
+func newFunctionChainJSONTestSchema() *schemaInfo {
+	return mustNewSchemaInfo(&schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 102, Name: "metadata", DataType: schemapb.DataType_JSON},
+			{
+				FieldID: 103, Name: common.MetaFieldName, DataType: schemapb.DataType_JSON,
+				IsDynamic: true,
 			},
 		},
 	})
@@ -362,6 +718,28 @@ func chainStringParam(value string) *schemapb.FunctionParamValue {
 func chainIntParam(value int64) *schemapb.FunctionParamValue {
 	return &schemapb.FunctionParamValue{
 		Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: value},
+	}
+}
+
+func chainDataTypesParam(dataTypes ...schemapb.DataType) *schemapb.FunctionParamValue {
+	values := make([]*schemapb.FunctionParamValue, len(dataTypes))
+	for i, dataType := range dataTypes {
+		values[i] = chainIntParam(int64(dataType))
+	}
+	return chainArrayParam(values...)
+}
+
+func chainDoubleParam(value float64) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{
+		Value: &schemapb.FunctionParamValue_DoubleValue{DoubleValue: value},
+	}
+}
+
+func chainArrayParam(values ...*schemapb.FunctionParamValue) *schemapb.FunctionParamValue {
+	return &schemapb.FunctionParamValue{
+		Value: &schemapb.FunctionParamValue_ArrayValue{
+			ArrayValue: &schemapb.FunctionParamArray{Values: values},
+		},
 	}
 }
 

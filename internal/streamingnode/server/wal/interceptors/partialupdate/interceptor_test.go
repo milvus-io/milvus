@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -50,20 +51,20 @@ func TestPartialUpdateInterceptorBuildsIndependentPerWALState(t *testing.T) {
 	require.EqualValues(t, 1, first.state.channel.Term)
 	require.EqualValues(t, 2, second.state.channel.Term)
 
-	first.state.pkVersions.UpdateAllTyped("v1", primaryKeys{
-		kind:        primaryKeyKindInt64,
-		int64Values: []int64{10},
+	first.state.pkVersions.UpdateAllTyped("v1", primarykey.Keys{
+		Kind:        primarykey.KindInt64,
+		Int64Values: []int64{10},
 	}, 100)
 	longPK := strings.Repeat("x", int(estimatedVersionEntryFixedBytes))
-	second.state.pkVersions.UpdateAllTyped("v2", primaryKeys{
-		kind:         primaryKeyKindString,
-		stringValues: []string{longPK},
+	second.state.pkVersions.UpdateAllTyped("v2", primarykey.Keys{
+		Kind:         primarykey.KindString,
+		StringValues: []string{longPK},
 	}, 101)
 	require.Equal(t, estimatedVersionEntryFixedBytes, budget.used.Load())
 	require.LessOrEqual(t, budget.used.Load(), budget.limit)
 	requirePartialUpdateRetryable(t, second.state.pkVersions.VerifyTyped(
 		"v2",
-		primaryKeys{},
+		primarykey.Keys{},
 		101,
 		102,
 	))
@@ -271,6 +272,24 @@ func TestPartialUpdateChainRecoveredLocalCASReturnsRetry(t *testing.T) {
 	require.Equal(t, message.TxnStateRollbacked, session.State())
 }
 
+func TestPartialUpdateChainHistoryRejectionRollsBackBeforeAppend(t *testing.T) {
+	env := newPartialUpdateChainTestEnv(t)
+	readTS := env.allocateReadTS(t)
+	env.partial.state.historyStartTs = readTS + 1
+	txnContext := env.prepareCASTxn(t, readTS, 10)
+	appended := false
+	_, err := env.append(newChainTestCASCommit(t, txnContext), func(context.Context, message.MutableMessage) (message.MessageID, error) {
+		appended = true
+		return env.nextMessageID(), nil
+	})
+	requirePartialUpdateRetryable(t, err)
+	require.True(t, txn.IsCommitAdmissionRejected(err))
+	require.False(t, appended)
+	session, err := env.txnManager.GetSessionOfTxn(txnContext.TxnID)
+	require.NoError(t, err)
+	require.Equal(t, message.TxnStateRollbacked, session.State())
+}
+
 func TestPartialUpdateInterceptorRecordsTxnWriteAndMetaAfterAppend(t *testing.T) {
 	interceptor := newTestAppendInterceptor(types.PChannelInfo{Name: "p1", Term: 1})
 	meta := validCASMeta(100, 1)
@@ -281,7 +300,7 @@ func TestPartialUpdateInterceptorRecordsTxnWriteAndMetaAfterAppend(t *testing.T)
 	_, err := interceptor.DoAppend(context.Background(), msg, appendOK)
 	require.NoError(t, err)
 	txnState := interceptor.state.getTxn(1)
-	require.Equal(t, primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, txnState.pks)
+	require.Equal(t, primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, txnState.pks)
 	require.True(t, proto.Equal(meta, txnState.meta))
 	require.EqualValues(t, 10, txnState.collectionID)
 	require.EqualValues(t, 1, txnState.schemaVersion)
@@ -301,7 +320,7 @@ func TestPartialUpdateInterceptorCollectsPKsAcrossInsertChunks(t *testing.T) {
 	}
 
 	txnState := interceptor.state.getTxn(1)
-	require.Equal(t, primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10, 20, 30}}, txnState.pks)
+	require.Equal(t, primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10, 20, 30}}, txnState.pks)
 	require.True(t, proto.Equal(meta, txnState.meta))
 }
 
@@ -359,7 +378,7 @@ func TestPartialUpdateInterceptorCommitsCAS(t *testing.T) {
 	_, err := interceptor.DoAppend(context.Background(), commit, appendOK)
 	require.NoError(t, err)
 	require.Nil(t, interceptor.state.getTxn(1))
-	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 129, 131))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 129, 131))
 }
 
 func TestPartialUpdateInterceptorRejectsCommitWithoutTxnContext(t *testing.T) {
@@ -401,7 +420,7 @@ func TestPartialUpdateInterceptorCommitAppendErrorDoesNotPublish(t *testing.T) {
 
 	require.ErrorIs(t, err, expectedErr)
 	require.Nil(t, interceptor.state.getTxn(1))
-	require.NoError(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 129, 131))
+	require.NoError(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 129, 131))
 }
 
 func TestPartialUpdateInterceptorRejectsMissingCommitMarker(t *testing.T) {
@@ -429,7 +448,7 @@ func TestPartialUpdateInterceptorPublishesOrdinaryTxn(t *testing.T) {
 
 	_, err = interceptor.DoAppend(context.Background(), newCommitTxnMessage("v1", 1, 130), appendOK)
 	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 129, 131))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 129, 131))
 }
 
 func TestPartialUpdateInterceptorRecoveredOrdinaryTxnUsesVChannelFence(t *testing.T) {
@@ -497,7 +516,7 @@ func TestPartialUpdateInterceptorReplicatedCASBypassesSourceTerm(t *testing.T) {
 
 	_, err := interceptor.DoAppend(context.Background(), commit, appendOK)
 	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 129, 131))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 129, 131))
 }
 
 func TestPartialUpdateInterceptorRollbackCleansTxnState(t *testing.T) {
@@ -583,7 +602,7 @@ func TestPartialUpdateInterceptorUpdatesNonTxnDeletePKAfterAppend(t *testing.T) 
 
 	_, err := interceptor.DoAppend(context.Background(), msg, appendOK)
 	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 119, 121))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 119, 121))
 }
 
 func TestPartialUpdateInterceptorTimeTickAdvancesPKVersionRetention(t *testing.T) {
@@ -625,7 +644,7 @@ func TestPartialUpdateInterceptorCollectionFences(t *testing.T) {
 		_, loaded = interceptor.state.pkVersions.channels.Load("v2")
 		require.True(t, loaded)
 		require.Equal(t, versionIndexBudgetForEntries(1), interceptor.state.pkVersions.budget.used.Load())
-		requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v2", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{20}}, 109, 121))
+		requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v2", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{20}}, 109, 121))
 		require.NoError(t, interceptor.state.incompleteTxnFences.Verify("v1", 109))
 		requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v2", 109))
 		require.NoError(t, interceptor.state.fences.Verify("v1", 10, 109))
@@ -648,7 +667,7 @@ func TestPartialUpdateInterceptorKeepsStateWhenDropCollectionAppendFails(t *test
 	_, loaded := interceptor.state.pkVersions.channels.Load("v1")
 	require.True(t, loaded)
 	require.Equal(t, versionIndexBudgetForEntries(1), interceptor.state.pkVersions.budget.used.Load())
-	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 109, 121))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 109, 121))
 	requirePartialUpdateRetryable(t, interceptor.state.incompleteTxnFences.Verify("v1", 109))
 	requirePartialUpdateRetryable(t, interceptor.state.fences.Verify("v1", 10, 109))
 }
@@ -682,7 +701,7 @@ func TestPartialUpdateInterceptorExtractsOrdinaryInsertPKUsingDescriptor(t *test
 		appendOK,
 	)
 	require.NoError(t, err)
-	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primaryKeys{kind: primaryKeyKindInt64, int64Values: []int64{10}}, 119, 121))
+	requirePartialUpdateRetryable(t, interceptor.state.pkVersions.VerifyTyped("v1", primarykey.Keys{Kind: primarykey.KindInt64, Int64Values: []int64{10}}, 119, 121))
 }
 
 func TestPartialUpdateInterceptorFallsBackToFenceWithoutSchema(t *testing.T) {
@@ -932,6 +951,7 @@ func appendCASTxnBody(
 func newTestAppendInterceptor(channel types.PChannelInfo) *appendInterceptor {
 	state := newPartialUpdateState(30*time.Second, versionIndexBudgetForEntries(100))
 	state.channel = channel
+	state.historyStartTs = 1
 	return &appendInterceptor{
 		state: state,
 		pkDescriptorGetter: &staticPrimaryKeyDescriptorGetter{
@@ -940,6 +960,38 @@ func newTestAppendInterceptor(channel types.PChannelInfo) *appendInterceptor {
 				DataType: schemapb.DataType_Int64,
 			},
 		},
+	}
+}
+
+func TestPartialUpdateBuilderReestablishesHistoryOnReopen(t *testing.T) {
+	paramtable.Init()
+	builder := NewInterceptorBuilder()
+	for _, floor := range []uint64{90, 110} {
+		firstTick := streamingtimetick.NewTimeTickMsg(floor, walimplstest.NewTestMessageID(0), 0, true).
+			IntoImmutableMessage(walimplstest.NewTestMessageID(1))
+		interceptor := builder.Build(&interceptors.InterceptorBuildParam{
+			ChannelInfo:         types.PChannelInfo{Name: "p1", Term: 2},
+			LastTimeTickMessage: firstTick,
+		}).(*appendInterceptor)
+		require.Equal(t, floor, interceptor.state.historyStartTs)
+		interceptor.state.recordTxnBegin(1)
+		require.NoError(t, interceptor.state.recordTxnCAS(1, validCASMeta(100, 2), validCASScope()))
+		interceptor.state.recordTxnWrites(1, []any{int64(10)})
+		appended := false
+		_, err := interceptor.DoAppend(context.Background(), newCASCommitTxnMessage(t, "v1", 1, 120),
+			func(context.Context, message.MutableMessage) (message.MessageID, error) {
+				appended = true
+				return walimplstest.NewTestMessageID(2), nil
+			})
+		if floor > 100 {
+			requirePartialUpdateRetryable(t, err)
+			require.True(t, txn.IsCommitAdmissionRejected(err))
+			require.False(t, appended)
+		} else {
+			require.NoError(t, err)
+			require.True(t, appended)
+		}
+		interceptor.Close()
 	}
 }
 

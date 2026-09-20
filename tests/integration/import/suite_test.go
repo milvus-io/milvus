@@ -14,8 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "index/Meta.h"
+package importv2
 
-namespace milvus::index {
-std::string kOverrideRootPathForUT;
-}  // namespace milvus::index
+import (
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration"
+)
+
+type importSuite struct {
+	integration.MiniClusterSuite
+}
+
+func (s *importSuite) SetupSuite() {
+	// Small import fixtures should exercise every stage without waiting for
+	// production scheduling intervals. Set these before the tickers are created.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportCheckIntervalHigh.Key, "0.1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportScheduleInterval.Key, "0.1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.CompactionScheduleInterval.Key, "100")
+	s.MiniClusterSuite.SetupSuite()
+}

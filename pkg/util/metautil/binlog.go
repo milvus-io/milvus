@@ -196,7 +196,12 @@ func ExtractJSONKeyStatsRelativePath(file string) string {
 // BuildJSONKeyStatsV3Prefix returns the V3 remote base path for JSON key stats.
 // Format: {segmentBasePath}/_stats/json_stats.{fieldID}
 func BuildJSONKeyStatsV3Prefix(segmentBasePath string, fieldID int64) string {
-	return path.Join(segmentBasePath, "_stats", "json_stats."+strconv.FormatInt(fieldID, 10))
+	suffix := "_stats/json_stats." + strconv.FormatInt(fieldID, 10)
+	if segmentBasePath == "" {
+		return suffix
+	}
+	// The manifest base is a complete key; preserve literal remote components.
+	return strings.TrimRight(segmentBasePath, "/") + "/" + suffix
 }
 
 // JSONStatsSegmentInfo is the segment metadata needed to derive a JSON stats base path.

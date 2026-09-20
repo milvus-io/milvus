@@ -115,6 +115,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSelectsRows(t *testing.T)
 		nil,
 		7,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -169,12 +170,12 @@ func TestRepackInsertDataByPartitionForStreamingServiceCarriesPartialUpdateCASIn
 		nil,
 		7,
 		meta,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
 	require.True(t, streamingmessage.HasPartialUpdateCAS(msgs[0]))
-	extracted, err := streamingmessage.ExtractPartialUpdateCAS(msgs[0])
-	require.NoError(t, err)
+	extracted := partialUpdateCASOf(t, msgs[0])
 	require.True(t, proto.Equal(meta, extracted))
 
 	bodyProperties := streamingmessage.MustAsMutableInsertMessageV1(msgs[0]).MustBody().GetBase().GetProperties()
@@ -224,6 +225,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSelectsCompactNullableVec
 		nil,
 		7,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)
@@ -247,6 +249,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceRejectsInvalidSelection(t
 		t.Run(name, func(t *testing.T) {
 			msgs, err := repackInsertDataByPartitionForStreamingService(
 				context.Background(), 200, "target-partition", selection, "vchannel-1", source, nil, 7, nil,
+				nil,
 			)
 			require.Error(t, err)
 			require.Empty(t, msgs)
@@ -269,6 +272,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceEmptySelection(t *testing
 		nil,
 		7,
 		nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Empty(t, msgs)
@@ -283,6 +287,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *tes
 	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	msgs, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(), 200, "target-partition", []int{0, 1}, "vchannel-1", source, nil, 7, nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
@@ -290,6 +295,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *tes
 	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	msgs, err = repackInsertDataByPartitionForStreamingService(
 		context.Background(), 200, "target-partition", []int{0, 1}, "vchannel-1", source, nil, 7, nil,
+		nil,
 	)
 	require.NoError(t, err)
 	require.Len(t, msgs, 1)

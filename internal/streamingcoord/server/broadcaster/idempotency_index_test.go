@@ -684,6 +684,20 @@ func newBroadcastTaskManagerWithEntrypointForTest(t *testing.T, protos ...*strea
 		return nil
 	})
 
+	// Earlier tests in this package shrink the tombstone GC window to milliseconds and
+	// never restore it. The idempotency entry lives exactly as long as its task's
+	// tombstone, so under that window the GC can drop the winner's entry before a
+	// slow caller reaches the lookup, and the caller creates a second task. Pin a long
+	// window, as newBroadcastTaskManagerForTest does.
+	oldInterval := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue("1h")
+	oldLifetime := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue("1h")
+	oldCount := paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue("8192")
+	t.Cleanup(func() {
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneCheckInternal.SwapTempValue(oldInterval)
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxLifetime.SwapTempValue(oldLifetime)
+		paramtable.Get().StreamingCfg.WALBroadcasterTombstoneMaxCount.SwapTempValue(oldCount)
+	})
+
 	roleCheck := mockey.Mock((*broadcastTaskManager).checkClusterRole).Return(nil).Build()
 	t.Cleanup(func() { roleCheck.UnPatch() })
 

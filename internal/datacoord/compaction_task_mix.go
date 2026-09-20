@@ -118,10 +118,21 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 }
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
-	result, err := cluster.QueryCompaction(t.GetTaskProto().GetNodeID(), &datapb.CompactionStateRequest{
-		PlanID: t.GetTaskProto().GetPlanID(),
+	task := t.GetTaskProto()
+	result, err := cluster.QueryCompaction(task.GetNodeID(), &datapb.CompactionStateRequest{
+		PlanID: task.GetPlanID(),
 	})
 	if err != nil || result == nil {
+		if errors.Is(err, merr.ErrCompactionResultNotFound) {
+			if dropErr := cluster.DropCompaction(task.GetNodeID(), task.GetPlanID()); dropErr != nil {
+				mlog.Warn(context.TODO(), "mixCompactionTask failed to drop task with unavailable result",
+					mlog.Int64("planID", task.GetPlanID()),
+					mlog.Int64("nodeID", task.GetNodeID()),
+					mlog.Err(dropErr))
+				return
+			}
+		}
+
 		mlog.Warn(context.TODO(), "mixCompactionTask failed to get compaction result", mlog.Err(err))
 		if err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_pipelining), setNodeID(NullNodeID)); err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to updateAndSaveTaskMeta", mlog.Err(err))
@@ -141,7 +152,7 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 		if err := t.saveSegmentMeta(result); err != nil {
 			mlog.Warn(context.TODO(), "mixCompactionTask failed to save segment meta", mlog.Err(err))
 			if errors.Is(err, merr.ErrIllegalCompactionPlan) {
-				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+				err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
 				if err != nil {
 					mlog.Warn(context.TODO(), "mixCompactionTask failed to setState failed", mlog.Err(err))
 				}
@@ -153,20 +164,23 @@ func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
 		return
 	case datapb.CompactionTaskState_timeout:
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_timeout), setFailReason("DataNode reported compaction timeout"))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
 		}
 	case datapb.CompactionTaskState_failed:
-		mlog.Info(context.TODO(), "mixCompactionTask fail in datanode")
-		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		mlog.Info(context.TODO(), "mixCompactionTask fail in datanode",
+			mlog.String("failReason", compactionFailReason(result)))
+		err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(compactionFailReason(result)))
 		if err != nil {
 			mlog.Warn(context.TODO(), "fail to updateAndSaveTaskMeta")
 		}
 	default:
 		mlog.Error(context.TODO(), "not support compaction task state", mlog.String("state", result.GetState().String()))
-		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed))
+		err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed),
+			setFailReason(fmt.Sprintf("DataNode returned unsupported compaction state: %s", result.GetState().String())))
 		if err != nil {
 			mlog.Warn(context.TODO(), "update clustering compaction task meta failed", mlog.Err(err))
 			return
@@ -237,6 +251,15 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 		case getBuildIndexChSingleton() <- newSegID:
 		default:
 		}
+	}
+
+	// The SegmentMeta mutation is committed (inputs dropped, outputs visible,
+	// manifest versions advanced); schedule an asynchronous DataView snapshot
+	// reconciliation. The recompute runs on the latest SegmentMeta, so it
+	// observes both the output publish and the input retirement in one
+	// projection.
+	if meta, ok := t.meta.(*meta); ok {
+		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
 	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
