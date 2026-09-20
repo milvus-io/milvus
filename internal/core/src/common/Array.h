@@ -805,6 +805,11 @@ class ArrayView {
         return data_array;
     }
 
+    DataType
+    get_element_type() const noexcept {
+        return element_type_;
+    }
+
     int
     length() const {
         return length_;
