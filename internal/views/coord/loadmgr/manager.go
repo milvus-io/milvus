@@ -7,7 +7,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
-	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
@@ -19,6 +18,14 @@ type DirtyCollectionNotifier func(collectionID int64)
 // shard assignment changes. The caller can translate it into an assignment
 // discovery watch update without coupling loadmgr to StreamingCoord.
 type ShardAssignmentNotifier func()
+
+// ShardAssignmentEntry identifies a discoverable shard replica in a load-manager
+// snapshot. Transport adapters are responsible for publishing these entries.
+type ShardAssignmentEntry struct {
+	CollectionID int64
+	ShardIndex   int32
+	ReplicaID    int64
+}
 
 // CollectionLoadManager is the Coord-side facade over desired load config
 // lifecycle.
@@ -116,13 +123,13 @@ func (m *CollectionLoadManager) MarkShardDiscoverable(shardID qviews.ShardID) bo
 // ShardAssignmentsByPChannel returns a snapshot of discoverable shard replicas,
 // grouped by pchannel. StreamingCoord maps these pchannel groups onto the
 // current SN owners when publishing assignment discovery.
-func (m *CollectionLoadManager) ShardAssignmentsByPChannel() map[string][]types.ShardAssignmentEntry {
+func (m *CollectionLoadManager) ShardAssignmentsByPChannel() map[string][]ShardAssignmentEntry {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	assignments := make(map[string][]types.ShardAssignmentEntry)
+	assignments := make(map[string][]ShardAssignmentEntry)
 	for _, shard := range m.discoverableShards {
-		assignments[shard.pchannel] = append(assignments[shard.pchannel], types.ShardAssignmentEntry{
+		assignments[shard.pchannel] = append(assignments[shard.pchannel], ShardAssignmentEntry{
 			CollectionID: shard.collectionID,
 			ShardIndex:   shard.shardIndex,
 			ReplicaID:    shard.replicaID,
