@@ -41,6 +41,95 @@ func walFlush(tt uint64) message.ImmutableMessage {
 	return message.NewManualFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
 }
 
+func TestWALMaterializerExplicitMessagesSplitQueuedDeletes(t *testing.T) {
+	for name, build := range map[string]func() message.MutableMessage{
+		"ManualFlush": func() message.MutableMessage {
+			return message.NewManualFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.ManualFlushMessageHeader{}).WithBody(&message.ManualFlushMessageBody{}).MustBuildMutable()
+		},
+		"FlushAll": func() message.MutableMessage {
+			return message.NewFlushAllMessageBuilderV2().WithVChannel("v1").WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).MustBuildMutable()
+		},
+		"DropCollection": func() message.MutableMessage {
+			return message.NewDropCollectionMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DropCollectionMessageHeader{}).WithBody(&msgpb.DropCollectionRequest{}).MustBuildMutable()
+		},
+		"DropPartition": func() message.MutableMessage {
+			return message.NewDropPartitionMessageBuilderV1().WithVChannel("v1").WithHeader(&message.DropPartitionMessageHeader{}).WithBody(&msgpb.DropPartitionRequest{}).MustBuildMutable()
+		},
+		"TruncateCollection": func() message.MutableMessage {
+			return message.NewTruncateCollectionMessageBuilderV2().WithVChannel("v1").WithHeader(&message.TruncateCollectionMessageHeader{}).WithBody(&message.TruncateCollectionMessageBody{}).MustBuildMutable()
+		},
+		"AlterWAL": func() message.MutableMessage {
+			return message.NewAlterWALMessageBuilderV2().WithVChannel("v1").WithHeader(&message.AlterWALMessageHeader{}).WithBody(&message.AlterWALMessageBody{}).MustBuildMutable()
+		},
+		"CreateSnapshot": func() message.MutableMessage {
+			return message.NewCreateSnapshotMessageBuilderV2().WithVChannel("v1").WithHeader(&message.CreateSnapshotMessageHeader{}).WithBody(&message.CreateSnapshotMessageBody{}).MustBuildMutable()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			boundary := func(tt uint64) message.ImmutableMessage {
+				return build().WithTimeTick(tt).WithLastConfirmed(rmq.NewRmqID(int64(tt - 1))).IntoImmutableMessage(rmq.NewRmqID(int64(tt)))
+			}
+			m, tasks, batches := testWALMaterializer(t, 0, 1<<20)
+			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+			walObserve(m, tracker, walDelete(100))
+			m.RequestPersistThrough(100) // Keep the first output in flight.
+			walObserve(m, tracker, walDelete(110))
+			walObserve(m, tracker, boundary(120))
+			walObserve(m, tracker, walDelete(130))
+			walObserve(m, tracker, boundary(140))
+			walObserve(m, tracker, walDelete(150))
+			require.Len(t, *tasks, 1)
+			require.NoError(t, (*tasks)[0].Execute(context.Background()))
+			require.Len(t, *tasks, 2)
+			require.NoError(t, (*tasks)[1].Execute(context.Background()))
+			require.Equal(t, uint64(120), tracker.CompletedPoint().TimeTick)
+			require.Equal(t, uint64(120), (*batches)[1].TargetTimeTick)
+			require.Len(t, (*batches)[1].Entries, 1)
+			require.Equal(t, uint64(110), (*batches)[1].Entries[0].GetTimeTick())
+			require.Len(t, *tasks, 3)
+			require.NoError(t, (*tasks)[2].Execute(context.Background()))
+			require.Equal(t, uint64(140), tracker.CompletedPoint().TimeTick)
+			require.Len(t, (*batches)[2].Entries, 1)
+			require.Equal(t, uint64(130), (*batches)[2].Entries[0].GetTimeTick())
+			require.Len(t, *tasks, 3, "the small post-boundary tail must not be forced")
+			require.Equal(t, deleteBytes(walDelete(150)), m.pendingBytes)
+			m.RequestPersistThrough(150)
+			require.NoError(t, (*tasks)[3].Execute(context.Background()))
+			require.Zero(t, m.pendingBytes)
+			require.Equal(t, uint64(150), tracker.CompletedPoint().TimeTick)
+		})
+	}
+}
+
+// Non-message triggers retain their existing admission policy: pending work can
+// grow while another task is active, unless an explicit WAL boundary separates it.
+func TestWALMaterializerImplicitTriggersKeepBatching(t *testing.T) {
+	for _, trigger := range []string{"capacity", "age", "persist"} {
+		t.Run(trigger, func(t *testing.T) {
+			m, tasks, batches := testWALMaterializer(t, 0, 1<<20)
+			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+			walObserve(m, tracker, walDelete(100))
+			m.RequestPersistThrough(100)
+			walObserve(m, tracker, walDelete(110))
+			switch trigger {
+			case "capacity":
+				m.maxBytes = 1
+			case "age":
+				m.FlushStale(time.Now().Add(2*time.Hour), time.Hour)
+			case "persist":
+				m.RequestPersistThrough(110)
+			}
+			walObserve(m, tracker, walDelete(150))
+			require.NoError(t, (*tasks)[0].Execute(context.Background()))
+			require.Len(t, *tasks, 2)
+			require.NoError(t, (*tasks)[1].Execute(context.Background()))
+			require.Len(t, (*batches)[1].Entries, 2)
+			require.Equal(t, uint64(150), (*batches)[1].TargetTimeTick)
+			require.Equal(t, uint64(150), tracker.CompletedPoint().TimeTick)
+		})
+	}
+}
+
 func walObserve(m *WALMaterializer, tracker *messageack.Tracker, msg message.ImmutableMessage) {
 	owner := tracker.Track(msg)
 	retained := owner.Clone()

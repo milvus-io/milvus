@@ -185,7 +185,7 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		m.handleInsertMessage(ctx, retained)
 	case message.MessageTypeFlush:
 		m.handleFlushMessage(ctx, retained)
-	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL:
+	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
 		m.flushAllSegmentsCreatedBefore(ctx, retained)
 	}
 	m.l0Materializer.ObserveMessage(retained)

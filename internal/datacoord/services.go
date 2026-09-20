@@ -2399,6 +2399,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
+	// Business-channel Acks prove L1/L0 persistence through each snapshot fence.
 	// Broadcast CreateSnapshot message via DDL framework
 	// Snapshot ID is allocated in the callback
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
@@ -2409,8 +2410,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		WithUnreplicable().
-		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))

@@ -15,7 +15,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | CreateIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | AlterIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropIndex | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
-| CreateSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
+| CreateSnapshot | Broadcast: All Collection VChannels + CChannel (AckSyncUp) | Yes | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshot | Broadcast: CChannel | No | ExclusiveSnapshotName |
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
@@ -42,7 +42,8 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **TruncateCollection**: Logically truncates by sealing and dropping all segments before the truncation timestamp. Implicitly flushes all growing segments. Uses AckSyncUp.
 - **CreatePartition** / **DropPartition**: Creates or drops a partition. DropPartition implicitly flushes the partition's growing segments.
 - **CreateIndex** / **AlterIndex** / **DropIndex**: Manages indexes on a collection's field. CChannel-only.
-- **CreateSnapshot** / **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
+- **CreateSnapshot**: Broadcasts to all collection VChannels plus CChannel with AckSyncUp. Flushes earlier L1/L0 data and uses each business channel's message position as the snapshot cut.
+- **DropSnapshot** / **RestoreSnapshot** / **DropSnapshotsByCollection**: Manages collection snapshots. CChannel-only.
 - **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
 - **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. It does not require a StreamingNode Flush or per-channel commit RPC.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.

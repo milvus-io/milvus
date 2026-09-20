@@ -110,6 +110,8 @@ The RPC waits for every split message's L1 final commits and L0 output/registrat
 independently of unrelated VChannels holding the global recovery checkpoint.
 
 Each VChannel uses its ManualFlush message TimeTick as the completion boundary.
+L0 batches stop at each explicit WAL flush/lifecycle message, including ManualFlush
+and FlushAll queued behind an active task; later Deletes stay in the next batch.
 No independent coordinator TSO or BarrierTimeTick is needed. The returned FlushTs
 is zero: completion is already guaranteed by the successful RPC. GetFlushState
 checks the supplied segment states, then returns true for zero FlushTs even if
@@ -121,6 +123,20 @@ preserves the collection entry with an empty array. The existing flushed-segment
 list is still collected from DataCoord metadata after completion, with the same
 state and non-L0 filters. Channel checkpoints are captured before broadcasting,
 as before; they are recovery positions, not proof of this Flush's completion.
+
+## Snapshot API Completion
+
+CreateSnapshot broadcasts with `AckSyncUp` to every collection VChannel plus
+CChannel under the existing collection/snapshot resource locks. The append
+interceptor fences segment allocation, and business-channel consuming-side Acks
+wait for earlier L1 final commits and L0 output/registration. L0 treats each
+CreateSnapshot as a hard batch boundary, including requests behind active work.
+
+The all-Ack callback derives each channel's snapshot position from that channel's
+broadcast append result and excludes CChannel. The shared WAL recovery checkpoint
+is not the snapshot cut. Snapshot generation receives these positions explicitly;
+it neither calls Flush RPC nor waits for cp_updater to publish them. Existing
+compaction protection and snapshot publication remain in the snapshot manager.
 
 ## Truncate API Completion
 

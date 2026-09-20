@@ -33,13 +33,18 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
-func TestDropPartitionFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) {
-	for _, emptyPartition := range []bool{false, true} {
-		name := "nonempty"
-		if emptyPartition {
-			name = "empty"
-		}
-		t.Run(name, func(t *testing.T) {
+func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		emptyPartition bool
+		snapshot       bool
+	}{
+		{name: "drop_nonempty"},
+		{name: "drop_empty", emptyPartition: true},
+		{name: "snapshot_nonempty", snapshot: true},
+		{name: "snapshot_empty", emptyPartition: true, snapshot: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			scheduler := &recordingVChannelScheduler{}
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
@@ -56,7 +61,7 @@ func TestDropPartitionFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) 
 				3: newMaterializationBlockerMeta(3, 150, false),
 			}
 			expectedCommits := []int64{2}
-			if !emptyPartition {
+			if !tc.emptyPartition {
 				metas[1] = newMaterializationBlockerMeta(1, 40, false)
 				expectedCommits = append(expectedCommits, 1)
 			}
@@ -82,6 +87,12 @@ func TestDropPartitionFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) 
 				WithHeader(&message.DropPartitionMessageHeader{CollectionId: 1, PartitionId: 1}).
 				WithBody(&message.DropPartitionRequest{}).MustBuildMutable().WithTimeTick(100).
 				WithLastConfirmed(walimplstest.NewTestMessageID(100)).IntoImmutableMessage(walimplstest.NewTestMessageID(101))
+			if tc.snapshot {
+				raw = message.NewCreateSnapshotMessageBuilderV2().WithVChannel("v1").
+					WithHeader(&message.CreateSnapshotMessageHeader{CollectionId: 1, Name: "snapshot"}).
+					WithBody(&message.CreateSnapshotMessageBody{}).MustBuildMutable().WithTimeTick(100).
+					WithLastConfirmed(walimplstest.NewTestMessageID(100)).IntoImmutableMessage(walimplstest.NewTestMessageID(101))
+			}
 			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
 			owner := tracker.Track(raw)
 			retained := owner.Clone()
@@ -89,7 +100,11 @@ func TestDropPartitionFlushesAllEarlierSegmentsBeforeL0Completion(t *testing.T) 
 			require.True(t, module.ObserveMessage(ctx, retained))
 			retained.Release()
 			owner.Release()
-			require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_DROPPED, module.vchannelView.meta.CollectionInfo.Partitions[0].State)
+			expectedState := streamingpb.PartitionState_PARTITION_STATE_DROPPED
+			if tc.snapshot {
+				expectedState = streamingpb.PartitionState_PARTITION_STATE_NORMAL
+			}
+			require.Equal(t, expectedState, module.vchannelView.meta.CollectionInfo.Partitions[0].State)
 			require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_NORMAL, module.vchannelView.meta.CollectionInfo.Partitions[1].State)
 			require.Zero(t, tracker.CompletedPoint().TimeTick)
 			require.Len(t, scheduler.tasks, len(expectedCommits)+1, "L1 and L0 schedule independently")

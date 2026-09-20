@@ -25,8 +25,8 @@ publication bridge, and reconnect the Summary consumer.
 - Delete and committed Txn containing Delete retain one outer-message clone.
 - Pure Insert, ordinary TimeTick, RecoveryBarrier and generic DDL retain no L0
   handle and do not force output.
-- ManualFlush, FlushAll, DropCollection, DropPartition, TruncateCollection and
-  AlterWAL retain a clone and force completion through their message boundary.
+- ManualFlush, FlushAll, DropCollection, DropPartition, TruncateCollection,
+  CreateSnapshot and AlterWAL retain a clone and force completion through their message boundary.
 - Ordinary single-Segment Flush only flushes that Segment, matching master.
 
 Each VChannel has an ordered pending buffer and at most one active serial task.
@@ -66,8 +66,14 @@ by RecoveryStorage. New arrivals do not reset the oldest buffer age.
 
 Admission freezes a finite batch. Messages arriving during execution accumulate
 in the next buffer; completion schedules that buffer only when capacity or a
-captured force request permits it. Empty explicit batches advance metadata
-without writing an empty L0. TimeTick progress alone does not write metadata or
+captured force request permits it. Every explicit WAL flush/lifecycle message
+is a hard batch boundary: even if queued behind an active task, select only the prefix through the first
+pending ManualFlush, FlushAll, DropCollection, DropPartition, TruncateCollection,
+AlterWAL or CreateSnapshot, retaining later messages and their byte accounting
+for the next batch. Whole L0 files must not mix deletes across these boundaries.
+Capacity, age and RequestPersistThrough keep their existing trigger policies;
+they do not introduce additional batch boundaries.
+Empty explicit batches advance metadata without writing an empty L0. TimeTick progress alone does not write metadata or
 create empty output merely to match the global checkpoint.
 
 Summary remains permanently enabled, with independent persistence/backlog and

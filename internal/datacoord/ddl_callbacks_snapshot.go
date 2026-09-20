@@ -18,10 +18,16 @@ package datacoord
 
 import (
 	"context"
+	"sort"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 )
 
 // createSnapshotV2AckCallback handles the callback for CreateSnapshot DDL message.
@@ -35,7 +41,20 @@ func (s *DDLCallbacks) createSnapshotV2AckCallback(ctx context.Context, result m
 	log.Info(ctx, "createSnapshotV2AckCallback received")
 
 	// Create snapshot - ID is allocated inside CreateSnapshot
-	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds)
+	positions := make([]*msgpb.MsgPosition, 0, len(result.Results))
+	for channel, fence := range result.Results {
+		if funcutil.IsControlChannel(channel) {
+			continue
+		}
+		positions = append(positions, &msgpb.MsgPosition{
+			ChannelName: channel,
+			Timestamp:   fence.TimeTick,
+			MsgID:       adaptor.MustGetMQWrapperIDFromMessage(fence.LastConfirmedMessageID).Serialize(),
+			WALName:     commonpb.WALName(fence.LastConfirmedMessageID.WALName()),
+		})
+	}
+	sort.Slice(positions, func(i, j int) bool { return positions[i].GetChannelName() < positions[j].GetChannelName() })
+	snapshotID, err := s.snapshotManager.CreateSnapshot(ctx, header.CollectionId, header.Name, header.Description, header.CompactionProtectionSeconds, positions)
 	if err != nil {
 		log.Error(ctx, "failed to create snapshot via DDL callback", mlog.Err(err))
 		return err

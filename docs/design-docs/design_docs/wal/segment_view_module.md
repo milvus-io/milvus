@@ -132,7 +132,7 @@ position with the SN snapshot's timestamp-only lifecycle checkpoint.
 
 ### 3.5 Flush-Style Messages
 
-DropCollection, DropPartition, TruncateCollection, ManualFlush, FlushAll,
+DropCollection, DropPartition, TruncateCollection, ManualFlush, FlushAll, CreateSnapshot,
 schema-changing AlterCollection, and AlterWAL may flush several SegmentViews.
 Every affected view owns its own handle and completion condition.
 

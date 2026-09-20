@@ -93,13 +93,7 @@ func (m *WALMaterializer) MaterializedTimeTick() uint64 {
 
 func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessage) {
 	msg := retained.Message()
-	flush := false
-	switch msg.MessageType() {
-	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
-		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
-		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL:
-		flush = true
-	}
+	flush := isL0FlushMessage(msg.MessageType())
 	deleted := messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete
 	m.mu.Lock()
 	if msg.TimeTick() <= m.observed {
@@ -125,6 +119,18 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 	task := m.scheduleLocked()
 	m.mu.Unlock()
 	m.submit(task)
+}
+
+// isL0FlushMessage identifies explicit WAL boundaries for L0 materialization.
+func isL0FlushMessage(t message.MessageType) bool {
+	switch t {
+	case message.MessageTypeManualFlush, message.MessageTypeFlushAll,
+		message.MessageTypeDropCollection, message.MessageTypeDropPartition,
+		message.MessageTypeTruncateCollection, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
+		return true
+	default:
+		return false
+	}
 }
 
 func deleteBytes(msg message.ImmutableMessage) uint64 {
@@ -172,10 +178,25 @@ func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
 	if m.flushThrough < m.pending[0].Message().TimeTick() && (m.maxBytes == 0 || m.pendingBytes < m.maxBytes) {
 		return nil
 	}
-	task := &walMaterializeTask{owner: m, handles: m.pending, through: m.pending[len(m.pending)-1].Message().TimeTick()}
-	m.pending = nil
-	m.pendingBytes = 0
-	m.pendingSince = time.Time{}
+	// Every explicit WAL flush message ends a batch, including when it queues
+	// behind an active task. Later deletes belong to the next batch.
+	end := len(m.pending)
+	for i, handle := range m.pending {
+		if isL0FlushMessage(handle.Message().MessageType()) {
+			end = i + 1
+			break
+		}
+	}
+	handles := m.pending[:end:end]
+	task := &walMaterializeTask{owner: m, handles: handles, through: handles[len(handles)-1].Message().TimeTick()}
+	m.pending = m.pending[end:]
+	for _, handle := range handles {
+		m.pendingBytes -= deleteBytes(handle.Message())
+	}
+	if len(m.pending) == 0 {
+		m.pending = nil
+		m.pendingSince = time.Time{}
+	}
 	m.task = task
 	return task
 }

@@ -3629,6 +3629,46 @@ func TestServer_GetExportSnapshotState(t *testing.T) {
 
 // --- Test CreateSnapshot additional cases ---
 
+func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
+	ctx := context.Background()
+	oldWAL := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	defer streaming.SetWALForTest(oldWAL)
+	patch := mockey.Mock((*snapshotManager).GetSnapshot).
+		Return(nil, merr.WrapErrSnapshotNotFound("snap", "not found")).Build()
+	defer patch.UnPatch()
+	patchCollection := mockey.Mock((*embeddedHandler).GetCollection).Return(&collectionInfo{
+		ID: 100, DatabaseName: "default", Schema: &schemapb.CollectionSchema{Name: "collection"},
+		VChannelNames: []string{"p1_100v0", "p2_100v1"},
+	}, nil).Build()
+	defer patchCollection.UnPatch()
+	patchExists := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
+	defer patchExists.UnPatch()
+	patchStart := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).Return(&embeddedBroadcastAPI{}, nil).Build()
+	defer patchStart.UnPatch()
+	patchClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+	defer patchClose.UnPatch()
+	called := false
+	patchBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+		func(_ *embeddedBroadcastAPI, _ context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+			called = true
+			require.Equal(t, message.MessageTypeCreateSnapshot, msg.MessageType())
+			require.True(t, msg.BroadcastHeader().AckSyncUp)
+			require.ElementsMatch(t, []string{streaming.WAL().ControlChannel(), "p1_100v0", "p2_100v1"}, msg.BroadcastHeader().VChannels)
+			return &types2.BroadcastAppendResult{}, nil
+		}).Build()
+	defer patchBroadcast.UnPatch()
+	server := &Server{
+		snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+		handler:         &embeddedHandler{}, broker: &embeddedBroker{},
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{Name: "snap", CollectionId: 100})
+	require.NoError(t, err)
+	require.NoError(t, merr.Error(resp))
+	require.True(t, called)
+}
+
 func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 	t.Run("server_not_healthy", func(t *testing.T) {
 		ctx := context.Background()
