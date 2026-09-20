@@ -792,7 +792,7 @@ TEST(GroupBY, GrowingRawData) {
     }
 }
 
-TEST(GroupBY, GrowingIndex) {
+TEST(GroupBY, IGrowingIndex) {
     //0. set up growing segment
     int dim = 128;
     uint64_t seed = 512;

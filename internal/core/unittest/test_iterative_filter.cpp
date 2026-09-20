@@ -352,7 +352,7 @@ TEST(IterativeFilter, GrowingRawData) {
     }
 }
 
-TEST(IterativeFilter, GrowingIndex) {
+TEST(IterativeFilter, IGrowingIndex) {
     int dim = 128;
     auto schema = std::make_shared<Schema>();
     auto metric_type = knowhere::metric::L2;

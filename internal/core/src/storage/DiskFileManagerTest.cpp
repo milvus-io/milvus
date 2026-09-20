@@ -79,7 +79,7 @@
 #include "index/StringIndexMarisa.h"
 #include "index/StringIndexSort.h"
 #include "index/VectorDiskIndex.h"
-#include "index/VectorIndexValidDataUtils.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectDOUBLE_Test;
 class DiskAnnFileManagerTest_CacheOptFieldToDiskCorrectFLOAT_Test;
