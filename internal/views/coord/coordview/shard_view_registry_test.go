@@ -224,7 +224,7 @@ func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 		observed <- struct{}{}
 	})
 
-	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{
+	reg.onManagerStatsChanged(reg.Get(shardID), shardID, shardStatsForNodes(map[int64][]int64{
 		101: {1, 2},
 		102: {1},
 	}))
@@ -233,7 +233,7 @@ func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 	assert.Len(t, reg.NodeShards(1), 1, "a shard is indexed once even when multiple segments use the node")
 	<-observed
 
-	reg.onShardStatsChanged(shardID, shardStatsForNodes(map[int64][]int64{
+	reg.onManagerStatsChanged(reg.Get(shardID), shardID, shardStatsForNodes(map[int64][]int64{
 		103: {3},
 	}))
 	assert.Empty(t, reg.NodeShards(1))
@@ -241,12 +241,12 @@ func TestRegistry_NodeIndexTracksStatsReplacement(t *testing.T) {
 	assert.ElementsMatch(t, []qviews.ShardID{shardID}, reg.NodeShards(3))
 	<-observed
 
-	reg.onShardStatsChanged(shardID, emptyShardStats())
+	reg.onManagerStatsChanged(reg.Get(shardID), shardID, emptyShardStats())
 	assert.Empty(t, reg.NodeShards(3))
 	<-observed
 
 	assert.NotPanics(t, func() {
-		reg.onShardStatsChanged(shardID, nil)
+		reg.onManagerStatsChanged(reg.Get(shardID), shardID, nil)
 	})
 	assert.Empty(t, reg.NodeShards(3))
 	<-observed
@@ -261,12 +261,12 @@ func TestRegistry_SnapshotForShards(t *testing.T) {
 	reg.Ensure(shardB)
 	statsA := shardStatsForNodes(map[int64][]int64{101: {1}})
 	statsB := shardStatsForNodes(map[int64][]int64{201: {2}})
-	reg.onShardStatsChanged(shardA, statsA)
-	reg.onShardStatsChanged(shardB, statsB)
+	reg.onManagerStatsChanged(reg.Get(shardA), shardA, statsA)
+	reg.onManagerStatsChanged(reg.Get(shardB), shardB, statsB)
 
 	resident := reg.Snapshot()
 	updatedStatsA := shardStatsForNodes(map[int64][]int64{102: {3}})
-	reg.onShardStatsChanged(shardA, updatedStatsA)
+	reg.onManagerStatsChanged(reg.Get(shardA), shardA, updatedStatsA)
 	require.Same(t, resident, reg.snapshot)
 
 	scoped := reg.SnapshotForShards([]qviews.ShardID{shardA, missing, shardA})
@@ -498,4 +498,27 @@ func shardStatsForNodes(segmentNodes map[int64][]int64) *ShardStats {
 		}
 	}
 	return stats
+}
+
+func TestRegistryPublicationReplayRejectsRetiredManager(t *testing.T) {
+	reg := newTestRegistry(t, newMockCatalog(), newMockSyncer())
+	old := reg.Ensure(testShardID)
+	var published []*ShardStats
+	stop := reg.RegisterPublicationListener(func(id qviews.ShardID, stats *ShardStats) {
+		require.Equal(t, testShardID, id)
+		published = append(published, stats)
+	})
+	require.Len(t, published, 1)
+	callback := reg.statsObserver(old)
+	reg.removeEmptyManager(testShardID, old)
+	require.Len(t, published, 2)
+	require.Nil(t, published[1])
+	replacement := reg.Ensure(testShardID)
+	require.Len(t, published, 3)
+	require.NotSame(t, old, replacement)
+	callback(testShardID, &ShardStats{})
+	require.Len(t, published, 3, "late callback must not overwrite replacement")
+	stop()
+	reg.removeEmptyManager(testShardID, replacement)
+	require.Len(t, published, 3)
 }

@@ -5,30 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
-
-type testSnapshotSource struct {
-	snapshot     *BalancerSnapshot
-	afterCapture func()
-}
-
-func (s *testSnapshotSource) build(context.Context, triggerBatch) (*BalancerSnapshot, []qviews.ShardID) {
-	snapshot := s.snapshot
-	if s.afterCapture != nil {
-		s.afterCapture()
-	}
-	shards := make([]qviews.ShardID, 0, len(snapshot.ShardStatsMap()))
-	for shardID := range snapshot.ShardStatsMap() {
-		shards = append(shards, shardID)
-	}
-	return snapshot, shards
-}
 
 func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 	const collID, replicaID int64 = 1, 10
@@ -60,7 +43,7 @@ func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
 		},
 		policyTestConfig(),
 	)
-	b := NewDefaultBalancer(builder, reg, nil)
+	b := NewDefaultBalancer(cacheFromBuilder(t, builder), reg, nil)
 
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -95,7 +78,7 @@ func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 		},
 		policyTestConfig(),
 	)
-	b := NewDefaultBalancer(builder, reg, nil)
+	b := NewDefaultBalancer(cacheFromBuilder(t, builder), reg, nil)
 
 	b.Trigger(TriggerScope{DirtyCollections: []int64{collID}})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -106,50 +89,32 @@ func TestBalancer_ReconcileDirtyCollectionCreatesDataViewShards(t *testing.T) {
 	assert.NotNil(t, stats.PreparingVersion)
 }
 
-func TestBalancer_ReconcilePreservesTriggerArrivingDuringSnapshotBuild(t *testing.T) {
-	const collID, replicaID int64 = 1, 10
-	shardID := qviews.ShardID{
-		ReplicaID: replicaID,
-		VChannel:  "by-dev-rootcoord-dml_0_1v0",
-	}
-
-	reg := emptyRegistry(t)
-	addShardWithPreparingView(t, reg, shardID, map[int64]map[int64][]int64{
-		1: {100: {101}},
-	})
-
-	viewSnapshot := reg.Snapshot()
-	source := &testSnapshotSource{
-		snapshot: &BalancerSnapshot{
-			LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(1, map[int64]*loadmgr.LoadConfig{
-				collID: cfgFor(collID, replicaID, nil, nil),
-			}),
-			ShardViewSnapshot: viewSnapshot,
-		},
-	}
-	b := &DefaultBalancer{
-		snapshotBuilder: source,
-		viewRegistry:    reg,
-		policy:          NewDefaultBalancePolicy(),
-		queue:           newTriggerQueue(),
-	}
-	source.afterCapture = func() {
-		source.afterCapture = nil
-		source.snapshot = &BalancerSnapshot{
-			LoadConfigSnapshot: loadmgr.NewLoadConfigSnapshot(2, map[int64]*loadmgr.LoadConfig{}),
-			ShardViewSnapshot:  viewSnapshot,
+func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T) {
+	const collectionID, replicaID int64 = 1, 10
+	shard := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
+	registry := emptyRegistry(t)
+	addShardWithPreparingView(t, registry, shard, map[int64]map[int64][]int64{1: {100: {101}}})
+	cache := NewCache(policyTestConfig())
+	cache.PublishLoadConfig(collectionID, cfgFor(collectionID, replicaID, nil, nil), 1)
+	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
+	cache.MarkReady()
+	controller := NewDefaultBalancer(cache, registry, nil)
+	var original func(*Cache, int64) *CollectionEntry
+	once := true
+	patch := mockey.Mock((*Cache).GetCollection).Origin(&original).To(func(c *Cache, id int64) *CollectionEntry {
+		entry := original(c, id)
+		if once {
+			once = false
+			cache.PublishLoadConfig(collectionID, nil, 2)
 		}
-		b.Trigger(TriggerScope{DirtyCollections: []int64{collID}})
-	}
-
-	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
-	require.NoError(t, b.Reconcile(context.Background()))
-	require.NotNil(t, reg.Get(shardID).Stats().PreparingVersion)
-
-	require.NoError(t, b.Reconcile(context.Background()))
-	stats := reg.Get(shardID).Stats()
-	assert.Nil(t, stats.PreparingVersion)
-	assert.Empty(t, stats.Segments)
+		return entry
+	}).Build()
+	defer patch.UnPatch()
+	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.NotNil(t, registry.Get(shard).Stats().PreparingVersion)
+	require.NoError(t, controller.Reconcile(t.Context()))
+	require.Nil(t, registry.Get(shard).Stats().PreparingVersion)
 }
 
 func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
@@ -178,7 +143,7 @@ func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
 		},
 		policyTestConfig(),
 	)
-	b := NewDefaultBalancer(builder, reg, nil)
+	b := NewDefaultBalancer(cacheFromBuilder(t, builder), reg, nil)
 
 	nodeProvider.notifyNodeChanged()
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -212,7 +177,7 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 		},
 		policyTestConfig(),
 	)
-	b := NewDefaultBalancer(builder, reg, nil)
+	b := NewDefaultBalancer(cacheFromBuilder(t, builder), reg, nil)
 
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 	require.NoError(t, b.Reconcile(context.Background()))
@@ -245,7 +210,7 @@ func TestBalancer_UsesConfiguredTickerInterval(t *testing.T) {
 	builder := NewSnapshotBuilder(nil, reg, nil, nil, &BalanceConfig{
 		TickerInterval: 5 * time.Minute,
 	})
-	b := NewDefaultBalancer(builder, reg, nil)
+	b := NewDefaultBalancer(cacheFromBuilder(t, builder), reg, nil)
 
 	assert.Equal(t, 5*time.Minute, b.tickerInterval)
 }

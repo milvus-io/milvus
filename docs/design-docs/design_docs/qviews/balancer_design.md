@@ -1,8 +1,8 @@
 # Balancer & CollectionLoadManager Design
 
-> Target design: the resident cache refactor described here is agreed but not
-> implemented yet. Current code still uses `BalancerSnapshot` and
-> `SnapshotBuilder`. Batch ordering, score formulas, and plan emission remain
+> The resident `balancer.Cache` now replaces `BalancerSnapshot` and
+> `SnapshotBuilder` on the reconcile path. Batch ordering, score formulas,
+> and plan emission remain
 > unchanged. Production runtime wiring and RPC changes are outside this work.
 >
 > References: [Balancer Cache](balancer_cache.md),
@@ -294,7 +294,7 @@ func (r *ShardViewRegistry) ShardIDs() []qviews.ShardID
 func (r *ShardViewRegistry) RegisterStatsObserver(observer func(qviews.ShardID, *ShardStats))
 ```
 
-Registry remains the lifecycle owner of shard managers. In the target design,
+Registry remains the lifecycle owner of shard managers. With the resident cache,
 its source adapter publishes actual shard state and removal into the cache;
 cache indexes supply Balancer scope resolution. The listed Snapshot and
 RegisterStatsObserver APIs describe the existing implementation, not the new

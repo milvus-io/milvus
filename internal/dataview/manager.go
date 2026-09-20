@@ -48,6 +48,7 @@ type CollectionRecoveryValidator func(ctx context.Context, collectionID int64) (
 type Projector func(ctx context.Context, collectionID int64) ([]LoadableSegment, error)
 
 type Manager interface {
+	api.DataViewPublisher
 	OnCreateCollection(ctx context.Context, event CreateCollectionDataViewEvent) (*viewpb.DataVersion, error)
 	OnBootstrapCollection(ctx context.Context, event BootstrapCollectionDataViewEvent) (*viewpb.DataVersion, error)
 	// PrepareFlush builds the post-flush snapshot under the Collection lock
@@ -159,6 +160,9 @@ type collectionState struct {
 	id       int64
 	latest   *versionEntry
 	versions map[qviews.DataVersion]*versionEntry
+	// Retain only the latest native projection, not one for every historical version.
+	publishedEntry *versionEntry
+	native         *api.CollectionDataView
 }
 
 // newCollectionState constructs a Collection state with an empty version
@@ -168,9 +172,13 @@ func newCollectionState(collectionID int64) *collectionState {
 }
 
 type dataViewManager struct {
-	mu      sync.RWMutex
-	catalog Catalog
-	states  map[int64]*collectionState
+	publicationMu sync.Mutex
+	published     map[int64]*api.CollectionDataView
+	listeners     map[uint64]api.DataViewListener
+	nextListener  uint64
+	mu            sync.RWMutex
+	catalog       Catalog
+	states        map[int64]*collectionState
 	// dropped records Collections whose DataViews were removed by
 	// OnDropCollection. Late mutations (in-flight flush, queued recompute)
 	// consult it and no-op instead of resurrecting the state or persisting
@@ -400,6 +408,11 @@ func RecoverManager(
 	}
 	// Failed recovery attempts must not leave a worker retaining their
 	// snapshots and SegmentMeta projection until the server context ends.
+	for _, state := range manager.states {
+		state.mu.Lock()
+		manager.publishDataViewLocked(state)
+		state.mu.Unlock()
+	}
 	manager.startWorker()
 	return manager, nil
 }
@@ -485,8 +498,14 @@ func (m *dataViewManager) recomputeNow(ctx context.Context, collectionID int64, 
 		// never overwrites a published value (a normally-published entry is
 		// never empty).
 		if entry := state.latest; entry != nil && len(entry.stats) == 0 {
-			entry.stats = buildSegmentRowStats(segments)
+			if stats := buildSegmentRowStats(segments); len(stats) > 0 {
+				updated := *entry
+				updated.stats = stats
+				state.versions[protoVersionToStruct(entry.view.GetDataVersion())] = &updated
+				state.latest = &updated
+			}
 		}
+		m.publishDataViewLocked(state)
 		return dataVersionFromView(base), nil
 	}
 	next.DataVersion = nextDataVersion(base, dataViewAdvanceCompact)
@@ -511,6 +530,7 @@ func (m *dataViewManager) OnDropCollection(ctx context.Context, collectionID int
 	// order and deadlock the whole coordinator against an in-flight flush or
 	// recompute on the same Collection.
 	m.mu.Unlock()
+	m.publishDataViewDrop(collectionID)
 	if state != nil {
 		state.mu.Lock()
 		defer state.mu.Unlock()
@@ -677,7 +697,10 @@ func (m *dataViewManager) DataViewSnapshotForCollections(ctx context.Context, co
 func (m *dataViewManager) collectionDataView(state *collectionState) *api.CollectionDataView {
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	return m.collectionDataViewLocked(state)
+}
 
+func (m *dataViewManager) collectionDataViewLocked(state *collectionState) *api.CollectionDataView {
 	m.mu.RLock()
 	current := m.states[state.id] == state
 	m.mu.RUnlock()
@@ -751,6 +774,7 @@ func (m *dataViewManager) persistLockedWithStats(ctx context.Context, state *col
 			)
 		}
 		state.latest = existing
+		m.publishDataViewLocked(state)
 		return nil
 	}
 	if err := m.catalog.SaveDataView(ctx, persisted); err != nil {
@@ -783,6 +807,7 @@ func (m *dataViewManager) persistMemoryLockedWithStats(state *collectionState, v
 			)
 		}
 		state.latest = existing
+		m.publishDataViewLocked(state)
 		return nil
 	}
 	entry := newVersionEntry(persisted)
@@ -795,6 +820,7 @@ func (m *dataViewManager) persistMemoryLockedWithStats(state *collectionState, v
 	entry.stats = stats
 	state.versions[key] = entry
 	state.latest = entry
+	m.publishDataViewLocked(state)
 	return nil
 }
 
@@ -1354,4 +1380,63 @@ func dataVersionKey(version *viewpb.DataVersion) string {
 		version.GetStreamingVersion(),
 		version.GetCompactVersion(),
 	)
+}
+
+// RegisterDataViewListener serializes initial replay with all publications.
+// The callback receives immutable values and must not re-enter this manager.
+func (m *dataViewManager) RegisterDataViewListener(listener api.DataViewListener) func() {
+	m.publicationMu.Lock()
+	if m.listeners == nil {
+		m.listeners = make(map[uint64]api.DataViewListener)
+	}
+	m.nextListener++
+	id := m.nextListener
+	m.listeners[id] = listener
+	for collectionID, view := range m.published {
+		listener(collectionID, view)
+	}
+	m.publicationMu.Unlock()
+	return func() { m.publicationMu.Lock(); delete(m.listeners, id); m.publicationMu.Unlock() }
+}
+
+// Caller holds state.mu. Publication never acquires another collection lock.
+func (m *dataViewManager) publishDataViewLocked(state *collectionState) {
+	entry := state.latest
+	if entry == nil {
+		return
+	}
+	if state.publishedEntry != entry {
+		view := m.collectionDataViewLocked(state)
+		if view == nil {
+			return
+		}
+		state.native = api.PrepareCollectionDataView(view)
+		state.publishedEntry = entry
+	}
+	m.publicationMu.Lock()
+	defer m.publicationMu.Unlock()
+	// Drop removes source membership before waiting for state.mu. Revalidate
+	// inside the publication critical section so a late commit cannot resurrect it.
+	m.mu.RLock()
+	current := m.states[state.id] == state
+	m.mu.RUnlock()
+	if !current || m.published[state.id] == state.native {
+		return
+	}
+	if m.published == nil {
+		m.published = make(map[int64]*api.CollectionDataView)
+	}
+	m.published[state.id] = state.native
+	for _, listener := range m.listeners {
+		listener(state.id, state.native)
+	}
+}
+
+func (m *dataViewManager) publishDataViewDrop(collectionID int64) {
+	m.publicationMu.Lock()
+	defer m.publicationMu.Unlock()
+	delete(m.published, collectionID)
+	for _, listener := range m.listeners {
+		listener(collectionID, nil)
+	}
 }

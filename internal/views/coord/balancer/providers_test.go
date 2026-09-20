@@ -11,13 +11,14 @@ import (
 	datacatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
-var _ DataViewProvider = (dataview.Manager)(nil)
+var _ api.DataViewPublisher = (dataview.Manager)(nil)
 
 func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	ctx := t.Context()
@@ -30,7 +31,7 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 			1: {{CollectionID: 1, PartitionID: 100}},
 		}, nil).Build(),
 		mockey.Mock((*querycoord.Catalog).GetReplicas).Return([]*querypb.Replica{{ID: 10, CollectionID: 1}}, nil).Build(),
-		mockey.Mock((*fakeNodeProvider).Snapshot).Return(NewNodeSnapshot(1, map[int64]*NodeInfo{1: {NodeID: 1, Alive: true}})).Build(),
+
 		mockey.Mock((*stubSyncer).SyncViews).Return(nil).Build(),
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
@@ -56,14 +57,25 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	t.Cleanup(registry.Close)
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, querycoord.NewCatalog(nil))
 	require.NoError(t, err)
-	builder := NewSnapshotBuilder(store, registry, &fakeNodeProvider{}, m, policyTestConfig())
-	controller := NewDefaultBalancer(builder, registry, nil)
+	// Use real replaying source hooks; mock only the node source boundary.
+	nodes := &fakeNodeProvider{}
+	nodePatch := mockey.Mock((*fakeNodeProvider).RegisterNodeListener).To(func(_ *fakeNodeProvider, listener NodeListener) func() {
+		listener(1, &NodeInfo{NodeID: 1, Alive: true})
+		return func() {}
+	}).Build()
+	t.Cleanup(func() { nodePatch.UnPatch() })
+	cache := NewCacheFromSources(policyTestConfig(), store, m, registry, nodes)
+	t.Cleanup(cache.Close)
+	require.True(t, cache.Ready())
+	controller := NewDefaultBalancer(cache, registry, nil)
 	controller.Trigger(TriggerScope{DirtyCollections: []int64{1}})
 	require.NoError(t, controller.Reconcile(ctx))
 	stats := registry.Get(shardID).Stats()
 	require.Equal(t, qviews.FromProtoDataVersion(version), stats.PreparingVersion.DataVersion)
 	require.True(t, stats.Segments[101].HasRowNum)
 	require.Equal(t, int64(42), stats.Segments[101].RowNum)
-	snapshot := buildFullSnapshot(builder)
-	require.Equal(t, int64(42), snapshot.Nodes[1].PendingRowCount)
+	require.Equal(t, int64(42), cache.GetNode(1).Info().PendingRowCount)
 }
+
+// Patched with mockey: there is no hand-written node source behavior.
+func (*fakeNodeProvider) RegisterNodeListener(NodeListener) func() { panic("mock with mockey") }

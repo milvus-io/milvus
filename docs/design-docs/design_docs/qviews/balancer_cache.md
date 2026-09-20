@@ -1,7 +1,7 @@
 # Balancer Cache
 
-This is the agreed target design for replacing `BalancerSnapshot` and
-`SnapshotBuilder`. The cache refactor is not implemented yet. The existing
+The resident `balancer.Cache` replaces the runtime `BalancerSnapshot` and
+`SnapshotBuilder` path. The old snapshot builder remains only as a test oracle. The existing
 batch policy, ordering, scores, and assignment comparison remain unchanged;
 production runtime wiring and RPC changes are outside this refactor.
 
@@ -11,7 +11,7 @@ See [Balancer design](balancer_design.md) for the allocation algorithm,
 
 ## 1. Contract and ownership
 
-`BalancerCache` holds all facts required for reconciliation. Upstream managers
+`balancer.Cache` holds all facts required for reconciliation. Upstream managers
 remain the authoritative owners and synchronously publish their committed
 in-memory state through registered hooks. The cache owns the derived indexes
 and aggregates. Balancer reads the cache through `Get` and key iteration;
@@ -118,31 +118,31 @@ indexes before enqueuing work.
 
 ## 3. Read interface and concurrency
 
-The following is a semantic interface sketch, not an already implemented API:
+The implemented read interface is:
 
 ```go
 type Reader interface {
-    GetCollection(collectionID int64) (*CollectionEntry, bool)
-    GetNode(nodeID int64) (*NodeEntry, bool)
-    GetResourceGroup(name string) (*ResourceGroupEntry, bool)
+    GetCollection(collectionID int64) *CollectionEntry
+    GetNode(nodeID int64) *NodeEntry
+    GetResourceGroup(name string) *ResourceGroupEntry
     GetBalanceConfig() *BalanceConfig
 
     CollectionForReplica(replicaID int64) (int64, bool)
     RangeCollectionIDs(func(int64) bool)
     RangeNodeIDs(func(int64) bool)
-    RangeCollectionsInResourceGroup(string, func(int64) bool)
-    RangeShardsOnNode(int64, func(ShardID) bool)
 }
 ```
 
 Accessors such as `collection.DataView()`, `collection.GetShard(id)`,
-`node.TotalRows()`, and `node.Contribution(id)` read the receiver's version;
+`node.Info()`, and `node.Contribution(id)` read the receiver's version;
 they do not perform another live-cache lookup. Iteration copies at most keys
 or references, never segment payloads, and does not invoke callers under cache
 locks. Cross-object iteration is not a globally consistent list operation.
 
-A sharded RWMutex-protected directory of immutable pointers is sufficient.
-`Get` takes the lock only to obtain the pointer. Updating an entry does not
+An RWMutex protects directory keys and slots; each Collection/Node slot has
+a writer mutex and an atomic immutable pointer. `Get` holds the directory lock
+only to find the slot. RG and contribution indexes use a persistent radix tree
+(`go-immutable-radix`) so writes copy only changed paths. Updating an entry does not
 clone the global directory. Published maps, slices, protobufs, and backing
 arrays cannot subsequently be mutated or reused. An input without an immutable
 ownership contract must be copied at the write boundary. Old in-memory objects
@@ -272,8 +272,11 @@ mechanism; no distributed sequencing protocol is introduced.
 
 The existing QueryNodeProvider only exposes a membership notification and
 full node/RG reads. It cannot satisfy this contract unchanged. Source owners
-need keyed state-publication hooks or synchronous calls at their commit points;
-an asynchronous refresh after an unkeyed notification would retain a stale
+must implement `QueryNodeStatePublisher` and `ResourceGroupStatePublisher`
+(or an equivalent synchronous `NodePublisher`) at their commit points;
+`nodeview.QueryNodePublisher` merges these keyed facts and replays them to cache
+subscribers.
+An asynchronous refresh after an unkeyed notification would retain a stale
 cache window. Production assembly remains outside this PR.
 
 ### 5.3 DataView ownership and row statistics
@@ -387,3 +390,22 @@ Required validation:
 Key implementation packages are `internal/views/coord/balancer/`,
 `internal/views/coord/loadmgr/`, `internal/views/coord/coordview/`,
 `internal/views/coord/nodeview/`, and `internal/dataview/`.
+
+## 9. Implemented component boundaries
+
+- `NewCacheFromSources` registers synchronous replay hooks with
+  LoadConfigStore, DataViewManager, ShardViewRegistry, and a NodePublisher; it
+  marks the cache ready only after all replays return. The owner stops the
+  controller before calling `Cache.Close` and closing the node publisher.
+- DataViewManager retains one finalized native projection for its latest
+  collection publication. Historical DataVersion entries do not each retain
+  a second native segment tree. Recovery footprint initialization replaces
+  the entry while sharing its reference counter; old readers remain immutable.
+- `NewDefaultBalancer` consumes the cache, and failed allocation/apply work is
+  requeued with a 100 ms to 5 s loop backoff. `UpdateBalanceConfig` publishes
+  a new immutable configuration and requests a full pass.
+- Per-collection replica-use counts avoid scanning resident shards while
+  publishing one shard or removing desired config. Empty Collection/Node/RG
+  entries are reclaimed once their desired/actual references disappear.
+- Assembly in MixCoord/QueryCoord and concrete node/RG owner hooks remain
+  outside this PR. There are no new RPCs or wire-protocol changes.

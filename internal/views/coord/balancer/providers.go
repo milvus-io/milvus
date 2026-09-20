@@ -10,8 +10,8 @@ import (
 // every QueryNode visible to this Coord. Backed by Node Manager and resource
 // group metadata at the facade layer.
 //
-// The SnapshotBuilder combines these infos with cross-shard-aggregated load
-// (from ShardViewRegistry) to produce the final *BalanceNode in the snapshot.
+// This pull interface is retained for compatibility. The Balancer runtime
+// subscribes to NodePublisher and reads the resident Cache.
 type NodeProvider interface {
 	// Snapshot returns an immutable node snapshot.
 	Snapshot() *NodeSnapshot
