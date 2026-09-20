@@ -119,9 +119,10 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnapshot) (*metastore.WALRecoverySnapshot, error) {
 	recoverySnapshot := &metastore.WALRecoverySnapshot{}
 	type snapshotIdentity struct {
-		module    moduleapi.ModuleName
-		vchannel  string
-		segmentID int64
+		module        moduleapi.ModuleName
+		vchannel      string
+		segmentID     int64
+		schemaCleanup bool
 	}
 	seen := make(map[snapshotIdentity]struct{}, len(snapshot.ModuleDirtySnaps))
 	for _, dirtySnapshot := range snapshot.ModuleDirtySnaps {
@@ -134,9 +135,10 @@ func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnaps
 			)
 		}
 		identity := snapshotIdentity{
-			module:    dirtySnapshot.ModuleName(),
-			vchannel:  key.VChannel,
-			segmentID: key.SegmentID,
+			module:        dirtySnapshot.ModuleName(),
+			vchannel:      key.VChannel,
+			segmentID:     key.SegmentID,
+			schemaCleanup: dirtySnapshot.Op() == moduleapi.SnapshotOpDeleteSchemas,
 		}
 		if identity.module == moduleapi.ModuleNameSegment {
 			identity.vchannel = ""
@@ -180,6 +182,14 @@ func (rs *recoveryStorageImpl) buildRecoverySnapshot(snapshot *dirtyPersistSnaps
 					recoverySnapshot.VChannelBaseMetas = make(map[string]*streamingpb.VChannelMeta)
 				}
 				recoverySnapshot.VChannelBaseMetas[key.VChannel] = meta
+			case moduleapi.SnapshotOpDeleteSchemas:
+				if recoverySnapshot.RemovedVChannelSchemas == nil {
+					recoverySnapshot.RemovedVChannelSchemas = make(map[string][]uint64)
+				}
+				for _, schema := range meta.GetCollectionInfo().GetSchemas() {
+					recoverySnapshot.RemovedVChannelSchemas[key.VChannel] = append(
+						recoverySnapshot.RemovedVChannelSchemas[key.VChannel], schema.GetCheckpointTimeTick())
+				}
 			case moduleapi.SnapshotOpDelete:
 				if recoverySnapshot.RemovedVChannels == nil {
 					recoverySnapshot.RemovedVChannels = make(map[string]*streamingpb.VChannelMeta)

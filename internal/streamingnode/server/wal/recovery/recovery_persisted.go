@@ -578,6 +578,9 @@ func validateRecoveredViewMeta(
 		if len(schemas) == 0 {
 			return merr.WrapErrDataIntegrityMsg("vchannel %s missing schemas in recovery meta", vchannelName)
 		}
+		if schemas[len(schemas)-1].GetState() != streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL {
+			return merr.WrapErrDataIntegrityMsg("vchannel %s latest schema is not normal in recovery meta", vchannelName)
+		}
 		for schemaIndex, schema := range schemas {
 			if schema.GetCheckpointTimeTick() == 0 && (!allowLegacySchemaBaseline || schemaIndex != 0) {
 				return merr.WrapErrDataIntegrityMsg("vchannel %s missing schema checkpoint timetick in recovery meta", vchannelName)
@@ -585,7 +588,8 @@ func validateRecoveredViewMeta(
 			if schema.GetSchema() == nil {
 				return merr.WrapErrDataIntegrityMsg("vchannel %s missing schema body in recovery meta", vchannelName)
 			}
-			if schema.GetState() != streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL {
+			if schema.GetState() != streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
+				schema.GetState() != streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED {
 				return merr.WrapErrDataIntegrityMsg("vchannel %s unknown schema state in recovery meta", vchannelName)
 			}
 		}

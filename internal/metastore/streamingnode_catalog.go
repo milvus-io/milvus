@@ -73,6 +73,8 @@ type WALRecoverySnapshot struct {
 	// RemovedVChannels are the vchannel base and schema records to remove;
 	// skipped if empty.
 	RemovedVChannels map[string]*streamingpb.VChannelMeta
+	// RemovedVChannelSchemas identifies persisted schema tombstones by their original effective timeticks.
+	RemovedVChannelSchemas map[string][]uint64
 	// SalvageCheckpoint is the salvage checkpoint to save; skipped if nil.
 	// It must be persisted before the consume checkpoint to guarantee ordering.
 	SalvageCheckpoint *commonpb.ReplicateCheckpoint

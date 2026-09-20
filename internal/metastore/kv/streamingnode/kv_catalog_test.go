@@ -595,7 +595,7 @@ func vchannelsByName(vchannels map[string]*streamingpb.VChannelMeta, names ...st
 	return selected
 }
 
-func TestCatalogRejectsDroppedVChannelSchemaOnSave(t *testing.T) {
+func TestCatalogRejectsUnknownVChannelSchemaOnSave(t *testing.T) {
 	catalog := &catalog{}
 	vchannel := &streamingpb.VChannelMeta{
 		Vchannel: "vchannel-1",
@@ -605,7 +605,7 @@ func TestCatalogRejectsDroppedVChannelSchemaOnSave(t *testing.T) {
 				{
 					Schema:             &schemapb.CollectionSchema{Name: "collection-1"},
 					CheckpointTimeTick: 10,
-					State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED,
+					State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_UNKNOWN,
 				},
 			},
 		},

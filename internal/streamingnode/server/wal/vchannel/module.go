@@ -114,7 +114,8 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 				// A DataCoord-only legacy segment has no allocation timestamp.
 				// Resolve its stored encoding version, not the schema at first data.
 				for _, version := range config.VChannelMeta.GetCollectionInfo().GetSchemas() {
-					if version.GetSchema().GetVersion() == meta.GetSchemaVersion() {
+					if version.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
+						version.GetSchema().GetVersion() == meta.GetSchemaVersion() {
 						schema = version.GetSchema()
 					}
 				}
@@ -603,6 +604,30 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 					func() { m.completeVChannelCleanup(checkpointTimeTick) },
 				),
 			)
+		} else {
+			// Keep references until segment catalog deletion has completed; pending
+			// cleanup entries still belong to m.segments.
+			segments := make([]*streamingpb.SegmentAssignmentMeta, 0, len(m.segments))
+			for _, view := range m.segments {
+				segments = append(segments, view.AssignmentMeta())
+			}
+			owner := m.vchannelView
+			deleted, changed := owner.SchemaCleanupPlan(cleanup.PhysicalTimeTick, segments)
+			vchannelChanged = changed || vchannelChanged
+			if deleted != nil {
+				snapshots = append(snapshots, newDirtySnapshot(
+					moduleapi.ModuleNameVChannel,
+					moduleapi.SnapshotKey{PChannel: m.pchannel, VChannel: m.vchannel},
+					moduleapi.SnapshotOpDeleteSchemas,
+					deleted,
+					func() {
+						owner.MarkSchemaCleanupPersisted(deleted)
+						if m.runtime.Notifier != nil {
+							m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+						}
+					},
+				))
+			}
 		}
 	}
 	m.mu.Unlock()

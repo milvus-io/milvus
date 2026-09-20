@@ -91,6 +91,15 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			))
 		}
 	}
+	for vchannel, timeticks := range snapshot.RemovedVChannelSchemas {
+		for _, timetick := range timeticks {
+			key := buildVChannelSchemaKey(pChannelName, vchannel, timetick)
+			removes = append(removes, key)
+			// A schema change can be frozen after cleanup selected these durable
+			// tombstones. Do not rewrite them from that newer full snapshot.
+			delete(vchannelSaves, key)
+		}
+	}
 	for _, r := range removes {
 		b.Remove(r)
 	}

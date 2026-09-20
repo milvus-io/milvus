@@ -113,6 +113,33 @@ clear later mutations.
 The owning RecoveryStorage writes these component snapshots before the one
 global checkpoint.
 
+### Schema Tombstone GC
+
+Schema history shares the existing VChannel cleanup scan. Active VChannels with
+multiple schema versions remain cleanup candidates; no separate GC worker or
+expiration timer is introduced.
+
+The scan retains the schema effective at the **already published global WAL
+checkpoint**, every later version (including the latest), and the schemas needed
+by every retained SegmentAssignment. Segment allocation timestamps and stored
+encoding versions both retain dependencies, including legacy migrated segments.
+Segments awaiting catalog deletion continue to pin their schemas. QueryView
+retention must keep the corresponding SegmentViews alive; it does not introduce
+a separate schema-version index here.
+
+Unreferenced historical versions first become `DROPPED` in a normal full
+VChannel snapshot. Their `checkpoint_time_tick` remains the original effective
+version timestamp. A later scan selects only persisted tombstones for explicit
+schema-key deletion through `SaveRecoverySnapshot`, under the same checkpoint
+and owner fencing as other metadata cleanup. Recovery accepts these tombstones
+and resumes deletion. The latest schema remains `NORMAL`.
+
+Deletion completion removes only the captured schema identities from memory.
+Concurrent schema additions are preserved. Base-only metadata updates do not
+block GC, and if a newer full snapshot still contains a selected tombstone, its
+explicit removal wins over the stale key save. Final VChannel cleanup removes
+all remaining schema keys together with the channel metadata.
+
 ## 5. Segment Completion And Summary L0 Scheduling (Future Wiring)
 
 One message may have independent effects:

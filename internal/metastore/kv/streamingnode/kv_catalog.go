@@ -127,7 +127,8 @@ func (c *catalog) getRemovalAndSaveForVChannel(pchannelName string, info *stream
 	// Save the schema of the vchannel.
 	for _, schema := range info.GetCollectionInfo().GetSchemas() {
 		switch schema.State {
-		case streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL:
+		case streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
+			streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED:
 			data, err := proto.Marshal(schema)
 			if err != nil {
 				return nil, nil, merr.WrapErrSerializationFailed(err, "marshal schema %d at pchannel %s", schema.GetCheckpointTimeTick(), pchannelName)

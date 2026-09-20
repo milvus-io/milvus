@@ -57,6 +57,8 @@ const (
 	SnapshotOpUpsert SnapshotOp = iota
 	SnapshotOpUpsertBase
 	SnapshotOpDelete
+	// SnapshotOpDeleteSchemas removes persisted schema tombstones only.
+	SnapshotOpDeleteSchemas
 )
 
 type DirtySnapshot interface {

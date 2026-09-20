@@ -214,7 +214,7 @@ func (info *VChannelView) HasCleanupCandidate() bool {
 			return true
 		}
 	}
-	return false
+	return len(info.meta.GetCollectionInfo().GetSchemas()) > 1
 }
 
 // IsActive returns true if the vchannel is active.
@@ -430,6 +430,9 @@ func (info *VChannelView) GetSchemaLocked(timetick uint64) (int, *schemapb.Colle
 	for i := len(info.meta.CollectionInfo.Schemas) - 1; i >= 0; i-- {
 		schema := info.meta.CollectionInfo.Schemas[i]
 		if schema.CheckpointTimeTick <= timetick {
+			if schema.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED {
+				return -1, nil
+			}
 			return i, schema.Schema
 		}
 	}
