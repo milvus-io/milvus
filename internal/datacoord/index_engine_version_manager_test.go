@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/blang/semver/v4"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
@@ -1031,4 +1032,59 @@ func TestTheNoSessionScalarBoundIsWhatThisImageCanLoad(t *testing.T) {
 	})
 	assert.EqualValues(t, 4, m.GetMaximumScalarIndexEngineVersion(),
 		"a session that exists is read the same way, and replaces the fallback")
+}
+
+// The compiled-in version is read only when it is the answer: a form installed
+// and no QueryNode session. Reading it is three cgo calls under the manager's
+// lock, and GetMaximumIndexEngineVersion is asked for every segment index a
+// compaction checks, so it must not be read when the sessions answer, or on a
+// stock binary, which never uses it.
+func TestTheCompiledInVersionIsReadOnlyWhenItIsTheAnswer(t *testing.T) {
+	paramtable.Init()
+	reads := 0
+	var origin func() segcore.IndexEngineInfo
+	counting := mockey.Mock(segcore.GetIndexEngineInfo).To(func() segcore.IndexEngineInfo {
+		reads++
+		return origin()
+	}).Origin(&origin).Build()
+	defer counting.UnPatch()
+
+	withSession := func(m IndexEngineVersionManager) {
+		m.Startup(map[string]*sessionutil.Session{
+			"qn1": {SessionRaw: sessionutil.SessionRaw{
+				ServerID:           1,
+				IndexEngineVersion: sessionutil.IndexEngineVersion{CurrentIndexVersion: 3, MaximumIndexVersion: 4},
+			}},
+		})
+	}
+
+	t.Run("stock binary, no session", func(t *testing.T) {
+		ext.ResetForTest()
+		t.Cleanup(ext.ResetForTest)
+		m := newIndexEngineVersionManager()
+		reads = 0
+		m.GetMaximumIndexEngineVersion()
+		m.GetCurrentIndexEngineVersion()
+		assert.Zero(t, reads, "a stock binary answers without this image's version")
+	})
+
+	t.Run("form installed, a session registered", func(t *testing.T) {
+		installForm(t)
+		m := newIndexEngineVersionManager()
+		withSession(m)
+		reads = 0
+		assert.EqualValues(t, 4, m.GetMaximumIndexEngineVersion())
+		assert.EqualValues(t, 3, m.GetCurrentIndexEngineVersion())
+		assert.Zero(t, reads, "the sessions answer, so this image's version is not read")
+	})
+
+	t.Run("form installed, no session", func(t *testing.T) {
+		installForm(t)
+		m := newIndexEngineVersionManager()
+		reads = 0
+		m.GetMaximumIndexEngineVersion()
+		assert.Equal(t, 1, reads, "with nothing registered, this image's version is the answer")
+		m.GetCurrentIndexEngineVersion()
+		assert.Equal(t, 2, reads)
+	})
 }

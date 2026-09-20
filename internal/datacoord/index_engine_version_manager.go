@@ -204,7 +204,7 @@ func (m *versionManagerImpl) GetCurrentIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentVersion() int32 {
 	if len(m.versions) == 0 {
-		return noSessionVersion(segcore.GetIndexEngineInfo().CurrentIndexVersion)
+		return noSessionVersion(func() int32 { return segcore.GetIndexEngineInfo().CurrentIndexVersion })
 	}
 
 	current := int32(math.MaxInt32)
@@ -246,7 +246,7 @@ func (m *versionManagerImpl) GetCurrentScalarIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getCurrentScalarVersion() int32 {
 	if len(m.scalarIndexVersions) == 0 {
-		return noSessionVersion(common.CurrentScalarIndexEngineVersion)
+		return noSessionVersion(func() int32 { return common.CurrentScalarIndexEngineVersion })
 	}
 
 	current := int32(math.MaxInt32)
@@ -293,8 +293,10 @@ func (m *versionManagerImpl) getMaximumVersion() int32 {
 	// current version alone would make the same image bound an operator's
 	// target lower with no session than with one, and clamp index builds
 	// during a restart to a version this very image can read past.
-	info := segcore.GetIndexEngineInfo()
-	return getMaximumVersionFrom(m.versions, max(info.CurrentIndexVersion, info.MaxIndexVersion))
+	return getMaximumVersionFrom(m.versions, func() int32 {
+		info := segcore.GetIndexEngineInfo()
+		return max(info.CurrentIndexVersion, info.MaxIndexVersion)
+	})
 }
 
 func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
@@ -307,7 +309,9 @@ func (m *versionManagerImpl) GetMaximumScalarIndexEngineVersion() int32 {
 func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
 	// As getMaximumVersion: the bound with no session is what this image can
 	// LOAD, which is how a registered node is read too.
-	return getMaximumVersionFrom(m.scalarIndexVersions, max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion))
+	return getMaximumVersionFrom(m.scalarIndexVersions, func() int32 {
+		return max(common.CurrentScalarIndexEngineVersion, common.MaximumScalarIndexEngineVersion)
+	})
 }
 
 // noSessionVersion is the current index engine version with no QueryNode
@@ -331,9 +335,11 @@ func (m *versionManagerImpl) getMaximumScalarVersion() int32 {
 // than written into index builds nothing can load. If the assumption is wrong
 // - a QueryNode on an older image joins - its session replaces both figures
 // the moment it registers, and the answers become cluster-wide again.
-func noSessionVersion(compiledIn int32) int32 {
+//
+// compiledIn is called only on that path; see getMaximumVersionFrom.
+func noSessionVersion(compiledIn func() int32) int32 {
 	if extension.FormInstalled() {
-		return compiledIn
+		return compiledIn()
 	}
 	return 0
 }
@@ -352,10 +358,15 @@ func noSessionVersion(compiledIn int32) int32 {
 // of being written into index builds unchecked. An unbounded MaxInt32 makes
 // the clamp a no-op precisely when there is no QueryNode to disprove the
 // override, which is what a stock binary does and keeps doing.
-func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion, compiledIn int32) int32 {
+//
+// compiledIn is called only when it is the answer. Asking this image for its
+// version is three cgo calls, made under the manager's lock and for every
+// segment index a compaction checks (ResolveVecIndexVersion), while the answer
+// almost always comes from the registered sessions instead.
+func getMaximumVersionFrom(versions map[int64]sessionutil.IndexEngineVersion, compiledIn func() int32) int32 {
 	if len(versions) == 0 {
 		if extension.FormInstalled() {
-			return compiledIn
+			return compiledIn()
 		}
 		return math.MaxInt32
 	}
