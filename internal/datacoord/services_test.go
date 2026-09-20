@@ -2423,86 +2423,63 @@ func TestServer_DropSegmentsByTime(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("watch channel checkpoint failed", func(t *testing.T) {
-		s := &Server{}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
+	for _, checkpoint := range []struct {
+		name string
+		ts   uint64
+	}{
+		{name: "missing checkpoint"},
+		{name: "lagging checkpoint", ts: flushTs - 1},
+		{name: "caught up checkpoint", ts: flushTs},
+	} {
+		t.Run(checkpoint.name, func(t *testing.T) {
+			s := &Server{}
+			s.stateCode.Store(commonpb.StateCode_Healthy)
+			meta, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			s.meta = meta
 
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-		s.meta = meta
+			if checkpoint.ts != 0 {
+				require.NoError(t, meta.UpdateChannelCheckpoint(ctx, channelName, &msgpb.MsgPosition{
+					ChannelName: channelName,
+					MsgID:       []byte{1},
+					Timestamp:   checkpoint.ts,
+				}))
+			}
 
-		// WatchChannelCheckpoint will wait indefinitely, so we use a context with timeout
-		ctxWithTimeout, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-		defer cancel()
+			segments := []struct {
+				channel string
+				ts      uint64
+				state   commonpb.SegmentState
+			}{
+				{channelName, flushTs - 1, commonpb.SegmentState_Dropped},
+				{channelName, flushTs, commonpb.SegmentState_Dropped},
+				{channelName, flushTs + 1, commonpb.SegmentState_Flushed},
+				{"other-channel", flushTs - 1, commonpb.SegmentState_Flushed},
+			}
+			for i, segment := range segments {
+				require.NoError(t, meta.AddSegment(ctx, &SegmentInfo{
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:            int64(i + 1),
+						CollectionID:  collectionID,
+						InsertChannel: segment.channel,
+						State:         commonpb.SegmentState_Flushed,
+						DmlPosition:   &msgpb.MsgPosition{Timestamp: segment.ts},
+					},
+				}))
+			}
 
-		err = s.DropSegmentsByTime(ctxWithTimeout, collectionID, map[string]uint64{channelName: flushTs})
-		assert.Error(t, err)
-	})
-
-	t.Run("success - drop segments", func(t *testing.T) {
-		s := &Server{}
-		s.stateCode.Store(commonpb.StateCode_Healthy)
-
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-		s.meta = meta
-
-		// Set channel checkpoint to satisfy WatchChannelCheckpoint
-		pos := &msgpb.MsgPosition{
-			ChannelName: channelName,
-			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-			Timestamp:   flushTs,
-		}
-		err = meta.UpdateChannelCheckpoint(ctx, channelName, pos)
-		assert.NoError(t, err)
-
-		// Add segments to drop (timestamp <= flushTs)
-		seg1 := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           1,
-				CollectionID: collectionID,
-				State:        commonpb.SegmentState_Flushed,
-				DmlPosition: &msgpb.MsgPosition{
-					Timestamp: flushTs - 100, // less than flushTs
-				},
-			},
-		}
-		err = meta.AddSegment(ctx, seg1)
-		assert.NoError(t, err)
-
-		// Add segment that should not be dropped (timestamp > flushTs)
-		seg2 := &SegmentInfo{
-			SegmentInfo: &datapb.SegmentInfo{
-				ID:           2,
-				CollectionID: collectionID,
-				State:        commonpb.SegmentState_Flushed,
-				DmlPosition: &msgpb.MsgPosition{
-					Timestamp: flushTs + 100, // greater than flushTs
-				},
-			},
-		}
-		err = meta.AddSegment(ctx, seg2)
-		assert.NoError(t, err)
-
-		// Set segment channel
-		seg1.InsertChannel = channelName
-		seg2.InsertChannel = channelName
-		meta.segments.SetSegment(seg1.ID, seg1)
-		meta.segments.SetSegment(seg2.ID, seg2)
-
-		err = s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs})
-		assert.NoError(t, err)
-
-		// Verify segment 1 is dropped
-		seg1After := meta.GetSegment(ctx, seg1.ID)
-		assert.NotNil(t, seg1After)
-		assert.Equal(t, commonpb.SegmentState_Dropped, seg1After.GetState())
-
-		// Verify segment 2 is not dropped
-		seg2After := meta.GetSegment(ctx, seg2.ID)
-		assert.NotNil(t, seg2After)
-		assert.NotEqual(t, commonpb.SegmentState_Dropped, seg2After.GetState())
-	})
+			// The broadcast Acks already guarantee persistence; a missing or
+			// lagging recovery checkpoint must not delay the metadata mutation.
+			ctx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			require.NoError(t, s.DropSegmentsByTime(ctx, collectionID, map[string]uint64{channelName: flushTs}))
+			for i, segment := range segments {
+				actual := meta.GetSegment(ctx, int64(i+1))
+				require.NotNil(t, actual)
+				assert.Equal(t, segment.state, actual.GetState())
+			}
+		})
+	}
 }
 
 func TestGetSegmentInfo_WithCompaction(t *testing.T) {

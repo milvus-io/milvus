@@ -122,6 +122,20 @@ list is still collected from DataCoord metadata after completion, with the same
 state and non-L0 filters. Channel checkpoints are captured before broadcasting,
 as before; they are recovery positions, not proof of this Flush's completion.
 
+## Truncate API Completion
+
+TruncateCollection broadcasts with `AckSyncUp` to all collection VChannels and
+CChannel. Business-channel consuming-side Acks wait for pre-truncate L1 final
+commits and L0 output/registration, so the all-Ack callback can drop segments
+without waiting for DataCoord channel checkpoints. Recovery checkpoint and
+Summary backlog publication are independent of this completion boundary.
+
+The callback retains each business channel's own Truncate TimeTick as the
+inclusive segment-drop boundary. Segments after that boundary are preserved;
+CChannel's TimeTick does not replace a business-channel boundary. Existing
+compaction protection, target refresh, and collection metadata updates remain
+part of the truncate flow.
+
 ## 8. Import Commit Ownership
 
 Import, CommitImport, and RollbackImport broadcast to the business VChannels

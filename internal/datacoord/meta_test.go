@@ -5862,16 +5862,6 @@ func TestChannelCP(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("WatchChannelCheckpoint", func(t *testing.T) {
-		meta, err := newMemoryMeta(t)
-		assert.NoError(t, err)
-
-		err = meta.UpdateChannelCheckpoint(context.TODO(), mockVChannel, pos)
-		assert.NoError(t, err)
-		err = meta.WatchChannelCheckpoint(context.TODO(), mockVChannel, pos.Timestamp-1)
-		assert.NoError(t, err)
-	})
-
 	t.Run("TruncateChannelByTime", func(t *testing.T) {
 		meta, err := newMemoryMeta(t)
 		assert.NoError(t, err)

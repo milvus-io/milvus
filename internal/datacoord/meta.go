@@ -62,7 +62,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
-	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -168,17 +167,13 @@ type channelCPs struct {
 	lock.RWMutex
 	checkpoints  map[string]*msgpb.MsgPosition
 	channelLocks *lock.KeyLock[string]
-	cond         *syncutil.ContextCond
 }
 
 func newChannelCps() *channelCPs {
-	cp := &channelCPs{
+	return &channelCPs{
 		checkpoints:  make(map[string]*msgpb.MsgPosition),
 		channelLocks: lock.NewKeyLock[string](),
 	}
-	// use the same lock as channelCPs
-	cp.cond = syncutil.NewContextCond(&cp.RWMutex)
-	return cp
 }
 
 type segmentMetricStateChange map[string]map[string]map[string]map[string]map[string]int
@@ -3439,8 +3434,6 @@ func (m *meta) UpdateChannelCheckpoints(ctx context.Context, positions []*msgpb.
 		channel := pos.GetChannelName()
 		m.channelCPs.checkpoints[channel] = pos
 	}
-	// broadcast the change of channel checkpoint for TruncateCollection op to drop segments
-	m.channelCPs.cond.UnsafeBroadcast()
 	m.channelCPs.Unlock()
 	for _, pos := range toUpdates {
 		channel := pos.GetChannelName()
@@ -4275,22 +4268,4 @@ func (m *meta) TruncateChannelByTime(ctx context.Context, vChannel string, flush
 	}
 
 	return nil
-}
-
-// WatchChannelCheckpoint waits until the checkpoint of the specified channel
-// reaches or exceeds the target timestamp. Used for TruncateCollection.
-func (m *meta) WatchChannelCheckpoint(ctx context.Context, vChannel string, targetTs uint64) error {
-	m.channelCPs.cond.L.Lock()
-
-	for {
-		cp, ok := m.channelCPs.checkpoints[vChannel]
-		if ok && cp != nil && cp.GetTimestamp() >= targetTs {
-			m.channelCPs.cond.L.Unlock()
-			return nil
-		}
-
-		if err := m.channelCPs.cond.Wait(ctx); err != nil {
-			return err
-		}
-	}
 }

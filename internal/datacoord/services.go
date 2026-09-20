@@ -2299,16 +2299,10 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		mlog.Int64("collectionID", collectionID))
 
 	for channelName, flushTs := range flushTsList {
-		// wait until the checkpoint reaches or exceeds the flush timestamp
-		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
-		if err != nil {
-			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
-			return err
-		}
-		// drop segments that were updated before the flush timestamp
-		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
-		if err != nil {
-			mlog.Warn(context.TODO(), "TruncateChannelByTime failed", mlog.Err(err))
+		// Truncate's consuming-side Acks already guarantee L1/L0 persistence and
+		// registration. Recovery checkpoint publication is independent of completion.
+		if err := s.meta.TruncateChannelByTime(ctx, channelName, flushTs); err != nil {
+			mlog.Warn(ctx, "TruncateChannelByTime failed", mlog.Err(err))
 			return err
 		}
 	}
