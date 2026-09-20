@@ -19,14 +19,15 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <unordered_set>
 #include <type_traits>
+#include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -43,14 +44,22 @@ struct MemoryEntryTarget {
 
 // Shared by entries writing different regions of the same local file.
 // Prepare, Finish and Cleanup run on LocalFileIOPool. All writes must drain
-// before Finish, Commit or Cleanup; cleanup precedes releasing directory leases.
+// before Finish, Commit or Cleanup; cleanup precedes releasing directory
+// leases.
 struct IndexFileTarget {
     const std::string path;
     const size_t file_size;
     const bool retain_on_success;
+    // Legacy byte concatenation can require BUFFERED writes when physical
+    // payload boundaries are unaligned. Nullopt retains the global policy.
+    const std::optional<FileWriter::WriteMode> write_mode;
 
     // Describes the destination without opening it.
-    IndexFileTarget(std::string path, size_t file_size, bool retain_on_success);
+    IndexFileTarget(
+        std::string path,
+        size_t file_size,
+        bool retain_on_success,
+        std::optional<FileWriter::WriteMode> write_mode = std::nullopt);
     IndexFileTarget(const IndexFileTarget&) = delete;
     IndexFileTarget&
     operator=(const IndexFileTarget&) = delete;
@@ -101,8 +110,8 @@ EntryTargetSize(const EntryTarget& target) {
     return std::visit([](const auto& value) { return value.bytes; }, target);
 }
 
-// Index code chooses destinations; AsyncIndexEntryReader derives slices and CRCs
-// from the immutable directory.
+// Index code chooses destinations; AsyncIndexEntryReader derives slices and
+// CRCs from the immutable directory.
 struct EntryLoadPlan {
     std::string name;
     EntryTarget target;

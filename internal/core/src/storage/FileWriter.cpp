@@ -14,13 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cassert>
+#include <cstdlib>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <unistd.h>
-#include <cassert>
-#include <cstdlib>
 #include <thread>
+#include <unistd.h>
 #include <utility>
 
 #include "common/FastMem.h"
@@ -245,8 +245,8 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
         offset_ = 0;
     }
 
-    // if the left data is aligned, we can just write it to the file and only save the tail to the aligned buffer
-    // it will save the time of memcpy
+    // if the left data is aligned, we can just write it to the file and only save
+    // the tail to the aligned buffer it will save the time of memcpy
     if (reinterpret_cast<uintptr_t>(src) % ALIGNMENT_BYTES == 0) {
         size_t aligned_left_size = left_size & ~ALIGNMENT_MASK;
         left_size -= aligned_left_size;
@@ -284,7 +284,8 @@ FileWriter::WriteInternal(const void* data, size_t nbyte) {
 
 void
 FileWriter::Write(const void* data, size_t nbyte) {
-    // if the data can fit in the aligned buffer, we can just copy it to the aligned buffer
+    // if the data can fit in the aligned buffer, we can just copy it to the
+    // aligned buffer
     if (nbyte <= capacity_ - offset_) {
         const char* src = static_cast<const char*>(data);
         milvus::fastmem::FastMemcpy(
@@ -307,7 +308,8 @@ FileWriter::FlushWithDirectIO() {
            nearest_aligned_offset - offset_);
     PositionedWriteWithCheck(aligned_buf_, nearest_aligned_offset, file_size_);
     file_size_ += offset_;
-    // truncate the file to the actual size since the file written by the aligned buffer may be larger than the actual size
+    // truncate the file to the actual size since the file written by the aligned
+    // buffer may be larger than the actual size
     if (ftruncate(fd_, file_size_) != 0) {
         Cleanup();
         ThrowInfo(ErrorCode::FileWriteFailed,
@@ -358,13 +360,16 @@ FileWriter::Finish() {
     return file_size_;
 }
 
-PositionedFileWriter::PositionedFileWriter(std::string filename,
-                                           size_t file_size,
-                                           io::Priority priority)
+PositionedFileWriter::PositionedFileWriter(
+    std::string filename,
+    size_t file_size,
+    io::Priority priority,
+    std::optional<FileWriter::WriteMode> mode)
     : filename_(std::move(filename)),
       file_size_(file_size),
-      mode_(priority == io::Priority::HIGH ? FileWriter::WriteMode::BUFFERED
-                                           : FileWriter::GetMode()),
+      mode_(mode.value_or(priority == io::Priority::HIGH
+                              ? FileWriter::WriteMode::BUFFERED
+                              : FileWriter::GetMode())),
       use_direct_io_(mode_ == FileWriter::WriteMode::DIRECT),
       priority_(priority),
       rate_limiter_(io::WriteRateLimiter::GetInstance()) {
