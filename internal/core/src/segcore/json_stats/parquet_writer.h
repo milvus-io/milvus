@@ -31,7 +31,7 @@
 #include "common/EasyAssert.h"
 #include "common/protobuf_utils.h"
 #include "glog/logging.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/utils.h"
 #include "log/Log.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/packed/writer.h"

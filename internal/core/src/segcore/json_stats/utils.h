@@ -33,8 +33,8 @@
 #include "arrow/api.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/Types.h"
 #include "common/jsmn.h"
-#include "index/InvertedIndexTantivy.h"
 
 namespace milvus::index {
 

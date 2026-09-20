@@ -25,7 +25,7 @@
 #include "common/ScopedTimer.h"
 #include "fmt/core.h"
 #include "glog/logging.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "pb/common.pb.h"
 #include "segcore/CacheMetricAttribution.h"
