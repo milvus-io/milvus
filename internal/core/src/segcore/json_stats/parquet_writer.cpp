@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "index/json_stats/parquet_writer.h"
+#include "segcore/json_stats/parquet_writer.h"
 
 #include <arrow/array/builder_binary.h>
 #include <arrow/array/builder_primitive.h>

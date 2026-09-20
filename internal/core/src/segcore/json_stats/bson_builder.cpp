@@ -31,7 +31,7 @@
 #include "common/Utils.h"
 #include "common/bson_shim.h"
 #include "glog/logging.h"
-#include "index/json_stats/bson_builder.h"
+#include "segcore/json_stats/bson_builder.h"
 #include "log/Log.h"
 #include "simdjson/dom/array.h"
 #include "simdjson/dom/element.h"

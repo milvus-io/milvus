@@ -25,7 +25,7 @@
 #include "common/EasyAssert.h"
 #include "glog/logging.h"
 #include "index/Utils.h"
-#include "index/json_stats/bson_inverted.h"
+#include "segcore/json_stats/bson_inverted.h"
 #include "log/Log.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/LocalChunkManager.h"
@@ -85,7 +85,7 @@ BsonInvertedIndex::BuildIndex() {
                       path_);
         }
         auto field_name = std::to_string(field_id_) + "_" + "shared";
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        wrapper_ = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
             field_name.c_str(), path_.c_str(), tantivy_index_version_);
         LOG_INFO("build bson inverted index for field id:{} with dir:{}",
                  field_id_,
@@ -120,7 +120,7 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
             ThrowInfo(
                 ErrorCode::DataFormatBroken, "index dir not exist: {}", path_);
         }
-        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+        wrapper_ = std::make_shared<milvus::tantivy::TantivyIndexWrapper>(
             path_.c_str(), load_in_mmap, milvus::index::SetBitsetUnused);
         if (!load_in_mmap) {
             // the index is loaded in ram, so we can remove files in advance
@@ -136,7 +136,7 @@ BsonInvertedIndex::LoadIndex(const std::vector<std::string>& index_files,
     }
 }
 
-IndexStatsPtr
+storage::ArtifactStats
 BsonInvertedIndex::UploadIndex() {
     AssertInfo(!is_load_, "upload index is not supported for load index");
     AssertInfo(wrapper_ != nullptr,
@@ -165,13 +165,13 @@ BsonInvertedIndex::UploadIndex() {
     const auto& remote_paths_to_size =
         disk_file_manager_->GetRemotePathsToFileSize();
 
-    std::vector<SerializedIndexFileInfo> index_files;
+    std::vector<storage::SerializedFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size());
     for (const auto& file : remote_paths_to_size) {
         index_files.emplace_back(file.first, file.second);
     }
-    return IndexStats::New(disk_file_manager_->GetAddedTotalFileSize(),
-                           std::move(index_files));
+    return storage::ArtifactStats(disk_file_manager_->GetAddedTotalFileSize(),
+                                  std::move(index_files));
 }
 
 void
