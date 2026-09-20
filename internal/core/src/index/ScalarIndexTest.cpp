@@ -62,6 +62,7 @@
 #include "pb/common.pb.h"
 #include "storage/ChunkManager.h"
 #include "storage/LocalFileIOPool.h"
+#include "storage/MemFileManagerImpl.h"
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "index/StringIndexMarisa.h"
@@ -115,6 +116,130 @@ GetTempFileManagerCtx(CDataType data_type) {
     auto ctx = milvus::storage::FileManagerContext(
         field_meta, index_meta, chunk_manager, fs);
     return ctx;
+}
+
+TEST(LegacyHybridResourceEstimate, ResolvesPersistedChildType) {
+    using namespace milvus;
+    using namespace milvus::index;
+    auto ctx = GetTempFileManagerCtx(Int64);
+    ctx.indexMeta.build_id = 5348301;
+    storage::MemFileManagerImpl manager(ctx);
+    auto cleanup = folly::makeGuard([&] {
+        for (const auto& [path, size] : manager.GetRemotePathsToFileSize()) {
+            ctx.chunkManagerPtr->Remove(path);
+        }
+    });
+    constexpr uint64_t index_size = 1UL << 20;
+    constexpr int64_t rows = 10001;
+    for (const auto& [type, name] :
+         {std::pair{ScalarIndexType::BITMAP, BITMAP_INDEX_TYPE},
+          std::pair{ScalarIndexType::INVERTED, INVERTED_INDEX_TYPE},
+          std::pair{ScalarIndexType::STLSORT, ASCENDING_SORT},
+          std::pair{ScalarIndexType::MARISA, MARISA_TRIE}}) {
+        // Use the same standalone binlog encoding as legacy HYBRID uploads.
+        BinarySet binary_set;
+        auto data = std::make_shared<uint8_t[]>(1);
+        data[0] = static_cast<uint8_t>(type);
+        binary_set.Append(INDEX_TYPE, data, 1);
+        ASSERT_TRUE(manager.AddFile(binary_set));
+        ASSERT_EQ(manager.GetRemotePathsToFileSize().size(), 1);
+        const std::vector<std::string> files{
+            TestLocalPath + "/unread_index_payload",
+            manager.GetRemotePathsToFileSize().begin()->first};
+        for (const auto* version : {"1", "2", ""}) {
+            std::map<std::string, std::string> params{
+                {INDEX_TYPE, HYBRID_INDEX_TYPE}};
+            if (*version != '\0') {
+                params[SCALAR_INDEX_ENGINE_VERSION] = version;
+            }
+            auto child_params = params;
+            child_params[INDEX_TYPE] = name;
+            for (bool async : {false, true}) {
+                ctx.use_async_load = async;
+                for (bool mmap : {false, true}) {
+                    SCOPED_TRACE(::testing::Message()
+                                 << name << " version=" << version
+                                 << " async=" << async << " mmap=" << mmap);
+                    const auto expected =
+                        IndexFactory::GetInstance().ScalarIndexLoadResource(
+                            DataType::INT64,
+                            0,
+                            index_size,
+                            child_params,
+                            mmap,
+                            rows);
+                    const auto resources =
+                        IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                            DataType::INT64,
+                            index_size,
+                            params,
+                            mmap,
+                            rows,
+                            files,
+                            ctx);
+                    EXPECT_EQ(resources.request.final_memory_cost,
+                              expected.final_memory_cost);
+                    EXPECT_EQ(resources.request.final_disk_cost,
+                              expected.final_disk_cost);
+                    EXPECT_EQ(resources.request.max_memory_cost,
+                              expected.max_memory_cost);
+                    EXPECT_EQ(resources.request.max_disk_cost,
+                              expected.max_disk_cost);
+                    EXPECT_EQ(resources.request.has_raw_data,
+                              expected.has_raw_data);
+                    EXPECT_FALSE(resources.overhead.has_value());
+                }
+            }
+        }
+    }
+}
+
+TEST(LegacyHybridResourceEstimate, FallsBackWhenChildTypeIsUnavailable) {
+    using namespace milvus;
+    using namespace milvus::index;
+    auto ctx = GetTempFileManagerCtx(Int64);
+    ctx.indexMeta.build_id = 5348302;
+    storage::MemFileManagerImpl manager(ctx);
+    auto cleanup = folly::makeGuard([&] {
+        for (const auto& [path, size] : manager.GetRemotePathsToFileSize()) {
+            ctx.chunkManagerPtr->Remove(path);
+        }
+    });
+    constexpr uint64_t index_size = 1UL << 20;
+    const std::map<std::string, std::string> params{
+        {INDEX_TYPE, HYBRID_INDEX_TYPE}};
+    auto check_fallback = [&](const std::vector<std::string>& files,
+                              const storage::FileManagerContext& context) {
+        const auto resources =
+            IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+                DataType::INT64,
+                index_size,
+                params,
+                false,
+                10001,
+                files,
+                context);
+        EXPECT_EQ(resources.request.final_memory_cost, index_size);
+        EXPECT_EQ(resources.request.final_disk_cost, index_size);
+        EXPECT_EQ(resources.request.max_memory_cost, 2 * index_size);
+        EXPECT_EQ(resources.request.max_disk_cost, index_size);
+        EXPECT_FALSE(resources.request.has_raw_data);
+        EXPECT_FALSE(resources.overhead.has_value());
+    };
+    check_fallback({}, ctx);
+    check_fallback({TestLocalPath + "/missing_legacy_hybrid/index_type"}, ctx);
+    // Unknown type and invalid payload length must not be decoded as a child.
+    for (const size_t size : {1, 2}) {
+        BinarySet binary_set;
+        auto data = std::make_shared<uint8_t[]>(size);
+        data[0] =
+            size == 1 ? 255 : static_cast<uint8_t>(ScalarIndexType::BITMAP);
+        binary_set.Append(INDEX_TYPE, data, size);
+        ASSERT_TRUE(manager.AddFile(binary_set));
+        const auto path = manager.GetRemotePathsToFileSize().begin()->first;
+        check_fallback({path}, ctx);
+        check_fallback({path}, storage::FileManagerContext{});
+    }
 }
 
 class TestScalarIndexV3LoadRoute : public milvus::index::ScalarIndex<int32_t> {
