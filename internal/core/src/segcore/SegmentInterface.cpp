@@ -18,7 +18,6 @@
 #include <limits>
 #include <map>
 #include <ratio>
-#include <type_traits>
 #include <unordered_set>
 
 #include "ChunkedSegmentSealedImpl.h"
@@ -38,7 +37,7 @@
 #include "expr/ITypeExpr.h"
 #include "fmt/core.h"
 #include "futures/Future.h"
-#include "index/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/JsonKeyStats.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
 #include "plan/PlanNode.h"
@@ -795,47 +794,6 @@ SegmentInternalInterface::GetFieldSkipMetrics(FieldId field_id) const {
     return {};
 }
 
-PinWrapper<index::TextMatchIndex*>
-SegmentInternalInterface::GetTextIndex(milvus::OpContext* op_ctx,
-                                       FieldId field_id) const {
-    std::shared_lock lock(mutex_);
-    auto iter = text_indexes_.find(field_id);
-    if (iter == text_indexes_.end()) {
-        ThrowInfo(milvus::ErrorCode::TextIndexNotFound,
-                  "text index not found for field {}",
-                  field_id.get());
-    }
-
-    auto make_pin = [&](auto&& alt) -> PinWrapper<index::TextMatchIndex*> {
-        using Alt = std::decay_t<decltype(alt)>;
-
-        if constexpr (std::is_same_v<
-                          Alt,
-                          std::unique_ptr<milvus::index::TextMatchIndex>>) {
-            return PinWrapper<index::TextMatchIndex*>(alt.get());
-        } else if constexpr (std::is_same_v<
-                                 Alt,
-                                 std::shared_ptr<
-                                     milvus::index::TextMatchIndexHolder>>) {
-            return PinWrapper<index::TextMatchIndex*>(alt, alt->get());
-        } else if constexpr (std::is_same_v<
-                                 Alt,
-                                 std::shared_ptr<
-                                     milvus::cachinglayer::CacheSlot<
-                                         milvus::index::TextMatchIndex>>>) {
-            auto ca = SemiInlineGet(alt->PinCells(op_ctx, {0}));
-            auto index = ca->get_cell_of(0);
-            return PinWrapper<index::TextMatchIndex*>(std::move(ca), index);
-        } else {
-            ThrowInfo(milvus::ErrorCode::UnexpectedError,
-                      "text index of segment is not supported for field {}",
-                      field_id.get());
-        }
-    };
-
-    return std::visit(make_pin, iter->second);
-}
-
 std::unique_ptr<DataArray>
 SegmentInternalInterface::bulk_subscript_not_exist_field(
     const milvus::FieldMeta& field_meta, int64_t count) const {
@@ -933,7 +891,8 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                 }
                 break;
             }
-            case DataType::VARCHAR: {
+            case DataType::VARCHAR:
+            case DataType::TEXT: {
                 auto data_ptr = result->mutable_scalars()
                                     ->mutable_string_data()
                                     ->mutable_data();
@@ -978,21 +937,6 @@ SegmentInternalInterface::bulk_subscript_not_exist_field(
                "Non-nullable scalar field without default value should not "
                "reach here");
     return result;
-}
-
-// Only sealed segment has ngram index
-PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndex(milvus::OpContext* op_ctx,
-                                        FieldId field_id) const {
-    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
-}
-
-PinWrapper<index::NgramInvertedIndex*>
-SegmentInternalInterface::GetNgramIndexForJson(
-    milvus::OpContext* op_ctx,
-    FieldId field_id,
-    const std::string& nested_path) const {
-    return PinWrapper<index::NgramInvertedIndex*>(nullptr);
 }
 
 std::shared_ptr<index::JsonKeyStats>
