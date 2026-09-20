@@ -315,4 +315,16 @@ impl IndexWriterWrapperImpl {
         self.index_writer.as_mut().left().unwrap().commit()?;
         Ok(())
     }
+
+    pub(crate) fn rollback(&mut self) -> Result<()> {
+        match self.index_writer.as_mut() {
+            Either::Left(writer) => {
+                writer.rollback()?;
+                Ok(())
+            }
+            Either::Right(_) => Err(TantivyBindingError::InternalError(
+                "rollback is not supported for a single-segment writer".to_string(),
+            )),
+        }
+    }
 }
