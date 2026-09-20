@@ -1615,6 +1615,19 @@ func TestValidateImportFilePaths(t *testing.T) {
 		// write it, so a caller directory of that name must pass.
 		{"remote root, cache-named dir", "files", "files/cache/mine.json", nil, false, "remote"},
 
+		// Explore planning manifests are written at the local root, and at the
+		// bucket root outside minio.rootPath on remote storage -- so the segment
+		// is denied under the root only when the storage type is local.
+		{"local root, explore temp dir", "/var/lib/milvus/data", "/var/lib/milvus/data/__explore_temp__/coord_1/attempt_1/manifest.json", nil, true, "local"},
+		{"remote root, explore-named dir", "files", "files/__explore_temp__/mine.json", nil, false, "remote"},
+
+		// Legacy StorageV3 segments keep living under <root>/<minio.rootPath>/insert_log
+		// after an upgrade of a local deployment, so that directory is internal too.
+		// On a remote root the same spelling is an ordinary caller directory.
+		{"local root, legacy V3 insert_log", "/var/lib/milvus/data", "/var/lib/milvus/data/files/insert_log/1/2/3/_data/data.parquet", nil, true, "local"},
+		{"local root, legacy prefix without insert_log", "/var/lib/milvus/data", "/var/lib/milvus/data/files/staging/a.json", nil, false, "local"},
+		{"remote root, legacy prefix is not internal", "files", "files/files/insert_log/1/2/3/a.parquet", nil, false, "remote"},
+
 		// A relative key is resolved by os.Open against the datanode working
 		// directory, not against the storage root the deny entries are anchored
 		// at, so it could never match one. With WORKDIR /milvus and
@@ -1669,6 +1682,11 @@ func TestValidateImportFilePaths(t *testing.T) {
 				paramtable.Get().Save(key, tt.storageType)
 				defer paramtable.Get().Reset(key)
 			}
+			// The legacy local namespace is <root>/<minio.rootPath>/insert_log,
+			// so the cases above must not depend on the configured default.
+			rootKey := paramtable.Get().MinioCfg.RootPath.Key
+			paramtable.Get().Save(rootKey, "files")
+			defer paramtable.Get().Reset(rootKey)
 
 			rootPath, filePath := tt.rootPath, tt.path
 			if tt.storageType == "local" {

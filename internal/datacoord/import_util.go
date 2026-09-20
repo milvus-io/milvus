@@ -873,9 +873,19 @@ func ValidateImportFilePaths(cm storage.ChunkManager, files []*msgpb.ImportFile,
 	if err != nil {
 		return err
 	}
-	denied := make([]string, 0, len(segments))
+	denied := make([]string, 0, len(segments)+1)
 	for _, segment := range segments {
 		denied = append(denied, normalizeStorageKey(path.Join(rootPath, segment)))
+	}
+	if localStorage {
+		// Legacy StorageV3 segments stay at <localStorage.path>/<minio.rootPath>/insert_log
+		// across an upgrade and are read in place: migration protects exactly that
+		// directory (storage/localmigrate/migrate.go legacyNamespace) and an update to
+		// a legacy manifest keeps its base. An empty or "." prefix collapses onto the
+		// <root>/insert_log entry above.
+		legacyInsertLog := path.Join(rootPath,
+			paramtable.Get().MinioCfg.RootPath.GetValue(), common.SegmentInsertLogPath)
+		denied = append(denied, normalizeStorageKey(legacyInsertLog))
 	}
 
 	for _, file := range files {

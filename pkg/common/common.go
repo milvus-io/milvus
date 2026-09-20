@@ -235,6 +235,12 @@ const (
 	// would deny paths Milvus never writes.
 	LocalCacheRootPath = "cache"
 
+	// ExploreTempRootPath storage path const for Explore planning manifests.
+	// Layout: {localStorage.path}/__explore_temp__/coord_{jobID}/attempt_{n}/...
+	// Under a remote root these manifests live at the bucket root, outside
+	// minio.rootPath, which is why this is a local-only segment.
+	ExploreTempRootPath = "__explore_temp__"
+
 	DefaultResourceGroupName = "__default_resource_group"
 )
 
@@ -301,6 +307,7 @@ var InternalStorageRootSegments = []string{
 // Milvus never writes.
 var LocalOnlyStorageRootSegments = []string{
 	LocalCacheRootPath,
+	ExploreTempRootPath,
 }
 
 const (
