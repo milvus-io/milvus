@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -669,6 +670,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	operators := []UpdateOperator{}
+	var flushedVersion *viewpb.DataVersion
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
@@ -681,8 +683,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
+		if req.GetFlushed() && segment.GetSealedAtDataVersion() != nil {
+			return dataview.FlushResultStatus(segment.GetSealedAtDataVersion()), nil
+		}
 		if segment.State == commonpb.SegmentState_Dropped {
-			mlog.Info(context.TODO(), "save to dropped segment, ignore this request")
+			mlog.Info(ctx, "save to dropped segment, ignore this request")
+			if req.GetFlushed() {
+				return dataview.FlushResultStatus(nil), nil
+			}
 			return merr.Success(), nil
 		}
 
@@ -833,6 +841,21 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				mlog.Warn(ctx, "failed to prepare DataView flush snapshot", mlog.Err(err))
 				return merr.Status(err), nil
 			}
+			// PrepareFlush holds the collection lock. Recheck after acquiring it:
+			// another flush may have committed while this RPC was waiting.
+			current := s.meta.GetSegment(ctx, req.GetSegmentID())
+			if current == nil {
+				abortView()
+				return dataview.FlushResultStatus(nil), nil
+			}
+			if current.GetState() == commonpb.SegmentState_Dropped || current.GetSealedAtDataVersion() != nil {
+				abortView()
+				return dataview.FlushResultStatus(current.GetSealedAtDataVersion()), nil
+			}
+			flushedVersion = flushView.GetDataVersion()
+			if flushedVersion != nil {
+				operators = append(operators, setSealedAtDataVersion(req.GetSegmentID(), flushedVersion))
+			}
 			committed, err := s.meta.UpdateSegmentsInfoAndDataView(ctx, flushView, operators...)
 			if err != nil {
 				// Catalog failures were already retried in-function until
@@ -908,6 +931,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 	}
 
+	if req.GetFlushed() && s.dataViewManager != nil {
+		return dataview.FlushResultStatus(flushedVersion), nil
+	}
 	return merr.Success(), nil
 }
 

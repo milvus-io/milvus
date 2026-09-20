@@ -8,6 +8,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -154,7 +155,8 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 			return err
 		}
 		meta := segment.AssignmentMeta()
-		if err := segment.lifecycle.CommitL1Segment(ctx, meta); err != nil {
+		version, err := segment.lifecycle.CommitL1Segment(ctx, meta)
+		if err != nil {
 			// Same as ensure: classification is execute's job, marking ErrDelay
 			// here would requeue a terminally-failed task.
 			return err
@@ -163,9 +165,14 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 		segment.mu.Lock()
 		handles := segment.markPendingDataDurableLocked(t.timetick)
 		segment.finalCommitDone.Store(true)
-		segment.meta.L1CommitDone = true
+		segment.meta.SealedAtDataVersion = version
+		if version == nil {
+			// Empty/deleted targets have no DataView membership. Record their
+			// confirmed terminal lifecycle, not a synthetic version.
+			segment.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
+		}
 		segment.durableMeta.State = segment.meta.State
-		segment.durableMeta.L1CommitDone = true
+		segment.durableMeta.SealedAtDataVersion = version
 		if stat := segment.meta.GetStat(); stat != nil && segment.durableMeta.GetStat() != nil {
 			segment.durableMeta.Stat.LastModifiedTimestamp = stat.GetLastModifiedTimestamp()
 		}

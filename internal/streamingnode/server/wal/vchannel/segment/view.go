@@ -68,7 +68,8 @@ func newSegmentView(
 }
 
 func finalCommitDoneFromMeta(meta *streamingpb.SegmentAssignmentMeta) bool {
-	return meta.GetL1CommitDone()
+	return meta.GetSealedAtDataVersion() != nil ||
+		meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
 }
 
 func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bool {
@@ -76,8 +77,7 @@ func shouldRetryRecoveredFinalCommit(meta *streamingpb.SegmentAssignmentMeta) bo
 		return false
 	}
 	switch meta.GetState() {
-	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-		streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED:
+	case streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED:
 		return meta.GetCheckpointTimeTick() > 0
 	default:
 		return false
@@ -173,8 +173,8 @@ type SegmentView struct {
 	// second Store.
 	unrecoverableError atomic.Pointer[error]
 	// finalCommitDone is process-local task state. Recovery restores it from the
-	// persisted L1 commit marker; object durability alone does not prove that the
-	// coordinator accepted the final commit. It is published atomically so the
+	// persisted publication version or confirmed terminal lifecycle. Object
+	// durability alone does not prove coordinator acceptance. It is published atomically so the
 	// vchannel module can scan views without taking the per-view lock on the WAL
 	// observation hot path.
 	finalCommitDone atomic.Bool

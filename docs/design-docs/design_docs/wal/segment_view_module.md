@@ -121,9 +121,25 @@ Flush closes the segment at the message TimeTick. It joins pending Insert
 writes and final lifecycle commit. Stable state advances through the Flush only
 after all preceding segment work and the idempotent commit succeed.
 
-After DataCoord accepts the idempotent final binlog commit, SegmentView stores
-`l1_commit_done` in its durable snapshot. Recovery retries a flushed segment
-whose marker is absent.
+DataCoord binds `sealed_at_data_version` to the Segment's first growing-to-sealed
+publication. SegmentInfo and the DataView are committed together; on the large
+transaction fallback, the Segment record carrying this binding and the DataView
+remain in the final atomic transaction, after binlog writes. SaveBinlogPaths
+returns that original version on every retry, including after compaction has
+retired the Segment. It never substitutes the latest Collection DataVersion.
+
+SegmentView installs this version in both live and stable metadata, marks dirty,
+and only then releases Flush handles. A version-only change must be published
+even if the component checkpoint TimeTick did not advance. Recovery retries a
+flushed Segment whose version is absent. A missing or malformed version in an
+ordinary success response is an error, not completion.
+
+Empty Segments do not enter DataView. An explicit retired result from DataCoord
+(or SegmentNotFound) completes their lifecycle as a durable TOMBSTONED snapshot
+without inventing a version. Other already-dropped targets follow the same
+terminal path when they have no original publication version. Tombstones are
+installed only after coordinator confirmation and do not require another commit
+on recovery. No independent L1-committed boolean is persisted.
 Final commit, including a recovered retry, omits StartPositions and CheckPoints:
 all data packs were already registered, so sealing preserves DataCoord's complete
 data positions and cumulative row count. It must not replace a usable physical
@@ -178,7 +194,7 @@ advances only through the exact captured stable snapshot.
 4. skip this segment's effects at or before its frontier;
 5. rebuild pending work for later messages with fresh handles;
 6. schedule or reuse final commit for every recovered flushed segment missing
-   `l1_commit_done`.
+   `sealed_at_data_version`; confirmed terminal tombstones need no retry.
 
 Recovery is logically idempotent but not physically exactly once. A crash after
 an object write and before snapshot publication may leave an unreferenced

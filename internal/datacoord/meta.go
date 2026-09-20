@@ -2102,6 +2102,29 @@ func UpdateImportSegmentPosition(segmentID int64, minTs, maxTs uint64) UpdateOpe
 	}
 }
 
+// setSealedAtDataVersion binds the first publication in the same transaction as
+// SegmentMeta and DataView. The caller holds the DataView collection lock.
+func setSealedAtDataVersion(segmentID int64, version *viewpb.DataVersion) UpdateOperator {
+	return func(pack *updateSegmentPack) bool {
+		current := pack.meta.segments.GetSegment(segmentID)
+		if current == nil || current.GetState() == commonpb.SegmentState_Dropped {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if current.GetState() == commonpb.SegmentState_Flushed && current.GetSealedAtDataVersion() == nil {
+			return pack.fail(merr.WrapErrServiceInternalMsg("flushed segment %d has no publication version", segmentID))
+		}
+		segment := pack.Get(segmentID)
+		if segment == nil {
+			return pack.fail(merr.WrapErrSegmentNotFound(segmentID))
+		}
+		if segment.GetSealedAtDataVersion() != nil && !proto.Equal(segment.GetSealedAtDataVersion(), version) {
+			return pack.fail(merr.WrapErrServiceInternalMsg("conflicting sealed DataVersion for segment %d", segmentID))
+		}
+		segment.SealedAtDataVersion = proto.Clone(version).(*viewpb.DataVersion)
+		return true
+	}
+}
+
 // UpdateAsDroppedIfEmptyWhenFlushing updates segment state to Dropped if segment is empty and in Flushing state
 // It's used to make a empty flushing segment to be dropped directly.
 func UpdateAsDroppedIfEmptyWhenFlushing(segmentID int64) UpdateOperator {
@@ -2152,24 +2175,12 @@ func (m *meta) UpdateSegmentsInfo(ctx context.Context, operators ...UpdateOperat
 	return nil
 }
 
-// UpdateSegmentsInfoAndDataView applies operators to SegmentMeta and commits
-// SegmentMeta together with the supplied DataView snapshot in one atomic
-// catalog txn (flush path). The DataView entry is the visibility marker of
-// the composite write (see DataViewEntry encoding): on the over-limit
-// fallback the DataView key lands in the final guarded txn after every
-// SegmentMeta op, so a visible DataView implies its SegmentMeta is committed.
-// dataView may be nil to commit SegmentMeta alone.
-// UpdateSegmentsInfoAndDataView returns whether the composite txn actually
-// ran. The DataView snapshot is persisted even when the SegmentMeta update
-// short-circuits (updatePack == nil, e.g. a replayed flush of an
-// already-flushed segment): the flush must synchronously advance
-// streaming_version. Catalog failures are retried in-function until the
-// version is durably published (catalog.Update is an idempotent KV
-// overwrite, so an in-function retry is safe; retrying the whole
-// SaveBinlogPaths from the caller would not be idempotent). Only when both
-// sides are empty (no SegmentMeta mutation and no DataView snapshot) does it
-// return (false, nil); the caller then discards any prepared in-memory
-// snapshot instead of committing a version that does not exist in etcd.
+// UpdateSegmentsInfoAndDataView persists SegmentMeta and its DataView before
+// publishing either in memory. On the over-limit fallback, binlogs land first;
+// the first-publication binding and DataView commit together in the final txn.
+// dataView may be nil to commit SegmentMeta alone. A supplied DataView is saved
+// even without SegmentMeta mutations; (false, nil) means both are absent.
+// Catalog retries overwrite the same actions until success or cancellation.
 func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *viewpb.DataViewOfCollection, operators ...UpdateOperator) (bool, error) {
 	m.segMu.Lock()
 	defer m.segMu.Unlock()
@@ -2207,8 +2218,7 @@ func (m *meta) UpdateSegmentsInfoAndDataView(ctx context.Context, dataView *view
 	}
 	// The flush publish must keep retrying: catalog.Update is an idempotent
 	// overwrite of the same actions, so an in-function retry converges to a
-	// durable streaming_version without replaying caller-side effects
-	// (retrying SaveBinlogPaths from the caller is not idempotent).
+	// durable streaming_version without replaying caller-side effects.
 	// retry.Do short-circuits InputError-typed errors unless an explicit
 	// RetryErr predicate is supplied, so AttemptAlways alone is not enough.
 	if err := retry.Do(ctx, func() error {

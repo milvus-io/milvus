@@ -102,7 +102,7 @@ task must never interpret not-yet-observed data as an empty interval.
 The owner derives:
 
 ```text
-L = min(create_segment_time_tick of every Segment with l1_commit_done = false)
+L = min(create_segment_time_tick of every nonterminal Segment without sealed_at_data_version)
 ```
 
 With no blocker, L is unbounded. The creation TimeTick is safe to include

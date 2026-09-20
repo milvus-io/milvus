@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
@@ -29,7 +30,7 @@ func TestFlushJoinsIndependentL1AndL0Completion(t *testing.T) {
 			patch := mockey.Mock(mockey.GetMethod(scheduler, "Submit")).To(func(task nodescheduler.Task) nodescheduler.TaskHandle { tasks = append(tasks, task); return nil }).Build()
 			defer patch.UnPatch()
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
-			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).Return(nil).Build()
+			commit := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).Return(&viewpb.DataVersion{StreamingVersion: 1}, nil).Build()
 			defer commit.UnPatch()
 			meta := newMaterializationBlockerMeta(1, 100, false)
 			meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING

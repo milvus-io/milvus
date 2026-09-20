@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
@@ -49,9 +50,9 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			scheduler := &recordingVChannelScheduler{}
 			lifecycle := segment.NewSegmentLifecycleWriter(nil, 1)
 			var committed []int64
-			patch := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).To(func(_ context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
+			patch := mockey.Mock(mockey.GetMethod(lifecycle, "CommitL1Segment")).To(func(_ context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
 				committed = append(committed, meta.GetSegmentId())
-				return nil
+				return &viewpb.DataVersion{StreamingVersion: 1}, nil
 			}).Build()
 			defer patch.UnPatch()
 			metas := map[int64]*streamingpb.SegmentAssignmentMeta{

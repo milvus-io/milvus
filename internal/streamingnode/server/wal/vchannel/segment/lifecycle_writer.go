@@ -6,10 +6,12 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -53,10 +55,22 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 	return err
 }
 
-func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
-	// All data packs have already published their positions. Preserve those
-	// positions when sealing, including retries recovered from SN metadata.
-	return w.saveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
+func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	// All data packs have already published their positions. Preserve them on
+	// final commit, including retries recovered from SN metadata.
+	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
+	resp, err := w.coord.SaveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		if errors.Is(err, merr.ErrSegmentNotFound) {
+			// A retired segment does not need a fabricated publication version.
+			return nil, nil
+		}
+		if merr.GetErrorType(err) == merr.InputError {
+			err = retry.Unrecoverable(err)
+		}
+		return nil, err
+	}
+	return dataview.ParseFlushResult(resp)
 }
 
 // TODO: Remove after enabling queryview. Existing query recovery loads growing

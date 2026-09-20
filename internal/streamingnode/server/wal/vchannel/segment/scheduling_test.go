@@ -11,6 +11,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -151,8 +152,8 @@ func (failingLifecycle) EnsureGrowingSegment(context.Context, *streamingpb.Segme
 	return retry.Unrecoverable(merr.WrapErrParameterInvalid("v2", "v3"))
 }
 
-func (failingLifecycle) CommitL1Segment(context.Context, *streamingpb.SegmentAssignmentMeta) error {
-	return retry.Unrecoverable(merr.WrapErrParameterInvalid("v2", "v3"))
+func (failingLifecycle) CommitL1Segment(context.Context, *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	return nil, retry.Unrecoverable(merr.WrapErrParameterInvalid("v2", "v3"))
 }
 
 // TestSegmentTaskTerminalErrorNotMarkedDelay covers the CRITICAL contract: an

@@ -89,7 +89,7 @@ The single recovery scanner reaches RecoveryBarrier before the startup
 write-path snapshot is published. QueryRuntime preparation may additionally
 wait for actual component conditions, including:
 
-- every retained flushed Segment has `l1_commit_done`;
+- every retained nonterminal flushed Segment has `sealed_at_data_version`;
 - required TransformLog subscription start points remain readable;
 - captured schema and segment state form a consistent VChannel snapshot.
 
@@ -103,10 +103,12 @@ Each segment is classified independently from its durable lifecycle state:
 ```text
 GROWING
     -> growing Segment snapshot
-FLUSHED && !l1_commit_done
+FLUSHED && sealed_at_data_version absent
     -> retry or wait for the idempotent DataCoord final commit
-FLUSHED && l1_commit_done
-    -> DataCoord already owns the final full-binlog state
+FLUSHED && sealed_at_data_version present
+    -> DataCoord published the Segment at this immutable DataVersion
+TOMBSTONED
+    -> lifecycle complete (empty/retired segments may have no DataVersion)
 ```
 
 There is no second recovery checkpoint tied to this lifecycle classification.

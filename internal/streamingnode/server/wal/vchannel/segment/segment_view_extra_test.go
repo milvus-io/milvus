@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
@@ -91,9 +92,9 @@ func TestShouldRetryRecoveredFinalCommit(t *testing.T) {
 	assert.False(t, shouldRetryRecoveredFinalCommit(flushedNoCheckpoint))
 
 	done := &streamingpb.SegmentAssignmentMeta{
-		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-		CheckpointTimeTick: 10,
-		L1CommitDone:       true,
+		State:               streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+		CheckpointTimeTick:  10,
+		SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
 	}
 	assert.False(t, shouldRetryRecoveredFinalCommit(done))
 
@@ -107,7 +108,7 @@ func TestShouldRetryRecoveredFinalCommit(t *testing.T) {
 		State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED,
 		CheckpointTimeTick: 10,
 	}
-	assert.True(t, shouldRetryRecoveredFinalCommit(tombstoned))
+	assert.False(t, shouldRetryRecoveredFinalCommit(tombstoned), "tombstones record confirmed terminal work")
 }
 
 // TestSegmentViewObserveCreateSegmentMessageV2 covers observing a create
@@ -253,11 +254,11 @@ func TestSegmentViewTombstoneLifecycle(t *testing.T) {
 	// its observation watermark can be finalized to TOMBSTONED.
 	view := newSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
-			SegmentId:          1,
-			Vchannel:           "v1",
-			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick: 10,
-			L1CommitDone:       true,
+			SegmentId:           1,
+			Vchannel:            "v1",
+			State:               streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick:  10,
+			SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
 		},
 		10,
 		false,
@@ -303,11 +304,11 @@ func TestSegmentViewTombstoneLifecycle(t *testing.T) {
 	// watermark cannot be finalized either.
 	pending := newSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
-			SegmentId:          1,
-			Vchannel:           "v1",
-			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick: 10,
-			L1CommitDone:       true,
+			SegmentId:           1,
+			Vchannel:            "v1",
+			State:               streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick:  10,
+			SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
 		},
 		10,
 		false,
@@ -365,11 +366,11 @@ func TestSegmentViewResumePendingRecovery(t *testing.T) {
 	// A finally-committed segment has nothing to resume.
 	done := newSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
-			SegmentId:          1,
-			Vchannel:           "v1",
-			State:              streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			CheckpointTimeTick: 10,
-			L1CommitDone:       true,
+			SegmentId:           1,
+			Vchannel:            "v1",
+			State:               streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
+			CheckpointTimeTick:  10,
+			SealedAtDataVersion: &viewpb.DataVersion{StreamingVersion: 1},
 		},
 		10,
 		false,

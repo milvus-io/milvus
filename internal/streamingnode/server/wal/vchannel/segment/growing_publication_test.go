@@ -10,9 +10,11 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/adaptor"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
@@ -38,6 +40,9 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 		requests = append(requests, proto.Clone(req).(*datapb.SaveBinlogPathsRequest))
 		if fail {
 			return nil, merr.WrapErrServiceUnavailableMsg("coordinator unavailable")
+		}
+		if req.GetFlushed() {
+			return dataview.FlushResultStatus(&viewpb.DataVersion{StreamingVersion: 2}), nil
 		}
 		return merr.Success(), nil
 	}).Build()
@@ -112,7 +117,8 @@ func TestGrowingPublicationRetriesBeforeCompletingInsert(t *testing.T) {
 	require.Empty(t, requests[3].GetStartPositions())
 	require.Equal(t, uint64(20), requests[3].GetCheckPoints()[0].GetPosition().GetTimestamp())
 	require.Equal(t, adaptor.MustGetMQWrapperIDFromMessage(rmq.NewRmqID(20)).Serialize(), requests[3].GetCheckPoints()[0].GetPosition().GetMsgID())
-	require.NoError(t, view.lifecycle.CommitL1Segment(ctx, view.AssignmentMeta()))
+	_, err := view.lifecycle.CommitL1Segment(ctx, view.AssignmentMeta())
+	require.NoError(t, err)
 	require.True(t, requests[4].GetFlushed())
 	require.Empty(t, requests[4].GetStartPositions())
 	require.Empty(t, requests[4].GetCheckPoints(), "final commit preserves the already registered DmlPosition")
