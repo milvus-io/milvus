@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/index"
+	"github.com/milvus-io/milvus/internal/datanode/taskcost"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -872,11 +873,25 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	// DataCoord's estimate for this task, carried beside task_slot. Absent from
-	// a coordinator that predates the keys, in which case the worker books zero.
+	// DataCoord's estimate for this task, carried beside task_slot.
 	resource, err := properties.GetTaskResource()
 	if err != nil {
 		return merr.Status(err), nil
+	}
+	if resource.IsZero() {
+		// A coordinator that predates these keys sets neither, and booking zero
+		// would make this node report cpu and memory it does not have. A worker
+		// pool shared by several Milvus versions runs both kinds of task side by
+		// side for as long as the pool exists, not for an upgrade window, so the
+		// ledger has to account for the keyless ones too. Charge them the share
+		// of the node their scalar slot stands for.
+		//
+		// IsZero identifies them exactly: every formula in DataCoord's
+		// task_resource.go floors cpu at one, so a coordinator that does set the
+		// keys never sends a zero pair.
+		if slot, slotErr := properties.GetTaskSlot(); slotErr == nil {
+			resource = taskcost.ResourceFromSlot(slot, index.CalculateNodeSlots(), nodeTaskCapacity())
+		}
 	}
 	switch taskType {
 	case taskcommon.PreImport:
