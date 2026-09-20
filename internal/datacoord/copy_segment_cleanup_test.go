@@ -221,7 +221,7 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		finished <- SyncCopySegmentTask(task, &datapb.QueryCopySegmentResponse{
+		finished <- SyncCopySegmentTask(context.Background(), task, &datapb.QueryCopySegmentResponse{
 			State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 			SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001, ManifestPath: packed.MarshalManifestPath(base, 3)}},
 		}, copies, m)
@@ -250,7 +250,10 @@ func TestRejectedCopyCleanupSkipsActivePublication(t *testing.T) {
 	exists, err = m.chunkManager.Exist(ctx, dataFile)
 	require.NoError(t, err)
 	require.True(t, exists)
-	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskCompleted, task.GetState())
+	// The completed transition is a CAS from InProgress: the concurrent job
+	// failure already moved the task to Failed, so the late publication is
+	// discarded instead of resurrecting a task under a failed job.
+	require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
 }
 
 type cleanupEnqueueRecorder struct {
@@ -302,7 +305,7 @@ func TestRejectedCopyCleanupDoesNotBlockDispatch(t *testing.T) {
 	// A late result must not make the scheduler wait for the cleanup worker.
 	lateResult := make(chan error, 1)
 	go func() {
-		lateResult <- SyncCopySegmentTask(failed, &datapb.QueryCopySegmentResponse{
+		lateResult <- SyncCopySegmentTask(context.Background(), failed, &datapb.QueryCopySegmentResponse{
 			State: datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		}, copies, m)
 	}()
@@ -365,7 +368,7 @@ func TestRejectedCopyCleanupAllowsAbsentLocalPrefixes(t *testing.T) {
 	// not publish the now-deleted artifact, even though the intent is cleared.
 	restarted, err := NewCopySegmentMeta(ctx, m.catalog, m, nil, nil)
 	require.NoError(t, err)
-	err = SyncCopySegmentTask(restarted.GetTask(ctx, task.GetTaskId()), &datapb.QueryCopySegmentResponse{
+	err = SyncCopySegmentTask(context.Background(), restarted.GetTask(ctx, task.GetTaskId()), &datapb.QueryCopySegmentResponse{
 		State:          datapb.CopySegmentTaskState_CopySegmentTaskCompleted,
 		SegmentResults: []*datapb.CopySegmentResult{{SegmentId: 2001}},
 	}, restarted, m)

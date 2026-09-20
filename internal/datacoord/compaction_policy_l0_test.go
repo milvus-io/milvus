@@ -46,6 +46,7 @@ type L0CompactionPolicySuite struct {
 	handler            Handler
 	inspector          *MockCompactionInspector
 	collection         *collectionInfo
+	collections        *typeutil.ConcurrentMap[UniqueID, *collectionInfo]
 
 	l0Policy *l0CompactionPolicy
 }
@@ -59,8 +60,7 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 
 	segments := genSegmentsForMeta(s.testLabel)
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
@@ -69,9 +69,17 @@ func (s *L0CompactionPolicySuite) SetupTest() {
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, s.collection)
+	s.collections = typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+	s.collections.Insert(s.testLabel.CollectionID, s.collection)
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
-	s.l0Policy = newL0CompactionPolicy(meta, s.mockAlloc)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, collectionID int64) (*collectionInfo, error) {
+			collection, _ := s.collections.Get(collectionID)
+			return collection, nil
+		}).Maybe()
+	s.handler = handler
+	s.l0Policy = newL0CompactionPolicy(meta, s.mockAlloc, handler)
 }
 
 const MB = 1024 * 1024
@@ -152,10 +160,9 @@ func (s *L0CompactionPolicySuite) TestTriggerViewChange() {
 		segments[arg.ID] = info
 	}
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	s.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -242,13 +249,12 @@ func (s *L0CompactionPolicySuite) TestPositionFiltering() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	s.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -327,13 +333,12 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringWithNoGrowingSegments() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	s.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -391,13 +396,12 @@ func (s *L0CompactionPolicySuite) TestPositionFilteringEdgeCase() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
+	s.collections.Insert(s.testLabel.CollectionID, &collectionInfo{
 		ID:     s.testLabel.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -554,13 +558,12 @@ func (s *L0CompactionPolicySuite) TestMultiChannelPositionFiltering() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for id, segment := range segments {
 		meta.segments.SetSegment(id, segment)
 	}
-	meta.collections.Insert(label1.CollectionID, &collectionInfo{
+	s.collections.Insert(label1.CollectionID, &collectionInfo{
 		ID:     label1.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})
@@ -627,8 +630,7 @@ func (s *L0CompactionPolicySuite) TestGroupL0ViewsByPartChan() {
 	}
 
 	meta := &meta{
-		segments:    NewSegmentsInfo(),
-		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments: NewSegmentsInfo(),
 	}
 	for _, segView := range segments {
 		info := genTestSegmentInfo(segView.label, segView.ID, segView.Level, commonpb.SegmentState_Flushed)
@@ -636,7 +638,7 @@ func (s *L0CompactionPolicySuite) TestGroupL0ViewsByPartChan() {
 		info.Deltalogs = genTestBinlogs(1, 4*MB)
 		meta.segments.SetSegment(segView.ID, info)
 	}
-	meta.collections.Insert(label1.CollectionID, &collectionInfo{
+	s.collections.Insert(label1.CollectionID, &collectionInfo{
 		ID:     label1.CollectionID,
 		Schema: &schemapb.CollectionSchema{},
 	})

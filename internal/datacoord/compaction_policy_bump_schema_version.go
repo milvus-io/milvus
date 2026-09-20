@@ -85,11 +85,13 @@ func (policy *bumpSchemaVersionPolicy) staleFlushedSegments(collectionID int64, 
 }
 
 func (policy *bumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
-	collections := policy.meta.GetCollections()
 	events := make(map[CompactionTriggerType][]CompactionView)
 
-	for _, collection := range collections {
-		if collection.Schema == nil {
+	for collectionID := range policy.meta.GetAllCollectionNumRows() {
+		collection, err := policy.handler.GetCollection(ctx, collectionID)
+		if err != nil || collection == nil || collection.Schema == nil {
+			mlog.Warn(ctx, "failed to get collection for schema bump compaction",
+				mlog.FieldCollectionID(collectionID), mlog.Err(err))
 			continue
 		}
 		if collection.IsExternal() {
@@ -101,7 +103,6 @@ func (policy *bumpSchemaVersionPolicy) Trigger(ctx context.Context) (map[Compact
 				mlog.FieldCollectionID(collection.ID))
 			continue
 		}
-		collectionID := collection.ID
 		capturedSchema := proto.Clone(collection.Schema).(*schemapb.CollectionSchema)
 		collectionSchemaVersion := capturedSchema.GetVersion()
 		partSegments := policy.staleFlushedSegments(collectionID, collectionSchemaVersion)

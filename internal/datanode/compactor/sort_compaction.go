@@ -486,8 +486,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if err := t.preCompact(); err != nil {
 		mlog.Warn(t.ctx, "failed to preCompact", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
-			PlanID: t.GetPlanID(),
-			State:  datapb.CompactionTaskState_failed,
+			PlanID:     t.GetPlanID(),
+			State:      datapb.CompactionTaskState_failed,
+			FailStatus: merr.Status(err),
 		}, nil
 	}
 
@@ -495,8 +496,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if err := t.initLOBCompactionContext(ctx); err != nil {
 		mlog.Warn(ctx, "failed to init LOB compaction context", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
-			PlanID: t.GetPlanID(),
-			State:  datapb.CompactionTaskState_failed,
+			PlanID:     t.GetPlanID(),
+			State:      datapb.CompactionTaskState_failed,
+			FailStatus: merr.Status(err),
 		}, nil
 	}
 
@@ -517,8 +519,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		log.Warn(t.ctx, "failed to sort segment",
 			mlog.Err(err))
 		return &datapb.CompactionPlanResult{
-			PlanID: t.GetPlanID(),
-			State:  datapb.CompactionTaskState_failed,
+			PlanID:     t.GetPlanID(),
+			State:      datapb.CompactionTaskState_failed,
+			FailStatus: merr.Status(err),
 		}, nil
 	}
 	sortSegmentCost := time.Since(stepStart)
@@ -536,8 +539,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	if err := t.applyLOBCompaction(ctx, res.GetSegments()); err != nil {
 		log.Warn(t.ctx, "failed to apply LOB compaction", mlog.Err(err))
 		return &datapb.CompactionPlanResult{
-			PlanID: t.GetPlanID(),
-			State:  datapb.CompactionTaskState_failed,
+			PlanID:     t.GetPlanID(),
+			State:      datapb.CompactionTaskState_failed,
+			FailStatus: merr.Status(err),
 		}, nil
 	}
 
@@ -550,8 +554,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 			log.Warn(t.ctx, "failed to create text indexes", mlog.Int64("targetSegmentID", targetSegemntID),
 				mlog.Err(err))
 			return &datapb.CompactionPlanResult{
-				PlanID: t.GetPlanID(),
-				State:  datapb.CompactionTaskState_failed,
+				PlanID:     t.GetPlanID(),
+				State:      datapb.CompactionTaskState_failed,
+				FailStatus: merr.Status(err),
 			}, nil
 		}
 		// For V3 segments, register text index stats in manifest.
@@ -565,8 +570,9 @@ func (t *sortCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 				log.Warn(t.ctx, "failed to add text index stats to manifest",
 					mlog.Int64("targetSegmentID", targetSegemntID), mlog.Err(mErr))
 				return &datapb.CompactionPlanResult{
-					PlanID: t.GetPlanID(),
-					State:  datapb.CompactionTaskState_failed,
+					PlanID:     t.GetPlanID(),
+					State:      datapb.CompactionTaskState_failed,
+					FailStatus: merr.Status(mErr),
 				}, nil
 			}
 			resultSegment.Manifest = newManifest
@@ -595,8 +601,12 @@ func (t *sortCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *sortCompactionTask) Stop() {
+func (t *sortCompactionTask) Cancel() {
 	t.cancel()
+}
+
+func (t *sortCompactionTask) Stop() {
+	t.Cancel()
 	<-t.done
 }
 

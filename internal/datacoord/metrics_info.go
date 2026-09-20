@@ -39,8 +39,26 @@ import (
 )
 
 // getQuotaMetrics returns DataCoordQuotaMetrics.
-func (s *Server) getQuotaMetrics() *metricsinfo.DataCoordQuotaMetrics {
-	info := s.meta.GetQuotaInfo()
+func (s *Server) getQuotaMetrics(ctx context.Context) *metricsinfo.DataCoordQuotaMetrics {
+	collections := make(map[int64]*collectionInfo)
+	complete := true
+	for collectionID := range s.meta.GetAllCollectionNumRows() {
+		collection, err := s.handler.GetCollection(ctx, collectionID)
+		if err != nil || collection == nil {
+			complete = false
+			mlog.Warn(ctx, "failed to get collection while building quota metrics",
+				mlog.FieldCollectionID(collectionID), mlog.Err(err))
+			continue
+		}
+		collections[collectionID] = collection
+	}
+	if !complete {
+		// Do not replace collection-labeled Prometheus series with a partial
+		// RootCoord view. Quota values themselves are segment-derived and remain
+		// available; the labeled series are refreshed by a later complete call.
+		collections = nil
+	}
+	info := s.meta.GetQuotaInfo(collections)
 	return info
 }
 
@@ -250,7 +268,7 @@ func (s *Server) getDataCoordMetrics(ctx context.Context) metricsinfo.DataCoordI
 		SystemConfigurations: metricsinfo.DataCoordConfiguration{
 			SegmentMaxSize: Params.DataCoordCfg.SegmentMaxSize.GetAsFloat(),
 		},
-		QuotaMetrics:      s.getQuotaMetrics(),
+		QuotaMetrics:      s.getQuotaMetrics(ctx),
 		CollectionMetrics: s.getCollectionMetrics(ctx),
 	}
 

@@ -245,6 +245,12 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
 	_, err := AzureObjectStorage.Client.NewContainerClient(bucketName).NewBlockBlobClient(objectName).Delete(ctx, &blob.DeleteOptions{})
+	// Match the idempotent delete semantics of the other object-storage
+	// backends and the C++ Azure chunk manager's DeleteIfExists behavior.
+	// ContainerNotFound and every other Azure failure remain errors.
+	if bloberror.HasCode(err, bloberror.BlobNotFound) {
+		return nil
+	}
 	return mapObjectStorageError(objectName, err)
 }
 

@@ -20,15 +20,21 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"testing"
+	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -38,8 +44,8 @@ import (
 func TestImportMeta_Restore(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return([]*datapb.ImportJob{{JobID: 0}}, nil)
-	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1}}, nil)
-	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return([]*datapb.PreImportTask{{TaskID: 1, TaskVersion: 4}}, nil)
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2, TaskVersion: 7}}, nil)
 	ctx := context.TODO()
 
 	im, err := NewImportMeta(ctx, catalog, nil, nil)
@@ -53,11 +59,16 @@ func TestImportMeta_Restore(t *testing.T) {
 	tasks = im.GetTaskBy(ctx, WithType(PreImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(1), tasks[0].GetTaskID())
+	assert.Equal(t, int64(4), tasks[0].GetTaskVersion(), "pre-import attempts must survive coordinator restart")
 	tasks = im.GetTaskBy(ctx, WithType(ImportTaskType))
 	assert.Equal(t, 1, len(tasks))
 	assert.Equal(t, int64(2), tasks[0].GetTaskID())
 	tasks = im.GetTaskByJob(ctx, 0)
 	assert.Equal(t, 2, len(tasks))
+	tasks = im.GetTaskBy(ctx, WithType(ImportTaskType))
+	assert.Equal(t, int64(7), tasks[0].GetTaskVersion(), "import lineage attempts must survive coordinator restart")
+	assert.Equal(t, ctx, tasks[0].(*importTask).ctx,
+		"restored tasks need the component context for crash-recovery retries")
 
 	// new meta failed
 	mockErr := errors.New("mock error")
@@ -78,6 +89,246 @@ func TestImportMeta_Restore(t *testing.T) {
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return([]*datapb.ImportTaskV2{{TaskID: 2}}, nil)
 	_, err = NewImportMeta(ctx, catalog, nil, nil)
 	assert.Error(t, err)
+}
+
+func TestImportMeta_ReplaceRetryTask(t *testing.T) {
+	oldIDs := []int64{10, 20}
+	newSegments := []*SegmentInfo{
+		NewSegmentInfo(&datapb.SegmentInfo{ID: 30, CollectionID: 100, State: commonpb.SegmentState_Importing, IsImporting: true}),
+		NewSegmentInfo(&datapb.SegmentInfo{ID: 40, CollectionID: 100, State: commonpb.SegmentState_Importing, IsImporting: true}),
+	}
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything,
+		mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, actions ...metastore.UpdateAction) {
+			assert.Len(t, actions, 6)
+			drop, ok := actions[0].Entry.(metastore.ImportTaskEntry)
+			assert.True(t, ok)
+			assert.Equal(t, int64(1), drop.TaskID)
+			_, ok = actions[len(actions)-1].Entry.(metastore.ImportTaskEntry)
+			assert.True(t, ok, "the replacement task is part of the same catalog update")
+		}).Return(nil).Once()
+
+	im := &importMeta{jobs: make(map[int64]ImportJob), tasks: newImportTasks(), catalog: catalog}
+	im.jobs[7] = &importJob{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 100, State: internalpb.ImportJobState_Importing}}
+	oldTask := &importTask{importMeta: im}
+	oldTask.task.Store(&datapb.ImportTaskV2{
+		JobID: 7, TaskID: 1, CollectionID: 100, SegmentIDs: oldIDs,
+		NodeID: 9, State: datapb.ImportTaskStateV2_InProgress,
+	})
+	im.tasks.add(oldTask)
+	replacement := oldTask.Clone().(*importTask)
+	replacement.task.Load().TaskID = 2
+	replacement.task.Load().NodeID = NullNodeID
+	replacement.task.Load().State = datapb.ImportTaskStateV2_Pending
+
+	segmentMeta := &meta{catalog: catalog, segments: NewSegmentsInfo()}
+	for _, segmentID := range oldIDs {
+		segmentMeta.segments.SetSegment(segmentID, NewSegmentInfo(&datapb.SegmentInfo{
+			ID: segmentID, CollectionID: 100, State: commonpb.SegmentState_Flushed, IsImporting: true,
+		}))
+	}
+
+	replaced, err := im.replaceRetryTask(context.Background(), segmentMeta, oldTask, replacement, newSegments)
+	assert.NoError(t, err)
+	assert.False(t, replaced, "a stale inspector snapshot cannot replace a non-Retry task")
+	oldTask.task.Load().State = datapb.ImportTaskStateV2_Retry
+	im.jobs[7].(*importJob).State = internalpb.ImportJobState_Failed
+
+	replaced, err = im.replaceRetryTask(context.Background(), segmentMeta, oldTask, replacement, newSegments)
+	assert.NoError(t, err)
+	assert.False(t, replaced, "a retry snapshot cannot replace a task after its job failed")
+	assert.Same(t, oldTask, im.GetTask(context.Background(), oldTask.GetTaskID()))
+	assert.Nil(t, im.GetTask(context.Background(), replacement.GetTaskID()))
+	im.jobs[7].(*importJob).State = internalpb.ImportJobState_Importing
+
+	replaced, err = im.replaceRetryTask(context.Background(), segmentMeta, oldTask, replacement, newSegments)
+	assert.NoError(t, err)
+	assert.True(t, replaced)
+	assert.Nil(t, im.GetTask(context.Background(), oldTask.GetTaskID()))
+	assert.Same(t, replacement, im.GetTask(context.Background(), replacement.GetTaskID()))
+	assert.Equal(t, []int64{30, 40}, replacement.GetSegmentIDs())
+	assert.Equal(t, datapb.ImportTaskStateV2_Failed, oldTask.GetState())
+	for _, segmentID := range oldIDs {
+		segment := segmentMeta.GetSegment(context.Background(), segmentID)
+		assert.Equal(t, commonpb.SegmentState_Dropped, segment.GetState())
+		assert.False(t, segment.GetIsImporting())
+	}
+	for _, segment := range newSegments {
+		assert.Same(t, segment, segmentMeta.GetSegment(context.Background(), segment.GetID()))
+	}
+}
+
+func TestImportMeta_ReplacePreImportRetryTask(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).
+		Run(func(_ context.Context, actions ...metastore.UpdateAction) {
+			assert.Len(t, actions, 2)
+			drop, ok := actions[0].Entry.(metastore.PreImportTaskEntry)
+			assert.True(t, ok)
+			assert.Equal(t, int64(1), drop.TaskID)
+			save, ok := actions[1].Entry.(metastore.PreImportTaskEntry)
+			assert.True(t, ok)
+			assert.Equal(t, int64(2), save.Task.GetTaskID())
+		}).Return(nil).Once()
+
+	im := &importMeta{jobs: make(map[int64]ImportJob), tasks: newImportTasks(), catalog: catalog}
+	im.jobs[7] = &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 7, CollectionID: 100, State: internalpb.ImportJobState_PreImporting,
+	}}
+	oldTask := &preImportTask{importMeta: im}
+	oldTask.task.Store(&datapb.PreImportTask{
+		JobID: 7, TaskID: 1, CollectionID: 100,
+		NodeID: 9, State: datapb.ImportTaskStateV2_InProgress,
+	})
+	im.tasks.add(oldTask)
+	replacement := oldTask.Clone().(*preImportTask)
+	replacement.task.Load().TaskID = 2
+	replacement.task.Load().NodeID = NullNodeID
+	replacement.task.Load().State = datapb.ImportTaskStateV2_Pending
+
+	replaced, err := im.replacePreImportRetryTask(context.Background(), oldTask, replacement)
+	assert.NoError(t, err)
+	assert.False(t, replaced, "a stale inspector snapshot cannot replace a non-Retry task")
+
+	oldTask.task.Load().State = datapb.ImportTaskStateV2_Retry
+	im.jobs[7].(*importJob).State = internalpb.ImportJobState_Failed
+	replaced, err = im.replacePreImportRetryTask(context.Background(), oldTask, replacement)
+	assert.NoError(t, err)
+	assert.False(t, replaced, "a retry snapshot cannot replace a task after its job failed")
+
+	im.jobs[7].(*importJob).State = internalpb.ImportJobState_PreImporting
+	replaced, err = im.replacePreImportRetryTask(context.Background(), oldTask, replacement)
+	assert.NoError(t, err)
+	assert.True(t, replaced)
+	assert.Nil(t, im.GetTask(context.Background(), oldTask.GetTaskID()))
+	assert.Same(t, replacement, im.GetTask(context.Background(), replacement.GetTaskID()))
+	assert.Equal(t, datapb.ImportTaskStateV2_Retry, oldTask.GetState())
+}
+
+func TestImportMeta_ReplacePreImportRetryTaskCatalogFailureKeepsOldTask(t *testing.T) {
+	mockErr := errors.New("mock catalog failure")
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(mockErr).Once()
+	im := &importMeta{jobs: make(map[int64]ImportJob), tasks: newImportTasks(), catalog: catalog}
+	im.jobs[7] = &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 7, CollectionID: 100, State: internalpb.ImportJobState_PreImporting,
+	}}
+	oldTask := &preImportTask{importMeta: im}
+	oldTask.task.Store(&datapb.PreImportTask{
+		JobID: 7, TaskID: 1, CollectionID: 100,
+		NodeID: 9, State: datapb.ImportTaskStateV2_Retry,
+	})
+	im.tasks.add(oldTask)
+	replacement := oldTask.Clone().(*preImportTask)
+	replacement.task.Load().TaskID = 2
+	replacement.task.Load().NodeID = NullNodeID
+	replacement.task.Load().State = datapb.ImportTaskStateV2_Pending
+
+	replaced, err := im.replacePreImportRetryTask(context.Background(), oldTask, replacement)
+	assert.ErrorIs(t, err, mockErr)
+	assert.False(t, replaced)
+	assert.Same(t, oldTask, im.GetTask(context.Background(), oldTask.GetTaskID()))
+	assert.Nil(t, im.GetTask(context.Background(), replacement.GetTaskID()))
+}
+
+func TestImportMeta_AddImportTasks(t *testing.T) {
+	task := &importTask{}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID: 1, TaskID: 2, CollectionID: 3, SegmentIDs: []int64{10, 20},
+		State: datapb.ImportTaskStateV2_Pending,
+	})
+	segments := []*SegmentInfo{
+		NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 3, State: commonpb.SegmentState_Importing, IsImporting: true}),
+		NewSegmentInfo(&datapb.SegmentInfo{ID: 20, CollectionID: 3, State: commonpb.SegmentState_Importing, IsImporting: true}),
+	}
+
+	t.Run("publish catalog before memory", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Run(func(_ context.Context, actions ...metastore.UpdateAction) {
+				assert.Len(t, actions, 3)
+				_, ok := actions[0].Entry.(metastore.SegmentEntry)
+				assert.True(t, ok)
+				_, ok = actions[1].Entry.(metastore.SegmentEntry)
+				assert.True(t, ok)
+				_, ok = actions[2].Entry.(metastore.ImportTaskEntry)
+				assert.True(t, ok)
+			}).
+			Return(nil).
+			Once()
+
+		im := &importMeta{tasks: newImportTasks(), jobs: make(map[int64]ImportJob), catalog: catalog}
+		segmentMeta := &meta{catalog: catalog, segments: NewSegmentsInfo()}
+		assert.NoError(t, im.addImportTasks(context.Background(), segmentMeta, []ImportTask{task}, segments))
+		assert.Same(t, task, im.GetTask(context.Background(), task.GetTaskID()))
+		for _, segment := range segments {
+			assert.Same(t, segment, segmentMeta.GetSegment(context.Background(), segment.GetID()))
+		}
+	})
+
+	t.Run("catalog failure leaves memory unchanged", func(t *testing.T) {
+		catalog := mocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(errors.New("catalog update failed")).
+			Once()
+
+		im := &importMeta{tasks: newImportTasks(), jobs: make(map[int64]ImportJob), catalog: catalog}
+		segmentMeta := &meta{catalog: catalog, segments: NewSegmentsInfo()}
+		assert.Error(t, im.addImportTasks(context.Background(), segmentMeta, []ImportTask{task}, segments))
+		assert.Nil(t, im.GetTask(context.Background(), task.GetTaskID()))
+		for _, segment := range segments {
+			assert.Nil(t, segmentMeta.GetSegment(context.Background(), segment.GetID()))
+		}
+	})
+}
+
+func TestImportMeta_CompositeUpdateUsesCommitLockOrder(t *testing.T) {
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+
+	im := &importMeta{tasks: newImportTasks(), jobs: make(map[int64]ImportJob), catalog: catalog}
+	segmentMeta := &meta{catalog: catalog, segments: NewSegmentsInfo()}
+	task := &importTask{}
+	task.task.Store(&datapb.ImportTaskV2{
+		JobID: 1, TaskID: 2, CollectionID: 3, SegmentIDs: []int64{10},
+		State: datapb.ImportTaskStateV2_Pending,
+	})
+	segment := NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 3, State: commonpb.SegmentState_Importing, IsImporting: true,
+	})
+
+	// Hold the import lock just as HandleCommitVchannel does before running its
+	// segment callback. A composite update must wait here without holding segMu;
+	// otherwise the callback and update can deadlock in opposite lock order.
+	im.mu.Lock()
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		close(started)
+		done <- im.addImportTasks(context.Background(), segmentMeta, []ImportTask{task}, []*SegmentInfo{segment})
+	}()
+	<-started
+
+	inverted := false
+	for i := 0; i < 1000; i++ {
+		if !segmentMeta.segMu.TryLock() {
+			inverted = true
+			break
+		}
+		segmentMeta.segMu.Unlock()
+		runtime.Gosched()
+	}
+	im.mu.Unlock()
+
+	assert.False(t, inverted, "composite update must not hold segment meta while waiting for import meta")
+	select {
+	case err := <-done:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("composite update remained blocked after import meta was released")
+	}
 }
 
 func TestImportMeta_Job(t *testing.T) {
@@ -153,6 +404,162 @@ func TestImportMeta_Job(t *testing.T) {
 	assert.Equal(t, 2, len(jobs))
 	count = im.CountJobBy(context.TODO())
 	assert.Equal(t, 2, count)
+}
+
+func TestImportMeta_TerminalJobCatalogFailureFailsStopUnderLock(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	catalogErr := errors.New("ambiguous catalog response")
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.MatchedBy(func(job *datapb.ImportJob) bool {
+		return job.GetState() == internalpb.ImportJobState_Completed
+	})).Return(catalogErr).Once()
+
+	const jobID = int64(1000)
+	im := &importMeta{
+		ctx:     ctx,
+		jobs:    map[int64]ImportJob{jobID: &importJob{ImportJob: &datapb.ImportJob{JobID: jobID, State: internalpb.ImportJobState_PreImporting}}},
+		tasks:   newImportTasks(),
+		catalog: catalog,
+	}
+
+	fatalCalled := false
+	lockHeld := false
+	mockFatal := mockey.Mock(mlog.Fatal).
+		To(func(context.Context, string, ...mlog.Field) {
+			fatalCalled = true
+			lockHeld = !im.mu.TryLock()
+			if !lockHeld {
+				im.mu.Unlock()
+			}
+		}).
+		Build()
+	defer mockFatal.UnPatch()
+
+	err := im.UpdateJob(context.Background(), jobID, UpdateJobState(internalpb.ImportJobState_Completed))
+	assert.ErrorIs(t, err, catalogErr)
+	assert.True(t, fatalCalled)
+	assert.True(t, lockHeld)
+	assert.Equal(t, internalpb.ImportJobState_PreImporting, im.GetJob(context.Background(), jobID).GetState())
+}
+
+func TestImportMeta_CompletedTaskCatalogFailureFailsStopUnderLock(t *testing.T) {
+	tests := []struct {
+		name     string
+		taskType TaskType
+	}{
+		{name: "preimport", taskType: PreImportTaskType},
+		{name: "import", taskType: ImportTaskType},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			catalogErr := errors.New("ambiguous catalog response")
+			catalog := mocks.NewDataCoordCatalog(t)
+			const taskID = int64(1001)
+			var task ImportTask
+			switch test.taskType {
+			case PreImportTaskType:
+				catalog.EXPECT().SavePreImportTask(mock.Anything, mock.MatchedBy(func(task *datapb.PreImportTask) bool {
+					return task.GetTaskID() == taskID && task.GetState() == datapb.ImportTaskStateV2_Completed
+				})).Return(catalogErr).Once()
+				preImport := &preImportTask{}
+				preImport.task.Store(&datapb.PreImportTask{TaskID: taskID, State: datapb.ImportTaskStateV2_InProgress})
+				task = preImport
+			case ImportTaskType:
+				catalog.EXPECT().SaveImportTask(mock.Anything, mock.MatchedBy(func(task *datapb.ImportTaskV2) bool {
+					return task.GetTaskID() == taskID && task.GetState() == datapb.ImportTaskStateV2_Completed
+				})).Return(catalogErr).Once()
+				importTask := &importTask{}
+				importTask.task.Store(&datapb.ImportTaskV2{TaskID: taskID, State: datapb.ImportTaskStateV2_InProgress})
+				task = importTask
+			}
+
+			im := &importMeta{
+				ctx:     ctx,
+				jobs:    make(map[int64]ImportJob),
+				tasks:   newImportTasks(),
+				catalog: catalog,
+			}
+			im.tasks.add(task)
+
+			fatalCalled := false
+			lockHeld := false
+			mockFatal := mockey.Mock(mlog.Fatal).
+				To(func(context.Context, string, ...mlog.Field) {
+					fatalCalled = true
+					lockHeld = !im.mu.TryLock()
+					if !lockHeld {
+						im.mu.Unlock()
+					}
+				}).
+				Build()
+			defer mockFatal.UnPatch()
+
+			operationCtx, cancelOperation := context.WithCancel(context.Background())
+			cancelOperation()
+			err := im.UpdateTask(operationCtx, taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
+			assert.ErrorIs(t, err, catalogErr)
+			assert.True(t, fatalCalled)
+			assert.True(t, lockHeld)
+			assert.Equal(t, datapb.ImportTaskStateV2_InProgress, im.GetTask(context.Background(), taskID).GetState())
+		})
+	}
+}
+
+func TestImportMeta_TaskCatalogFailureDoesNotFailStopOutsideLiveCompletion(t *testing.T) {
+	tests := []struct {
+		name          string
+		componentLive bool
+		oldState      datapb.ImportTaskStateV2
+		newState      datapb.ImportTaskStateV2
+	}{
+		{name: "retry write", componentLive: true, oldState: datapb.ImportTaskStateV2_InProgress, newState: datapb.ImportTaskStateV2_Retry},
+		{name: "failed write", componentLive: true, oldState: datapb.ImportTaskStateV2_InProgress, newState: datapb.ImportTaskStateV2_Failed},
+		{name: "completion during shutdown", componentLive: false, oldState: datapb.ImportTaskStateV2_InProgress, newState: datapb.ImportTaskStateV2_Completed},
+		{name: "idempotent completion", componentLive: true, oldState: datapb.ImportTaskStateV2_Completed, newState: datapb.ImportTaskStateV2_Completed},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if !test.componentLive {
+				cancel()
+			}
+
+			catalogErr := errors.New("catalog error")
+			catalog := mocks.NewDataCoordCatalog(t)
+			catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(catalogErr).Once()
+			const taskID = int64(1002)
+			task := &importTask{}
+			task.task.Store(&datapb.ImportTaskV2{TaskID: taskID, State: test.oldState})
+			im := &importMeta{
+				ctx:     ctx,
+				jobs:    make(map[int64]ImportJob),
+				tasks:   newImportTasks(),
+				catalog: catalog,
+			}
+			im.tasks.add(task)
+
+			fatalCalled := false
+			mockFatal := mockey.Mock(mlog.Fatal).
+				To(func(context.Context, string, ...mlog.Field) {
+					fatalCalled = true
+				}).
+				Build()
+			defer mockFatal.UnPatch()
+
+			err := im.UpdateTask(context.Background(), taskID, UpdateState(test.newState))
+			assert.ErrorIs(t, err, catalogErr)
+			assert.False(t, fatalCalled)
+			assert.Equal(t, test.oldState, im.GetTask(context.Background(), taskID).GetState())
+		})
+	}
 }
 
 func TestImportMetaAddJob(t *testing.T) {
@@ -465,6 +872,21 @@ func TestHandleCommitVchannel(t *testing.T) {
 	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch1", cb)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, callCount) // still 1, not 2
+
+	// A callback for a channel outside the job must not make unrelated segments
+	// visible or occupy one of the job's expected commit acknowledgements.
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch3", cb)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+	assert.Equal(t, 1, callCount)
+	assert.NotContains(t, im.GetJob(context.TODO(), jobID).GetCommittedVchannels(), "ch3")
+
+	// Terminal jobs no-op even for a stale foreign callback, so the flusher can
+	// retire an already-settled broadcast instead of retrying forever.
+	err = im.UpdateJob(context.TODO(), jobID, UpdateJobState(internalpb.ImportJobState_Completed))
+	assert.NoError(t, err)
+	err = im.HandleCommitVchannel(context.TODO(), jobID, "ch3", cb)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, callCount)
 
 	// Unknown job returns error
 	err = im.HandleCommitVchannel(context.TODO(), int64(9999), "ch1", cb)

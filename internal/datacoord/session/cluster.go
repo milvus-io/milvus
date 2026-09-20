@@ -37,8 +37,9 @@ import (
 
 // WorkerSlots represents the slot information for a worker node
 type WorkerSlots struct {
-	NodeID         int64
-	AvailableSlots int64
+	NodeID                     int64
+	AvailableSlots             int64
+	SupportsV3StatsAttemptPath bool
 }
 
 // Cluster defines the interface for tasks
@@ -200,8 +201,9 @@ func (c *cluster) QuerySlot() map[int64]*WorkerSlots {
 			mu.Lock()
 			defer mu.Unlock()
 			availableNodeSlots[nodeID] = &WorkerSlots{
-				NodeID:         nodeID,
-				AvailableSlots: resp.GetAvailableSlots(),
+				NodeID:                     nodeID,
+				AvailableSlots:             resp.GetAvailableSlots(),
+				SupportsV3StatsAttemptPath: resp.GetSupportsV3StatsAttemptPath(),
 			}
 		}()
 	}
@@ -418,7 +420,6 @@ func (c *cluster) CreateIndex(nodeID int64, in *workerpb.CreateJobRequest) error
 	properties.AppendType(taskcommon.Index)
 	properties.AppendTaskSlot(in.GetTaskSlot())
 	properties.AppendNumRows(in.GetNumRows())
-	properties.AppendTaskVersion(in.GetIndexVersion())
 	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }
@@ -488,6 +489,23 @@ func (c *cluster) DropIndex(nodeID int64, taskID int64) error {
 }
 
 func (c *cluster) CreateStats(nodeID int64, in *workerpb.CreateStatsRequest) error {
+	// Also enforce capability on direct dispatch (including bound index nodes),
+	// rather than relying solely on the scheduler's earlier slot snapshot.
+	if in.GetUseV3StatsAttemptPath() {
+		ctx, cancel := context.WithTimeout(context.Background(), paramtable.Get().DataCoordCfg.RequestTimeoutSeconds.GetAsDuration(time.Second))
+		defer cancel()
+		cli, err := c.nm.GetClient(nodeID)
+		if err != nil {
+			return err
+		}
+		resp, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+		if err = merr.CheckRPCCall(resp.GetStatus(), err); err != nil {
+			return err
+		}
+		if !resp.GetSupportsV3StatsAttemptPath() {
+			return merr.Wrapf(merr.ErrServiceUnimplemented, "DataNode %d does not support StorageV3 stats attempt paths", nodeID)
+		}
+	}
 	properties := taskcommon.NewProperties(nil)
 	properties.AppendClusterID(paramtable.Get().CommonCfg.ClusterPrefix.GetValue())
 	properties.AppendTaskID(in.GetTaskID())
@@ -570,7 +588,6 @@ func (c *cluster) CreateAnalyze(nodeID int64, in *workerpb.AnalyzeRequest) error
 	properties.AppendTaskID(in.GetTaskID())
 	properties.AppendType(taskcommon.Analyze)
 	properties.AppendTaskSlot(in.GetTaskSlot())
-	properties.AppendTaskVersion(in.GetVersion())
 	properties.AppendCollectionID(in.GetCollectionID())
 	return c.createTask(nodeID, in, properties)
 }

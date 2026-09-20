@@ -134,7 +134,7 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 		mlog.Any("files", t.req.GetImportFiles()),
 		mlog.FieldSchema(t.GetSchema()),
 	)...)
-	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(t.GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
@@ -143,12 +143,15 @@ func (t *L0PreImportTask) Execute() []*conc.Future[any] {
 	fn := func(i int, file *internalpb.ImportFile) (err error) {
 		defer func() {
 			if err != nil {
+				// TODO: Once storage/import readers preserve reliable error
+				// categories and causes, aggregate every file result before choosing
+				// Failed for InputError or Retry for other errors.
 				reason := err.Error()
 				if len(t.GetFileStats()) == 1 {
 					reason = fmt.Sprintf("error: %v, file: %s", err, t.GetFileStats()[0].GetImportFile().String())
 				}
 				mlog.Warn(t.ctx, "l0 import task execute failed", WrapLogFields(t, mlog.String("err", reason))...)
-				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
+				t.manager.Update(t, UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(reason))
 			}
 		}()
 		pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
@@ -219,6 +222,6 @@ func (t *L0PreImportTask) readL0Stat(reader binlog.L0Reader, fileIdx int) error 
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
 	}
-	t.manager.Update(t.GetTaskID(), UpdateFileStat(fileIdx, stat))
+	t.manager.Update(t, UpdateFileStat(fileIdx, stat))
 	return nil
 }

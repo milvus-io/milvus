@@ -20,7 +20,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -35,11 +34,11 @@ import (
 func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(nil).Build()
-	defer mockGetCloned.UnPatch()
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, int64(999)).Return(nil, nil).Once()
 
 	server := &Server{
-		meta: &meta{},
+		handler: handler,
 	}
 
 	err := server.updateExternalSchemaViaWAL(ctx, 999, "s3://bucket/new", `{"format":"parquet"}`)
@@ -50,7 +49,8 @@ func TestUpdateExternalSchemaViaWAL_CollectionNotFound(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(&collectionInfo{
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -58,15 +58,14 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 			ExternalSpec:   `{"format":"parquet"}`,
 		},
 		DatabaseName: "default",
-	}).Build()
-	defer mockGetCloned.UnPatch()
+	}, nil).Once()
 
 	mixCoord := mocks.NewMixCoord(t)
 	mixCoord.EXPECT().AlterCollection(mock.Anything, mock.Anything).
 		Return(nil, errors.New("rpc connection error"))
 
 	server := &Server{
-		meta:     &meta{},
+		handler:  handler,
 		mixCoord: mixCoord,
 	}
 
@@ -78,7 +77,8 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionRPCError(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(&collectionInfo{
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -86,15 +86,14 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 			ExternalSpec:   `{"format":"parquet"}`,
 		},
 		DatabaseName: "default",
-	}).Build()
-	defer mockGetCloned.UnPatch()
+	}, nil).Once()
 
 	mixCoord := mocks.NewMixCoord(t)
 	mixCoord.EXPECT().AlterCollection(mock.Anything, mock.Anything).
 		Return(merr.Status(merr.WrapErrCollectionNotFound(100)), nil)
 
 	server := &Server{
-		meta:     &meta{},
+		handler:  handler,
 		mixCoord: mixCoord,
 	}
 
@@ -106,7 +105,8 @@ func TestUpdateExternalSchemaViaWAL_AlterCollectionStatusError(t *testing.T) {
 func TestUpdateExternalSchemaViaWAL_Success(t *testing.T) {
 	ctx := context.Background()
 
-	mockGetCloned := mockey.Mock((*meta).GetClonedCollectionInfo).Return(&collectionInfo{
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 		ID: 100,
 		Schema: &schemapb.CollectionSchema{
 			Name:           "test_collection",
@@ -119,8 +119,7 @@ func TestUpdateExternalSchemaViaWAL_Success(t *testing.T) {
 		DatabaseName:  "default",
 		DatabaseID:    1,
 		VChannelNames: []string{"ch-0", "ch-1"},
-	}).Build()
-	defer mockGetCloned.UnPatch()
+	}, nil).Once()
 
 	var capturedReq *milvuspb.AlterCollectionRequest
 	mixCoord := mocks.NewMixCoord(t)
@@ -131,7 +130,7 @@ func TestUpdateExternalSchemaViaWAL_Success(t *testing.T) {
 		Return(merr.Success(), nil)
 
 	server := &Server{
-		meta:     &meta{},
+		handler:  handler,
 		mixCoord: mixCoord,
 	}
 

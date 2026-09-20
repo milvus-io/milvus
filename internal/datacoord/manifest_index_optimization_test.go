@@ -30,6 +30,7 @@ import (
 	catalogkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -136,6 +137,10 @@ func TestManifestLastIndexDropClearsMarkerAtomically(t *testing.T) {
 	readFailure.UnPatch()
 	require.Equal(t, previous, m.GetSegment(ctx, 8001).GetManifestPath())
 	require.True(t, m.GetSegment(ctx, 8001).GetManifestHasIndex())
+	// An ambiguous manifest publication write is a fail-stop in production;
+	// neutralize it so the test can assert the retry a restart would see.
+	fatal := mockey.Mock(mlog.Fatal).To(func(context.Context, string, ...mlog.Field) {}).Build()
+	defer fatal.UnPatch()
 	failure := mockey.Mock((*catalogkv.Catalog).Update).Return(merr.ErrServiceUnavailable).Build()
 	t.Cleanup(func() { failure.UnPatch() })
 	require.ErrorIs(t, drop(2), merr.ErrServiceUnavailable)

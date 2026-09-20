@@ -32,6 +32,7 @@ import (
 	kvdatacoord "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -87,6 +88,9 @@ func TestRejectedCopyCleanupWorkerLossAfterAdmission(t *testing.T) {
 			prefixes := append([]string(nil), task.GetCleanupPrefixes()...)
 			cluster := session.NewMockCluster(t)
 			cluster.EXPECT().QueryCopySegment(int64(42), mock.Anything).Return(nil, merr.WrapErrNodeNotFound(42))
+			// An unadmitted attempt is abandoned for a fresh-identity replan, which
+			// releases its worker best effort.
+			cluster.EXPECT().DropCopySegment(int64(42), task.GetTaskId()).Return(nil).Maybe()
 			if scenario.failStateSave || scenario.failClearSave {
 				var original func(*kvdatacoord.Catalog, context.Context, *datapb.CopySegmentTask) error
 				patch := mockey.Mock((*kvdatacoord.Catalog).SaveCopySegmentTask).Origin(&original).To(func(c *kvdatacoord.Catalog, ctx context.Context, record *datapb.CopySegmentTask) error {
@@ -114,7 +118,9 @@ func TestRejectedCopyCleanupWorkerLossAfterAdmission(t *testing.T) {
 				require.Equal(t, datapb.CopySegmentJobState_CopySegmentJobFailed, copies.GetJob(ctx, task.GetJobId()).GetState())
 				task.DropTaskOnWorker(cluster) // Assignment was durably released; no Drop RPC.
 			} else {
-				require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskPending, task.GetState())
+				// Nothing was admitted: the attempt is retired under a fresh identity
+				// instead of being re-dispatched under the same target segment IDs.
+				require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskRetry, task.GetState())
 				require.False(t, task.GetCleanupRequired())
 			}
 			recovered, err := NewCopySegmentMeta(ctx, m.catalog, m, nil, nil)
@@ -145,7 +151,13 @@ func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
 			orphanIndex := path.Join(root, "index_v1/100/10/2001/6/1/index.bin")
 			require.NoError(t, m.chunkManager.Write(ctx, data, []byte("published segment")))
 			require.NoError(t, m.chunkManager.Write(ctx, orphanIndex, []byte("uninstalled index")))
-			// The target publication succeeds, then the final task save fails.
+			// The target publication succeeds, then the final task save fails. That
+			// ambiguous Completed write is a fail-stop in production (the record
+			// may already be durable); neutralize it here so the test can follow
+			// the same recovery path a restart would take: the admitted result is
+			// failed and its cleanup plan retained.
+			fatal := mockey.Mock(mlog.Fatal).To(func(context.Context, string, ...mlog.Field) {}).Build()
+			defer fatal.UnPatch()
 			var original func(*kvdatacoord.Catalog, context.Context, *datapb.CopySegmentTask) error
 			patch := mockey.Mock((*kvdatacoord.Catalog).SaveCopySegmentTask).Origin(&original).To(func(c *kvdatacoord.Catalog, ctx context.Context, record *datapb.CopySegmentTask) error {
 				if record.GetState() == datapb.CopySegmentTaskState_CopySegmentTaskCompleted {
@@ -161,9 +173,21 @@ func TestRejectedCopyCleanupWaitsForOrdinaryGC(t *testing.T) {
 			}, nil)
 			task.QueryTaskOnWorker(cluster)
 			patch.UnPatch()
+			// The fail-stop leaves the admitted InProgress record, with its cleanup
+			// intent, in the catalog. Model the restart that follows: reload the
+			// record, then find the worker that held the result gone.
+			require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskInProgress, task.GetState())
+			require.True(t, task.GetCleanupRequired())
+			copies, err := NewCopySegmentMeta(ctx, m.catalog, m, nil, nil)
+			require.NoError(t, err)
+			task = copies.GetTask(ctx, task.GetTaskId()).(*copySegmentTask)
+			lost := session.NewMockCluster(t)
+			lost.EXPECT().QueryCopySegment(int64(42), mock.Anything).Return(nil, merr.WrapErrNodeNotFound(42))
+			task.QueryTaskOnWorker(lost)
 			require.Equal(t, datapb.CopySegmentTaskState_CopySegmentTaskFailed, task.GetState())
-			require.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, 2001).GetState())
-			require.False(t, m.GetSegment(ctx, 2001).GetIsImporting())
+			// A copy target stays hidden until CompleteJob publishes every mapping
+			// with the terminal job state, so a per-task result never flips it.
+			require.NotEqual(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, 2001).GetState())
 			// This is the same visible-segment shape selected by GenSnapshot.
 			handler := &copyCleanupLoadedHandler{mockHandler: newMockHandler()}
 			gc := newGarbageCollector(m, handler, GcOption{cli: m.chunkManager})

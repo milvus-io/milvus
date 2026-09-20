@@ -73,6 +73,12 @@ type Manager interface {
 
 	Latest(ctx context.Context, collectionID int64) (DataViewRef, error)
 	Get(ctx context.Context, collectionID int64, dataVersion *viewpb.DataVersion) (DataViewRef, error)
+	// ManagedCollections lists the Collections that currently hold DataView
+	// state. It is the enumeration source for collection-scoped sweeps
+	// (GarbageCollect): the manager owns which Collections have snapshots, so
+	// a sweep driven by any other list either no-ops on Collections without a
+	// DataView or misses snapshots a Collection drop left behind.
+	ManagedCollections() []int64
 	GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error
 }
 
@@ -533,6 +539,17 @@ func (m *dataViewManager) Get(_ context.Context, collectionID int64, version *vi
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	return acquireRefLocked(state, state.versions[protoVersionToStruct(version)]), nil
+}
+
+func (m *dataViewManager) ManagedCollections() []int64 {
+	m.mu.RLock()
+	collectionIDs := make([]int64, 0, len(m.states))
+	for collectionID := range m.states {
+		collectionIDs = append(collectionIDs, collectionID)
+	}
+	m.mu.RUnlock()
+	sort.Slice(collectionIDs, func(i, j int) bool { return collectionIDs[i] < collectionIDs[j] })
+	return collectionIDs
 }
 
 func (m *dataViewManager) GarbageCollect(ctx context.Context, collectionID int64, retainLatest int) error {

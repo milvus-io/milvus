@@ -26,6 +26,9 @@ import (
 type Compactor interface {
 	Complete()
 	Compact() (*datapb.CompactionPlanResult, error)
+	// Cancel requests cancellation without waiting for Compact to return.
+	Cancel()
+	// Stop requests cancellation and waits for Complete.
 	Stop()
 	GetPlanID() typeutil.UniqueID
 	GetCollection() typeutil.UniqueID

@@ -291,10 +291,10 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 const auto& column_name = sample_field.column_name;
                 auto chunked = table->GetColumnByName(column_name);
                 if (chunked == nullptr) {
-                    return MakeCStatusError(
+                    return milvus::FailureCStatus(
+                        milvus::InvalidParameter,
                         fmt::format("Column '{}' not found in schema",
-                                    column_name)
-                            .c_str());
+                                    column_name));
                 }
 
                 int64_t col_bytes = 0;

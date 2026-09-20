@@ -42,9 +42,10 @@ func (e *snapshotExportJobPersistenceError) Is(target error) bool {
 }
 
 type snapshotExportMeta struct {
-	catalog metastore.DataCoordCatalog
-	jobs    *typeutil.ConcurrentMap[int64, *datapb.ExportSnapshotJob]
-	locks   *lock.KeyLock[int64]
+	componentCtx context.Context
+	catalog      metastore.DataCoordCatalog
+	jobs         *typeutil.ConcurrentMap[int64, *datapb.ExportSnapshotJob]
+	locks        *lock.KeyLock[int64]
 }
 
 func newSnapshotExportMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*snapshotExportMeta, error) {
@@ -54,9 +55,10 @@ func newSnapshotExportMeta(ctx context.Context, catalog metastore.DataCoordCatal
 	}
 
 	meta := &snapshotExportMeta{
-		catalog: catalog,
-		jobs:    typeutil.NewConcurrentMap[int64, *datapb.ExportSnapshotJob](),
-		locks:   lock.NewKeyLock[int64](),
+		componentCtx: ctx,
+		catalog:      catalog,
+		jobs:         typeutil.NewConcurrentMap[int64, *datapb.ExportSnapshotJob](),
+		locks:        lock.NewKeyLock[int64](),
 	}
 	for _, job := range jobs {
 		if job == nil || job.GetJobId() == 0 {
@@ -83,7 +85,9 @@ func (m *snapshotExportMeta) CreateJob(ctx context.Context, job *datapb.ExportSn
 
 	clone := proto.Clone(job).(*datapb.ExportSnapshotJob)
 	if err := m.catalog.SaveExportSnapshotJob(ctx, clone); err != nil {
-		return merr.Wrap(err, "failed to persist snapshot export job")
+		return &snapshotExportJobPersistenceError{
+			error: merr.Wrap(err, "failed to persist snapshot export job"),
+		}
 	}
 	m.jobs.Insert(clone.GetJobId(), clone)
 	return nil
@@ -161,9 +165,25 @@ func (m *snapshotExportMeta) updateJobLocked(
 		return proto.Clone(job).(*datapb.ExportSnapshotJob), false, nil
 	}
 	if err := m.catalog.SaveExportSnapshotJob(ctx, clone); err != nil {
-		return nil, false, &snapshotExportJobPersistenceError{
+		persistenceErr := &snapshotExportJobPersistenceError{
 			error: merr.Wrap(err, "failed to update snapshot export job"),
 		}
+		oldState := job.GetState()
+		newState := clone.GetState()
+		entersPublishing := oldState != datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing &&
+			newState == datapb.ExportSnapshotJobState_ExportSnapshotJobPublishing
+		entersTerminal := !isSnapshotExportTerminal(oldState) && isSnapshotExportTerminal(newState)
+		if (entersPublishing || entersTerminal) && m.componentCtx != nil && m.componentCtx.Err() == nil {
+			// The phase-boundary write may already be durable even when its
+			// response is lost. Fail-stop while holding the per-job lock so no
+			// stale in-memory state can overwrite Publishing or a terminal state.
+			mlog.Fatal(m.componentCtx, "snapshot export phase publication failed; terminating process",
+				mlog.FieldJobID(jobID),
+				mlog.String("oldState", oldState.String()),
+				mlog.String("newState", newState.String()),
+				mlog.Err(err))
+		}
+		return nil, false, persistenceErr
 	}
 	// The mutator owns clone for the duration of this call. Cache a separate
 	// copy so retaining and modifying that pointer cannot bypass persistence.

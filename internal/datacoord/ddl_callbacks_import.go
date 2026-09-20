@@ -407,15 +407,13 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 	registry.RegisterUpdateImportV2AckCallback(c.updateImportAckCallback)
 }
 
-// commitImportV2AckCallback handles the ack callback for the CommitImport WAL message.
-// For coordinator-owned jobs it makes all segments visible (commit timestamp and is_importing=false)
-// and transitions the job to Completed. Committing durably protects retries from
-// timeout/cleanup between these writes.
-// Concurrency safety is guaranteed by the broadcaster framework's resource key lock
-// (exclusive collection-level lock), so no CAS is needed here.
+// commitImportV2AckCallback handles the ack callback for CommitImport.
+// Local commits persist Committing before broadcasting; a replicated commit
+// enters the same protected phase here. Coordinator-owned jobs publish each
+// channel's visibility and Completed in this callback, while legacy jobs retain
+// their per-channel RPC completion.
 func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result message.BroadcastResultCommitImportMessageV2) error {
-	header := result.Message.Header()
-	jobID := header.GetJobId()
+	jobID := result.Message.Header().GetJobId()
 	mlog.Info(ctx, "CommitImport broadcast ack received", mlog.FieldJobID(jobID))
 
 	job := c.importMeta.GetJob(ctx, jobID)
@@ -424,18 +422,9 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return merr.WrapErrImportSysFailedMsg("job %d not found, waiting for import job creation", jobID)
 	}
 	switch job.GetState() {
-	case internalpb.ImportJobState_Uncommitted:
-		// Protect visibility updates from timeout/cleanup, including a crash
-		// after segment persistence but before the final Completed write.
-		if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobState(internalpb.ImportJobState_Committing)); err != nil {
-			return err
-		}
-		if c.importMeta.GetJob(ctx, jobID).GetState() == internalpb.ImportJobState_Failed {
-			// A concurrent timeout won before the commit phase was persisted.
-			return nil
-		}
-	case internalpb.ImportJobState_Committing:
-		// Retry the same callback after an interrupted commit.
+	case internalpb.ImportJobState_Uncommitted, internalpb.ImportJobState_Committing:
+		// The primary may have persisted its intent before the broadcast, while
+		// a secondary enters Committing from the replicated callback.
 	case internalpb.ImportJobState_Completed:
 		if c.meta != nil {
 			c.meta.recomputeDataView(ctx, job.GetCollectionID())
@@ -444,19 +433,58 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return nil
 	case internalpb.ImportJobState_Failed:
-		// Divergence signal: the source committed but this replica already failed, so
-		// this replica will NOT make the data visible. Left as a no-op here; surfaced
-		// at WARN for alerting.
 		mlog.Warn(ctx, "CommitImport ack landed on a Failed import job; this replica will NOT commit while the source commits - potential primary/standby divergence",
 			mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
 		return nil
 	default:
-		// CommitImport may be replicated before the local import task reaches
-		// Uncommitted. Returning an error keeps the broadcast task alive so the
-		// callback can retry after the import task finishes writing local meta.
 		mlog.Info(ctx, "CommitImport: job is not ready, retry later",
 			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
 		return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
+	}
+	if len(job.GetVchannels()) == 0 {
+		return merr.WrapErrImportSysFailedMsg("job %d has no vchannels", jobID)
+	}
+
+	metaCtx := c.ctx
+	if metaCtx == nil {
+		metaCtx = ctx
+	}
+	if job.GetState() == internalpb.ImportJobState_Uncommitted {
+		if err := c.importMeta.UpdateJob(metaCtx, jobID, func(current ImportJob) {
+			// Evaluate the precondition under importMeta.mu so a concurrent
+			// timeout cannot be overwritten from an Uncommitted snapshot.
+			if current.GetState() == internalpb.ImportJobState_Uncommitted {
+				UpdateJobState(internalpb.ImportJobState_Committing)(current)
+			}
+		}); err != nil {
+			// The catalog write may have landed even when its response was lost.
+			// Callback cancellation is not component shutdown: stop before a
+			// stale in-memory job can overwrite a durable commit intent.
+			if metaCtx.Err() == nil {
+				mlog.Fatal(ctx, "replicated import commit intent publication failed; terminating process",
+					mlog.FieldJobID(jobID), mlog.Err(err))
+			}
+			return err
+		}
+		job = c.importMeta.GetJob(metaCtx, jobID)
+		if job == nil {
+			return merr.WrapErrImportSysFailedMsg("job %d not found after entering commit phase", jobID)
+		}
+		switch job.GetState() {
+		case internalpb.ImportJobState_Committing:
+			// Continue with visibility publication.
+		case internalpb.ImportJobState_Completed:
+			if c.meta != nil {
+				c.meta.recomputeDataView(ctx, job.GetCollectionID())
+			}
+			return nil
+		case internalpb.ImportJobState_Failed:
+			mlog.Warn(ctx, "CommitImport ack lost the race to a terminal import failure; this replica will NOT commit",
+				mlog.FieldJobID(jobID), mlog.String("reason", job.GetReason()))
+			return nil
+		default:
+			return merr.WrapErrImportSysFailedMsg("job %d is in state %s, waiting for Uncommitted", jobID, job.GetState())
+		}
 	}
 
 	// Legacy callbacks only enter Committing. The message consumer still owns
@@ -465,23 +493,16 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 		return nil
 	}
 
-	// Each business vchannel has its own WAL commit fence. Use that channel's
-	// append timetick, not the broadcast maximum (which may come from CChannel).
+	// Each business vchannel has its own WAL commit fence. CChannel's tick and
+	// the broadcast maximum must not replace that per-channel boundary.
 	ops := make([]UpdateOperator, 0)
 	for vchannel, appendResult := range result.Results {
 		if funcutil.IsControlChannel(vchannel) {
-			// The control channel carries no data segments; its timetick must
-			// not be used as a segment commit timestamp.
 			continue
 		}
-		segIDs := c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
-		if len(segIDs) == 0 {
-			continue
-		}
-		commitTs := appendResult.TimeTick
-		for _, segID := range segIDs {
+		for _, segID := range c.getImportSegmentIDsByVchannel(ctx, jobID, vchannel) {
 			ops = append(ops,
-				UpdateCommitTimestamp(segID, commitTs),
+				UpdateCommitTimestamp(segID, appendResult.TimeTick),
 				UpdateIsImporting(segID, false),
 			)
 		}
@@ -491,15 +512,13 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 			return err
 		}
 	}
-
-	// Import visibility now commits in this callback rather than the legacy
-	// per-channel RPC. Preserve DataView reconciliation after SegmentMeta.
+	// Reconciliation runs outside ImportMeta's lock and after SegmentMeta.
 	if c.meta != nil {
 		c.meta.recomputeDataView(ctx, job.GetCollectionID())
 	}
 
 	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
-	if err := c.importMeta.UpdateJob(ctx, jobID,
+	if err := c.importMeta.UpdateJob(metaCtx, jobID,
 		UpdateJobState(internalpb.ImportJobState_Completed),
 		UpdateJobCompleteTime(completeTime),
 	); err != nil {
@@ -508,8 +527,7 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	totalDuration := job.GetTR().ElapseSpan()
 	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
 	mlog.Info(ctx, "import job committed to Completed",
-		mlog.FieldJobID(jobID),
-		mlog.Duration("jobTimeCost/total", totalDuration))
+		mlog.FieldJobID(jobID), mlog.Duration("jobTimeCost/total", totalDuration))
 	return nil
 }
 

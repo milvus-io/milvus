@@ -67,6 +67,9 @@ func (suite *UtilSuite) TestCompactionMergeInfoEnums() {
 		datapb.CompactionTaskState_cleaned:    commonpb.CompactionTaskState_CompactionTaskStateCleaned,
 		datapb.CompactionTaskState_meta_saved: commonpb.CompactionTaskState_CompactionTaskStateMetaSaved,
 		datapb.CompactionTaskState_statistic:  commonpb.CompactionTaskState_CompactionTaskStateStatistic,
+		// Internal-only: an attempt awaiting replan is reported as still
+		// executing, since the public enum has no `retrying` counterpart.
+		datapb.CompactionTaskState_retrying: commonpb.CompactionTaskState_CompactionTaskStateExecuting,
 	}
 	// Adding an internal enum requires verifying its public wire equivalent.
 	suite.Len(types, len(datapb.CompactionType_name))

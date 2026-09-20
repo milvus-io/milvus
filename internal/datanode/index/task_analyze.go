@@ -129,7 +129,7 @@ func buildAnalyzeInfo(req *workerpb.AnalyzeRequest) *clusteringpb.AnalyzeInfo {
 			continue
 		}
 
-		// V1: reconstruct insert-log paths from logIDs.
+		// StorageV2: reconstruct insert-log paths from logIDs.
 		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
 		for _, id := range stats.GetLogIDs() {
 			path := metautil.BuildInsertLogPath(req.GetStorageConfig().RootPath,

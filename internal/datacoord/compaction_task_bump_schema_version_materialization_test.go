@@ -40,7 +40,7 @@ const (
 )
 
 func newMaterializationTask(meta *meta, schemaVersion int32) *bumpSchemaVersionTask {
-	return newBumpSchemaVersionTask(&datapb.CompactionTask{
+	return newBumpSchemaVersionTask(context.Background(), &datapb.CompactionTask{
 		PlanID:        materializationPlanID,
 		CollectionID:  1,
 		PartitionID:   10,

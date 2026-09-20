@@ -553,6 +553,78 @@ func (s *SchedulerSuite) TestScheduler_ImportFileWithFunction() {
 	s.NoError(err)
 }
 
+func TestScheduler_StaleCompletionCannotFinishReplacement(t *testing.T) {
+	manager := NewTaskManager()
+	scheduler := NewScheduler(manager).(*scheduler)
+
+	releaseOldTask := make(chan struct{})
+	oldFuture := conc.Go(func() (any, error) {
+		<-releaseOldTask
+		return nil, nil
+	})
+	executed := make(chan struct{})
+	oldTask := NewMockTask(t)
+	oldTask.EXPECT().GetTaskID().Return(int64(1)).Maybe()
+	oldTask.EXPECT().GetState().Return(datapb.ImportTaskStateV2_Pending).Maybe()
+	oldTask.EXPECT().Execute().Run(func() { close(executed) }).Return([]*conc.Future[any]{oldFuture}).Once()
+	oldTask.EXPECT().Cancel().Once()
+	manager.Add(oldTask)
+
+	scheduled := make(chan struct{})
+	go func() {
+		defer close(scheduled)
+		scheduler.scheduleTasks()
+	}()
+	<-executed
+
+	manager.Remove(oldTask.GetTaskID())
+	newCtx, newCancel := context.WithCancel(context.Background())
+	defer newCancel()
+	newTask := &ImportTask{
+		ImportTaskV2: &datapb.ImportTaskV2{
+			TaskID: 1,
+			State:  datapb.ImportTaskStateV2_Pending,
+		},
+		ctx:    newCtx,
+		cancel: newCancel,
+	}
+	manager.Add(newTask)
+
+	close(releaseOldTask)
+	<-scheduled
+
+	if state := manager.Get(newTask.GetTaskID()).GetState(); state != datapb.ImportTaskStateV2_Pending {
+		t.Fatalf("stale scheduler finalizer changed replacement state to %s", state)
+	}
+}
+
+func TestScheduler_CopySegmentValidationFailureStaysFailed(t *testing.T) {
+	manager := NewTaskManager()
+	scheduler := NewScheduler(manager).(*scheduler)
+	task := NewCopySegmentTask(
+		context.Background(),
+		&datapb.CopySegmentRequest{TaskID: 1},
+		manager,
+		nil,
+		nil,
+		nil,
+		nil,
+		"",
+		"",
+	)
+	manager.Add(task)
+
+	scheduler.scheduleTasks()
+
+	got := manager.Get(task.GetTaskID())
+	if got.GetState() != datapb.ImportTaskStateV2_Failed {
+		t.Fatalf("scheduler overwrote validation failure with %s", got.GetState())
+	}
+	if got.GetReason() != "no source segments to copy" {
+		t.Fatalf("unexpected validation failure reason %q", got.GetReason())
+	}
+}
+
 func TestScheduler(t *testing.T) {
 	suite.Run(t, new(SchedulerSuite))
 }
