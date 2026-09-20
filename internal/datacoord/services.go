@@ -3067,13 +3067,9 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
-	bc, err := broadcast.GetWithContext(ctx)
-	if err != nil {
-		return err
-	}
 	// WAL ordering places later DDL after this commit fence, so owned imports can
 	// release the Begin's keys through the normal FastAck path.
-	if handled, err := bc.BroadcastWithResourceKeyOwner(ctx, msg); handled || err != nil {
+	if handled, err := s.tryBroadcastWithRetainedOwner(ctx, msg); handled || err != nil {
 		return err
 	}
 
@@ -3103,7 +3099,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 		return errors.Mark(merr.WrapErrImportSysFailedMsg("job %d has no vchannels", job.GetJobID()), errRollbackImportNoVchannels)
 	}
 	msg := buildRollbackImportMessage(job)
-	if handled, err := s.tryBroadcastRollbackToRetainedOwner(ctx, msg); handled || err != nil {
+	if handled, err := s.tryBroadcastWithRetainedOwner(ctx, msg); handled || err != nil {
 		return err
 	}
 
@@ -3124,7 +3120,7 @@ func (s *Server) closeFailedImport(ctx context.Context, job ImportJob) error {
 		// Legacy jobs may have no data channels; new retained Begins cannot.
 		return nil
 	}
-	_, err := s.tryBroadcastRollbackToRetainedOwner(ctx, buildRollbackImportMessage(job))
+	_, err := s.tryBroadcastWithRetainedOwner(ctx, buildRollbackImportMessage(job))
 	return err
 }
 
@@ -3136,7 +3132,7 @@ func buildRollbackImportMessage(job ImportJob) message.BroadcastMutableMessage {
 		MustBuildBroadcast()
 }
 
-func (s *Server) tryBroadcastRollbackToRetainedOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
+func (s *Server) tryBroadcastWithRetainedOwner(ctx context.Context, msg message.BroadcastMutableMessage) (bool, error) {
 	bc, err := broadcast.GetWithContext(ctx)
 	if err != nil {
 		return false, err
