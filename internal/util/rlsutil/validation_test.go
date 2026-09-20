@@ -90,6 +90,27 @@ func TestValidatePayloadBounds(t *testing.T) {
 		))
 	})
 
+	t.Run("stored policies ignore refreshable expression limits", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxExpressionLength.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxExpressionLength.Key)
+
+		err := ValidatePolicyForUpdate(
+			"policy",
+			PolicyTypePermissive,
+			[]PolicyAction{PolicyActionQuery},
+			"true",
+			"",
+		)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		require.NoError(t, ValidateStoredPolicy(
+			"policy",
+			PolicyTypePermissive,
+			[]PolicyAction{PolicyActionQuery},
+			"true",
+			"",
+		))
+	})
+
 	t.Run("unused policy expressions are rejected", func(t *testing.T) {
 		for _, test := range []struct {
 			name      string
@@ -160,6 +181,16 @@ func TestValidatePayloadBounds(t *testing.T) {
 		payload, err := TagsToJSON(tags)
 		require.NoError(t, err)
 		require.JSONEq(t, `{"tenant":"acme","level":3,"score":0.75}`, payload)
+		for _, value := range []TagValue{
+			NewDoubleTagValue(3),
+			NewDoubleTagValue(9223372036854774784),
+		} {
+			payload, err := TagsToJSON(map[string]TagValue{"value": value})
+			require.NoError(t, err)
+			roundTrip, err := TagsFromJSON(payload)
+			require.NoError(t, err)
+			require.Equal(t, value, roundTrip["value"])
+		}
 		largeDoublePayload, err := TagsToJSON(map[string]TagValue{"value": NewDoubleTagValue(1e20)})
 		require.NoError(t, err)
 		largeDoubleTags, err := TagsFromJSON(largeDoublePayload)
