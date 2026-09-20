@@ -346,12 +346,29 @@ from submitting new sync work after the syncer has closed.
 
 ## 6. Thread Safety
 
+The agreed [Balancer Cache refactor](balancer_cache.md) adds synchronous
+actual-state publication; that refactor is not implemented yet. At the
+manager's in-memory commit, its hook publishes immutable shard state and node
+contributions before returning. Registry initialization and final removal also
+publish, with source replay/readiness and manager-instance checks. The hook
+performs only in-memory cache updates and dirty-key notification, never I/O or
+re-entry into a manager. This publication does not wait for the separate
+persist-before-sync scheduler and does not change QueryView transitions.
+
+Cache readers retain immutable objects without manager locks. Node totals and
+their contribution indexes are maintained on publication, so Balancer no
+longer aggregates all placements while constructing a planning snapshot.
+Sharing the existing immutable `statsLocked()` result is an initial adapter
+option; it does not eliminate the cost of that full statistics rebuild.
+Incremental statistics publication remains a separate optimization.
+
 - `ShardViewManager.mu` protects its state machines, fast pointers, and atomic
   event creation.
 - `DirtyViewFlushScheduler.mu` protects pending events, inflight and held shard
   lanes, queued task accounting, terminal error, and closed state.
-- No ETCD, RPC, task execution, or callback runs while a manager lock is held;
-  only the scheduler's non-blocking in-memory `Submit` runs under that lock.
+- No ETCD, RPC, task execution, or re-entrant callback runs while a manager lock
+  is held. In-memory statistics/cache publication hooks may run under that
+  lock; they follow the upstream-to-cache lock order and never call upstream.
 - No Catalog or ReliableSyncer I/O runs while the Scheduler lock is held.
 - The shared `NodeScheduler` queue is unbounded and non-blocking, so submitting
   an event does not wait for a batch task to execute.

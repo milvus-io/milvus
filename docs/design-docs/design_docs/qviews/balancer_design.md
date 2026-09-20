@@ -1,82 +1,84 @@
 # Balancer & CollectionLoadManager Design
 
-> This document describes the design of the Coord-side Balancer and CollectionLoadManager, which together are responsible for generating, managing, and maintaining QueryViews across all replicas and shards.
-> Reference: [Distributed Query View Design](README.md), [Shard View Management](shard_view_management.md), [Syncer Design](syncer.md), [QueryView State Machine](query_view_state_machine.md), [view.proto](../../../../pkg/proto/view.proto)
+> Target design: the resident cache refactor described here is agreed but not
+> implemented yet. Current code still uses `BalancerSnapshot` and
+> `SnapshotBuilder`. Batch ordering, score formulas, and plan emission remain
+> unchanged. Production runtime wiring and RPC changes are outside this work.
+>
+> References: [Balancer Cache](balancer_cache.md),
+> [Distributed Query View](README.md),
+> [Shard View Management](shard_view_management.md), [Syncer](syncer.md),
+> [QueryView State Machine](query_view_state_machine.md).
 
 ## 1. Overview
 
-The Balancer and CollectionLoadManager sit above the per-shard `ShardViewManager` layer on the Coord side. They are responsible for:
+The Balancer and CollectionLoadManager manage QueryViews across replicas and
+shards. State ownership is separate from planning:
 
-1. **Deciding WHEN and WHICH shards** need new QueryViews (Balancer reconcile loop).
-2. **Deciding HOW to assign segments to QueryNodes** (BalancePolicy).
-3. **Persisting desired load state and load lifecycle callbacks** (CollectionLoadManager).
-4. **Maintaining actual shard-view indexes and statistics** (ShardViewRegistry).
+1. Upstream managers own desired configuration, DataViews, node topology, and
+   actual QueryView state.
+2. `BalancerCache` receives synchronous publication hooks and maintains
+   immutable read objects, actual-load aggregates, and reverse indexes.
+3. Balancer resolves dirty scopes from the cache and requests one batch plan.
+4. BalancePolicy reads immutable objects and maintains private predicted loads.
+5. The executor applies the completed plan through ShardViewManager.
 
 ### Architecture
 
-```
-External Inputs (provided by other Coord modules, consumed as interfaces)
-├── Node Manager         → available QueryNode list
-├── Replica Manager      → Replica-to-Node mapping
-├── DataView Manager     → per-shard sealed segment list (DataView)
-│
-DDL Callbacks (WAL message acknowledgment)
-├── AlterLoadConfigMessage → CollectionLoadManager.UpdateLoadConfig()
-└── DropLoadConfigMessage  → CollectionLoadManager.ReleaseCollection()
-        │
-        │  state changes → Balancer.Trigger()
-        ▼
-┌──────────────────────────────────────────────────────────────┐
-│                        Balancer                              │
-│  • Work queue (deduplicated trigger scopes)                  │
-│  • Single goroutine loop:                                    │
-│      1. Detach the pending trigger batch                     │
-│      2. Resolve the collection and shard planning scope      │
-│      3. Build a scoped snapshot and refresh the row ledger   │
-│      4. policy.Plan(snapshot, dirty) → BalancePlan           │
-│      5. Apply plan (AddPreparing + ReleaseShardViews)        │
-│  • Periodic ticker as fallback (full scan)                   │
-└────────────┬────────────────────────────┬────────────────────┘
-             │ build snapshot              │ apply plan
-             ▼                             ▼
-┌──────────────────────────────────────────────────────────────┐
-│                 Coord-side QueryView state                   │
-│  ┌──────────────────────────┐ ┌──────────────────────────┐  │
-│  │    LoadConfigStore       │ │   ShardViewRegistry      │  │
-│  │  • Desired state (load   │ │  • ShardViewManager      │  │
-│  │    config + replica      │ │    lifecycle             │  │
-│  │    assignments)          │ │  • Aggregates Stats()    │  │
-│  │  • ETCD persistence      │ │    across all shards     │  │
-│  └──────────────────────────┘ └──────────────────────────┘  │
-│  CollectionLoadManager lives in loadmgr and connects DDL     │
-│  broadcast results to LoadConfigStore and Balancer.          │
-│                                                              │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐            │
-│  │ShardViewMgr │ │ShardViewMgr │ │ShardViewMgr │  ...       │
-│  │(replica1,   │ │(replica1,   │ │(replica2,   │            │
-│  │ vchan0)     │ │ vchan1)     │ │ vchan0)     │            │
-│  └─────────────┘ └─────────────┘ └─────────────┘            │
-└──────────────────────────────────────────────────────────────┘
-             │                             │
-             ▼                             ▼
-         Catalog (ETCD)              ReliableSyncer → Nodes
+```text
+LoadConfigStore    DataViewManager    Node/RG owners    ShardViewRegistry
+       \                |                 |                  /
+        +---------------+-----------------+-----------------+
+                        | synchronous publication hooks
+                        v
+                  BalancerCache
+                  - Collection / Shard entries
+                  - Node totals + contribution indexes
+                  - RG / discovery indexes and policy config
+                        | publish, then enqueue affected keys
+                        v
+                  Balancer work queue
+                        |
+                        v
+                  Single reconcile loop
+                  1. Detach pending scopes
+                  2. Resolve keys from cache
+                  3. Plan(cache Reader, dirty shards)
+                     - pin objects through Get
+                     - maintain private projectedRows
+                  4. Apply complete batch
+                        |
+                        v
+                  ShardViewManager
+                        |
+                  Persist and sync scheduler
 ```
 
 ### Design Principles
 
-- **Level-triggered reconciliation (Kubernetes controller pattern)**: Event sources enqueue affected collection, shard, or node scopes via `Trigger(scope)`; the Balancer compares desired vs. current state and converges. The periodic full scan covers sources without a direct notifier and any missed event. Repeated scopes are deduplicated in the pending batch.
-- **Unified allocation algorithm**: A single BalancePolicy handles all scenarios. Scenario differences are encoded in input variations (available nodes, current view, data view), not separate algorithms. This prevents thrashing.
-- **Scoped batch planning**: Each reconcile cycle detaches the pending trigger batch, resolves its collection and shard scope, builds one immutable snapshot for that scope, and asks the Policy for a complete plan. The Policy handles all target shards in one call while using cluster-wide node row totals for cross-shard coordination.
-- **External inputs as interfaces**: Node Manager, Replica Manager, and DataView Manager are external dependencies consumed via interfaces.
-- **Separated desired and actual state ownership**: `loadmgr` owns load-config lifecycle and desired-state snapshots; `coordview` owns actual QueryView state, shard-view aggregation, and actual-state snapshots. The Balancer composes both snapshots during reconciliation.
+- **Level-triggered reconciliation**: Hooks publish state before enqueueing
+  affected keys. Repeated events coalesce; events arriving during processing
+  remain pending for a successor pass.
+- **Object-local consistency**: Each read object is immutable and internally
+  consistent. Different Get calls need not represent one global instant.
+- **Write-side aggregation**: Node totals, shard contributions, desired shard
+  totals/counts, and RG candidate indexes are maintained on publication.
+  Reconcile does not reconstruct these facts from all segments.
+- **Copy-on-write with structural sharing**: Node and Collection are the main
+  access units; large Collection children and node contribution indexes share
+  unchanged structure. Neither reads nor small writes copy global segment data.
+- **Preserved batch planning**: Must before MayOptimize, then larger shards
+  first with deterministic tie-breaking. All candidates share one private
+  projected-load tracker. Apply starts only after planning the batch.
+- **Separated state ownership**: The cache is a derived view, not a new owner
+  of load lifecycle or QueryView state. No predicted plan is written into it.
 
 ## 2. Components
 
 ### 2.1 Balancer
 
-The top-level scheduling framework. Owns a work queue and a single reconcile goroutine. Pure executor: builds snapshots, delegates decisions to Policy, applies the resulting plan.
-
-#### Interface
+The controller owns a work queue and one reconcile goroutine. It resolves
+scope, delegates batch decisions, and applies the completed plan.
 
 ```go
 type Balancer interface {
@@ -93,129 +95,92 @@ type TriggerScope struct {
 }
 ```
 
-- `Trigger()` with no scopes triggers a full scan.
-- `Trigger(scope)` records only the affected scope; `SnapshotBuilder` resolves it before reading scoped DataView and ShardView details.
-- A periodic ticker (e.g., 10s) calls `Trigger()` as a safety net for missed events and steady-state balance checks.
+Existing explicit Trigger calls remain supported. `Trigger()` with no scope
+requests a full cache scan. The periodic interval remains unchanged (default
+10 seconds); it runs optimization and catches pending lifecycle work, without
+repulling upstream state or rebuilding row accounting.
 
 #### Main Loop
 
-```go
-for {
-    select {
-    case <-queue.Signal():
-    case <-ticker.C:
-        queue.AddAll()   // full scan
-    case <-ctx.Done():
-        return
-    }
+The target control flow is schematic:
 
-    pending := b.queue.TakePending()
-    if pending.Empty() {
-        continue
-    }
-
-    snap, dirty := b.snapshotBuilder.build(ctx, pending)
-    if len(dirty) == 0 {
-        continue
-    }
-
-    plan := b.policy.Plan(snap, dirty)
-    b.apply(ctx, plan)
-}
+```text
+wait for queued work, periodic tick, retry, or cancellation
+pending := queue.TakePending()
+dirty := resolveScope(cache, pending)
+plan := policy.Plan(cache, dirty)
+failedOrInvalidated := apply(plan)
+requeue affected failures with bounded backoff
 ```
 
-`TakePending` establishes the reconcile-cycle boundary before scope resolution
-and snapshot construction. Triggers arriving during construction remain queued
-for the next cycle. The detached batch is resolved before DataView and
-ShardView details are read, so scoped providers only fetch the collections and
-shards needed by that cycle.
-
-The loop is purely infrastructural: the Policy is where all business decisions happen.
+The queue detaches work before scope resolution. A concurrent publication must
+remain scheduled for a later pass. Required sources must finish initial cache
+seeding before the loop starts. A periodic cache scan cannot repair an update
+that the upstream never published.
 
 #### Scope Resolution
 
-`triggerBatch.resolveScope` produces three sets before provider details are
-read:
+Scope resolution uses cache keys and indexes:
 
-```go
-type reconcileScope struct {
-    collectionIDs     map[int64]struct{}
-    collectionWideIDs map[int64]struct{}
-    targetShards      map[qviews.ShardID]struct{}
-}
-```
+- A collection scope combines configured replicas × DataView vchannels with
+  resident shards, including residual views after desired configuration removal.
+- A direct shard scope targets that ShardID.
+- A node-loss/Stopping scope expands through its placed-shard index.
+- Node addition or recovery expands to desired collections in its RG; a new
+  node has no placements to discover through the placed-shard index.
+- RG reassignment covers both the old and new groups.
+- Full scope combines all desired collections and all residual resident shards.
+  An unkeyed node notification or an unresolvable legacy scope may fall back
+  to this full scope without rebuilding the cache.
 
-- `collectionIDs` selects the DataViews fetched for the cycle.
-- `collectionWideIDs` identifies collection triggers whose DataView shards are
-  expanded across every configured replica.
-- `targetShards` is the exact ShardView scope and Policy input.
-
-Dirty collections combine configured replica-by-vchannel shards with resident
-shards from the Registry collection index. Dirty shards are exact targets.
-Dirty nodes expand through the Registry node index. A full planning scope
-combines every configured collection with every resident Registry shard. When
-a scoped trigger cannot be narrowed safely, it uses the same full planning
-scope; only an explicit or periodic full trigger also rebuilds the row-count
-ledger.
-
-The DataView provider exposes both full and collection-scoped reads:
-
-```go
-DataViewSnapshot(ctx context.Context) *DataViewSnapshot
-DataViewSnapshotForCollections(ctx context.Context, collectionIDs map[int64]struct{}) *DataViewSnapshot
-```
-
-A nil collection set selects all collections; a non-nil empty set selects none.
-The native snapshot embeds each segment's `RowNum`. Placement segments that no
-longer belong to the latest DataView retain their statistics through the
-corresponding QueryView's exact-version `DataViewRef`; no separate SegmentMeta
-lookup is required. See [DataView consumer interfaces](data_view.md#view-consumer-interfaces).
+Shard details are obtained from retained CollectionEntry references. Missing
+LoadConfig means release only after source readiness is known. Desired config
+with a missing/unready DataView waits or retries, rather than releasing views.
 
 #### External System Integration
 
-| External System | When | Trigger Call |
+| Source event | Cache publication | Reconcile scope |
 |---|---|---|
-| Node Manager | Node crash / scale-out / graceful shutdown | `Trigger(TriggerScope{NodeChanged: true})` |
-| DataView Manager | New DataVersion (Flush/Compact) | Observed by the periodic full scan; the current provider interface has no direct change notifier |
-| CollectionLoadManager | Load config updated (DDL callback) | `Trigger(TriggerScope{DirtyCollections: [collID]})` |
-| ShardViewManager | View becomes Unrecoverable | Node-loss cases are covered by `NodeChanged`; other cases are observed by the periodic full scan |
-| Periodic ticker | Timer fires | `Trigger()` (full scan) |
+| LoadConfig Put/Remove | Desired field and replica/RG indexes | Collection |
+| DataView publication/drop | Membership, RowNum, per-shard totals/counts | Collection |
+| Preparing completion / Unrecoverable | Actual shard and node contributions | Shard |
+| Ordinary progress report | Actual shard and affected node contributions | Periodic optimization may evaluate wider effects |
+| Node loss / Stopping | Node eligibility | Placed shards |
+| Node addition / recovery | Node and RG indexes | RG's desired collections |
+| RG migration | Old/new RG indexes and node membership | Both RGs |
+| Periodic tick | None | Full cache scope |
+
+The full hook, replay, and lock contracts are in
+[Balancer Cache](balancer_cache.md#5-source-hooks-and-publication).
 
 ### 2.2 BalancePolicy
 
-Processes a batch of target shards against one immutable snapshot and produces an execution plan. Stateless pure function.
+Policy retains the batch algorithm but takes a read-only cache interface:
 
 ```go
 type BalancePolicy interface {
-    // Plan classifies each dirty shard and computes assignments for those that
-    // need action. The snapshot contains scoped shard details and cluster-wide
-    // node row totals so decisions remain coordinated across the batch.
-    Plan(snap *BalancerSnapshot, dirty []qviews.ShardID) *BalancePlan
+    Plan(reader cache.Reader, dirty []qviews.ShardID) *BalancePlan
 }
 
-// BalancePlan is the complete set of actions to execute for this batch.
 type BalancePlan struct {
-    // Shards that need a new Preparing view.
     Prepares map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder
-    // Shards whose views should be released
-    // (desired state absent but current views exist).
     Releases []qviews.ShardID
 }
 ```
 
-`BalancerSnapshot` combines scoped DataView and ShardView details with the
-global node topology and row-count projection for this batch (see Section 4).
-It is built once and reused for all target shards in the cycle.
+These are target signatures. A call-local PlanningContext fixes each input
+object after its first Get, so classification, sorting, and allocation reuse
+that object's contents. Objects acquired at different times may have different
+source revisions. Temporary row predictions belong only to this call; the
+policy never mutates cache objects.
 
-#### Why a Unified Algorithm Works
-
-| Scenario | Input Difference | Algorithm Behavior |
+| Scenario | Input difference | Algorithm behavior |
 |---|---|---|
-| Initial Load | CurrentStats empty | No stickiness → full placement from scratch |
-| Node crash | Crashed node not in Nodes list | Crashed node's segments lose stickiness → redistributed; others stay |
-| DataVersion change | DataView has new/removed segments | New segments placed optimally; existing segments sticky |
-| Scale-out | New node in Nodes list | New node has low load → attracts segments; stickiness keeps most in place |
-| Periodic balance | Node loads shifted | State-aware reuse prevents unnecessary moves; only large imbalances trigger migration |
+| Initial load | No current placements | Place from scratch |
+| Node crash | Node ineligible | Reassign lost placements, preserve surviving reuse |
+| DataVersion change | New immutable desired membership | Rebuild at the new version |
+| Scale-out | Additional eligible RG node | Evaluate optional moves with the same scores |
+| Periodic balance | Updated actual row totals | Re-evaluate complete candidates |
 
 ### 2.3 CollectionLoadManager
 
@@ -232,19 +197,20 @@ loadmgr.CollectionLoadManager
 │   ├── Replica RG constraints (persisted, embedded in LoadConfig)
 │   └── Full-config writes with orphan cleanup
 │
-└── DirtyCollectionNotifier  ← injected balancer trigger callback
+└── source publication hook  ← synchronous cache update, then dirty notification
 ```
 
 #### LoadConfigStore
 
 Owns **desired state**: per-collection load config and replica resource-group
 constraints. Does not know about ShardID, views, or live node membership —
-focused purely on LoadConfig persistence plus a resident immutable snapshot for
-Balancer.
+focused on LoadConfig persistence and immutable per-collection publication.
+The cache registers a source hook; its publish-before-notify contract replaces
+the Balancer dependency on a global LoadConfigSnapshot.
 
 ```go
-// Concrete type, no interface abstraction. Snapshot returns an immutable
-// resident view and refreshes lazily when the live version advances.
+// Concrete desired-state owner. Existing snapshot APIs may remain for
+// compatibility; Balancer consumes the cache publication instead.
 type LoadConfigStore struct { /* ... */ }
 
 // Sole constructor: loads persisted state from ETCD at construction.
@@ -290,13 +256,18 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 ```
 
 **Persistence**: Split storage, reusing legacy key formats for upgrade compatibility:
+
 - `querycoord-collection-loadinfo/{collectionID}` — CollectionLoadInfo proto
 - `querycoord-partition-loadinfo/{collectionID}/{partitionID}` — PartitionLoadInfo proto
 - `querycoord-replica/{collectionID}/{replicaID}` — Replica proto
 
 Legacy proto fields are kept for wire compatibility but ignored by the new design: `ro_nodes`, `rw_sq_nodes`, `ro_sq_nodes`, `channel_node_infos`, `status`, `recover_times`, `load_percentage`, `replica_number`, `load_type`, `released_partitions`. New design uses only `nodes` (RW only), `resource_group`, `ID`, `collectionID` on Replica, and `collectionID`, `dbID`, `load_fields`, `field_indexID`, `user_specified_replica_mode` on CollectionLoadInfo. **TODO**: `Priority` is carried in memory but not yet persisted (needs a new Replica proto field).
 
-**Copy-On-Write semantics**: Put clones its input before storing, so callers may reuse/mutate their input freely. Snapshot returns pointers into the store's immutable view — callers must call `.Clone()` before any mutation. The store never modifies published snapshots in place; updates advance the live version and the next Snapshot call lazily publishes a new immutable view.
+**Copy-On-Write semantics**: Put clones caller-owned configuration and never
+mutates a published value. The target publication hook shares this immutable
+value and its source revision with the cache before Put returns. Remove
+publishes desired absence before returning. Existing Snapshot APIs can remain
+compatibility views but are not the Balancer read path.
 
 **Write amplification**: Put always writes the full config (no diff). Orphan partitions / replicas (present in previous state but absent from new config) are deleted. This is intentionally simple — dedup / diff optimization can be added later if write volume becomes a concern.
 
@@ -323,24 +294,28 @@ func (r *ShardViewRegistry) ShardIDs() []qviews.ShardID
 func (r *ShardViewRegistry) RegisterStatsObserver(observer func(qviews.ShardID, *ShardStats))
 ```
 
-Maintains live per-shard stats via callbacks from each `ShardViewManager`.
-`collectionShards` supports collection-scoped reconciliation, while
-`nodeShards` tracks the shards currently referencing each node. `Snapshot()`
-publishes the resident full snapshot lazily; `SnapshotForShards()` copies only
-the requested `ShardID -> *ShardStats` entries.
+Registry remains the lifecycle owner of shard managers. In the target design,
+its source adapter publishes actual shard state and removal into the cache;
+cache indexes supply Balancer scope resolution. The listed Snapshot and
+RegisterStatsObserver APIs describe the existing implementation, not the new
+publication contract. Registration must additionally cover initial replay and
+manager removal without missing updates.
 
-Shard managers remain resident for the lifetime of the Registry. A QueryView
-reaching Dropped removes that state machine from its manager, but does not
-remove the manager. Collection index entries are maintained independently of
-view state transitions. Node index entries follow the latest stats and
-disappear when the shard no longer references that node.
+The cache shares published immutable statistics, then updates affected node
+contributions and reverse indexes. Keeping the existing full `statsLocked()`
+calculation initially is possible, but does not eliminate its writer-side
+cost. Incremental statistics publication is a separate optimization.
+
+An ordinary empty manager may remain resident. A released manager is removed
+after its last view completes durable removal; its cache state is removed with
+an identity check so a late callback cannot erase a replacement manager.
 
 #### CollectionLoadManager (Facade)
 
 ```go
 type CollectionLoadManager interface {
-    // Facade parses the WAL ack broadcast result, calls LoadConfigStore.Put,
-    // and triggers Balancer. Balancer derives shards from DataView.
+    // Facade parses WAL ack results and calls LoadConfigStore.
+    // Store publication updates cache before enqueuing Balancer work.
     UpdateLoadConfig(ctx context.Context, result message.BroadcastResultAlterLoadConfigMessageV2) error
     ReleaseCollection(ctx context.Context, msg *messagespb.DropLoadConfigMessageHeader) error
 }
@@ -353,12 +328,12 @@ WAL ack of CChannel AlterLoadConfig broadcast
         → CollectionLoadManager.UpdateLoadConfig(result)
          ├── parse result.Message.Header() → LoadConfig
          ├── LoadConfigStore.Put(fullCfg)  // full write + orphan cleanup
-         └── Balancer.Trigger(DirtyCollections: [collID])
+         └── store hook: publish cache, then enqueue collID
 
 WAL ack of CChannel DropLoadConfig broadcast
         → CollectionLoadManager.ReleaseCollection(msg.Header())
          ├── LoadConfigStore.Remove(collID)
-         └── Balancer.Trigger(DirtyCollections: [collID])
+         └── store hook: publish cache, then enqueue collID
          // ShardViewRegistry cleanup via reconcile: Phase 1
          // sees "desired absent + current exists" → actionRelease
 ```
@@ -368,28 +343,35 @@ broadcast completion callback to update `CollectionLoadManager`. StreamingNode d
 persist a vchannel-local load config; QueryView metadata identifies the versioned load
 info used when the local state machine acquires resources.
 
-**Release semantics (Option A)**: `ReleaseCollection` immediately removes the LoadConfig and triggers Balancer. Orphan views (view exists but no config) are naturally detected by reconcile Phase 1 and released via `RequestRelease`. No "releasing" state needed. Crash recovery is handled uniformly by reconcile.
+**Release semantics (Option A)**: `ReleaseCollection` removes LoadConfig; its
+source hook clears the cache desired field and enqueues the collection. Orphan
+views are detected by Phase 1 and released via `RequestRelease`. No separate
+"releasing" desired state is needed; crash recovery uses the same reconciliation.
 
 **Load status derivation**: `LoadStatus` and `LoadPercentage` are derived from view states:
+
 - **Loaded**: All shards for the collection have an Up view.
 - **Loading**: At least one shard has no Up view.
 - **LoadPercentage**: `count(shards with Up view) / count(total shards) * 100`.
 
-**Recovery**: On startup: LoadConfigStore recovers from ETCD → ShardViewRegistry recovers persisted managers, stats, and indexes → Balancer triggers a full reconcile that hydrates the row-count ledger before planning.
+**Recovery**: Register source hooks before recovery, or use a registration and
+initial-replay contract without a missing-update window. Recover LoadConfig,
+DataView references, shard state, and topology; populate cache aggregates and
+indexes; then mark all sources ready and start reconciliation. No first-pass
+ledger hydration is required.
 
 ## 3. Policy Planning
 
-The Policy internally organizes work into three phases, but processes all dirty shards in one batch so decisions across shards are coordinated.
+The Policy organizes work into three phases and processes all dirty shards
+in one batch so decisions across shards remain coordinated.
 
-The Balancer / BalancePolicy / BalancerSnapshot / BalancePlan boundaries provide
-every input required by the normalized design: eligible nodes, cluster-wide row
-totals, target-shard row contributions, per-segment `RowNum`, and current
-segment-to-node states. Snapshot construction and row accounting remain
-Coord-local and require no additional RPC, protobuf, or QueryView lifecycle
-state.
+The cache Reader supplies eligible nodes, actual node row totals and their
+contributions, per-segment RowNum, desired shard summaries, and current
+placement. PlanningContext retains immutable references and private predictions.
+No additional RPC, protobuf, or QueryView lifecycle state is required.
 
 ```
-Plan(snap, dirty)
+Plan(reader, dirty)
     │
     ▼
 Phase 1: Classify each dirty shard
@@ -440,11 +422,13 @@ processed first, then by ShardID. Within a shard, segments are processed by
 `RowNum` descending and SegmentID ascending. The explicit secondary ordering
 makes planning deterministic.
 
-A shared `projectedRows` map starts from the snapshot's cross-shard row counts.
-Before rebuilding a shard, the Policy removes that shard's currently accounted
-rows from the tracker. The candidate then adds each desired segment exactly
-once. Once accepted, the candidate remains in `projectedRows`, so later shards
-in the batch see its steady-state effect.
+A shared `projectedRows` tracker starts from pinned NodeEntry row totals.
+Before rebuilding a shard, Policy subtracts its contribution from those same
+NodeEntry versions; it must not use independently refreshed shard statistics
+for that subtraction. The candidate adds each desired segment exactly once.
+Accepted replacements update a private delta, so later shards see their
+steady-state effect. Desired shard size and segment count come from cached
+DataView summaries. See [batch accounting](balancer_cache.md#42-planningcontext-and-predicted-loads).
 
 This is deliberately different from transient preparation accounting. It does
 not keep the old shard placement and add the complete replacement on top: doing
@@ -608,11 +592,252 @@ bias.
 
 There is no plan-level `BalanceThreshold`, `CostEfficiencyThreshold`, or
 migration-gain score. Stickiness already provides the migration-benefit gate at
-the segment decision point. Snapshot/version validation, prepare concurrency,
+the segment decision point. Local version validation, prepare concurrency,
 and migration-row throttling belong to plan execution and may delay work, but
 do not decide whether a placement is economically worthwhile.
 
-### 3.4 Algorithm Complexity
+### 3.4 Computation and Cost Boundaries
+
+The cache moves actual-state aggregation to publication. It does not change
+candidate allocation: collecting/sorting desired segments costs `O(S log S)`
+and evaluating eligible nodes normally costs `O(S*N)` per allocated shard.
+Overlapping placement copies can add stickiness-scan work. FanoutBudget remains
+a score, not a hard cap on candidate enumeration. A stable optional shard may
+still require a full allocation before assignment equality suppresses emission.
+
+The target reconcile work is:
+
+| Work | Location and cost boundary |
+|---|---|
+| Read Collection/Node objects | Get references; no segment deep copy or global snapshot construction |
+| Order dirty shards | Cached TotalRows lookup plus `O(D log D)` sorting |
+| Establish node baselines | `O(M)` retained references/scalars; no global consistency requirement |
+| Replace candidate contributions | Read the pinned node's contribution index; lookup cost depends on its shared representation |
+| Calculate ReferenceRows | Sum predicted eligible-node loads once per candidate |
+| Allocate segments | Existing segment sort and node scoring |
+| Return accepted plans | Memory proportional to accepted segment assignments |
+
+RG candidate indexes are maintained when topology changes. No reconcile scans
+all placements to recompute node totals, or scans desired segments solely to
+compute TotalRows/SegmentCount. Contribution replacement and scoring may still
+traverse many nodes; this design does not claim to eliminate every `D*M` term.
+The old implementation's detailed bounds are retained in Appendix A as a
+baseline, not a guarantee of the target data structure's lookup complexity.
+
+## 4. BalancerCache and PlanningContext
+
+The complete object model, interfaces, hooks, initialization, and consistency
+contract are in [Balancer Cache](balancer_cache.md). It replaces the previous
+per-cycle BalancerSnapshot and SnapshotBuilder model.
+
+### 4.1 Actual-State Aggregation
+
+Upstream publication and cache updates maintain:
+
+- DataView shard TotalRows and SegmentCount, together with membership and RowNum.
+- Actual shard-to-node contributions from retained QueryView statistics.
+- Each NodeEntry's Up/Pending totals and its matching contribution index.
+- Node/RG eligibility and collection/shard discovery indexes.
+
+Published RowNum is the only load metric. Known zero is distinct from unknown;
+exact-version statistics take precedence over historical fallback. This design
+adds neither MemSize nor a segment-count node-load score. Transform start-after
+TimeTick production remains the separate TODO in
+[the frontier design](transform_start_after_timetick.md); cache adoption does
+not implement that protocol.
+
+### 4.2 Within-Batch Prediction
+
+PlanningContext pins object references and owns the only mutable planning data:
+
+```text
+base[n] = pinnedNode[n].TotalRows
+old[n,s] = pinnedNode[n].Contribution(s).TotalRows
+projected[n] = base[n] + acceptedDelta[n]
+
+for each candidate s in the existing policy order:
+    candidateBase[n] = projected[n] - old[n,s]
+    candidate = allocate(s, candidateBase)
+    if accepted:
+        acceptedDelta[n] += candidate.Rows[n] - old[n,s]
+```
+
+Releases subtract their pinned old contributions before allocation; rejected
+optional candidates leave predictions unchanged. The node total and subtracted
+contribution belong to one object version, while different nodes and
+collections may reflect different times. ReferenceRows and partial assignments
+are recomputed from these predictions, not written back to the cache.
+
+### 4.3 Apply and Convergence
+
+The whole batch is planned before any of its actions are applied. Apply retains
+DataVersion non-regression and exact-version reference acquisition. A lost
+version or failed action requeues affected keys. Local prechecks may reject
+obviously superseded work, but do not form a cross-manager transaction. The
+refactor permits temporary stale plans that subsequent reconciliation corrects;
+stronger serialization of desired-state writes against plan acceptance is
+outside scope.
+
+## 5. Event Processing Examples
+
+### 5.1 Node Crash Recovery
+
+1. The node owner publishes QN3 as ineligible, then enqueues its placed shards.
+2. QueryView failure transitions independently publish actual contributions.
+3. Balancer detaches work, obtains cache references, and classifies candidates.
+4. Lost placements are redistributed with surviving-copy stickiness preserved.
+   Accepted candidates update only the private projected-load delta.
+5. Apply creates Preparing views; their source hooks publish actual state.
+   Updates during the batch remain queued for a successor pass.
+
+### 5.2 Load Collection
+
+1. CollectionLoadManager persists the desired config through LoadConfigStore.
+2. The store hook publishes the Collection desired field and indexes before
+   enqueueing C1 and returning.
+3. Scope resolution combines configured replicas and published DataView shards.
+4. Policy uses cached shard totals for ordering and allocates complete placements
+   with one shared projected-load tracker.
+5. Apply calls AddPreparing; the exact DataViewRef is acquired before existing
+   views can be preempted. Missing versions cause replanning.
+
+### 5.3 Optional Scale-Out
+
+1. Node/RG publication adds the node and enqueues desired collections in the RG,
+   even though the new node has no placed shards.
+2. Stable shards classify as MayOptimize; existing scores decide each placement.
+3. Each complete candidate is compared against its current assignment. Unchanged
+   candidates emit no plan; accepted candidates update the shared prediction.
+4. The executor applies the completed batch. Cache load values change only
+   through actual-state hooks, not through speculative plan construction.
+
+## 6. Thread Safety
+
+| Component | Concurrency model |
+|---|---|
+| Balancer | Single reconcile goroutine; thread-safe key enqueue |
+| BalancerCache | Object/partition locks for publication and lookup; immutable published object graphs |
+| PlanningContext | Call-local retained references and mutable prediction deltas |
+| BalancePolicy | No shared mutable planning state; one context per Plan call |
+| LoadConfigStore | Existing desired-state serialization, then synchronous publication |
+| ShardViewRegistry/Manager | Existing lifecycle locks; synchronous actual-state publication |
+| Source adapters | Never re-enter upstream from cache locks or perform I/O in hooks |
+
+Readers release cache locks before allocation or plan application. Writers
+follow upstream-to-cache lock ordering. Different fields of a shared entry are
+merged under its cache lock; published descendants remain immutable.
+
+## 7. Component Responsibilities
+
+| Component | Responsibility | State |
+|---|---|---|
+| Balancer | Resolve queued scopes, call Policy, apply/requeue | Work queue |
+| BalancerCache | Publish readable actual/desired facts and derived indexes | Immutable objects, aggregate contribution indexes |
+| PlanningContext | Reuse per-object reads and coordinate batch predictions | References, candidate-local data, accepted deltas |
+| BalancePolicy | Classify, order, allocate, compare | No cross-call state |
+| CollectionLoadManager | Desired load lifecycle through LoadConfigStore | Existing store |
+| ShardViewRegistry | Actual manager lifecycle and source publication | Resident managers |
+| ShardViewManager | QueryView state and placement/statistics publication | Per-shard state machines and DataViewRefs |
+
+## 8. Package Layout and Migration
+
+The existing implementation lives in:
+
+- `internal/views/coord/balancer/`: loop, scope queue, policy and scoring;
+  snapshot_builder.go and snapshot.go currently implement the old read path.
+- `internal/views/coord/loadmgr/`: load config owner and lifecycle facade.
+- `internal/views/coord/coordview/`: actual QueryView owners and sync scheduler.
+- `internal/views/coord/nodeview/`: current pull-based topology adapter.
+- `internal/dataview/`: immutable version publication and reference ownership.
+
+Add an isolated cache implementation and dependency-leaf read types, then source
+publication/initialization adapters, then switch Policy to Reader and its private
+PlanningContext. Do not create upstream-to-policy import cycles. Remove the
+snapshot builder from reconcile; compatibility snapshot APIs can remain for
+other consumers. Production runtime wiring is still a separate task.
+
+## 9. Future Considerations
+
+1. **Preparing timeout eviction**: Periodic reconcile can detect shards stuck in Preparing beyond a timeout → mark as Unrecoverable to release the slot.
+2. **Global optimization passes**: The current Policy uses deterministic per-shard greedy allocation with a shared steady-state row tracker. For batches where many shards need rebalancing simultaneously (e.g., scale-out), a second optimization pass could detect and resolve cross-shard conflicts (two shards both wanting the same lightly-loaded node).
+3. **Disk-based scoring**: Add `DiskUsage`/`DiskCapacity` back to `BalanceNode` and a disk-balance soft constraint once mmap / disk-index segments are in scope.
+4. **Rate limiting**: Cap concurrent Preparing views across all shards to prevent overwhelming the cluster during large-scale events.
+
+## 10. Verification
+
+### 10.1 Score Invariants
+
+1. `StickinessScore`, `NodeLoadScore`, `FanoutScore`, and `PlacementIntent` are
+   always within `[0, 1]`.
+2. A segment's stickiness does not change because earlier segments moved.
+3. `ReferenceRows` remains fixed while one shard candidate is constructed.
+4. Opening an over-budget node is penalized once; reusing it is not penalized
+   again.
+5. Equal-score selection is deterministic and prefers reuse before movement.
+
+### 10.2 Policy Behavior
+
+1. Current shard rows are removed before candidate assignments are added, so
+   same-node reuse is not double-counted.
+2. Ten small segments whose total rows fit one shard-node target do not
+   automatically fan out to ten QueryNodes.
+3. A large shard can use more QueryNodes within its row-derived fanout budget
+   when node-load benefit justifies it.
+4. Small load improvements do not overcome segment stickiness; sufficiently
+   large improvements move unsaturated segments, while saturated stickiness is
+   the maximum optional movement cost under the equal default weights.
+5. Node loss neutralizes stickiness only for segments without an eligible
+   reusable copy.
+6. DataVersion advancement places new segments without unnecessarily moving
+   surviving reusable segments.
+7. Optional optimization emits no plan when the complete assignment is
+   unchanged and requires no additional gain threshold when it changes.
+8. Replanning an applied candidate with unchanged inputs produces no further
+   optional plan.
+9. Earlier accepted shards update the shared steady-state row tracker seen by
+   later shards in the same batch.
+10. Under production defaults, pure node-load benefit does not open a node
+    beyond `FanoutBudget` when stickiness is equal.
+
+### 10.3 End-to-End Scenarios
+
+1. Initial load balances rows without unnecessary shard fanout.
+2. Low-benefit scale-out remains a no-op.
+3. High-benefit scale-out moves segments when weighted load gain exceeds
+   stickiness.
+4. Flush/DataVersion changes preserve reusable placements and load new
+   segments.
+5. QueryNode failure performs mandatory recovery and converges.
+6. A small shard previously spread over many QueryNodes consolidates to a
+   smaller node subset.
+
+### 10.4 Cache Publication and Batch Accounting
+
+1. Cache scopes cover dirty collection/shard/node events and residual releases;
+   a new node with no placements still triggers its RG's desired collections.
+2. Each retained object stays immutable across concurrent source publications.
+   Concurrent updates to different fields do not overwrite one another.
+3. Node totals match the contributions included in that same NodeEntry.
+   Mixed-time reads still subtract that version's contribution correctly.
+4. Desired shard totals and counts are published with their membership/RowNum;
+   reconciliation does not rescan segments to compute these summaries.
+5. Full reconcile performs no upstream snapshot pull or row-ledger rebuild.
+6. Registration/replay, readiness, repeated updates, old-instance callbacks,
+   deletion, and updates during processing do not lose work.
+7. Failed apply and missing DataView versions requeue. Flush aborts do not
+   expose unpublished membership, and cache refs do not bypass DataView GC.
+8. Static-input plans match the previous algorithm. ReferenceRows reflects
+   earlier accepted candidates rather than a static cached RG total.
+
+See [cache verification](balancer_cache.md#8-migration-performance-and-verification)
+for concurrency and performance scenarios.
+
+## Appendix A. Pre-Refactor Implementation Complexity
+
+The following bounds describe the existing SnapshotBuilder-era implementation,
+including full projected-row map clones and per-shard node filtering/sorting.
+They are retained as the optimization baseline. They do not describe the target
+cache's nested-index lookup cost or claim these old copies remain required.
 
 Let:
 
@@ -737,369 +962,3 @@ These bounds exclude snapshot acquisition. `SnapshotBuilder` reads only the
 resolved DataView and ShardView scope, refreshes row counts for dirty shards,
 and uses the row-count ledger to populate cluster-wide node loads. Initial and
 periodic full reconciles rebuild the complete ledger.
-
-## 4. BalancerSnapshot
-
-The snapshot is the immutable planning view built once per reconcile cycle.
-LoadConfig and node topology remain globally visible. DataView, ShardView, and
-per-shard row details are limited to the resolved planning scope, while each
-node carries its row total across all resident shards. All target shards in the
-batch are processed against the same snapshot.
-
-### 4.1 Structure
-
-```go
-type BalancerSnapshot struct {
-    // Provider-owned immutable snapshots composed for this reconcile cycle.
-    LoadConfigSnapshot *loadmgr.LoadConfigSnapshot
-    ShardViewSnapshot  *coordview.ShardViewSnapshot
-    DataViewSnapshot   *DataViewSnapshot
-    NodeSnapshot       *NodeSnapshot
-
-    // Per-node info with cross-shard aggregates embedded.
-    Nodes map[int64]*BalanceNode
-
-    // Exact row contributions for target shards. These values are already
-    // included in Nodes and are subtracted before replacement or release.
-    ShardRowStatsSnapshot map[qviews.ShardID]ShardRowStats
-
-    // Tunables (production defaults supplied by DefaultBalanceConfig).
-    Config *BalanceConfig
-}
-
-// ShardStats is the per-shard placement snapshot returned by ShardViewManager.
-type ShardStats struct {
-    UpVersion         *qviews.QueryViewVersion // nil if no Up view
-    UpLoadInfoVersion uint64                   // zero if no Up view
-    PreparingVersion  *qviews.QueryViewVersion // nil if no Preparing/Ready view
-    Segments          map[int64]*SegmentStats  // segmentID -> node states
-}
-
-type SegmentStats struct {
-    SegmentID   int64
-    PartitionID int64
-    Nodes       map[int64]SegmentState  // nodeID -> merged state
-}
-
-type SegmentState int
-
-const (
-    SegmentStateUnrecoverable SegmentState = iota
-    SegmentStatePreparing
-    // SegmentStateReady also covers Down views. Down is SN-only; QueryNodes do
-    // not receive Down and their loaded segments remain more reusable than
-    // Preparing placements.
-    SegmentStateReady
-    SegmentStateUp
-)
-
-// ShardStats.Segments is a node-level segment-state summary. The same segment
-// may appear on multiple nodes while views overlap, but a segment has only one
-// state per node. States are derived by merging all currently relevant views:
-//
-//   Up            <- current Up view assignment
-//   Ready         <- Preparing/Ready/Unrecoverable view assignment plus QueryNode ready report,
-//                    or Down view assignment because Down is SN-only and QN segments remain loaded
-//   Preparing     <- Preparing/Ready view assignment without ready report
-//   Unrecoverable <- Unrecoverable view assignment without ready report
-//
-// When multiple views mention the same (segmentID, nodeID), states are merged
-// by priority: Up > Ready > Preparing > Unrecoverable.
-
-// SegmentDataView carries the minimum metadata the Balancer needs per segment.
-type SegmentDataView struct {
-    SegmentID   int64
-    PartitionID int64
-    RowNum      int64  // sole balance load metric
-}
-
-// BalanceNode combines identity/health with cross-shard aggregated load.
-type BalanceNode struct {
-    // Identity & health (Node Manager).
-    NodeID         int64
-    Alive          bool
-    Stopping       bool
-    ResourceGroup  string
-
-    // Aggregated across all shards from SegmentInfo.RowNum.
-    UpRowCount      int64  // Up segments on this node
-    PendingRowCount int64  // Ready / Preparing segments on this node
-}
-
-// ShardRowStats maps each QueryNode to the rows contributed by one shard.
-type ShardRowStats map[int64]NodeRowStats
-
-type NodeRowStats struct {
-    UpRowCount      int64
-    PendingRowCount int64
-}
-
-// BalanceConfig contains only policy inputs. Each score is normalized before
-// its weight is applied.
-type BalanceConfig struct {
-    StickinessWeight float64
-    NodeLoadWeight   float64
-    FanoutWeight     float64
-
-    StickyRowsScale        int64
-    TargetRowsPerShardNode int64
-
-    TickerInterval time.Duration
-}
-```
-
-**Notes**:
-- The current policy assumes QueryNodes are homogeneous, so absolute assigned row count is comparable across nodes.
-- `RowNum` is the only load signal used by allocation, scoring, shard ordering, stickiness, and fanout-budget calculation. The native snapshot does not carry `MemSize`.
-- `SegmentCount` is not a node-load score. The desired shard's segment count is used only to cap `FanoutBudget` because fanout cannot exceed the number of segments.
-- The three weights must be non-negative and at least one must be positive. `StickyRowsScale` and `TargetRowsPerShardNode` must be positive.
-- `SegmentCountWeight`, `BaselineSegmentRows`, `BalanceThreshold`, and `CostEfficiencyThreshold` are not part of the normalized design.
-- The production defaults in Section 3.2 are calibrated with deterministic unit and end-to-end scenarios; they are not used as hidden normalization constants.
-- `ShardRowStatsSnapshot` contains the target shards' exact contributions already included in `Nodes`. Policy subtracts these values before replacing or releasing a shard, so the global node totals are not double-counted.
-- Memory and disk capacity are intentionally not admission-control constraints in this policy. Heterogeneous-node capacity normalization can be added later when a reliable capacity signal is available.
-
-### 4.2 State Source Summary
-
-```
-BalancerSnapshot (built once per reconcile cycle)
-│
-├── LoadConfigSnapshot      ← LoadConfigStore (global)
-├── ShardViewSnapshot       ← ShardViewRegistry (target shards)
-├── DataViewSnapshot        ← DataView Manager (selected collections)
-├── NodeSnapshot            ← Node Manager + Replica Manager (global)
-├── Nodes                   ← NodeSnapshot joined with global row-count ledger
-├── ShardRowStatsSnapshot   ← row-count ledger (target shards)
-└── Config                  ← runtime-supplied BalanceConfig
-                              (DefaultBalanceConfig in production wiring)
-```
-
-`SnapshotBuilder` owns a row-count ledger with three indexes:
-
-```go
-type rowCountLedger struct {
-    segmentRowCounts map[int64]int64
-    shardRowCount    map[qviews.ShardID]ShardRowStats
-    nodeRowCount     map[int64]NodeRowStats
-}
-```
-
-The Registry stats observer marks changed shard contributions dirty without
-performing metadata I/O or starting a reconcile. A scoped build refreshes the
-detached dirty set and keeps stable shard contributions unchanged. An explicit
-or periodic full reconcile clears and rebuilds all three indexes before
-planning. Scope fallback may expand planning to all shards without forcing a
-ledger rebuild.
-
-`RowNum` in segment metadata is the sole balance load metric. A missing or zero
-row count contributes zero load. Zero-row segments are placed using
-stickiness, fanout, and deterministic tie-breaking; no global segment-count
-bonus is added to the node score.
-
-The ledger caches row counts from the native planning snapshot by SegmentID.
-Each placed segment also carries `RowNum` and `HasRowNum` from the retained
-DataViewRefs. Known reference statistics take precedence over the cache,
-including a known zero; missing reference statistics fall back to the cache.
-A segment missing from both sources contributes zero. Retained versions may
-lack statistics after recovery because row statistics are not persisted.
-
-`TransformStartAfterTimetick` from DataView is passed through to QueryView metadata but is NOT consumed by the allocation algorithm.
-
-### 4.3 Consumption by Phase
-
-| Phase | Snapshot Fields | Purpose |
-|---|---|---|
-| **Phase 1** | `LoadConfigSnapshot`, `ShardViewSnapshot`, `DataViewSnapshot`, `Nodes[*].Alive` | Classify each dirty shard: must / may-optimize / release / none |
-| **Phase 2** | `DataViewSnapshot` shard and segment lookup, `Nodes` filtered by replica, `ShardRowStatsSnapshot`, shard segment/node states, normalized-score config | Remove current shard rows, incrementally produce the complete segment → node assignment, update partial rows and opened-node state |
-| **Phase 3** | Current assignment and complete candidate assignment | Always emit mandatory work; emit optional work only when assignments differ |
-
-### 4.4 Within-Batch Coordination
-
-The snapshot itself is not mutated during `Plan`. The Policy owns a shared
-steady-state row tracker cloned from the snapshot:
-
-```
-projectedRows := totalRows(snap.Nodes)
-for each candidate in orderedCandidates:
-    baseRows := projectedRows - currentRows(candidate.shardID)
-    placement := allocate(snap, candidate.shardID, baseRows)
-
-    if mandatory || placement differs from current assignment:
-        projectedRows := baseRows + rows(placement)
-        emit placement
-```
-
-Rejected/no-op optional candidates leave `projectedRows` unchanged. Accepted
-candidates replace their old shard contribution instead of being added on top
-of it. This gives cross-shard coordination without mutating the snapshot,
-rebuilding it per shard, or double-counting the replacement view.
-
-## 5. Event Processing Examples
-
-### 5.1 Node Crash Recovery
-
-```
-1. Node Manager detects QN3 crash → Trigger(NodeChanged: true)
-2. Balancer loop wakes and detaches the pending full-scan trigger batch
-3. Scope resolution selects all configured and resident shards
-4. Balancer rebuilds the row-count ledger and snapshot; QN3 is unavailable,
-   and shard stats may already reflect Syncer's OnNodeLost transitions
-5. policy.Plan(snap, [A, B, C]):
-   Phase 1: each shard either references unavailable QN3 or is already
-            Unrecoverable → all actionMust
-   Phase 2: order by size desc; for each shard:
-     - QN3 is ineligible → its segments have no reusable location and receive
-       neutral stickiness
-     - other segments retain stickiness → stay in place
-     - the accepted candidate replaces the shard's old contribution in
-       projectedRows so the next shard sees the shifted steady-state load
-   → plan.Prepares = {A: ..., B: ..., C: ...}
-6. Balancer.apply(plan) → AddPreparing for each
-```
-
-### 5.2 Load Collection
-
-```
-1. Load RPC → broadcast AlterLoadConfigMessage to CChannel → append-result FastAck
-2. DDL callback: CollectionLoadManager.UpdateLoadConfig(result)
-   → persist load config + Trigger(DirtyCollections: [C1])
-3. Balancer resolves C1, reads only its DataView and resident ShardStats, and
-   expands its DataView shards across the configured replicas
-4. policy.Plan(snap, [shards of C1]):
-   Phase 1: desired present, current absent → actionMust for each
-   Phase 2: no stickiness; segments sorted largest-first
-            NodeLoadScore coordinates rows across shards and FanoutScore avoids
-            opening unnecessary QueryNodes inside a small shard
-   → plan.Prepares = {each shard: builder}
-5. Balancer.apply(plan) → AddPreparing for each
-```
-
-### 5.3 Optional Scale-Out
-
-```
-1. A new QueryNode joins the replica resource group → Trigger(NodeChanged: true)
-2. Stable shards classify as actionMayOptimize
-3. For each segment, the current node participates as a normal candidate:
-   - moving loses segment-local StickinessScore
-   - a lighter new node may gain NodeLoadScore
-   - opening the node may lose FanoutScore when the shard is already at budget
-4. If no segment selects a different node, no plan is emitted
-5. If at least one segment selects a different node, the complete candidate is
-   emitted directly; there is no second plan-level gain threshold
-```
-
-## 6. Thread Safety
-
-| Component | Concurrency Model |
-|---|---|
-| Balancer | Single goroutine reconcile loop. `Trigger()` is thread-safe (enqueue only). |
-| SnapshotBuilder | Row-count ledger is owned by the serialized reconcile loop; a separate mutex protects observer-written dirty shard marks. |
-| BalancePolicy | Stateless pure function; receives immutable snapshot. Thread-safe by definition. |
-| CollectionLoadManager | Delegates desired-state mutation to LoadConfigStore (RWMutex). |
-| ShardViewRegistry | RWMutex protects resident managers, stats, reverse indexes, and observer registration. |
-| ShardViewManager | `sync.Mutex` per instance (existing). `Stats()` returns an atomic snapshot. |
-
-## 7. Component Responsibilities
-
-| Component | Responsibility | Holds State |
-|---|---|---|
-| Balancer | Scheduling framework: work queue + reconcile loop + plan executor | Work queue |
-| SnapshotBuilder | Resolve trigger scope, compose scoped snapshots, and maintain cluster-wide row totals | Row-count ledger + dirty shard set |
-| BalancePolicy | Batch planning: classify dirty shards + compute normalized incremental assignments + emit changed optional candidates | None |
-| CollectionLoadManager | Load-config lifecycle: DDL broadcast-result handling, desired-state persistence, dirty collection notify. | None beyond dependencies |
-| ShardViewRegistry | Actual shard view state aggregation, scoped snapshots, reverse indexes, and stats notifications. | Resident managers + stats + indexes + snapshot cache |
-| ShardViewManager | Per-shard multi-version view management (existing). Exposes `Stats()` for aggregation. | Per-shard state |
-
-## 8. Package Layout
-
-```
-internal/views/
-├── coord/
-│   ├── balancer/
-│   │   ├── balancer.go        # Balancer + reconcile loop + plan application
-│   │   ├── snapshot_builder.go # Scoped snapshot composition + row-count ledger
-│   │   ├── trigger.go         # TriggerScope queue + reconcile scope resolution
-│   │   ├── snapshot.go        # BalancerSnapshot, BalanceNode, SegmentInfo, BalanceConfig
-│   │   ├── policy.go          # BalancePolicy interface + BalancePlan
-│   │   ├── policy_impl.go     # Default Plan() implementation + shared steady-state row tracker
-│   │   └── scoring.go         # Hard constraints + normalized stickiness/load/fanout scoring
-│   ├── loadmgr/
-│   │   ├── load_config.go           # LoadConfig, ReplicaAssignment types
-│   │   ├── load_config_store.go     # LoadConfigStore
-│   │   └── manager.go               # CollectionLoadManager facade
-│   └── coordview/
-│       ├── shard_view_registry.go # ShardViewRegistry (aggregates ShardViewManagers)
-│       ├── shard_view_manager.go  # ShardViewManager (existing, + Stats())
-│       ├── state_machine.go       # CoordQueryViewStateMachine (existing)
-│       └── syncer/                # ReliableSyncer (existing)
-├── worknode/                  # Work-node side QueryView handlers
-└── qviews/                    # Shared types (existing)
-```
-
-## 9. Future Considerations
-
-1. **Preparing timeout eviction**: Periodic reconcile can detect shards stuck in Preparing beyond a timeout → mark as Unrecoverable to release the slot.
-2. **Global optimization passes**: The current Policy uses deterministic per-shard greedy allocation with a shared steady-state row tracker. For batches where many shards need rebalancing simultaneously (e.g., scale-out), a second optimization pass could detect and resolve cross-shard conflicts (two shards both wanting the same lightly-loaded node).
-3. **Disk-based scoring**: Add `DiskUsage`/`DiskCapacity` back to `BalanceNode` and a disk-balance soft constraint once mmap / disk-index segments are in scope.
-4. **Rate limiting**: Cap concurrent Preparing views across all shards to prevent overwhelming the cluster during large-scale events.
-
-## 10. Verification
-
-### 10.1 Score Invariants
-
-1. `StickinessScore`, `NodeLoadScore`, `FanoutScore`, and `PlacementIntent` are
-   always within `[0, 1]`.
-2. A segment's stickiness does not change because earlier segments moved.
-3. `ReferenceRows` remains fixed while one shard candidate is constructed.
-4. Opening an over-budget node is penalized once; reusing it is not penalized
-   again.
-5. Equal-score selection is deterministic and prefers reuse before movement.
-
-### 10.2 Policy Behavior
-
-1. Current shard rows are removed before candidate assignments are added, so
-   same-node reuse is not double-counted.
-2. Ten small segments whose total rows fit one shard-node target do not
-   automatically fan out to ten QueryNodes.
-3. A large shard can use more QueryNodes within its row-derived fanout budget
-   when node-load benefit justifies it.
-4. Small load improvements do not overcome segment stickiness; sufficiently
-   large improvements move unsaturated segments, while saturated stickiness is
-   the maximum optional movement cost under the equal default weights.
-5. Node loss neutralizes stickiness only for segments without an eligible
-   reusable copy.
-6. DataVersion advancement places new segments without unnecessarily moving
-   surviving reusable segments.
-7. Optional optimization emits no plan when the complete assignment is
-   unchanged and requires no additional gain threshold when it changes.
-8. Replanning an applied candidate with unchanged inputs produces no further
-   optional plan.
-9. Earlier accepted shards update the shared steady-state row tracker seen by
-   later shards in the same batch.
-10. Under production defaults, pure node-load benefit does not open a node
-    beyond `FanoutBudget` when stickiness is equal.
-
-### 10.3 End-to-End Scenarios
-
-1. Initial load balances rows without unnecessary shard fanout.
-2. Low-benefit scale-out remains a no-op.
-3. High-benefit scale-out moves segments when weighted load gain exceeds
-   stickiness.
-4. Flush/DataVersion changes preserve reusable placements and load new
-   segments.
-5. QueryNode failure performs mandatory recovery and converges.
-6. A small shard previously spread over many QueryNodes consolidates to a
-   smaller node subset.
-
-### 10.4 Snapshot Scope and Row Accounting
-
-1. Dirty collection, shard, and node triggers resolve the expected target
-   shards without reading unrelated ShardStats.
-2. Collection-scoped DataView snapshots exclude unselected collections and
-   preserve segment metadata and delete timeticks for selected collections.
-3. Scoped planning fallback and explicit full reconciliation select the same
-   full planning scope, while only the explicit full path rebuilds the ledger.
-4. Incremental shard contribution replacement produces the same node totals as
-   a full rebuild, including overlapping views and empty stats.
-5. Collection-scoped release uses the Registry collection index, while
-   periodic full reconciliation remains the safety net for residual state
-   outside scoped triggers.
