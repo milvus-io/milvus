@@ -25,10 +25,19 @@
 
 namespace milvus::index {
 
-// Owns destinations and engine context from planning through finalization.
-// The caller must drain reads before destroying the plan. Plans containing
-// files must be released on LocalFileIOPool; uncommitted files are removed
-// before engine context (including directory leases) is released.
+/**
+ * @brief Per-load destinations and family initialization state for packed
+ * input.
+ *
+ * Owns targets until successful reader initialization transfers their
+ * resources. Destruction removes uncommitted files before releasing family
+ * state and its directory leases; Commit marks successful ownership handoff
+ * without I/O.
+ * @pre Issued reads/writes must be drained before destruction. Destroy a failed
+ * reader before its plan so mappings cannot outlive their backing files.
+ * @note Async loading performs cleanup on the local-file executor; synchronous
+ * loading keeps cleanup on the caller thread.
+ */
 struct IndexLoadPlan {
     std::vector<storage::EntryLoadPlan> entries;
     std::any load_context;
@@ -38,13 +47,16 @@ struct IndexLoadPlan {
     IndexLoadPlan&
     operator=(const IndexLoadPlan&) = delete;
 
+    /** @brief Transfer cleanup responsibility, leaving the old plan empty. */
     IndexLoadPlan(IndexLoadPlan&& other) noexcept
         : entries(std::move(other.entries)),
           load_context(std::move(other.load_context)) {
         other.entries.clear();
     }
+
     IndexLoadPlan&
     operator=(IndexLoadPlan&&) = delete;
+
     ~IndexLoadPlan() {
         for (const auto& entry : entries) {
             const auto* target =
@@ -55,6 +67,11 @@ struct IndexLoadPlan {
         }
     }
 
+    /**
+     * @brief Look up a destination in this load's plan.
+     * @return A reference owned by this plan.
+     * @throws SegcoreError If the named entry was not planned.
+     */
     const storage::EntryLoadPlan&
     At(std::string_view name) const {
         const auto it = std::find_if(
@@ -65,7 +82,11 @@ struct IndexLoadPlan {
         return *it;
     }
 
-    // Called only after successful engine finalization. Does not perform I/O.
+    /**
+     * @brief Hand off prepared files after successful reader initialization.
+     * @pre All file targets are prepared and their writes have completed.
+     * @note Does not perform I/O; call only after the final cancellation check.
+     */
     void
     Commit() {
         for (auto& entry : entries) {
@@ -79,4 +100,5 @@ struct IndexLoadPlan {
         }
     }
 };
+
 }  // namespace milvus::index
