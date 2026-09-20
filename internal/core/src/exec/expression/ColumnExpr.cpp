@@ -16,8 +16,11 @@
 
 #include "ColumnExpr.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
+#include <type_traits>
+#include <vector>
 
 #include "bitset/bitset.h"
 #include "boost/variant/get.hpp"
@@ -27,6 +30,57 @@
 
 namespace milvus {
 namespace exec {
+
+template <typename T>
+bool
+PhyColumnExpr::GatherFromValueReader(const int64_t* offsets,
+                                     int64_t count,
+                                     T* values,
+                                     TargetBitmapView valid) {
+    using ReaderValue =
+        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+    if (!value_lookup_.Covers(offsets, count)) {
+        return false;
+    }
+    const auto* selected = value_lookup_.Reader<ReaderValue>();
+    AssertInfo(selected != nullptr,
+               "cached value reader does not match column type {}",
+               expr_->GetColumn().data_type_);
+
+    std::vector<uint8_t> seen(static_cast<size_t>(count), 0);
+    selected->Gather(
+        offsets,
+        count,
+        [&](int64_t i, const ReaderValue* value, bool is_valid) {
+            AssertInfo(i >= 0 && i < count,
+                       "value gather output {} exceeds batch size {}",
+                       i,
+                       count);
+            const auto pos = static_cast<size_t>(i);
+            AssertInfo(seen[pos] == 0,
+                       "value gather produced output {} twice",
+                       i);
+            seen[pos] = 1;
+            valid[pos] = is_valid;
+            if (!is_valid) {
+                return;
+            }
+            AssertInfo(value != nullptr,
+                       "value reader returned a null value for row {}",
+                       offsets[pos]);
+            if constexpr (std::is_same_v<T, std::string>) {
+                values[pos].assign(value->data(), value->size());
+            } else {
+                values[pos] = *value;
+            }
+        });
+    for (int64_t i = 0; i < count; ++i) {
+        AssertInfo(seen[static_cast<size_t>(i)] != 0,
+                   "value gather omitted row {}",
+                   offsets[i]);
+    }
+    return true;
+}
 
 int64_t
 PhyColumnExpr::GetNextBatchSize() {
@@ -84,6 +138,10 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
     AssertInfo(!expr_->GetColumn().element_level_,
                "ColumnExpr of row-level access is not supported");
 
+    if (HasValueReader()) {
+        return DoEvalFromValueReader<T>(input);
+    }
+
     // similar to PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op)
     // take offsets as input
     if (has_offset_input_) {
@@ -103,8 +161,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 auto accessor =
                     segment_chunk_reader_.GetStringDataAccessorByOffsets(
                         expr_->GetColumn().field_id_,
-                        OffsetView::From(input->data(), real_batch_size),
-                        PinnedIndexForRawLookup());
+                        OffsetView::From(input->data(), real_batch_size));
                 for (int64_t i = 0; i < real_batch_size; ++i) {
                     auto value = accessor(i);
                     if (value.has_value()) {
@@ -122,9 +179,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         // iterations and rebuild only when the chunk id changes, avoiding a
         // per-row chunk pin + accessor construction. Safe on both sealed
         // (CellAccessor keeps the chunk resident) and growing (data and the
-        // chunked validity storage have stable per-chunk buffers). The pinned
-        // index view is chunk-independent, so it is resolved once.
-        const auto pinned_index = PinnedIndexForRawLookup();
+        // chunked validity storage have stable per-chunk buffers).
         int64_t cached_chunk_id = -1;
         segcore::ChunkDataAccessor cda;
         for (auto i = 0; i < real_batch_size; ++i) {
@@ -149,8 +204,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
                 cda = segment_chunk_reader_.GetChunkDataAccessor(
                     expr_->GetColumn().data_type_,
                     expr_->GetColumn().field_id_,
-                    chunk_id,
-                    pinned_index);
+                    chunk_id);
                 cached_chunk_id = chunk_id;
             }
             auto chunk_data_by_offset = cda(chunk_offset);
@@ -182,7 +236,6 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             expr_->GetColumn().field_id_,
             current_chunk_id_,
             current_chunk_pos_,
-            PinnedIndexForRawLookup(),
             real_batch_size,
             &string_scan_state_);
         for (int i = 0; i < real_batch_size; ++i) {
@@ -217,8 +270,7 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
             auto cda = segment_chunk_reader_.GetChunkDataAccessor(
                 expr_->GetColumn().data_type_,
                 expr_->GetColumn().field_id_,
-                chunk_id,
-                PinnedIndexForRawLookup());
+                chunk_id);
 
             for (int i = chunk_id == current_chunk_id_ ? current_chunk_pos_ : 0;
                  i < chunk_size;
@@ -241,6 +293,76 @@ PhyColumnExpr::DoEval(OffsetVector* input) {
         }
         return res_vec;
     }
+}
+
+template <typename T>
+VectorPtr
+PhyColumnExpr::DoEvalFromValueReader(OffsetVector* input) {
+    const auto real_batch_size =
+        input != nullptr ? static_cast<int64_t>(input->size())
+                         : GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    std::vector<int64_t> offsets(static_cast<size_t>(real_batch_size));
+    if (input != nullptr) {
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            offsets[static_cast<size_t>(i)] = (*input)[i];
+        }
+    } else {
+        const auto row_begin = GetCurrentRows();
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            offsets[static_cast<size_t>(i)] = row_begin + i;
+        }
+    }
+
+    auto result = std::make_shared<ColumnVector>(
+        expr_->GetColumn().data_type_, real_batch_size);
+    auto* values = result->RawAsValues<T>();
+    TargetBitmapView valid(result->GetValidRawData(), real_batch_size);
+    valid.set();
+    if (!GatherFromValueReader(
+            offsets.data(), real_batch_size, values, valid)) {
+        const auto raw_chunk_count =
+            segment_chunk_reader_.NumChunkData(expr_->GetColumn().field_id_);
+        int64_t cached_chunk_id = -1;
+        segcore::ChunkDataAccessor accessor;
+        for (int64_t i = 0; i < real_batch_size; ++i) {
+            const auto offset = offsets[static_cast<size_t>(i)];
+            const auto [chunk_id, chunk_offset] = [&]() {
+                if (segment_chunk_reader_.segment_->type() ==
+                    SegmentType::Growing) {
+                    const auto chunk_size =
+                        segment_chunk_reader_.SizePerChunk();
+                    return std::pair{offset / chunk_size, offset % chunk_size};
+                }
+                if (segment_chunk_reader_.segment_->is_chunked() &&
+                    raw_chunk_count > 0) {
+                    return segment_chunk_reader_.GetChunkByOffset(
+                        expr_->GetColumn().field_id_, offset);
+                }
+                return std::pair<int64_t, int64_t>{0, offset};
+            }();
+            if (chunk_id != cached_chunk_id) {
+                accessor = segment_chunk_reader_.GetChunkDataAccessor(
+                    expr_->GetColumn().data_type_,
+                    expr_->GetColumn().field_id_,
+                    chunk_id);
+                cached_chunk_id = chunk_id;
+            }
+            auto value = accessor(chunk_offset);
+            if (!value.has_value()) {
+                valid[static_cast<size_t>(i)] = false;
+            } else {
+                values[i] = segcore::get_from_variant<T>(value);
+            }
+        }
+    }
+    if (input == nullptr) {
+        value_lookup_current_row_ += real_batch_size;
+    }
+    return result;
 }
 
 }  //namespace exec

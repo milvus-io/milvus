@@ -1384,7 +1384,6 @@ template <typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     OffsetVector* input) {
-    using Index = index::ScalarIndex<T>;
     typedef std::conditional_t<std::is_integral_v<T> &&
                                    !std::is_same_v<bool, T>,
                                int64_t,
@@ -1410,12 +1409,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
     auto right_operand = right_operand_arg_.GetValue<HighPrecisionType>();
     auto op_type = expr_->op_type_;
     auto arith_type = expr_->arith_op_type_;
-    auto sub_batch_size = has_offset_input_ ? input->size() : size_per_chunk_;
 
     auto execute_sub_batch =
-        [ op_type, arith_type,
-          sub_batch_size ]<FilterType filter_type = FilterType::sequential>(
-            Index * index_ptr,
+        [op_type,
+         arith_type]<FilterType filter_type = FilterType::sequential>(
+            const index::IScalarValueReader<T>* index_ptr,
+            size_t sub_batch_size,
             HighPrecisionType value,
             HighPrecisionType right_operand,
             const int32_t* offsets = nullptr) {
@@ -2276,7 +2275,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
         return res;
     };
     if (has_offset_input_) {
-        auto res = ProcessIndexChunksByOffsets<T>(
+        auto res = ProcessValueIndexByOffsets<T>(
             execute_sub_batch, input, value, right_operand);
 
         AssertInfo(res->size() == real_batch_size,
@@ -2287,7 +2286,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForIndex(
         return res;
     } else {
         auto res =
-            ProcessIndexChunks<T>(execute_sub_batch, value, right_operand);
+            ProcessValueIndex<T>(execute_sub_batch, value, right_operand);
         AssertInfo(res->size() == real_batch_size,
                    "internal error: expr processed rows {} not equal "
                    "expect batch size {}",

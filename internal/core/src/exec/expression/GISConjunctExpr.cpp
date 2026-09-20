@@ -24,10 +24,6 @@
 #include "common/Utils.h"
 #include "exec/expression/GISFunctionFilterExpr.h"
 #include "geos_c.h"
-#include "index/Index.h"
-#include "index/Meta.h"
-#include "index/ScalarIndex.h"
-#include "knowhere/dataset.h"
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "pb/schema.pb.h"
@@ -102,24 +98,13 @@ GISGroupState::~GISGroupState() {
 // -------------------------------------------------------------------------
 PhyGISCoarseConjunctExpr::CoarseOutcome
 PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
-    // Mirrors PhyGISFunctionFilterExpr::EvalForIndexSegment's coarse query.
-    using Index = index::ScalarIndex<std::string>;
-    EnsurePinnedIndex();
-
-    // p.has_index was sampled at compile time from segment_->HasIndex(), but
-    // HasIndex() can report true while the index is still mid-load, so the pin
-    // may yield nothing (num_index_chunk_ != 1) or a non-string index (the
-    // dynamic_cast below returns nullptr). Unlike the baseline
-    // DetermineExecPath(), this coarse path has no RawData fallback, so guard
-    // both here and degrade to an all-set coarse bitmap in that window -- the
-    // same behavior as the no-index path (p.has_index == false). The Refine
-    // node still evaluates the exact predicate, so results stay correct; we
-    // only lose R-Tree pruning for this segment while the index warms up.
-    const Index* scalar_index =
-        (num_index_chunk_ == 1 && !pinned_index_.empty())
-            ? dynamic_cast<const Index*>(pinned_index_[0].get())
-            : nullptr;
-    if (scalar_index == nullptr) {
+    if (spatial_reader_ == nullptr) {
+        auto req = MakeIndexRequirement(RequiredReader::Spatial);
+        req.value_type = DataType::GEOMETRY;
+        SelectAndPinIndex(req);
+        exec_path_ = ExprExecPath::RawData;
+    }
+    if (spatial_reader_ == nullptr) {
         // Degrade to an all-set coarse: results stay correct (Refine still
         // evaluates the exact predicate) but this segment loses R-Tree pruning.
         // The caller aggregates this across the group's predicates and warns
@@ -132,12 +117,8 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     GEOSContextHandle_t ctx = GetThreadLocalGEOSContext();
     Geometry query_geom(ctx, p.query_wkt.c_str());
 
-    auto ds = std::make_shared<milvus::Dataset>();
-    ds->Set(milvus::index::OPERATOR_TYPE, p.op);
-    ds->Set(milvus::index::MATCH_VALUE, query_geom);
-
-    auto* idx_ptr = const_cast<Index*>(scalar_index);
-    auto tmp = idx_ptr->Query(ds);
+    auto tmp = spatial_reader_->Candidates(gis_detail::ToSpatialOp(p.op),
+                                           query_geom);
     // Query() returns a bitmap sized index->Count() -- every row appended to
     // the index -- while Eval combines it into a candidate bitmap sized
     // active_count_, the MVCC-visible row count at the query timestamp. On a
@@ -147,14 +128,14 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // operator&=/|= size check is a bare assert() that is compiled out under
     // NDEBUG. Normalize into active_count_ space: keep the first
     // active_count_ bits.
-    if (static_cast<int64_t>(tmp.size()) > active_count_) {
+    const auto covered = selected_covered_row_end_;
+    if (static_cast<int64_t>(tmp.size()) > covered) {
         TargetBitmap sliced;
-        sliced.append(tmp, 0, active_count_);
-        p.coarse = std::move(sliced);
-        return CoarseOutcome::kPruned;
+        sliced.append(tmp, 0, covered);
+        tmp = std::move(sliced);
     }
-    // The reverse direction -- the index reporting FEWER rows than are
-    // visible -- is unreachable on a growing segment (SegmentGrowingImpl
+    // The reverse direction -- the index reporting FEWER rows than it claims
+    // to cover -- is unreachable on a growing segment (SegmentGrowingImpl
     // appends to the index before acking rows) but IS reachable on a sealed
     // one: an R-Tree built before empty/unparseable geometries were kept as
     // placeholder entries under-reports the row space, and its missing
@@ -166,10 +147,14 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
     // row space to candidates (coarse ⊇ exact holds trivially, Refine still
     // evaluates the exact predicate) and lose R-Tree pruning for this
     // segment. Same defensive posture as the pin-empty degrade above.
-    if (PromoteShortGISCoarseBitmap(tmp, active_count_)) {
+    if (PromoteShortGISCoarseBitmap(tmp, covered)) {
+        // Rows past the covered prefix are legitimately un-indexed on a
+        // growing segment; they are candidates too.
+        tmp.resize(active_count_, /*init=*/true);
         p.coarse = std::move(tmp);
         return CoarseOutcome::kIndexShort;
     }
+    tmp.resize(active_count_, /*init=*/true);
     p.coarse = std::move(tmp);
     return CoarseOutcome::kPruned;
 }
@@ -177,9 +162,9 @@ PhyGISCoarseConjunctExpr::RunRTreeQuery(GISGroupState::Pred& p) {
 void
 PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
     // Self-guard like every other SegmentExpr subclass: block until the
-    // prefetch-pool DetermineExecPath()/EnsurePinnedIndex() has finished before
-    // RunRTreeQuery() re-pins on the query thread, closing the pinned_index_
-    // race. No-op once the future is drained (subsequent batches hit the cheap
+    // prefetch-pool DetermineExecPath() has finished before RunRTreeQuery()
+    // selects and pins the exact spatial entry on the query thread. No-op once
+    // the future is drained (subsequent batches hit the cheap
     // EnsureExecPathDetermined() branch). FilterBits already waits before the
     // first Eval, so this only hardens direct/other callers.
     WaitPrefetch();
@@ -232,7 +217,7 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
         // or permanently, if it is broken -- so warn: nothing else in the
         // pipeline reports it and a degraded deployment would otherwise look
         // exactly like a healthy one. All preds share the field's index, so
-        // num_index_chunk_/pinned_index_ reflect that shared pin state.
+        // num_index_chunk_/spatial_reader_ reflect that shared pin state.
         if (unusable_index > 0) {
             LOG_WARN(
                 "GIS coarse pruning degraded to full scan: field {} reports an "
@@ -243,7 +228,7 @@ PhyGISCoarseConjunctExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 unusable_index,
                 st_->preds.size(),
                 num_index_chunk_,
-                pinned_index_.size());
+                spatial_reader_ != nullptr ? 1 : 0);
         }
         // Same shape as the per-predicate path's short-index warning
         // (GISFunctionFilterExpr.cpp), throttled the same way: this is an
