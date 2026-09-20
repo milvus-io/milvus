@@ -51,7 +51,8 @@ const (
 
 type loadSuite struct {
 	integration.MiniClusterSuite
-	async bool
+	async  bool
+	faults *storageFaultProxy
 }
 
 func TestSyncLoad(t *testing.T) {
@@ -262,6 +263,10 @@ func (s *loadSuite) buildFixture(jsonStats bool) loadFixture {
 }
 
 func (s *loadSuite) checkReload(f loadFixture) {
+	if s.faults != nil {
+		s.checkStorageFaults(f)
+		return
+	}
 	for pass := 0; pass < 2; pass++ {
 		s.loadAndQuery(f)
 		s.release(f)
