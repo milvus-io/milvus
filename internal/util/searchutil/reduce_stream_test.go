@@ -113,6 +113,22 @@ type testHit struct {
 	score float32
 }
 
+func searchChunkBytes(t *testing.T, hits ...testHit) int {
+	t.Helper()
+	result := newSearchChunk(1, int64(len(hits)), hits)
+	buffer := &orderedChildBuffer{}
+	_, err := buffer.accept(result, 1, int64(len(hits)))
+	require.NoError(t, err)
+
+	bytes := 0
+	for _, unit := range buffer.units {
+		unitBytes, err := unit.reducibleByteSize()
+		require.NoError(t, err)
+		bytes += unitBytes
+	}
+	return bytes
+}
+
 type retainedInputStats struct {
 	chunks        int
 	bufferedUnits int
@@ -126,7 +142,6 @@ func assertRetainedInputBound(t *testing.T, stream *OrderedReduceStream) retaine
 	stats := retainedInputStats{}
 	for i := range stream.childBuffers {
 		buffer := &stream.childBuffers[i]
-		require.LessOrEqual(t, len(buffer.units), stream.chunkSize)
 		if !buffer.hasUnit() {
 			continue
 		}
@@ -139,11 +154,21 @@ func assertRetainedInputBound(t *testing.T, stream *OrderedReduceStream) retaine
 		stats.bufferedUnits += len(buffer.units)
 		stats.unreadUnits += len(buffer.units) - buffer.cursor
 		stats.protobufBytes += proto.Size(chunk)
+
+		bufferedBytes := 0
+		lastUnitBytes := 0
+		for _, unit := range buffer.units {
+			unitBytes, err := unit.reducibleByteSize()
+			require.NoError(t, err)
+			bufferedBytes += unitBytes
+			lastUnitBytes = unitBytes
+		}
+		if len(buffer.units) > 1 {
+			require.Less(t, bufferedBytes-lastUnitBytes, stream.chunkBytes)
+		}
 	}
 
 	require.LessOrEqual(t, stats.chunks, len(stream.childStreams))
-	require.LessOrEqual(t, stats.bufferedUnits, stream.chunkSize*len(stream.childStreams))
-	require.LessOrEqual(t, stats.unreadUnits, stream.chunkSize*len(stream.childStreams))
 	return stats
 }
 
@@ -159,7 +184,7 @@ func TestOrderedReduceStreamMergesANNHits(t *testing.T) {
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 1, Topk: 4, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{left, right},
-		2,
+		searchChunkBytes(t, testHit{id: 1, score: 0.95}, testHit{id: 2, score: 0.90}),
 	)
 	require.NoError(t, err)
 
@@ -187,7 +212,7 @@ func TestOrderedReduceStreamReturnsPartialFinalChunk(t *testing.T) {
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 1, Topk: 3, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{left, right},
-		2,
+		searchChunkBytes(t, testHit{id: 1, score: 0.9}, testHit{id: 2, score: 0.8}),
 	)
 	require.NoError(t, err)
 
@@ -195,17 +220,29 @@ func TestOrderedReduceStreamReturnsPartialFinalChunk(t *testing.T) {
 	assertSearchChunk(t, recvChunk(t, stream), []int64{3}, []float32{0.7}, []int64{1})
 }
 
-func TestOrderedReduceStreamAllocBufferUsesRemainingUnits(t *testing.T) {
-	stream := &OrderedReduceStream{
-		nq:              2,
-		topK:            5,
-		chunkSize:       1024,
-		emittedPerQuery: []int64{4, 3},
-	}
-	require.Equal(t, 3, cap(stream.allocBuffer().units))
+func TestOrderedReduceStreamDefersOversizedUnitToNextChunk(t *testing.T) {
+	largeID := int64(1 << 56)
+	child := &fakeReduceStream{recv: []fakeStreamRecv{{chunk: newSearchChunk(1, 2, []testHit{
+		{id: 1, score: 0.9},
+		{id: largeID, score: 0.8},
+	})}}}
+	chunkBytes := searchChunkBytes(t, testHit{id: 1, score: 0.9}) + 1
+	require.Greater(t, searchChunkBytes(t, testHit{id: largeID, score: 0.8}), chunkBytes)
 
-	stream.chunkSize = 2
-	require.Equal(t, 2, cap(stream.allocBuffer().units))
+	stream, err := NewReduceStream(
+		&internalpb.SearchRequest{Nq: 1, Topk: 2, MetricType: "IP", IsIterator: true},
+		[]ReduceStream{child},
+		chunkBytes,
+	)
+	require.NoError(t, err)
+	assertSearchChunk(t, recvChunk(t, stream), []int64{1}, []float32{0.9}, []int64{1})
+	assertSearchChunk(t, recvChunk(t, stream), []int64{largeID}, []float32{0.8}, []int64{1})
+}
+
+func TestOrderedReduceStreamAllocBufferStartsEmpty(t *testing.T) {
+	buffer := (&OrderedReduceStream{}).allocBuffer()
+	require.Empty(t, buffer.units)
+	require.Zero(t, buffer.byteSize)
 }
 
 func TestOrderedReduceStreamMergesMultipleQueries(t *testing.T) {
@@ -224,10 +261,15 @@ func TestOrderedReduceStreamMergesMultipleQueries(t *testing.T) {
 		)},
 	}}
 
+	chunkBytes := searchChunkBytes(t,
+		testHit{id: 1, score: 0.90},
+		testHit{id: 2, score: 0.85},
+		testHit{id: 11, score: 0.95},
+	)
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 2, Topk: 2, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{left, right},
-		3,
+		chunkBytes,
 	)
 	require.NoError(t, err)
 
@@ -244,7 +286,7 @@ func TestOrderedReduceStreamBreaksScoreTiesByPK(t *testing.T) {
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 1, Topk: 2, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{left, right},
-		2,
+		searchChunkBytes(t, testHit{id: 2, score: 0.9}, testHit{id: 5, score: 0.9}),
 	)
 	require.NoError(t, err)
 
@@ -258,7 +300,7 @@ func TestOrderedReduceStreamComposesReducedChildStreams(t *testing.T) {
 			[]testHit{{id: 1, score: 0.95}, {id: 5, score: 0.50}})}}},
 		&fakeReduceStream{recv: []fakeStreamRecv{{chunk: newSearchChunk(1, 3,
 			[]testHit{{id: 3, score: 0.75}})}}},
-	}, 2)
+	}, searchChunkBytes(t, testHit{id: 1, score: 0.95}, testHit{id: 3, score: 0.75}))
 	require.NoError(t, err)
 
 	right, err := NewReduceStream(request, []ReduceStream{
@@ -266,10 +308,13 @@ func TestOrderedReduceStreamComposesReducedChildStreams(t *testing.T) {
 			[]testHit{{id: 2, score: 0.90}})}}},
 		&fakeReduceStream{recv: []fakeStreamRecv{{chunk: newSearchChunk(1, 3,
 			[]testHit{{id: 4, score: 0.70}})}}},
-	}, 2)
+	}, searchChunkBytes(t, testHit{id: 2, score: 0.90}, testHit{id: 4, score: 0.70}))
 	require.NoError(t, err)
 
-	stream, err := NewReduceStream(request, []ReduceStream{left, right}, 2)
+	stream, err := NewReduceStream(request, []ReduceStream{left, right}, searchChunkBytes(t,
+		testHit{id: 1, score: 0.95},
+		testHit{id: 2, score: 0.90},
+	))
 	require.NoError(t, err)
 
 	assertSearchChunk(t, recvChunk(t, stream), []int64{1, 2}, []float32{0.95, 0.90}, []int64{2})
@@ -289,10 +334,11 @@ func TestOrderedReduceStreamRetainsOneChunkPerChild(t *testing.T) {
 	rightHigh := &fakeReduceStream{recv: []fakeStreamRecv{{chunk: rightHighChunk}}}
 	rightOther := &fakeReduceStream{recv: []fakeStreamRecv{{chunk: rightOtherChunk}}}
 
-	leftStream, err := NewReduceStream(request, []ReduceStream{leftHigh, leftOther}, 2)
+	chunkBytes := searchChunkBytes(t, testHit{id: 1, score: 0.99}, testHit{id: 2, score: 0.98})
+	leftStream, err := NewReduceStream(request, []ReduceStream{leftHigh, leftOther}, chunkBytes)
 	require.NoError(t, err)
 	left := leftStream.(*OrderedReduceStream)
-	rightStream, err := NewReduceStream(request, []ReduceStream{rightHigh, rightOther}, 2)
+	rightStream, err := NewReduceStream(request, []ReduceStream{rightHigh, rightOther}, chunkBytes)
 	require.NoError(t, err)
 	right := rightStream.(*OrderedReduceStream)
 
@@ -318,7 +364,7 @@ func TestOrderedReduceStreamRetainsOneChunkPerChild(t *testing.T) {
 		protobufBytes: proto.Size(rightHighChunk) + proto.Size(rightOtherChunk),
 	}, rightStats)
 
-	finalStream, err := NewReduceStream(request, []ReduceStream{left, right}, 2)
+	finalStream, err := NewReduceStream(request, []ReduceStream{left, right}, chunkBytes)
 	require.NoError(t, err)
 	final := finalStream.(*OrderedReduceStream)
 	readyBuffers, err := final.getReadyBuffers()
@@ -334,8 +380,9 @@ func TestOrderedReduceStreamRetainsOneChunkPerChild(t *testing.T) {
 
 	outputBuffer := final.allocBuffer()
 	for range 2 {
-		unit, err := final.produceNextUnits(readyBuffers)
+		unit, chunkReady, err := final.produceNextUnits(readyBuffers, outputBuffer.byteSize)
 		require.NoError(t, err)
+		require.False(t, chunkReady)
 		require.NotNil(t, unit)
 		final.merge(outputBuffer, unit)
 	}
@@ -388,7 +435,7 @@ func TestOrderedReduceStreamComposesMetadata(t *testing.T) {
 	left, err := NewReduceStream(request, []ReduceStream{
 		&fakeReduceStream{recv: []fakeStreamRecv{{chunk: leftFirst}}},
 		&fakeReduceStream{recv: []fakeStreamRecv{{chunk: leftSecond}}},
-	}, 2)
+	}, searchChunkBytes(t, testHit{id: 1, score: 0.95}))
 	require.NoError(t, err)
 
 	rightFirst := newSearchChunk(1, 4, []testHit{{id: 2, score: 0.90}})
@@ -406,10 +453,15 @@ func TestOrderedReduceStreamComposesMetadata(t *testing.T) {
 	right, err := NewReduceStream(request, []ReduceStream{
 		&fakeReduceStream{recv: []fakeStreamRecv{{chunk: rightFirst}}},
 		&fakeReduceStream{recv: []fakeStreamRecv{{chunk: rightSecond}}},
-	}, 2)
+	}, searchChunkBytes(t, testHit{id: 2, score: 0.90}))
 	require.NoError(t, err)
 
-	stream, err := NewReduceStream(request, []ReduceStream{left, right}, 4)
+	stream, err := NewReduceStream(request, []ReduceStream{left, right}, searchChunkBytes(t,
+		testHit{id: 1, score: 0.95},
+		testHit{id: 2, score: 0.90},
+		testHit{id: 3, score: 0.75},
+		testHit{id: 4, score: 0.70},
+	))
 	require.NoError(t, err)
 	chunk := recvChunk(t, stream)
 	assertSearchChunk(t, chunk, []int64{1, 2, 3, 4}, []float32{0.95, 0.90, 0.75, 0.70}, []int64{4})
@@ -438,7 +490,7 @@ func TestOrderedReduceStreamUsesInternalScoreOrderForL2(t *testing.T) {
 			&fakeReduceStream{recv: []fakeStreamRecv{{chunk: leftChunk}}},
 			&fakeReduceStream{recv: []fakeStreamRecv{{chunk: rightChunk}}},
 		},
-		2,
+		searchChunkBytes(t, testHit{id: 1, score: -0.10}, testHit{id: 2, score: -0.20}),
 	)
 	require.NoError(t, err)
 
@@ -467,12 +519,49 @@ func TestSplitSearchResultPreservesQueryBoundaries(t *testing.T) {
 		[]testHit{{id: 10, score: 0.95}, {id: 11, score: 0.85}},
 	)
 
-	chunks, err := SplitSearchResult(result, 2)
+	chunks, err := SplitSearchResult(result, searchChunkBytes(t,
+		testHit{id: 1, score: 0.9},
+		testHit{id: 2, score: 0.8},
+	))
 	require.NoError(t, err)
 	require.Len(t, chunks, 3)
 	assertSearchChunk(t, chunks[0], []int64{1, 2}, []float32{0.9, 0.8}, []int64{2, 0})
 	assertSearchChunk(t, chunks[1], []int64{3, 10}, []float32{0.7, 0.95}, []int64{1, 1})
 	assertSearchChunk(t, chunks[2], []int64{11}, []float32{0.85}, []int64{0, 1})
+}
+
+func TestSplitSearchResultAcceptsUnitThatCrossesThreshold(t *testing.T) {
+	result := newSearchChunk(1, 3, []testHit{
+		{id: 1, score: 0.9},
+		{id: 2, score: 0.8},
+		{id: 3, score: 0.7},
+	})
+	chunkBytes := searchChunkBytes(t,
+		testHit{id: 1, score: 0.9},
+		testHit{id: 2, score: 0.8},
+	) - 1
+
+	chunks, err := SplitSearchResult(result, chunkBytes)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	assertSearchChunk(t, chunks[0], []int64{1, 2}, []float32{0.9, 0.8}, []int64{2})
+	assertSearchChunk(t, chunks[1], []int64{3}, []float32{0.7}, []int64{1})
+}
+
+func TestSplitSearchResultEmitsOversizedUnitAlone(t *testing.T) {
+	largeID := int64(1 << 56)
+	result := newSearchChunk(1, 2, []testHit{
+		{id: 1, score: 0.9},
+		{id: largeID, score: 0.8},
+	})
+	chunkBytes := searchChunkBytes(t, testHit{id: 1, score: 0.9}) + 1
+	require.Greater(t, searchChunkBytes(t, testHit{id: largeID, score: 0.8}), chunkBytes)
+
+	chunks, err := SplitSearchResult(result, chunkBytes)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2)
+	assertSearchChunk(t, chunks[0], []int64{1}, []float32{0.9}, []int64{1})
+	assertSearchChunk(t, chunks[1], []int64{largeID}, []float32{0.8}, []int64{1})
 }
 
 func TestSplitSearchResultEmitsMetadataOnce(t *testing.T) {
@@ -496,9 +585,12 @@ func TestSplitSearchResultEmitsMetadataOnce(t *testing.T) {
 	result.FilterValidCounts = []int64{5, 6}
 	result.ResultData.AllSearchCount = 50
 
-	chunks, err := SplitSearchResult(result, 1)
+	chunks, err := SplitSearchResult(result, searchChunkBytes(t,
+		testHit{id: 1, score: 0.9},
+		testHit{id: 2, score: 0.8},
+	))
 	require.NoError(t, err)
-	require.Len(t, chunks, 3)
+	require.Len(t, chunks, 2)
 
 	require.Equal(t, int64(100), chunks[0].GetBase().GetSourceID())
 	require.Equal(t, int64(200), chunks[0].GetReqID())
@@ -588,7 +680,7 @@ func TestOrderedReduceStreamAggregatesMetadataOnce(t *testing.T) {
 			&fakeReduceStream{recv: []fakeStreamRecv{{chunk: leftChunk}}},
 			&fakeReduceStream{recv: []fakeStreamRecv{{chunk: rightChunk}}},
 		},
-		2,
+		searchChunkBytes(t, testHit{id: 1, score: 0.9}, testHit{id: 2, score: 0.8}),
 	)
 	require.NoError(t, err)
 
@@ -681,7 +773,7 @@ func TestOrderedReduceStreamStartsMissingChildReceivesConcurrently(t *testing.T)
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 1, Topk: 2, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{left, right},
-		2,
+		searchChunkBytes(t, testHit{id: 1, score: 0.9}, testHit{id: 2, score: 0.8}),
 	)
 	require.NoError(t, err)
 
@@ -718,7 +810,7 @@ func TestOrderedReduceStreamClosesChildrenOnRecvError(t *testing.T) {
 	stream, err := NewReduceStream(
 		&internalpb.SearchRequest{Nq: 1, Topk: 2, MetricType: "IP", IsIterator: true},
 		[]ReduceStream{left, right},
-		2,
+		searchChunkBytes(t, testHit{id: 1, score: 0.9}, testHit{id: 2, score: 0.8}),
 	)
 	require.NoError(t, err)
 
@@ -774,7 +866,7 @@ func TestNewReduceStreamValidatesPlainANNSearch(t *testing.T) {
 	require.NoError(t, stream.Close())
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true}, []ReduceStream{child}, 0)
-	require.ErrorContains(t, err, "positive Chunk size")
+	require.ErrorContains(t, err, "positive Chunk bytes")
 
 	_, err = NewReduceStream(&internalpb.SearchRequest{Nq: 1, Topk: 1, IsIterator: true}, []ReduceStream{nil}, 1)
 	require.ErrorContains(t, err, "child stream 0 is nil")

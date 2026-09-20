@@ -51,6 +51,7 @@ type orderedUnit struct {
 	data       *schemapb.SearchResultData
 	queryIndex int64
 	rowIndex   int64
+	byteSize   int
 }
 
 func (u orderedUnit) score() float32 {
@@ -62,11 +63,33 @@ func (u orderedUnit) pk() any {
 }
 
 type orderedOutputBuffer struct {
-	units []orderedUnit
+	units    []orderedUnit
+	byteSize int
 }
 
 func (b *orderedOutputBuffer) isEmpty() bool {
 	return len(b.units) == 0
+}
+
+func (u orderedUnit) reducibleByteSize() (int, error) {
+	chunk, err := buildSearchChunk(
+		[]orderedUnit{u},
+		u.data.GetNumQueries(),
+		u.data.GetTopK(),
+		"",
+		false,
+		false,
+	)
+	if err != nil {
+		return 0, err
+	}
+	data := chunk.GetResultData()
+	return proto.Size(&schemapb.SearchResultData{
+		FieldsData:     data.GetFieldsData(),
+		Scores:         data.GetScores(),
+		Ids:            data.GetIds(),
+		ElementIndices: data.GetElementIndices(),
+	}), nil
 }
 
 type orderedChildBuffer struct {
@@ -167,7 +190,7 @@ func decodeChunk(chunk *internalpb.SearchResults, nq, topK int64) (*schemapb.Sea
 }
 
 // SplitSearchResult splits one complete Search result into query-major Chunks.
-func SplitSearchResult(result *internalpb.SearchResults, chunkSize int) ([]*internalpb.SearchResults, error) {
+func SplitSearchResult(result *internalpb.SearchResults, chunkBytes int) ([]*internalpb.SearchResults, error) {
 	if result == nil {
 		return nil, errors.New("SplitSearchResult requires a Search result")
 	}
@@ -180,8 +203,8 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkSize int) ([]*inte
 	if result.GetTopK() <= 0 {
 		return nil, fmt.Errorf("SplitSearchResult requires a positive topK, got %d", result.GetTopK())
 	}
-	if chunkSize <= 0 {
-		return nil, fmt.Errorf("SplitSearchResult requires a positive Chunk size, got %d", chunkSize)
+	if chunkBytes <= 0 {
+		return nil, fmt.Errorf("SplitSearchResult requires positive Chunk bytes, got %d", chunkBytes)
 	}
 
 	buffer := &orderedChildBuffer{}
@@ -198,11 +221,52 @@ func SplitSearchResult(result *internalpb.SearchResults, chunkSize int) ([]*inte
 		return []*internalpb.SearchResults{chunk}, nil
 	}
 
-	chunks := make([]*internalpb.SearchResults, 0, (len(buffer.units)+chunkSize-1)/chunkSize)
-	for start := 0; start < len(buffer.units); start += chunkSize {
-		end := min(start+chunkSize, len(buffer.units))
+	chunks := make([]*internalpb.SearchResults, 0)
+	start := 0
+	accumulatedBytes := 0
+	for end, unit := range buffer.units {
+		unitBytes, err := unit.reducibleByteSize()
+		if err != nil {
+			return nil, err
+		}
+		if unitBytes > chunkBytes && accumulatedBytes > 0 {
+			chunk, err := buildSearchChunk(
+				buffer.units[start:end],
+				result.GetNumQueries(),
+				result.GetTopK(),
+				result.GetMetricType(),
+				result.GetIsTopkReduce(),
+				result.GetIsRecallEvaluation(),
+			)
+			if err != nil {
+				return nil, err
+			}
+			chunks = append(chunks, chunk)
+			start = end
+			accumulatedBytes = 0
+		}
+		accumulatedBytes += unitBytes
+		if accumulatedBytes < chunkBytes {
+			continue
+		}
 		chunk, err := buildSearchChunk(
-			buffer.units[start:end],
+			buffer.units[start:end+1],
+			result.GetNumQueries(),
+			result.GetTopK(),
+			result.GetMetricType(),
+			result.GetIsTopkReduce(),
+			result.GetIsRecallEvaluation(),
+		)
+		if err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, chunk)
+		start = end + 1
+		accumulatedBytes = 0
+	}
+	if start < len(buffer.units) {
+		chunk, err := buildSearchChunk(
+			buffer.units[start:],
 			result.GetNumQueries(),
 			result.GetTopK(),
 			result.GetMetricType(),
@@ -245,7 +309,7 @@ type OrderedReduceStream struct {
 
 	nq              int64
 	topK            int64
-	chunkSize       int
+	chunkBytes      int
 	metricType      string
 	currentQuery    int64
 	emittedPerQuery []int64
@@ -261,7 +325,7 @@ type OrderedReduceStream struct {
 }
 
 // NewReduceStream creates the Plain ANN Search iterator OrderedReduceStream implementation.
-func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkSize int) (ReduceStream, error) {
+func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStream, chunkBytes int) (ReduceStream, error) {
 	if request == nil {
 		return nil, errors.New("NewReduceStream requires a Search request")
 	}
@@ -274,8 +338,8 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 	if request.GetIsAdvanced() || len(request.GetSubReqs()) > 0 || request.GetGroupByFieldId() > 0 || len(request.GetGroupByFieldIds()) > 0 {
 		return nil, errors.New("NewReduceStream currently supports Plain ANN Search only")
 	}
-	if chunkSize <= 0 {
-		return nil, fmt.Errorf("NewReduceStream requires a positive Chunk size, got %d", chunkSize)
+	if chunkBytes <= 0 {
+		return nil, fmt.Errorf("NewReduceStream requires positive Chunk bytes, got %d", chunkBytes)
 	}
 	for i, childStream := range childStreams {
 		if childStream == nil {
@@ -291,7 +355,7 @@ func NewReduceStream(request *internalpb.SearchRequest, childStreams []ReduceStr
 		childRecvCompletions: make(chan childRecvCompletion, max(1, len(childStreams))),
 		nq:                   request.GetNq(),
 		topK:                 request.GetTopk(),
-		chunkSize:            chunkSize,
+		chunkBytes:           chunkBytes,
 		metricType:           request.GetMetricType(),
 		emittedPerQuery:      make([]int64, request.GetNq()),
 	}, nil
@@ -314,9 +378,12 @@ func (s *OrderedReduceStream) Recv() (*internalpb.SearchResults, error) {
 			return nil, s.fail(err)
 		}
 
-		oneReduceResult, err := s.produceNextUnits(readyBuffers)
+		oneReduceResult, chunkReady, err := s.produceNextUnits(readyBuffers, outputBuffer.byteSize)
 		if err != nil {
 			return nil, s.fail(err)
+		}
+		if chunkReady {
+			break
 		}
 
 		s.merge(outputBuffer, oneReduceResult)
@@ -350,18 +417,11 @@ func (s *OrderedReduceStream) Recv() (*internalpb.SearchResults, error) {
 }
 
 func (s *OrderedReduceStream) allocBuffer() *orderedOutputBuffer {
-	capacity := 0
-	for queryIndex := s.currentQuery; queryIndex < s.nq && capacity < s.chunkSize; queryIndex++ {
-		remaining := max(int64(0), s.topK-s.emittedPerQuery[queryIndex])
-		capacity += min(s.chunkSize-capacity, int(remaining))
-	}
-	return &orderedOutputBuffer{
-		units: make([]orderedUnit, 0, capacity),
-	}
+	return &orderedOutputBuffer{}
 }
 
 func (s *OrderedReduceStream) isChunkReady(outputBuffer *orderedOutputBuffer) bool {
-	return len(outputBuffer.units) >= s.chunkSize || s.currentQuery >= s.nq
+	return outputBuffer.byteSize >= s.chunkBytes || s.currentQuery >= s.nq
 }
 
 func (s *OrderedReduceStream) getReadyBuffers() ([]*orderedChildBuffer, error) {
@@ -500,12 +560,12 @@ func (s *OrderedReduceStream) acceptMetadata(chunk *internalpb.SearchResults, da
 	s.metadata.ResultData.AllSearchCount += data.GetAllSearchCount()
 }
 
-func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer) (*orderedUnit, error) {
+func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffer, outputBytes int) (*orderedUnit, bool, error) {
 	for s.currentQuery < s.nq {
 		if s.emittedPerQuery[s.currentQuery] >= s.topK {
 			if s.currentQuery == s.nq-1 {
 				s.currentQuery++
-				return nil, nil
+				return nil, false, nil
 			}
 
 			for _, buffer := range readyBuffers {
@@ -513,7 +573,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 			}
 			for i := range s.childBuffers {
 				if !s.childDrained[i] && !s.childBuffers[i].hasUnit() {
-					return nil, nil
+					return nil, false, nil
 				}
 			}
 			s.currentQuery++
@@ -527,7 +587,7 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 			}
 			candidate := buffer.front()
 			if candidate.queryIndex < s.currentQuery {
-				return nil, fmt.Errorf("child buffer returned query %d after query %d started", candidate.queryIndex, s.currentQuery)
+				return nil, false, fmt.Errorf("child buffer returned query %d after query %d started", candidate.queryIndex, s.currentQuery)
 			}
 			if candidate.queryIndex > s.currentQuery {
 				continue
@@ -549,19 +609,30 @@ func (s *OrderedReduceStream) produceNextUnits(readyBuffers []*orderedChildBuffe
 			continue
 		}
 
+		selected := readyBuffers[winner].front()
+		unitBytes, err := selected.reducibleByteSize()
+		if err != nil {
+			return nil, false, err
+		}
+		if unitBytes > s.chunkBytes && outputBytes > 0 {
+			return nil, true, nil
+		}
+
 		oneReduceResult := s.pop(readyBuffers[winner])
+		oneReduceResult.byteSize = unitBytes
 		s.emittedPerQuery[s.currentQuery]++
 		if s.emittedPerQuery[s.currentQuery] == s.topK && s.currentQuery == s.nq-1 {
 			s.currentQuery++
 		}
-		return &oneReduceResult, nil
+		return &oneReduceResult, false, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 func (s *OrderedReduceStream) merge(outputBuffer *orderedOutputBuffer, oneReduceResult *orderedUnit) {
 	if oneReduceResult != nil {
 		outputBuffer.units = append(outputBuffer.units, *oneReduceResult)
+		outputBuffer.byteSize += oneReduceResult.byteSize
 	}
 }
 
