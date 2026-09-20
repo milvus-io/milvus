@@ -108,8 +108,7 @@ ScanRawField(milvus::OpContext* op_ctx,
         reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
                                             field_id,
                                             chunk_id,
-                                            chunk_pos,
-                                            segcore::PinnedIndexView{});
+                                            chunk_pos);
     for (size_t offset = 0; offset < row_count; ++offset) {
         if ((offset & 1023) == 0) {
             segcore::CheckCancellation(op_ctx,
