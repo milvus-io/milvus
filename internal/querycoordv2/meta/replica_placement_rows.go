@@ -30,19 +30,11 @@ import (
 )
 
 // refreshRows caches a complete recovery-view row snapshot for a loaded scope.
-// The caller holds the group recovery lock; RPCs hold no metadata locks.
+// The caller holds the group recovery lock; recovery-view reads hold no metadata locks.
 func (g *replicaPlacement) refreshRows(ctx context.Context, broker Broker, scope map[int64][]int64) error {
-	// All triggers share a complete successful row snapshot. Slow RPCs hold only
+	// All triggers share a complete successful row snapshot. Recovery-view reads hold only
 	// this group's scheduling lock, never replica/collection/resource metadata locks.
 	var refreshErr error
-	for _, parts := range scope {
-		// Spawn precedes load metadata registration. Keep fault recovery active,
-		// but do not optimize with an unknown scope mistaken for empty data.
-		if len(parts) == 0 {
-			refreshErr = merr.WrapErrServiceUnavailable("replica placement load scope is not registered yet")
-			break
-		}
-	}
 	if !reflect.DeepEqual(scope, g.scope) || time.Since(g.refreshed) >= 30*time.Second {
 		rows := make(map[int64]int64, len(scope))
 		ids := make([]int64, 0, len(scope))
@@ -52,9 +44,9 @@ func (g *replicaPlacement) refreshRows(ctx context.Context, broker Broker, scope
 		slices.Sort(ids)
 		singleShard := make(map[int64]bool, len(scope))
 		for _, id := range ids {
-			if refreshErr != nil {
-				break
-			}
+			// Replica creation precedes load metadata registration. Until partitions
+			// are known, request the whole collection; a later scope change refreshes
+			// this cache immediately, even before its normal expiry.
 			parts := scope[id]
 			channels, segments, err := broker.GetRecoveryInfoV2(ctx, id, parts...)
 			if err != nil {
@@ -78,7 +70,7 @@ func (g *replicaPlacement) refreshRows(ctx context.Context, broker Broker, scope
 				}
 				// DC owns recovery frontier selection; retain selected Dropped
 				// compaction parents and match the loaded partition scope.
-				if partitions.Contain(segment.GetPartitionID()) || segment.GetPartitionID() == common.AllPartitionsID {
+				if len(parts) == 0 || partitions.Contain(segment.GetPartitionID()) || segment.GetPartitionID() == common.AllPartitionsID {
 					rows[id] += segment.GetNumOfRows()
 				}
 			}

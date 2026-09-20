@@ -29,8 +29,10 @@ type Meta struct {
 	*ResourceManager
 	Broker Broker // existing coordinator dependency, used only by enabled replica placement
 
-	placementMu     sync.RWMutex
-	placementPolicy *replicaPlacementPolicy
+	placementMu      sync.Mutex
+	placementPolicy  *replicaPlacementPolicy
+	placementGroups  map[string]*replicaPlacement
+	placementPending sync.Map // collection ID -> uncertain atomic replica save
 }
 
 func NewMeta(
