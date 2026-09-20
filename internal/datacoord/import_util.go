@@ -830,6 +830,11 @@ func normalizeStorageKey(key string) string {
 // Under local storage the read is os.Open, which follows symlinks and /proc
 // magic links such as /proc/self/root, so the key is resolved first. A key
 // that cannot be resolved is an error, which rejects the import.
+//
+// This resolve and the later open are not atomic, and the datanode opens the
+// caller's original string rather than what was resolved here. A caller who can
+// write to the staging directory can swap a symlink in between. Closing that
+// needs O_NOFOLLOW or a resolve-and-recheck at the read.
 func comparableStorageKey(key string, localStorage bool) (string, error) {
 	if localStorage {
 		resolved, err := filepath.EvalSymlinks(key)
