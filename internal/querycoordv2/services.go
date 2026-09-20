@@ -147,7 +147,7 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 		// available follows the same scope: the caller asks whether THAT
 		// group can serve, and a group that cannot must not be reported as
 		// serving because some other group can.
-		queryServiceAvailable := s.checkAnyReplicaAvailable(collectionID)
+		var queryServiceAvailable bool
 		if rgName := req.GetResourceGroup(); rgName != "" {
 			scoped, err := utils.LoadPercentageByResourceGroup(ctx, s.meta, s.targetMgr, s.dist, collectionID, rgName)
 			if err != nil {
@@ -159,6 +159,8 @@ func (s *Server) ShowLoadCollections(ctx context.Context, req *querypb.ShowColle
 			}
 			percentage = scoped
 			queryServiceAvailable = s.checkAnyReplicaAvailableInResourceGroup(ctx, collectionID, rgName)
+		} else {
+			queryServiceAvailable = s.checkAnyReplicaAvailable(collectionID)
 		}
 
 		resp.CollectionIDs = append(resp.CollectionIDs, collectionID)

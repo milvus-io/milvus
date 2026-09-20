@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -232,4 +233,45 @@ func TestShowLoadCollectionsScopedIsNotAvailableWithoutAServiceableLeader(t *tes
 	require.NoError(t, merr.Error(resp.GetStatus()))
 	assert.EqualValues(t, 100, resp.GetInMemoryPercentages()[0], "sanity: fully loaded by the percentage")
 	assert.False(t, resp.GetQueryServiceAvailable()[0], "loaded is not serving: the leader is not serviceable")
+}
+
+// Each request answers availability in its own scope and computes only that
+// answer: a request naming a resource group asks the group's shard leaders and
+// never the collection-wide check, which it would only overwrite.
+func TestShowLoadCollectionsComputesOnlyTheAvailabilityItsScopeAsksFor(t *testing.T) {
+	withFailedLoadCache(t)
+	f := newRGLoadPercentageFixture(t)
+	f.putTarget(t, 100, 1000, "100-dmc0", 1, 2)
+	f.putReplica(t, 100, 10, "rg-a")
+	f.registerNode(10)
+	f.putServiceableDelegator(100, 10, "100-dmc0", 1, 2)
+	f.promoteTarget(t, 100)
+	require.NoError(t, f.meta.PutPartitionWithoutSave(context.Background(), &meta.Partition{
+		PartitionLoadInfo: &querypb.PartitionLoadInfo{CollectionID: 100, PartitionID: 1000},
+		LoadPercentage:    100,
+	}))
+
+	collectionWide := 0
+	var origin func(*Server, int64) bool
+	counting := mockey.Mock((*Server).checkAnyReplicaAvailable).To(func(s *Server, collectionID int64) bool {
+		collectionWide++
+		return origin(s, collectionID)
+	}).Origin(&origin).Build()
+	defer counting.UnPatch()
+
+	show := func(rg string) bool {
+		resp, err := f.server().ShowLoadCollections(context.Background(), &querypb.ShowCollectionsRequest{
+			CollectionIDs: []int64{100},
+			ResourceGroup: rg,
+		})
+		require.NoError(t, err)
+		require.NoError(t, merr.Error(resp.GetStatus()))
+		return resp.GetQueryServiceAvailable()[0]
+	}
+
+	assert.True(t, show("rg-a"))
+	assert.Zero(t, collectionWide, "a scoped request does not compute the collection-wide answer")
+
+	assert.True(t, show(""))
+	assert.Equal(t, 1, collectionWide, "an unscoped request does")
 }
