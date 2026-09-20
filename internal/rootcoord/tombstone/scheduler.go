@@ -110,6 +110,9 @@ func (s *tombstoneSweeperImpl) triggerGCTombstone(ctx context.Context) {
 		if !confirmed {
 			return true
 		}
+		// Keep removals synchronous in this single background loop. Collection
+		// GC releases ddLock during catalog I/O and relies on this ordering to
+		// exclude legacy partition GC that can rewrite the collection record.
 		if err := tombstone.Remove(ctx); err != nil {
 			s.Logger().Warn(ctx, "fail to remove tombstone", mlog.String("tombstone", tombstoneID), mlog.Err(err))
 			return true

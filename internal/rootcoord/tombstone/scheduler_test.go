@@ -19,6 +19,7 @@ package tombstone
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -144,6 +145,65 @@ func TestTombstoneSweeper_ConcurrentReplacementIsNotDeleted(t *testing.T) {
 	value, ok := sweeper.tombstones.Load("same")
 	require.True(t, ok)
 	assert.Same(t, replacement, value.(*tombstoneEntry).tombstone)
+}
+
+func TestTombstoneSweeper_RemovalsAreSerial(t *testing.T) {
+	sweeper := &tombstoneSweeperImpl{
+		notifier: syncutil.NewAsyncTaskNotifier[struct{}](),
+		interval: time.Millisecond,
+	}
+	started := make(chan string, 4)
+	proceed := make(chan struct{})
+	release := sync.OnceFunc(func() { close(proceed) })
+	for _, id := range []string{"c:100", "p:100:1001"} {
+		sweeper.AddTombstone(&funcTombstone{
+			id: id,
+			confirm: func(context.Context) (bool, error) {
+				return true, nil
+			},
+			remove: func(ctx context.Context) error {
+				select {
+				case started <- id:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				select {
+				case <-proceed:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			},
+		})
+	}
+	go sweeper.background()
+	t.Cleanup(func() {
+		release()
+		sweeper.Close()
+	})
+	waitStarted := func() string {
+		t.Helper()
+		select {
+		case id := <-started:
+			return id
+		case <-time.After(5 * time.Second):
+			t.Fatal("tombstone removal did not start")
+			return ""
+		}
+	}
+	first := waitStarted()
+	// Neither the other tombstone nor a later tick may enter Remove until the
+	// current catalog operation completes. Collection GC relies on this when
+	// it releases ddLock during I/O; legacy partition GC can rewrite its record.
+	select {
+	case id := <-started:
+		t.Fatalf("removal %s overlapped blocked removal %s", id, first)
+	case <-time.After(50 * time.Millisecond):
+	}
+	release()
+	second := waitStarted()
+	assert.ElementsMatch(t, []string{"c:100", "p:100:1001"}, []string{first, second})
+	require.Eventually(t, func() bool { return countTombstones(sweeper) == 0 }, 5*time.Second, time.Millisecond)
 }
 
 func countTombstones(sweeper *tombstoneSweeperImpl) int {
