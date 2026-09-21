@@ -35,11 +35,13 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -163,6 +165,28 @@ func testMilvusTableTargetRefreshSchema() *schemapb.CollectionSchema {
 	return schema
 }
 
+// mockRefreshSnapshotReads exercises real parsing while isolating packed I/O.
+// The packed package separately tests both snapshot metadata consumers.
+func mockRefreshSnapshotReads(t *testing.T, read func() ([]byte, error)) {
+	t.Helper()
+	parse := func() (*datapb.SnapshotMetadata, error) {
+		data, err := read()
+		if err != nil {
+			return nil, err
+		}
+		return snapshotio.ParseSnapshotMetadataWithVersionCheck(data)
+	}
+	metadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).To(func(string, string, *indexpb.StorageConfig, packed.ExternalSpecContext) (*datapb.SnapshotMetadata, error) {
+		return parse()
+	}).Build()
+	t.Cleanup(func() { metadata.UnPatch() })
+	explore := mockey.Mock(packed.ExploreFilesReturnManifestPath).To(func([]string, string, string, string, *indexpb.StorageConfig, packed.ExternalSpecContext) ([]packed.FileInfo, string, error) {
+		_, err := parse()
+		return nil, "", err
+	}).Build()
+	t.Cleanup(func() { explore.UnPatch() })
+}
+
 func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -185,20 +209,20 @@ func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
 			previousSchema := proto.Clone(schema)
 			mt := &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](), segments: NewSegmentsInfo()}
 			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: schema})
-			previousSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 32, State: commonpb.SegmentState_Flushed}
-			mt.segments.SetSegment(10, NewSegmentInfo(proto.Clone(previousSegment).(*datapb.SegmentInfo)))
+			segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 32, State: commonpb.SegmentState_Flushed})
+			previousSegment := proto.Clone(segment.SegmentInfo)
+			mt.segments.SetSegment(10, segment)
 			validMetadata, err := protojson.Marshal(&datapb.SnapshotMetadata{
 				Collection: &datapb.CollectionDescription{Schema: testMilvusTableRefreshSchema(false)},
 			})
 			require.NoError(t, err)
 			var reads atomic.Int32
-			read := mockey.Mock(packed.ReadFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, _ string, _ packed.ExternalSpecContext) ([]byte, error) {
+			mockRefreshSnapshotReads(t, func() ([]byte, error) {
 				if reads.Add(1) == 1 && tc.validFirst {
 					return validMetadata, nil
 				}
 				return []byte(tc.data), nil
-			}).Build()
-			defer read.UnPatch()
+			})
 			var persisted *datapb.ExternalCollectionRefreshJob
 			failStateWrite := tc.failStateWrite
 			save := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).To(func(_ *stubCatalog, _ context.Context, job *datapb.ExternalCollectionRefreshJob) error {
@@ -260,7 +284,7 @@ func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
 }
 
 func TestExploreExternalFilesErrorPropagation(t *testing.T) {
-	for _, scenario := range []string{"invalid_source", "invalid_spec", "missing_collection", "read_timeout", "service_unavailable", "success"} {
+	for _, scenario := range []string{"invalid_source", "invalid_spec", "missing_collection", "read_timeout", "service_unavailable", "allocate_attempt", "success"} {
 		t.Run(scenario, func(t *testing.T) {
 			job := &datapb.ExternalCollectionRefreshJob{
 				CollectionId:   100,
@@ -281,6 +305,10 @@ func TestExploreExternalFilesErrorPropagation(t *testing.T) {
 				exploreErr = context.DeadlineExceeded
 			case "service_unavailable":
 				exploreErr = merr.WrapErrServiceUnavailable("storage unavailable")
+			case "allocate_attempt":
+				exploreErr = merr.WrapErrServiceUnavailable("allocator unavailable")
+				allocate := mockey.Mock((*stubAllocator).AllocID).Return(int64(0), exploreErr).Build()
+				defer allocate.UnPatch()
 			}
 			explore := mockey.Mock(packed.ExploreFilesReturnManifestPath).
 				Return([]packed.FileInfo{{FilePath: "a.parquet", NumRows: 10}}, "manifest.json", exploreErr).Build()
@@ -335,14 +363,13 @@ func TestCreateTasksForJobSnapshotErrorCodes(t *testing.T) {
 				})
 				require.NoError(t, err)
 				reads := 0
-				read := mockey.Mock(packed.ReadFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, _ string, _ packed.ExternalSpecContext) ([]byte, error) {
+				mockRefreshSnapshotReads(t, func() ([]byte, error) {
 					reads++
 					if failDuringExplore && reads == 1 {
 						return validMetadata, nil
 					}
 					return []byte(tc.data), nil
-				}).Build()
-				defer read.UnPatch()
+				})
 				manager := &externalCollectionRefreshManager{mt: mt, allocator: &stubAllocator{nextID: 1000}}
 				job := &datapb.ExternalCollectionRefreshJob{
 					CollectionId: 100, ExternalSource: schema.GetExternalSource(), ExternalSpec: schema.GetExternalSpec(),
@@ -374,13 +401,12 @@ func TestRefreshMilvusTableMetadataReadTimeoutRetries(t *testing.T) {
 	mt := &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
 	mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: schema})
 	var reads atomic.Int32
-	read := mockey.Mock(packed.ReadFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, _ string, _ packed.ExternalSpecContext) ([]byte, error) {
+	mockRefreshSnapshotReads(t, func() ([]byte, error) {
 		if reads.Add(1) == 1 {
 			return nil, context.DeadlineExceeded
 		}
 		return []byte(`{"corrupt manifest`), nil
-	}).Build()
-	defer read.UnPatch()
+	})
 	manager := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{nextID: 1000},
 		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
 	defer manager.Stop()
@@ -398,10 +424,7 @@ func TestRefreshMilvusTableMetadataReadTimeoutRetries(t *testing.T) {
 }
 
 func TestCreateTasksForJobInvalidMetadataRedactsSource(t *testing.T) {
-	read := mockey.Mock(packed.ReadFileWithExternalSpec).Return([]byte(`{"corrupt manifest`), nil).Build()
-	defer read.UnPatch()
-	_, metadataErr := packed.ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
-		`{"format":"milvus-table"}`, nil, packed.ExternalSpecContext{})
+	_, metadataErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(`{"corrupt manifest`))
 	require.ErrorIs(t, metadataErr, merr.ErrDataIntegrity)
 	// Source validation rejects userinfo before reading. Inject only the
 	// dependency's real parse error here to test diagnostic redaction in isolation.
@@ -489,7 +512,7 @@ func TestEnsureTasksForInitJobDeduplicatesExplore(t *testing.T) {
 }
 
 func TestCreateTasksForJobPlanningFailures(t *testing.T) {
-	for _, failure := range []string{"empty_source", "allocate_id", "publish_tasks"} {
+	for _, failure := range []string{"empty_source", "plan_tasks", "allocate_id", "publish_tasks"} {
 		t.Run(failure, func(t *testing.T) {
 			refreshMeta := createTestRefreshMeta(t)
 			files := []*datapb.ExternalFileInfo{{FilePath: "a.parquet"}}
@@ -500,6 +523,9 @@ func TestCreateTasksForJobPlanningFailures(t *testing.T) {
 			defer explore.UnPatch()
 			cause := merr.WrapErrServiceUnavailable("metadata unavailable")
 			switch failure {
+			case "plan_tasks":
+				patch := mockey.Mock(planExternalRefreshOwnership).Return(nil, externalRefreshOwnershipSummary{}, cause).Build()
+				defer patch.UnPatch()
 			case "allocate_id":
 				patch := mockey.Mock((*stubAllocator).AllocID).Return(int64(0), cause).Build()
 				defer patch.UnPatch()

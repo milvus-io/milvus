@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -1964,7 +1965,7 @@ func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Exercise both consumers with real parsing. Only object I/O is patched.
-			read := mockey.Mock(ReadFileWithExternalSpec).Return([]byte(tc.data), nil).Build()
+			read := mockey.Mock(readExternalSourceFile).Return([]byte(tc.data), nil).Build()
 			defer read.UnPatch()
 			_, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
 				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
@@ -1984,7 +1985,7 @@ func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
 func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *testing.T) {
 	for _, readErr := range []error{context.DeadlineExceeded, ErrLoonTransient} {
 		t.Run(readErr.Error(), func(t *testing.T) {
-			read := mockey.Mock(ReadFileWithExternalSpec).Return(nil, readErr).Build()
+			read := mockey.Mock(readExternalSourceFile).Return(nil, readErr).Build()
 			defer read.UnPatch()
 			_, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
 				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
@@ -1997,7 +1998,7 @@ func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *test
 }
 
 func TestReadMilvusTableSnapshotMetadata_ValidMetadata(t *testing.T) {
-	read := mockey.Mock(ReadFileWithExternalSpec).Return([]byte(`{"format_version":2}`), nil).Build()
+	read := mockey.Mock(readExternalSourceFile).Return([]byte(`{"format_version":2}`), nil).Build()
 	defer read.UnPatch()
 	metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
 		`{"format":"milvus-table"}`, nil, ExternalSpecContext{})

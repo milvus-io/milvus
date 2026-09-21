@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -1040,7 +1041,11 @@ func TestGetMilvusTableSourcePKFieldMetadataErrors(t *testing.T) {
 		{"read_timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			read := mockey.Mock(packed.ReadFileWithExternalSpec).Return([]byte(tc.data), tc.readErr).Build()
+			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			if tc.readErr != nil {
+				parseErr = tc.readErr
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, parseErr).Build()
 			defer read.UnPatch()
 			task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
 				ExternalSource: "s3://source-bucket/snapshots/10/metadata/20.json",

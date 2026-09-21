@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -1972,7 +1973,11 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			read := mockey.Mock(packed.ReadFileWithExternalSpec).Return([]byte(tc.data), tc.readErr).Build()
+			_, parseErr := snapshotio.ParseSnapshotMetadataWithVersionCheck([]byte(tc.data))
+			if tc.readErr != nil {
+				parseErr = tc.readErr
+			}
+			read := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).Return(nil, parseErr).Build()
 			defer read.UnPatch()
 
 			err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
