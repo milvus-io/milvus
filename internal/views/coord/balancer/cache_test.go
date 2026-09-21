@@ -2,7 +2,6 @@ package balancer
 
 import (
 	"fmt"
-	"math/rand"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -11,7 +10,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
-	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -102,74 +100,6 @@ func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	require.NoError(t, controller.Reconcile(t.Context()))
 }
 
-func snapshotOfCache(c *balancercache.Cache) *BalancerSnapshot {
-	s := &BalancerSnapshot{Config: c.GetBalanceConfig(), Nodes: make(map[int64]*BalanceNode), ShardRowStatsSnapshot: make(map[qviews.ShardID]ShardRowStats)}
-	configs := make(map[int64]*loadmgr.LoadConfig)
-	versions := make(map[int64]uint64)
-	stats := make(map[qviews.ShardID]*coordview.ShardStats)
-	var data []*CollectionDataView
-	c.RangeCollectionIDs(func(id int64) bool {
-		entry := c.GetCollection(id)
-		if entry.LoadConfig() != nil {
-			configs[id] = entry.LoadConfig()
-			versions[id] = entry.ConfigVersion()
-		}
-		if entry.DataView() != nil {
-			data = append(data, entry.DataView())
-		}
-		entry.RangeShards(func(shard *balancercache.ShardEntry) bool {
-			stats[shard.ID()] = shard.Stats()
-			rows := make(ShardRowStats)
-			c.RangeNodeIDs(func(id int64) bool { rows[id] = c.GetNode(id).Contribution(shard.ID()); return true })
-			s.ShardRowStatsSnapshot[shard.ID()] = rows
-			return true
-		})
-		return true
-	})
-	c.RangeNodeIDs(func(id int64) bool { s.Nodes[id] = c.GetNode(id).Info(); return true })
-	s.LoadConfigSnapshot = loadmgr.NewLoadConfigSnapshotWithVersions(1, configs, versions)
-	s.ShardViewSnapshot = coordview.NewShardViewSnapshot(1, stats)
-	s.DataViewSnapshot = NewDataViewSnapshot(1, data)
-	return s
-}
-
-func TestCachePolicyMatchesLegacyBatchPlanning(t *testing.T) {
-	random := rand.New(rand.NewSource(17))
-	for scenario := 0; scenario < 80; scenario++ {
-		c := balancercache.New(policyTestConfig())
-		for id := int64(1); id <= 4; id++ {
-			c.PublishNode(id, &NodeInfo{NodeID: id, Alive: true, Stopping: id == 4 && scenario%3 == 0, ResourceGroup: "rg1"})
-		}
-		for id := int64(1); id <= 5; id++ {
-			shard := cacheShard(id, id*10)
-			c.PublishLoadConfig(id, cfgFor(id, id*10, nil, nil), 1)
-			rows := []int64{int64(random.Intn(1_000_000)), int64(random.Intn(1_000_000)), 0}
-			c.PublishDataView(id, cacheData(id, shard.VChannel, rows...))
-			if (scenario+int(id))%3 != 0 {
-				version := qviews.QueryViewVersion{DataVersion: qviews.DataVersion{StreamingVersion: 1}, QueryVersion: 1}
-				stats := &coordview.ShardStats{UpVersion: &version, UpLoadInfoVersion: 1, Segments: make(map[int64]*coordview.SegmentStats)}
-				for i, row := range rows {
-					segment := id*1000 + int64(i)
-					stats.Segments[segment] = &coordview.SegmentStats{SegmentID: segment, PartitionID: 1, RowNum: row, HasRowNum: true, Nodes: map[int64]coordview.SegmentState{int64(random.Intn(4) + 1): coordview.SegmentStateUp}}
-				}
-				c.PublishShard(shard, stats)
-			}
-			if id == 5 && scenario%2 == 0 {
-				c.PublishLoadConfig(id, nil, 2)
-			}
-		}
-		dirty := resolveCacheScope(c, triggerBatch{full: true})
-		old := legacyPlan(snapshotOfCache(c), dirty)
-		next := NewDefaultBalancePolicy().Plan(c, dirty)
-		require.Equal(t, old.Releases, next.Releases, "scenario %d", scenario)
-		require.Len(t, next.Prepares, len(old.Prepares), "scenario %d", scenario)
-		for shard, builder := range old.Prepares {
-			require.Contains(t, next.Prepares, shard)
-			require.Equal(t, flattenAssignments(builder.Build()), flattenAssignments(next.Prepares[shard].Build()), "scenario %d, shard %v", scenario, shard)
-		}
-	}
-}
-
 func BenchmarkCacheFullPlan(b *testing.B) {
 	for _, scenario := range []struct {
 		name                  string
@@ -198,4 +128,26 @@ func BenchmarkCacheFullPlan(b *testing.B) {
 			}
 		})
 	}
+}
+
+func TestPlanningContextPinsAbsenceAndResolvesReplicaBinding(t *testing.T) {
+	c := balancercache.New(nil)
+	p := newPlanningContext(c)
+	shard := cacheShard(1, 10)
+	require.Nil(t, p.GetCollection(1))
+	require.Zero(t, p.ConfigVersion(1))
+	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
+	require.Nil(t, p.ConfigForShard(shard), "an absent collection is also pinned for this batch")
+	fresh := newPlanningContext(c)
+	require.Equal(t, uint64(1), fresh.ConfigVersion(1))
+	// A channel without an encoded collection ID resolves through its replica.
+	short := qviews.ShardID{ReplicaID: 10, VChannel: "short-channel"}
+	c.PublishShard(short, cacheStats(100, 1, 42, coordview.SegmentStateUp, true))
+	next := newPlanningContext(c)
+	require.Equal(t, int64(1), next.ConfigForShard(short).CollectionID)
+	require.Equal(t, int64(42), next.CurrentRows(short)[1])
+	require.NotNil(t, next.GetShardStats(short))
+	short.ReplicaID = 999
+	require.Nil(t, next.ConfigForShard(short))
+	require.Nil(t, next.GetShardStats(short))
 }

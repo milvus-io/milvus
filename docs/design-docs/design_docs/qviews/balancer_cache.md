@@ -1,7 +1,8 @@
 # Balancer Cache
 
 The resident `cache.Cache` replaces the runtime `BalancerSnapshot` and
-`SnapshotBuilder` path. The old snapshot builder remains only as a test oracle. The existing
+`SnapshotBuilder` path. Tests publish inputs directly into the cache and assert
+planning behavior; no snapshot-era implementation is retained. The existing
 batch policy, ordering, scores, and assignment comparison remain unchanged;
 production runtime wiring and RPC changes are outside this refactor.
 
@@ -366,8 +367,10 @@ Incremental placement-block/statistics publication is a separate optimization.
 
 Required validation:
 
-1. Compare old and new plans for static inputs, including ordering, mandatory
-   and optional emission, row replacement, zero-row segments, and replicas.
+1. Assert exact plans for static inputs, including ordering, mandatory and
+   optional emission, row replacement, zero-row segments, and replicas.
+   Batch tests must verify Must priority, descending shard size, deterministic
+   ties, and shared predictions independently of input order.
 2. Retain old references while concurrently updating; verify deep immutability
    and run race tests. Concurrent source-field updates must not overwrite one
    another.
@@ -429,5 +432,8 @@ Key implementation packages are `internal/views/coord/balancer/cache/`,
 The parent package retains aliases for the existing public scalar types; the
 cache implementation, constructors, and read-entry types live in the subpackage.
 Planning and integration tests stay in the parent; cache-only tests and COW
-benchmarks live beside the cache. Legacy snapshot fixtures use public cache
-publication APIs, so they cannot bypass the package's encapsulation.
+benchmarks live beside the cache. Policy and scope tests seed inputs through
+public cache publication APIs; controller tests connect real registry hooks.
+Old snapshot builders, ledgers, scope resolvers, and compatibility fixtures have
+been removed. Explicit expected assignments replace the migration-time old/new
+planner comparison.
