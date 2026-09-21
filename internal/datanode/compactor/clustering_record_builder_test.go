@@ -371,8 +371,8 @@ func TestClusteringRecordBuilderStillExceedsGlobalLimit(t *testing.T) {
 	require.Greater(t, before, int(task.memoryLimit), "tracked output buffers alone exceed the task budget")
 	require.NoError(t, task.flushLargestBuffers(context.Background()))
 	require.Equal(t, before, alloc.CurrentAlloc(), "V2 FlushChunk has not freed the submitted Arrow buffers")
-	t.Logf("phase-one gap: limit=%d retained Arrow bytes=%d buckets=%d batchBytes=%d writerBytes=%d",
-		task.memoryLimit, before, len(task.clusterBuffers), 64<<10, 8<<20)
+	t.Logf("phase-one gap: limit=%d retained Arrow bytes=%d buckets=%d builderBytes=%d writerBytes=%d",
+		task.memoryLimit, before, len(task.clusterBuffers), task.clusterBuffers[0].writer.binLogMaxSize/2, 8<<20)
 	for bucket, buffer := range task.clusterBuffers {
 		require.NoError(t, buffer.Close())
 		segments := buffer.GetCompactionSegments()
