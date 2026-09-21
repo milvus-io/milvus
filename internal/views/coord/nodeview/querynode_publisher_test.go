@@ -9,7 +9,7 @@ import (
 
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 )
 
 // Source methods are patched with mockey; no alternative publisher implementation.
@@ -38,8 +38,8 @@ func TestQueryNodePublisherReplayAndTransitions(t *testing.T) {
 	}).Build()
 	defer groups.UnPatch()
 	p := NewQueryNodePublisher(&fakeQueryNodeClient{}, &fakeResourceGroupManager{})
-	var values []*balancer.NodeInfo
-	stop := p.RegisterNodeListener(func(id int64, node *balancer.NodeInfo) { require.Equal(t, int64(1), id); values = append(values, node) })
+	var values []*api.NodeInfo
+	stop := p.RegisterNodeListener(func(id int64, node *api.NodeInfo) { require.Equal(t, int64(1), id); values = append(values, node) })
 	require.Len(t, values, 1)
 	require.Equal(t, "rg-b", values[0].ResourceGroup)
 	onGroup("rg-b", []int64{1})
@@ -81,7 +81,7 @@ func TestQueryNodePublisherConcurrentReplay(t *testing.T) {
 		}(id)
 	}
 	seen := make(map[int64]int)
-	stop := p.RegisterNodeListener(func(id int64, _ *balancer.NodeInfo) { seen[id]++ })
+	stop := p.RegisterNodeListener(func(id int64, _ *api.NodeInfo) { seen[id]++ })
 	wg.Wait()
 	stop()
 	require.Len(t, seen, 50)

@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -59,12 +60,12 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	require.NoError(t, err)
 	// Use real replaying source hooks; mock only the node source boundary.
 	nodes := &fakeNodeProvider{}
-	nodePatch := mockey.Mock((*fakeNodeProvider).RegisterNodeListener).To(func(_ *fakeNodeProvider, listener NodeListener) func() {
+	nodePatch := mockey.Mock((*fakeNodeProvider).RegisterNodeListener).To(func(_ *fakeNodeProvider, listener balancercache.NodeListener) func() {
 		listener(1, &NodeInfo{NodeID: 1, Alive: true})
 		return func() {}
 	}).Build()
 	t.Cleanup(func() { nodePatch.UnPatch() })
-	cache := NewCacheFromSources(policyTestConfig(), store, m, registry, nodes)
+	cache := balancercache.NewFromSources(policyTestConfig(), store, m, registry, nodes)
 	t.Cleanup(cache.Close)
 	require.True(t, cache.Ready())
 	controller := NewDefaultBalancer(cache, registry, nil)
@@ -78,4 +79,6 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 }
 
 // Patched with mockey: there is no hand-written node source behavior.
-func (*fakeNodeProvider) RegisterNodeListener(NodeListener) func() { panic("mock with mockey") }
+func (*fakeNodeProvider) RegisterNodeListener(balancercache.NodeListener) func() {
+	panic("mock with mockey")
+}

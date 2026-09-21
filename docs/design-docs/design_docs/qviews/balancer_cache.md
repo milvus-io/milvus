@@ -1,6 +1,6 @@
 # Balancer Cache
 
-The resident `balancer.Cache` replaces the runtime `BalancerSnapshot` and
+The resident `cache.Cache` replaces the runtime `BalancerSnapshot` and
 `SnapshotBuilder` path. The old snapshot builder remains only as a test oracle. The existing
 batch policy, ordering, scores, and assignment comparison remain unchanged;
 production runtime wiring and RPC changes are outside this refactor.
@@ -11,7 +11,7 @@ See [Balancer design](balancer_design.md) for the allocation algorithm,
 
 ## 1. Contract and ownership
 
-`balancer.Cache` holds all facts required for reconciliation. Upstream managers
+`cache.Cache` holds all facts required for reconciliation. Upstream managers
 remain the authoritative owners and synchronously publish their committed
 in-memory state through registered hooks. The cache owns the derived indexes
 and aggregates. Balancer reads the cache through `Get` and key iteration;
@@ -387,13 +387,14 @@ Required validation:
    usage, and full-reconcile CPU/allocations for both huge collections and many
    small collections. Index choices must satisfy the small-write objective.
 
-Key implementation packages are `internal/views/coord/balancer/`,
+Key implementation packages are `internal/views/coord/balancer/cache/`,
+`internal/views/coord/balancer/api/`, `internal/views/coord/balancer/`,
 `internal/views/coord/loadmgr/`, `internal/views/coord/coordview/`,
 `internal/views/coord/nodeview/`, and `internal/dataview/`.
 
 ## 9. Implemented component boundaries
 
-- `NewCacheFromSources` registers synchronous replay hooks with
+- `cache.NewFromSources` registers synchronous replay hooks with
   LoadConfigStore, DataViewManager, ShardViewRegistry, and a NodePublisher; it
   marks the cache ready only after all replays return. The owner stops the
   controller before calling `Cache.Close` and closing the node publisher.
@@ -409,3 +410,24 @@ Key implementation packages are `internal/views/coord/balancer/`,
   entries are reclaimed once their desired/actual references disappear.
 - Assembly in MixCoord/QueryCoord and concrete node/RG owner hooks remain
   outside this PR. There are no new RPCs or wire-protocol changes.
+
+## 10. Package boundaries
+
+- `balancer/cache`: Reader, immutable entries, publication, derived indexes,
+  contribution accounting, source registration, and cache-only tests. Construct
+  with `cache.New` or `cache.NewFromSources`.
+- `balancer/api`: shared DataView, BalanceConfig, BalanceNode, NodeInfo, and
+  TriggerScope types. This dependency-leaf package does not import the cache or
+  the policy.
+- `balancer`: PlanningContext, scope expansion, policy/scoring, trigger queue,
+  and controller/apply. It consumes `cache.Reader` through public accessors;
+  cache internals do not depend on the parent package.
+- `nodeview.QueryNodePublisher` publishes through the cache/API contracts
+  without depending on the concrete balancing policy. The legacy pull adapter
+  retains its compatibility API.
+
+The parent package retains aliases for the existing public scalar types; the
+cache implementation, constructors, and read-entry types live in the subpackage.
+Planning and integration tests stay in the parent; cache-only tests and COW
+benchmarks live beside the cache. Legacy snapshot fixtures use public cache
+publication APIs, so they cannot bypass the package's encapsulation.

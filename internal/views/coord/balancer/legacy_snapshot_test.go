@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -121,3 +122,8 @@ func segmentInfoFor(snap *BalancerSnapshot, segmentID, partitionID int64) *Segme
 	}
 	return &SegmentDataView{SegmentID: segmentID, PartitionID: partitionID}
 }
+
+type (
+	ShardRowStats = balancercache.ShardRowStats
+	NodeRowStats  = balancercache.NodeRowStats
+)

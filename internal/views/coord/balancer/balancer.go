@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -28,7 +29,7 @@ type Balancer interface {
 // decisions are delegated to BalancePolicy; this type reads the cache,
 // drains dirty work, and applies the resulting BalancePlan.
 type DefaultBalancer struct {
-	cache          *Cache
+	cache          *balancercache.Cache
 	reconcileMu    sync.Mutex
 	viewRegistry   *coordview.ShardViewRegistry
 	policy         BalancePolicy
@@ -42,7 +43,7 @@ type DefaultBalancer struct {
 
 // NewDefaultBalancer constructs the standard Balancer controller.
 func NewDefaultBalancer(
-	cache *Cache,
+	cache *balancercache.Cache,
 	registry *coordview.ShardViewRegistry,
 	policy BalancePolicy,
 ) *DefaultBalancer {

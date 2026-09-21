@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
@@ -14,7 +15,7 @@ import (
 // Implementations must be stateless: the reader and dirty list are the
 // only inputs, and the BalancePlan is the only output. No side effects.
 type BalancePolicy interface {
-	Plan(reader Reader, dirty []qviews.ShardID) *BalancePlan
+	Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan
 }
 
 // BalancePlan is the complete set of actions to execute for one reconcile
