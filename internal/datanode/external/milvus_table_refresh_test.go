@@ -246,13 +246,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableSegmentManife
 func (s *RefreshExternalCollectionTaskSuite) TestCarryMilvusTableDerivedArtifactsReusesFilesWithoutOldDeltalogs() {
 	paramtable.Init()
 	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()}
-	basePath := "files/carry_milvus_table_artifacts/segment-1"
-	oldDeltaPath := path.Join(storageConfig.GetRootPath(), basePath, "_delta/old")
-	newDeltaPath := path.Join(storageConfig.GetRootPath(), basePath, "_delta/new")
-	newerDeltaPath := path.Join(storageConfig.GetRootPath(), basePath, "_delta/newer")
-	oldTextStatsPath := path.Join(storageConfig.GetRootPath(), basePath, "_stats/text_index.100/old")
-	newTextStatsPath := path.Join(storageConfig.GetRootPath(), basePath, "_stats/text_index.100/new")
-	jsonStatsPath := path.Join(storageConfig.GetRootPath(), basePath, "_stats/json_stats.102/old")
+	basePath := path.Join(storageConfig.GetRootPath(), "carry_milvus_table_artifacts/segment-1")
+	oldDeltaPath := path.Join(basePath, "_delta/old")
+	newDeltaPath := path.Join(basePath, "_delta/new")
+	newerDeltaPath := path.Join(basePath, "_delta/newer")
+	oldTextStatsPath := path.Join(basePath, "_stats/text_index.100/old")
+	newTextStatsPath := path.Join(basePath, "_stats/text_index.100/new")
+	jsonStatsPath := path.Join(basePath, "_stats/json_stats.102/old")
 	for filePath, content := range map[string]string{
 		oldDeltaPath:     "old-delta",
 		newDeltaPath:     "new-delta",
@@ -414,13 +414,13 @@ func (s *RefreshExternalCollectionTaskSuite) TestCarryMilvusTableDerivedArtifact
 func (s *RefreshExternalCollectionTaskSuite) TestCarryMilvusTableDerivedArtifactsNoopWithoutFunctionsOrStats() {
 	paramtable.Init()
 	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()}
-	basePath := "files/carry_milvus_table_artifacts_noop/segment-1"
+	basePath := path.Join(storageConfig.GetRootPath(), "carry_milvus_table_artifacts_noop/segment-1")
 	sourceManifest, err := packed.CommitManifestUpdates(
 		basePath,
 		packed.ManifestEarliest,
 		storageConfig,
 		&packed.ManifestUpdates{DeltaLogs: []packed.DeltaLogEntry{{
-			Path:       path.Join(storageConfig.GetRootPath(), basePath, "_delta/old"),
+			Path:       path.Join(basePath, "_delta/old"),
 			NumEntries: 1,
 		}}},
 	)
@@ -429,7 +429,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestCarryMilvusTableDerivedArtifact
 		sourceManifest,
 		storageConfig,
 		[]packed.DeltaLogEntry{{
-			Path:       path.Join(storageConfig.GetRootPath(), basePath, "_delta/new"),
+			Path:       path.Join(basePath, "_delta/new"),
 			NumEntries: 2,
 		}},
 	)
@@ -585,8 +585,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableSegmentManife
 func (s *RefreshExternalCollectionTaskSuite) TestRefreshMilvusTableSegmentManifestCarryFailureKeepsVersion() {
 	paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	storageConfig := &indexpb.StorageConfig{StorageType: "local", RootPath: s.T().TempDir()}
-	basePath := "files/refresh_failure_keeps_version/segment-1"
-	statPath := path.Join(storageConfig.GetRootPath(), basePath, "_stats/data")
+	basePath := path.Join(storageConfig.GetRootPath(), "refresh_failure_keeps_version/segment-1")
+	statPath := path.Join(basePath, "_stats/data")
 	s.Require().NoError(packed.WriteFile(storageConfig, statPath, []byte("stats")))
 	sourceManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, storageConfig, &packed.ManifestUpdates{
 		Stats: []packed.StatEntry{{Key: "text_index.100", Files: []string{statPath}, Metadata: map[string]string{"generation": "source"}}},
