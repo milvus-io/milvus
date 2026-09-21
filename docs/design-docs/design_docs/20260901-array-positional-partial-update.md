@@ -661,8 +661,8 @@ Operand completeness and child-mask rules are covered by the
 
 ## Current Implementation Differences and Limitations
 
-These are known implementation issues, not intentional long-term operation
-boundaries. The support tables do not imply that either issue is resolved.
+These notes distinguish the deferred REST validation difference from the JSON
+output-size guarantee and its resource-accounting limits.
 
 ### REST v2 JSON replacement validation
 
@@ -678,11 +678,17 @@ goal, not a property of the current implementation.
 ### JSON materialization memory budget
 
 Every matching duplicate key receives the replacement, so inputs within the
-normal size limits can expand into a much larger result. The result is built
-before the post-merge length check rejects it. Enforcing an output-size budget
-before allocation remains an unresolved implementation limitation; the final
-JSON field-size limit does not constrain intermediate buffer sizes. This does
-not change the selected duplicate-key semantics.
+normal size limits can expand into a much larger result. Materialization uses
+one output buffer per row, shared by every recursive branch. Each write checks
+the cumulative output length against `common.JSONMaxLength` before appending
+or growing the buffer; an oversized result is rejected as an input error.
+Keys, punctuation, untouched values, and every replacement count toward the
+same limit. No intermediate replacement document is constructed per branch,
+and a failure does not publish any partially materialized rows.
+
+This bounds the serialized output length, not total heap usage: buffer capacity,
+decoder/encoder temporaries, input data, and other rows in the batch still
+consume memory. The duplicate-key semantics remain unchanged.
 
 ## Validation and Error Classification
 
@@ -908,8 +914,9 @@ No new storage format, index update mechanism, WAL record, or downstream
 memory state is introduced. Existing field-capacity, JSON field-size, and
 message-size checks limit the materialized data admitted to the write path.
 
-They do not bound peak JSON materialization memory; see the unresolved
-[memory-budget limitation](#json-materialization-memory-budget).
+JSON materialization also enforces its output-length limit during construction.
+This is not a request-wide heap limit; see the
+[memory-budget boundary](#json-materialization-memory-budget).
 
 ## Observability
 

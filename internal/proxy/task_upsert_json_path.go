@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -132,89 +133,126 @@ func validateJSONReplaceOperand(field *schemapb.FieldData, rows int) error {
 	return nil
 }
 
-func replaceJSONPath(value json.RawMessage, path []jsonPathSegment, replacement json.RawMessage) (json.RawMessage, error) {
+// jsonPathOutput checks every write before bytes.Buffer can grow. One output is
+// shared by the whole row, so duplicate keys and nested matches consume the same
+// budget without constructing intermediate replacement documents.
+type jsonPathOutput struct {
+	buffer    bytes.Buffer
+	maxLength int64
+}
+
+func (out *jsonPathOutput) Write(value []byte) (int, error) {
+	if int64(len(value)) > out.maxLength-int64(out.buffer.Len()) {
+		return 0, merr.WrapErrParameterInvalidMsg("JSON PATH_REPLACE result exceeds max length (%d)", out.maxLength)
+	}
+	return out.buffer.Write(value)
+}
+
+func (out *jsonPathOutput) writeByte(value byte) error {
+	_, err := out.Write([]byte{value})
+	return err
+}
+
+func replaceJSONPath(value json.RawMessage, path []jsonPathSegment, replacement json.RawMessage, maxLength int64) (json.RawMessage, error) {
 	if !json.Valid(value) || !json.Valid(replacement) {
 		return nil, merr.WrapErrServiceInternalMsg("malformed JSON passed to path replacement")
 	}
-	return replaceJSONValue(value, path, replacement)
+	output := &jsonPathOutput{maxLength: maxLength}
+	if err := writeJSONValue(output, value, path, replacement); err != nil {
+		return nil, err
+	}
+	return output.buffer.Bytes(), nil
 }
 
-// replaceJSONValue traverses validated JSON without converting objects to maps.
+// writeJSONValue traverses validated JSON without converting objects to maps.
 // Every duplicate key matches, including intermediate keys. Preserve all members
 // and update every matching branch; any branch error discards the entire result.
 // RawMessage preserves numbers and untouched values without HTML re-encoding.
-func replaceJSONValue(value json.RawMessage, path []jsonPathSegment, replacement json.RawMessage) (json.RawMessage, error) {
+func writeJSONValue(output *jsonPathOutput, value json.RawMessage, path []jsonPathSegment, replacement json.RawMessage) error {
 	if len(path) == 0 {
-		return replacement, nil
+		_, err := output.Write(replacement)
+		return err
 	}
 	value = bytes.TrimSpace(value)
 	segment := path[0]
 	if segment.isKey && value[0] != '{' {
-		return nil, merr.WrapErrParameterInvalidMsg("JSON path requires an existing object parent")
+		return merr.WrapErrParameterInvalidMsg("JSON path requires an existing object parent")
 	}
 	if !segment.isKey && value[0] != '[' {
-		return nil, merr.WrapErrParameterInvalidMsg("JSON path requires an existing array parent")
+		return merr.WrapErrParameterInvalidMsg("JSON path requires an existing array parent")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(value))
 	_, _ = decoder.Token() // Opening delimiter; the complete value is validated.
-	var output bytes.Buffer
-	output.WriteByte(value[0])
+	if err := output.writeByte(value[0]); err != nil {
+		return err
+	}
 	found := false
 	count := 0
 	for decoder.More() {
 		match := count == segment.index
 		if count > 0 {
-			output.WriteByte(',')
+			if err := output.writeByte(','); err != nil {
+				return err
+			}
 		}
 		if segment.isKey {
 			start := decoder.InputOffset()
 			token, err := decoder.Token()
 			if err != nil {
-				return nil, merr.WrapErrServiceInternalErr(err, "decode JSON member key")
+				return merr.WrapErrServiceInternalErr(err, "decode JSON member key")
 			}
 			key := token.(string) // Object keys in validated JSON are strings.
 			match = key == segment.key
 			// Token also consumes the preceding comma and whitespace. Copy the
 			// original key literal: re-encoding can expand U+2028/U+2029 even
 			// with SetEscapeHTML(false), making an otherwise valid update too large.
-			output.Write(bytes.TrimLeft(value[start:decoder.InputOffset()], ", \t\r\n"))
-			output.WriteByte(':')
+			if _, err := output.Write(bytes.TrimLeft(value[start:decoder.InputOffset()], ", \t\r\n")); err != nil {
+				return err
+			}
+			if err := output.writeByte(':'); err != nil {
+				return err
+			}
 		}
 		var child json.RawMessage
 		if err := decoder.Decode(&child); err != nil {
-			return nil, merr.WrapErrServiceInternalErr(err, "decode JSON member value")
+			return merr.WrapErrServiceInternalErr(err, "decode JSON member value")
 		}
 		if match {
 			found = true
-			updated, err := replaceJSONValue(child, path[1:], replacement)
-			if err != nil {
-				return nil, err
+			if err := writeJSONValue(output, child, path[1:], replacement); err != nil {
+				return err
 			}
-			child = updated
+		} else if _, err := output.Write(child); err != nil {
+			return err
 		}
-		output.Write(child)
 		count++
 	}
 	if !found {
 		if !segment.isKey {
-			return nil, merr.WrapErrParameterInvalidMsg("JSON path index is out of range")
+			return merr.WrapErrParameterInvalidMsg("JSON path index is out of range")
 		}
 		if len(path) > 1 {
-			return nil, merr.WrapErrParameterInvalidMsg("JSON intermediate path key is missing")
+			return merr.WrapErrParameterInvalidMsg("JSON intermediate path key is missing")
 		}
 		if count > 0 {
-			output.WriteByte(',')
+			if err := output.writeByte(','); err != nil {
+				return err
+			}
 		}
 		// Only a missing key needs encoding; existing keys retain their bytes.
-		encoder := json.NewEncoder(&output)
+		encoder := json.NewEncoder(output)
 		encoder.SetEscapeHTML(false)
-		_ = encoder.Encode(segment.key)   // Encoding a string into bytes.Buffer cannot fail.
-		output.Truncate(output.Len() - 1) // Remove Encode's LF.
-		output.WriteByte(':')
-		output.Write(replacement)
+		if err := encoder.Encode(segment.key); err != nil {
+			return err
+		}
+		// Reuse Encode's trailing LF as the colon: this byte was already
+		// checked by Write, and no temporary byte consumes the output budget.
+		output.buffer.Bytes()[output.buffer.Len()-1] = ':'
+		if _, err := output.Write(replacement); err != nil {
+			return err
+		}
 	}
-	output.WriteByte(value[len(value)-1])
-	return output.Bytes(), nil
+	return output.writeByte(value[len(value)-1])
 }
 
 func materializeJSONPathReplace(dst, old, operand *schemapb.FieldData, path []jsonPathSegment, dataIndices, rowIndices, operandIndices []int64) error {
@@ -223,6 +261,7 @@ func materializeJSONPathReplace(dst, old, operand *schemapb.FieldData, path []js
 	}
 	values := make([][]byte, len(dataIndices))
 	valid := typeutil.GetFieldDataValidData(old)
+	maxLength := paramtable.Get().CommonCfg.JSONMaxLength.GetAsInt64()
 	for i, index := range dataIndices {
 		row := rowIndices[i]
 		if len(valid) != 0 {
@@ -240,7 +279,7 @@ func materializeJSONPathReplace(dst, old, operand *schemapb.FieldData, path []js
 		if !json.Valid(value) || !utf8.Valid(value) {
 			return merr.WrapErrServiceInternalMsg("malformed retrieved JSON value")
 		}
-		updated, err := replaceJSONPath(value, path, operand.GetScalars().GetJsonData().GetData()[operandIndices[i]])
+		updated, err := replaceJSONPath(value, path, operand.GetScalars().GetJsonData().GetData()[operandIndices[i]], maxLength)
 		if err != nil {
 			return merr.Wrapf(err, "PATH_REPLACE field %q row %d", old.GetFieldName(), i)
 		}

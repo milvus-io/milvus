@@ -152,7 +152,7 @@ func TestJSONPathReplace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			path, err := parseJSONReplacePath(tc.path)
 			require.NoError(t, err)
-			got, err := replaceJSONPath([]byte(tc.old), path, []byte(tc.replacement))
+			got, err := replaceJSONPath([]byte(tc.old), path, []byte(tc.replacement), 64<<10)
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
 				require.ErrorIs(t, err, merr.ErrParameterInvalid)
@@ -181,7 +181,7 @@ func TestJSONPathReplace(t *testing.T) {
 	} {
 		path, err := parseJSONReplacePath(tc.path)
 		require.NoError(t, err)
-		_, err = replaceJSONPath([]byte(tc.old), path, []byte(tc.operand))
+		_, err = replaceJSONPath([]byte(tc.old), path, []byte(tc.operand), 64<<10)
 		require.ErrorIs(t, err, merr.ErrServiceInternal)
 	}
 }
@@ -203,7 +203,7 @@ func TestJSONPathReplaceDuplicateKeys(t *testing.T) {
 			path, err := parseJSONReplacePath(tc.path)
 			require.NoError(t, err)
 			old, operand := []byte(tc.old), []byte(tc.replacement)
-			got, err := replaceJSONPath(old, path, operand)
+			got, err := replaceJSONPath(old, path, operand, 64<<10)
 			require.NoError(t, err)
 			// JSONEq decodes into maps and would hide lost duplicate members.
 			require.Equal(t, tc.want, string(got))
@@ -243,7 +243,7 @@ func TestJSONPathReplacePreservesKeyBytes(t *testing.T) {
 			path, err := parseJSONReplacePath(tc.path)
 			require.NoError(t, err)
 			old, operand := []byte(tc.old), []byte(tc.replacement)
-			got, err := replaceJSONPath(old, path, operand)
+			got, err := replaceJSONPath(old, path, operand, 64<<10)
 			require.NoError(t, err)
 			// Compare bytes: semantic JSON equality hides changed key spellings.
 			require.Equal(t, tc.want, string(got))
@@ -262,11 +262,116 @@ func TestJSONPathReplaceTraversalDecodeErrors(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			// Bypass the validated entry point to exercise defensive decode errors.
-			got, err := replaceJSONValue([]byte(tc.value), path, []byte(`1`))
+			output := &jsonPathOutput{maxLength: 64 << 10}
+			err := writeJSONValue(output, []byte(tc.value), path, []byte(`1`))
 			require.ErrorIs(t, err, merr.ErrServiceInternal)
 			require.ErrorContains(t, err, tc.message)
-			require.Nil(t, got)
 		})
+	}
+}
+
+func TestJSONPathOutputRejectsBeforeGrowing(t *testing.T) {
+	output := &jsonPathOutput{maxLength: 8}
+	_, err := output.Write([]byte("prefix"))
+	require.NoError(t, err)
+	capacity := output.buffer.Cap()
+	// A rejected write must not append any bytes or grow the backing buffer.
+	n, err := output.Write([]byte(strings.Repeat("x", 64<<10)))
+	require.Zero(t, n)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Equal(t, merr.InputError, merr.GetErrorType(err))
+	require.Equal(t, "prefix", output.buffer.String())
+	require.Equal(t, capacity, output.buffer.Cap())
+}
+
+func TestJSONPathReplaceOutputLimits(t *testing.T) {
+	for _, tc := range []struct{ name, old, path, replacement, want string }{
+		{"object", `{"a":0}`, `["a"]`, `123`, `{"a":123}`},
+		{"array", `[0,1]`, `[1]`, `{"b":2}`, `[0,{"b":2}]`},
+		{"untouched_value", `{"keep":"<>&","a":0}`, `["a"]`, `null`, `{"keep":"<>&","a":null}`},
+		{"new_key", `{}`, `["a"]`, `0`, `{"a":0}`},
+		{"new_key_after_member", `{"b":1}`, `["a"]`, `0`, `{"b":1,"a":0}`},
+		{"escaped_new_key", `{}`, `["a\"b"]`, `0`, `{"a\"b":0}`},
+		{"unicode_new_key", `{}`, `["\u2028"]`, `0`, `{"\u2028":0}`},
+		{"html_new_key", `{}`, `["<>&"]`, `0`, `{"<>&":0}`},
+		{"duplicate_leaf", `{"a":0,"a":1}`, `["a"]`, `"xx"`, `{"a":"xx","a":"xx"}`},
+		{"nested_duplicates", `{"a":{"b":0},"a":{"b":1}}`, `["a"]["b"]`, `[1,2]`, `{"a":{"b":[1,2]},"a":{"b":[1,2]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := parseJSONReplacePath(tc.path)
+			require.NoError(t, err)
+			old, operand := []byte(tc.old), []byte(tc.replacement)
+			// Every smaller budget fails, including budgets exhausted by keys,
+			// punctuation, untouched values or a nested/duplicate replacement.
+			for limit := -1; limit < len(tc.want); limit++ {
+				got, err := replaceJSONPath(old, path, operand, int64(limit))
+				require.ErrorIs(t, err, merr.ErrParameterInvalid, "limit %d", limit)
+				require.Equal(t, merr.InputError, merr.GetErrorType(err))
+				require.Nil(t, got, "must not return a partial document")
+			}
+			for _, limit := range []int{len(tc.want), len(tc.want) + 1} {
+				got, err := replaceJSONPath(old, path, operand, int64(limit))
+				require.NoError(t, err, "limit %d", limit)
+				require.Equal(t, tc.want, string(got))
+			}
+			require.Equal(t, tc.old, string(old))
+			require.Equal(t, tc.replacement, string(operand))
+		})
+	}
+}
+
+func TestJSONPathReplaceBoundsDuplicateAmplification(t *testing.T) {
+	const limit = 64 << 10
+	replacement := []byte(`"` + strings.Repeat("x", 60000) + `"`)
+	for _, tc := range []struct{ name, old, path string }{
+		{"leaf", `{` + strings.Repeat(`"a":0,`, 9999) + `"a":0}`, `["a"]`},
+		{"nested", `{"a":{` + strings.Repeat(`"b":0,`, 9999) + `"b":0}}`, `["a"]["b"]`},
+		{"ancestors", `{` + strings.Repeat(`"a":{"b":0},`, 4999) + `"a":{"b":0}}`, `["a"]["b"]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Both inputs fit individually; unrestricted duplicate replacement
+			// would produce hundreds of MB. The shared output must stop at 64 KiB.
+			require.Less(t, len(tc.old), limit)
+			require.Less(t, len(replacement), limit)
+			path, err := parseJSONReplacePath(tc.path)
+			require.NoError(t, err)
+			output := &jsonPathOutput{maxLength: limit}
+			err = writeJSONValue(output, []byte(tc.old), path, replacement)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			require.LessOrEqual(t, output.buffer.Len(), limit)
+		})
+	}
+}
+
+func TestJSONPathReplaceSizeLimitDoesNotPublishPartialRows(t *testing.T) {
+	params := paramtable.Get()
+	limitKey, savedLimit := params.CommonCfg.JSONMaxLength.Key, params.CommonCfg.JSONMaxLength.GetValue()
+	require.NoError(t, params.Save(limitKey, "16"))
+	t.Cleanup(func() { require.NoError(t, params.Save(limitKey, savedLimit)) })
+	path, err := parseJSONReplacePath(`["a"]`)
+	require.NoError(t, err)
+	old := jsonPathTestField(`{"a":0}`, `{"a":0,"a":1}`)
+	operand := jsonPathTestField(`1`, `"xx"`)
+	dst := jsonPathTestField(`"unchanged"`)
+	oldBefore, operandBefore, dstBefore := proto.Clone(old), proto.Clone(operand), proto.Clone(dst)
+	err = materializeJSONPathReplace(dst, old, operand, path, []int64{0, 1}, []int64{0, 1}, []int64{0, 1})
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Equal(t, merr.InputError, merr.GetErrorType(err))
+	require.ErrorContains(t, err, `field "metadata" row 1`)
+	require.ErrorContains(t, err, "max length (16)")
+	require.True(t, proto.Equal(oldBefore, old))
+	require.True(t, proto.Equal(operandBefore, operand))
+	require.True(t, proto.Equal(dstBefore, dst))
+
+	// The limit applies to each row, not the sum of the batch's output lengths.
+	old = jsonPathTestField(`{"a":0}`, `{"a":0}`)
+	operand = jsonPathTestField(`"12345678"`, `"12345678"`)
+	dst = jsonPathTestField()
+	require.NoError(t, materializeJSONPathReplace(dst, old, operand, path, []int64{0, 1}, []int64{0, 1}, []int64{0, 1}))
+	require.Len(t, dst.GetScalars().GetJsonData().GetData(), 2)
+	for _, value := range dst.GetScalars().GetJsonData().GetData() {
+		require.Len(t, value, 16)
+		require.Equal(t, `{"a":"12345678"}`, string(value))
 	}
 }
 
