@@ -149,12 +149,6 @@ func (b *ClusterBuffer) writeRecord() error {
 	return b.writer.Write(record)
 }
 
-func (b *ClusterBuffer) Flush() error {
-	b.lock.Lock()
-	defer b.lock.Unlock()
-	return b.writeRecord()
-}
-
 func (b *ClusterBuffer) FlushChunk() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()

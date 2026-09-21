@@ -364,7 +364,7 @@ func TestClusteringRecordBuilderStillExceedsGlobalLimit(t *testing.T) {
 			require.NoError(t, buffer.WriteRecord(record, row))
 		}
 		record.Release()
-		require.NoError(t, buffer.Flush())
+		require.NoError(t, buffer.FlushChunk())
 		require.Zero(t, buffer.builder.GetRowNum())
 	}
 	before := alloc.CurrentAlloc()
