@@ -1257,7 +1257,7 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.SortReadRangeSize.Key, "0")
 		assert.Equal(t, int64(0), Params.SortReadRangeSize.GetAsSize(), "0 keeps one range at a time")
 		params.Reset(Params.SortReadRangeSize.Key)
-		assert.Equal(t, int64(64*1024*1024), Params.SortReadBufferSize.GetAsSize())
+		assert.Equal(t, int64(512*1024*1024), Params.SortReadBufferSize.GetAsSize())
 		params.Save(Params.SortReadBufferSize.Key, "128m")
 		assert.Equal(t, int64(128*1024*1024), Params.SortReadBufferSize.GetAsSize())
 		params.Reset(Params.SortReadBufferSize.Key)

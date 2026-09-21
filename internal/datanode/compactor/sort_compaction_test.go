@@ -285,7 +285,7 @@ func (s *SortCompactionTaskSuite) parallelChunkReadSeen() []storage.ParallelChun
 func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsDefault() {
 	s.Equal([]storage.ParallelChunkRead{{
 		Concurrency: min(hardware.GetCPUNum(), 8),
-		BufferSize:  64 * 1024 * 1024,
+		BufferSize:  512 * 1024 * 1024,
 		RangeSize:   8 * 1024 * 1024,
 	}}, s.parallelChunkReadSeen(), "the input reader must be opened once, with the default read options")
 }
