@@ -345,6 +345,8 @@ bound. `RequestFlushThrough` can still request progress independently of size.
 RecoveryStorage supplies `FlushL0MaxSize` as the staging threshold and
 `SummaryMaxBytesPerPChannel` as the retained-byte budget. It does not yet pass `MaxRetainedChunks`, so the count bound is disabled
 in production wiring even though the standalone manager supports it.
+The old idempotency-specific retained-byte and chunk-count settings are removed;
+retention of this shared store is controlled by `streaming.summary.maxBytesPerPChannel`.
 
 Publication is scheduled independently of the RecoveryStorage checkpoint tick.
 The integration must combine its own completed frontier with `LastAcked()`;
@@ -369,7 +371,10 @@ Retention removes the oldest eligible chunks from the retained index. Existing
 byte/count budgets and transform-consumer frontiers determine eligibility.
 Bytes bound storage volume; chunk count bounds index entries and per-object
 read overhead that can grow even with many tiny chunks. Budgets apply to whole
-pchannel objects, not per-vchannel slices. There is no TTL or minimum duration.
+pchannel objects, not per-vchannel slices. A GC-eligible chunk remains retained
+while the configured retention budgets are not exceeded. This preserves readable
+history after materialization without promising a duration: there is no TTL or
+minimum retention time.
 Either budget can request release, but neither overrides a transform consumer
 that still needs the oldest chunk.
 Unmaterialized transform records cannot be discarded merely to meet a budget;

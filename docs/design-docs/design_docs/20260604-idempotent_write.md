@@ -109,11 +109,10 @@ Legacy global or collection enable settings have no effect.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `streaming.idempotency.maxBytesPerWindow` | `16MiB` | Per-vchannel in-memory window cap. Nothing is evicted until this is reached; then oldest-first. |
-| `streaming.idempotency.maxRetainedBytes` | `256MiB` | Pchannel-wide soft budget of the retained chunk objects. `0` disables that bound. |
-| `streaming.idempotency.maxRetainedChunks` | `256` | Pchannel-wide cap on the NUMBER of retained chunk objects. `0` disables that bound. |
+| `streaming.summary.maxBytesPerPChannel` | `4GB` | Shared WALSummary retained-object byte budget per pchannel. GC-eligible chunks remain retained until this budget is exceeded; `0` disables the byte bound. |
 | `streaming.idempotency.maxKeyLength` | `256` | Maximum accepted explicit key length in bytes. |
 
-The retained-object budgets are pchannel-wide, while the in-memory window cap
+The retained-object budget is pchannel-wide, while the in-memory window cap
 is per vchannel. This affects the effective retry horizon on a shared pchannel;
 see [Retention](#retention). The mapping to the standalone manager and its
 independent sealing triggers is described in
@@ -259,8 +258,11 @@ consumes individually.
 
 **Store (objects), per pchannel.** Durable retry history follows
 [WALSummary retention](wal/summary.md#4-retention-gc). The idempotency consumer
-accepts expiry under the shared byte/count budgets; consumers requiring data
-for materialization supply their own durable GC frontiers. The in-memory
+accepts expiry under the shared Summary retention budget; consumers requiring data
+for materialization supply their own durable GC frontiers. Production wiring
+uses the byte budget and does not configure a chunk-count bound. Eligibility
+alone does not remove a chunk: retention first requires exceeding the budget.
+There is no minimum retention duration or time-based expiry. The in-memory
 window and durable history can therefore retain different spans. On a busy
 pchannel, traffic from other vchannels can shorten a quiet vchannel's history
 after recovery. Neither layer promises a minimum retention duration.
