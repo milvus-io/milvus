@@ -126,6 +126,9 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 		}
 
 		if err := b.Reconcile(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			mlog.Warn(ctx, "query view balance will retry", mlog.Err(err))
 			timer := time.NewTimer(retryDelay)
 			select {
@@ -143,14 +146,18 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 
 // Reconcile runs one reconcile cycle. It is exported primarily for tests and
 // for callers that want a synchronous controller pass during startup.
+// It waits for cache readiness before consuming queued work; ctx cancels that wait.
 func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
-	b.reconcileMu.Lock()
-	defer b.reconcileMu.Unlock()
 	if b.cache == nil || b.viewRegistry == nil || b.policy == nil {
 		return nil
 	}
-	if !b.cache.Ready() {
-		return merr.WrapErrServiceNotReadyMsg("balancer cache sources have not completed initial replay")
+	if err := b.cache.WaitForReady(ctx); err != nil {
+		return err
+	}
+	b.reconcileMu.Lock()
+	defer b.reconcileMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	pending := b.queue.takePending()
 	if pending.empty() {

@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -81,7 +82,10 @@ func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	registry := emptyRegistry(t)
 	controller := NewDefaultBalancer(c, registry, nil)
 	controller.Trigger()
-	require.ErrorIs(t, controller.Reconcile(t.Context()), merr.ErrServiceNotReady)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, controller.Reconcile(ctx), context.Canceled)
+	require.True(t, controller.queue.takePending().full, "cancellation must not consume pending work")
 	c.MarkReady()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	shard := cacheShard(1, 10)
