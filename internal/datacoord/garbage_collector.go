@@ -180,6 +180,12 @@ func (gc *gcPauseRecords) DeleteByID(id int64) {
 	gc.deleteMatching(func(r gcPauseRecord) bool { return r.id == id })
 }
 
+// Clear drops every record, whatever ticket it holds. It backs the ticket-less
+// resume, which has no ticket to match on and means "GC must not be paused".
+func (gc *gcPauseRecords) Clear() {
+	gc.deleteMatching(func(gcPauseRecord) bool { return true })
+}
+
 // deleteMatching rebuilds the heap without the matching records, dropping
 // already-expired records along the way.
 func (gc *gcPauseRecords) deleteMatching(match func(gcPauseRecord) bool) {
@@ -511,6 +517,20 @@ func (gc *garbageCollector) rollbackPause(cmd gcCmd, recordID int64) {
 }
 
 func (gc *garbageCollector) resume(cmd gcCmd) {
+	// A resume carrying no ticket is the pre collection level GC control
+	// semantic: release every outstanding pause. Pauses issued through the proxy
+	// route always carry a generated ticket, so a ticket-scoped delete would
+	// match nothing here and leave GC paused while reporting success.
+	if cmd.ticket == "" {
+		gc.pauseUntil.Clear()
+		gc.pausedCollection.Range(func(collectionID int64, _ *gcPauseRecords) bool {
+			gc.pausedCollection.Remove(collectionID)
+			return true
+		})
+		mlog.Info(gc.ctx, "garbage collection resumed", mlog.Bool("stillPaused", false))
+		return
+	}
+
 	// reset to zero value
 	var afterResume time.Time
 	if cmd.collectionID <= 0 {
