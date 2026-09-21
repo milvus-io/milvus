@@ -157,7 +157,10 @@ charged its group, else the whole segment.
 The **scalar task slot** of an index task is derived from this same field size
 (`calculateIndexTaskSlot`, at creation and at reload); without a cached schema
 it falls back to the binlog size it used before. The **memory** of index and
-stats tasks is this field size times the expansion factor.
+stats tasks is this field size times the expansion factor, except an FM-index
+build: its peak holds the text, its suffix array and the sampling structures at
+once, several times the field, so it is priced on `estimateFMIndexBuildPeakBytes`
+-- the same peak its scalar slot already comes from.
 
 ### Configuration (`dataCoord.taskResource.*`, refreshable, in milvus.yaml)
 

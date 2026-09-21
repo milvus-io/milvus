@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -92,6 +93,30 @@ func TestTaskResource_IndexScalar(t *testing.T) {
 
 	it := newIndexBuildTask(&model.SegmentIndex{CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 4, BuildID: 5, NumRows: 1000}, 1, mt, nil, nil, nil)
 	assert.Equal(t, indexTaskResource(1000*64, false), taskPrice(it.GetTaskResource()))
+}
+
+// TestTaskResource_IndexFMIndex: an FM-index build is priced on its modeled
+// peak -- the text, its suffix array and the sampling structures held at once --
+// which is the same peak its scalar slot is derived from. The generic factor
+// on the field size would under-price it several times over.
+func TestTaskResource_IndexFMIndex(t *testing.T) {
+	paramtable.Init()
+	mt := bigFamilyMeta(t)
+	// Repoint the index at the varchar field with an FM-index.
+	idx := mt.indexMeta.indexes[1][4]
+	idx.FieldID = 102
+	idx.IndexParams = []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexFMINDEX}}
+
+	fieldSize := estimateFieldSize(mt.segments.segments[3], testResourceSchema(), 102)
+	assert.Positive(t, fieldSize)
+	want := fmIndexTaskResource(fieldSize, bigFamilyRows, idx.IndexParams)
+	assert.Equal(t, clampTaskMemory(estimateFMIndexBuildPeakBytes(fieldSize, bigFamilyRows, idx.IndexParams)), want.Memory)
+
+	it := bigFamilyIndexTask(mt)
+	assert.Equal(t, want, taskPrice(it.GetTaskResource()))
+	assert.True(t, taskPriceResolved(it.GetTaskResource()))
+	assert.Greater(t, want.Memory, indexTaskResource(fieldSize, false).Memory,
+		"the generic factor would under-price an FM-index build")
 }
 
 // bigFamilyMeta is familyMeta scaled up so that every price in play clears the

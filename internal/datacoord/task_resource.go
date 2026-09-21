@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -94,6 +95,19 @@ func indexTaskResource(fieldSize int64, isVectorIndex bool) taskcommon.Resource 
 	return taskcommon.Resource{
 		CPU:    cpu,
 		Memory: clampTaskMemory(scaled(fieldSize, Params.DataCoordCfg.TaskResourceIndexMemoryFactor.GetAsFloat())),
+	}
+}
+
+// fmIndexTaskResource: an FM-index build's peak is not a multiple of its field.
+// It holds the text, its suffix array and the sampled-SA structures at the same
+// time, which estimateFMIndexBuildPeakBytes models allocation by allocation, and
+// that peak is several times the field. The scalar slot of the same build is
+// already derived from this peak (fmIndexBuildTaskSlots), so the memory estimate
+// uses it too rather than the generic index factor, which would under-price it.
+func fmIndexTaskResource(fieldSize, numRows int64, indexParams []*commonpb.KeyValuePair) taskcommon.Resource {
+	return taskcommon.Resource{
+		CPU:    defaultCPU(),
+		Memory: clampTaskMemory(estimateFMIndexBuildPeakBytes(fieldSize, numRows, indexParams)),
 	}
 }
 

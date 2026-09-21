@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -147,6 +148,9 @@ func (it *indexBuildTask) GetTaskResource() (taskcommon.Resource, bool) {
 		fieldSize := estimateFieldSize(segment, coll.Schema, fieldID)
 		if fieldSize <= 0 {
 			return defaultTaskResource(), false
+		}
+		if indexType == indexparamcheck.IndexFMINDEX {
+			return fmIndexTaskResource(fieldSize, segment.GetNumOfRows(), indexParams), true
 		}
 		return indexTaskResource(fieldSize, isVectorIndex), true
 	})
