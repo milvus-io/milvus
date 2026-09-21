@@ -97,10 +97,15 @@ func (s *HelloMilvusSuite) TestHelloStreaming() {
 	})
 	err = merr.CheckRPCCall(flushResp, err)
 	s.NoError(err)
-	s.T().Logf("flush response, flushTs=%d, segmentIDs=%v", flushResp.GetCollFlushTs()[collectionName], flushResp.GetCollSegIDs()[collectionName])
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	// Streaming Flush completes persistence before returning; no pending segments or checkpoint wait remain.
+	pendingIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	s.Require().True(has)
+	s.Require().Empty(pendingIDs.GetData())
+	s.Require().Zero(flushResp.GetCollFlushTs()[collectionName])
+	s.T().Logf("flush response, flushTs=%d, flushedSegmentIDs=%v", flushResp.GetCollFlushTs()[collectionName], flushResp.GetFlushCollSegIDs()[collectionName])
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
 	s.True(has)

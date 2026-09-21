@@ -94,9 +94,9 @@ func (s *HelloMilvusSuite) TestAliasOperations() {
 		CollectionNames: []string{collectionName1},
 	})
 	s.NoError(err)
-	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName1]
+	segmentIDs, has := flushResp.GetFlushCollSegIDs()[collectionName1]
 	ids := segmentIDs.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids)
 	s.Require().True(has)
 	flushTs, has := flushResp.GetCollFlushTs()[collectionName1]
 	s.Require().True(has)
@@ -107,9 +107,9 @@ func (s *HelloMilvusSuite) TestAliasOperations() {
 		CollectionNames: []string{collectionName2},
 	})
 	s.NoError(err)
-	segmentIDs2, has2 := flushResp2.GetCollSegIDs()[collectionName2]
+	segmentIDs2, has2 := flushResp2.GetFlushCollSegIDs()[collectionName2]
 	ids2 := segmentIDs2.GetData()
-	s.Require().NotEmpty(segmentIDs)
+	s.Require().NotEmpty(ids2)
 	s.Require().True(has2)
 	flushTs2, has2 := flushResp2.GetCollFlushTs()[collectionName2]
 	s.Require().True(has2)
