@@ -2,9 +2,10 @@
 
 The resident `cache.Cache` replaces the runtime `BalancerSnapshot` and
 `SnapshotBuilder` path. Tests publish inputs directly into the cache and assert
-planning behavior; no snapshot-era implementation is retained. The existing
-batch policy, ordering, scores, and assignment comparison remain unchanged;
-production runtime wiring and RPC changes are outside this refactor.
+planning behavior; no snapshot-era implementation is retained. Batch ordering and logical row accounting remain unchanged.
+[Replica placement](replica_placement.md) adds balanced target node sets,
+suspension and compatible cross-replica resource reuse. Production runtime
+wiring and RPC changes are outside this work.
 
 See [Balancer design](balancer_design.md) for the allocation algorithm,
 [DataView](data_view.md) for publication and reference ownership, and
@@ -29,10 +30,9 @@ The consistency contract is object-local:
 - Before an upstream mutation returns, its cache publication and affected-key
   notification have completed. Previously acquired references remain valid
   representations of older state.
-- With unchanged inputs, the new policy must produce the same assignments as
-  the existing batch policy. With concurrent changes, intermediate plans need
-  not match the old implementation; lifecycle safety and convergence remain
-  required.
+- Target node layouts remain stable under ordinary view progress and DataView
+  changes. Placement now obeys replica isolation and may differ from the old
+  RG-wide policy. Lifecycle safety and eventual convergence remain required.
 
 This is an in-process publication mechanism, not a distributed informer
 protocol. It does not require a replicated event log, network watch, or relist
@@ -334,7 +334,8 @@ need not trigger expensive optimization for every progress report:
 
 - Desired config or DataView changes enqueue the collection.
 - Preparing completion and Unrecoverable transitions enqueue the shard.
-- Node loss/Stopping enqueues its placed shards.
+- Node loss/Stopping enqueues its placed shards and the affected RG collections,
+  including collections without placements on that node.
 - Node addition/recovery enqueues its RG's desired collections; RG migration
   covers both old and new groups.
 - Ordinary row/progress changes update the cache; periodic optimization can
@@ -452,3 +453,7 @@ public cache publication APIs; controller tests connect real registry hooks.
 Old snapshot builders, ledgers, scope resolvers, and compatibility fixtures have
 been removed. Explicit expected assignments replace the migration-time old/new
 planner comparison.
+
+## Replica placement facts
+
+See [Replica Placement](replica_placement.md). Collection entries additionally maintain immutable per-node replica footprints and reference-counted ready-resource indexes. Shard statistics retain Up/Preparing node footprints and resident nodes through durable deletion. Node loss, stopping, addition and RG changes all invalidate the affected RG collections. Actual row accounting remains logical per-shard accounting; it is not physical resource deduplication. Desired target layouts are owned by the default policy, never published as cache facts.

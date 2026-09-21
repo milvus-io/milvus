@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
+	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
@@ -65,6 +66,7 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 	addShardWithPreparingView(t, registry, shard, map[int64]map[int64][]int64{1: {100: {101}}})
 	cache := balancercache.New(policyTestConfig())
 	cache.PublishLoadConfig(collectionID, cfgFor(collectionID, replicaID, nil, nil), 1)
+	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
 	controller := NewDefaultBalancer(cache, registry, nil)
@@ -189,7 +191,8 @@ func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
 	reg := emptyRegistry(t)
 	c := newTestCache(cfgFor(1, 10, nil, nil))
 	shard := cacheShard(1, 10)
-	c.PublishDataView(1, cacheData(1, shard.VChannel, 100))
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	c.PublishShard(shard, &coordview.ShardStats{})
 	t.Cleanup(reg.RegisterPublicationListener(c.PublishShard))
 	c.MarkReady()
 	failed := make(chan struct{}, 1)
@@ -211,11 +214,11 @@ func TestBalancerLoopRetriesUnavailableAllocation(t *testing.T) {
 	select {
 	case <-failed:
 	case <-time.After(5 * time.Second):
-		t.Fatal("initial allocation did not retry missing nodes")
+		t.Fatal("initial allocation did not retry missing DataView")
 	}
 	// Disable publication notifications so recovery must consume the queued retry.
 	c.SetNotifier(nil)
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	c.PublishDataView(1, cacheData(1, shard.VChannel, 100))
 	require.Eventually(t, func() bool {
 		manager := reg.Get(shard)
 		return manager != nil && manager.Stats().PreparingVersion != nil

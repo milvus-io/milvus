@@ -1,14 +1,14 @@
 # Balancer & CollectionLoadManager Design
 
-> The resident `cache.Cache` now replaces `BalancerSnapshot` and
-> `SnapshotBuilder` on the reconcile path. Batch ordering, score formulas,
-> and plan emission remain
-> unchanged. Production runtime wiring and RPC changes are outside this work.
+> Reconcile reads the resident cache. QueryNode replica placement first repairs
+> balanced, stable collection/RG node targets, then plans shards as one batch.
+> Node shortages suspend excess replicas without changing desired configuration.
+> Production wiring, RPC changes and StreamingNode replica scheduling remain out of scope.
 >
-> References: [Balancer Cache](balancer_cache.md),
-> [Distributed Query View](README.md),
-> [Shard View Management](shard_view_management.md), [Syncer](syncer.md),
-> [QueryView State Machine](query_view_state_machine.md).
+> The [Replica Placement](replica_placement.md) design specifies the updated
+> node allocation, suspension, resource reuse and discovery contracts.
+> References: [Balancer Cache](balancer_cache.md), [Query Views](README.md),
+> [Shard View Management](shard_view_management.md), [Syncer](syncer.md).
 
 ## 1. Overview
 
@@ -126,7 +126,8 @@ Scope resolution uses cache keys and indexes:
 - A collection scope combines configured replicas × DataView vchannels with
   resident shards, including residual views after desired configuration removal.
 - A direct shard scope targets that ShardID.
-- A node-loss/Stopping scope expands through its placed-shard index.
+- A node-loss/Stopping scope expands through its placed-shard index and the
+  affected RG collection index, since replica quotas also change.
 - Node addition or recovery expands to desired collections in its RG; a new
   node has no placements to discover through the placed-shard index.
 - RG reassignment covers both the old and new groups.
@@ -146,7 +147,7 @@ with a missing/unready DataView waits or retries, rather than releasing views.
 | DataView publication/drop | Membership, RowNum, per-shard totals/counts | Collection |
 | Preparing completion / Unrecoverable | Actual shard and node contributions | Shard |
 | Ordinary progress report | Actual shard and affected node contributions | Periodic optimization may evaluate wider effects |
-| Node loss / Stopping | Node eligibility | Placed shards |
+| Node loss / Stopping | Node eligibility | Placed shards and RG desired collections |
 | Node addition / recovery | Node and RG indexes | RG's desired collections |
 | RG migration | Old/new RG indexes and node membership | Both RGs |
 | Periodic tick | None | Full cache scope |
@@ -189,7 +190,8 @@ Load-config lifecycle facade in `loadmgr`. It absorbs the desired-state parts
 of the legacy `CollectionManager` and `ReplicaManager`: parsing DDL callback
 messages, persisting `LoadConfig`, and notifying Balancer reconciliation.
 Replica node membership is not persisted in load config; Balancer expands each
-replica's resource group to live QueryNodes when it allocates QueryViews.
+replica's resource group to live QueryNodes and assigns balanced, stable
+per-replica target sets before allocating QueryViews.
 
 ```
 loadmgr.CollectionLoadManager
@@ -200,6 +202,16 @@ loadmgr.CollectionLoadManager
 │
 └── source publication hook  ← synchronous cache update, then dirty notification
 ```
+
+#### Managed discovery
+
+`CollectionDiscoveryUpdate` replaces a collection's serving shard set, guarded
+by load-config version and a monotonically increasing controller revision.
+`DefaultBalancer.SetDiscoveryPublisher` connects this component boundary before
+Start. Once managed, legacy ObserveShardUp callbacks cannot reinsert withdrawn
+shards. Discovery rejection skips that collection's view changes and requeues
+it. Suspended replicas remain desired; restored views reappear only after Up.
+Production subscriptions and transport adapters remain outside this PR.
 
 #### LoadConfigStore
 
@@ -262,7 +274,7 @@ func FromAlterLoadConfigMessage(msg *messagespb.AlterLoadConfigMessageHeader) *L
 - `querycoord-partition-loadinfo/{collectionID}/{partitionID}` — PartitionLoadInfo proto
 - `querycoord-replica/{collectionID}/{replicaID}` — Replica proto
 
-Legacy proto fields are kept for wire compatibility but ignored by the new design: `ro_nodes`, `rw_sq_nodes`, `ro_sq_nodes`, `channel_node_infos`, `status`, `recover_times`, `load_percentage`, `replica_number`, `load_type`, `released_partitions`. New design uses only `nodes` (RW only), `resource_group`, `ID`, `collectionID` on Replica, and `collectionID`, `dbID`, `load_fields`, `field_indexID`, `user_specified_replica_mode` on CollectionLoadInfo. **TODO**: `Priority` is carried in memory but not yet persisted (needs a new Replica proto field).
+Legacy proto fields are kept for wire compatibility but ignored by the new design: `ro_nodes`, `rw_sq_nodes`, `ro_sq_nodes`, `channel_node_infos`, `status`, `recover_times`, `load_percentage`, `replica_number`, `load_type`, `released_partitions`. New design uses only `resource_group`, `ID`, `collectionID` on Replica; physical node membership fields are ignored, and `collectionID`, `dbID`, `load_fields`, `field_indexID`, `user_specified_replica_mode` on CollectionLoadInfo. **TODO**: `Priority` is carried in memory but not yet persisted (needs a new Replica proto field).
 
 **Copy-On-Write semantics**: Put clones caller-owned configuration and never
 mutates a published value. The target publication hook shares this immutable
@@ -363,7 +375,9 @@ ledger hydration is required.
 
 ## 3. Policy Planning
 
-The Policy organizes work into three phases and processes all dirty shards
+The default policy first repairs/reuses collection/RG layouts as described in
+[Replica Placement](replica_placement.md), retaining targets across calls. It
+then organizes shard work into three phases and processes all dirty shards
 in one batch so decisions across shards remain coordinated.
 
 The cache Reader supplies eligible nodes, actual node row totals and their
@@ -373,6 +387,9 @@ No additional RPC, protobuf, or QueryView lifecycle state is required.
 
 ```
 Plan(reader, dirty)
+    │
+    ▼
+Phase 0: Repair/reuse balanced collection/RG target node sets
     │
     ▼
 Phase 1: Classify each dirty shard
@@ -401,7 +418,11 @@ Return BalancePlan { Prepares, Releases }
 
 ### 3.1 Phase 1: Classify
 
-Pure state comparison. For each dirty shard:
+Compare desired state, actual state and the retained target layout. Before
+ordinary classification, a zero-quota replica drains after protecting the last
+serving cover and withdrawing discovery; it never retries allocation. An
+in-flight view on a lost/ineligible node is replaceable. An Up view outside
+its active target requires Must convergence. For other dirty shards:
 
 | Condition (checked in order) | Action |
 |---|---|
@@ -442,6 +463,7 @@ and migration concurrency are execution-layer concerns.
 |---|---|
 | Node Health | Must be alive and not stopping |
 | Resource Group | Must belong to this replica's resource group |
+| Replica target | Must belong to this replica's nonempty target node set |
 
 **Soft constraints** are three independent normalized scores. Every component
 and their weighted combination is bounded in `[0, 1]`.
@@ -464,6 +486,11 @@ StickinessScore(segment, node) =
     1.0 - MovePenalty(segment)
         otherwise
 ```
+
+Reusable resources are indexed across replicas and require exact PartitionID,
+SegmentID, DataVersion and LoadInfoVersion compatibility plus ready state.
+The node-layout phase uses raw row costs; the normalized score below remains
+a segment placement tradeoff.
 
 The mandatory exception is segment-local. A mandatory shard rebuild still
 preserves stickiness for surviving reusable segments; only a segment whose old

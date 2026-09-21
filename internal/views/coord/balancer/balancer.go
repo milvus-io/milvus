@@ -33,12 +33,19 @@ type DefaultBalancer struct {
 	reconcileMu    sync.Mutex
 	viewRegistry   *coordview.ShardViewRegistry
 	policy         BalancePolicy
+	discovery      DiscoveryPublisher
 	queue          *triggerQueue
 	tickerInterval time.Duration
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+}
+
+// SetDiscoveryPublisher connects the component-level discovery boundary. Call
+// before Start. Production transport/subscription wiring is supplied separately.
+func (b *DefaultBalancer) SetDiscoveryPublisher(p DiscoveryPublisher) {
+	b.discovery = p
 }
 
 // NewDefaultBalancer constructs the standard Balancer controller.
@@ -163,6 +170,17 @@ func (b *DefaultBalancer) Reconcile(ctx context.Context) error {
 	if pending.empty() {
 		return nil
 	}
+	if pending.full {
+		if policy, ok := b.policy.(*DefaultBalancePolicy); ok {
+			policy.mu.Lock()
+			for collectionID := range policy.layouts.domains {
+				if collection := b.cache.GetCollection(collectionID); collection == nil || collection.LoadConfig() == nil {
+					delete(policy.layouts.domains, collectionID)
+				}
+			}
+			policy.mu.Unlock()
+		}
+	}
 	reader := newPlanningContext(b.cache)
 	dirty := resolveCacheScope(reader, pending)
 	if len(dirty) == 0 {
@@ -176,10 +194,30 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 	if plan == nil {
 		return nil
 	}
+	var errs []error
+	blocked := make(map[int64]bool)
+	if b.discovery != nil {
+		for _, update := range plan.Discovery {
+			if !b.discovery.UpdateCollectionDiscovery(update) {
+				blocked[update.CollectionID] = true
+				b.Trigger(TriggerScope{DirtyCollections: []int64{update.CollectionID}})
+				errs = append(errs, merr.WrapErrServiceUnavailableMsg("collection %d discovery inputs changed during balance", update.CollectionID))
+			}
+		}
+	}
+	isBlocked := func(id qviews.ShardID) bool {
+		collectionID, ok := parseShardCollection(id)
+		if !ok {
+			collectionID, _ = b.cache.CollectionForReplica(id.ReplicaID)
+		}
+		return blocked[collectionID]
+	}
 	batch := b.viewRegistry.Begin()
 	defer batch.Commit()
-	var errs []error
 	for _, shardID := range plan.Releases {
+		if isBlocked(shardID) {
+			continue
+		}
 		mgr := b.viewRegistry.Get(shardID)
 		if mgr == nil {
 			continue
@@ -190,7 +228,7 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		}
 	}
 	for shardID, builder := range plan.Prepares {
-		if builder == nil {
+		if builder == nil || isBlocked(shardID) {
 			continue
 		}
 		mgr := b.viewRegistry.Ensure(shardID)

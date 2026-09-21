@@ -36,6 +36,7 @@ type CollectionLoadManager struct {
 	mu                      sync.RWMutex
 	discoverableShards      map[qviews.ShardID]discoverableShard
 	shardAssignmentNotifier ShardAssignmentNotifier
+	discoveryRevisions      map[int64]uint64
 }
 
 type discoverableShard struct {
@@ -53,6 +54,7 @@ func NewCollectionLoadManager(
 		store:              store,
 		notify:             notify,
 		discoverableShards: make(map[qviews.ShardID]discoverableShard),
+		discoveryRevisions: make(map[int64]uint64),
 	}
 }
 
@@ -146,6 +148,9 @@ func (m *CollectionLoadManager) markDiscoverable(shardID qviews.ShardID) bool {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if _, managed := m.discoveryRevisions[shard.collectionID]; managed {
+		return false
+	}
 	if _, exists := m.discoverableShards[shardID]; exists {
 		return false
 	}

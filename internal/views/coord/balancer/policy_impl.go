@@ -2,16 +2,20 @@ package balancer
 
 import (
 	"sort"
+	"sync"
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-// DefaultBalancePolicy is the built-in three-phase policy described in
-// balancer_design.md. It is intentionally stateless; all mutable planning
-// state is scoped to a single Plan call.
-type DefaultBalancePolicy struct{}
+// DefaultBalancePolicy retains target layouts across batches. Actual facts and
+// row predictions remain in the cache and call-local planning context respectively.
+type DefaultBalancePolicy struct {
+	mu                sync.Mutex
+	layouts           layoutManager
+	discoveryRevision uint64
+}
 
 // NewDefaultBalancePolicy creates the standard balance policy.
 func NewDefaultBalancePolicy() *DefaultBalancePolicy {
@@ -27,6 +31,8 @@ type balanceCandidate struct {
 // optimization, and allocates each accepted shard against a shared
 // steady-state row tracker.
 func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	plan := &BalancePlan{
 		Prepares: make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder),
 	}
@@ -34,6 +40,7 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 		return plan
 	}
 	snap := newPlanningContext(reader)
+	dirty = p.layouts.prepare(snap, dirty)
 
 	var mandatory, optional []balanceCandidate
 	seen := make(map[qviews.ShardID]struct{}, len(dirty))
@@ -96,6 +103,8 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	sort.Slice(plan.Releases, func(i, j int) bool {
 		return shardLess(plan.Releases[i], plan.Releases[j])
 	})
+	p.discoveryRevision++
+	plan.Discovery = planDiscovery(snap, plan.Releases, p.discoveryRevision)
 	return plan
 }
 
