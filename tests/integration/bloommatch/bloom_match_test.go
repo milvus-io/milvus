@@ -78,6 +78,11 @@ func (s *BloomMatchTestSuite) SetupSuite() {
 	// raw data. Must be set before the cluster starts.
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.IndexOffsetCacheEnabled.Key, "true")
 	s.WithMilvusConfig(paramtable.Get().AutoIndexConfig.ScalarAutoIndexParams.Key, scalarAutoIndexBuildParams)
+	// JSON HYBRID indexes require version 4; the 3.0 default is version 3,
+	// which makes DataCoord downgrade AUTOINDEX to INVERTED. Opt in so the
+	// JSON index matrix exercises the intended HYBRID path.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TargetScalarIndexVersion.Key,
+		fmt.Sprint(common.MinScalarIndexVersionForJsonPathMultiType))
 	s.MiniClusterSuite.SetupSuite()
 	s.dbName = ""
 	s.dim = 128
