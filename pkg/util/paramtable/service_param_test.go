@@ -507,6 +507,11 @@ func TestServiceParam(t *testing.T) {
 
 		assert.NotEqual(t, Params.Path.GetValue(), "")
 		t.Logf("rocksmq path = %s", Params.Path.GetValue())
+
+		// The shipped default must survive getAsFloat: the accessor swallows the
+		// parse error and returns 0, which silently disables the memory-proportional
+		// RocksDB block cache sizing in NewRocksMQ.
+		assert.Equal(t, 0.06, Params.LRUCacheRatio.GetAsFloat())
 	})
 
 	t.Run("test kafkaConfig", func(t *testing.T) {

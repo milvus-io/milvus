@@ -51,7 +51,8 @@ namespace milvus::storage {
 MemFileManagerImpl::MemFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta) {
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.use_async_load) {
     rcm_ = fileManagerContext.chunkManagerPtr;
     fs_ = fileManagerContext.fs;
     loon_ffi_properties_ = fileManagerContext.loon_ffi_properties;

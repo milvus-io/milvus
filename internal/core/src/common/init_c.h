@@ -127,7 +127,7 @@ void
 SetStorageV2CellTargetSizeBytes(int64_t bytes);
 
 // Updates the rollout default used by newly constructed manifest translators.
-void
+CStatus
 SetStorageV2AsyncLoadEnabled(bool enabled);
 
 // Sets a positive async executor worker limit without creating an unused pool.

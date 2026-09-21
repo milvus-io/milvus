@@ -121,6 +121,9 @@ struct FileManagerContext {
     IndexMeta indexMeta;
     ChunkManagerPtr chunkManagerPtr;
     milvus_storage::ArrowFileSystemPtr fs;
+    // Cache translators pin the mode used by their resource estimate. Other
+    // callers leave it unset and select the global mode when loading starts.
+    std::optional<bool> use_async_load;
     bool for_loading_index{false};
     std::shared_ptr<CPluginContext> plugin_context;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties;
@@ -143,11 +146,19 @@ struct FileManagerContext {
 class FileManagerImpl : public milvus::FileManager {
  public:
     explicit FileManagerImpl(const FieldDataMeta& field_mata,
-                             IndexMeta index_meta)
-        : field_meta_(field_mata), index_meta_(std::move(index_meta)) {
+                             IndexMeta index_meta,
+                             std::optional<bool> use_async_load = std::nullopt)
+        : field_meta_(field_mata),
+          index_meta_(std::move(index_meta)),
+          use_async_load_(use_async_load) {
     }
 
- public:
+    // Unset means the caller has no cache-owned resource reservation.
+    std::optional<bool>
+    GetAsyncLoadEnabled() const {
+        return use_async_load_;
+    }
+
     /**
      * @brief Load a file to the local disk, so we can use stl lib to operate it.
      *
@@ -197,6 +208,27 @@ class FileManagerImpl : public milvus::FileManager {
     std::shared_ptr<InputStream>
     OpenInputStream(const std::string& local_full_file_path) override final {
         return OpenInputStream(local_full_file_path, /*is_index_file=*/true);
+    }
+
+    folly::SemiFuture<std::shared_ptr<InputStream>>
+    OpenInputStreamAsync(
+        const std::string& local_full_file_path) override final {
+        return OpenInputStreamAsync(local_full_file_path,
+                                    /*is_index_file=*/true);
+    }
+
+    // Resolve the same object as OpenInputStream, then open it and obtain its
+    // size asynchronously. The future owns the resolved path and filesystem.
+    folly::SemiFuture<std::shared_ptr<InputStream>>
+    OpenInputStreamAsync(const std::string& local_full_file_path,
+                         bool is_index_file) {
+        return folly::makeSemiFutureWith([&] {
+            AssertInfo(fs_, "fs_ is nullptr, cannot open input stream");
+            auto path = is_index_file ? GetRemoteIndexObjectPrefix()
+                                      : GetRemoteTextLogPrefix();
+            path += "/" + GetFileName(local_full_file_path);
+            return RemoteInputStream::OpenAsync(fs_, std::move(path)).semi();
+        });
     }
 
     /**
@@ -288,7 +320,6 @@ class FileManagerImpl : public milvus::FileManager {
             OpenOutputStream(filename, is_index_file));
     }
 
- public:
     virtual std::string
     GetName() const = 0;
 
@@ -378,6 +409,7 @@ class FileManagerImpl : public milvus::FileManager {
     IndexMeta index_meta_;
     ChunkManagerPtr rcm_;
     milvus_storage::ArrowFileSystemPtr fs_;
+    std::optional<bool> use_async_load_;
     std::shared_ptr<milvus_storage::api::Properties> loon_ffi_properties_;
     std::shared_ptr<CPluginContext> plugin_context_;
     StorageColumnMappings storage_column_mappings_;

@@ -49,6 +49,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -70,8 +71,10 @@ const (
 	manifestObjectDir = "manifest"
 
 	// walsummaryObjectDir is the object storage directory of the summary store.
-	// The store keeps nothing in etcd, so this is its only root.
-	walsummaryObjectDir = "walsummary"
+	// The store keeps nothing in etcd, so this is its only root. It aliases the
+	// registered segment so this top-level directory stays in
+	// common.InternalStorageRootSegments, which import path validation denies.
+	walsummaryObjectDir = common.WalSummaryRootPath
 )
 
 var (

@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <string>
 #include <thread>
 #include <utility>
@@ -14,8 +16,14 @@
 #include "arrow/io/interfaces.h"
 #include "arrow/result.h"
 #include "arrow/status.h"
+#include "arrow/buffer.h"
+#include "arrow/util/thread_pool.h"
 #include "common/Consts.h"
 #include "common/EasyAssert.h"
+#include "folly/coro/Promise.h"
+#include "folly/coro/WithCancellation.h"
+#include "milvus-storage/common/extend_status.h"
+#include "milvus-storage/filesystem/async_random_access_file.h"
 #include "storage/StatusToErrorCode.h"
 
 namespace milvus::storage {
@@ -24,6 +32,20 @@ namespace {
 constexpr int kRemoteInputStreamMaxReadRetries = 5;
 constexpr const char* kFailedFlushResponseStreamError =
     "Failed to flush response stream";
+
+// Preserve Arrow status details until the stream has classified retryability.
+template <typename T>
+folly::coro::Future<arrow::Result<T>>
+AwaitFileResult(arrow::Future<T> arrow_future) {
+    auto [promise, future] =
+        folly::coro::makePromiseContract<arrow::Result<T>>();
+    auto completion = std::make_shared<folly::coro::Promise<arrow::Result<T>>>(
+        std::move(promise));
+    arrow_future.AddCallback([completion](const arrow::Result<T>& result) {
+        completion->setValue(result);
+    });
+    return std::move(future);
+}
 
 // currently only retry failed flush response stream error
 bool
@@ -114,6 +136,104 @@ RemoteInputStream::RemoteInputStream(
                   status.status().ToString());
     }
     file_size_ = static_cast<size_t>(status.ValueOrDie());
+}
+
+folly::coro::Task<std::shared_ptr<InputStream>>
+RemoteInputStream::OpenAsync(std::shared_ptr<arrow::fs::FileSystem> fs,
+                             std::string path) {
+    auto opened = co_await folly::coro::co_withCancellation(
+        folly::CancellationToken{},
+        AwaitFileResult(fs->OpenInputFileAsync(path)));
+    if (!opened.ok()) {
+        throw milvus_storage::ToSegcoreError(opened.status());
+    }
+    auto file = std::move(*opened);
+    arrow::Future<int64_t> size_future;
+    if (auto* native =
+            dynamic_cast<milvus_storage::NonBlockingRandomAccessFile*>(
+                file.get())) {
+        size_future = native->GetSizeAsync();
+    } else {
+        auto submitted = file->io_context().executor()->Submit(
+            [file] { return file->GetSize(); });
+        if (!submitted.ok()) {
+            throw milvus_storage::ToSegcoreError(submitted.status());
+        }
+        size_future = std::move(*submitted);
+    }
+    auto size = co_await folly::coro::co_withCancellation(
+        folly::CancellationToken{}, AwaitFileResult(std::move(size_future)));
+    if (!size.ok()) {
+        throw milvus_storage::ToSegcoreError(size.status());
+    }
+    AssertInfo(*size >= 0, "Negative remote file size: {}", *size);
+    co_return std::shared_ptr<InputStream>(
+        new RemoteInputStream(std::move(file), static_cast<size_t>(*size)));
+}
+
+folly::SemiFuture<size_t>
+RemoteInputStream::ReadAtAsync(void* data, size_t offset, size_t size) {
+    return ReadAtAsyncImpl(data, offset, size).semi();
+}
+
+folly::coro::Task<size_t>
+RemoteInputStream::ReadAtAsyncImpl(void* data, size_t offset, size_t size) {
+    AssertInfo((data != nullptr || size == 0) &&
+                   offset <= std::numeric_limits<int64_t>::max(),
+               "Invalid async stream read offset or destination");
+    if (size == 0 || offset >= file_size_) {
+        co_return 0;
+    }
+    const auto bytes = std::min(size, file_size_ - offset);
+    auto* native = dynamic_cast<milvus_storage::NonBlockingRandomAccessFile*>(
+        remote_file_.get());
+    for (int attempt = 0;; ++attempt) {
+        arrow::Result<int64_t> result;
+        if (native != nullptr) {
+            result = co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{},
+                AwaitFileResult(native->ReadAtAsyncInto(
+                    offset, bytes, static_cast<uint8_t*>(data))));
+        } else {
+            auto read = co_await folly::coro::co_withCancellation(
+                folly::CancellationToken{},
+                AwaitFileResult(remote_file_->ReadAsync(offset, bytes)));
+            if (!read.ok()) {
+                result = read.status();
+            } else {
+                // Resume on the caller's executor before copying a whole slice.
+                // Arrow's completion callback only forwards the buffer.
+                const auto& buffer = *read;
+                if (buffer == nullptr || buffer->size() < 0 ||
+                    static_cast<uint64_t>(buffer->size()) > bytes) {
+                    result =
+                        arrow::Status::IOError("Invalid async read buffer");
+                } else {
+                    if (buffer->size() != 0) {
+                        std::memcpy(data, buffer->data(), buffer->size());
+                    }
+                    result = buffer->size();
+                }
+            }
+        }
+        if (result.ok()) {
+            AssertInfo(*result >= 0 && static_cast<uint64_t>(*result) <= bytes,
+                       "Invalid async read count: {} for {} bytes",
+                       *result,
+                       bytes);
+            co_return static_cast<size_t>(*result);
+        }
+        const auto detail =
+            milvus_storage::ExtendStatusDetail::UnwrapStatus(result.status());
+        const bool retryable = detail ? detail->retryable()
+                                      : IsRetryableReadError(result.status());
+        if (!retryable || attempt == kRemoteInputStreamMaxReadRetries) {
+            throw milvus_storage::ToSegcoreError(result.status());
+        }
+        co_await folly::coro::co_withCancellation(
+            folly::CancellationToken{},
+            folly::futures::sleep(std::chrono::milliseconds(1 << attempt)));
+    }
 }
 
 size_t

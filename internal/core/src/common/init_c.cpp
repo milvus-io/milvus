@@ -34,7 +34,7 @@
 #include "log/Log.h"
 #include "monitor/Monitor.h"
 #include "segcore/memory_planner.h"
-#include "segcore/storagev2translator/AsyncLoadExecutor.h"
+#include "storage/AsyncLoadExecutor.h"
 #include "segcore/storagev2translator/GroupCTMeta.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/ThreadPool.h"
@@ -243,16 +243,24 @@ SetStorageV2CellTargetSizeBytes(int64_t bytes) {
     milvus::segcore::storagev2translator::SetCellTargetSizeBytes(bytes);
 }
 
-void
+CStatus
 SetStorageV2AsyncLoadEnabled(const bool enabled) {
-    milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+    try {
+        milvus::segcore::storagev2translator::SetStorageV2AsyncLoadEnabled(
+            enabled);
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& error) {
+        return milvus::FailureCStatus(&error);
+    } catch (...) {
+        return milvus::FailureCStatus(milvus::UnexpectedError,
+                                      "Failed to configure async load mode");
+    }
 }
 
 CStatus
 SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
     try {
-        milvus::segcore::storagev2translator::SetAsyncLoadThreadPoolSize(
-            threads);
+        milvus::storage::SetAsyncLoadThreadPoolSize(threads);
         return milvus::SuccessCStatus();
     } catch (const std::exception& error) {
         return milvus::FailureCStatus(&error);
@@ -264,7 +272,7 @@ SetStorageV2AsyncLoadThreadPoolSize(const int threads) {
 
 int
 GetStorageV2AsyncLoadThreadPoolSize() {
-    return milvus::segcore::storagev2translator::GetAsyncLoadThreadPoolSize();
+    return milvus::storage::GetAsyncLoadThreadPoolSize();
 }
 
 void

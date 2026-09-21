@@ -138,7 +138,8 @@ DiskFileManagerImpl::LocalDirWriteLease::Release() noexcept {
 DiskFileManagerImpl::DiskFileManagerImpl(
     const FileManagerContext& fileManagerContext)
     : FileManagerImpl(fileManagerContext.fieldDataMeta,
-                      fileManagerContext.indexMeta),
+                      fileManagerContext.indexMeta,
+                      fileManagerContext.use_async_load),
       file_path_generation_(
           g_file_path_generation.fetch_add(1, std::memory_order_relaxed)) {
     rcm_ = fileManagerContext.chunkManagerPtr;

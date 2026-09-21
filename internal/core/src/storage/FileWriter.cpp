@@ -495,6 +495,8 @@ PositionedFileWriter::WriteAt(size_t file_offset,
                size,
                file_size_);
 
+    const auto write_permit =
+        LocalFileIOPool::GetInstance().AcquireWritePermit();
     if (use_direct_io_) {
         WriteDirectAlignedAt(file_offset, data, size);
     } else {
@@ -514,7 +516,13 @@ PositionedFileWriter::Finish() {
                   filename_,
                   strerror(errno));
     }
-    Cleanup();
+    // close() can release the descriptor even on error; never retry that fd.
+    if (fd_ != -1 && ::close(std::exchange(fd_, -1)) != 0) {
+        ThrowInfo(ErrorCode::FileWriteFailed,
+                  "Failed to close file: {}, error: {}",
+                  filename_,
+                  strerror(errno));
+    }
     return file_size_;
 }
 
