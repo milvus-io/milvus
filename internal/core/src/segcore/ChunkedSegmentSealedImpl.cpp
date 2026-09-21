@@ -361,7 +361,7 @@ struct ColumnGroupMaterializationParams {
     int64_t original_column_group_index;
     std::shared_ptr<milvus_storage::api::Reader> reader;
     std::shared_ptr<ColumnSizeEstimateState> size_estimate_state;
-    std::vector<std::string> column_group_columns;
+    std::shared_ptr<const std::vector<std::string>> column_group_columns;
     std::shared_ptr<std::vector<std::string>> needed_columns;
     std::unordered_map<FieldId, FieldMeta> field_metas;
     bool use_mmap;
@@ -415,7 +415,7 @@ CreateColumnGroupTranslator(const ColumnGroupMaterializationParams& context,
             context.original_column_group_index,
             std::move(chunk_reader),
             context.field_metas,
-            context.column_group_columns,
+            *context.column_group_columns,
             *context.needed_columns,
             context.use_mmap,
             context.mmap_populate,
@@ -2321,7 +2321,7 @@ void
 ChunkedSegmentSealedImpl::LoadLazyColumnGroup(
     const std::shared_ptr<milvus_storage::api::Reader>& reader,
     int64_t index,
-    const std::vector<std::string>& column_group_columns,
+    const std::shared_ptr<const std::vector<std::string>>& column_group_columns,
     const std::vector<FieldId>& milvus_field_ids,
     const std::unordered_map<FieldId, FieldMeta>& field_metas,
     const SegmentLoadInfo& segment_load_info,
@@ -8894,9 +8894,11 @@ ChunkedSegmentSealedImpl::LoadColumnGroup(
     const bool use_mmap = has_mmap_setting ? mmap_enabled : global_use_mmap;
 
     if (lazy_materialization) {
+        const std::shared_ptr<const std::vector<std::string>>
+            column_group_columns(column_group, &column_group->columns);
         LoadLazyColumnGroup(committer.runtime()->reader,
                             index,
-                            column_group->columns,
+                            column_group_columns,
                             milvus_field_ids,
                             field_metas,
                             segment_load_info,

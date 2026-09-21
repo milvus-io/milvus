@@ -1428,7 +1428,8 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     LoadLazyColumnGroup(
         const std::shared_ptr<milvus_storage::api::Reader>& reader,
         int64_t index,
-        const std::vector<std::string>& column_group_columns,
+        const std::shared_ptr<const std::vector<std::string>>&
+            column_group_columns,
         const std::vector<FieldId>& milvus_field_ids,
         const std::unordered_map<FieldId, FieldMeta>& field_metas,
         const SegmentLoadInfo& segment_load_info,

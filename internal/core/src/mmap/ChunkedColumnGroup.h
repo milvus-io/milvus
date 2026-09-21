@@ -282,21 +282,26 @@ class ChunkedColumnGroup {
 
         TranslatorFactory factory;
         std::mutex mutex;
+        std::atomic<bool> ready{false};
     };
 
-    SlotPtr
+    // Safe to borrow: slot_ is never reset or replaced after publication.
+    CacheSlot<GroupChunk>*
     GetSlotIfReady() const {
         // Ordinary groups never change their slot after construction.
         if (!IsLazy()) {
-            return slot_;
+            return slot_.get();
         }
-        return std::atomic_load_explicit(&slot_, std::memory_order_acquire);
+        if (!lazy_init_->ready.load(std::memory_order_acquire)) {
+            return nullptr;
+        }
+        return slot_.get();
     }
 
-    SlotPtr
+    CacheSlot<GroupChunk>*
     EnsureMaterialized(milvus::OpContext* op_ctx) const {
         if (!IsLazy()) {
-            return slot_;
+            return slot_.get();
         }
 
         if (auto slot = GetSlotIfReady()) {
@@ -331,9 +336,10 @@ class ChunkedColumnGroup {
 
         // Publish the complete slot and its cached chunk count and size together.
         // Failures leave slot_ empty so the next caller can retry.
-        std::atomic_store_explicit(&slot_, slot, std::memory_order_release);
+        slot_ = std::move(slot);
         init.factory = nullptr;
-        return slot;
+        init.ready.store(true, std::memory_order_release);
+        return slot_.get();
     }
 
     const segcore::storagev2translator::GroupCTMeta*
@@ -343,7 +349,7 @@ class ChunkedColumnGroup {
     }
 
     mutable SlotPtr slot_;
-    // Written before publishing slot_; only read after EnsureMaterialized().
+    // Published with slot_ through LazyInitState::ready.
     mutable size_t num_chunks_{0};
     mutable size_t memory_size_{0};
     int64_t num_rows_{0};

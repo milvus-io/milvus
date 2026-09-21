@@ -303,7 +303,11 @@ TEST_F(ChunkedColumnGroupTest, DeferredFieldsShareConcurrentInitialization) {
             started.set_value();
         }
         release_future.wait();
-        return MakeGroupTranslator("deferred-concurrent");
+        auto translator = MakeGroupTranslator("deferred-concurrent");
+        auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
+            translator->meta());
+        meta->chunk_memory_size_ = {128};
+        return translator;
     });
     auto first =
         std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
@@ -315,12 +319,16 @@ TEST_F(ChunkedColumnGroupTest, DeferredFieldsShareConcurrentInitialization) {
         reads.push_back(std::async(
             std::launch::async, [column = i % 2 == 0 ? first : second] {
                 auto num_chunks = column->num_chunks();
+                EXPECT_EQ(column->DataByteSize(), 128);
                 auto rows = column->GetChunk(nullptr, 0).get()->RowNums();
                 return std::make_pair(num_chunks, rows);
             }));
     }
     auto status = started_future.wait_for(std::chrono::seconds(5));
-    // Always release the builder before asserting or joining readers.
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_FALSE(group->CellsLoaded({0}));
+    EXPECT_EQ(group->GetSkipMetrics(FieldId(1), 0), nullptr);
+    // Always release the builder before joining readers.
     release.set_value();
     EXPECT_EQ(status, std::future_status::ready);
     for (auto& read : reads) {
