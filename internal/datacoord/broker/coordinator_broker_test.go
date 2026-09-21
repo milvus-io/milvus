@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -771,6 +772,42 @@ func TestCreateCollection_WithExistingBase(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// TestCreateCollection_UsesSnapshotRestoreBrokerTimeout guards against the restore-path
+// CreateCollection RPC being bounded by queryCoord.brokerTimeout (5s by default, sized for
+// QueryCoord metadata lookups) instead of its own dataCoord.snapshot.restoreBrokerTimeout.
+// This DDL must be appended to the WAL before RootCoord replies, so a short metadata timeout
+// can fire before the DDL completes even though it eventually succeeds, leaving an orphan
+// collection behind (see https://github.com/milvus-io/milvus/issues/53715).
+func TestCreateCollection_UsesSnapshotRestoreBrokerTimeout(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	oldQueryCoordTimeout := paramtable.Get().QueryCoordCfg.BrokerTimeout.SwapTempValue("1")
+	defer paramtable.Get().QueryCoordCfg.BrokerTimeout.SwapTempValue(oldQueryCoordTimeout)
+	oldRestoreTimeout := paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.SwapTempValue("30000")
+	defer paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.SwapTempValue(oldRestoreTimeout)
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreateCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
+			deadline, ok := ctx.Deadline()
+			assert.True(t, ok)
+			// With queryCoord.brokerTimeout at 1ms, a ctx bounded by it would have a
+			// sub-millisecond budget left here; the restore-specific timeout (30s) must
+			// be the one actually in effect.
+			assert.True(t, time.Until(deadline) > time.Second)
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+	})
+
+	assert.NoError(t, err)
+}
+
 func TestCreatePartition_Success(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
@@ -828,6 +865,38 @@ func TestCreatePartition_StatusError(t *testing.T) {
 	})
 
 	assert.Error(t, err)
+}
+
+// TestCreatePartition_UsesSnapshotRestoreBrokerTimeout mirrors
+// TestCreateCollection_UsesSnapshotRestoreBrokerTimeout: CreatePartition is the other
+// restore-path DDL that must go through the WAL and therefore needs the dedicated
+// restore timeout rather than queryCoord.brokerTimeout.
+func TestCreatePartition_UsesSnapshotRestoreBrokerTimeout(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+
+	oldQueryCoordTimeout := paramtable.Get().QueryCoordCfg.BrokerTimeout.SwapTempValue("1")
+	defer paramtable.Get().QueryCoordCfg.BrokerTimeout.SwapTempValue(oldQueryCoordTimeout)
+	oldRestoreTimeout := paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.SwapTempValue("30000")
+	defer paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.SwapTempValue(oldRestoreTimeout)
+
+	mockMixCoord := mocks.NewMixCoord(t)
+	mockMixCoord.EXPECT().CreatePartition(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, req *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
+			deadline, ok := ctx.Deadline()
+			assert.True(t, ok)
+			assert.True(t, time.Until(deadline) > time.Second)
+			return merr.Success(), nil
+		})
+
+	broker := NewCoordinatorBroker(mockMixCoord)
+	err := broker.CreatePartition(ctx, &milvuspb.CreatePartitionRequest{
+		DbName:         "test_db",
+		CollectionName: "test_collection",
+		PartitionName:  "test_partition",
+	})
+
+	assert.NoError(t, err)
 }
 
 func TestDescribeCollectionByName_Success(t *testing.T) {

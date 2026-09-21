@@ -238,7 +238,11 @@ func (b *coordinatorBroker) HasCollection(ctx context.Context, collectionID int6
 // CreateCollection creates a new collection via RootCoord.
 // Used by DataCoord-driven snapshot restore.
 func (b *coordinatorBroker) CreateCollection(ctx context.Context, req *milvuspb.CreateCollectionRequest) error {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	// This DDL must be appended to the WAL before RootCoord replies, so it is bounded
+	// by WAL append latency rather than a metadata RPC round trip. Use the dedicated
+	// restore timeout instead of queryCoord.brokerTimeout, which is sized for QueryCoord
+	// metadata lookups and can be far shorter than a WAL append can legitimately take.
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := mlog.With(
 		mlog.FieldDbName(req.GetDbName()),
@@ -265,7 +269,9 @@ func (b *coordinatorBroker) CreateCollection(ctx context.Context, req *milvuspb.
 // CreatePartition creates a new partition via RootCoord.
 // Used by DataCoord-driven snapshot restore.
 func (b *coordinatorBroker) CreatePartition(ctx context.Context, req *milvuspb.CreatePartitionRequest) error {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	// See CreateCollection above: this DDL goes through the WAL, so it needs the
+	// dedicated restore timeout rather than the QueryCoord metadata-lookup timeout.
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().DataCoordCfg.SnapshotRestoreBrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := mlog.With(
 		mlog.FieldDbName(req.GetDbName()),
