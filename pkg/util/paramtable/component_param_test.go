@@ -333,6 +333,57 @@ func TestStorageV2AsyncLoadThreadPoolSize(t *testing.T) {
 	assert.Equal(t, wantDefault, item.GetAsInt())
 }
 
+func TestRequeryUnsolvedQueueSizeInvalidFallback(t *testing.T) {
+	Init()
+	params := Get()
+	laneKey := params.QueryNodeCfg.RequeryUnsolvedQueueSize.Key
+	regularKey := params.QueryNodeCfg.MaxUnsolvedQueueSize.Key
+	assert.NoError(t, params.Reset(laneKey))
+	assert.NoError(t, params.Reset(regularKey))
+	t.Cleanup(func() {
+		assert.NoError(t, params.Reset(laneKey))
+		assert.NoError(t, params.Reset(regularKey))
+	})
+
+	assert.Equal(t, int64(1024), params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64())
+	assert.NoError(t, params.Save(regularKey, "7"))
+	assert.Equal(t, int64(1024), params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64())
+	assert.NoError(t, params.Save(laneKey, "2048"))
+	assert.Equal(t, int64(2048), params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64())
+	assert.NoError(t, params.Save(regularKey, "3"))
+	assert.Equal(t, int64(2048), params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64())
+
+	for _, invalid := range []string{"1", "1023", "invalid", "1.5", "1024x", "AUTO", " 8 "} {
+		assert.NoError(t, params.Save(laneKey, invalid))
+		assert.Equal(t, int64(1024), params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64(), invalid)
+	}
+
+	assert.NoError(t, params.Save(laneKey, "-1"))
+	assert.Equal(t, int64(-1), params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64())
+	assert.NoError(t, params.Save(laneKey, "0"))
+	assert.Zero(t, params.QueryNodeCfg.RequeryUnsolvedQueueSize.GetAsInt64())
+}
+
+func TestRequeryPriorityBaseCreditDynamic(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryNodeCfg.RequeryPriorityBaseCredit
+	assert.NoError(t, params.Reset(item.Key))
+	t.Cleanup(func() { assert.NoError(t, params.Reset(item.Key)) })
+
+	assert.Equal(t, 3, item.GetAsInt())
+	for value, expected := range map[string]int{"1": 1, "7": 7} {
+		require.NoError(t, params.Save(item.Key, value))
+		assert.Equal(t, expected, item.GetAsInt())
+	}
+	for _, invalid := range []string{"0", "-1", "typo", "1.5", " 8 ", "9223372036854775808"} {
+		require.NoError(t, params.Save(item.Key, invalid))
+		assert.Equal(t, 3, item.GetAsInt(), invalid)
+	}
+	assert.NoError(t, params.Reset(item.Key))
+	assert.Equal(t, 3, item.GetAsInt())
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()
@@ -958,6 +1009,11 @@ func TestComponentParam(t *testing.T) {
 
 		assert.Equal(t, int32(1024), Params.MaxUnsolvedQueueSize.GetAsInt32())
 		assert.Equal(t, "1024", Params.MaxUnsolvedQueueSize.DefaultValue)
+		assert.Equal(t, int64(1024), Params.RequeryUnsolvedQueueSize.GetAsInt64())
+		assert.Equal(t, "1024", Params.RequeryUnsolvedQueueSize.DefaultValue)
+		assert.Empty(t, Params.RequeryUnsolvedQueueSize.FallbackKeys)
+		assert.Equal(t, 3, Params.RequeryPriorityBaseCredit.GetAsInt())
+		assert.Equal(t, "3", Params.RequeryPriorityBaseCredit.DefaultValue)
 		assert.Equal(t, int64(64), Params.MaxGroupNQ.GetAsInt64())
 		assert.Equal(t, 16.0, Params.NQMergeRatio.GetAsFloat())
 		assert.Equal(t, 20.0, Params.TopKMergeRatio.GetAsFloat())
@@ -1015,8 +1071,6 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryNode.gracefulStopTimeout", "100")
 		gracefulStopTimeout := &Params.GracefulStopTimeout
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())
-
-		assert.Equal(t, false, Params.EnableWorkerSQCostMetrics.GetAsBool())
 
 		params.Save("querynode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))

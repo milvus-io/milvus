@@ -20,6 +20,10 @@ type fifoPolicy struct {
 	queue *mergeTaskQueue
 }
 
+func (p *fifoPolicy) Classify(Task) taskClass {
+	return taskClassRegular
+}
+
 func (p *fifoPolicy) Cleanup(now time.Time) []*queuedTask {
 	return p.queue.cleanup(now)
 }

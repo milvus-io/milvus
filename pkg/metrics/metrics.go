@@ -64,6 +64,7 @@ const (
 	UpsertQueryLabel = "upsert_query"
 	DeleteQueryLabel = "delete_query"
 	ReQueryLabel     = "requery"
+	RegularLabel     = "regular"
 	CacheHitLabel    = "hit"
 	CacheMissLabel   = "miss"
 	TimetickLabel    = "timetick"
@@ -169,6 +170,7 @@ const (
 	queueTypeLabelName             = `queue_type`
 	poolNameLabelName              = "pool_name"
 	outcomeLabelName               = "outcome"
+	laneLabelName                  = "lane"
 
 	// model function/UDF labels
 	functionTypeName = "function_type_name"

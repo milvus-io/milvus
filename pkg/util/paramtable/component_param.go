@@ -30,6 +30,7 @@ import (
 	"github.com/blang/semver/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	"go.uber.org/atomic"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/config"
@@ -4358,6 +4359,8 @@ type queryNodeConfig struct {
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
+	RequeryUnsolvedQueueSize     ParamItem `refreshable:"true"`
+	RequeryPriorityBaseCredit    ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
@@ -4426,8 +4429,6 @@ type queryNodeConfig struct {
 	// StorageV2AsyncLoadReadWindowSizeBytes controls the estimated bytes read
 	// by one Storage V3 async window.
 	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
-
-	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
 
@@ -5379,9 +5380,61 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.unsolvedQueueSize",
 		Version:      "2.0.0",
 		DefaultValue: "1024",
-		Export:       true,
+		Doc: "Maximum number of regular read tasks waiting in the scheduler. " +
+			"When the dedicated requery lane is enabled under fifo, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.",
+		Export: true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
+
+	const defaultRequeryUnsolvedQueueSize = "1024"
+	p.RequeryUnsolvedQueueSize = ParamItem{
+		Key:          "queryNode.scheduler.requeryUnsolvedQueueSize",
+		Version:      "3.0.0",
+		DefaultValue: defaultRequeryUnsolvedQueueSize,
+		Formatter: func(v string) string {
+			capacity, err := strconv.ParseInt(v, 10, 64)
+			if err == nil && (capacity <= 0 || capacity >= 1024) {
+				return v
+			}
+			mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+				"invalid requery queue capacity, falling back to default capacity",
+				mlog.String("key", p.RequeryUnsolvedQueueSize.Key),
+				mlog.String("value", v),
+				mlog.Int64("fallbackCapacity", 1024))
+			return defaultRequeryUnsolvedQueueSize
+		},
+		Doc: "Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane when scheduleReadPolicy is fifo, including a task staged for execution handoff. " +
+			"It defaults to an independent capacity of 1024, so the default total waiting-task capacity is 1024 regular tasks plus 1024 requery tasks. " +
+			"A value >= 1024 sets the lane capacity, a value <= 0 disables the lane, and any other value emits a warning and falls back to 1024. " +
+			"The lane is disabled when scheduleReadPolicy is user-task-polling.",
+		Export: true,
+	}
+	p.RequeryUnsolvedQueueSize.Init(base.mgr)
+
+	const defaultRequeryPriorityBaseCredit = "3"
+	p.RequeryPriorityBaseCredit = ParamItem{
+		Key:          "queryNode.scheduler.requeryPriorityBaseCredit",
+		Version:      "3.0.0",
+		DefaultValue: defaultRequeryPriorityBaseCredit,
+		Formatter: func(v string) string {
+			credit, err := strconv.Atoi(v)
+			if err == nil && credit > 0 {
+				return v
+			}
+			mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
+				"invalid requery priority base credit, falling back to default",
+				mlog.String("key", p.RequeryPriorityBaseCredit.Key),
+				mlog.String("value", v),
+				mlog.Int("fallbackCredit", 3))
+			return defaultRequeryPriorityBaseCredit
+		},
+		Doc: "Base number of requery tasks that may be selected before a waiting regular task under the fifo requery priority policy. " +
+			"A served regular task refreshes the credit to the maximum of this value and its merged original request count. " +
+			"Positive values take effect dynamically at the next credit refresh; invalid or non-positive values fall back to 3. " +
+			"This setting has no effect under user-task-polling.",
+		Export: false,
+	}
+	p.RequeryPriorityBaseCredit.Init(base.mgr)
 
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
@@ -5801,14 +5854,6 @@ user-task-polling:
 		},
 	}
 	p.StorageV2AsyncLoadReadWindowSizeBytes.Init(base.mgr)
-
-	p.EnableWorkerSQCostMetrics = ParamItem{
-		Key:          "queryNode.enableWorkerSQCostMetrics",
-		Version:      "2.3.0",
-		DefaultValue: "false",
-		Doc:          "whether use worker's cost to measure delegator's workload",
-	}
-	p.EnableWorkerSQCostMetrics.Init(base.mgr)
 
 	p.ExprEvalBatchSize = ParamItem{
 		Key:          "queryNode.segcore.exprEvalBatchSize",
