@@ -56,6 +56,9 @@ const (
 	requeryThreshold = 0.5 * 1024 * 1024
 	radiusKey        = "radius"
 	rangeFilterKey   = "range_filter"
+	// iterativeFilterKey is the `hints` value that moves the predicate after
+	// the vector search (see segcore ITERATIVE_FILTER).
+	iterativeFilterKey = "iterative_filter"
 )
 
 // type requery func(span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, error)
@@ -446,6 +449,18 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	t.SubReqs = make([]*internalpb.SubSearchRequest, len(t.request.GetSubReqs()))
 	t.queryInfos = make([]*planpb.QueryInfo, len(t.request.GetSubReqs()))
 	t.hybridSubSearchInfos = make([]hybridSubSearchInfo, len(t.request.GetSubReqs()))
+	// Computing the filter-sharing hint costs a JSON probe per sub-request plus
+	// a fingerprint over its predicate and template values. Skip all of it when
+	// the query node will not consume the hint -- the flag is off by default,
+	// and a hint the delegator ignores buys nothing. A node that has sharing on
+	// while this proxy has it off sees every hint at 0, reads that as "nothing
+	// to share", and searches exactly as it does today; it reports those
+	// sub-requests on its unshareable fallback counter.
+	shareFilters := Params.QueryNodeCfg.HybridSearchSharedFilterEnabled.GetAsBool()
+	var filterSharingCandidates []filterSharingCandidate
+	if shareFilters {
+		filterSharingCandidates = make([]filterSharingCandidate, len(t.request.GetSubReqs()))
+	}
 	t.hybridElementLevel = false
 	queryFieldIDs := []int64{}
 	for index, subReq := range t.request.GetSubReqs() {
@@ -576,11 +591,21 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if shareFilters {
+			filterSharingCandidates[index] = filterSharingCandidateOf(
+				subReq.GetDsl(), subReq.GetExprTemplateValues(), plan, queryInfo)
+		}
 		t.SubReqs[index] = internalSubReq
 		t.queryInfos[index] = queryInfo
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
+	}
+
+	// Every plan is built, so predicates can now be compared against each other.
+	// With sharing off there are no candidates and every hint stays at 0.
+	for index, group := range assignFilterSharingGroups(filterSharingCandidates) {
+		t.SubReqs[index].FilterSharingGroup = group
 	}
 
 	t.hybridElementLevel = inferElementLevelHybrid(t.hybridSubSearchInfos)

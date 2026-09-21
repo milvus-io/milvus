@@ -3686,8 +3686,9 @@ type queryNodeConfig struct {
 	EnableLatestDeleteSnapshotOptimization ParamItem `refreshable:"true"`
 
 	// expr cache
-	ExprResCacheEnabled       ParamItem `refreshable:"false"`
-	ExprResCacheCapacityBytes ParamItem `refreshable:"false"`
+	HybridSearchSharedFilterEnabled ParamItem `refreshable:"true"`
+	ExprResCacheEnabled             ParamItem `refreshable:"false"`
+	ExprResCacheCapacityBytes       ParamItem `refreshable:"false"`
 
 	// pipeline
 	CleanExcludeSegInterval ParamItem `refreshable:"false"`
@@ -4988,6 +4989,15 @@ user-task-polling:
 		Export:       false,
 	}
 	p.EnableLatestDeleteSnapshotOptimization.Init(base.mgr)
+
+	p.HybridSearchSharedFilterEnabled = ParamItem{
+		Key:          "queryNode.hybridSearch.sharedFilter.enabled",
+		Version:      "2.6.24",
+		DefaultValue: "false",
+		Doc:          "Evaluate the filter once per segment for hybrid search sub-requests that carry an identical filter predicate, instead of once per sub-request. Sub-requests whose predicates differ, or that use iterative filtering, are unaffected.",
+		Export:       true,
+	}
+	p.HybridSearchSharedFilterEnabled.Init(base.mgr)
 
 	// expr cache
 	p.ExprResCacheEnabled = ParamItem{

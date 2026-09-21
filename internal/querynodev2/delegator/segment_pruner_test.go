@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -633,6 +634,7 @@ func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key)
 	sps.SetupForClustering("vec")
 	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
 	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
@@ -657,6 +659,69 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
 	sps.Equal(1, len(sps.sealedSegments[1].Segments))
 	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
+}
+
+func (sps *SegmentPrunerSuite) TestPruneSegmentsRejectsSharedFilterGroupByVectorField() {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key, "true")
+	defer paramtable.Get().Reset(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key)
+	sps.SetupForClustering("vec")
+
+	err := pruneSegments(
+		context.TODO(),
+		sps.partitionStats,
+		&internalpb.SearchRequest{},
+		nil,
+		sps.schema,
+		sps.sealedSegments,
+		PruneInfo{filterRatio: 1},
+		true,
+	)
+	sps.ErrorIs(err, errSharedFilterUngroupable)
+}
+
+func (sps *SegmentPrunerSuite) TestPruneSharedFilterGroupSelectsClusteringKeyOnce() {
+	paramtable.Init()
+	sps.SetupForClustering("age")
+
+	var scalarKey, vectorKey *schemapb.FieldSchema
+	for _, field := range sps.schema.GetFields() {
+		switch field.GetName() {
+		case "age":
+			scalarKey = field
+		case "vec":
+			vectorKey = field
+		}
+	}
+	sps.Require().NotNil(scalarKey)
+	sps.Require().NotNil(vectorKey)
+
+	keyCalls := 0
+	patch := mockey.Mock(clustering.GetClusteringKeyField).To(
+		func(*schemapb.CollectionSchema) *schemapb.FieldSchema {
+			keyCalls++
+			if keyCalls == 1 {
+				return scalarKey
+			}
+			return vectorKey
+		}).Build()
+	defer patch.UnPatch()
+
+	// The first lookup selects a scalar key. If the grouped-request guard and
+	// pruning resolved the refreshable key independently, the second lookup
+	// would switch this same call to unsafe branch-0 vector pruning.
+	err := pruneSegments(
+		context.TODO(),
+		sps.partitionStats,
+		&internalpb.SearchRequest{},
+		nil,
+		sps.schema,
+		sps.sealedSegments,
+		PruneInfo{filterRatio: 1},
+		true,
+	)
+	sps.NoError(err)
+	sps.Equal(1, keyCalls)
 }
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {
