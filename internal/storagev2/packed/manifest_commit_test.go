@@ -31,6 +31,8 @@ import (
 
 // manifestTestStorageConfig returns a storage config wired to a per-test
 // temp dir for use with CommitManifestUpdates / FFIPackedWriter.
+// Local Loon filesystems are rooted at "/", so callers must include RootPath
+// in each complete file key instead of relying on an implicit root prefix.
 func manifestTestStorageConfig(t *testing.T) *indexpb.StorageConfig {
 	t.Helper()
 	paramtable.Init()
@@ -72,9 +74,9 @@ func TestCommitManifestUpdates_EmptyShortCircuit(t *testing.T) {
 
 func TestRemoveUnpublishedManifestKeepsSuccessorReadable(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/remove_unpublished_manifest/seg1"
-	firstStatPath := path.Join(cfg.RootPath, basePath, "_stats/text_index.100/1")
-	secondStatPath := path.Join(cfg.RootPath, basePath, "_stats/json_stats.101/1")
+	basePath := path.Join(cfg.RootPath, "remove_unpublished_manifest/seg1")
+	firstStatPath := path.Join(basePath, "_stats/text_index.100/1")
+	secondStatPath := path.Join(basePath, "_stats/json_stats.101/1")
 	require.NoError(t, WriteFile(cfg, firstStatPath, []byte("text-stats")))
 	require.NoError(t, WriteFile(cfg, secondStatPath, []byte("json-stats")))
 
@@ -126,23 +128,23 @@ func TestRemoveUnpublishedManifestErrors(t *testing.T) {
 	err = RemoveUnpublishedManifest("not-a-manifest", cfg)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 
-	err = RemoveUnpublishedManifest(MarshalManifestPath("files/non_persisted", ManifestEarliest), cfg)
+	err = RemoveUnpublishedManifest(MarshalManifestPath(path.Join(cfg.RootPath, "non_persisted"), ManifestEarliest), cfg)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 
-	err = RemoveUnpublishedManifest(MarshalManifestPath("files/missing_manifest", 1), cfg)
+	err = RemoveUnpublishedManifest(MarshalManifestPath(path.Join(cfg.RootPath, "missing_manifest"), 1), cfg)
 	require.ErrorIs(t, err, merr.ErrStorage)
 }
 
 func TestReadManifestColumnGroupEntries(t *testing.T) {
 	paramtable.InitWithBaseTable(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/read_column_group_entries/seg1"
+	basePath := path.Join(cfg.RootPath, "read_column_group_entries/seg1")
 	groups := []ColumnGroupEntry{
 		{Columns: []string{"100"}, Format: "parquet", Files: []ColumnGroupFileEntry{{
-			Path: path.Join(cfg.RootPath, basePath, "input.parquet"), EndIndex: 10,
+			Path: path.Join(basePath, "input.parquet"), EndIndex: 10,
 		}}},
 		{Columns: []string{"101", "102"}, Format: "vortex", Files: []ColumnGroupFileEntry{{
-			Path: path.Join(cfg.RootPath, basePath, "output.vortex"), StartIndex: 2, EndIndex: 10,
+			Path: path.Join(basePath, "output.vortex"), StartIndex: 2, EndIndex: 10,
 			Properties: map[string]string{"file_size": "1234", "footer_size": "256", "custom_property": "preserved"},
 		}}},
 	}
@@ -221,7 +223,8 @@ func TestReadManifestColumnGroupEntries(t *testing.T) {
 func TestColumnGroupEntriesFromCValidatesNativeArrays(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
 	schema := arrow.NewSchema([]arrow.Field{{Name: "101", Type: arrow.PrimitiveTypes.Int64}}, nil)
-	writer, err := NewFFIPackedWriter("files/column_group_entries/seg1", schema,
+	basePath := path.Join(cfg.RootPath, "column_group_entries/seg1")
+	writer, err := NewFFIPackedWriter(basePath, schema,
 		[]storagecommon.ColumnGroup{{Columns: []int{0}, GroupID: 101}}, cfg, nil)
 	require.NoError(t, err)
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
@@ -324,13 +327,13 @@ func TestCarryManifestArtifactsErrorsReturnEmptyResult(t *testing.T) {
 
 func TestCarryManifestArtifactsFinalStatsFailureKeepsCommittedVersion(t *testing.T) {
 	cfg := manifestTestStorageConfig(t)
-	basePath := "files/carry_final_stats_failure/seg1"
+	basePath := path.Join(cfg.RootPath, "carry_final_stats_failure/seg1")
 	source, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
-		Stats: []StatEntry{{Key: "text_index.100", Files: []string{path.Join(cfg.RootPath, basePath, "_stats/text")}}},
+		Stats: []StatEntry{{Key: "text_index.100", Files: []string{path.Join(basePath, "_stats/text")}}},
 	})
 	require.NoError(t, err)
 	target, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
-		DeltaLogs: []DeltaLogEntry{{Path: path.Join(cfg.RootPath, basePath, "_delta/new"), NumEntries: 1}},
+		DeltaLogs: []DeltaLogEntry{{Path: path.Join(basePath, "_delta/new"), NumEntries: 1}},
 	})
 	require.NoError(t, err)
 	_, targetVersion, err := UnmarshalManifestPath(target)
@@ -360,7 +363,7 @@ func TestCarryManifestArtifactsFinalStatsFailureKeepsCommittedVersion(t *testing
 	_, err = ReadFile(cfg, fmt.Sprintf("%s/_metadata/manifest-%d.avro", basePath, committedVersion))
 	require.NoError(t, err, "an empty error result must not imply rollback of the committed manifest")
 	next, err := CommitManifestUpdates(basePath, ManifestEarliest, cfg, &ManifestUpdates{
-		DeltaLogs: []DeltaLogEntry{{Path: path.Join(cfg.RootPath, basePath, "_delta/retry"), NumEntries: 2}},
+		DeltaLogs: []DeltaLogEntry{{Path: path.Join(basePath, "_delta/retry"), NumEntries: 2}},
 	})
 	require.NoError(t, err)
 	_, nextVersion, err := UnmarshalManifestPath(next)
