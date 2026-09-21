@@ -335,6 +335,49 @@ func TestRecordBuilderTextNullsAcrossRepresentations(t *testing.T) {
 	}
 }
 
+func TestRecordBuilderFillsNullableInt64Defaults(t *testing.T) {
+	const defaultValue int64 = 1_700_000_000_000_000
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_Int64, schemapb.DataType_Timestamptz} {
+		t.Run(dataType.String(), func(t *testing.T) {
+			for _, withDefault := range []bool{false, true} {
+				field := &schemapb.FieldSchema{FieldID: 100, Name: "value", DataType: dataType, Nullable: true}
+				if withDefault {
+					field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: defaultValue}}
+					if dataType == schemapb.DataType_Timestamptz {
+						field.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: defaultValue}}
+					}
+				}
+				rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+				defer rb.Release()
+				for batch := 0; batch < 2; batch++ {
+					input := array.NewInt64Builder(memory.DefaultAllocator)
+					input.AppendNull()
+					input.Append(0)
+					input.Append(123)
+					column := input.NewArray()
+					input.Release()
+					record := NewSimpleArrowRecord(array.NewRecord(
+						arrow.NewSchema([]arrow.Field{{Name: field.Name, Type: column.DataType(), Nullable: true}}, nil),
+						[]arrow.Array{column}, 3), map[FieldID]int{field.FieldID: 0})
+					column.Release()
+					err := rb.Append(record, 0, record.Len())
+					record.Release()
+					require.NoError(t, err)
+					output := rb.Build()
+					values := output.Column(field.FieldID).(*array.Int64)
+					assert.Equal(t, !withDefault, values.IsNull(0))
+					if withDefault {
+						assert.Equal(t, defaultValue, values.Value(0))
+					}
+					assert.EqualValues(t, 0, values.Value(1))
+					assert.EqualValues(t, 123, values.Value(2))
+					output.Release()
+				}
+			}
+		})
+	}
+}
+
 func TestRecordBuilderFillsNullableDoubleDefault(t *testing.T) {
 	for _, withDefault := range []bool{false, true} {
 		field := &schemapb.FieldSchema{FieldID: 100, Name: "double", DataType: schemapb.DataType_Double, Nullable: true}

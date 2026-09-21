@@ -131,7 +131,7 @@ func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	if err := b.builder.Append(r, row, row+1); err != nil {
 		return err
 	}
-	// Split the buffering budget between row batching and the native writer.
+	// Leave room for buffering in the underlying writer.
 	if b.builder.GetSize() >= max(uint64(1), b.writer.binLogMaxSize/2) {
 		return b.writeRecord()
 	}

@@ -52,6 +52,11 @@ func TestClusterBufferWideReadback(t *testing.T) {
 				FieldID: 104, Name: "double", DataType: schemapb.DataType_Double, Nullable: true,
 				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_DoubleData{DoubleData: 3.5}},
 			}
+			const defaultTimestamp int64 = 1_700_000_000_000_000
+			schema.Fields[7] = &schemapb.FieldSchema{
+				FieldID: 105, Name: "timestamp", DataType: schemapb.DataType_Timestamptz, Nullable: true,
+				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: defaultTimestamp}},
+			}
 			buffer, observer := newClusteringTestBuffer(t, schema, 16<<10, version)
 			for row := 0; row < rows; row++ {
 				record := clusteringTestRecord(t, schema, row, 1)
@@ -93,7 +98,11 @@ func TestClusterBufferWideReadback(t *testing.T) {
 						}
 						switch column := column.(type) {
 						case *array.Int64:
-							require.EqualValues(t, rowID, column.Value(row))
+							want := int64(rowID)
+							if field.GetDataType() == schemapb.DataType_Timestamptz && rowID%3 == 0 {
+								want = defaultTimestamp
+							}
+							require.Equal(t, want, column.Value(row))
 						case *array.Int32:
 							require.EqualValues(t, rowID, column.Value(row))
 						case *array.Float64:

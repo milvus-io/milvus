@@ -152,7 +152,11 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		}
 		if ia.IsNull(idx) {
 			if defaultValue != nil {
-				b.Append(defaultValue.GetLongData())
+				if field.GetDataType() == schemapb.DataType_Timestamptz {
+					b.Append(defaultValue.GetTimestamptzData())
+				} else {
+					b.Append(defaultValue.GetLongData())
+				}
 				return 8, nil
 			}
 			b.AppendNull()
