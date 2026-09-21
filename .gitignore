@@ -27,7 +27,6 @@ internal/msgstream/pulsarms/client-cpp/build/*
 tests/python_client/default.etcd/
 
 # vscode generated files
-.vscode
 docker-compose-devcontainer.yml
 docker-compose-devcontainer.yml.tmp
 .cursor
@@ -138,3 +137,7 @@ docs/plans/
 
 # Local run artifacts of internal/querynodev2/segments TestFlushData* (SegmentBasePath under suite.rootPath)
 internal/querynodev2/segments/TestSegmentLoader/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
