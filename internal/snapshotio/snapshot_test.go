@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func TestManifestSchemaByVersion(t *testing.T) {
@@ -72,11 +73,22 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 
 	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":99}`))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "incompatible snapshot format")
+	assert.Contains(t, err.Error(), "snapshot format version 99 is too new")
+	assert.Contains(t, err.Error(), "current supported version: 4")
+	assert.Contains(t, err.Error(), "please upgrade Milvus")
+	assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	assert.Equal(t, int32(3000), merr.Status(err).GetCode())
+	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	assert.False(t, merr.Status(err).GetRetriable())
 
 	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse metadata JSON")
+	assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+	assert.Equal(t, int32(1009), merr.Status(err).GetCode())
+	assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+	assert.False(t, merr.Status(err).GetRetriable())
+	assert.NotNil(t, errors.Unwrap(err), "preserve the original JSON parsing error")
 
 	assert.NoError(t, ValidateFormatVersion(0))
 	assert.NoError(t, ValidateFormatVersion(SnapshotFormatVersion))

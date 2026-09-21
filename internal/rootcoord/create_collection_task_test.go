@@ -1961,6 +1961,27 @@ func TestPrepareMilvusTableSnapshotSchemaErrors(t *testing.T) {
 		assert.Contains(t, err.Error(), "read milvus-table snapshot metadata")
 	})
 
+	for _, tc := range []struct {
+		name    string
+		data    string
+		readErr error
+		wantErr error
+	}{
+		{"corrupt metadata", `{`, nil, merr.ErrDataIntegrity},
+		{"unsupported snapshot version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
+		{"metadata read timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read := mockey.Mock(packed.ReadFileWithExternalSpec).Return([]byte(tc.data), tc.readErr).Build()
+			defer read.UnPatch()
+
+			err := baseTask(baseSchema()).prepareMilvusTableSnapshotSchema(context.Background())
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Status(err).GetCode())
+			assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		})
+	}
+
 	t.Run("missing source schema", func(t *testing.T) {
 		mockReadMetadata := mockey.Mock(packed.ReadMilvusTableSnapshotMetadata).
 			Return(&datapb.SnapshotMetadata{

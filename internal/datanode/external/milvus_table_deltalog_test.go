@@ -27,6 +27,8 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -1023,6 +1026,34 @@ func (s *RefreshExternalCollectionTaskSuite) TestLoadMilvusTableSourceDeltalogDe
 	s.Empty(deletes)
 	s.Nil(keys)
 	s.Contains(err.Error(), "has no allocated log ID")
+}
+
+func TestGetMilvusTableSourcePKFieldMetadataErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		data    string
+		readErr error
+		wantErr error
+	}{
+		{"corrupt_metadata", `{`, nil, merr.ErrDataIntegrity},
+		{"unsupported_version", `{"format_version":99999}`, nil, merr.ErrOperationNotSupported},
+		{"read_timeout", "", context.DeadlineExceeded, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			read := mockey.Mock(packed.ReadFileWithExternalSpec).Return([]byte(tc.data), tc.readErr).Build()
+			defer read.UnPatch()
+			task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
+				ExternalSource: "s3://source-bucket/snapshots/10/metadata/20.json",
+				ExternalSpec:   `{"format":"milvus-table"}`,
+			})
+
+			field, err := task.getMilvusTableSourcePKField()
+			require.ErrorIs(t, err, tc.wantErr)
+			assert.Nil(t, field)
+			assert.Nil(t, task.milvusTableSourcePKField)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Code(err))
+		})
+	}
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestGetMilvusTableSourcePKFieldCachesSnapshotMetadata() {
