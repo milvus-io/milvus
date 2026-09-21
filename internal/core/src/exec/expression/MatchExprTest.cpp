@@ -1899,9 +1899,12 @@ TEST_F(SealedMatchExprTest, PinnedSnapshotMatchesUnpinnedForMatchExpr) {
 
 // The same pinned/unpinned parity for a nullable struct-array field across two
 // chunks. ApplyStructRowValidity must read validity data through the pinned
-// snapshot (SegmentChunkReader::ApplyFieldValidData) so the write path is
-// actually exercised: non-nullable arrays short-circuit before the chunk
-// walk, and a single-chunk segment iterates the per-chunk loop only once.
+// snapshot (SegmentChunkReader::ApplyFieldValidData). To make the validity
+// write observable, every row holds an empty array and the predicate is
+// match_all: an empty array is vacuously true, so the result bitset starts all
+// set and only the NULL rows (cleared by ApplyFieldValidData) flip to false.
+// Gutting the validity write to a no-op would leave the NULL rows set and fail
+// the count assertion below.
 TEST_F(SealedMatchExprTest,
        PinnedSnapshotMatchesUnpinnedForNullableStructAcrossChunks) {
     FieldId vec_fid;
@@ -1964,25 +1967,24 @@ TEST_F(SealedMatchExprTest,
         return generated_data;
     };
 
-    // Rows 1 and 4 of chunk 1 are NULL (no elements); rows 0 and 3 of chunk 2
-    // are NULL. A match_any/>= predicate must drop the NULL rows and the row
-    // whose only element fails the predicate.
-    auto first =
-        make_dataset(100, chunk1_valid, {{1, 2}, {}, {9001}, {1, 2}, {}});
-    auto second =
-        make_dataset(200, chunk2_valid, {{}, {9001}, {5, 6}, {}, {7, 8}});
+    // Every row holds an empty array. Rows 1 and 4 of chunk 1 are NULL (no
+    // elements); rows 0 and 3 of chunk 2 are NULL. match_all on an empty array
+    // is vacuously true, so only the NULL rows are dropped by the validity
+    // write.
+    auto first = make_dataset(100, chunk1_valid, {{}, {}, {}, {}, {}});
+    auto second = make_dataset(200, chunk2_valid, {{}, {}, {}, {}, {}});
 
     auto segment = CreateTwoChunkSealed(schema, first, second);
     ASSERT_NE(segment->CaptureReadSnapshot(), nullptr);
 
     ScopedSchemaHandle schema_handle(*schema);
     auto plan_str = schema_handle.ParseSearch(
-        "match_any(struct_array, $[sub_int] >= 9000)",  // expression
-        "fakevec",                                      // vector field name
-        10,                                             // topK
-        "L2",                                           // metric_type
-        R"({"nprobe": 10})",                            // search_params
-        3                                               // round_decimal
+        "match_all(struct_array, $[sub_int] >= 0)",  // expression
+        "fakevec",                                   // vector field name
+        10,                                          // topK
+        "L2",                                        // metric_type
+        R"({"nprobe": 10})",                         // search_params
+        3                                            // round_decimal
     );
     auto plan =
         CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
@@ -2004,11 +2006,15 @@ TEST_F(SealedMatchExprTest,
     for (int64_t i = 0; i < total_rows; ++i) {
         EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
     }
-    // Only the non-null rows containing an element >= 9000 survive: global
-    // offsets 2 (chunk1 row2) and 6 (chunk2 row1, global 200+1).
-    EXPECT_EQ(unpinned.count(), 2);
-    EXPECT_TRUE(unpinned[2]);
-    EXPECT_TRUE(unpinned[6]);
+    // Only the non-NULL empty-array rows survive (vacuous match_all truth).
+    // Non-NULL rows: 0,2,3 (chunk1) and 1,2,4 (chunk2) -> global 0,2,3,6,7,9.
+    EXPECT_EQ(unpinned.count(), 6);
+    for (const auto row : {0, 2, 3, 6, 7, 9}) {
+        EXPECT_TRUE(unpinned[row]) << "row " << row << " should be valid";
+    }
+    for (const auto row : {1, 4, 5, 8}) {
+        EXPECT_FALSE(unpinned[row]) << "row " << row << " should be NULL";
+    }
 }
 
 TEST_F(SealedMatchExprTest, MatchAnyWithNestedIndex) {
