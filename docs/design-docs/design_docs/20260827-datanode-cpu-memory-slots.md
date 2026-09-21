@@ -1,8 +1,8 @@
-# DataNode task placement on CPU and memory (3.0)
+# DataNode task placement on CPU and memory
 
 Date: 2026-08-27
-Branch: `enhance/datanode-cpu-memory-slots-3.0` (base `upstream/3.0` @ `b4870e2a34`)
-Supersedes the approach in PR #52561.
+Issue: #52180. Master PR #52561; the 3.0 PR #52982 is its cherry-pick.
+This replaces the DataNode-side admission design #52561 started from.
 
 ## Goal
 
@@ -37,7 +37,8 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
   where the scalar `usingSlots` is added and subtracted today. The worker never
   recomputes an estimate, and never reads one off the request payload — the
   handler resolves it once and passes it down as a parameter. A request without
-  the properties (old coordinator) books zero.
+  the properties (old coordinator) books the share of the node its scalar
+  `task_slot` stands for; see Compatibility.
 - The old scalar chain (`GetTaskSlot`, `slot_usage`/`task_slot`,
   `available_slots`, the max-heap `pickNode`) is untouched.
 
@@ -45,7 +46,7 @@ pickNode (2-D)  <--(QuerySlot: total/available cpu+memory)--                    
 
 | message | new fields |
 |---|---|
-| `datapb.QuerySlotResponse` | `int64 total_cpu`, `int64 available_cpu`, `int64 total_memory`, `int64 available_memory` (memory in bytes) |
+| `datapb.QuerySlotResponse` | `int64 total_cpu`, `int64 available_cpu`, `int64 total_memory`, `int64 available_memory` (memory in bytes), tags 5-8; tag 4 is left free because it is `copy_segment_shared_indexes` on master |
 
 That is the only proto change. The worker's report needs fixed fields because
 it is a response the coordinator reads directly; a per-task estimate does not.
@@ -103,13 +104,22 @@ the cap never fires there. Each file is still bounded by *its own* size, which
 is all the buffer reading it can hold, so a task of many small files is priced
 at their bytes rather than at one whole buffer each.
 
-Every memory estimate is clamped to at least `minTaskMemory` (64MB). A task
-whose inputs cannot be resolved yet is priced at the floor, not cached, **and
-reported as unresolved**: `GetTaskResource` answers `(resource, false)` and the
-scheduler sets it aside for the next round instead of placing it. The floor
-fits every worker, so placing on it would put a task of unknown size on a node
-that books its real size as soon as the request is built. This is the window
-right after a DataCoord restart, while collection schemas are still reloading.
+Every memory estimate is clamped to at least `minTaskMemory` (64MB), and every
+answer is placeable: the scheduler never waits for a better number. A task that
+cannot be priced exactly answers `(resource, false)`, and the `false` only
+stops the answer from being cached. Two cases are priced differently:
+
+- **inputs still resolving** (a collection schema not cached yet after a
+  DataCoord restart, index params not read back yet): an upper bound on the
+  task, the whole segment. An over-estimate only makes a worker take less work;
+  the floor would let a worker accept a task of unknown size and then book its
+  real size once the request is built.
+- **inputs gone for good** (a segment dropped by compaction, drop-collection or
+  drop-partition; a job no longer in meta): the floor. Such a task never
+  resolves, and `CreateTaskOnWorker` is the only code that retires it, so it
+  must be placed to reach that code. Waiting for an exact price instead would
+  re-queue it forever, and `maxDelayedPerRound` of them would end every round
+  before it placed anything.
 
 ### fieldSize
 
@@ -120,8 +130,13 @@ bounds**.
 - the schema's: `rows x width` for a fixed-width type (numbers, bool,
   timestamps, dense vectors), `rows x (max_length + 4)` for a varchar (the
   proxy rejects a value longer than `max_length` bytes; 4 is the Arrow
-  offset), plus the validity bitmap when nullable. json, text, array,
-  geometry, sparse and array-of-vector fields have no schema bound;
+  offset), plus the validity bitmap when nullable. A JSON value is bounded by
+  `common.JSONMaxLength` and an array by `max_capacity` x element width, both
+  of which the proxy enforces on insert. Text and geometry have no such limit
+  (`checkTextFieldData` skips the length check, geometry is only checked for
+  WKB convertibility), so they, sparse and array-of-vector fields have no
+  schema bound. A bound here is never an average: the worker books what the
+  task was priced at, so an average under-prices every value above it;
 - the container's: the memory size of the binlogs holding the field. In
   storage v2/v3 one binlog holds a whole column group (the system group, or
   the group of all remaining short fields), so this is the group, not the
@@ -134,8 +149,9 @@ V3 segments do not persist the column-group binlogs (`kv_catalog.go`), so after
 a DataCoord restart the container is unknown. A fixed-width field is exact
 anyway; a variable-width field is then bounded by the segment's insert size
 minus every fixed-width field and the system fields (16 bytes a row). With no
-bound at all (an unbounded type in a segment without size statistics) the
-schema's per-row estimate is used, then the whole segment. An unknown field is
+bound at all (text or geometry in a segment without size statistics) the whole
+segment is charged; the schema's per-row estimate is deliberately not used,
+because it is the dynamic-field average, not a bound. An unknown field is
 charged its group, else the whole segment.
 
 The **scalar task slot** of an index task is derived from this same field size
@@ -164,10 +180,10 @@ scheduler saw: cached on the task for the nine families that walk meta, a pure
 function of three job fields for import/preimport. Either way, what was placed
 and what was shipped are the same number.
 
-A family that cannot resolve its inputs — nil schema, missing segment, empty or
-invalid index type — returns the floor and is **not** cached, so the next
+A family that cannot resolve its inputs is **not** cached, so the next
 scheduling round retries instead of freezing a placeholder for the task's
-lifetime. A field that is genuinely absent from a schema we DO have is a real
+lifetime. A nil schema or an empty or invalid index type answers the
+whole-segment upper bound; a missing segment answers the floor (see above). A field that is genuinely absent from a schema we DO have is a real
 answer, not a miss: it is priced at the whole segment (conservative) and cached.
 
 ## DataNode ledger and report
@@ -258,8 +274,13 @@ Same rules as PR #52561, implemented thinner:
   heap is used; the extra `task_cpu` / `task_memory` properties are unknown
   keys the old worker simply ignores.
 - Old DataCoord + new DataNode: the properties carry neither key, so
-  `GetTaskResource` returns the zero resource with no error, the ledger books
-  zero and `available == total`. Absence is the compatibility case, not a
+  `GetTaskResource` returns the zero resource with no error. `CreateTask` then
+  books the share of the node the task's `task_slot` stands for:
+  `slot / CalculateNodeSlots()` of the node's capacity. Both totals describe
+  the same machine under the same standalone discount, so the ratio holds
+  inside one node. Booking zero instead would make the node report memory it
+  does not have, and a worker pool shared by several Milvus versions runs such
+  tasks for as long as the pool exists, not only during an upgrade. Absence is the compatibility case, not a
   protocol violation, so it must not be reported as one — unlike `task_slot`,
   a missing `task_cpu` never fails the task. A key that is present but
   unparsable is a real error and does fail the `CreateTask` call.
