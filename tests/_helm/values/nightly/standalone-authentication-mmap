@@ -39,6 +39,7 @@ extraConfigFiles:
     grpc:
       client:
         compressionEnabled: true
+        compressionAlgorithm: s2
     dataCoord:
       targetVecIndexVersion: 11
       forceRebuildScalarSegmentIndex: true

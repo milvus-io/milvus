@@ -69,6 +69,7 @@ extraConfigFiles:
     grpc:
       client:
         compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       bloomFilterApplyBatchSize: 511
       storage:
