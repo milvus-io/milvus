@@ -11,6 +11,14 @@ import (
 // consistent with each other: segment placements reflect exactly the views whose
 // state is reported.
 type ShardStats struct {
+	// Exact view footprints, including empty partitions and retained Dropping
+	// references. ResidentNodes disappear only after durable view removal.
+	UpNodes        []int64
+	PreparingNodes []int64
+	ResidentNodes  []int64
+	// Resources contains confirmed ready resources. Matching the full key is
+	// conservative: a different DataVersion may still be physically reusable.
+	Resources map[int64]map[ResourceKey]struct{}
 	// UpVersion is the version of the current Up view, if any.
 	// Nil when no view is currently Up.
 	UpVersion *qviews.QueryViewVersion
@@ -33,6 +41,16 @@ type ShardStats struct {
 	// receive Down and the loaded segments are still more reusable than
 	// Preparing placements. Dropping and Dropped views are excluded.
 	Segments map[int64]*SegmentStats
+}
+
+// ResourceKey identifies a compatible loading requirement within a collection.
+// DataVersion covers membership/manifest revisions; LoadInfoVersion covers fields
+// and indexes. Unknown load versions are not published as reusable resources.
+type ResourceKey struct {
+	PartitionID     int64
+	SegmentID       int64
+	DataVersion     qviews.DataVersion
+	LoadInfoVersion uint64
 }
 
 // SegmentState is the per-node segment progress observed by Coord. Larger

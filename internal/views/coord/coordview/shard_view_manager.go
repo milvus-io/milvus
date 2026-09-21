@@ -198,10 +198,15 @@ func (m *ShardViewManager) Stats() *ShardStats {
 
 func (m *ShardViewManager) statsLocked() *ShardStats {
 	stats := &ShardStats{
-		Segments: make(map[int64]*SegmentStats),
+		Segments:  make(map[int64]*SegmentStats),
+		Resources: make(map[int64]map[ResourceKey]struct{}),
 	}
+	resident := make(map[int64]struct{})
 
 	for _, sm := range m.views {
+		for _, node := range sm.View().GetQueryNode() {
+			resident[node.GetNodeId()] = struct{}{}
+		}
 		baseState, ok := segmentStateFromViewState(sm.State())
 		if !ok {
 			continue
@@ -213,18 +218,48 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 			if stats.UpVersion == nil || version.GT(*stats.UpVersion) {
 				stats.UpVersion = &version
 				stats.UpLoadInfoVersion = sm.View().GetMeta().GetLoadInfoVersion()
+				stats.UpNodes = viewNodeIDs(sm.View())
 			}
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			if stats.PreparingVersion == nil || version.GT(*stats.PreparingVersion) {
 				stats.PreparingVersion = &version
+				stats.PreparingNodes = viewNodeIDs(sm.View())
 			}
 		}
 
 		fillSegments(stats.Segments, sm.View().GetQueryNode(), baseState, sm.QNReadySegments())
+		// Down/Dropping resources may already be on a release path. Preparing
+		// resources do not imply that concurrent acquisitions can be coalesced.
+		if (sm.State() == qviews.QueryViewStateUp || sm.State() == qviews.QueryViewStateReady) && sm.View().GetMeta().GetLoadInfoVersion() != 0 {
+			for _, node := range sm.View().GetQueryNode() {
+				resources := stats.Resources[node.GetNodeId()]
+				if resources == nil {
+					resources = make(map[ResourceKey]struct{})
+					stats.Resources[node.GetNodeId()] = resources
+				}
+				for _, partition := range node.GetPartitions() {
+					for _, id := range partition.GetSegmentIds() {
+						resources[ResourceKey{PartitionID: partition.GetPartitionId(), SegmentID: id, DataVersion: version.DataVersion, LoadInfoVersion: sm.View().GetMeta().GetLoadInfoVersion()}] = struct{}{}
+					}
+				}
+			}
+		}
 	}
+	for node := range resident {
+		stats.ResidentNodes = append(stats.ResidentNodes, node)
+	}
+	sort.Slice(stats.ResidentNodes, func(i, j int) bool { return stats.ResidentNodes[i] < stats.ResidentNodes[j] })
 
 	m.fillShardRows(stats)
 	return stats
+}
+
+func viewNodeIDs(view *viewpb.QueryViewOfShard) []int64 {
+	nodes := make([]int64, 0, len(view.GetQueryNode()))
+	for _, node := range view.GetQueryNode() {
+		nodes = append(nodes, node.GetNodeId())
+	}
+	return nodes
 }
 
 // fillShardRows attaches the published RowNum of each placed segment, read

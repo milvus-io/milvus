@@ -378,3 +378,7 @@ StreamingNode already implements Pub-Sub capability. PureDeleteStreamManager wra
 - Bloom filter filtering + batch merge of delete data at the Node level.
 - Remote Load L0 (conflicts with Bloom filter filtering; choose one of the two).
 - Subscription catch-up merging.
+
+### QueryNode replica placement
+
+[Replica Placement](replica_placement.md) defines balanced, stable per-collection node targets, temporary suspension on node shortage, and safe discovery withdrawal/restoration.

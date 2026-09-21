@@ -90,7 +90,8 @@ func TestCacheControllerReadinessAndRetry(t *testing.T) {
 	require.NoError(t, controller.Reconcile(t.Context()))
 	shard := cacheShard(1, 10)
 	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
-	// Desired with missing DataView is not release; retry allocation once available.
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
+	// Active desired with missing DataView retries allocation once available.
 	controller.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shard}})
 	require.Error(t, controller.Reconcile(t.Context()))
 	require.Contains(t, controller.queue.takePending().dirtyShards, shard)

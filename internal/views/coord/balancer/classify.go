@@ -1,6 +1,8 @@
 package balancer
 
 import (
+	"slices"
+
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -47,6 +49,9 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	hasUpView := stats != nil && stats.UpVersion != nil
 	hasPreparing := stats != nil && stats.PreparingVersion != nil
 	hasAnyView := hasUpView || hasPreparing || (stats != nil && len(stats.Segments) > 0)
+	if entry := snap.ShardEntry(shardID); entry != nil && len(entry.ResidentNodes()) > 0 {
+		hasAnyView = true
+	}
 
 	// 1. Desired absent → release any residual views.
 	if desired == nil {
@@ -54,6 +59,31 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 			return actionRelease
 		}
 		return actionNone
+	}
+	if target, managed := snap.TargetNodes(shardID); managed && len(target) == 0 {
+		if !hasAnyView {
+			return actionNone
+		}
+		if !healthyUp(snap, shardID) {
+			return actionRelease
+		}
+		// Never retire the last healthy serving cover merely to reduce replicas.
+		for _, replica := range desired.Replicas {
+			sibling := qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shardID.VChannel}
+			if nodes, ok := snap.TargetNodes(sibling); ok && len(nodes) > 0 && healthyUp(snap, sibling) {
+				return actionRelease
+			}
+		}
+		return actionNone
+	}
+	if hasPreparing {
+		if entry := snap.ShardEntry(shardID); entry != nil {
+			for _, node := range entry.PreparingNodes() {
+				if !eligibleShardNode(snap, desired, shardID, node) {
+					return actionMust
+				}
+			}
+		}
 	}
 
 	// 2. Desired present but no Up view → must create.
@@ -85,9 +115,41 @@ func classifyShard(snap balanceInput, shardID qviews.ShardID) actionKind {
 	if loadInfoDiffer(snap, desired, stats) {
 		return actionMust
 	}
+	if target, managed := snap.TargetNodes(shardID); managed {
+		if entry := snap.ShardEntry(shardID); entry != nil {
+			for _, node := range entry.UpNodes() {
+				if _, found := slices.BinarySearch(target, node); !found {
+					return actionMust
+				}
+			}
+		}
+	}
 
 	// 7. Steady-state — candidate for balance optimization.
 	return actionMayOptimize
+}
+
+func eligibleShardNode(snap balanceInput, cfg *loadmgr.LoadConfig, id qviews.ShardID, node int64) bool {
+	n := snap.NodesMap()[node]
+	r := findReplica(cfg, id.ReplicaID)
+	return n != nil && n.Alive && !n.Stopping && r != nil && n.ResourceGroup == r.ResourceGroup
+}
+
+func healthyUp(snap balanceInput, id qviews.ShardID) bool {
+	stats := snap.GetShardStats(id)
+	if stats == nil || stats.UpVersion == nil {
+		return false
+	}
+	entry := snap.ShardEntry(id)
+	if entry != nil {
+		for _, node := range entry.UpNodes() {
+			n := snap.NodesMap()[node]
+			if n == nil || !n.Alive || n.Stopping {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // dataViewVersionAdvanced returns true if the shard's current Up view was

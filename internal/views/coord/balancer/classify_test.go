@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,7 @@ func testShardStats(
 		UpVersion:         upVersion,
 		UpLoadInfoVersion: loadInfoVersion,
 		Segments:          make(map[int64]*coordview.SegmentStats),
+		Resources:         make(map[int64]map[coordview.ResourceKey]struct{}),
 	}
 	for _, p := range placements {
 		segment := stats.Segments[p.segmentID]
@@ -71,6 +73,21 @@ func testShardStats(
 			stats.Segments[p.segmentID] = segment
 		}
 		segment.Nodes[p.nodeID] = p.state
+		if !slices.Contains(stats.ResidentNodes, p.nodeID) {
+			stats.ResidentNodes = append(stats.ResidentNodes, p.nodeID)
+		}
+		if p.state == coordview.SegmentStateUp && !slices.Contains(stats.UpNodes, p.nodeID) {
+			stats.UpNodes = append(stats.UpNodes, p.nodeID)
+		}
+		if (p.state == coordview.SegmentStatePreparing || p.state == coordview.SegmentStateReady) && !slices.Contains(stats.PreparingNodes, p.nodeID) {
+			stats.PreparingNodes = append(stats.PreparingNodes, p.nodeID)
+		}
+		if upVersion != nil && loadInfoVersion != 0 && p.state == coordview.SegmentStateUp {
+			if stats.Resources[p.nodeID] == nil {
+				stats.Resources[p.nodeID] = make(map[coordview.ResourceKey]struct{})
+			}
+			stats.Resources[p.nodeID][coordview.ResourceKey{SegmentID: p.segmentID, PartitionID: p.partitionID, DataVersion: upVersion.DataVersion, LoadInfoVersion: loadInfoVersion}] = struct{}{}
+		}
 	}
 	return stats
 }
@@ -130,7 +147,7 @@ func TestClassify_DataVersionAdvanced_Must(t *testing.T) {
 		1,
 		placement(101, 10, 1, coordview.SegmentStateUp),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 2, CompactVersion: 0}, nil) // advanced
 
 	assert.Equal(t, actionMust, classifyShard(newPlanningContext(c), shardID))
@@ -176,7 +193,7 @@ func TestClassify_PartitionsChanged_Must(t *testing.T) {
 		0,
 		placement(101, 10, 1, coordview.SegmentStateUp),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionMust, classifyShard(newPlanningContext(c), shardID))
@@ -192,7 +209,7 @@ func TestClassify_FieldsChanged_Must(t *testing.T) {
 		0,
 		placement(101, 10, 1, coordview.SegmentStateUp),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionMust, classifyShard(newPlanningContext(c), shardID))
@@ -208,7 +225,7 @@ func TestClassify_HasPreparingView_None(t *testing.T) {
 		placement(101, 10, 1, coordview.SegmentStateUp),
 		placement(202, 10, 1, coordview.SegmentStatePreparing),
 	), ver(1, 1, 2)))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionNone, classifyShard(newPlanningContext(c), shardID))
@@ -224,7 +241,7 @@ func TestClassify_HasPreparingViewWithAdvancedDataVersion_None(t *testing.T) {
 		placement(101, 10, 1, coordview.SegmentStateUp),
 		placement(202, 10, 1, coordview.SegmentStatePreparing),
 	), ver(2, 1, 1)))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 3, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionNone, classifyShard(newPlanningContext(c), shardID))
@@ -239,7 +256,7 @@ func TestClassify_UnrecoverableOnly_Must(t *testing.T) {
 		0,
 		placement(202, 10, 1, coordview.SegmentStateUnrecoverable),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionMust, classifyShard(newPlanningContext(c), shardID))
@@ -254,7 +271,7 @@ func TestClassify_SteadyState_MayOptimize(t *testing.T) {
 		1,
 		placement(101, 10, 1, coordview.SegmentStateUp),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionMayOptimize, classifyShard(newPlanningContext(c), shardID))
@@ -270,7 +287,7 @@ func TestClassify_UnrelatedLoadConfigVersionChangeDoesNotTriggerMust(t *testing.
 		1,
 		placement(101, 10, 1, coordview.SegmentStateUp),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	publishTestData(c, 1, qviews.DataVersion{StreamingVersion: 1, CompactVersion: 1}, nil)
 
 	assert.Equal(t, actionMayOptimize, classifyShard(newPlanningContext(c), shardID))
@@ -288,7 +305,7 @@ func TestClassify_MissingDataVersionDoesNotTriggerMust(t *testing.T) {
 		1,
 		placement(101, 10, 1, coordview.SegmentStateUp),
 	))
-	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	// No DataView has been published for the collection.
 
 	assert.Equal(t, actionMayOptimize, classifyShard(newPlanningContext(c), shardID))

@@ -70,7 +70,11 @@ func allocate(
 
 	// Current per-node segment states for stickiness / avoidance lookup.
 	current := currentSegmentStates(snap, shardID)
-	ctx := newAllocationContext(snap.NodesMap(), replica.ResourceGroup, baseRows, shardTotalLoad(snap, shardID), shardDV.SegmentCount, snap.GetBalanceConfig(), snap.CandidateNodes(replica.ResourceGroup))
+	candidates := snap.CandidateNodes(replica.ResourceGroup)
+	if target, ok := snap.TargetNodes(shardID); ok {
+		candidates = target
+	}
+	ctx := newAllocationContext(snap.NodesMap(), replica.ResourceGroup, baseRows, shardTotalLoad(snap, shardID), shardDV.SegmentCount, snap.GetBalanceConfig(), candidates)
 	if len(ctx.eligible) == 0 && len(entries) > 0 {
 		return nil
 	}
@@ -81,7 +85,11 @@ func allocate(
 
 	for _, e := range entries {
 		segInfo := e.segment
-		nodeID, ok := pickNode(ctx, segInfo, current[e.segmentID])
+		states := current[e.segmentID]
+		if planning, ok := snap.(*planningContext); ok {
+			states = reusableResources(planning, shardID, segInfo, ctx.eligible, states)
+		}
+		nodeID, ok := pickNode(ctx, segInfo, states)
 		if !ok {
 			return nil
 		}
@@ -106,6 +114,26 @@ func allocate(
 		assignments: flatAssignments,
 		rowsByNode:  ctx.assignedRows,
 	}
+}
+
+func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64, current map[int64]coordview.SegmentState) map[int64]coordview.SegmentState {
+	c := p.collectionForShard(id)
+	if c == nil || c.DataView() == nil {
+		return current
+	}
+	key := coordview.ResourceKey{SegmentID: segment.SegmentID, PartitionID: segment.PartitionID, DataVersion: c.DataView().DataVersion, LoadInfoVersion: c.ConfigVersion()}
+	states := make(map[int64]coordview.SegmentState)
+	for node, state := range current {
+		if state == coordview.SegmentStateUnrecoverable {
+			states[node] = state
+		}
+	}
+	for _, node := range nodes {
+		if n := c.PlacementNode(node); n != nil && n.HasResource(key) {
+			states[node] = coordview.SegmentStateReady
+		}
+	}
+	return states
 }
 
 type segmentNodeStates map[int64]map[int64]coordview.SegmentState

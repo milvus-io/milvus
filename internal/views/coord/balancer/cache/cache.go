@@ -31,6 +31,7 @@ type CollectionEntry struct {
 	configVersion uint64
 	data          *api.CollectionDataView
 	shards        immutableIndex[*ShardEntry]
+	placements    immutableIndex[*PlacementNode]
 }
 
 func (c *CollectionEntry) ID() int64                         { return c.id }
@@ -44,9 +45,10 @@ func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
 func (c *CollectionEntry) RangeShards(fn func(*ShardEntry) bool) { c.shards.each(fn) }
 
 type ShardEntry struct {
-	id    qviews.ShardID
-	stats *coordview.ShardStats
-	rows  ShardRowStats
+	id                                     qviews.ShardID
+	stats                                  *coordview.ShardStats
+	rows                                   ShardRowStats
+	upNodes, preparingNodes, residentNodes []int64
 }
 
 func (s *ShardEntry) ID() qviews.ShardID           { return s.id }
@@ -368,7 +370,9 @@ func (c *Cache) PublishDataView(id int64, data *api.CollectionDataView) {
 		old := next.GetShard(shardID)
 		rows := shardRows(old.stats, slot.rows)
 		c.replaceContributions(shardID, old.rows, rows)
-		next.shards = next.shards.set(shardKey(shardID), &ShardEntry{id: shardID, stats: old.stats, rows: rows})
+		updated := *old
+		updated.rows = rows
+		next.shards = next.shards.set(shardKey(shardID), &updated)
 	}
 	slot.value.Store(&next)
 	c.changed(api.TriggerScope{DirtyCollections: []int64{id}})
@@ -420,6 +424,11 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	}
 	rows := shardRows(stats, slot.rows)
 	c.replaceContributions(id, previous, rows)
+	var replacement *ShardEntry
+	if stats != nil {
+		replacement = &ShardEntry{id: id, stats: stats, rows: rows, upNodes: stats.UpNodes, preparingNodes: stats.PreparingNodes, residentNodes: stats.ResidentNodes}
+	}
+	next.replacePlacements(id, old, replacement)
 	if stats == nil {
 		if old != nil {
 			slot.replicaUses[id.ReplicaID]--
@@ -432,7 +441,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		if old == nil {
 			slot.replicaUses[id.ReplicaID]++
 		}
-		next.shards = next.shards.set(shardKey(id), &ShardEntry{id: id, stats: stats, rows: rows})
+		next.shards = next.shards.set(shardKey(id), replacement)
 	}
 	if old != nil {
 		for segmentID := range old.stats.Segments {
@@ -541,7 +550,7 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	c.mu.Unlock()
 	slot.value.Store(&next)
 	scope := api.TriggerScope{DirtyNodes: []int64{id}}
-	if old.ResourceGroup != next.info.ResourceGroup || (next.info.Alive && !next.info.Stopping) {
+	{
 		seen := make(map[int64]struct{})
 		for _, name := range []string{old.ResourceGroup, next.info.ResourceGroup} {
 			if rg := c.GetResourceGroup(name); rg != nil {

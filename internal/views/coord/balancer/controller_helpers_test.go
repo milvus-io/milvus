@@ -22,7 +22,7 @@ type stubSyncer struct{}
 func (*stubSyncer) SyncViews(context.Context, syncer.SyncGroup) error { panic("mock with mockey") }
 func (*stubSyncer) Close() error                                      { panic("mock with mockey") }
 
-func emptyRegistry(t *testing.T) *coordview.ShardViewRegistry {
+func emptyRegistry(t *testing.T, syncCallbacks ...func(context.Context, syncer.SyncGroup) error) *coordview.ShardViewRegistry {
 	t.Helper()
 	// Existing placement fixtures use collection 1 at (1,0) or (1,1).
 	// Back their references with a real Manager; row estimates are published separately by each test.
@@ -38,7 +38,12 @@ func emptyRegistry(t *testing.T) *coordview.ShardViewRegistry {
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock(mockey.GetMethod(catalog, "ListQueryViews")).Return(nil, nil).Build(),
 		mockey.Mock(mockey.GetMethod(catalog, "SaveQueryViews")).Return(nil).Build(),
-		mockey.Mock((*stubSyncer).SyncViews).Return(nil).Build(),
+		mockey.Mock((*stubSyncer).SyncViews).To(func(_ *stubSyncer, ctx context.Context, group syncer.SyncGroup) error {
+			if len(syncCallbacks) != 0 {
+				return syncCallbacks[0](ctx, group)
+			}
+			return nil
+		}).Build(),
 	} {
 		t.Cleanup(func() { patch.UnPatch() })
 	}

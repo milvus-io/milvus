@@ -19,6 +19,9 @@ type balanceInput interface {
 	NodesMap() map[int64]*BalanceNode
 	CandidateNodes(string) []int64
 	CurrentRows(qviews.ShardID) map[int64]int64
+	// TargetNodes returns a sorted, immutable target, including empty suspended targets.
+	TargetNodes(qviews.ShardID) ([]int64, bool)
+	ShardEntry(qviews.ShardID) *balancercache.ShardEntry
 }
 
 type planningContext struct {
@@ -28,6 +31,7 @@ type planningContext struct {
 	nodes       map[int64]*BalanceNode
 	groups      map[string][]int64
 	config      *BalanceConfig
+	targets     map[int64][]int64
 }
 
 func newPlanningContext(reader balancercache.Reader) *planningContext {
@@ -35,6 +39,7 @@ func newPlanningContext(reader balancercache.Reader) *planningContext {
 		return current
 	}
 	p := &planningContext{Reader: reader, collections: make(map[int64]*balancercache.CollectionEntry), nodeEntries: make(map[int64]*balancercache.NodeEntry), nodes: make(map[int64]*BalanceNode), groups: make(map[string][]int64), config: reader.GetBalanceConfig()}
+	p.targets = make(map[int64][]int64)
 	if p.config == nil {
 		p.config = DefaultBalanceConfig()
 	}
@@ -48,6 +53,18 @@ func newPlanningContext(reader balancercache.Reader) *planningContext {
 		return true
 	})
 	return p
+}
+
+func (p *planningContext) TargetNodes(id qviews.ShardID) ([]int64, bool) {
+	nodes, ok := p.targets[id.ReplicaID]
+	return nodes, ok
+}
+
+func (p *planningContext) ShardEntry(id qviews.ShardID) *balancercache.ShardEntry {
+	if c := p.collectionForShard(id); c != nil {
+		return c.GetShard(id)
+	}
+	return nil
 }
 
 func (p *planningContext) GetCollection(id int64) *balancercache.CollectionEntry {
