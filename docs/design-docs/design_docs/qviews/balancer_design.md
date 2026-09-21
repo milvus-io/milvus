@@ -106,6 +106,7 @@ The target control flow is schematic:
 
 ```text
 wait for queued work, periodic tick, retry, or cancellation
+cache.WaitForReady(ctx)  // cancellation preserves pending work
 pending := queue.TakePending()
 dirty := resolveScope(cache, pending)
 plan := policy.Plan(cache, dirty)
@@ -114,9 +115,9 @@ requeue affected failures with bounded backoff
 ```
 
 The queue detaches work before scope resolution. A concurrent publication must
-remain scheduled for a later pass. Required sources must finish initial cache
-seeding before the loop starts. A periodic cache scan cannot repair an update
-that the upstream never published.
+remain scheduled for a later pass. The loop may start during recovery, but waits
+for all sources to finish initial cache seeding before consuming pending work.
+A periodic cache scan cannot repair an update that the upstream never published.
 
 #### Scope Resolution
 

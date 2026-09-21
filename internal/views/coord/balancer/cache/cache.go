@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -105,12 +106,13 @@ type Cache struct {
 	groups        map[string]*ResourceGroupEntry
 	notify        func(api.TriggerScope)
 	config        atomic.Pointer[api.BalanceConfig]
-	ready         atomic.Bool
+	readyCh       chan struct{}
+	readyOnce     sync.Once
 	subscriptions []func()
 }
 
 func New(config *api.BalanceConfig) *Cache {
-	c := &Cache{collections: make(map[int64]*collectionSlot), nodes: make(map[int64]*nodeSlot), replicas: make(map[int64]int64), groups: make(map[string]*ResourceGroupEntry)}
+	c := &Cache{collections: make(map[int64]*collectionSlot), nodes: make(map[int64]*nodeSlot), replicas: make(map[int64]int64), groups: make(map[string]*ResourceGroupEntry), readyCh: make(chan struct{})}
 	c.UpdateBalanceConfig(config)
 	return c
 }
@@ -140,8 +142,34 @@ func (c *Cache) Close() {
 		unsubscribe()
 	}
 }
-func (c *Cache) MarkReady()                            { c.ready.Store(true); c.changed(api.TriggerScope{NodeChanged: true}) }
-func (c *Cache) Ready() bool                           { return c.ready.Load() }
+
+// MarkReady opens the one-way initialization barrier after all sources have
+// replayed their recovered state. Repeated calls are safe.
+func (c *Cache) MarkReady() {
+	c.readyOnce.Do(func() { close(c.readyCh) })
+	c.changed(api.TriggerScope{NodeChanged: true})
+}
+
+func (c *Cache) Ready() bool {
+	select {
+	case <-c.readyCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// WaitForReady blocks until source initialization completes or ctx is canceled.
+// Closing the barrier wakes every waiter, including callers arriving later.
+func (c *Cache) WaitForReady(ctx context.Context) error {
+	select {
+	case <-c.readyCh:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (c *Cache) SetNotifier(fn func(api.TriggerScope)) { c.mu.Lock(); c.notify = fn; c.mu.Unlock() }
 func (c *Cache) changed(scope api.TriggerScope) {
 	c.mu.RLock()

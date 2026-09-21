@@ -308,6 +308,21 @@ replay with no missing-update window. A separate List followed by registration
 is insufficient. Reconcile starts only after every required source has seeded
 its entries and declared readiness. Unknown/uninitialized is not absence.
 
+`Cache.WaitForReady(ctx)` waits on a one-way channel closed by `MarkReady`.
+The controller may start during recovery, but Reconcile waits before taking
+pending work, reading planning inputs, or applying a plan. Cancellation leaves
+pending work untouched and lets Stop terminate the loop without waiting for
+recovery. Waiting for initialization is not an allocation failure and does not
+enter retry backoff.
+
+Queue signals are coalesced wakeups; the full flag and dirty-key sets retain the
+work. Consuming a wakeup before waiting does not consume those sets. Closing the
+ready channel resumes the waiting reconcile without requiring another balance
+signal. `MarkReady` also requests a full pass; if it ran before the controller
+subscribed, Start's initial full request covers that ordering. The barrier is
+idempotent and wakes all current and future waiters. Callers must only mark it
+ready after all source recovery/replay has completed.
+
 RemoveLoadConfig clears desired state but preserves actual shards for cleanup.
 A desired collection with an unavailable DataView waits/retries; it is not
 treated as released. Removal or update callbacks from a retired manager must
