@@ -225,7 +225,7 @@ func (s *ServerSuite) TestSaveBinlogPath_ChannelNotMatch() {
 		Channel:   "test",
 	})
 	s.NoError(err)
-	s.ErrorIs(merr.Error(resp), merr.ErrChannelNotFound)
+	s.ErrorIs(merr.Error(resp), merr.ErrChannelMisrouted)
 }
 
 func (s *ServerSuite) TestSaveBinlogPath_SaveUnhealthySegment() {

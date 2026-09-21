@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
@@ -230,7 +231,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	l0Writer := l0materializer.NewSyncMaterializer(
 		resource.Resource().ChunkManager(),
 		idalloc.NewMAllocator(resource.Resource().IDAllocator()),
-		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID()),
+		syncmgr.BrokerMetaWriter(broker.NewCoordBroker(coord, paramtable.GetNodeID()), paramtable.GetNodeID(), retry.Attempts(1)),
 	)
 	// The temporary L0 consumer rebuilds retained Delete handles from WAL replay.
 	// Deprecated: the manager periodically reports the pchannel recovery

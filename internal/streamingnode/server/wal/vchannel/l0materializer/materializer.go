@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 )
 
 const (
@@ -168,7 +169,8 @@ func (m *SyncMaterializer) materializeGroup(
 		mlog.Int64("rows", int64(len(group.pks))),
 		mlog.Uint64("bytes", group.bytes),
 	)
-	return task.Run(ctx)
+	// Bound coordinator client retries; the WAL task scheduler owns later attempts.
+	return task.Run(retry.WithMaxAttemptsContext(ctx, 3))
 }
 
 type materializeGroup struct {

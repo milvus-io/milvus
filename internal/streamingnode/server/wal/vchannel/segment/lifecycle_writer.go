@@ -61,11 +61,11 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
 	resp, err := w.coord.SaveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
 	if err = merr.CheckRPCCall(resp, err); err != nil {
-		if errors.Is(err, merr.ErrSegmentNotFound) {
-			// A retired segment does not need a fabricated publication version.
+		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+			// A retired segment/channel does not need a fabricated publication version.
 			return nil, nil
 		}
-		if merr.GetErrorType(err) == merr.InputError {
+		if errors.Is(err, merr.ErrChannelMisrouted) || merr.GetErrorType(err) == merr.InputError {
 			err = retry.Unrecoverable(err)
 		}
 		return nil, err
@@ -95,19 +95,20 @@ func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, req *datap
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
 	resp, err := w.coord.SaveBinlogPaths(ctx, req)
 	err = merr.CheckRPCCall(resp, err)
-	if errors.Is(err, merr.ErrSegmentNotFound) {
-		// The segment no longer exists in DataCoord (dropped or removed):
+	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+		// The segment or its channel has retired in DataCoord:
 		// there is nothing to commit, so ignore the error and treat the
 		// commit as done. DataCoord itself ignores writes to dropped
 		// segments (returns success), and retrying or failing the segment
 		// here would only surface a lifecycle event as a task failure.
-		mlog.Warn(ctx, "segment no longer exists in DataCoord, ignore the L1 commit",
+		mlog.Warn(ctx, "segment or channel retired in DataCoord, ignore the L1 commit",
 			mlog.Int64("segmentID", req.GetSegmentID()),
 			mlog.String("vchannel", req.GetChannel()))
 		return nil
 	}
-	if merr.GetErrorType(err) == merr.InputError {
-		// A request-content rejection is permanent — e.g. a TEXT segment
+	if errors.Is(err, merr.ErrChannelMisrouted) || merr.GetErrorType(err) == merr.InputError {
+		// Lost WAL ownership is terminal for this publisher. A request-content
+		// rejection is also permanent — e.g. a TEXT segment
 		// saved with a pre-V3 storage version, or a V3 segment without a
 		// manifest path. DataCoord will never accept the same request, so
 		// fail the segment instead of hot-looping on it.

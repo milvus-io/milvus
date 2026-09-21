@@ -654,10 +654,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Moreover, the Match operation may be called if the flusher is ready to work, but the channel manager on coord don't see the assignment success.
 		// So the match operation may be rejected and wait for retry.
 		// TODO: We need to make an idempotent operation to avoid the double flush strictly.
+		// Only a durable lifecycle tombstone allows a consumer to finish without
+		// registration. An unavailable assignment must remain retryable.
+		if funcutil.IsDroppedChannelCheckpoint(s.meta.GetChannelCheckpoint(channelName)) {
+			return merr.Status(merr.WrapErrChannelNotFound(channelName)), nil
+		}
 		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
-		if err != nil || targetID != nodeID {
-			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-			mlog.Warn(context.TODO(), "failed to get latest wal allocated", mlog.Int64("nodeID", nodeID), mlog.Int64("channel nodeID", targetID), mlog.Err(err))
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if targetID != nodeID {
+			err := merr.WrapErrChannelMisrouted(channelName, fmt.Sprintf("WAL owner is node %d, publisher is node %d", targetID, nodeID))
+			mlog.Warn(ctx, "reject WAL publication from previous owner", mlog.Int64("nodeID", nodeID), mlog.Int64("channel nodeID", targetID), mlog.Err(err))
 			return merr.Status(err), nil
 		}
 	}

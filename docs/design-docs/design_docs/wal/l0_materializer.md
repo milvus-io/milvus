@@ -117,6 +117,32 @@ following a partial failure or crash, as with the Summary consumer; this is not
 physical exactly-once object creation. The logical cursor advances only after
 all partition/output groups succeed.
 
+### Registration errors and WAL ownership
+
+DataCoord distinguishes lifecycle retirement from a missing assignment. A
+persisted dropped-channel checkpoint permits `ChannelNotFound`; the consumer
+can finish because that channel's data lifecycle has ended. An unavailable WAL
+assignment returns `ChannelNotAvailable`, and lookup failures propagate as
+errors. Neither means registration completed.
+
+Publication continues to compare only the publisher NodeID against the current
+WAL owner. A mismatch returns `ChannelMisrouted`. No assignment term or new RPC
+field is introduced. This retains the existing limitation for reassignment back
+to the same NodeID.
+
+On `ChannelMisrouted`, the old WALMaterializer terminates, poisons and releases
+its active and queued Delete/Flush handles, and poisons later relevant messages.
+It does not advance the materialized cursor, install completion metadata, or
+acknowledge the failed WAL prefix. Poison is local to that consumer; a new owner
+replays the original messages from the published checkpoint. L1 publication
+uses the same ownership error to enter its existing terminal/poison path.
+
+Other registration failures retain the fixed batch and return scheduler delay.
+The RecoveryStorage MetaWriter makes one registration attempt per task execution;
+the coordinator client's internal RPC retries are also bounded. The scheduler
+owns subsequent attempts. Only an actual successful registration or confirmed
+lifecycle retirement allows normal handle release.
+
 Restart restores the materialized cursor and rebuilds remaining Delete/Flush
 handles from the single WAL replay. Unmaterialized Delete messages cannot be
 behind the global checkpoint in this runtime. There is no new persisted request

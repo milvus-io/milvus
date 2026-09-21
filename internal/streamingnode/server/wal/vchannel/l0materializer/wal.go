@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message/messageutil"
@@ -69,6 +70,7 @@ type WALMaterializer struct {
 	writer                    Materializer
 	onMaterialized            func(uint64)
 	task                      *walMaterializeTask
+	terminalErr               error
 }
 
 func NewWALMaterializer(config WALConfig) *WALMaterializer {
@@ -96,6 +98,13 @@ func (m *WALMaterializer) ObserveMessage(retained message.RetainedImmutableMessa
 	flush := isL0FlushMessage(msg.MessageType())
 	deleted := messageutil.ClassifyTransformLogMessage(msg) == messageutil.TransformLogKindDelete
 	m.mu.Lock()
+	if m.terminalErr != nil {
+		m.mu.Unlock()
+		if deleted || flush {
+			retained.IntoPoisoned()
+		}
+		return
+	}
 	if msg.TimeTick() <= m.observed {
 		m.mu.Unlock()
 		return
@@ -172,7 +181,7 @@ func (m *WALMaterializer) FlushStale(now time.Time, maxAge time.Duration) {
 }
 
 func (m *WALMaterializer) scheduleLocked() *walMaterializeTask {
-	if m.task != nil || len(m.pending) == 0 || m.runtime.Scheduler == nil {
+	if m.terminalErr != nil || m.task != nil || len(m.pending) == 0 || m.runtime.Scheduler == nil {
 		return nil
 	}
 	if m.flushThrough < m.pending[0].Message().TimeTick() && (m.maxBytes == 0 || m.pendingBytes < m.maxBytes) {
@@ -213,13 +222,14 @@ type walMaterializeTask struct {
 	handles []message.RetainedImmutableMessage
 	through uint64
 	done    bool
+	err     error
 }
 
 func (t *walMaterializeTask) Execute(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.done {
-		return nil
+		return t.err
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -247,6 +257,10 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 			StartPositions: positions,
 			Checkpoint:     utility.NewMessagePosition(t.handles[len(t.handles)-1].Message(), m.vchannel),
 		}); err != nil {
+			if errors.Is(err, merr.ErrChannelMisrouted) {
+				t.poison(ctx, err)
+				return err
+			}
 			return errors.Mark(err, nodescheduler.ErrDelay)
 		}
 	}
@@ -267,4 +281,30 @@ func (t *walMaterializeTask) Execute(ctx context.Context) error {
 	t.handles = nil
 	m.submit(next)
 	return nil
+}
+
+// poison terminates this old owner's materializer without completing its WAL
+// prefix. A new owner replays those messages; poison is only local state.
+func (t *walMaterializeTask) poison(ctx context.Context, err error) {
+	m := t.owner
+	m.mu.Lock()
+	m.terminalErr = err
+	pending := m.pending
+	m.pending = nil
+	m.pendingBytes = 0
+	m.pendingSince = time.Time{}
+	m.task = nil
+	m.mu.Unlock()
+
+	t.done = true
+	t.err = err
+	for _, handle := range t.handles {
+		handle.PoisonedRelease()
+	}
+	t.handles = nil
+	for _, handle := range pending {
+		handle.PoisonedRelease()
+	}
+	mlog.Warn(ctx, "L0 materializer lost WAL ownership, poisoned pending messages",
+		mlog.String("vchannel", m.vchannel), mlog.Err(err))
 }
