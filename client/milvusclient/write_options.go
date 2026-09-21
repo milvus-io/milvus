@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/internal/merr"
+	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 	"github.com/milvus-io/milvus/client/v3/internal/typeutil"
 	"github.com/milvus-io/milvus/client/v3/row"
 )
@@ -704,13 +705,15 @@ func selectPathReplaceStructSchema(field *entity.Field, mask []string) (*entity.
 func pathReplaceStructFieldMask(rows []interface{}, fieldName string) ([]string, error) {
 	var expected []string
 	for rowIndex, inputRow := range rows {
-		value, found, err := pathReplaceRowField(reflect.ValueOf(inputRow), fieldName)
+		fields, err := rowutil.ParseFields(reflect.ValueOf(inputRow))
 		if err != nil {
 			return nil, err
 		}
+		field, found := fields[fieldName]
 		if !found {
 			return nil, errors.Newf("row %d is missing struct array field %q", rowIndex, fieldName)
 		}
+		value := field.Value
 		for value.IsValid() && (value.Kind() == reflect.Interface || value.Kind() == reflect.Ptr) {
 			if value.IsNil() {
 				return nil, errors.Newf(
@@ -742,71 +745,6 @@ func pathReplaceStructFieldMask(rows []interface{}, fieldName string) ([]string,
 		}
 	}
 	return expected, nil
-}
-
-func pathReplaceRowField(value reflect.Value, fieldName string) (reflect.Value, bool, error) {
-	for value.IsValid() && value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			break
-		}
-		value = value.Elem()
-	}
-	if !value.IsValid() {
-		return reflect.Value{}, false, errors.New("unsupported nil row")
-	}
-	switch value.Kind() {
-	case reflect.Map:
-		if value.Type().Key().Kind() != reflect.String {
-			return reflect.Value{}, false, errors.Newf("unsupported row map key type: %s", value.Type().Key())
-		}
-		iter := value.MapRange()
-		for iter.Next() {
-			if iter.Key().String() == fieldName {
-				return iter.Value(), true, nil
-			}
-		}
-		return reflect.Value{}, false, nil
-	case reflect.Struct:
-		var result reflect.Value
-		found := false
-		for i := 0; i < value.NumField(); i++ {
-			fieldType := value.Type().Field(i)
-			if fieldType.Anonymous && fieldType.Type.Kind() == reflect.Struct {
-				embedded, embeddedFound, err := pathReplaceRowField(value.Field(i), fieldName)
-				if err != nil {
-					return reflect.Value{}, false, err
-				}
-				if embeddedFound {
-					if found {
-						return reflect.Value{}, false, errors.Newf(
-							"column has duplicated name: %s when parsing field: %s", fieldName, fieldType.Name)
-					}
-					result, found = embedded, true
-				}
-				continue
-			}
-			name := fieldType.Name
-			if tag, ok := fieldType.Tag.Lookup(row.MilvusTag); ok {
-				if tag == row.MilvusSkipTagValue {
-					continue
-				}
-				if taggedName, ok := row.ParseTagSetting(tag, row.MilvusTagSep)[row.MilvusTagName]; ok {
-					name = taggedName
-				}
-			}
-			if name != fieldName {
-				continue
-			}
-			if found {
-				return reflect.Value{}, false, errors.Newf(
-					"column has duplicated name: %s when parsing field: %s", name, fieldType.Name)
-			}
-			result, found = value.Field(i), true
-		}
-		return result, found, nil
-	default:
-		return reflect.Value{}, false, errors.Newf("unsupported row type: %s", value.Kind())
-	}
 }
 
 func (opt *rowBasedDataOption) WriteBackPKs(sch *entity.Schema, pks column.Column) error {

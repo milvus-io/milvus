@@ -17,7 +17,6 @@
 package milvusclient
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/samber/lo"
@@ -27,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/row"
 )
 
 func buildPartialOpTestCollection() *entity.Collection {
@@ -252,7 +252,7 @@ func TestRowBasedPathReplaceRejectsInvalidOperands(t *testing.T) {
 		row  any
 		want string
 	}{
-		{"nil row", nil, "unsupported nil row"},
+		{"nil row", nil, "unsupported row type"},
 		{"wrong row type", 1, "unsupported"},
 		{"wrong map key", map[int]any{1: 2}, "map key type"},
 		{"missing parent", map[string]any{"id": int64(1)}, "missing struct array field"},
@@ -301,23 +301,32 @@ func TestRowBasedPathReplaceRejectsInvalidOperands(t *testing.T) {
 	})
 }
 
-func TestPathReplaceRowFieldEmbeddedAndDuplicateNames(t *testing.T) {
+func TestRowBasedPathReplaceUsesSharedFieldMapping(t *testing.T) {
 	type profileFields struct {
+		ID      int64          `milvus:"name:id"`
 		Profile map[string]any `milvus:"name:profile"`
 	}
 	type duplicateFields struct {
 		First  int `milvus:"name:profile"`
 		Second int `milvus:"name:profile"`
 	}
-	operand := map[string]any{"age": []int64{18}}
-	row := &struct {
+	coll, _ := buildStructPathReplaceCollection()
+	operand := map[string]any{"age": []int64{18}, "city": []string{"Hangzhou"}, "score": []float32{1}}
+	input := &struct {
 		profileFields
 		Ignored int `milvus:"-"`
-	}{profileFields: profileFields{Profile: operand}}
-	value, found, err := pathReplaceRowField(reflect.ValueOf(&row), "profile")
+	}{profileFields: profileFields{ID: 1, Profile: operand}}
+	// Both preflight mask extraction and column conversion must honor embedded
+	// fields, renamed columns, skipped fields, and multiple row-pointer levels.
+	want, err := NewRowBasedInsertOption(coll.Name, &input).UpsertRequest(coll)
 	require.NoError(t, err)
-	require.True(t, found)
-	require.Equal(t, operand, value.Interface())
+	got, err := NewRowBasedInsertOption(coll.Name, &input).
+		WithPathReplace("profile", "[0]").UpsertRequest(coll)
+	require.NoError(t, err)
+	require.ElementsMatch(t, want.GetFieldsData(), got.GetFieldsData())
+	require.Len(t, got.GetFieldsData(), 2)
+	require.EqualValues(t, 1, got.GetNumRows())
+	require.Equal(t, "[0]", got.GetFieldOps()[0].GetPath())
 
 	for _, input := range []any{
 		duplicateFields{},
@@ -333,10 +342,12 @@ func TestPathReplaceRowFieldEmbeddedAndDuplicateNames(t *testing.T) {
 			Second int `milvus:"name:profile"`
 		}{},
 	} {
-		_, _, err := pathReplaceRowField(reflect.ValueOf(input), "profile")
-		require.ErrorContains(t, err, "duplicated name")
+		_, conversionErr := row.AnyToColumns([]any{input}, true, coll.Schema)
+		_, maskErr := pathReplaceStructFieldMask([]any{input}, "profile")
+		require.ErrorContains(t, conversionErr, "duplicated name")
+		require.EqualError(t, maskErr, conversionErr.Error())
 	}
-	_, _, err = pathReplaceRowField(reflect.ValueOf((*profileFields)(nil)), "profile")
+	_, err = pathReplaceStructFieldMask([]any{(*profileFields)(nil)}, "profile")
 	require.Error(t, err)
 }
 

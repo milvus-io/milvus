@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/internal/rowutil"
 )
 
 type ValidStruct struct {
@@ -184,7 +185,7 @@ func (s *RowsSuite) TestDynamicSchema() {
 	})
 }
 
-func (s *RowsSuite) TestReflectValueCandi() {
+func (s *RowsSuite) TestParseFields() {
 	type DynamicRows struct {
 		Float float32 `json:"float" milvus:"name:float"`
 	}
@@ -192,7 +193,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 	cases := []struct {
 		tag       string
 		v         reflect.Value
-		expect    map[string]fieldCandi
+		expect    map[string]any
 		expectErr bool
 	}{
 		{
@@ -200,15 +201,9 @@ func (s *RowsSuite) TestReflectValueCandi() {
 			v: reflect.ValueOf(map[string]interface{}{
 				"A": "abd", "B": int64(8),
 			}),
-			expect: map[string]fieldCandi{
-				"A": {
-					name: "A",
-					v:    reflect.ValueOf("abd"),
-				},
-				"B": {
-					name: "B",
-					v:    reflect.ValueOf(int64(8)),
-				},
+			expect: map[string]any{
+				"A": "abd",
+				"B": int64(8),
 			},
 			expectErr: false,
 		},
@@ -218,15 +213,9 @@ func (s *RowsSuite) TestReflectValueCandi() {
 				A string
 				B int64
 			}{A: "abc", B: 16}),
-			expect: map[string]fieldCandi{
-				"A": {
-					name: "A",
-					v:    reflect.ValueOf("abc"),
-				},
-				"B": {
-					name: "B",
-					v:    reflect.ValueOf(int64(16)),
-				},
+			expect: map[string]any{
+				"A": "abc",
+				"B": int64(16),
 			},
 			expectErr: false,
 		},
@@ -244,15 +233,9 @@ func (s *RowsSuite) TestReflectValueCandi() {
 				A string `milvus:"name:a"`
 				DynamicRows
 			}{A: "emb", DynamicRows: DynamicRows{Float: 0.1}}),
-			expect: map[string]fieldCandi{
-				"a": {
-					name: "a",
-					v:    reflect.ValueOf("emb"),
-				},
-				"float": {
-					name: "float",
-					v:    reflect.ValueOf(float32(0.1)),
-				},
+			expect: map[string]any{
+				"a":     "emb",
+				"float": float32(0.1),
 			},
 			expectErr: false,
 		},
@@ -275,7 +258,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 
 	for _, c := range cases {
 		s.Run(c.tag, func() {
-			r, err := reflectValueCandi(c.v)
+			r, err := rowutil.ParseFields(c.v)
 			if c.expectErr {
 				s.Error(err)
 				return
@@ -285,7 +268,7 @@ func (s *RowsSuite) TestReflectValueCandi() {
 			for k, v := range c.expect {
 				rv, has := r[k]
 				s.Require().True(has, fmt.Sprintf("candidate with key(%s) must provided", k))
-				s.Equal(v.name, rv.name)
+				s.Equal(v, rv.Value.Interface())
 			}
 		})
 	}
@@ -455,7 +438,7 @@ func (s *RowsSuite) TestSetFieldPointer() {
 	})
 }
 
-func (s *RowsSuite) TestReflectValueCandiPointer() {
+func (s *RowsSuite) TestParseFieldsPointer() {
 	s.Run("pointer_field_isPtr", func() {
 		type PtrStruct struct {
 			Name  *string
@@ -463,17 +446,81 @@ func (s *RowsSuite) TestReflectValueCandiPointer() {
 		}
 		name := "test"
 		v := reflect.ValueOf(PtrStruct{Name: &name, Value: 42})
-		result, err := reflectValueCandi(v)
+		result, err := rowutil.ParseFields(v)
 		s.NoError(err)
 
 		nameCandi, ok := result["Name"]
 		s.True(ok)
-		s.True(nameCandi.isPtr)
+		s.True(nameCandi.IsPtr)
 
 		valueCandi, ok := result["Value"]
 		s.True(ok)
-		s.False(valueCandi.isPtr)
+		s.False(valueCandi.IsPtr)
 	})
+}
+
+func (s *RowsSuite) TestParseFieldsBoundaries() {
+	type namedKey string
+	name := "kept"
+	for _, input := range []any{nil, (*ValidStruct)(nil), map[int]any{1: "value"}} {
+		_, err := rowutil.ParseFields(reflect.ValueOf(input))
+		s.Error(err)
+	}
+	for _, input := range []any{
+		map[string]*string{"name": &name},
+		map[namedKey]*string{"name": &name},
+	} {
+		fields, err := rowutil.ParseFields(reflect.ValueOf(input))
+		s.Require().NoError(err)
+		s.Equal(&name, fields["name"].Value.Interface())
+		s.False(fields["name"].IsPtr, "map values must retain their representation")
+	}
+	fields, err := rowutil.ParseFields(reflect.ValueOf(map[string]any(nil)))
+	s.NoError(err)
+	s.Empty(fields)
+
+	input := &struct {
+		ID      int64      `milvus:"primary_key;name:id"`
+		Vector  [2]float32 `milvus:"name:vector"`
+		Ignored int        `milvus:"-"`
+	}{ID: 1, Vector: [2]float32{2, 3}}
+	fields, err = rowutil.ParseFields(reflect.ValueOf(&input))
+	s.Require().NoError(err)
+	s.Len(fields, 2)
+	s.Equal(int64(1), fields["id"].Value.Interface())
+	s.Equal([]float32{2, 3}, fields["vector"].Value.Interface())
+	s.True(fields["id"].Value.CanSet())
+}
+
+func (s *RowsSuite) TestParseTagSettingCompatibility() {
+	for _, tc := range []struct {
+		tag  string
+		want map[string]string
+	}{
+		{"", map[string]string{}},
+		{";name:profile;;", map[string]string{"NAME": "profile"}},
+		{"primary_key; name:profile;dim:2", map[string]string{"PRIMARY_KEY": "PRIMARY_KEY", "NAME": "profile", "DIM": "2"}},
+		{`name:a\;b\;c:tail;auto_id`, map[string]string{"NAME": "a;b;c:tail", "AUTO_ID": "AUTO_ID"}},
+	} {
+		s.Equal(tc.want, ParseTagSetting(tc.tag, MilvusTagSep))
+	}
+}
+
+func (s *RowsSuite) TestSetFieldEmbeddedName() {
+	type identity struct {
+		ID *int64 `milvus:"name:id"`
+	}
+	input := &struct {
+		identity
+		Ignored int64 `milvus:"-"`
+	}{}
+	s.NoError(SetField(&input, "id", int64(42)))
+	s.Require().NotNil(input.ID)
+	s.Equal(int64(42), *input.ID)
+	s.NoError(SetField(input, "Ignored", int64(7)))
+	s.Zero(input.Ignored)
+	s.NoError(SetField(input, "id", nil))
+	s.Nil(input.ID)
 }
 
 func TestRows(t *testing.T) {
