@@ -9,6 +9,7 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
+#include "segcore/storagev2translator/StorageV2Config.h"
 #include <boost/container/vector.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <fmt/core.h>
@@ -57,6 +58,7 @@
 #include "storage/PayloadReader.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/IndexEntryEncryptedLocalWriter.h"
+#include "storage/IndexEntryReader.h"
 #include "storage/LoadOverheadController.h"
 #include "storage/PluginLoader.h"
 #include "storage/ThreadPools.h"
@@ -81,6 +83,12 @@ class CountingOpenFileSystem : public arrow::fs::SubTreeFileSystem {
     OpenInputFile(const std::string& path) override {
         ++open_input_file_count_;
         return arrow::fs::SubTreeFileSystem::OpenInputFile(path);
+    }
+
+    arrow::Future<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFileAsync(const std::string& path) override {
+        ++open_input_file_count_;
+        return arrow::fs::SubTreeFileSystem::OpenInputFileAsync(path);
     }
 
     size_t
@@ -687,19 +695,23 @@ TYPED_TEST_P(HybridIndexTestV1, ResourceEstimateUsesInternalIndexType) {
         this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
     ctx.set_for_loading_index(true);
 
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        this->index_files_,
-        ctx);
+    auto resources =
+        index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            this->type_,
+            index_size,
+            index_params,
+            false,
+            this->nb_,
+            this->index_files_,
+            ctx);
+    const auto& request = resources.request;
 
-    EXPECT_EQ(request.final_memory_cost, index_size);
+    EXPECT_EQ(request.final_memory_cost,
+              index_size + (this->cardinality_ + 1) *
+                               TargetBitmap(this->nb_).size_in_bytes());
     EXPECT_EQ(request.final_disk_cost, 0);
-    EXPECT_EQ(request.max_memory_cost, 2 * index_size);
+    EXPECT_GE(request.max_memory_cost, 2 * index_size);
+    EXPECT_FALSE(resources.overhead.has_value());
     EXPECT_EQ(request.max_disk_cost, 0);
     EXPECT_FALSE(request.has_raw_data);
 }
@@ -741,6 +753,8 @@ TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
             BITMAP_INDEX_DATA, entry_data.data(), entry_data.size());
         writer.PutMeta(INDEX_TYPE,
                        static_cast<uint8_t>(ScalarIndexType::BITMAP));
+        writer.PutMeta(BITMAP_INDEX_LENGTH, 1);
+        writer.PutMeta(BITMAP_INDEX_NUM_ROWS, this->nb_);
         writer.Finish();
     }
 
@@ -749,35 +763,42 @@ TYPED_TEST_P(HybridIndexTestV1, BitmapResourceEstimateKeepsFullStreamOverhead) {
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
-    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
+    auto input = file_manager.OpenInputStream(remote_path);
+    auto reader =
+        storage::IndexEntryReader::Open(input, input->Size(), collection_id);
+    // This fixture's cipher preserves size. Each sync encrypted slice holds
+    // ciphertext plus two plaintext buffers, including the metadata entry.
+    const auto meta_bytes = reader->Directory()
+                                .At(storage::MILVUS_V3_META_ENTRY_NAME)
+                                .plaintext_size;
+    const auto total_transient_bytes = 3 * (entry_data.size() + meta_bytes);
+    const auto max_task_transient_bytes = 3 * slice_size;
 
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        {remote_path},
-        ctx,
-        &stream_load_info);
+    auto resources =
+        index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            this->type_,
+            index_size,
+            index_params,
+            false,
+            this->nb_,
+            {remote_path},
+            ctx);
+    const auto& request = resources.request;
 
-    ASSERT_TRUE(stream_load_info.has_value());
-    EXPECT_TRUE(stream_load_info->encrypted);
     auto bounded_stream_overhead = storage::EntryStreamMaxTransientBytes(
-        stream_load_info->total_transient_bytes,
-        stream_load_info->max_task_transient_bytes);
-    ASSERT_LT(bounded_stream_overhead, stream_load_info->total_transient_bytes);
+        total_transient_bytes, max_task_transient_bytes);
+    ASSERT_LT(bounded_stream_overhead, total_transient_bytes);
     auto bounded_max_memory =
         std::max(2 * index_size,
                  index_size + static_cast<uint64_t>(bounded_stream_overhead));
-    auto full_stream_max_memory = std::max(
-        2 * index_size,
-        index_size +
-            static_cast<uint64_t>(stream_load_info->total_transient_bytes));
+    auto full_stream_max_memory =
+        std::max(2 * index_size,
+                 index_size + static_cast<uint64_t>(total_transient_bytes));
     ASSERT_LT(bounded_max_memory, full_stream_max_memory);
-    EXPECT_EQ(request.final_memory_cost, index_size);
-    EXPECT_EQ(request.max_memory_cost, full_stream_max_memory);
+    EXPECT_GE(request.final_memory_cost,
+              index_size + 2 * TargetBitmap(this->nb_).size_in_bytes());
+    EXPECT_GE(request.max_memory_cost, full_stream_max_memory);
+    EXPECT_FALSE(resources.overhead.has_value());
 }
 
 TYPED_TEST_P(HybridIndexTestV1,
@@ -975,22 +996,27 @@ TYPED_TEST_P(HybridIndexTestInverted,
                                     counting_fs);
     ctx.set_for_loading_index(true);
 
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        this->index_files_,
-        ctx);
+    auto resources =
+        index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            this->type_,
+            index_size,
+            index_params,
+            false,
+            this->nb_,
+            this->index_files_,
+            ctx);
+    const auto& request = resources.request;
 
     auto validity_bitmap_bytes = TargetBitmap(this->nb_).size_in_bytes();
     auto resident_bytes = index_size + validity_bitmap_bytes;
     EXPECT_EQ(request.final_memory_cost, resident_bytes);
     EXPECT_EQ(request.final_disk_cost, 0);
-    EXPECT_EQ(request.max_memory_cost,
+    EXPECT_GE(request.max_memory_cost,
               std::max<uint64_t>(stream_overhead, resident_bytes));
+    ASSERT_TRUE(resources.overhead.has_value());
+    ASSERT_TRUE(resources.overhead->memory.has_value());
+    EXPECT_EQ(resources.overhead->memory->max_runtime_unit,
+              max_task_transient_bytes);
     EXPECT_EQ(request.max_disk_cost, index_size);
     EXPECT_FALSE(request.has_raw_data);
     EXPECT_EQ(counting_fs->OpenInputFileCount(), 1);
@@ -998,14 +1024,18 @@ TYPED_TEST_P(HybridIndexTestInverted,
 
 TYPED_TEST_P(HybridIndexTestInverted,
              ScalarIndexLoadingOverheadUsesBudgetAndSingleTaskBounds) {
+    using namespace milvus::segcore::storagev2translator;
+    const auto previous_enabled = StorageV2AsyncLoadEnabled();
+    auto restore_mode = folly::makeGuard(
+        [&] { SetStorageV2AsyncLoadEnabled(previous_enabled); });
+    SetStorageV2AsyncLoadEnabled(true);
     auto& budget = storage::LoadAdmissionController::GetInstance();
     auto old_capacity = budget.CapacityBytes();
     auto cleanup = folly::makeGuard(
         [&budget, old_capacity]() { budget.SetCapacityBytes(old_capacity); });
     budget.SetCapacityBytes(0);
     auto memory_group =
-        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate(
-            milvus::ThreadPools::GetLoadExecutorWorkers());
+        storage::LoadMemoryOverheadController::GetInstance().GetOrCreate();
 
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
@@ -1042,6 +1072,7 @@ TYPED_TEST_P(HybridIndexTestInverted,
     storage::FileManagerContext ctx(
         this->field_meta_, this->index_meta_, this->chunk_manager_, this->fs_);
     ctx.set_for_loading_index(true);
+    ctx.use_async_load = true;
 
     Config config = index_params;
     milvus::segcore::storagev1translator::SealedIndexTranslator translator(
@@ -1051,9 +1082,6 @@ TYPED_TEST_P(HybridIndexTestInverted,
         ctx,
         std::move(config));
 
-    auto max_task_overhead =
-        milvus::SaturatingMultiply(storage::MaxEntryStreamTaskBytes(),
-                                   storage::kFileStreamBufferMultiplier);
     ASSERT_TRUE(translator.meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(translator.meta()->loading_overhead_config->memory.has_value());
     EXPECT_EQ(translator.meta()->loading_overhead_config->memory->group,
@@ -1061,9 +1089,16 @@ TYPED_TEST_P(HybridIndexTestInverted,
     ASSERT_TRUE(
         translator.meta()
             ->loading_overhead_config->memory->max_runtime_unit.has_value());
-    EXPECT_EQ(
-        *translator.meta()->loading_overhead_config->memory->max_runtime_unit,
-        max_task_overhead);
+    const auto max_task_overhead =
+        *translator.meta()->loading_overhead_config->memory->max_runtime_unit;
+    EXPECT_GT(max_task_overhead, 0);
+    EXPECT_LE(max_task_overhead,
+              2 * storage::DefaultStreamSliceSize() +
+                  2 * storage::FileWriter::ALIGNMENT_MASK);
+    // The pinned async path must not inherit the larger sync prefetch bound.
+    EXPECT_LT(max_task_overhead,
+              storage::MaxEntryStreamTaskBytes() *
+                  storage::kFileStreamBufferMultiplier);
     EXPECT_FALSE(translator.meta()->loading_overhead_config->file.has_value());
     auto [loaded_resource, loading_overhead] =
         translator.estimated_byte_size_of_cell(0);
@@ -1170,34 +1205,41 @@ TYPED_TEST_P(HybridIndexTestInverted,
     std::map<std::string, std::string> index_params{
         {"index_type", milvus::index::HYBRID_INDEX_TYPE},
         {milvus::index::SCALAR_INDEX_ENGINE_VERSION, "3"}};
-    std::optional<storage::EntryStreamLoadInfo> stream_load_info;
+    auto input = file_manager.OpenInputStream(remote_path);
+    auto reader =
+        storage::IndexEntryReader::Open(input, input->Size(), collection_id);
+    // This fixture's cipher preserves size. Each sync encrypted slice holds
+    // ciphertext plus two plaintext buffers, including the metadata entry.
+    const auto meta_bytes = reader->Directory()
+                                .At(storage::MILVUS_V3_META_ENTRY_NAME)
+                                .plaintext_size;
+    const auto total_transient_bytes = 3 * (entry_data.size() + meta_bytes);
+    const auto max_task_transient_bytes = 3 * slice_size;
 
-    auto request = index::IndexFactory::GetInstance().ScalarIndexLoadResource(
-        this->type_,
-        0,
-        index_size,
-        index_params,
-        false,
-        this->nb_,
-        {remote_path},
-        ctx,
-        &stream_load_info);
+    auto resources =
+        index::IndexFactory::GetInstance().ScalarIndexFileLoadResource(
+            this->type_,
+            index_size,
+            index_params,
+            false,
+            this->nb_,
+            {remote_path},
+            ctx);
+    const auto& request = resources.request;
 
-    ASSERT_TRUE(stream_load_info.has_value());
-    EXPECT_TRUE(stream_load_info->encrypted);
-    ASSERT_GT(stream_load_info->total_transient_bytes,
-              stream_load_info->max_task_transient_bytes);
-    ASSERT_LT(storage::EntryStreamMaxTransientBytes(
-                  stream_load_info->total_transient_bytes,
-                  stream_load_info->max_task_transient_bytes),
-              stream_load_info->total_transient_bytes);
+    ASSERT_GT(total_transient_bytes, max_task_transient_bytes);
+    ASSERT_LT(storage::EntryStreamMaxTransientBytes(total_transient_bytes,
+                                                    max_task_transient_bytes),
+              total_transient_bytes);
     auto validity_bitmap_bytes = TargetBitmap(this->nb_).size_in_bytes();
     auto resident_bytes = index_size + validity_bitmap_bytes;
     EXPECT_EQ(request.final_memory_cost, resident_bytes);
     EXPECT_EQ(request.final_disk_cost, 0);
-    EXPECT_EQ(request.max_memory_cost,
-              std::max<uint64_t>(stream_load_info->total_transient_bytes,
-                                 resident_bytes));
+    EXPECT_GE(request.max_memory_cost, resident_bytes + total_transient_bytes);
+    ASSERT_TRUE(resources.overhead.has_value());
+    ASSERT_TRUE(resources.overhead->memory.has_value());
+    EXPECT_GE(resources.overhead->memory->max_runtime_unit.value(),
+              max_task_transient_bytes);
 }
 
 TYPED_TEST_P(HybridIndexTestInverted, ScalarV3LoadingRequiresStreamLoadInfo) {

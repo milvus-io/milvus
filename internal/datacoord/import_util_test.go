@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +44,7 @@ import (
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -1237,6 +1240,64 @@ func TestImportUtil_ListBinlogImportRequestFiles(t *testing.T) {
 		assert.Nil(t, files)
 	})
 
+	t.Run("backup files - invalid paths take precedence over storage errors", func(t *testing.T) {
+		for _, invalidPaths := range [][]string{nil, {"insert", "delta", "extra"}} {
+			for _, invalidFirst := range []bool{false, true} {
+				t.Run(fmt.Sprintf("paths_%d/invalid_first_%t", len(invalidPaths), invalidFirst), func(t *testing.T) {
+					mockCM := mocks2.NewChunkManager(t)
+					mockCM.EXPECT().WalkWithPrefix(mock.Anything, "valid", false, mock.Anything).
+						Return(merr.WrapErrIoTooManyRequests("valid", errors.New("SlowDown"))).Maybe()
+					reqFiles := []*internalpb.ImportFile{
+						{Paths: []string{"valid"}},
+						{Paths: invalidPaths},
+					}
+					if invalidFirst {
+						reqFiles[0], reqFiles[1] = reqFiles[1], reqFiles[0]
+					}
+
+					files, err := ListBinlogImportRequestFiles(ctx, mockCM, reqFiles,
+						[]*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}})
+					require.Error(t, err)
+					assert.Nil(t, files)
+					assert.ErrorIs(t, err, merr.ErrImportFailed)
+					status := merr.Status(err)
+					assert.Equal(t, merr.Code(merr.ErrImportFailed), status.GetCode())
+					assert.False(t, status.GetRetriable())
+					assert.Equal(t, merr.InputError, merr.GetErrorType(merr.Error(status)))
+					mockCM.AssertNotCalled(t, "WalkWithPrefix", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+				})
+			}
+		}
+	})
+
+	t.Run("backup files - storage errors remain retryable", func(t *testing.T) {
+		for _, test := range []struct {
+			name string
+			err  error
+		}{
+			{"untyped", errors.New("object storage unavailable")},
+			{"throttled", merr.WrapErrIoTooManyRequests("insert", errors.New("SlowDown"))},
+			{"missing object", merr.WrapErrIoKeyNotFound("insert")},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				mockCM := mocks2.NewChunkManager(t)
+				mockCM.EXPECT().WalkWithPrefix(mock.Anything, "insert", false, mock.Anything).
+					Return(test.err).Once()
+				files, err := ListBinlogImportRequestFiles(ctx, mockCM,
+					[]*internalpb.ImportFile{{Paths: []string{"insert"}}},
+					[]*commonpb.KeyValuePair{{Key: importutilv2.BackupFlag, Value: "true"}})
+				require.Error(t, err)
+				assert.Nil(t, files)
+				assert.ErrorIs(t, err, test.err)
+				status := merr.Status(err)
+				assert.Equal(t, merr.Code(merr.ErrServiceUnavailable), status.GetCode())
+				assert.True(t, status.GetRetriable())
+				assert.Equal(t, merr.SystemError, merr.GetErrorType(merr.Error(status)))
+				assert.True(t, merr.IsRetryableErr(merr.Error(status)))
+			})
+		}
+	})
+
 	t.Run("backup files - success", func(t *testing.T) {
 		reqFiles := []*internalpb.ImportFile{
 			{
@@ -1508,4 +1569,306 @@ func TestErrPKRangeTooSmall_IsDistinguishableAndKeepsItsCode(t *testing.T) {
 	// why the branch never fired.
 	assert.False(t, merr.IsNonRetryableErr(terminal))
 	assert.False(t, merr.IsNonRetryableErr(transient))
+}
+
+func TestValidateImportFilePaths(t *testing.T) {
+	backupOptions := []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}}
+	l0Options := []*commonpb.KeyValuePair{{Key: "l0_import", Value: "true"}}
+
+	tests := []struct {
+		name        string
+		rootPath    string
+		path        string
+		options     []*commonpb.KeyValuePair
+		wantReject  bool
+		storageType string // "" means leave the configured default (remote)
+	}{
+		{"plain internal insert_log", "files", "files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"dot dot escape back into insert_log", "files", "files/../files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"leading slash", "files", "/files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"single dot segment", "files", "files/./insert_log/1/2/3/100/4", nil, true, ""},
+		{"delta_log", "files", "files/delta_log/1/2/3/4", nil, true, ""},
+		{"snapshots", "files", "files/snapshots/449/metadata/12.json", nil, true, ""},
+		// Woodpecker's WAL lives under the same root; its segment reached the
+		// registry only after the milvus#51894 review flagged the omission.
+		{"woodpecker wal", "files", "files/wp/0/1/2.log", nil, true, ""},
+
+		// The node-local cache subtree is at the storage root under
+		// storageType=local, so it is denied there.
+		{"local cache dir", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/x", nil, true, "local"},
+
+		// Everything segcore writes lives INSIDE that subtree, because its
+		// ChunkManager is initialized with pathutil.GetPath(LocalChunkPath, nodeID)
+		// = {localStorage.path}/cache/{nodeID}/local_chunk. The cache entry
+		// therefore already covers raw_datas / ngram_log / tmp / rtree-index; they
+		// must not be registered at the root as well.
+		{"segcore raw_datas under the cache subtree", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/raw_datas/449_100/0", nil, true, "local"},
+		{"segcore temp index under the cache subtree", "/var/lib/milvus/data", "/var/lib/milvus/data/cache/1/local_chunk/tmp/HNSW/1", nil, true, "local"},
+
+		// ...and the root-level names must stay ALLOWED, since Milvus never writes
+		// them there. Denying <root>/tmp/ would break a caller staging imports in
+		// a directory of that name while claiming it is Milvus-internal.
+		{"local root, tmp is not internal", "/var/lib/milvus/data", "/var/lib/milvus/data/tmp/data.parquet", nil, false, "local"},
+		{"local root, raw_datas is not internal", "/var/lib/milvus/data", "/var/lib/milvus/data/raw_datas/a.json", nil, false, "local"},
+		{"remote root, tmp staging", "files", "files/tmp/data.parquet", nil, false, "remote"},
+
+		// The cache entry itself is local-only: on a remote root Milvus does not
+		// write it, so a caller directory of that name must pass.
+		{"remote root, cache-named dir", "files", "files/cache/mine.json", nil, false, "remote"},
+
+		// Explore planning manifests are written at the local root, and at the
+		// bucket root outside minio.rootPath on remote storage -- so the segment
+		// is denied under the root only when the storage type is local.
+		{"local root, explore temp dir", "/var/lib/milvus/data", "/var/lib/milvus/data/__explore_temp__/coord_1/attempt_1/manifest.json", nil, true, "local"},
+		{"remote root, explore-named dir", "files", "files/__explore_temp__/mine.json", nil, false, "remote"},
+		// On remote storage the manifests themselves live at the bucket root,
+		// outside minio.rootPath, so no root-anchored entry reaches them.
+		{"remote root, explore temp at bucket root", "files", "__explore_temp__/coord_1/attempt_1/milvus-table-explore.json", nil, true, "remote"},
+
+		// External refresh task results are root-anchored on both storage types.
+		{"remote root, external refresh results", "files", "files/external_refresh_results/1/2/3/4/a.json", nil, true, "remote"},
+		{"local root, external refresh results", "/var/lib/milvus/data", "/var/lib/milvus/data/external_refresh_results/1/2/3/4/a.json", nil, true, "local"},
+
+		// Legacy StorageV3 segments keep living under <root>/<minio.rootPath>/insert_log
+		// after an upgrade of a local deployment, so that directory is internal too.
+		// On a remote root the same spelling is an ordinary caller directory.
+		{"local root, legacy V3 insert_log", "/var/lib/milvus/data", "/var/lib/milvus/data/files/insert_log/1/2/3/_data/data.parquet", nil, true, "local"},
+		{"local root, legacy prefix without insert_log", "/var/lib/milvus/data", "/var/lib/milvus/data/files/staging/a.json", nil, false, "local"},
+		{"remote root, legacy prefix is not internal", "files", "files/files/insert_log/1/2/3/a.parquet", nil, false, "remote"},
+
+		// A relative key is resolved by os.Open against the datanode working
+		// directory, not against the storage root the deny entries are anchored
+		// at, so it could never match one. With WORKDIR /milvus and
+		// localStorage.path=/milvus/data this reads the snapshot dir while
+		// comparing as "/data/snapshots/...".
+		{"local root, relative path refused", "/milvus/data", "data/snapshots/449/metadata/12.json", nil, true, "local"},
+		{"local root, relative staging path refused too", "/milvus/data", "staging/a.json", nil, true, "local"},
+
+		// Remote keys are relative by nature and are used literally by S3, so the
+		// rule must not leak outside local storage.
+		{"remote root, relative path is normal", "files", "staging/a.json", nil, false, "remote"},
+
+		// Woodpecker writes under BOTH roots, so it stays denied on remote.
+		{"remote root, woodpecker still denied", "files", "files/wp/0/1/2.log", nil, true, "remote"},
+		{"exact directory with no trailing content", "files", "files/insert_log", nil, true, ""},
+		{"empty root path", "", "insert_log/1/2/3/100/4", nil, true, ""},
+
+		// An absolute storage root is what storageType=local uses
+		// (localStorage.path). The candidate path and the deny list must be
+		// normalized into one namespace or none of these can ever match.
+		{"absolute root", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_log/1/2/3/100/4", nil, true, ""},
+		{"absolute root, doubled slash", "/var/lib/milvus/data", "//var/lib/milvus/data/snapshots/449/metadata/1.json", nil, true, ""},
+
+		// path.Clean collapses repeated slashes only once the key is rooted;
+		// stripping a single leading slash by hand leaves "//x" as "/x".
+		{"doubled leading slash", "files", "//files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"tripled leading slash", "files", "///files/insert_log/1/2/3/100/4", nil, true, ""},
+
+		// LocalChunkManager passes the key straight to os.Open, where a leading
+		// ".." resolves against the process working directory.
+		{"leading dot dot", "files", "../files/insert_log/1/2/3/100/4", nil, true, ""},
+		{"two leading dot dots", "files", "../../files/insert_log/1/2/3/100/4", nil, true, ""},
+
+		// Must NOT be rejected: prefix collision on a non-boundary.
+		{"user directory sharing a prefix", "files", "files/insert_logs_2026/a.json", nil, false, ""},
+		{"ordinary staging path", "files", "staging/a.json", nil, false, ""},
+		{"user file named centroids", "files", "staging/centroids", nil, false, ""},
+		{"absolute root, unrelated path", "/var/lib/milvus/data", "/home/user/data.json", nil, false, ""},
+		{"absolute root, prefix collision", "/var/lib/milvus/data", "/var/lib/milvus/data/insert_logs_2026/a.json", nil, false, ""},
+		{"dot dot into an unrelated directory", "files", "../staging/a.json", nil, false, ""},
+		{"caller top-level dir sharing the segment name", "files", "insert_log/mine.json", nil, false, ""},
+
+		// Must NOT be rejected: backup and L0 import legitimately read binlogs.
+		{"backup import into insert_log", "files", "files/insert_log/1/2/3", backupOptions, false, ""},
+		{"l0 import into delta_log", "files", "files/delta_log/1/2/3", l0Options, false, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.storageType != "" {
+				key := paramtable.Get().CommonCfg.StorageType.Key
+				paramtable.Get().Save(key, tt.storageType)
+				defer paramtable.Get().Reset(key)
+			}
+			// The legacy local namespace is <root>/<minio.rootPath>/insert_log,
+			// so the cases above must not depend on the configured default.
+			rootKey := paramtable.Get().MinioCfg.RootPath.Key
+			paramtable.Get().Save(rootKey, "files")
+			defer paramtable.Get().Reset(rootKey)
+
+			rootPath, filePath := tt.rootPath, tt.path
+			if tt.storageType == "local" {
+				// Local keys are resolved on disk, so the root and the file must exist.
+				rootPath, filePath = materializeLocalImportPath(t, tt.rootPath, tt.path)
+			}
+
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(rootPath).Maybe()
+
+			files := []*msgpb.ImportFile{{Paths: []string{filePath}}}
+			err := ValidateImportFilePaths(cm, files, tt.options)
+
+			if tt.wantReject {
+				assert.Error(t, err)
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// materializeLocalImportPath moves rootPath under a temp directory and creates
+// filePath there when it is absolute. A relative filePath is returned as is.
+func materializeLocalImportPath(t *testing.T, rootPath, filePath string) (string, string) {
+	base := t.TempDir()
+	localRoot := filepath.Join(base, rootPath)
+	require.NoError(t, os.MkdirAll(localRoot, 0o755))
+	if !filepath.IsAbs(filePath) {
+		return localRoot, filePath
+	}
+	localFile := filepath.Join(base, filePath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(localFile), 0o755))
+	require.NoError(t, os.WriteFile(localFile, []byte("{}"), 0o600))
+	return localRoot, localFile
+}
+
+// Under storageType=local the datanode reads with os.Open, which follows
+// symlinks and /proc magic links. An alias of an internal directory must be
+// denied like the directory itself.
+// An internal directory can itself be a symlink -- moving the cache subtree
+// onto another disk is the ordinary reason. Both spellings must be denied: the
+// one under the storage root, and the directory it resolves to.
+func TestValidateImportFilePaths_SymlinkedInternalDir(t *testing.T) {
+	key := paramtable.Get().CommonCfg.StorageType.Key
+	paramtable.Get().Save(key, "local")
+	defer paramtable.Get().Reset(key)
+
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+	require.NoError(t, os.MkdirAll(root, 0o755))
+
+	// <root>/cache -> <base>/nvme-cache, holding one segcore chunk file.
+	elsewhere := filepath.Join(base, "nvme-cache")
+	chunk := filepath.Join(elsewhere, "1", "local_chunk", "x.parquet")
+	require.NoError(t, os.MkdirAll(filepath.Dir(chunk), 0o755))
+	require.NoError(t, os.WriteFile(chunk, []byte("x"), 0o600))
+	require.NoError(t, os.Symlink(elsewhere, filepath.Join(root, common.LocalCacheRootPath)))
+
+	staging := filepath.Join(base, "ordinary.json")
+	require.NoError(t, os.WriteFile(staging, []byte("{}"), 0o600))
+
+	// A registered segment that is an ordinary directory, with a symlink one
+	// level below it: <root>/snapshots/449 -> <base>/nvme-snapshots.
+	snapshotsDir := filepath.Join(root, common.SnapshotRootPath)
+	require.NoError(t, os.MkdirAll(snapshotsDir, 0o755))
+	sub := filepath.Join(base, "nvme-snapshots")
+	require.NoError(t, os.MkdirAll(filepath.Join(sub, "metadata"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "metadata", "12.json"), []byte("{}"), 0o600))
+	require.NoError(t, os.Symlink(sub, filepath.Join(snapshotsDir, "449")))
+
+	tests := []struct {
+		name       string
+		path       string
+		wantReject bool
+	}{
+		{"through the root spelling", filepath.Join(root, common.LocalCacheRootPath, "1", "local_chunk", "x.parquet"), true},
+		{"through the resolved directory", chunk, true},
+		{"ordinary staging file", staging, false},
+		// The link can also sit BELOW the registered segment, where the resolved
+		// form leaves the root's namespace and no root-anchored entry matches it.
+		{"symlink below the segment", filepath.Join(root, common.SnapshotRootPath, "449", "metadata", "12.json"), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(root).Maybe()
+
+			err := ValidateImportFilePaths(cm, []*msgpb.ImportFile{{Paths: []string{tt.path}}}, nil)
+			if tt.wantReject {
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// An unresolvable storage root is an operator-side fault, not a bad caller
+// path: it must not be bucketed as an InputError, which also stops retry.
+func TestValidateImportFilePaths_UnresolvableRootIsSystemError(t *testing.T) {
+	key := paramtable.Get().CommonCfg.StorageType.Key
+	paramtable.Get().Save(key, "local")
+	defer paramtable.Get().Reset(key)
+
+	missing := filepath.Join(t.TempDir(), "mount-dropped")
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return(missing).Maybe()
+
+	err := ValidateImportFilePaths(cm,
+		[]*msgpb.ImportFile{{Paths: []string{filepath.Join(missing, "a.json")}}}, nil)
+	assert.ErrorIs(t, err, merr.ErrImportSysFailed)
+	assert.NotErrorIs(t, err, merr.ErrImportFailed)
+}
+
+func TestValidateImportFilePaths_LocalAliases(t *testing.T) {
+	key := paramtable.Get().CommonCfg.StorageType.Key
+	paramtable.Get().Save(key, "local")
+	defer paramtable.Get().Reset(key)
+
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+	snapshot := filepath.Join(root, "snapshots", "449", "metadata", "12.json")
+	require.NoError(t, os.MkdirAll(filepath.Dir(snapshot), 0o755))
+	require.NoError(t, os.WriteFile(snapshot, []byte("{}"), 0o600))
+
+	staging := filepath.Join(base, "staging")
+	require.NoError(t, os.MkdirAll(staging, 0o755))
+	link := filepath.Join(staging, "a.json")
+	require.NoError(t, os.Symlink(snapshot, link))
+
+	rootLink := filepath.Join(base, "data-link")
+	require.NoError(t, os.Symlink(root, rootLink))
+
+	tests := []struct {
+		name       string
+		rootPath   string
+		path       string
+		wantReject bool
+	}{
+		{"proc self root alias", root, "/proc/self/root" + snapshot, true},
+		{"staging symlink into the root", root, link, true},
+		{"symlinked root, resolved path", rootLink, snapshot, true},
+		{"missing file", root, filepath.Join(staging, "missing.json"), true},
+		{"ordinary staging file", root, filepath.Join(base, "ordinary.json"), false},
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(base, "ordinary.json"), []byte("{}"), 0o600))
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cm := mocks2.NewChunkManager(t)
+			cm.EXPECT().RootPath().Return(tt.rootPath).Maybe()
+
+			err := ValidateImportFilePaths(cm, []*msgpb.ImportFile{{Paths: []string{tt.path}}}, nil)
+			if tt.wantReject {
+				assert.ErrorIs(t, err, merr.ErrImportFailed)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateImportFilePaths_ChecksEveryPathOfEveryFile(t *testing.T) {
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+
+	// The offending path is neither the first file nor the first path.
+	files := []*msgpb.ImportFile{
+		{Paths: []string{"staging/a.json"}},
+		{Paths: []string{"staging/b.json", "files/stats_log/1/2/3/100/4"}},
+	}
+
+	err := ValidateImportFilePaths(cm, files, nil)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
 }

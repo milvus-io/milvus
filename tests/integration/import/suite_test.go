@@ -6,39 +6,30 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package grpcclient
+
+package importv2
 
 import (
-	"bytes"
-	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"google.golang.org/grpc/encoding"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func TestGrpcEncoder(t *testing.T) {
-	data := "hello zstd algorithm!"
-	var buf bytes.Buffer
+type importSuite struct {
+	integration.MiniClusterSuite
+}
 
-	compressor := encoding.GetCompressor(Zstd)
-	writer, err := compressor.Compress(&buf)
-	assert.NoError(t, err)
-	written, err := writer.Write([]byte(data))
-	assert.NoError(t, err)
-	assert.Equal(t, written, len(data))
-	err = writer.Close()
-	assert.NoError(t, err)
-
-	reader, err := compressor.Decompress(bytes.NewReader(buf.Bytes()))
-	assert.NoError(t, err)
-	result := make([]byte, len(data))
-	reader.Read(result)
-	assert.Equal(t, data, string(result))
+func (s *importSuite) SetupSuite() {
+	// Small import fixtures should exercise every stage without waiting for
+	// production scheduling intervals. Set these before the tickers are created.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportCheckIntervalHigh.Key, "0.1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.ImportScheduleInterval.Key, "0.1")
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.CompactionScheduleInterval.Key, "100")
+	s.MiniClusterSuite.SetupSuite()
 }

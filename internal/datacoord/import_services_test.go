@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -94,6 +95,39 @@ func (s *ImportServicesSuite) TestImportV2_InvalidTimeoutReturnsError() {
 	s.NoError(err)
 	s.NotNil(resp)
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+}
+
+func (s *ImportServicesSuite) TestImportV2_InvalidBinlogPathsAreNotRetryable() {
+	paramtable.Init()
+	for _, paths := range [][]string{nil, {"insert", "delta", "extra"}} {
+		for _, test := range []struct {
+			name  string
+			files []*internalpb.ImportFile
+		}{
+			{"single", []*internalpb.ImportFile{{Paths: paths}}},
+			{"invalid_first", []*internalpb.ImportFile{{Paths: paths}, {Paths: []string{"valid"}}}},
+			{"invalid_last", []*internalpb.ImportFile{{Paths: []string{"valid"}}, {Paths: paths}}},
+		} {
+			s.Run(fmt.Sprintf("paths_%d/%s", len(paths), test.name), func() {
+				server := &Server{meta: &meta{}}
+				server.stateCode.Store(commonpb.StateCode_Healthy)
+				// A supplied job ID skips allocation; a nil chunk manager proves
+				// invalid path counts are rejected before accessing object storage.
+				resp, err := server.ImportV2(context.Background(), &internalpb.ImportRequestInternal{
+					JobID:   1,
+					Files:   test.files,
+					Options: []*commonpb.KeyValuePair{{Key: "backup", Value: "true"}},
+				})
+				s.Require().NoError(err)
+				s.Require().NotNil(resp)
+				status := resp.GetStatus()
+				s.Equal(merr.Code(merr.ErrImportFailed), status.GetCode())
+				s.False(status.GetRetriable())
+				s.ErrorIs(merr.Error(status), merr.ErrImportFailed)
+				s.Equal(merr.InputError, merr.GetErrorType(merr.Error(status)))
+			})
+		}
+	}
 }
 
 func (s *ImportServicesSuite) TestImportV2_L0ImportDisabledReturnsError() {
@@ -229,6 +263,7 @@ func (s *ImportServicesSuite) TestImportV2_BroadcastFailsReturnsError() {
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -303,6 +338,7 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -409,6 +445,7 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	server := &Server{
 		importMeta: importMeta,
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 
@@ -598,6 +635,7 @@ func (s *ImportServicesSuite) TestImportV2_UsesDefaultDbNameWhenEmpty() {
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
 

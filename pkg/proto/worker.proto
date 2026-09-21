@@ -210,6 +210,10 @@ message CreateStatsRequest {
   int64 json_stats_write_batch_size = 30;
   string manifest_path = 31;
   repeated internal.FileResourceInfo file_resources = 32;
+  // The requesting DataCoord commits standalone text/JSON stats to manifests.
+  // Absent or false keeps the manifest transaction on the worker. Sort always
+  // includes stats in its complete output manifest, regardless of this flag.
+  bool enable_manifest_delta = 33;
 }
 
 message CreateJobV2Request {

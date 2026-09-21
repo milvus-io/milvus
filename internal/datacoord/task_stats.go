@@ -635,6 +635,7 @@ func (st *statsTask) prepareJobRequest(ctx context.Context, segment *SegmentInfo
 		JsonStatsShreddingRatioThreshold: Params.DataCoordCfg.JSONStatsShreddingRatioThreshold.GetAsFloat(),
 		JsonStatsWriteBatchSize:          Params.DataCoordCfg.JSONStatsWriteBatchSize.GetAsInt64(),
 		ManifestPath:                     segment.GetManifestPath(),
+		EnableManifestDelta:              true,
 	}
 	WrapPluginContext(segment.GetCollectionID(), collInfo.Schema.GetProperties(), req)
 
@@ -720,6 +721,11 @@ func (st *statsTask) SetJobInfo(ctx context.Context, result *workerpb.StatsResul
 			if !errors.Is(updateErr, merr.ErrSegmentNotFound) {
 				return updateErr
 			}
+		} else {
+			// The SegmentMeta mutation is committed (manifest version
+			// advanced); reconcile the DataView snapshot asynchronously so
+			// consumers observe the new manifest version.
+			st.meta.recomputeDataView(ctx, st.GetCollectionID())
 		}
 	}
 

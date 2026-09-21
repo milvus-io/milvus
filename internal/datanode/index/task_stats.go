@@ -648,13 +648,14 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	}
 
 	// The Sort sub-job bakes text index stats into the freshly written target-segment
-	// manifest inline. A standalone TextIndexJob instead ships textIndexLogs to
+	// manifest inline, as do requests from legacy coordinators. An opted-in
+	// standalone TextIndexJob ships textIndexLogs to
 	// DataCoord, which runs the manifest transaction itself (CommitSegmentManifest,
 	// rebased onto the segment's current manifest); baking here would commit against a
 	// base that may already be stale, so the worker skips it. TextStatsLogs carries
 	// full object keys either way; the loon transaction stores the manifest-relative
 	// representation at commit time.
-	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort && st.manifestPath != "" && len(textIndexLogs) > 0 {
+	if (!st.req.GetEnableManifestDelta() || st.req.GetSubJobType() == indexpb.StatsSubJob_Sort) && st.manifestPath != "" && len(textIndexLogs) > 0 {
 		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
@@ -818,7 +819,8 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	}
 
 	// The Sort sub-job bakes JSON key stats into the freshly written target-segment
-	// manifest inline. A standalone JsonKeyIndexJob instead ships jsonKeyIndexStats to
+	// manifest inline, as do requests from legacy coordinators. An opted-in
+	// standalone JsonKeyIndexJob ships jsonKeyIndexStats to
 	// DataCoord, which runs the manifest transaction itself (CommitSegmentManifest,
 	// rebased onto the segment's current manifest) and reconstructs the absolute paths
 	// there; baking here would commit against a possibly stale base, so the worker skips it.
@@ -826,7 +828,7 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	// before registering with manifest (loon library expects absolute paths).
 	// Use a separate copy for manifest so the original stats retain relative paths
 	// for dual-write to etcd (etcd stores relative paths, reconstructed on read).
-	if st.req.GetSubJobType() == indexpb.StatsSubJob_Sort && st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
+	if (!st.req.GetEnableManifestDelta() || st.req.GetSubJobType() == indexpb.StatsSubJob_Sort) && st.manifestPath != "" && len(jsonKeyIndexStats) > 0 {
 		manifestStats := make(map[int64]*datapb.JsonKeyStats, len(jsonKeyIndexStats))
 		for fieldID, stats := range jsonKeyIndexStats {
 			cloned := proto.Clone(stats).(*datapb.JsonKeyStats)

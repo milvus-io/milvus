@@ -55,7 +55,8 @@
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
 #include "storage/EntryStreamUtils.h"
 #include "storage/LoadOverheadController.h"
-#include "storage/ThreadPools.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include <folly/ScopeGuard.h>
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
 
@@ -118,6 +119,10 @@ class GroupChunkTranslatorTest : public ::testing::TestWithParam<bool> {
 };
 
 TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
+    const auto previous_enabled = StorageV2AsyncLoadEnabled();
+    auto restore_mode = folly::makeGuard(
+        [&] { SetStorageV2AsyncLoadEnabled(previous_enabled); });
+    SetStorageV2AsyncLoadEnabled(false);
     auto temp_dir =
         std::filesystem::path(TestLocalPath) / "gctt_test_with_mmap";
     std::filesystem::create_directory(temp_dir);
@@ -125,26 +130,32 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
     auto use_mmap = GetParam();
     std::unordered_map<FieldId, FieldMeta> field_metas = schema_->get_fields();
     auto column_group_info = FieldDataInfo(0, 3000, temp_dir.string());
-    auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
+    const auto make_translator = [&] {
+        auto metadata = LoadGroupChunkMetadata(paths_, {}, "test_group_chunk");
 
-    auto translator = std::make_unique<GroupChunkTranslator>(
-        segment_id_,
-        GroupChunkType::DEFAULT,
-        field_metas,
-        column_group_info,
-        paths_,
-        std::move(metadata.row_group_meta_list),
-        use_mmap,
-        true,
-        schema_->get_field_ids().size(),
-        milvus::proto::common::LoadPriority::LOW,
-        /* warmup_policy */ "",
-        MmapChunkWritebackMode::Disabled);
+        return std::make_unique<GroupChunkTranslator>(
+            segment_id_,
+            GroupChunkType::DEFAULT,
+            field_metas,
+            column_group_info,
+            paths_,
+            std::move(metadata.row_group_meta_list),
+            use_mmap,
+            true,
+            schema_->get_field_ids().size(),
+            milvus::proto::common::LoadPriority::LOW,
+            /* warmup_policy */ "",
+            MmapChunkWritebackMode::Disabled);
+    };
+    auto translator = make_translator();
+    SetStorageV2AsyncLoadEnabled(true);
+    EXPECT_FALSE(
+        make_translator()->meta()->loading_overhead_config.has_value());
+    SetStorageV2AsyncLoadEnabled(false);
 
-    auto executor_workers = milvus::ThreadPools::GetLoadExecutorWorkers();
     auto memory_group =
         milvus::storage::LoadMemoryOverheadController::GetInstance()
-            .GetOrCreate(executor_workers);
+            .GetOrCreate();
     ASSERT_TRUE(translator->meta()->loading_overhead_config.has_value());
     ASSERT_TRUE(
         translator->meta()->loading_overhead_config->memory.has_value());
@@ -161,7 +172,7 @@ TEST_P(GroupChunkTranslatorTest, TestWithMmap) {
             translator->meta()->loading_overhead_config->file.has_value());
         EXPECT_EQ(translator->meta()->loading_overhead_config->file->group,
                   milvus::storage::LoadFileOverheadController::GetInstance()
-                      .GetOrCreate(executor_workers));
+                      .GetOrCreate());
         ASSERT_TRUE(
             translator->meta()
                 ->loading_overhead_config->file->max_runtime_unit.has_value());

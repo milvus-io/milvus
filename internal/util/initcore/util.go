@@ -278,8 +278,9 @@ func UpdateStorageV2CellTargetSizeBytes(bytes int64) {
 }
 
 // updateStorageV2AsyncLoadEnabled publishes the rollout value to C++.
-func updateStorageV2AsyncLoadEnabled(enabled bool) {
-	C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+func updateStorageV2AsyncLoadEnabled(enabled bool) error {
+	status := C.SetStorageV2AsyncLoadEnabled(C.bool(enabled))
+	return HandleCStatus(&status, "configure async load mode failed")
 }
 
 // updateStorageV2AsyncLoadThreadPoolSize publishes the positive worker limit.
@@ -335,48 +336,58 @@ func registerConfigWatcherWithCatchUp(register func(syncConfig func()), syncConf
 	serializedSync()
 }
 
-func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) {
+func applyQueryNodeLoadConfig(enabled bool, budgetBytes, slots int64) error {
 	// Stop new translators from selecting async before relaxing its defaults;
 	// install the limits before allowing new translators to select async.
 	if !enabled {
-		updateStorageV2AsyncLoadEnabled(false)
+		if err := updateStorageV2AsyncLoadEnabled(false); err != nil {
+			return err
+		}
 	}
 	UpdateLoadTransientBudgetBytes(budgetBytes)
 	UpdateLoadAdmissionSlots(slots)
 	if enabled {
-		updateStorageV2AsyncLoadEnabled(true)
+		return updateStorageV2AsyncLoadEnabled(true)
 	}
+	return nil
 }
 
 // registerQueryNodeLoadConfig applies the initial rollout switch and admission
 // limits, then keeps all three keys synchronized. Only QueryNode owns this
 // process-wide configuration, including when colocated with DataNode.
-func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(bool, int64, int64)) {
+func registerQueryNodeLoadConfig(ctx context.Context, pt *paramtable.ComponentParam, apply func(bool, int64, int64) error) error {
 	if ctx == nil {
 		ctx = context.TODO()
 	}
-	registerConfigWatcherWithCatchUp(func(syncConfig func()) {
-		for _, key := range []string{
-			pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
-			pt.CommonCfg.LoadTransientBudgetBytes.Key,
-			pt.CommonCfg.LoadAdmissionSlots.Key,
-		} {
-			pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
-				if !evt.HasUpdated {
-					return
-				}
-				syncConfig()
-			}))
-		}
-	}, func() {
+	var mu sync.Mutex
+	syncConfig := func() error {
+		mu.Lock()
+		defer mu.Unlock()
 		enabled := pt.QueryNodeCfg.StorageV2EnableAsyncLoad.GetAsBool()
 		budgetBytes, slots := pt.CommonCfg.ResolveLoadAdmissionLimits(enabled)
-		apply(enabled, budgetBytes, slots)
+		if err := apply(enabled, budgetBytes, slots); err != nil {
+			return err
+		}
 		mlog.Info(ctx, "QueryNode load configuration updated",
 			mlog.Bool("async_enabled", enabled),
 			mlog.Int64("transient_budget_bytes", budgetBytes),
 			mlog.Int64("admission_slots", slots))
-	})
+		return nil
+	}
+	for _, key := range []string{
+		pt.QueryNodeCfg.StorageV2EnableAsyncLoad.Key,
+		pt.CommonCfg.LoadTransientBudgetBytes.Key,
+		pt.CommonCfg.LoadAdmissionSlots.Key,
+	} {
+		pt.Watch(key, config.NewHandler(key+".querynode", func(evt *config.Event) {
+			if evt.HasUpdated {
+				if err := syncConfig(); err != nil {
+					mlog.Warn(ctx, "Failed to update QueryNode load configuration", mlog.Err(err))
+				}
+			}
+		}))
+	}
+	return syncConfig()
 }
 
 // registerStorageV2AsyncLoadReadWindowConfig keeps the native read-window

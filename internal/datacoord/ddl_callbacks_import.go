@@ -104,9 +104,33 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // original jobID. Retrying the same key once the limit frees up resolves normally;
 // minting a fresh key instead is what would import the data twice.
 func (s *Server) validateImportRequest(ctx context.Context, files []*msgpb.ImportFile, options []*commonpb.KeyValuePair) error {
+	// Must run before any option is read: checks read options as a repeated KV
+	// (first match wins) while the broadcast body folds them into a map (last
+	// value wins), so a duplicate key would validate under one value and
+	// execute under another.
+	if err := importutilv2.ValidateNoDuplicateKeys(options); err != nil {
+		return err
+	}
+
 	// Validate timeout
 	_, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
+		return err
+	}
+
+	// Keep ordinary imports out of Milvus's own storage directories.
+	//
+	// Deliberately NOT re-checked in createImportJobFromAck, unlike the L0 gate
+	// there, because this check is root-relative. It denies paths under THIS
+	// cluster's ChunkManager.RootPath(), and nothing ties a CDC pair's storage
+	// roots together (ReplicateConfiguration carries connection params and
+	// pchannels only). With the same root on both sides -- the default, and the
+	// normal deployment -- the primary's check covers the secondary exactly;
+	// only under differing roots does the same key mean something different on
+	// each side. Recorded in the PR's Known limitations rather than guarded
+	// here, since reaching it also requires enableInReplicatingCluster=true,
+	// which defaults to false and refuses every import on a replicating cluster.
+	if err := ValidateImportFilePaths(s.meta.chunkManager, files, options); err != nil {
 		return err
 	}
 
@@ -195,12 +219,12 @@ func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
 // idempotency key is scoped to this collection's ID, so a hit already means both
 // broadcasts targeted it. It is checked as an invariant, to fail loudly on an encoding
 // or scoping bug rather than hand back a jobID for another collection's import.
-func jobIDFromDuplicatedBroadcast(msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
+func jobIDFromDuplicatedBroadcast(ctx context.Context, msg message.BroadcastMutableMessage, collectionID int64) (int64, error) {
 	importMsg, err := message.AsBroadcastImportMessageV1(msg)
 	if err != nil {
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message")
 	}
-	body, err := importMsg.Body()
+	body, err := importMsg.Body(ctx)
 	if err != nil {
 		return 0, merr.Wrap(err, "malformed duplicated import broadcast message body")
 	}
@@ -325,7 +349,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// The broadcaster resolved this idempotency key to an earlier broadcast, so no
 	// new job was created; recover what that broadcast carried.
-	originalJobID, err := jobIDFromDuplicatedBroadcast(result.Duplicated, collectionID)
+	originalJobID, err := jobIDFromDuplicatedBroadcast(ctx, result.Duplicated, collectionID)
 	if err != nil {
 		return 0, false, err
 	}

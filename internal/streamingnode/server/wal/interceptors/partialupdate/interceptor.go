@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility/primarykey"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -120,7 +121,7 @@ func (i *appendInterceptor) appendWrite(
 		return nil, status.NewUnrecoverableError("partial update CAS message must be transactional")
 	}
 
-	var pks primaryKeys
+	var pks primarykey.Keys
 	var metaEncoded string
 	var casScope casInsertScope
 	var fenceCollectionID int64

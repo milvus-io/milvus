@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/v3/kv/predicates"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
@@ -545,4 +546,44 @@ func TestCatalog_Update_IndexRemovalRejectsNonAtomicFallback(t *testing.T) {
 		}))
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+}
+
+// TestCatalog_Update_DataViewEntryEncoding verifies the DataView entry of the
+// composite Update writes the two-part version key and lands on the commit
+// boundary: in the over-limit fallback a visible DataView implies its
+// SegmentMeta ops (recorded before it) are already committed.
+func TestCatalog_Update_DataViewEntryEncoding(t *testing.T) {
+	dv := &viewpb.DataViewOfCollection{
+		CollectionId: 100,
+		DataVersion:  &viewpb.DataVersion{StreamingVersion: 2, CompactVersion: 1},
+		Shards: []*viewpb.DataViewOfShard{{
+			Vchannel: "ch-1",
+			Partitions: []*viewpb.DataViewOfPartition{{
+				PartitionId: 10,
+				SegmentIds:  []int64{101, 102},
+			}},
+		}},
+	}
+
+	var saves map[string]string
+	var removals []string
+	metakv := mocks.NewMetaKv(t)
+	metakv.EXPECT().MaxTxnOps().Return(128).Maybe()
+	metakv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, s map[string]string, r []string, _ ...predicates.Predicate) error {
+			saves = s
+			removals = r
+			return nil
+		}).Once()
+	c := NewCatalog(metakv, "", "")
+	assert.NoError(t, c.Update(context.TODO(), metastore.SaveDataView(dv)))
+
+	assert.Empty(t, removals)
+	assert.Len(t, saves, 1)
+	key := buildDataViewVersionKey(100, 2, 1)
+	value, ok := saves[key]
+	assert.True(t, ok, "expected DataView key %q in saves", key)
+	decoded := &viewpb.DataViewOfCollection{}
+	assert.NoError(t, proto.Unmarshal([]byte(value), decoded))
+	assert.True(t, proto.Equal(dv, decoded))
 }
