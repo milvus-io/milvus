@@ -6,7 +6,7 @@
 > Production wiring, RPC changes and StreamingNode replica scheduling remain out of scope.
 >
 > The [Replica Placement](replica_placement.md) design specifies the updated
-> node allocation, suspension, resource reuse and discovery contracts.
+> node allocation, suspension and resource reuse contracts.
 > References: [Balancer Cache](balancer_cache.md), [Query Views](README.md),
 > [Shard View Management](shard_view_management.md), [Syncer](syncer.md).
 
@@ -203,15 +203,14 @@ loadmgr.CollectionLoadManager
 └── source publication hook  ← synchronous cache update, then dirty notification
 ```
 
-#### Managed discovery
+#### Replica suspension boundary
 
-`CollectionDiscoveryUpdate` replaces a collection's serving shard set, guarded
-by load-config version and a monotonically increasing controller revision.
-`DefaultBalancer.SetDiscoveryPublisher` connects this component boundary before
-Start. Once managed, legacy ObserveShardUp callbacks cannot reinsert withdrawn
-shards. Discovery rejection skips that collection's view changes and requeues
-it. Suspended replicas remain desired; restored views reappear only after Up.
-Production subscriptions and transport adapters remain outside this PR.
+Suspension is an internal Balancer layout decision: a zero-quota replica stops
+receiving Preparing views and releases existing views once the last-serving-cover
+barrier permits it. Desired load config remains unchanged. Balancer does not
+publish discovery state or notify CollectionLoadManager about suspension.
+Service discovery should follow QueryView lifecycle state; production
+subscriptions and transport adapters remain outside this PR.
 
 #### LoadConfigStore
 
@@ -420,7 +419,7 @@ Return BalancePlan { Prepares, Releases }
 
 Compare desired state, actual state and the retained target layout. Before
 ordinary classification, a zero-quota replica drains after protecting the last
-serving cover and withdrawing discovery; it never retries allocation. An
+serving cover; it never retries allocation. An
 in-flight view on a lost/ineligible node is replaceable. An Up view outside
 its active target requires Must convergence. For other dirty shards:
 

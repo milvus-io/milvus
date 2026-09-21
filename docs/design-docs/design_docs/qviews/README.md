@@ -381,4 +381,4 @@ StreamingNode already implements Pub-Sub capability. PureDeleteStreamManager wra
 
 ### QueryNode replica placement
 
-[Replica Placement](replica_placement.md) defines balanced, stable per-collection node targets, temporary suspension on node shortage, and safe discovery withdrawal/restoration.
+[Replica Placement](replica_placement.md) defines balanced, stable per-collection node targets, temporary suspension on node shortage, and safe view release/restoration.

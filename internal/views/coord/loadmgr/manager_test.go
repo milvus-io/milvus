@@ -131,3 +131,15 @@ func TestCollectionLoadManager_DiscoverableShardAssignments(t *testing.T) {
 	assert.Empty(t, manager.ShardAssignmentsByPChannel())
 	assert.Equal(t, 2, assignmentUpdates)
 }
+
+func TestMarkShardDiscoverableRejectsInvalidChannel(t *testing.T) {
+	manager := NewCollectionLoadManager(nil, nil)
+	require.False(t, manager.MarkShardDiscoverable(qviews.ShardID{ReplicaID: 1000, VChannel: "invalid"}))
+	require.Empty(t, manager.ShardAssignmentsByPChannel())
+
+	shard := qviews.ShardID{ReplicaID: 1000, VChannel: "by-dev-rootcoord-dml_0_100v2"}
+	require.True(t, manager.MarkShardDiscoverable(shard))
+	require.False(t, manager.MarkShardDiscoverable(shard))
+	require.Equal(t, []ShardAssignmentEntry{{CollectionID: 100, ShardIndex: 2, ReplicaID: 1000}},
+		manager.ShardAssignmentsByPChannel()["by-dev-rootcoord-dml_0"])
+}

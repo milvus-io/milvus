@@ -19,7 +19,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
-func TestReplicaControllerLifecycleAndDiscovery(t *testing.T) {
+func TestReplicaControllerSuspensionAndRestoration(t *testing.T) {
 	for _, patch := range []*mockey.Mocker{
 		mockey.Mock((*querycoord.Catalog).GetCollections).Return([]*querypb.CollectionLoadInfo{{CollectionID: 1}}, nil).Build(),
 		mockey.Mock((*querycoord.Catalog).GetPartitions).Return(map[int64][]*querypb.PartitionLoadInfo{}, nil).Build(),
@@ -29,13 +29,12 @@ func TestReplicaControllerLifecycleAndDiscovery(t *testing.T) {
 	}
 	store, err := loadmgr.RecoverLoadConfigStore(t.Context(), querycoord.NewCatalog(nil))
 	require.NoError(t, err)
-	discovery := loadmgr.NewCollectionLoadManager(store, nil)
 	var lost atomic.Int64
 	var holdDrops atomic.Bool
 	var dropMu sync.Mutex
 	var drops []syncer.SyncView
 	// Only catalog/transport boundaries are mocked. Registry, lifecycle, cache,
-	// policy, controller and discovery manager run their real implementations.
+	// policy, controller and load config store run their real implementations.
 	registry := emptyRegistry(t, func(_ context.Context, group syncer.SyncGroup) error {
 		for _, views := range group.ViewsByNode {
 			for _, view := range views {
@@ -70,7 +69,6 @@ func TestReplicaControllerLifecycleAndDiscovery(t *testing.T) {
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
 	controller := NewDefaultBalancer(cache, registry, nil)
-	controller.SetDiscoveryPublisher(discovery)
 	controller.Trigger()
 	require.NoError(t, controller.Reconcile(t.Context()))
 	awaitServing := func(count int) {
@@ -79,7 +77,13 @@ func TestReplicaControllerLifecycleAndDiscovery(t *testing.T) {
 			if controller.Reconcile(t.Context()) != nil {
 				return false
 			}
-			return len(discovery.ShardAssignmentsByPChannel()["by-dev-rootcoord-dml_0"]) == count
+			serving := 0
+			for _, id := range []qviews.ShardID{cacheShard(1, 10), cacheShard(1, 11)} {
+				if mgr := registry.Get(id); mgr != nil && mgr.Stats().UpVersion != nil {
+					serving++
+				}
+			}
+			return serving == count
 		}, 5*time.Second, time.Millisecond)
 	}
 	awaitServing(2)
@@ -119,27 +123,17 @@ func TestReplicaControllerLifecycleAndDiscovery(t *testing.T) {
 	require.Eventually(t, func() bool { return registry.Get(retired) == nil }, 5*time.Second, time.Millisecond)
 	require.Equal(t, []int64{1}, dropping.ResidentNodes, "published facts remain immutable after durable cleanup")
 	require.Contains(t, up.Resources[int64(1)], key)
-	discovery.ObserveShardUp(retired)
-	require.Len(t, discovery.ShardAssignmentsByPChannel()["by-dev-rootcoord-dml_0"], 1)
+	// A full reconcile must not recreate the suspended replica even though it
+	// remains desired. Suspension is entirely local to the Balancer layout.
+	for range 3 {
+		controller.Trigger()
+		require.NoError(t, controller.Reconcile(t.Context()))
+		require.Nil(t, registry.Get(retired))
+	}
+	require.Len(t, store.Snapshot().ConfigsMap()[1].Replicas, 2)
 	cache.PublishNode(3, &NodeInfo{NodeID: 3, ResourceGroup: "rg1", Alive: true})
 	require.NoError(t, controller.Reconcile(t.Context()))
 	awaitServing(2)
 	require.Equal(t, []int64{3}, registry.Get(retired).Stats().UpNodes)
 	require.Len(t, store.Snapshot().ConfigsMap()[1].Replicas, 2)
-}
-
-func TestDiscoveryRejectionPreservesViewsAndRequeues(t *testing.T) {
-	registry := emptyRegistry(t)
-	cache := replicaCache(1, 1)
-	id := cacheShard(1, 10)
-	addShardWithPreparingView(t, registry, id, map[int64]map[int64][]int64{1: {1: {1000}}})
-	controller := NewDefaultBalancer(cache, registry, nil)
-	publisher := loadmgr.NewCollectionLoadManager(nil, nil)
-	patch := mockey.Mock((*loadmgr.CollectionLoadManager).UpdateCollectionDiscovery).Return(false).Build()
-	t.Cleanup(func() { patch.UnPatch() })
-	controller.SetDiscoveryPublisher(publisher)
-	plan := &BalancePlan{Releases: []qviews.ShardID{id}, Discovery: []loadmgr.CollectionDiscoveryUpdate{{CollectionID: 1, Revision: 1}}}
-	require.Error(t, controller.apply(t.Context(), plan))
-	require.NotNil(t, registry.Get(id).Stats().PreparingVersion)
-	require.Contains(t, controller.queue.takePending().dirtyColls, int64(1))
 }

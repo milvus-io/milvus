@@ -17,7 +17,7 @@ R > 0 时统一使用以下配额规则（N 可以小于 R）：
 
 已持有健康节点的副本优先保留，继续使用第 4 节 gain 配额算法，不按 ReplicaID 截断。候选配额的保留收益和原有配额稳定性相同、且尚未冻结目标时，可优先保留完整可服务副本，再以稳定散列决胜。视图普通进度不触发重新竞选 Active 集合。资源不足时不轮换公平性，避免健康副本反复被停用。
 
-配额为 0 是目标状态，不要求立即销毁旧视图。旧副本经 Draining 到 Suspended：先保证保留副本能够承接相应 shard 的服务，再撤销被停用副本的 discovery，沿现有视图生命周期释放。仍可服务且是某个 shard 唯一覆盖的旧视图需暂时保留，不能因缩减 Active 集合制造停机；无法服务的旧视图无须等待这种屏障。允许这段交接期间临时共用节点。
+配额为 0 是目标状态，不要求立即销毁旧视图。旧副本经 Draining 到 Suspended：先保证保留副本能够承接相应 shard 的服务，再沿现有视图生命周期释放被停用副本。仍可服务且是某个 shard 唯一覆盖的旧视图需暂时保留，不能因缩减 Active 集合制造停机；无法服务的旧视图无须等待这种屏障。允许这段交接期间临时共用节点。
 
 N = 0 时没有非空数据的可行新分配，保留已有生命周期状态并等待节点事件/重试；不产生非法目标。R = 0 时回收目标，清理残留视图。
 
@@ -25,7 +25,7 @@ N = 0 时没有非空数据的可行新分配，保留已有生命周期状态�
 
 ## 2. 状态和接口
 
-Balancer 在 reconcileMu 保护下持有 LayoutManager，cache 只保存事实。DefaultBalancePolicy 当前无状态，不能把需要跨 reconcile 存活的目标放在一次 Plan 的局部变量里。
+DefaultBalancePolicy 在其互斥锁保护下持有 LayoutManager，跨 reconcile 保留目标；Balancer 的 reconcileMu 串行化规划与执行，cache 只保存事实。
 
 ```go
 type CollectionLayout struct {
@@ -151,9 +151,9 @@ Apply batch through existing lifecycle
 
 当前 `hasPreparing -> None` 必须细化：健康且允许完成的 Preparing 不重复创建；引用 lost/ineligible 节点的 Preparing 必须能替换。健康但不属于新目标的 Preparing 可先完成，然后通过后续 Must 迁移进入稳定目标，不能永远被 early return 屏蔽。
 
-classify 在“desired 存在但没有 Up -> Must”之前处理 quota=0：没有旧视图则 NoOp；仍有旧视图则受服务交接屏障约束地撤销 discovery 并 RequestRelease。它不是分配失败，不能加入普通失败重试队列，更不能下一轮因 LoadConfig 仍包含该 replica 而重新 AddPreparing。需要维护独立于 desired 的 effective placement/discovery eligibility；旧 ObserveShardUp 回调不得重新发布已停用副本，由当前 cache 中的 Up 事实和有效目标生成权威 discovery 更新，检查配置版本和单调发布 revision。配额重新变正后触发其所有 desired shards，新 Up 后重新发布。
+classify 在“desired 存在但没有 Up -> Must”之前处理 quota=0：没有旧视图则 NoOp；仍有旧视图则受服务交接屏障约束地 RequestRelease。它不是分配失败，不能加入普通失败重试队列，更不能下一轮因 LoadConfig 仍包含该 replica 而重新 AddPreparing。停用状态由 Balancer 内部的目标节点集合表达，不写回 LoadConfigStore，也不通知 CollectionLoadManager。配额重新变正后触发其所有 desired shards，沿正常 Preparing/Up 流程恢复服务。
 
-`loadmgr.CollectionDiscoveryUpdate` 提供按 collection 替换服务集合的接口，检查配置版本和 controller 单调 revision。接管后的 collection 不再接受旧 ObserveShardUp 回调重新加入。通过 `DefaultBalancer.SetDiscoveryPublisher` 在组件组装时绑定；拒绝过期更新时跳过该 collection 的视图变更并重新排队。实际生产订阅 wiring 仍按既定范围留到后续。discovery 撤销不等于所有客户端立即刷新；在途请求保护和视图租约继续由既有生命周期承担。
+Balancer 只输出视图 Prepare/Release 和必要的重试，不维护或发布另一份 discovery 集合。实际可服务状态应由 QueryView 生命周期反映；服务发现订阅与下发的生产 wiring 留到后续，不作为本次 Balance 执行的前置条件。在途请求保护和视图租约继续由既有生命周期承担。
 
 跨 replica 复用查询改成 node/resource 索引；生命周期、assignment equality 仍按 ShardID。共享 projectedRows 保持当前逻辑行数口径，不能只把实际统计改成物理去重而继续减去完整 shard 贡献。本版只给已就绪、版本完全匹配的资源复用收益，不预设正在加载的请求能够合并。新目标跨副本分离，且一个 segment 只属于一个 vchannel，因此同一 collection 的本轮新分配不会跨 shard 重复申请同一 node/resource。
 
@@ -163,7 +163,7 @@ classify 在“desired 存在但没有 Up -> Must”之前处理 quota=0：没�
 - 新 Up 前保留旧 Up，允许目标节点被其他 replica 的旧视图同时引用；不能等对方释放后才允许获取，否则无空闲节点时可能互等。
 - 新 Up 后旧视图沿既有 Down/Dropping 流程退出。服务布局进入目标，与物理引用完成清理分开统计；Dropping 仍可能占用资源，不能用 PendingRows=0 判定隔离完成。
 - Load/DataView 的普通资源变动不重选 owner；replica/RG/topology 变化才修复目标。目标节点行数忽高忽低不会触发归属抖动。
-- Suspended 恢复 Active 时先产生目标，再逐 shard 加载、达到 Up 后发布服务发现。加载失败保留旧的可服务视图，重试同一目标；不会因一次失败无限在多个布局间跳转。
+- Suspended 恢复 Active 时先产生目标，再逐 shard 加载、达到 Up 后恢复服务。加载失败保留旧的可服务视图，重试同一目标；不会因一次失败无限在多个布局间跳转。
 - 前提是拓扑/意图最终稳定、目标资源可加载、重试和清理最终推进。在这些前提下固定目标 + Must 迁移 + 旧引用清理给出最终物理隔离。
 
 ## 8. 验证矩阵
@@ -172,11 +172,11 @@ classify 在“desired 存在但没有 Up -> Must”之前处理 quota=0：没�
 
 成本：跨 replica 复用；同一资源多份只计一次覆盖；移出最后两份资源时固定评分误差与有界改良；不同 manifest/加载需求不可误判兼容；优化预算为 0 仍正确完成目标；大 RowNum 不被饱和归一化抹平。
 
-生命周期：节点不足时 Active=min(N,R)、其余 Suspended、desired 不变；不轮换健康 Active；停用副本不反复 Prepare/Retry；最后服务覆盖保护；discovery 撤销和迟到 Up 回调；节点恢复后原 ReplicaID 自动补齐；无备用节点交叉迁移；partial Apply；目标外健康 Preparing 与丢节点 Preparing；掉电恢复；Dropping 延迟清理；新增节点即使无旧视图也能触发相关 collection；普通进度不扫描完整资源集。
+生命周期：节点不足时 Active=min(N,R)、其余 Suspended、desired 不变；不轮换健康 Active；停用副本不反复 Prepare/Retry；最后服务覆盖保护；停用不反向更新加载配置管理；节点恢复后原 ReplicaID 自动补齐；无备用节点交叉迁移；partial Apply；目标外健康 Preparing 与丢节点 Preparing；掉电恢复；Dropping 延迟清理；新增节点即使无旧视图也能触发相关 collection；普通进度不扫描完整资源集。
 
 性能：独立测 layout fast path、纯配额修复、资源估价预算上限，区分原有 shard allocator 的复杂度。本设计不宣称修复现有 `CurrentRows` 扫描所有节点及每 shard 复制 projectedRows 的开销。
 
 
 实现选择：资源复用以 `(PartitionID, SegmentID, DataVersion, LoadInfoVersion)` 完全一致且已就绪为充分条件。跨 DataVersion 的兼容资源暂不计入复用收益；这是保守估计，避免缺少 materialization 身份时错误复用。第一版不启用可选的局部改良。目标布局由默认策略的专用 LayoutManager 保存，Plan 串行化；自定义策略接口保持不变。
 
-视图与 cache 的组件级实现不新增 RPC 或 Replica 节点列表。目标以 immutable layout 对象保留，不另加持久化 generation；discovery 的 Revision 只用于拒绝乱序发布，与 QueryViewVersion 分开。
+视图与 cache 的组件级实现不新增 RPC 或 Replica 节点列表。目标以 immutable layout 对象保留，不另加持久化 generation 或 discovery revision。

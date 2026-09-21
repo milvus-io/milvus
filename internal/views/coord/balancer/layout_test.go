@@ -139,12 +139,11 @@ func TestReplicaSuspensionPreservesLastServingCover(t *testing.T) {
 	plan := p.Plan(c, []qviews.ShardID{b})
 	require.Empty(t, plan.Releases)
 	require.Empty(t, plan.Retries)
-	require.Contains(t, plan.Discovery[0].Shards, b)
 	c.PublishShard(a, upStats(qviews.DataVersion{StreamingVersion: 1}, placement(1000, 1, 1, coordview.SegmentStateUp)))
 	plan = p.Plan(c, []qviews.ShardID{a})
 	require.Contains(t, plan.Releases, b)
-	require.NotContains(t, plan.Discovery[0].Shards, b)
-	require.Contains(t, plan.Discovery[0].Shards, a)
+	require.NotContains(t, plan.Prepares, b)
+	require.Empty(t, plan.Retries)
 }
 
 func TestReplicaLayoutLoadingCostAndCompatibility(t *testing.T) {
