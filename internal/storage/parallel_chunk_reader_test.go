@@ -60,6 +60,12 @@ type fakeChunk struct {
 	closed  bool
 }
 
+func (c *fakeChunk) isOpened() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.opened
+}
+
 // fakeChunkReader borrows records the way PackedReader does: the record
 // returned by Next is released by the following Next or by Close.
 type fakeChunkReader struct {
@@ -306,6 +312,76 @@ func TestParallelChunkReader_CanceledChunkReportsTheRealFailure(t *testing.T) {
 	}()
 	_, err := drain(t, r)
 	assert.ErrorIs(t, err, readErr)
+	assert.NoError(t, r.Close())
+	f.assertSettled(t, 0)
+}
+
+func TestParallelChunkReader_CanceledChunkCloseErrorKeepsTheRealFailure(t *testing.T) {
+	// A canceled chunk's own close error must not mask the real failure that
+	// stopped the reader, even when the consumer meets the canceled chunk
+	// first.
+	readErr := errors.New("corrupt file")
+	closeErr := errors.New("close failed")
+	f := rowsOf(1, 1, 1)
+	f.chunks[0].gate = make(chan struct{})
+	f.chunks[0].rows = 5
+	f.chunks[0].closeErr = closeErr
+	f.chunks[2].failAt, f.chunks[2].nextErr = 0, readErr
+	r := f.reader(context.Background(), 3)
+
+	go func() {
+		for r.firstFailure() == nil {
+			time.Sleep(time.Millisecond)
+		}
+		close(f.chunks[0].gate)
+	}()
+	_, err := drain(t, r)
+	assert.ErrorIs(t, err, readErr, "a canceled chunk's close error must not mask the real failure")
+	assert.NoError(t, r.Close())
+	f.assertSettled(t, 0)
+}
+
+// TestParallelChunkReader_CanceledChunkWithoutFailure returns a real error, not
+// a nil record with a nil error, when a stop with no recorded failure (the
+// shape Close gives the workers) cancels a chunk. It stops the workers the way
+// Close does and lets the consumer observe the canceled chunk, which the
+// single-consumer contract would otherwise leave to a Close/Next race.
+func TestParallelChunkReader_CanceledChunkWithoutFailure(t *testing.T) {
+	f := rowsOf(5)
+	f.chunks[0].gate = make(chan struct{})
+	r := f.reader(context.Background(), 1)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := drain(t, r)
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return f.chunks[0].isOpened() }, time.Second, time.Millisecond)
+	r.halt.Do(func() { close(r.stop) })
+	close(f.chunks[0].gate)
+	assert.ErrorIs(t, <-done, io.EOF, "a canceled chunk without a failure or close error reads as EOF")
+	assert.NoError(t, r.Close())
+	f.assertSettled(t, 0)
+}
+
+func TestParallelChunkReader_CanceledChunkSurfacesItsCloseError(t *testing.T) {
+	// A stop with no recorded failure must still surface the canceled chunk's
+	// own close error instead of a nil record with a nil error.
+	closeErr := errors.New("close failed")
+	f := rowsOf(5)
+	f.chunks[0].gate = make(chan struct{})
+	f.chunks[0].closeErr = closeErr
+	r := f.reader(context.Background(), 1)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := drain(t, r)
+		done <- err
+	}()
+	require.Eventually(t, func() bool { return f.chunks[0].isOpened() }, time.Second, time.Millisecond)
+	r.halt.Do(func() { close(r.stop) })
+	close(f.chunks[0].gate)
+	assert.ErrorIs(t, <-done, closeErr)
 	assert.NoError(t, r.Close())
 	f.assertSettled(t, 0)
 }

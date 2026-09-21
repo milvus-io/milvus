@@ -54,6 +54,12 @@ var _ RecordReader = (*parallelChunkRecordReader)(nil)
 // IterativeRecordReader. What the reader adds on top of the decoded input is
 // the state of the chunk readers still open, at most concurrency of them, and
 // it is open's job to bound each one.
+//
+// Next and Close must not run concurrently: Close hands the reader to a closed
+// state and the consumer stops calling Next once it has read its input. A
+// stray Next racing a Close is unsupported; the code is defensive about it
+// (it never returns a nil record with a nil error) but cannot make the race
+// well-defined.
 type parallelChunkRecordReader struct {
 	ctx         context.Context
 	numChunks   int
@@ -175,7 +181,14 @@ func (r *parallelChunkRecordReader) readChunk(chunk int) (res chunkResult) {
 		return chunkResult{err: err}
 	}
 	defer func() {
-		if closeErr := reader.Close(); closeErr != nil && res.err == nil && !res.canceled {
+		if reader == nil {
+			return
+		}
+		// A close error is worth keeping even for a canceled chunk: when the
+		// stop came from Close rather than from another chunk's failure, it may
+		// be the only signal the chunk produced. A real failure elsewhere still
+		// wins in Next, which checks canceled before res.err.
+		if closeErr := reader.Close(); closeErr != nil && res.err == nil {
 			res.err = closeErr
 		}
 	}()
@@ -219,14 +232,24 @@ func (r *parallelChunkRecordReader) Next() (Record, error) {
 		}
 		res := <-r.results[r.chunk]
 		r.chunk++
-		if res.err != nil {
-			r.err = res.err
+		if res.canceled {
+			// A chunk is canceled only after the reader was stopped, either by
+			// another chunk's failure or by Close. Checked first so that the
+			// recorded failure wins over the chunk's own close error, which a
+			// canceled chunk may now carry. When there is no failure the close
+			// error (if any) is surfaced, and EOF otherwise, so Next never
+			// returns a nil error alongside a nil record.
+			r.err = r.firstFailure()
+			if r.err == nil {
+				r.err = res.err
+			}
+			if r.err == nil {
+				r.err = io.EOF
+			}
 			return nil, r.err
 		}
-		if res.canceled {
-			// Only a failure elsewhere cancels a chunk while the reader is
-			// still open; report that failure, not the cancellation.
-			r.err = r.firstFailure()
+		if res.err != nil {
+			r.err = res.err
 			return nil, r.err
 		}
 		r.pending = res.records
@@ -249,6 +272,10 @@ func (r *parallelChunkRecordReader) releaseLent() {
 
 // Close implements RecordReader. It stops the workers, waits for them, and
 // releases every record that was read but never handed out.
+//
+// Close can take as long as one in-flight read to finish: a worker blocked
+// inside open or Next on a slow object-storage read only notices the stop once
+// that call returns. It does not add its own deadline.
 func (r *parallelChunkRecordReader) Close() error {
 	if r.closed {
 		return nil
