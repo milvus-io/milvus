@@ -5,7 +5,8 @@ import (
 
 	qnmanager "github.com/milvus-io/milvus/internal/querynodev2/client/manager"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/internal/views/coord/balancer"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 )
 
 // Both sources must synchronously replay and serialize committed updates with
@@ -31,14 +32,14 @@ type QueryNodePublisher struct {
 	facts        map[int64]nodeFacts
 	groups       map[string]map[int64]struct{}
 	bindings     map[int64]map[string]struct{}
-	published    map[int64]*balancer.NodeInfo
-	listeners    map[uint64]balancer.NodeListener
+	published    map[int64]*api.NodeInfo
+	listeners    map[uint64]cache.NodeListener
 	nextListener uint64
 	unsubscribe  []func()
 }
 
 func newQueryNodePublisher() *QueryNodePublisher {
-	return &QueryNodePublisher{facts: make(map[int64]nodeFacts), groups: make(map[string]map[int64]struct{}), bindings: make(map[int64]map[string]struct{}), published: make(map[int64]*balancer.NodeInfo), listeners: make(map[uint64]balancer.NodeListener)}
+	return &QueryNodePublisher{facts: make(map[int64]nodeFacts), groups: make(map[string]map[int64]struct{}), bindings: make(map[int64]map[string]struct{}), published: make(map[int64]*api.NodeInfo), listeners: make(map[uint64]cache.NodeListener)}
 }
 
 func NewQueryNodePublisher(nodes QueryNodeStatePublisher, groups ResourceGroupStatePublisher) *QueryNodePublisher {
@@ -54,7 +55,7 @@ func (p *QueryNodePublisher) Close() {
 	}
 }
 
-func (p *QueryNodePublisher) RegisterNodeListener(listener balancer.NodeListener) func() {
+func (p *QueryNodePublisher) RegisterNodeListener(listener cache.NodeListener) func() {
 	p.mu.Lock()
 	p.nextListener++
 	id := p.nextListener
@@ -115,9 +116,9 @@ func (p *QueryNodePublisher) publishLocked(id int64) {
 			}
 		}
 	}
-	var next *balancer.NodeInfo
+	var next *api.NodeInfo
 	if exists && rg != "" {
-		next = &balancer.NodeInfo{NodeID: id, Alive: true, Stopping: facts.stopping, ResourceGroup: rg}
+		next = &api.NodeInfo{NodeID: id, Alive: true, Stopping: facts.stopping, ResourceGroup: rg}
 	}
 	old := p.published[id]
 	if (old == nil && next == nil) || (old != nil && next != nil && *old == *next) {

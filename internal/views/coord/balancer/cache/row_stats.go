@@ -1,4 +1,4 @@
-package balancer
+package cache
 
 // ShardRowStats maps each QueryNode to the row-count load contributed by one shard.
 type ShardRowStats map[int64]NodeRowStats

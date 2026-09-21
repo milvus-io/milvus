@@ -1,4 +1,4 @@
-package balancer
+package cache
 
 import (
 	"sync"
@@ -8,6 +8,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 )
 
 // Reader returns immutable objects. Separate calls need not observe one instant.
@@ -16,7 +17,7 @@ type Reader interface {
 	GetCollection(int64) *CollectionEntry
 	GetNode(int64) *NodeEntry
 	GetResourceGroup(string) *ResourceGroupEntry
-	GetBalanceConfig() *BalanceConfig
+	GetBalanceConfig() *api.BalanceConfig
 	CollectionForReplica(int64) (int64, bool)
 	RangeCollectionIDs(func(int64) bool)
 	RangeNodeIDs(func(int64) bool)
@@ -27,14 +28,14 @@ type CollectionEntry struct {
 	id            int64
 	config        *loadmgr.LoadConfig
 	configVersion uint64
-	data          *CollectionDataView
+	data          *api.CollectionDataView
 	shards        immutableIndex[*ShardEntry]
 }
 
-func (c *CollectionEntry) ID() int64                       { return c.id }
-func (c *CollectionEntry) LoadConfig() *loadmgr.LoadConfig { return c.config }
-func (c *CollectionEntry) ConfigVersion() uint64           { return c.configVersion }
-func (c *CollectionEntry) DataView() *CollectionDataView   { return c.data }
+func (c *CollectionEntry) ID() int64                         { return c.id }
+func (c *CollectionEntry) LoadConfig() *loadmgr.LoadConfig   { return c.config }
+func (c *CollectionEntry) ConfigVersion() uint64             { return c.configVersion }
+func (c *CollectionEntry) DataView() *api.CollectionDataView { return c.data }
 func (c *CollectionEntry) GetShard(id qviews.ShardID) *ShardEntry {
 	shard, _ := c.shards.get(shardKey(id))
 	return shard
@@ -57,11 +58,11 @@ type nodeContribution struct {
 
 // NodeEntry publishes totals and the exact contributions included in them.
 type NodeEntry struct {
-	info          BalanceNode
+	info          api.BalanceNode
 	contributions immutableIndex[nodeContribution]
 }
 
-func (n *NodeEntry) Info() *BalanceNode { return &n.info }
+func (n *NodeEntry) Info() *api.BalanceNode { return &n.info }
 func (n *NodeEntry) Contribution(id qviews.ShardID) NodeRowStats {
 	value, _ := n.contributions.get(shardKey(id))
 	return value.rows
@@ -102,13 +103,13 @@ type Cache struct {
 	nodes         map[int64]*nodeSlot
 	replicas      map[int64]int64
 	groups        map[string]*ResourceGroupEntry
-	notify        func(TriggerScope)
-	config        atomic.Pointer[BalanceConfig]
+	notify        func(api.TriggerScope)
+	config        atomic.Pointer[api.BalanceConfig]
 	ready         atomic.Bool
 	subscriptions []func()
 }
 
-func NewCache(config *BalanceConfig) *Cache {
+func New(config *api.BalanceConfig) *Cache {
 	c := &Cache{collections: make(map[int64]*collectionSlot), nodes: make(map[int64]*nodeSlot), replicas: make(map[int64]int64), groups: make(map[string]*ResourceGroupEntry)}
 	c.UpdateBalanceConfig(config)
 	return c
@@ -117,14 +118,14 @@ func NewCache(config *BalanceConfig) *Cache {
 // NodeListener publishes committed node identity/RG facts; nil means removal.
 // Implementations serialize initial replay with all subsequent publications.
 type (
-	NodeListener  func(int64, *NodeInfo)
+	NodeListener  func(int64, *api.NodeInfo)
 	NodePublisher interface{ RegisterNodeListener(NodeListener) func() }
 )
 
-// NewCacheFromSources attaches replaying hooks before declaring the cache ready.
+// NewFromSources attaches replaying hooks before declaring the cache ready.
 // It is component assembly only; production owners must supply the node/RG publisher.
-func NewCacheFromSources(config *BalanceConfig, configs *loadmgr.LoadConfigStore, data api.DataViewPublisher, registry *coordview.ShardViewRegistry, nodes NodePublisher) *Cache {
-	c := NewCache(config)
+func NewFromSources(config *api.BalanceConfig, configs *loadmgr.LoadConfigStore, data api.DataViewPublisher, registry *coordview.ShardViewRegistry, nodes NodePublisher) *Cache {
+	c := New(config)
 	c.subscriptions = append(c.subscriptions, configs.RegisterLoadConfigListener(c.PublishLoadConfig))
 	c.subscriptions = append(c.subscriptions, data.RegisterDataViewListener(c.PublishDataView))
 	c.subscriptions = append(c.subscriptions, registry.RegisterPublicationListener(c.PublishShard))
@@ -139,10 +140,10 @@ func (c *Cache) Close() {
 		unsubscribe()
 	}
 }
-func (c *Cache) MarkReady()                        { c.ready.Store(true); c.changed(TriggerScope{NodeChanged: true}) }
-func (c *Cache) Ready() bool                       { return c.ready.Load() }
-func (c *Cache) SetNotifier(fn func(TriggerScope)) { c.mu.Lock(); c.notify = fn; c.mu.Unlock() }
-func (c *Cache) changed(scope TriggerScope) {
+func (c *Cache) MarkReady()                            { c.ready.Store(true); c.changed(api.TriggerScope{NodeChanged: true}) }
+func (c *Cache) Ready() bool                           { return c.ready.Load() }
+func (c *Cache) SetNotifier(fn func(api.TriggerScope)) { c.mu.Lock(); c.notify = fn; c.mu.Unlock() }
+func (c *Cache) changed(scope api.TriggerScope) {
 	c.mu.RLock()
 	fn := c.notify
 	c.mu.RUnlock()
@@ -150,14 +151,14 @@ func (c *Cache) changed(scope TriggerScope) {
 		fn(scope)
 	}
 }
-func (c *Cache) GetBalanceConfig() *BalanceConfig { return c.config.Load() }
-func (c *Cache) UpdateBalanceConfig(config *BalanceConfig) {
+func (c *Cache) GetBalanceConfig() *api.BalanceConfig { return c.config.Load() }
+func (c *Cache) UpdateBalanceConfig(config *api.BalanceConfig) {
 	if config == nil {
-		config = DefaultBalanceConfig()
+		config = api.DefaultBalanceConfig()
 	}
 	copy := *config
 	c.config.Store(&copy)
-	c.changed(TriggerScope{NodeChanged: true})
+	c.changed(api.TriggerScope{NodeChanged: true})
 }
 
 func (c *Cache) collection(id int64) *collectionSlot {
@@ -188,7 +189,7 @@ func (c *Cache) node(id int64) *nodeSlot {
 	defer c.mu.Unlock()
 	if slot = c.nodes[id]; slot == nil {
 		slot = &nodeSlot{}
-		slot.value.Store(&NodeEntry{info: BalanceNode{NodeID: id}})
+		slot.value.Store(&NodeEntry{info: api.BalanceNode{NodeID: id}})
 		c.nodes[id] = slot
 	}
 	return slot
@@ -302,12 +303,12 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	c.mu.Unlock()
 	next.config, next.configVersion = cfg, version
 	slot.value.Store(&next)
-	c.changed(TriggerScope{DirtyCollections: []int64{id}})
+	c.changed(api.TriggerScope{DirtyCollections: []int64{id}})
 }
 
 // PublishDataView receives a finalized immutable collection, not a request to
 // fetch it later. Row summaries were built by the source at publication.
-func (c *Cache) PublishDataView(id int64, data *CollectionDataView) {
+func (c *Cache) PublishDataView(id int64, data *api.CollectionDataView) {
 	slot := c.lockCollection(id)
 	defer c.finishCollection(id, slot)
 	next := *slot.value.Load()
@@ -342,7 +343,7 @@ func (c *Cache) PublishDataView(id int64, data *CollectionDataView) {
 		next.shards = next.shards.set(shardKey(shardID), &ShardEntry{id: shardID, stats: old.stats, rows: rows})
 	}
 	slot.value.Store(&next)
-	c.changed(TriggerScope{DirtyCollections: []int64{id}})
+	c.changed(api.TriggerScope{DirtyCollections: []int64{id}})
 }
 
 func (s *collectionSlot) pruneRow(next *CollectionEntry, id int64) {
@@ -414,7 +415,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		}
 	}
 	slot.value.Store(&next)
-	retained := slot.replicaUses[id.ReplicaID] > 0 || (next.config != nil && findReplica(next.config, id.ReplicaID) != nil)
+	retained := slot.replicaUses[id.ReplicaID] > 0 || (next.config != nil && hasReplica(next.config, id.ReplicaID))
 	c.mu.Lock()
 	if retained {
 		c.replicas[id.ReplicaID] = collectionID
@@ -423,7 +424,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 	}
 	c.mu.Unlock()
 	if old == nil || stats == nil || !sameVersion(old.stats.UpVersion, stats.UpVersion) || !sameVersion(old.stats.PreparingVersion, stats.PreparingVersion) {
-		c.changed(TriggerScope{DirtyShards: []qviews.ShardID{id}})
+		c.changed(api.TriggerScope{DirtyShards: []qviews.ShardID{id}})
 	}
 }
 
@@ -486,7 +487,7 @@ func (c *Cache) replaceNodeContribution(nodeID int64, id qviews.ShardID, rows No
 	slot.value.Store(&next)
 }
 
-func (c *Cache) PublishNode(id int64, info *NodeInfo) {
+func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	slot := c.lockNode(id)
 	defer c.finishNode(id, slot)
 	next := *slot.value.Load()
@@ -511,7 +512,7 @@ func (c *Cache) PublishNode(id int64, info *NodeInfo) {
 	c.storeGroupLocked(next.info.ResourceGroup, group)
 	c.mu.Unlock()
 	slot.value.Store(&next)
-	scope := TriggerScope{DirtyNodes: []int64{id}}
+	scope := api.TriggerScope{DirtyNodes: []int64{id}}
 	if old.ResourceGroup != next.info.ResourceGroup || (next.info.Alive && !next.info.Stopping) {
 		seen := make(map[int64]struct{})
 		for _, name := range []string{old.ResourceGroup, next.info.ResourceGroup} {
@@ -574,4 +575,21 @@ func (c *Cache) finishNode(id int64, slot *nodeSlot) {
 		c.mu.Unlock()
 	}
 	slot.mu.Unlock()
+}
+
+func hasReplica(config *loadmgr.LoadConfig, id int64) bool {
+	for _, replica := range config.Replicas {
+		if replica.ReplicaID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func parseShardCollection(shardID qviews.ShardID) (int64, bool) {
+	channel, err := metautil.ParseChannel(shardID.VChannel, metautil.NewDynChannelMapper())
+	if err != nil {
+		return 0, false
+	}
+	return channel.CollectionID(), true
 }

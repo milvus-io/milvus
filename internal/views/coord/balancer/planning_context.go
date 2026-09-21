@@ -1,6 +1,7 @@
 package balancer
 
 import (
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -21,19 +22,19 @@ type balanceInput interface {
 }
 
 type planningContext struct {
-	Reader
-	collections map[int64]*CollectionEntry
-	nodeEntries map[int64]*NodeEntry
+	balancercache.Reader
+	collections map[int64]*balancercache.CollectionEntry
+	nodeEntries map[int64]*balancercache.NodeEntry
 	nodes       map[int64]*BalanceNode
 	groups      map[string][]int64
 	config      *BalanceConfig
 }
 
-func newPlanningContext(reader Reader) *planningContext {
+func newPlanningContext(reader balancercache.Reader) *planningContext {
 	if current, ok := reader.(*planningContext); ok {
 		return current
 	}
-	p := &planningContext{Reader: reader, collections: make(map[int64]*CollectionEntry), nodeEntries: make(map[int64]*NodeEntry), nodes: make(map[int64]*BalanceNode), groups: make(map[string][]int64), config: reader.GetBalanceConfig()}
+	p := &planningContext{Reader: reader, collections: make(map[int64]*balancercache.CollectionEntry), nodeEntries: make(map[int64]*balancercache.NodeEntry), nodes: make(map[int64]*BalanceNode), groups: make(map[string][]int64), config: reader.GetBalanceConfig()}
 	if p.config == nil {
 		p.config = DefaultBalanceConfig()
 	}
@@ -49,7 +50,7 @@ func newPlanningContext(reader Reader) *planningContext {
 	return p
 }
 
-func (p *planningContext) GetCollection(id int64) *CollectionEntry {
+func (p *planningContext) GetCollection(id int64) *balancercache.CollectionEntry {
 	if collection, ok := p.collections[id]; ok {
 		return collection
 	}
@@ -57,10 +58,10 @@ func (p *planningContext) GetCollection(id int64) *CollectionEntry {
 	p.collections[id] = collection
 	return collection
 }
-func (p *planningContext) GetNode(id int64) *NodeEntry      { return p.nodeEntries[id] }
-func (p *planningContext) GetBalanceConfig() *BalanceConfig { return p.config }
-func (p *planningContext) NodesMap() map[int64]*BalanceNode { return p.nodes }
-func (p *planningContext) collectionForShard(id qviews.ShardID) *CollectionEntry {
+func (p *planningContext) GetNode(id int64) *balancercache.NodeEntry { return p.nodeEntries[id] }
+func (p *planningContext) GetBalanceConfig() *BalanceConfig          { return p.config }
+func (p *planningContext) NodesMap() map[int64]*BalanceNode          { return p.nodes }
+func (p *planningContext) collectionForShard(id qviews.ShardID) *balancercache.CollectionEntry {
 	collectionID, ok := parseShardCollection(id)
 	if !ok {
 		collectionID, ok = p.CollectionForReplica(id.ReplicaID)
@@ -72,22 +73,22 @@ func (p *planningContext) collectionForShard(id qviews.ShardID) *CollectionEntry
 }
 
 func (p *planningContext) ConfigForShard(id qviews.ShardID) *loadmgr.LoadConfig {
-	if collection := p.collectionForShard(id); collection != nil && collection.config != nil && findReplica(collection.config, id.ReplicaID) != nil {
-		return collection.config
+	if collection := p.collectionForShard(id); collection != nil && collection.LoadConfig() != nil && findReplica(collection.LoadConfig(), id.ReplicaID) != nil {
+		return collection.LoadConfig()
 	}
 	return nil
 }
 
 func (p *planningContext) DataViewForShard(id qviews.ShardID) *ShardDataView {
-	if collection := p.collectionForShard(id); collection != nil && collection.data != nil {
-		return collection.data.Shard(id.VChannel)
+	if collection := p.collectionForShard(id); collection != nil && collection.DataView() != nil {
+		return collection.DataView().Shard(id.VChannel)
 	}
 	return nil
 }
 
 func (p *planningContext) DataVersionForCollection(id int64) (qviews.DataVersion, bool) {
-	if collection := p.GetCollection(id); collection != nil && collection.data != nil {
-		return collection.data.DataVersion, true
+	if collection := p.GetCollection(id); collection != nil && collection.DataView() != nil {
+		return collection.DataView().DataVersion, true
 	}
 	return qviews.DataVersion{}, false
 }
@@ -95,7 +96,7 @@ func (p *planningContext) DataVersionForCollection(id int64) (qviews.DataVersion
 func (p *planningContext) GetShardStats(id qviews.ShardID) *coordview.ShardStats {
 	if collection := p.collectionForShard(id); collection != nil {
 		if shard := collection.GetShard(id); shard != nil {
-			return shard.stats
+			return shard.Stats()
 		}
 	}
 	return nil
@@ -103,7 +104,7 @@ func (p *planningContext) GetShardStats(id qviews.ShardID) *coordview.ShardStats
 
 func (p *planningContext) ConfigVersion(id int64) uint64 {
 	if collection := p.GetCollection(id); collection != nil {
-		return collection.configVersion
+		return collection.ConfigVersion()
 	}
 	return 0
 }
@@ -138,17 +139,17 @@ func (p *planningContext) CurrentRows(id qviews.ShardID) map[int64]int64 {
 
 // resolveCacheScope enumerates only keys and immutable references. Full passes
 // use the same cached statistics as scoped passes and never rebuild accounting.
-func resolveCacheScope(reader Reader, pending triggerBatch) []qviews.ShardID {
+func resolveCacheScope(reader balancercache.Reader, pending triggerBatch) []qviews.ShardID {
 	targets := make(map[qviews.ShardID]struct{})
 	addCollection := func(id int64) {
 		collection := reader.GetCollection(id)
 		if collection == nil {
 			return
 		}
-		collection.RangeShards(func(shard *ShardEntry) bool { targets[shard.id] = struct{}{}; return true })
-		if collection.config != nil && collection.data != nil {
-			for _, replica := range collection.config.Replicas {
-				for _, shard := range collection.data.Shards {
+		collection.RangeShards(func(shard *balancercache.ShardEntry) bool { targets[shard.ID()] = struct{}{}; return true })
+		if collection.LoadConfig() != nil && collection.DataView() != nil {
+			for _, replica := range collection.LoadConfig().Replicas {
+				for _, shard := range collection.DataView().Shards {
 					targets[qviews.ShardID{ReplicaID: replica.ReplicaID, VChannel: shard.VChannel}] = struct{}{}
 				}
 			}

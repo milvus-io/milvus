@@ -1,4 +1,4 @@
-package balancer
+package cache
 
 import (
 	"encoding/binary"

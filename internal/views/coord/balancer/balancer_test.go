@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -94,14 +95,14 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 	shard := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	registry := emptyRegistry(t)
 	addShardWithPreparingView(t, registry, shard, map[int64]map[int64][]int64{1: {100: {101}}})
-	cache := NewCache(policyTestConfig())
+	cache := balancercache.New(policyTestConfig())
 	cache.PublishLoadConfig(collectionID, cfgFor(collectionID, replicaID, nil, nil), 1)
 	t.Cleanup(registry.RegisterPublicationListener(cache.PublishShard))
 	cache.MarkReady()
 	controller := NewDefaultBalancer(cache, registry, nil)
-	var original func(*Cache, int64) *CollectionEntry
+	var original func(*balancercache.Cache, int64) *balancercache.CollectionEntry
 	once := true
-	patch := mockey.Mock((*Cache).GetCollection).Origin(&original).To(func(c *Cache, id int64) *CollectionEntry {
+	patch := mockey.Mock((*balancercache.Cache).GetCollection).Origin(&original).To(func(c *balancercache.Cache, id int64) *balancercache.CollectionEntry {
 		entry := original(c, id)
 		if once {
 			once = false
@@ -117,16 +118,14 @@ func TestBalancer_ReconcilePreservesTriggerArrivingDuringCacheRead(t *testing.T)
 	require.Nil(t, registry.Get(shard).Stats().PreparingVersion)
 }
 
-func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
+func TestBalancer_NodePublicationTriggersCollection(t *testing.T) {
 	const collID, replicaID int64 = 1, 10
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "v0"}
 
 	store := storeWithConfig(t, collID, replicaID, []int64{100}, []int64{1})
 	reg := emptyRegistry(t)
 	reg.Ensure(shardID)
-	nodeProvider := &fakeNodeProvider{infos: map[int64]*NodeInfo{
-		1: {NodeID: 1, Alive: true},
-	}}
+	nodeProvider := &fakeNodeProvider{}
 	builder := NewSnapshotBuilder(
 		store,
 		reg,
@@ -143,9 +142,10 @@ func TestBalancer_NodeChangedNotifierTriggersFullScan(t *testing.T) {
 		},
 		policyTestConfig(),
 	)
-	b := NewDefaultBalancer(cacheFromBuilder(t, builder), reg, nil)
+	cache := cacheFromBuilder(t, builder)
+	b := NewDefaultBalancer(cache, reg, nil)
 
-	nodeProvider.notifyNodeChanged()
+	cache.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true})
 	require.NoError(t, b.Reconcile(context.Background()))
 
 	stats := reg.Get(shardID).Stats()

@@ -3,6 +3,7 @@ package balancer
 import (
 	"sort"
 
+	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -25,7 +26,7 @@ type balanceCandidate struct {
 // Plan classifies dirty shards, orders mandatory work before optional
 // optimization, and allocates each accepted shard against a shared
 // steady-state row tracker.
-func (p *DefaultBalancePolicy) Plan(reader Reader, dirty []qviews.ShardID) *BalancePlan {
+func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan {
 	plan := &BalancePlan{
 		Prepares: make(map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder),
 	}

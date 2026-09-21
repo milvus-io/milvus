@@ -1,6 +1,6 @@
 # Balancer & CollectionLoadManager Design
 
-> The resident `balancer.Cache` now replaces `BalancerSnapshot` and
+> The resident `cache.Cache` now replaces `BalancerSnapshot` and
 > `SnapshotBuilder` on the reconcile path. Batch ordering, score formulas,
 > and plan emission remain
 > unchanged. Production runtime wiring and RPC changes are outside this work.
