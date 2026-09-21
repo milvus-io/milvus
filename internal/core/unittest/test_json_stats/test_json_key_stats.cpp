@@ -18,6 +18,7 @@
 #include <nlohmann/json.hpp>
 #include <simdjson.h>
 #include <stddef.h>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <future>
@@ -33,6 +34,7 @@
 #include "segcore/default_fs.h"
 
 #include "bitset/bitset.h"
+#include "cachinglayer/TieredStorageConfig.h"
 #include "cachinglayer/CacheSlot.h"
 #include "common/init_c.h"
 #include "common/Consts.h"
@@ -53,6 +55,7 @@
 #include "indexbuilder/IndexCreatorBase.h"
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
+#include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "simdjson/padded_string.h"
 #include "storage/ChunkManager.h"
@@ -77,6 +80,75 @@ GenerateRandomInt64(int64_t min, int64_t max) {
 
     std::uniform_int_distribution<int64_t> dist(min, max);
     return dist(gen);
+}
+
+TEST(JsonStatsTranslatorTest, AggregatesWarmupAndUsesZeroOuterBudget) {
+    using milvus::segcore::storagev2translator::JsonStatsLoadInfo;
+    using milvus::segcore::storagev2translator::JsonStatsTranslator;
+    auto& tiered = cachinglayer::TieredStorageConfig::GetInstance();
+    const auto saved = tiered.warmup_policies();
+    auto restore = folly::makeGuard([&] { tiered.SetWarmupPolicies(saved); });
+
+    struct Case {
+        CacheWarmupPolicy columns;
+        CacheWarmupPolicy bson;
+        CacheWarmupPolicy outer;
+    };
+    using Policy = CacheWarmupPolicy;
+    constexpr auto disabled = Policy::CacheWarmupPolicy_Disable;
+    constexpr auto async = Policy::CacheWarmupPolicy_Async;
+    constexpr auto sync = Policy::CacheWarmupPolicy_Sync;
+    const std::array<Case, 9> cases{{
+        {disabled, disabled, disabled},
+        {disabled, async, async},
+        {disabled, sync, sync},
+        {async, disabled, async},
+        {async, async, async},
+        {async, sync, sync},
+        {sync, disabled, sync},
+        {sync, async, sync},
+        {sync, sync, sync},
+    }};
+
+    auto info = std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>();
+    info->set_fieldid(101);
+    info->set_buildid(1001);
+    info->set_version(1);
+    for (const auto& test_case : cases) {
+        auto policies = saved;
+        policies.scalarFieldCacheWarmupPolicy = test_case.columns;
+        policies.scalarIndexCacheWarmupPolicy = test_case.bson;
+        tiered.SetWarmupPolicies(policies);
+        JsonStatsTranslator translator(
+            JsonStatsLoadInfo{/*segment_instance_uid=*/42,
+                              /*segment_id=*/3,
+                              "json-stats-policy-test"},
+            info,
+            nullptr,
+            nullptr);
+        EXPECT_EQ(translator.meta()->cache_warmup_policy, test_case.outer);
+    }
+
+    auto policies = saved;
+    policies.scalarFieldCacheWarmupPolicy = disabled;
+    policies.scalarIndexCacheWarmupPolicy = disabled;
+    tiered.SetWarmupPolicies(policies);
+    auto explicit_info =
+        std::make_shared<proto::indexcgo::LoadJsonKeyIndexInfo>(*info);
+    explicit_info->set_warmup_policy("sync");
+    JsonStatsTranslator explicit_policy(
+        JsonStatsLoadInfo{43, 3, "json-stats-policy-test"},
+        std::move(explicit_info),
+        nullptr,
+        nullptr);
+    EXPECT_EQ(explicit_policy.meta()->cache_warmup_policy, sync);
+    EXPECT_FALSE(explicit_policy.meta()->support_eviction);
+    EXPECT_EQ(explicit_policy.num_cells(), 1);
+    const auto [payload, overhead] =
+        explicit_policy.estimated_byte_size_of_cell(0);
+    EXPECT_EQ(payload, cachinglayer::ResourceUsage(0, 0));
+    EXPECT_EQ(overhead, cachinglayer::ResourceUsage(0, 0));
+    EXPECT_EQ(explicit_policy.cells_storage_bytes({0}), 0);
 }
 
 static std::vector<milvus::Json>

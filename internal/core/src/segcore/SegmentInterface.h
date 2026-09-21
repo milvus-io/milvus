@@ -311,6 +311,10 @@ class SegmentInterface {
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const = 0;
 
+    // Reports whether JSON stats are registered without initializing them.
+    virtual bool
+    HasJsonStats(FieldId field_id) const = 0;
+
     // Compute exact distances from the index for given query vectors and candidate IDs.
     // Used for refine step in reduce phase. Returns false if not supported (e.g., no index).
     virtual bool
@@ -698,6 +702,13 @@ class SegmentInternalInterface : public SegmentInterface {
 
     virtual std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
+
+    bool
+    HasJsonStats(FieldId field_id) const override {
+        std::shared_lock lock(mutex_);
+        auto iter = json_stats_.find(field_id);
+        return iter != json_stats_.end() && iter->second != nullptr;
+    }
 
  public:
     // `query_offsets` is not null only for vector array (embedding list) search
