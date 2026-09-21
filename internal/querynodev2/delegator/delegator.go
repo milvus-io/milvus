@@ -438,7 +438,8 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		zap.Int("growingNum", len(growing)),
 	)
 
-	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum)
+	indexType := sd.collection.GetIndexType(req.GetReq().GetFieldId())
+	req, err = optimizers.OptimizeSearchParams(ctx, req, sd.queryHook, sealedNum, indexType)
 	if err != nil {
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
