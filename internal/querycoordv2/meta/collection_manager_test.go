@@ -419,6 +419,69 @@ func (suite *CollectionManagerSuite) TestRecoverLoadingCollection() {
 	}
 }
 
+// An expired loading collection must not stop the recovery of the collections after it.
+func (suite *CollectionManagerSuite) TestRecoverContinuesAfterExpiredLoadingCollection() {
+	mgr := suite.mgr
+	ctx := suite.ctx
+	suite.releaseAll()
+
+	limit := paramtable.Get().QueryCoordCfg.CollectionRecoverTimesLimit.GetAsInt32()
+	// collection 100 sorts first in etcd and has reached the recover limit.
+	expired := &Collection{
+		CollectionLoadInfo: &querypb.CollectionLoadInfo{
+			CollectionID:  100,
+			ReplicaNumber: 1,
+			Status:        querypb.LoadStatus_Loading,
+			LoadType:      querypb.LoadType_LoadCollection,
+			RecoverTimes:  limit,
+		},
+		CreatedAt: time.Now(),
+	}
+	suite.NoError(mgr.PutCollection(ctx, expired))
+	for _, collectionID := range []int64{101, 102} {
+		partitions := lo.Map(suite.partitions[collectionID], func(partitionID int64, _ int) *Partition {
+			return &Partition{
+				PartitionLoadInfo: &querypb.PartitionLoadInfo{
+					CollectionID:  collectionID,
+					PartitionID:   partitionID,
+					ReplicaNumber: 1,
+					Status:        querypb.LoadStatus_Loaded,
+				},
+				LoadPercentage: 100,
+				CreatedAt:      time.Now(),
+			}
+		})
+		loaded := &Collection{
+			CollectionLoadInfo: &querypb.CollectionLoadInfo{
+				CollectionID:  collectionID,
+				ReplicaNumber: 1,
+				Status:        querypb.LoadStatus_Loaded,
+				LoadType:      querypb.LoadType_LoadCollection,
+				LoadFields:    []int64{100},
+			},
+			LoadPercentage: 100,
+			CreatedAt:      time.Now(),
+		}
+		suite.NoError(mgr.PutCollection(ctx, loaded, partitions...))
+	}
+
+	suite.clearMemory()
+	suite.NoError(mgr.Recover(ctx, suite.broker))
+
+	suite.False(mgr.Exist(ctx, 100))
+	stored, err := suite.catalog.GetCollections(ctx)
+	suite.NoError(err)
+	suite.ElementsMatch([]int64{101, 102}, lo.Map(stored, func(info *querypb.CollectionLoadInfo, _ int) int64 {
+		return info.GetCollectionID()
+	}))
+	for _, collectionID := range []int64{101, 102} {
+		suite.True(mgr.Exist(ctx, collectionID))
+		for _, partitionID := range suite.partitions[collectionID] {
+			suite.NotNil(mgr.GetPartition(ctx, partitionID))
+		}
+	}
+}
+
 func (suite *CollectionManagerSuite) TestUpdateLoadPercentage() {
 	mgr := suite.mgr
 	ctx := suite.ctx

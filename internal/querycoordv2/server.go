@@ -497,6 +497,12 @@ func (s *Server) startQueryCoord() error {
 	// check replica changes after restart
 	// Note: this should be called after start progress is done
 	s.watchLoadConfigChanges()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.releaseLeftoverLoadedCollections(s.ctx)
+	}()
 	return nil
 }
 

@@ -155,7 +155,7 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 				mlog.Info(ctx, "recover loading collection times reach limit, release collection",
 					mlog.FieldCollectionID(collection.CollectionID),
 					mlog.Int32("recoverTimes", collection.RecoverTimes))
-				break
+				continue
 			}
 			// update recoverTimes meta in etcd
 			collection.RecoverTimes += 1
@@ -166,7 +166,8 @@ func (m *CollectionManager) Recover(ctx context.Context, broker Broker) error {
 		err := m.upgradeLoadFields(ctx, collection, broker)
 		if err != nil {
 			if errors.Is(err, merr.ErrCollectionNotFound) {
-				mlog.Warn(ctx, "collection not found, skip upgrade logic and wait for release")
+				mlog.Warn(ctx, "collection not found, skip upgrade logic and wait for release",
+					mlog.FieldCollectionID(collection.GetCollectionID()))
 			} else {
 				mlog.Warn(ctx, "upgrade load field failed", mlog.Err(err))
 				return err

@@ -18,6 +18,9 @@ package querycoordv2
 
 import (
 	"context"
+	"time"
+
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
@@ -39,6 +42,12 @@ func (s *Server) tryPromoteReadyLoadConfigReplicas(ctx context.Context) {
 	// for resources during the switch.
 	for _, replica := range replicas {
 		if err := s.checkReplicaServiceable(ctx, replica); err != nil {
+			mlog.RatedWarn(ctx, rate.Every(time.Minute), "load config replicas stay query invisible, a replica is not serviceable",
+				mlog.FieldCollectionID(replica.GetCollectionID()),
+				mlog.Int64("replicaID", replica.GetID()),
+				mlog.String("resourceGroup", replica.GetResourceGroup()),
+				mlog.Int("invisibleReplicas", len(replicas)),
+				mlog.Err(err))
 			return
 		}
 	}
