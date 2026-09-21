@@ -23,6 +23,7 @@
 #include "common/Types.h"
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
+#include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentInterface.h"
 
 namespace milvus {
@@ -41,6 +42,7 @@ class PhyMatchFilterExpr : public Expr {
         : Expr(DataType::BOOL, std::move(input), name, op_ctx),
           expr_(expr),
           segment_(segment),
+          segment_chunk_reader_(op_ctx, segment, active_count),
           active_count_(active_count),
           batch_size_(batch_size) {
         size_per_chunk_ = segment_->size_per_chunk();
@@ -73,6 +75,11 @@ class PhyMatchFilterExpr : public Expr {
         return true;
     }
 
+    void
+    SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) override {
+        segment_chunk_reader_.SetSnapshot(snapshot);
+    }
+
     std::optional<milvus::expr::ColumnInfo>
     GetColumnInfo() const override {
         return std::nullopt;
@@ -93,6 +100,10 @@ class PhyMatchFilterExpr : public Expr {
  private:
     std::shared_ptr<const milvus::expr::MatchExpr> expr_;
     const segcore::SegmentInternalInterface* segment_;
+    // Wraps the request-scoped sealed read snapshot when pinned (see
+    // SegmentChunkReader::SetSnapshot); falls back to per-call segment access
+    // for growing segments / non-pinned paths.
+    segcore::SegmentChunkReader segment_chunk_reader_;
     int64_t active_count_;
     int64_t current_pos_{0};
     int64_t batch_size_;

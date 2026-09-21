@@ -57,6 +57,7 @@
 #include "pb/common.pb.h"
 #include "pb/schema.pb.h"
 #include "pb/segcore.pb.h"
+#include "query/ExecPlanNodeVisitor.h"
 #include "query/Plan.h"
 #include "segcore/SegcoreConfig.h"
 #include "segcore/SegmentGrowing.h"
@@ -1854,6 +1855,161 @@ class SealedMatchExprTest : public ::testing::Test {
     static constexpr int array_len_ = 5;
     int64_t saved_batch_size_{0};
 };
+
+// The pinned sealed read snapshot must yield bit-identical results to the
+// per-call segment fallback for the struct-array MatchExpr path. This covers
+// ApplyStructRowValidity's per-chunk get_chunk_by_offset / chunk_size reads,
+// which go through SegmentChunkReader when pinned.
+TEST_F(SealedMatchExprTest, PinnedSnapshotMatchesUnpinnedForMatchExpr) {
+    std::string target_str = "aaa";
+    int32_t target_int = 100;
+
+    auto filter_expr =
+        CreateSealedFilterExpr("MatchAny", 0, target_str, target_int);
+    ScopedSchemaHandle schema_handle(*schema_);
+    auto plan_str =
+        schema_handle.ParseSearch(filter_expr,          // expression
+                                  "vec",                // vector field name
+                                  10,                   // topK
+                                  "L2",                 // metric_type
+                                  R"({"nprobe": 10})",  // search_params
+                                  3                     // round_decimal
+        );
+    auto plan =
+        CreateSearchPlanByExpr(schema_, plan_str.data(), plan_str.size());
+    ASSERT_NE(plan, nullptr);
+
+    // vector search node -> mvcc node -> filter node
+    auto filter_node = plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+    auto segment_internal = dynamic_cast<SegmentInternalInterface*>(seg_.get());
+    ASSERT_NE(segment_internal, nullptr);
+    ASSERT_NE(seg_->CaptureReadSnapshot(), nullptr);
+
+    auto unpinned =
+        ExecuteQueryExpr(filter_node, segment_internal, N_, MAX_TIMESTAMP);
+    auto pinned = ExecuteQueryExpr(
+        filter_node, segment_internal, N_, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (size_t i = 0; i < N_; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    EXPECT_GT(unpinned.count(), 0);
+}
+
+// The same pinned/unpinned parity for a nullable struct-array field across two
+// chunks. ApplyStructRowValidity must read validity data through the pinned
+// snapshot (SegmentChunkReader::ApplyFieldValidData) so the write path is
+// actually exercised: non-nullable arrays short-circuit before the chunk
+// walk, and a single-chunk segment iterates the per-chunk loop only once.
+TEST_F(SealedMatchExprTest,
+       PinnedSnapshotMatchesUnpinnedForNullableStructAcrossChunks) {
+    FieldId vec_fid;
+    FieldId int64_fid;
+    FieldId sub_int_fid;
+    auto schema = std::make_shared<Schema>();
+    vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
+    int64_fid = schema->AddDebugField("id", DataType::INT64);
+    schema->set_primary_field_id(int64_fid);
+    sub_int_fid = schema->AddDebugArrayField(
+        "struct_array[sub_int]", DataType::INT32, true);
+
+    const std::vector<bool> chunk1_valid = {true, false, true, true, false};
+    const std::vector<bool> chunk2_valid = {false, true, true, false, true};
+
+    auto make_dataset = [&](int64_t seed,
+                            const std::vector<bool>& valid,
+                            const std::vector<std::vector<int32_t>>& rows) {
+        const int64_t row_count = valid.size();
+        auto insert_data = std::make_unique<InsertRecordProto>();
+
+        std::vector<int64_t> ids(row_count);
+        for (int64_t i = 0; i < row_count; ++i) {
+            ids[i] = seed + i;
+        }
+        auto id_array = CreateDataArrayFrom(
+            ids.data(), nullptr, row_count, schema->operator[](int64_fid));
+        insert_data->mutable_fields_data()->AddAllocated(id_array.release());
+
+        std::vector<float> fakevec(row_count * 4, 1.0F);
+        auto vec_array = CreateDataArrayFrom(
+            fakevec.data(), nullptr, row_count, schema->operator[](vec_fid));
+        insert_data->mutable_fields_data()->AddAllocated(vec_array.release());
+
+        auto* sub_field = insert_data->add_fields_data();
+        sub_field->set_field_id(sub_int_fid.get());
+        sub_field->set_field_name("struct_array[sub_int]");
+        sub_field->set_type(proto::schema::DataType::Array);
+        auto* array_data = sub_field->mutable_scalars()->mutable_array_data();
+        array_data->set_element_type(proto::schema::DataType::Int32);
+        for (auto is_valid : valid) {
+            sub_field->mutable_scalars()->add_valid_data(is_valid);
+        }
+        for (const auto& row : rows) {
+            auto* data_row = array_data->add_data();
+            for (auto value : row) {
+                data_row->mutable_int_data()->add_data(value);
+            }
+        }
+        insert_data->set_num_rows(row_count);
+
+        GeneratedData generated_data;
+        generated_data.schema_ = schema;
+        generated_data.raw_ = insert_data.release();
+        for (int64_t i = 0; i < row_count; ++i) {
+            generated_data.row_ids_.push_back(seed + i);
+            generated_data.timestamps_.push_back(seed + i);
+        }
+        return generated_data;
+    };
+
+    // Rows 1 and 4 of chunk 1 are NULL (no elements); rows 0 and 3 of chunk 2
+    // are NULL. A match_any/>= predicate must drop the NULL rows and the row
+    // whose only element fails the predicate.
+    auto first =
+        make_dataset(100, chunk1_valid, {{1, 2}, {}, {9001}, {1, 2}, {}});
+    auto second =
+        make_dataset(200, chunk2_valid, {{}, {9001}, {5, 6}, {}, {7, 8}});
+
+    auto segment = CreateTwoChunkSealed(schema, first, second);
+    ASSERT_NE(segment->CaptureReadSnapshot(), nullptr);
+
+    ScopedSchemaHandle schema_handle(*schema);
+    auto plan_str = schema_handle.ParseSearch(
+        "match_any(struct_array, $[sub_int] >= 9000)",  // expression
+        "fakevec",                                      // vector field name
+        10,                                             // topK
+        "L2",                                           // metric_type
+        R"({"nprobe": 10})",                            // search_params
+        3                                               // round_decimal
+    );
+    auto plan =
+        CreateSearchPlanByExpr(schema, plan_str.data(), plan_str.size());
+    ASSERT_NE(plan, nullptr);
+
+    // vector search node -> mvcc node -> filter node
+    auto filter_node = plan->plan_node_->plannodes_->sources()[0]->sources()[0];
+    auto segment_internal =
+        dynamic_cast<SegmentInternalInterface*>(segment.get());
+    ASSERT_NE(segment_internal, nullptr);
+
+    const int64_t total_rows = 10;
+    auto unpinned = ExecuteQueryExpr(
+        filter_node, segment_internal, total_rows, MAX_TIMESTAMP);
+    auto pinned = ExecuteQueryExpr(
+        filter_node, segment_internal, total_rows, MAX_TIMESTAMP, true);
+
+    ASSERT_EQ(pinned.size(), unpinned.size());
+    for (int64_t i = 0; i < total_rows; ++i) {
+        EXPECT_EQ(bool(pinned[i]), bool(unpinned[i])) << "row " << i;
+    }
+    // Only the non-null rows containing an element >= 9000 survive: global
+    // offsets 2 (chunk1 row2) and 6 (chunk2 row1, global 200+1).
+    EXPECT_EQ(unpinned.count(), 2);
+    EXPECT_TRUE(unpinned[2]);
+    EXPECT_TRUE(unpinned[6]);
+}
 
 TEST_F(SealedMatchExprTest, MatchAnyWithNestedIndex) {
     // Use fixed query values matching MatchExprTest pattern
