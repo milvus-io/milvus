@@ -1712,8 +1712,7 @@ BitmapIndex<T>::FinishLoadAsync(IndexLoadPlan& plan, const Config& config) {
         auto raw_map_guard = folly::makeGuard([&raw_file, raw_map, raw_size]() {
             munmap(raw_map, raw_size);
             // Best-effort cache eviction after removing the mapping's references.
-            (void)posix_fadvise(
-                raw_file.Descriptor(), 0, 0, POSIX_FADV_DONTNEED);
+            EvictFilePageCache(raw_file.Descriptor());
         });
         // Conversion scans the input once in order. Advice is best-effort.
         (void)madvise(raw_map, raw_size, MADV_SEQUENTIAL);
@@ -1838,8 +1837,7 @@ BitmapIndex<T>::LoadEntries(storage::IndexEntryReader& reader,
         auto tmp_map_guard = folly::makeGuard([&tmp_file, tmp_map, tmp_size]() {
             munmap(tmp_map, tmp_size);
             // Best-effort cache eviction after removing the mapping's references.
-            (void)posix_fadvise(
-                tmp_file.Descriptor(), 0, 0, POSIX_FADV_DONTNEED);
+            EvictFilePageCache(tmp_file.Descriptor());
         });
 
         // Conversion scans the input once in order. Advice is best-effort.
