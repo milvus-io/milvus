@@ -4688,10 +4688,10 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
                 an existing alias should fail (alias and collection share a namespace)
         method: create col_src + snapshot -> create alias A pointing to col_src
                 -> restore snapshot to target_collection_name=A
-        expected: restore is synchronously rejected with an alias-conflict error;
+        expected: restore is synchronously rejected with a target-already-exists error;
                   source collection, snapshot, and alias all remain intact
-        note: the rejection happens in datacoord's broker.CreateCollection path
-              during RestoreCollection (snapshot_manager.go:833)
+        note: restore admission resolves aliases and rejects an occupied target name
+              before creating the target collection
         """
         client = self._client()
         col_src = cf.gen_collection_name_by_testcase_name()
@@ -4704,8 +4704,8 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
         self.create_alias(client, col_src, alias_name)
 
         # 2. Restore with target_collection_name = existing alias name must fail
-        error = {ct.err_code: 1601, ct.err_msg: "alias and collection name conflict"}
-        self.restore_snapshot(
+        error = {ct.err_code: 1100, ct.err_msg: "already exists in database"}
+        res, _ = self.restore_snapshot(
             client,
             snapshot_name,
             col_src,
@@ -4713,6 +4713,7 @@ class TestMilvusClientSnapshotAlias(TestMilvusClientSnapshotBase):
             check_task=CheckTasks.err_res,
             check_items=error,
         )
+        assert res.code == error[ct.err_code], f"Unexpected restore error: {res}"
 
         # 3. Verify source, snapshot, and alias are all untouched
         snapshots, _ = self.list_snapshots(client, collection_name=col_src)
