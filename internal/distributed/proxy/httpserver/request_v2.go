@@ -1154,7 +1154,7 @@ func wrapperReturnDefault() gin.H {
 }
 
 type ResourceGroupNodeFilter struct {
-	NodeLabels map[string]string `json:"node_labels" binding:"required"`
+	NodeLabels map[string]string `json:"node_labels"`
 }
 
 func (req *ResourceGroupNodeFilter) GetNodeLabels() map[string]string {
@@ -1162,7 +1162,8 @@ func (req *ResourceGroupNodeFilter) GetNodeLabels() map[string]string {
 }
 
 type ResourceGroupLimit struct {
-	NodeNum int32 `json:"node_num" binding:"required"`
+	// Zero is valid, including when draining a resource group before dropping it.
+	NodeNum int32 `json:"node_num"`
 }
 
 func (req *ResourceGroupLimit) GetNodeNum() int32 {
@@ -1180,8 +1181,8 @@ func (req *ResourceGroupTransfer) GetResourceGroup() string {
 type ResourceGroupConfig struct {
 	Requests     *ResourceGroupLimit      `json:"requests" binding:"required"`
 	Limits       *ResourceGroupLimit      `json:"limits" binding:"required"`
-	TransferFrom []*ResourceGroupTransfer `json:"transfer_from"`
-	TransferTo   []*ResourceGroupTransfer `json:"transfer_to"`
+	TransferFrom []*ResourceGroupTransfer `json:"transfer_from" binding:"dive,required"`
+	TransferTo   []*ResourceGroupTransfer `json:"transfer_to" binding:"dive,required"`
 	NodeFilter   *ResourceGroupNodeFilter `json:"node_filter"`
 }
 
@@ -1219,7 +1220,7 @@ func (req *ResourceGroupReq) GetConfig() *ResourceGroupConfig {
 }
 
 type UpdateResourceGroupReq struct {
-	ResourceGroups map[string]*ResourceGroupConfig `json:"resource_groups" binding:"required"`
+	ResourceGroups map[string]*ResourceGroupConfig `json:"resource_groups" binding:"required,dive,required"`
 }
 
 func (req *UpdateResourceGroupReq) GetResourceGroups() map[string]*ResourceGroupConfig {
