@@ -262,8 +262,9 @@ func TestClusterBufferRecordBatches(t *testing.T) {
 	for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			schema := clusteringWideSchema()
-			// One row is larger than 8 KiB. This flushes well before 1024 rows.
-			buffer, observer := newClusteringTestBuffer(t, schema, 16<<10, version)
+			// Half of the 32 KiB binlog budget is for the builder. Each wide
+			// row exceeds 8 KiB, so submit two rows per Record.
+			buffer, observer := newClusteringTestBuffer(t, schema, 32<<10, version)
 			observer.captureValues = true
 			for i := 0; i < 5; i++ {
 				record := clusteringTestRecord(t, schema, i, 1)
