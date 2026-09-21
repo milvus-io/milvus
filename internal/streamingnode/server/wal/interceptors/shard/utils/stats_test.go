@@ -132,7 +132,6 @@ func TestSegmentStats(t *testing.T) {
 	inserted = stat.AllocRows(ModifiedMetrics{Rows: 1, BinarySize: 1})
 	assert.False(t, inserted)
 	assert.Equal(t, modifiedAfterCrossing, stat.Modified)
-
 }
 
 func TestIsZero(t *testing.T) {
