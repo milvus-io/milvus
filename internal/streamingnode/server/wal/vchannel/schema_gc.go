@@ -16,7 +16,7 @@ func (info *VChannelView) SchemaCleanupPlan(
 	info.mu.Lock()
 	defer info.mu.Unlock()
 	schemas := info.meta.GetCollectionInfo().GetSchemas()
-	if len(schemas) <= 1 || replayFloor == 0 {
+	if len(info.pendingDrops) > 0 || len(schemas) <= 1 || replayFloor == 0 {
 		return nil, false
 	}
 	// Base-only changes do not delay schema GC on a busy channel. A schema
@@ -52,7 +52,7 @@ func (info *VChannelView) SchemaCleanupPlan(
 			keep[i] = true
 		}
 		// Migrated segments may have a synthetic allocation timestamp. Keep
-		// their encoding version too, including after SEALED becomes FLUSHED.
+		// their encoding version too, until their recovery metadata is removed.
 		for i := len(schemas) - 1; i >= 0; i-- {
 			if schemas[i].GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL &&
 				schemas[i].GetSchema().GetVersion() == segment.GetSchemaVersion() {
@@ -84,9 +84,15 @@ func (info *VChannelView) MarkSchemaCleanupPersisted(snapshot *streamingpb.VChan
 	for _, schema := range snapshot.GetCollectionInfo().GetSchemas() {
 		removed[schema.GetCheckpointTimeTick()] = struct{}{}
 	}
-	info.meta.CollectionInfo.Schemas = slices.DeleteFunc(info.meta.CollectionInfo.Schemas,
-		func(schema *streamingpb.CollectionSchemaOfVChannel) bool {
-			_, ok := removed[schema.GetCheckpointTimeTick()]
-			return ok && schema.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
-		})
+	remove := func(meta *streamingpb.VChannelMeta) {
+		meta.CollectionInfo.Schemas = slices.DeleteFunc(meta.CollectionInfo.Schemas,
+			func(schema *streamingpb.CollectionSchemaOfVChannel) bool {
+				_, ok := removed[schema.GetCheckpointTimeTick()]
+				return ok && schema.GetState() == streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_DROPPED
+			})
+	}
+	remove(info.meta)
+	for _, drop := range info.pendingDrops {
+		remove(drop.before)
+	}
 }

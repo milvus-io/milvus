@@ -57,7 +57,7 @@ func TestSealedRecoveryReplaysTailBeforeFinalCommit(t *testing.T) {
 	second.ResumePendingRecovery()
 	require.NoError(t, second.pendingFinalCommit.Execute(ctx))
 	final := second.ConsumeDirtyAndGetSnapshot()
-	require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, final.GetState())
+	require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED, final.GetState())
 	require.EqualValues(t, 4, final.GetStat().GetModifiedRows())
 	require.NotNil(t, final.GetSealedAtDataVersion())
 	require.Equal(t, 1, publish.Times(), "restart must not publish the insert prefix twice")

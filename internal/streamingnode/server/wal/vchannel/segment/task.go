@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 )
 
 // retryLogRate throttles the retry log of a task. The limiter is shared
@@ -166,14 +167,14 @@ func (t *commitL1SegmentTask) Execute(ctx context.Context) error {
 		handles := segment.markPendingDataDurableLocked(t.timetick)
 		segment.finalCommitDone.Store(true)
 		segment.meta.SealedAtDataVersion = version
-		if version == nil {
-			// Empty/deleted targets have no DataView membership. Record their
-			// confirmed terminal lifecycle, not a synthetic version.
-			segment.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
-		}
+		// Publication and retirement are one stable transition; a snapshot can
+		// never capture an intermediate FLUSHED state before the owner callback.
+		segment.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
+		segment.meta.CheckpointTimeTick = max(segment.meta.GetCheckpointTimeTick(), t.timetick)
 		segment.durableMeta.State = segment.meta.State
 		segment.durableMeta.SealedAtDataVersion = version
 		if stat := segment.meta.GetStat(); stat != nil && segment.durableMeta.GetStat() != nil {
+			stat.LastModifiedTimestamp = tsoutil.PhysicalTime(t.timetick).Unix()
 			segment.durableMeta.Stat.LastModifiedTimestamp = stat.GetLastModifiedTimestamp()
 		}
 		segment.dirty = true

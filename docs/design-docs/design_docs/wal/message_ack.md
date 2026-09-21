@@ -230,3 +230,18 @@ reconstructed by replay from the global checkpoint.
 7. Broadcast Ack success is part of broadcast-message completion.
 8. RequestPersistThrough calls are VChannel-scoped and TimeTick-based.
 9. Txn messages complete as one whole outer message.
+
+## Runtime Closing And Tombstone Publication
+
+Drop/Flush observation first sets a runtime-only closing boundary. Existing
+asynchronous work continues; completion callbacks must not be suppressed merely
+because the object is closing. Stable tombstones become dirty only after all
+boundary dependencies finish, before the corresponding retained handles release.
+VChannel Drop joins both Segment final commits and L0 completion. Metadata
+publication cannot cross an unfinished Partition Drop. See
+[VChannel lifecycle](vchannel_view_module.md#runtime-close-and-stable-tombstones)
+and [Segment Flush](segment_view_module.md#34-flush).
+
+Global checkpoint progress and Summary retirement gate final metadata GC, not
+local task completion or tombstone installation. Shutdown does not complete
+pending closes; WAL replay reconstructs them.

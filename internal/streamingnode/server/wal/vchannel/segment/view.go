@@ -48,7 +48,12 @@ func newSegmentView(
 	if flushPolicy == nil {
 		flushPolicy = newDefaultWriteOnlyFlushPolicy()
 	}
+	var closingTimeTick uint64
+	if meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+		closingTimeTick = meta.GetCheckpointTimeTick()
+	}
 	return &SegmentView{
+		closingTimeTick:             closingTimeTick,
 		meta:                        proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta),
 		durableMeta:                 proto.Clone(meta).(*streamingpb.SegmentAssignmentMeta),
 		persistedCheckpointTimeTick: persistedCheckpointTimeTick,
@@ -132,12 +137,12 @@ type SegmentView struct {
 
 	// meta is the in-memory segment recovery state. It is updated synchronously
 	// by WAL observe and is used to recover the live write path. Its checkpoint
-	// is the observation watermark: the largest message timetick already
-	// delivered by the WAL. It starts at the durable checkpoint (the recovery
-	// anchor restored from the catalog) and only advances as messages are
-	// observed, so after a crash observation resumes at the last persisted data
-	// point and any re-delivered message at or below it is skipped.
+	// covers observed data, but not an unfinished close. The close boundary
+	// enters meta only after final publication; replay reconstructs it otherwise.
 	meta *streamingpb.SegmentAssignmentMeta
+	// closingTimeTick is runtime-only. Flush/Drop replay reconstructs it until
+	// final commit installs a stable tombstone.
+	closingTimeTick uint64
 	// durableMeta contains only effects whose object/lifecycle work has
 	// completed. It is the sole source of catalog snapshots and its checkpoint
 	// (the largest timetick whose data is durably flushed) is therefore the
@@ -257,7 +262,7 @@ func (s *SegmentView) shouldObserveLocked(timetick uint64) bool {
 // incoming message instead (see ObserveCreateSegmentMessageV2), so this
 // predicate stays a pure lifecycle/watermark test.
 func (s *SegmentView) shouldObserveCreateSegmentLocked(timetick uint64) bool {
-	return timetick > s.meta.GetCheckpointTimeTick() &&
+	return s.closingTimeTick == 0 && timetick > s.meta.GetCheckpointTimeTick() &&
 		s.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED
 }
 
@@ -271,7 +276,7 @@ func (s *SegmentView) shouldObserveCreateSegmentLocked(timetick uint64) bool {
 // entry points poison the incoming message instead (see ObserveInsert), so
 // this predicate stays a pure lifecycle/watermark test.
 func (s *SegmentView) shouldObserveInsertLocked(timetick uint64) bool {
-	return timetick > s.meta.GetCheckpointTimeTick() &&
+	return s.closingTimeTick == 0 && timetick > s.meta.GetCheckpointTimeTick() &&
 		(s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING ||
 			s.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED)
 }
@@ -333,17 +338,7 @@ func (s *SegmentView) Flush(
 	}
 	timetick := msg.TimeTick()
 	closed, flushTimeTick, metaChanged := s.observeFlushMeta(timetick)
-	if !closed || !s.shouldObserveLocked(flushTimeTick) {
-		return metaChanged
-	}
-	// The flush message is observed like any other message: advance the
-	// observation watermark. This never skips a future insert (the WAL
-	// delivers in timetick order, so every insert at or below the flush point
-	// has already been observed), and the durable checkpoint itself is only
-	// advanced later when the L1 commit actually lands (see
-	// markCheckpointDurableLocked).
-	s.meta.CheckpointTimeTick = flushTimeTick
-	if s.finalCommitDone.Load() {
+	if !closed {
 		return metaChanged
 	}
 	s.retainDataHandleLocked(flushTimeTick, owned.Clone())
@@ -455,7 +450,7 @@ func (info *SegmentView) WritePathRecoveryState() (moduleapi.SegmentWritePathRec
 	// decides whether this segment is a growing target. The unrecoverable
 	// health marker never touches the state machine — it only fast-fails the
 	// persistence tasks (see task execution and the observation gates).
-	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
+	if info.closingTimeTick != 0 || info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING {
 		return moduleapi.SegmentWritePathRecoveryState{}, false
 	}
 	state := moduleapi.SegmentWritePathRecoveryState{
@@ -538,7 +533,7 @@ func (info *SegmentView) NotifyDataUpdated() {
 }
 
 func (info *SegmentView) markCheckpointDurableLocked(timetick uint64) {
-	if timetick <= info.durableMeta.GetCheckpointTimeTick() {
+	if !info.shouldObserveLocked(timetick) {
 		return
 	}
 	// Only the durable checkpoint advances here. The observation watermark on
@@ -580,11 +575,11 @@ func (info *SegmentView) EnsureFinalCommit() bool {
 		info.mu.Unlock()
 		return false
 	}
-	if info.meta.GetState() != streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
+	if info.closingTimeTick == 0 {
 		info.mu.Unlock()
 		return true
 	}
-	task := info.newCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick())
+	task := info.newCommitL1SegmentTaskLocked(info.closingTimeTick)
 	if task != nil {
 		info.maybeSubmitNextLocked()
 	}
@@ -607,7 +602,7 @@ func (info *SegmentView) ResumePendingRecovery() {
 	// the recovered view sealed while replay fills its missing tail; only the
 	// recovery barrier may submit the final commit without another WAL Flush.
 	if info.meta.GetState() == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_SEALED {
-		info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
+		info.closingTimeTick = info.meta.GetCheckpointTimeTick()
 		if info.newCommitL1SegmentTaskLocked(info.meta.GetCheckpointTimeTick()) != nil {
 			info.maybeSubmitNextLocked()
 		}
@@ -623,11 +618,8 @@ func (info *SegmentView) ResumePendingRecovery() {
 func (info *SegmentView) IsGrowing() bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	// Pure lifecycle-state predicate: whether the segment is in the GROWING
-	// state of its assignment state machine. The unrecoverable health marker
-	// does not participate — it only fast-fails persistence tasks, it never
-	// changes what state the segment reports.
-	return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
+	// A runtime close stops allocation before it becomes a durable tombstone.
+	return info.closingTimeTick == 0 && info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING
 }
 
 // PersistedCheckpointTimeTick returns the checkpoint already stored in the
@@ -667,20 +659,16 @@ func (info *SegmentView) tombstonedCleanupReadyLocked(physicalTimeTick uint64) b
 }
 
 func (info *SegmentView) observeFlushMeta(timetick uint64) (bool, uint64, bool) {
-	if info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_TOMBSTONED {
-		return false, info.meta.GetCheckpointTimeTick(), false
+	if info.finalCommitDone.Load() {
+		return false, info.durableMeta.GetCheckpointTimeTick(), false
+	}
+	if info.closingTimeTick != 0 {
+		return true, info.closingTimeTick, false
 	}
 	if timetick <= info.durableMeta.GetCheckpointTimeTick() {
-		return info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED,
-			info.durableMeta.GetCheckpointTimeTick(), false
+		return false, info.durableMeta.GetCheckpointTimeTick(), false
 	}
-	if info.meta.State == streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED {
-		// idempotent
-		return true, info.meta.GetCheckpointTimeTick(), false
-	}
-	info.ensureStat()
-	info.meta.State = streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED
-	info.meta.Stat.LastModifiedTimestamp = tsoutil.PhysicalTime(timetick).Unix()
+	info.closingTimeTick = timetick
 	return true, timetick, true
 }
 

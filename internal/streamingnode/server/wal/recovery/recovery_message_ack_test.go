@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -647,4 +648,52 @@ func TestDeletePinsGlobalCheckpointEvenAfterSummaryPersistence(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(20), snapshot.VChannelBaseMetas["v1"].GetTransformMaterializedTimeTick())
 	require.Equal(t, uint64(10), storage.GetCheckpoint(ctx).TimeTick, "candidate is not yet published")
+}
+
+func TestPersistenceFailureNotifiesWALOwner(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		name := "terminal_error"
+		if canceled {
+			name = "close"
+		}
+		t.Run(name, func(t *testing.T) {
+			checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+			storage := newTestRecoveryStorage(t, checkpoint)
+			t.Cleanup(storage.metrics.Close)
+			storage.SetLogger(mlog.With())
+			reported := make(chan error, 1)
+			WithRecoveryFatalHandler(func(err error) { reported <- err })(storage)
+			next := checkpoint.Clone()
+			next.TimeTick = 20
+			snapshot := &dirtyPersistSnapshot{Checkpoint: next, CheckpointDirty: true}
+			storage.pendingPersistSnapshot = snapshot
+			failure := merr.WrapErrServiceInternalMsg("publisher lost ownership")
+			patch := mockey.Mock((*recoveryStorageImpl).saveRecoverySnapshot).To(func(_ *recoveryStorageImpl, ctx context.Context, _ *metastore.WALRecoverySnapshot) error {
+				if canceled {
+					storage.backgroundTaskNotifier.Cancel()
+					return ctx.Err()
+				}
+				return failure
+			}).Build()
+			defer patch.UnPatch()
+			storage.persistNotifier <- struct{}{}
+			done := make(chan struct{})
+			go func() { storage.backgroundTask(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				storage.backgroundTaskNotifier.Cancel()
+				t.Fatal("persistence did not stop")
+			}
+			if canceled {
+				require.Empty(t, reported, "normal close must not report a fatal error")
+			} else {
+				require.Len(t, reported, 1)
+				require.ErrorIs(t, <-reported, failure)
+			}
+			require.Same(t, snapshot, storage.pendingPersistSnapshot, "failure preserves the frozen batch")
+			require.Equal(t, uint64(10), storage.checkpoint.TimeTick, "failed publication cannot advance checkpoint")
+			require.Zero(t, testutil.ToFloat64(storage.metrics.isOnPersisting))
+		})
+	}
 }

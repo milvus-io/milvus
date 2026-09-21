@@ -96,6 +96,14 @@ func WithRecoveryTailRateLimiter(rateLimiter RecoveryTailRateLimiter) RecoverySt
 	}
 }
 
+// WithRecoveryFatalHandler reports a terminal persistence failure to the WAL
+// owner. The handler must not synchronously close recovery storage.
+func WithRecoveryFatalHandler(onFatal func(error)) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) {
+		r.onFatal = onFatal
+	}
+}
+
 func initialCheckpointFromLastTimeTickMessage(lastTimeTickMessage message.ImmutableMessage) *utility.WALCheckpoint {
 	return &utility.WALCheckpoint{
 		MessageID: lastTimeTickMessage.LastConfirmedMessageID(),
@@ -161,6 +169,7 @@ type recoveryStorageImpl struct {
 	taskScheduler           *scopedTaskScheduler
 	dirtyCounter            int // records the message count since last persist snapshot.
 	// used to trigger the recovery persist operation.
+	onFatal                func(error)
 	persistNotifier        chan struct{}
 	truncator              walimpls.WALImpls
 	metrics                *recoveryMetrics

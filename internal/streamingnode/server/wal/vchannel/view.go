@@ -82,6 +82,7 @@ type VChannelView struct {
 	mu sync.Mutex
 
 	meta                             *streamingpb.VChannelMeta
+	pendingDrops                     []pendingDrop
 	persistedMetaTimeTick            uint64
 	persistedMaterializedTimeTick    uint64 // the transform materialization frontier already stored in the catalog.
 	dirty                            bool   // whether the current vchannel recovery info still needs catalog persistence.
@@ -113,7 +114,7 @@ func (info *VChannelView) AssignmentMeta() *streamingpb.VChannelMeta {
 func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathRecoveryState, bool) {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || info.meta.GetCollectionInfo() == nil {
+	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL || info.meta.GetCollectionInfo() == nil {
 		return moduleapi.VChannelWritePathRecoveryState{}, false
 	}
 	collection := info.meta.GetCollectionInfo()
@@ -123,7 +124,7 @@ func (info *VChannelView) WritePathRecoveryState() (moduleapi.VChannelWritePathR
 		PartitionIDs: make([]int64, 0, len(collection.GetPartitions())),
 	}
 	for _, partition := range collection.GetPartitions() {
-		if isPartitionNormal(partition.GetState()) {
+		if isPartitionNormal(partition.GetState()) && !info.closingLocked(partition.GetPartitionId()) {
 			state.PartitionIDs = append(state.PartitionIDs, partition.GetPartitionId())
 		}
 	}
@@ -154,6 +155,9 @@ func (info *VChannelView) SetTransformMaterializedTimeTick(timetick uint64) {
 	defer info.mu.Unlock()
 	if timetick > info.meta.GetTransformMaterializedTimeTick() {
 		info.meta.TransformMaterializedTimeTick = timetick
+		for _, drop := range info.pendingDrops {
+			drop.before.TransformMaterializedTimeTick = timetick
+		}
 		info.dirty = true
 	}
 }
@@ -191,7 +195,7 @@ func (info *VChannelView) MarkSnapshotPersisted(snapshot *streamingpb.VChannelMe
 		info.pendingDirtySnapshot = nil
 		info.pendingDirtySnapshotSavesSchemas = false
 	}
-	info.dirty = !proto.Equal(info.meta, snapshot)
+	info.dirty = !proto.Equal(info.stableMetaLocked(), snapshot)
 }
 
 func (info *VChannelView) TryFinalizeTombstone(checkpointTimeTick uint64) bool {
@@ -221,7 +225,13 @@ func (info *VChannelView) HasCleanupCandidate() bool {
 func (info *VChannelView) IsActive() bool {
 	info.mu.Lock()
 	defer info.mu.Unlock()
-	return info.meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_NORMAL
+	return !info.closingLocked(0) && info.meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_NORMAL
+}
+
+func (info *VChannelView) IsTombstoned() bool {
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	return info.meta.GetState() == streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED
 }
 
 type existingCreateCollectionDecision int
@@ -255,10 +265,17 @@ func (info *VChannelView) canStartNewCollectionAtLocked(timetick uint64) bool {
 // delivered exactly once from the WAL, so anything at or before the consumed
 // checkpoint is skipped.
 func (info *VChannelView) shouldObserveLocked(timetick uint64) bool {
-	return timetick > info.meta.GetCheckpointTimeTick()
+	observed := info.meta.GetCheckpointTimeTick()
+	if len(info.pendingDrops) > 0 {
+		observed = max(observed, info.pendingDrops[len(info.pendingDrops)-1].timeTick)
+	}
+	return timetick > observed
 }
 
 func (info *VChannelView) canObserveAtLocked(timetick uint64) bool {
+	if info.closingLocked(0) {
+		return false
+	}
 	switch info.meta.GetState() {
 	case streamingpb.VChannelState_VCHANNEL_STATE_NORMAL:
 		// A normal vchannel observes every message.
@@ -276,6 +293,9 @@ func (info *VChannelView) canObserveAtLocked(timetick uint64) bool {
 }
 
 func (info *VChannelView) canObservePartitionAtLocked(partitionID int64, timetick uint64) bool {
+	if info.closingLocked(partitionID) {
+		return false
+	}
 	for _, partition := range info.meta.GetCollectionInfo().GetPartitions() {
 		if partition.GetPartitionId() != partitionID {
 			continue
@@ -321,6 +341,9 @@ func (info *VChannelView) TombstonedCleanupPlan(
 	info.mu.Lock()
 	defer info.mu.Unlock()
 
+	if len(info.pendingDrops) > 0 {
+		return nil, nil
+	}
 	if info.vchannelTombstonedCleanupReadyLocked(physicalTimeTick, persistedMaterializedTimeTick) {
 		return proto.Clone(info.meta).(*streamingpb.VChannelMeta), nil
 	}
@@ -445,7 +468,7 @@ func (info *VChannelView) ObserveSchemaChangeMessageV2(msg message.ImmutableSche
 	if !info.shouldObserveLocked(msg.TimeTick()) {
 		return false
 	}
-	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
 	if info.hasSchemaVersionLocked(msg.TimeTick(), msg.MustBody().Schema) {
@@ -469,7 +492,7 @@ func (info *VChannelView) ObserveAlterCollectionMessageV2(msg message.ImmutableA
 	if !info.shouldObserveLocked(msg.TimeTick()) {
 		return false
 	}
-	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
 	schemaChange := messageutil.IsSchemaChange(msg.Header())
@@ -505,13 +528,11 @@ func (info *VChannelView) ObserveDropCollectionMessageV1(msg message.ImmutableDr
 	if !info.shouldObserveLocked(msg.TimeTick()) {
 		return false
 	}
-	if isVChannelClosed(info.meta.GetState()) {
+	if info.closingLocked(0) || isVChannelClosed(info.meta.GetState()) {
 		// make it idempotent, only the first drop collection message can be observed.
 		return false
 	}
-	info.meta.State = streamingpb.VChannelState_VCHANNEL_STATE_DROPPED
-	info.meta.CheckpointTimeTick = msg.TimeTick()
-	info.dirty = true
+	info.beginDropLocked(0, msg.TimeTick())
 	return true
 }
 
@@ -521,7 +542,7 @@ func (info *VChannelView) ObserveTruncateCollectionMessageV2(msg message.Immutab
 	if !info.shouldObserveLocked(msg.TimeTick()) {
 		return false
 	}
-	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
 	info.meta.CheckpointTimeTick = msg.TimeTick()
@@ -538,13 +559,10 @@ func (info *VChannelView) ObserveDropPartitionMessageV1(msg message.ImmutableDro
 	for _, partition := range info.meta.CollectionInfo.Partitions {
 		if partition.PartitionId == msg.Header().PartitionId {
 			// make it idempotent, only the first drop partition message can be observed.
-			if !isPartitionNormal(partition.GetState()) {
+			if info.closingLocked(0) || info.closingLocked(partition.GetPartitionId()) || !isPartitionNormal(partition.GetState()) {
 				return false
 			}
-			partition.State = streamingpb.PartitionState_PARTITION_STATE_DROPPED
-			partition.CheckpointTimeTick = msg.TimeTick()
-			info.meta.CheckpointTimeTick = msg.TimeTick()
-			info.dirty = true
+			info.beginDropLocked(partition.GetPartitionId(), msg.TimeTick())
 			return true
 		}
 	}
@@ -557,11 +575,14 @@ func (info *VChannelView) ObserveCreatePartitionMessageV1(msg message.ImmutableC
 	if !info.shouldObserveLocked(msg.TimeTick()) {
 		return false
 	}
-	if info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
+	if info.closingLocked(0) || info.meta.GetState() != streamingpb.VChannelState_VCHANNEL_STATE_NORMAL {
 		return false
 	}
 	for _, partition := range info.meta.CollectionInfo.Partitions {
 		if partition.PartitionId == msg.Header().PartitionId {
+			if info.closingLocked(partition.GetPartitionId()) {
+				return false
+			}
 			if partition.GetState() != streamingpb.PartitionState_PARTITION_STATE_NORMAL {
 				partition.State = streamingpb.PartitionState_PARTITION_STATE_NORMAL
 				partition.CheckpointTimeTick = 0
@@ -593,7 +614,7 @@ func (info *VChannelView) ConsumeDirtyAndGetSnapshot() (*streamingpb.VChannelMet
 	if !info.dirty {
 		return nil, false
 	}
-	info.pendingDirtySnapshot = proto.Clone(info.meta).(*streamingpb.VChannelMeta)
+	info.pendingDirtySnapshot = proto.Clone(info.stableMetaLocked()).(*streamingpb.VChannelMeta)
 	info.pendingDirtySnapshotSavesSchemas = info.schemaDirty
 	return proto.Clone(info.pendingDirtySnapshot).(*streamingpb.VChannelMeta), info.pendingDirtySnapshotSavesSchemas
 }

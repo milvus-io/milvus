@@ -175,3 +175,18 @@ empty Flush, checkpoint pair reporting, and Drop/Summary retirement.
 Live validation must include growing Inserts plus Deletes, reload, SN/QN crash
 recovery, and enabled L0 compaction. WAL physical Truncate integration remains
 the separately deferred work.
+
+## Runtime Closing And Tombstone Publication
+
+Drop/Flush observation first sets a runtime-only closing boundary. Existing
+asynchronous work continues; completion callbacks must not be suppressed merely
+because the object is closing. Stable tombstones become dirty only after all
+boundary dependencies finish, before the corresponding retained handles release.
+VChannel Drop joins both Segment final commits and L0 completion. Metadata
+publication cannot cross an unfinished Partition Drop. See
+[VChannel lifecycle](vchannel_view_module.md#runtime-close-and-stable-tombstones)
+and [Segment Flush](segment_view_module.md#34-flush).
+
+Global checkpoint progress and Summary retirement gate final metadata GC, not
+local task completion or tombstone installation. Shutdown does not complete
+pending closes; WAL replay reconstructs them.

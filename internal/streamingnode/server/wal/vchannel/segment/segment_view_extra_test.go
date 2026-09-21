@@ -156,10 +156,10 @@ func TestSegmentViewObserveCreateSegmentMessageV2(t *testing.T) {
 	view.mu.Unlock()
 }
 
-// TestSegmentViewFlushTransitionsToFlushed covers the Flush success path:
-// observeFlushMeta moves GROWING -> FLUSHED, the flush handle is retained as
+// TestSegmentViewFlushClosesOnlyInMemory covers the Flush success path:
+// observeFlushMeta sets a runtime close boundary, the flush handle is retained as
 // pending data, and the final-commit task is scheduled.
-func TestSegmentViewFlushTransitionsToFlushed(t *testing.T) {
+func TestSegmentViewFlushClosesOnlyInMemory(t *testing.T) {
 	scheduler := &recordingSegmentScheduler{}
 	view := newSegmentView(
 		&streamingpb.SegmentAssignmentMeta{
@@ -187,11 +187,16 @@ func TestSegmentViewFlushTransitionsToFlushed(t *testing.T) {
 	flushDispatch.Release()
 	flushOwner.Release()
 
-	require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_FLUSHED, view.AssignmentMeta().GetState())
-	require.Equal(t, uint64(10), view.AssignmentMeta().GetCheckpointTimeTick())
+	require.Equal(t, streamingpb.SegmentAssignmentState_SEGMENT_ASSIGNMENT_STATE_GROWING, view.AssignmentMeta().GetState())
+	require.Zero(t, view.AssignmentMeta().GetCheckpointTimeTick())
+	require.Equal(t, uint64(10), view.closingTimeTick)
+	require.False(t, view.IsGrowing())
+	_, writable := view.WritePathRecoveryState()
+	require.False(t, writable)
+	require.Nil(t, view.ConsumeDirtyAndGetSnapshot())
 	require.Len(t, scheduler.tasks, 1, "flush schedules the final commit task")
 
-	// observeFlushMeta is idempotent once FLUSHED.
+	// observeFlushMeta is idempotent once closed.
 	view.mu.Lock()
 	closed, _, changed := view.observeFlushMeta(11)
 	assert.True(t, closed)

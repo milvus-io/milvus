@@ -214,6 +214,7 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		cp,
 		param.LastTimeTickMessage,
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
+		recovery.WithRecoveryFatalHandler(roWAL.markUnavailable),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "when recovering recovery storage")

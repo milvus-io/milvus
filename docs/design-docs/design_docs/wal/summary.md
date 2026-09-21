@@ -378,9 +378,10 @@ minimum retention time.
 Either budget can request release, but neither overrides a transform consumer
 that still needs the oldest chunk.
 Unmaterialized transform records cannot be discarded merely to meet a budget;
-missing consumer metadata does not prove cleanup. Restored DROPPED/TOMBSTONED
-metadata also uses its persisted materialization frontier: the lifecycle state
-alone does not prove that L0 has completed. A cleaned-up VChannel retains its
+missing consumer metadata does not prove cleanup. Restored metadata always
+uses its persisted materialization frontier for GC. New VChannel tombstones
+are published only after L0 completes through Drop, with that frontier captured
+in the snapshot; the state flag does not replace the frontier. A cleaned-up VChannel retains its
 durable tombstone until the recovery-authoritative manifest no longer retains
 its Delete history. `CanCleanupVChannel` also requires confirmed observation
 through its cleanup boundary and completed manifest publication; an in-memory

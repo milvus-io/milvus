@@ -1,14 +1,19 @@
 package vchannel
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/walimplstest"
 )
 
 func TestPChannelRecoveryManagerCleansDroppedVChannelInTwoPhases(t *testing.T) {
@@ -159,4 +164,42 @@ func TestVChannelTombstoneWaitsForSummaryRetirement(t *testing.T) {
 	require.Equal(t, moduleapi.SnapshotOpDelete, snapshots[0].Op())
 	snapshots[0].MarkPersisted()
 	require.Nil(t, manager.Module("v1"))
+}
+
+func TestTombstonedVChannelIgnoresFlushAndLateMaterialization(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_TOMBSTONED, nil)
+	module := manager.Module("v1")
+	before := module.vchannelView.AssignmentMeta()
+	cleanup := manager.ConsumeCleanupSnapshots(moduleapi.CleanupContext{
+		PhysicalTimeTick: 11, SummaryRetired: func(string, uint64) bool { return true },
+	})
+	require.Len(t, cleanup, 1)
+	require.Equal(t, moduleapi.SnapshotOpDelete, cleanup[0].Op())
+	raw := message.NewFlushAllMessageBuilderV2().WithVChannel("p1").
+		WithHeader(&message.FlushAllMessageHeader{}).WithBody(&message.FlushAllMessageBody{}).
+		MustBuildMutable().WithTimeTick(20).WithLastConfirmed(walimplstest.NewTestMessageID(19)).
+		IntoImmutableMessage(walimplstest.NewTestMessageID(20))
+	tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+	owner := tracker.Track(raw)
+	retained := owner.Clone()
+	require.True(t, module.ObserveMessage(context.Background(), retained))
+	retained.Release()
+	owner.Release()
+	require.Equal(t, uint64(20), tracker.CompletedPoint().TimeTick, "tombstone must not retain new flush work")
+	// A task queued before the tombstone transition may finish after cleanup
+	// captured its delete snapshot. Its empty frontier must not revive metadata.
+	module.markL0Materialized(20)
+	require.Equal(t, before, module.vchannelView.AssignmentMeta())
+	require.Empty(t, module.ConsumeDirtySnapshots())
+	cleanup[0].MarkPersisted()
+	require.Nil(t, manager.Module("v1"))
+}
+
+func TestDroppedVChannelStillRecordsMaterialization(t *testing.T) {
+	manager := newCleanupTestManager(t, streamingpb.VChannelState_VCHANNEL_STATE_DROPPED, nil)
+	module := manager.Module("v1")
+	module.markL0Materialized(20)
+	snapshots := module.ConsumeDirtySnapshots()
+	require.Len(t, snapshots, 1)
+	require.Equal(t, uint64(20), snapshots[0].Payload().(*streamingpb.VChannelMeta).GetTransformMaterializedTimeTick())
 }

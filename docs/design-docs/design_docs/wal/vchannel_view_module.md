@@ -83,11 +83,45 @@ pending queue and cannot advance `checkpoint_time_tick` across a gap.
 Rules include:
 
 - CreateCollection/CreatePartition add identity, membership, and schema state;
-- DropCollection/DropPartition persist logical tombstones before cleanup;
+- DropCollection/DropPartition first close their target in memory; stable tombstones become dirty only after their asynchronous dependencies complete;
 - TruncateCollection records the new lifecycle boundary and routes data work;
 - schema-changing AlterCollection appends schema history before segment routing;
 - AlterWAL state belongs to the PChannel control fields embedded in the global
   WALCheckpoint, not a VChannel snapshot.
+
+### Runtime Close And Stable Tombstones
+
+Drop observation records a runtime-only closing boundary. It neither writes a
+DROPPED state into metadata nor makes that boundary eligible for persistence.
+A closing Collection accepts no new business work; a closing Partition accepts
+no new writes while other Partitions continue. Existing tasks and completion
+callbacks continue normally, including L0 materialization progress.
+
+The module retains each Drop message until all Segments created before its
+boundary have completed their final commits and persisted their Segment
+tombstones, and L0 has completed through that boundary. The child-snapshot
+publication dependency is required because the catalog's chunked fallback saves
+VChannel ownership before Segment metadata: a terminal parent must never become
+recoverable before its terminal children. It does not wait for child GC or a
+new global checkpoint. DropPartition retains the existing VChannel-wide flush scope. These
+conditions exclude global checkpoint publication, Summary GC, and the Drop's
+own BroadcastAck, which would create circular dependencies.
+
+Metadata observation may continue beyond an unfinished DropPartition. Keep the
+metadata snapshot preceding each pending Drop as a publication fence. Dirty
+snapshots use the oldest such fence, with the current completed L0 frontier;
+later schema/partition changes cannot publish a checkpoint past unfinished
+metadata work. Finishing Drops in observation order installs their tombstones
+into live metadata and subsequent fences, then releases their retained handles
+outside the module lock. Each completed prefix can publish independently of
+later Drops. Schema/partition GC cannot remove metadata protected by a fence.
+
+A crash before tombstone publication restores the preceding stable state and
+replays Drop to rebuild the runtime close and unfinished work. A persisted
+tombstone proves local asynchronous completion and ignores subsequent business
+messages. Physical metadata removal is represented by absence, not a new
+DROPPED snapshot. The existing legacy metadata reader is separate from the new
+writer's state transitions.
 
 ## 4. Dirty Snapshots
 

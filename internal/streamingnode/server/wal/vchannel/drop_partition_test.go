@@ -102,7 +102,7 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			require.True(t, module.ObserveMessage(ctx, retained))
 			retained.Release()
 			owner.Release()
-			expectedState := streamingpb.PartitionState_PARTITION_STATE_DROPPED
+			expectedState := streamingpb.PartitionState_PARTITION_STATE_NORMAL
 			if tc.snapshot {
 				expectedState = streamingpb.PartitionState_PARTITION_STATE_NORMAL
 			}
@@ -117,6 +117,13 @@ func TestCollectionBarrierFlushesAllEarlierSegmentsBeforeL0Completion(t *testing
 			require.ElementsMatch(t, expectedCommits, committed)
 			require.Len(t, scheduler.tasks, len(expectedCommits)+1)
 			require.NoError(t, scheduler.tasks[len(expectedCommits)].Execute(ctx))
+			if !tc.snapshot {
+				require.Zero(t, tracker.CompletedPoint().TimeTick, "Drop waits for child tombstone publication")
+				for _, snapshot := range module.ConsumeDirtySnapshots() {
+					snapshot.MarkPersisted()
+				}
+				require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, module.vchannelView.meta.CollectionInfo.Partitions[0].State)
+			}
 			require.Equal(t, uint64(100), module.l0Materializer.MaterializedTimeTick())
 			require.Equal(t, uint64(100), tracker.CompletedPoint().TimeTick)
 			require.Equal(t, uint64(100), module.vchannelView.AssignmentMeta().GetTransformMaterializedTimeTick())
@@ -143,6 +150,11 @@ func TestWritePathRecoveryExcludesRetiredPartitions(t *testing.T) {
 		WithBody(&message.DropPartitionRequest{}).MustBuildMutable().WithTimeTick(100).
 		WithLastConfirmed(walimplstest.NewTestMessageID(99)).IntoImmutableMessage(walimplstest.NewTestMessageID(100))
 	require.True(t, view.ObserveDropPartitionMessageV1(message.MustAsImmutableDropPartitionMessageV1(msg)))
+	live, ok := view.WritePathRecoveryState()
+	require.True(t, ok)
+	require.Equal(t, []int64{1}, live.PartitionIDs)
+	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_NORMAL, view.AssignmentMeta().CollectionInfo.Partitions[1].State)
+	view.CompleteDrop(100)
 	snapshot, _ := view.ConsumeDirtyAndGetSnapshot()
 	data, err := proto.Marshal(snapshot)
 	require.NoError(t, err)
@@ -155,6 +167,6 @@ func TestWritePathRecoveryExcludesRetiredPartitions(t *testing.T) {
 	// Recovery filtering must not erase metadata still needed by Summary GC.
 	partitions := recovered.AssignmentMeta().GetCollectionInfo().GetPartitions()
 	require.Len(t, partitions, 3)
-	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_DROPPED, partitions[1].GetState())
+	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, partitions[1].GetState())
 	require.Equal(t, streamingpb.PartitionState_PARTITION_STATE_TOMBSTONED, partitions[2].GetState())
 }

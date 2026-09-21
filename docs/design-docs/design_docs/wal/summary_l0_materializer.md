@@ -251,8 +251,9 @@ An in-memory M alone cannot authorize GC. Both full and base-only VChannel
 snapshots must report their captured frontier after successful persistence.
 Callbacks cannot substitute a newer in-memory value. Durable lifecycle cleanup
 may provide an equivalent release position when no retained recovery/serving
-state still needs the records. Restoring DROPPED or TOMBSTONED metadata alone
-does not prove L0 completion: these states still use their persisted M for GC.
+state still needs the records. Restored metadata still uses its persisted M for
+GC. New tombstones require completed L0 work and capture M through their Drop
+boundary; GC does not infer a substitute frontier from the lifecycle flag.
 The catalog cleanup callback releases the remaining history only after cleanup
 has satisfied its materialization dependency.
 

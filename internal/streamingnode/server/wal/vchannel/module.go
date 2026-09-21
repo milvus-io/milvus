@@ -61,6 +61,7 @@ type VChannelRecoveryModule struct {
 	pendingCleanup  map[int64]*segment.SegmentView
 
 	l0Materializer *l0materializer.WALMaterializer
+	pendingDrops   []message.RetainedImmutableMessage
 
 	segmentLifecycle  segment.Lifecycle
 	segmentPackWriter segment.PackWriter
@@ -174,9 +175,16 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 		return true
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	defer func() {
+		completed := m.completeDropsLocked()
+		m.mu.Unlock()
+		releaseDropHandles(completed)
+	}()
 	if m.removed {
 		return false
+	}
+	if m.vchannelView != nil && (m.vchannelView.IsClosing() || m.vchannelView.IsTombstoned()) {
+		return true
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
@@ -222,6 +230,14 @@ func (m *VChannelRecoveryModule) RecoverySnapshot() *moduleapi.WritePathRecovery
 		}
 	}
 	for id, view := range m.segments {
+		// Older snapshots may already contain the final publication version
+		// without the assignment tombstone. New commits publish them together.
+		if view.TryFinalizeTombstone() {
+			m.markSegmentDirty(id, view)
+			if m.runtime.Notifier != nil {
+				m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
+			}
+		}
 		view.ResumePendingRecovery()
 		if state, ok := view.WritePathRecoveryState(); ok {
 			snapshot.GrowingSegments[id] = state
@@ -342,7 +358,9 @@ func (m *VChannelRecoveryModule) handleDropCollectionMessage(
 ) {
 	msg := message.MustAsImmutableDropCollectionMessageV1(owned.Message())
 	if m.vchannelView != nil {
-		m.vchannelView.ObserveDropCollectionMessageV1(msg)
+		if m.vchannelView.ObserveDropCollectionMessageV1(msg) {
+			m.pendingDrops = append(m.pendingDrops, owned.Clone())
+		}
 	}
 	m.flushAllSegmentsCreatedBefore(ctx, owned)
 }
@@ -353,7 +371,9 @@ func (m *VChannelRecoveryModule) handleDropPartitionMessage(
 ) {
 	msg := message.MustAsImmutableDropPartitionMessageV1(owned.Message())
 	if m.vchannelView != nil {
-		m.vchannelView.ObserveDropPartitionMessageV1(msg)
+		if m.vchannelView.ObserveDropPartitionMessageV1(msg) {
+			m.pendingDrops = append(m.pendingDrops, owned.Clone())
+		}
 	}
 	// L0 completion is VChannel-wide, so every earlier L1 blocker must flush,
 	// including segments belonging to partitions that remain live.
@@ -478,23 +498,16 @@ func (m *VChannelRecoveryModule) SegmentDataUpdated(segmentID int64, view *segme
 func (m *VChannelRecoveryModule) markSegmentViewUpdated(segmentID int64, view *segment.SegmentView) {
 	m.mu.Lock()
 	m.markSegmentViewUpdatedLocked(segmentID, view)
+	completed := m.completeDropsLocked()
 	m.mu.Unlock()
+	releaseDropHandles(completed)
 }
 
 func (m *VChannelRecoveryModule) markSegmentViewUpdatedLocked(segmentID int64, view *segment.SegmentView) {
 	if view == nil {
 		return
 	}
-	m.tryFinalizeSegmentLocked(segmentID, view)
 	m.markSegmentDirty(segmentID, view)
-}
-
-func (m *VChannelRecoveryModule) tryFinalizeSegmentLocked(segmentID int64, view *segment.SegmentView) bool {
-	if !view.TryFinalizeTombstone() {
-		return false
-	}
-	m.markSegmentDirty(segmentID, view)
-	return true
 }
 
 // L0 may precede L1 output, but DataCoord must know every earlier L1 so its
@@ -515,15 +528,56 @@ func (m *VChannelRecoveryModule) growingSegmentsRegistered(through uint64) bool 
 // only after the corresponding full or base-only snapshot has been persisted.
 func (m *VChannelRecoveryModule) markL0Materialized(timeTick uint64) {
 	m.mu.Lock()
+	// Drop's materialization is durable before the checkpoint permits a
+	// tombstone. A later empty flush must not dirty a pending cleanup snapshot.
+	if m.removed || m.vchannelView != nil && m.vchannelView.IsTombstoned() {
+		m.mu.Unlock()
+		return
+	}
 	if m.vchannelView != nil {
 		m.vchannelView.SetTransformMaterializedTimeTick(timeTick)
 	}
+	completed := m.completeDropsLocked()
 	m.mu.Unlock()
+	releaseDropHandles(completed)
 	if m.onL0Materialized != nil {
 		m.onL0Materialized(timeTick)
 	}
 	if m.runtime.Notifier != nil {
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+	}
+}
+
+// completeDropsLocked joins only work preceding each captured Drop boundary.
+// The retained Drop is released after its stable tombstone is installed, outside
+// m.mu: release may wake BroadcastAck and other message finalizers.
+func (m *VChannelRecoveryModule) completeDropsLocked() []message.RetainedImmutableMessage {
+	var completed []message.RetainedImmutableMessage
+	for len(m.pendingDrops) > 0 {
+		handle := m.pendingDrops[0]
+		through := handle.Message().TimeTick()
+		if handle.IsPoisoned() || m.vchannelView.MaterializedTimeTick() < through {
+			break
+		}
+		for _, view := range m.segments {
+			// Catalog's chunked write publishes VChannel ownership first. Wait
+			// for child tombstones to be durable before retiring that owner, so
+			// a crash cannot leave a terminal parent with unfinished children.
+			if view.CreateTimeTick() < through && !view.TombstonePersisted() {
+				return completed
+			}
+		}
+		m.vchannelView.CompleteDrop(through)
+		m.pendingDrops[0] = nil
+		m.pendingDrops = m.pendingDrops[1:]
+		completed = append(completed, handle)
+	}
+	return completed
+}
+
+func releaseDropHandles(handles []message.RetainedImmutableMessage) {
+	for _, handle := range handles {
+		handle.Release()
 	}
 }
 
@@ -541,7 +595,9 @@ func (m *VChannelRecoveryModule) markSegmentSnapshotPersisted(
 		}
 		m.cleanupSegments[segmentID] = view
 	}
+	completed := m.completeDropsLocked()
 	m.mu.Unlock()
+	releaseDropHandles(completed)
 	if tombstonePersisted && m.runtime.Notifier != nil {
 		m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameSegment)
 	}

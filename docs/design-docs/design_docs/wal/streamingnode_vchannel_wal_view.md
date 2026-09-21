@@ -98,18 +98,21 @@ or second checkpoint.
 
 ## 5. Segment Lifecycle Selection
 
-Each segment is classified independently from its durable lifecycle state:
+Each segment is classified from its stable metadata and runtime closing flag:
 
 ```text
-GROWING
+GROWING, no runtime close
     -> growing Segment snapshot
-FLUSHED && sealed_at_data_version absent
-    -> retry or wait for the idempotent DataCoord final commit
-FLUSHED && sealed_at_data_version present
-    -> DataCoord published the Segment at this immutable DataVersion
+GROWING, runtime close pending
+    -> stop accepting data; wait for data publication and final DataCoord commit
 TOMBSTONED
     -> lifecycle complete (empty/retired segments may have no DataVersion)
 ```
+
+New final commits install `sealed_at_data_version` and TOMBSTONED together.
+The runtime close is not part of a catalog snapshot; replay reconstructs it
+from Flush/Drop after a crash. Existing legacy SEALED/FLUSHED recovery remains
+separate from this path.
 
 There is no second recovery checkpoint tied to this lifecycle classification.
 

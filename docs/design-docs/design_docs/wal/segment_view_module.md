@@ -117,9 +117,22 @@ segments affected by the same Txn independently retain the same outer message.
 
 ### 3.4 Flush
 
-Flush closes the segment at the message TimeTick. It joins pending Insert
-writes and final lifecycle commit. Stable state advances through the Flush only
-after all preceding segment work and the idempotent commit succeed.
+Flush closes the segment using a runtime-only closing TimeTick. New Inserts
+and CreateSegment observations are rejected, while already retained work keeps
+running. Neither a FLUSHED state nor the close boundary is installed into the
+stable metadata merely because Flush was observed. Completed intermediate packs
+may still publish their growing (or legacy SEALED) snapshots.
+
+After all preceding Insert writes and the final lifecycle commit succeed,
+install the final checkpoint, publication DataVersion when present, and
+TOMBSTONED state together under the Segment lock; mark dirty before releasing
+handles. There is no intermediate FLUSHED snapshot in this write path and no
+later owner callback needed to turn successful publication into a tombstone.
+Before publication a crash replays the retained Flush/Drop to reconstruct close;
+after publication the tombstone proves completion.
+
+This tombstone retires the RecoveryStorage assignment, not the serving Segment.
+A normally flushed Segment and its binlogs remain owned by DataCoord.
 
 DataCoord binds `sealed_at_data_version` to the Segment's first growing-to-sealed
 publication. SegmentInfo and the DataView are committed together; on the large
@@ -193,8 +206,8 @@ advances only through the exact captured stable snapshot.
 3. replay once from the PChannel global checkpoint;
 4. skip this segment's effects at or before its frontier;
 5. rebuild pending work for later messages with fresh handles;
-6. schedule or reuse final commit for every recovered flushed segment missing
-   `sealed_at_data_version`; confirmed terminal tombstones need no retry.
+6. reconstruct unfinished close from replayed Flush/Drop; confirmed terminal
+   tombstones need no retry. Existing legacy final-commit recovery remains separate.
 
 Recovery is logically idempotent but not physically exactly once. A crash after
 an object write and before snapshot publication may leave an unreferenced

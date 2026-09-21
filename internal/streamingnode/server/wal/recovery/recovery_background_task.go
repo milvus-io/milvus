@@ -33,6 +33,9 @@ func (rs *recoveryStorageImpl) backgroundTask() {
 		case <-ticker.C:
 		}
 		if err := rs.persistDirtySnapshot(rs.backgroundTaskNotifier.Context(), mlog.DebugLevel); err != nil {
+			if rs.backgroundTaskNotifier.Context().Err() == nil && rs.onFatal != nil {
+				rs.onFatal(merr.Wrap(err, "recovery snapshot persistence stopped"))
+			}
 			return
 		}
 		rs.gcSummaryStore(rs.backgroundTaskNotifier.Context())
@@ -63,6 +66,7 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 
 	snapshot := rs.pendingPersistSnapshot
 	rs.metrics.ObserveIsOnPersisting(true)
+	defer rs.metrics.ObserveIsOnPersisting(false)
 	logger := rs.Logger().With(
 		mlog.String("checkpoint", snapshot.Checkpoint.MessageID.String()),
 		mlog.Uint64("checkpointTimeTick", snapshot.Checkpoint.TimeTick),
@@ -74,7 +78,6 @@ func (rs *recoveryStorageImpl) persistDirtySnapshot(ctx context.Context, lvl mlo
 		}
 		rs.pendingPersistSnapshot = nil
 		logger.Log(context.TODO(), lvl, "persist dirty snapshot")
-		rs.metrics.ObserveIsOnPersisting(false)
 	}()
 
 	recoverySnapshot, err := rs.buildRecoverySnapshot(snapshot)
