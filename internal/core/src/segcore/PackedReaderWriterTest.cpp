@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include <arrow/array/array_base.h>
+#include <arrow/array/array_primitive.h>
 #include <arrow/array/builder_primitive.h>
 #include <arrow/c/abi.h>
 #include <arrow/c/bridge.h>
@@ -132,4 +133,118 @@ TEST(CPackedTest, PackedWriterAndReader) {
     EXPECT_EQ(c_status.error_code, 0);
     EXPECT_TRUE(batch->Equals(*read_batch));
     FreeCColumnSplits(cgs);
+}
+
+namespace {
+
+// Writes the int64 values 0..num_rows-1 into one packed file at `file_path`.
+void
+WriteInt64File(const std::string& file_path,
+               int64_t num_rows,
+               std::shared_ptr<arrow::Schema>* out_schema) {
+    std::vector<int64_t> values(num_rows);
+    std::iota(values.begin(), values.end(), 0);
+    arrow::Int64Builder builder;
+    ASSERT_TRUE(builder.AppendValues(values).ok());
+    auto array = builder.Finish().ValueOrDie();
+
+    auto schema = arrow::schema(
+        {arrow::field("int64",
+                      arrow::int64(),
+                      false,
+                      arrow::key_value_metadata(
+                          {milvus_storage::ARROW_FIELD_ID_KEY}, {"100"}))});
+    *out_schema = schema;
+    auto batch = arrow::RecordBatch::Make(schema, array->length(), {array});
+
+    struct ArrowSchema c_write_schema;
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &c_write_schema).ok());
+    struct ArrowSchema c_origin_schema;
+    ASSERT_TRUE(arrow::ExportSchema(*schema, &c_origin_schema).ok());
+
+    char* paths[] = {const_cast<char*>(file_path.c_str())};
+    CColumnSplits cgs = NewCColumnSplits();
+    int group[] = {0};
+    AddCColumnSplit(cgs, group, 1);
+
+    CPackedWriter writer = nullptr;
+    auto status = NewPackedWriter(
+        &c_write_schema, 10 * 1024 * 1024, paths, 1, 0, cgs, &writer, nullptr);
+    ASSERT_EQ(status.error_code, 0);
+
+    struct ArrowArray carray;
+    struct ArrowSchema cschema;
+    ASSERT_TRUE(arrow::ExportRecordBatch(*batch, &carray, &cschema).ok());
+    struct ArrowArray arrays[] = {carray};
+    struct ArrowSchema array_schemas[] = {cschema};
+    status = WriteRecordBatch(writer, arrays, array_schemas, &c_origin_schema);
+    ASSERT_EQ(status.error_code, 0);
+    status = CloseWriter(writer);
+    ASSERT_EQ(status.error_code, 0);
+    FreeCColumnSplits(cgs);
+}
+
+}  // namespace
+
+// The eager range mode must return the same rows, in the same order, as the
+// lazy mode. The eager range size is far below the file size, so a read has
+// several ranges in flight, and the last mode uses a read buffer smaller than
+// the data, so the reader may take the file in more than one round.
+TEST(CPackedTest, PackedReaderEagerRanges) {
+    // 8 bytes per row: about 3MB of values.
+    const int64_t num_rows = 400 * 1000;
+    const std::string file_path = TestLocalPath + "eager_ranges_0";
+    std::shared_ptr<arrow::Schema> schema;
+    ASSERT_NO_FATAL_FAILURE(WriteInt64File(file_path, num_rows, &schema));
+
+    struct ReadMode {
+        int64_t buffer_size;
+        int64_t eager_range_size;
+    };
+    const ReadMode modes[] = {
+        {10 * 1024 * 1024, 0},                  // lazy, one round
+        {10 * 1024 * 1024, 64 * 1024},          // eager, one round
+        {1024 * 1024 + 512 * 1024, 64 * 1024},  // eager, several rounds
+    };
+    for (const auto& mode : modes) {
+        SCOPED_TRACE(
+            "buffer_size=" + std::to_string(mode.buffer_size) +
+            " eager_range_size=" + std::to_string(mode.eager_range_size));
+        struct ArrowSchema c_read_schema;
+        ASSERT_TRUE(arrow::ExportSchema(*schema, &c_read_schema).ok());
+        char* paths[] = {const_cast<char*>(file_path.c_str())};
+        CPackedReader reader = nullptr;
+        auto status = NewPackedReader(paths,
+                                      1,
+                                      &c_read_schema,
+                                      mode.buffer_size,
+                                      mode.eager_range_size,
+                                      &reader,
+                                      nullptr);
+        ASSERT_EQ(status.error_code, 0);
+        ASSERT_NE(reader, nullptr);
+
+        int64_t next = 0;
+        while (true) {
+            struct ArrowArray read_array {};
+            struct ArrowSchema read_schema {};
+            status = ReadNext(reader, &read_array, &read_schema);
+            ASSERT_EQ(status.error_code, 0);
+            if (read_array.release == nullptr) {
+                break;
+            }
+            auto imported = arrow::ImportRecordBatch(&read_array, &read_schema);
+            ASSERT_TRUE(imported.ok());
+            auto column = std::static_pointer_cast<arrow::Int64Array>(
+                imported.ValueOrDie()->column(0));
+            for (int64_t i = 0; i < column->length(); ++i) {
+                ASSERT_EQ(column->Value(i), next);
+                ++next;
+            }
+        }
+        EXPECT_EQ(next, num_rows);
+
+        status = CloseReader(reader);
+        EXPECT_EQ(status.error_code, 0);
+    }
 }

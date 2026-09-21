@@ -277,10 +277,11 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		// readers that stream their input must not do this. What reading ahead
 		// does add is the raw bytes of the rounds in flight, bounded by
 		// sortReadConcurrency * sortReadBufferSize.
-		storage.WithParallelChunkRead(
-			paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt(),
-			paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize()),
-		storage.WithBufferSize(paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize()),
+		storage.WithParallelChunkRead(storage.ParallelChunkRead{
+			Concurrency: paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt(),
+			BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
+			RangeSize:   paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize(),
+		}),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))

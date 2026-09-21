@@ -20,15 +20,21 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
+	"sync"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -143,9 +149,7 @@ func TestPackedChunksParallelRead(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
-				bufferSize:           tc.bufferSize,
-				chunkReadConcurrency: 3,
-				chunkReadRangeSize:   tc.rangeSize,
+				parallelChunkRead: ParallelChunkRead{Concurrency: 3, BufferSize: tc.bufferSize, RangeSize: tc.rangeSize},
 			}, nil)
 			_, parallel := reader.(*parallelChunkRecordReader)
 			require.True(t, parallel, "concurrency > 1 must select the parallel reader")
@@ -167,4 +171,99 @@ func TestPackedChunksParallelRead(t *testing.T) {
 			assert.EqualValues(t, numChunks*rowsPerChunk, next-1)
 		})
 	}
+}
+
+// TestPackedChunksRecordReaderSelection pins which reader a caller gets and the
+// read buffer each chunk is opened with. It does not touch object storage: the
+// packed reader constructor is replaced by one that records its arguments.
+func TestPackedChunksRecordReaderSelection(t *testing.T) {
+	paths := [][]string{{"chunk0/cg0", "chunk0/cg1"}, {"chunk1/cg0", "chunk1/cg1"}, {"chunk2/cg0", "chunk2/cg1"}}
+	schema := generateTestSchema()
+
+	type openCall struct {
+		paths      []string
+		bufferSize int64
+		numOpts    int
+	}
+	var mu sync.Mutex
+	var calls []openCall
+	mock := mockey.Mock(newPackedRecordReader).To(
+		func(chunkPaths []string,
+			_ *schemapb.CollectionSchema,
+			bufferSize int64,
+			_ *indexpb.StorageConfig,
+			_ *indexcgopb.StoragePluginContext,
+			_ packed.ExternalReaderContext,
+			opts ...packed.ReaderOption,
+		) (*packedRecordReader, error) {
+			mu.Lock()
+			calls = append(calls, openCall{paths: chunkPaths, bufferSize: bufferSize, numOpts: len(opts)})
+			mu.Unlock()
+			// A PackedReader without a native handle reports EOF and closes cleanly.
+			return &packedRecordReader{reader: &packed.PackedReader{}}, nil
+		}).Build()
+	defer mock.UnPatch()
+
+	drainAll := func(t *testing.T, reader RecordReader) []openCall {
+		mu.Lock()
+		calls = nil
+		mu.Unlock()
+		_, err := reader.Next()
+		require.ErrorIs(t, err, io.EOF)
+		require.NoError(t, reader.Close())
+		mu.Lock()
+		defer mu.Unlock()
+		got := append([]openCall(nil), calls...)
+		sort.Slice(got, func(i, j int) bool { return got[i].paths[0] < got[j].paths[0] })
+		return got
+	}
+
+	t.Run("no option keeps the serial reader and its buffer size", func(t *testing.T) {
+		reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{bufferSize: 7}, nil)
+		require.IsType(t, &IterativeRecordReader{}, reader)
+		for _, call := range drainAll(t, reader) {
+			assert.EqualValues(t, 7, call.bufferSize)
+			assert.Zero(t, call.numOpts, "the serial reader must not switch on eager ranges")
+		}
+	})
+
+	t.Run("concurrency 1 keeps the serial reader and ignores the parallel buffer size", func(t *testing.T) {
+		reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
+			bufferSize:        7,
+			parallelChunkRead: ParallelChunkRead{Concurrency: 1, BufferSize: 99, RangeSize: 11},
+		}, nil)
+		require.IsType(t, &IterativeRecordReader{}, reader)
+		for _, call := range drainAll(t, reader) {
+			assert.EqualValues(t, 7, call.bufferSize, "switching the feature off must restore the old read buffer")
+			assert.Zero(t, call.numOpts)
+		}
+	})
+
+	t.Run("parallel reader opens every chunk with the parallel buffer size", func(t *testing.T) {
+		reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
+			bufferSize:        7,
+			parallelChunkRead: ParallelChunkRead{Concurrency: 2, BufferSize: 99, RangeSize: 11},
+		}, nil)
+		require.IsType(t, &parallelChunkRecordReader{}, reader)
+		got := drainAll(t, reader)
+		require.Len(t, got, len(paths))
+		for i, call := range got {
+			assert.Equal(t, paths[i], call.paths)
+			assert.EqualValues(t, 99, call.bufferSize)
+			assert.Equal(t, 1, call.numOpts, "the eager range option must reach the packed reader")
+		}
+	})
+
+	t.Run("a non-positive parallel buffer size does not become unlimited", func(t *testing.T) {
+		for _, bufferSize := range []int64{0, -1} {
+			reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
+				parallelChunkRead: ParallelChunkRead{Concurrency: 2, BufferSize: bufferSize},
+			}, nil)
+			got := drainAll(t, reader)
+			require.Len(t, got, len(paths))
+			for _, call := range got {
+				assert.EqualValues(t, packed.DefaultReadBufferSize, call.bufferSize)
+			}
+		}
+	})
 }

@@ -62,25 +62,24 @@ const (
 )
 
 type rwOptions struct {
-	version              int64
-	op                   rwOp
-	bufferSize           int64
-	chunkReadConcurrency int
-	chunkReadRangeSize   int64
-	downloader           downloaderFn
-	uploader             uploaderFn
-	multiPartUploadSize  int64
-	columnGroups         []storagecommon.ColumnGroup
-	collectionID         int64
-	storageConfig        *indexpb.StorageConfig
-	neededFields         typeutil.Set[int64]
-	useLoonFFI           bool
-	pluginContext        *indexcgopb.StoragePluginContext
-	textColumnConfigs    []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
-	textRefsAsBinary     bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
-	externalReader       packed.ExternalReaderContext
-	writerFormat         string
-	presentFields        map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
+	version             int64
+	op                  rwOp
+	bufferSize          int64
+	parallelChunkRead   ParallelChunkRead
+	downloader          downloaderFn
+	uploader            uploaderFn
+	multiPartUploadSize int64
+	columnGroups        []storagecommon.ColumnGroup
+	collectionID        int64
+	storageConfig       *indexpb.StorageConfig
+	neededFields        typeutil.Set[int64]
+	useLoonFFI          bool
+	pluginContext       *indexcgopb.StoragePluginContext
+	textColumnConfigs   []packed.TextColumnConfig // TEXT column configurations for REWRITE_ALL mode
+	textRefsAsBinary    bool                      // TEXT columns already contain encoded LOB refs and should be copied as-is
+	externalReader      packed.ExternalReaderContext
+	writerFormat        string
+	presentFields       map[FieldID]struct{} // reader: caller-known physically-present field IDs, skips a manifest re-read
 }
 
 func (o *rwOptions) validate() error {
@@ -138,27 +137,41 @@ func WithBufferSize(bufferSize int64) RwOption {
 	}
 }
 
+// ParallelChunkRead configures WithParallelChunkRead.
+type ParallelChunkRead struct {
+	// Concurrency is how many chunks are read at once. <= 1 keeps the serial
+	// reader, with the buffer size of WithBufferSize, exactly as without this
+	// option.
+	Concurrency int
+	// BufferSize is the size of one read round of a chunk. It applies only to
+	// the parallel reader. <= 0 means packed.DefaultReadBufferSize: the packed
+	// reader treats a non-positive size as unlimited, which would make one
+	// round the whole chunk.
+	BufferSize int64
+	// RangeSize, when > 0, makes a read round fetch all of its byte ranges at
+	// once, and bounds how far adjacent ranges are coalesced into one request.
+	// A single range larger than this, such as one big column chunk, is still
+	// one request. <= 0 fetches one coalesced range at a time. It changes the
+	// request pattern only, not the memory described below.
+	RangeSize int64
+}
+
 // WithParallelChunkRead makes a StorageV2/V3 binlog reader read up to
-// concurrency chunks at once, still delivering records in order. Within a read
-// round every byte range is fetched concurrently, cut at rangeSize bytes;
-// rangeSize <= 0 fetches one coalesced range at a time, which changes the
-// request pattern only, not the memory described below.
+// Concurrency chunks at once, still delivering records in order.
 //
 // Memory, on top of what the caller keeps:
 //   - Decoded records: the reader does not wait for the caller, so up to the
 //     whole input may be decoded before the first record is consumed. Use this
 //     option only when the caller materializes its input anyway, such as a sort.
-//   - Raw file bytes: each in-flight chunk holds one read round, which is at
-//     most WithBufferSize, until the round is replaced or the chunk is closed.
-//     The total is up to concurrency * WithBufferSize, where the serial reader
-//     holds one round.
+//   - Raw file bytes: each in-flight chunk holds one read round, at most
+//     BufferSize, until the round is replaced or the chunk is closed. The total
+//     is up to Concurrency * BufferSize, and never more than the raw input.
 //
-// concurrency <= 1 keeps the serial reader and is the way to switch this off.
-// Segments read through a manifest are not affected.
-func WithParallelChunkRead(concurrency int, rangeSize int64) RwOption {
+// Only the binlog reader of NewBinlogRecordReader uses this option. Readers of
+// StorageV1 data and manifest readers ignore it, including its BufferSize.
+func WithParallelChunkRead(p ParallelChunkRead) RwOption {
 	return func(options *rwOptions) {
-		options.chunkReadConcurrency = concurrency
-		options.chunkReadRangeSize = rangeSize
+		options.parallelChunkRead = p
 	}
 }
 

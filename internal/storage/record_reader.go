@@ -201,8 +201,7 @@ func (ir *IterativeRecordReader) Next() (rec Record, err error) {
 
 // newPackedChunksRecordReader reads the packed chunks at paths in order. Callers
 // that opted into WithParallelChunkRead get several chunks read at once;
-// everyone else gets the serial reader. Either way an open chunk reader loads
-// at most options.bufferSize per read round.
+// everyone else gets the serial reader, unchanged.
 func newPackedChunksRecordReader(
 	ctx context.Context,
 	paths [][]string,
@@ -210,12 +209,19 @@ func newPackedChunksRecordReader(
 	options *rwOptions,
 	storagePluginContext *indexcgopb.StoragePluginContext,
 ) RecordReader {
-	if options.chunkReadConcurrency <= 1 {
+	parallel := options.parallelChunkRead
+	if parallel.Concurrency <= 1 {
 		return newIterativePackedRecordReader(paths, schema, options.bufferSize, options.storageConfig, storagePluginContext, options.externalReader)
 	}
-	return newParallelChunkRecordReader(ctx, len(paths), options.chunkReadConcurrency, func(chunk int) (RecordReader, error) {
-		reader, err := newPackedRecordReader(paths[chunk], schema, options.bufferSize, options.storageConfig,
-			storagePluginContext, options.externalReader, packed.WithEagerRangeSize(options.chunkReadRangeSize))
+	bufferSize := parallel.BufferSize
+	if bufferSize <= 0 {
+		// The packed reader reads a non-positive buffer size as "no limit", and
+		// one round would then keep a whole chunk file resident per worker.
+		bufferSize = packed.DefaultReadBufferSize
+	}
+	return newParallelChunkRecordReader(ctx, len(paths), parallel.Concurrency, func(chunk int) (RecordReader, error) {
+		reader, err := newPackedRecordReader(paths[chunk], schema, bufferSize, options.storageConfig,
+			storagePluginContext, options.externalReader, packed.WithEagerRangeSize(parallel.RangeSize))
 		if err != nil {
 			return nil, err
 		}

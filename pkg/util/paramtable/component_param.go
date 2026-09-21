@@ -8653,12 +8653,13 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 			"Each chunk is opened, read to its end and closed on its own, so neither opening a chunk nor any of its reads waits " +
 			"for the chunks before it; records are still delivered in order. " +
 			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. " +
-			"Every chunk being read additionally holds the raw bytes of one read round, so the read phase adds up to " +
-			"sortReadConcurrency * sortReadBufferSize on top of the input, per sort task. " +
-			"1 reads the chunks strictly one after another with a single round resident, and is the way to switch this off. " +
+			"Every chunk being read additionally holds the raw bytes of one read round, so the read phase of one sort task adds up to " +
+			"sortReadConcurrency * sortReadBufferSize, and never more than the raw size of its input. A DataNode runs several sort " +
+			"tasks at once, as many as its slots admit, so the figure for a node is that amount times the number of concurrent sort tasks. " +
+			"1 reads the chunks strictly one after another, exactly as before this option existed, and is the way to switch it off. " +
 			"Values <= 0 mean the number of CPU cores, capped at 8 to keep that product small by default. " +
 			"The requests actually in flight are further capped by arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient). " +
-			"Segments read through a manifest are not affected.",
+			"Only binlog-based StorageV2/V3 segments are read this way; segments read through a manifest are not.",
 		DefaultValue: "0",
 		Formatter: func(v string) string {
 			n, err := strconv.Atoi(v)
@@ -8674,10 +8675,11 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	p.SortReadRangeSize = ParamItem{
 		Key:     "dataNode.compaction.sortReadRangeSize",
 		Version: "3.0.2",
-		Doc: "Target size of one object-storage request when a sort compaction reads a chunk with sortReadConcurrency > 1. " +
-			"All byte ranges of a read round are cut at this size and fetched concurrently instead of one coalesced range at a time. " +
+		Doc: "When > 0 and sortReadConcurrency > 1, a read round of a sort compaction fetches all of its byte ranges at once instead of " +
+			"one at a time, and this value bounds how far adjacent ranges are coalesced into one object-storage request. " +
+			"A single range larger than this, such as one big column chunk, is still one request. " +
 			"Smaller values give more concurrency but more requests, which object stores bill for and may throttle. " +
-			"0 fetches one range at a time; this changes the request pattern only, not memory " +
+			"0 fetches one coalesced range at a time; this changes the request pattern only, not memory " +
 			"(see sortReadConcurrency and sortReadBufferSize for that). Accepts a byte count or a size such as 8m.",
 		DefaultValue: "8m",
 		Export:       false,
@@ -8687,10 +8689,12 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 	p.SortReadBufferSize = ParamItem{
 		Key:     "dataNode.compaction.sortReadBufferSize",
 		Version: "3.0.2",
-		Doc: "Size of one read round of a chunk when a sort compaction reads with sortReadConcurrency > 1. A chunk larger than this " +
-			"is read in several rounds, one after another; the raw bytes of a round stay resident until the next round or the end " +
-			"of the chunk. It bounds the memory a chunk being read adds (see sortReadConcurrency) and, divided by " +
-			"sortReadRangeSize, how many requests one chunk keeps in flight. Accepts a byte count or a size such as 64m.",
+		Doc: "Size of one read round of a chunk when a sort compaction reads with sortReadConcurrency > 1; it has no effect otherwise. " +
+			"A chunk larger than this is read in several rounds, one after another; the raw bytes of a round stay resident until " +
+			"the next round or the end of the chunk. It bounds the memory a chunk being read adds (see sortReadConcurrency), and a " +
+			"larger round keeps more requests of one chunk in flight, which matters once arrow's IO thread pool is larger than " +
+			"sortReadConcurrency * sortReadBufferSize / sortReadRangeSize. Values that are not positive or cannot be parsed mean 32m. " +
+			"Accepts a byte count or a size such as 64m.",
 		DefaultValue: "64m",
 		Export:       false,
 	}

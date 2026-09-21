@@ -55,7 +55,9 @@ type readerOptions struct {
 }
 
 // WithEagerRangeSize makes every read round fetch all of its byte ranges at
-// once, cut at rangeSize bytes, instead of one coalesced range at a time. The
+// once instead of one coalesced range at a time. rangeSize bounds how far
+// adjacent ranges are coalesced into one request; a single range larger than
+// rangeSize, such as one big column chunk, is still one request. The
 // raw bytes of a round stay cached until the next round either way (arrow's
 // read cache never evicts within a round), so for a given buffer size this
 // changes how many requests are in flight, not how much a round holds. The

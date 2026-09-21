@@ -34,8 +34,9 @@ GetArrowReaderProperties();
 //
 // The configured properties read lazily: arrow fetches a coalesced range only
 // when the decoder first touches it, so one file has one request in flight.
-// With eager_range_size_bytes > 0 the ranges are instead cut at that size and
-// all submitted to arrow's IO pool when the read starts. Arrow's read cache
+// With eager_range_size_bytes > 0 all ranges are instead submitted to arrow's
+// IO pool when the read starts, and that value bounds how far adjacent ranges
+// are coalesced. It does not split a single range. Arrow's read cache
 // never evicts within a read, lazy or not, so a read ends up holding the raw
 // bytes of all its row groups either way; what bounds that is how many row
 // groups the caller puts into one read (the packed reader's buffer size), not

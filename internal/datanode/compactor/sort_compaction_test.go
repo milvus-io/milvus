@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -261,6 +262,48 @@ func (s *SortCompactionTaskSuite) prepareSortCompactionTask() {
 			},
 		},
 	}
+}
+
+// parallelChunkReadSeen runs one sort compaction and returns every value the
+// sort handed to storage.WithParallelChunkRead.
+func (s *SortCompactionTaskSuite) parallelChunkReadSeen() []storage.ParallelChunkRead {
+	var seen []storage.ParallelChunkRead
+	var origin func(storage.ParallelChunkRead) storage.RwOption
+	mock := mockey.Mock(storage.WithParallelChunkRead).To(func(p storage.ParallelChunkRead) storage.RwOption {
+		seen = append(seen, p)
+		return origin(p)
+	}).Origin(&origin).Build()
+	defer mock.UnPatch()
+
+	s.prepareSortCompactionTask()
+	result, err := s.task.Compact()
+	s.NoError(err)
+	s.Equal(datapb.CompactionTaskState_completed, result.GetState())
+	return seen
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsDefault() {
+	s.Equal([]storage.ParallelChunkRead{{
+		Concurrency: min(hardware.GetCPUNum(), 8),
+		BufferSize:  64 * 1024 * 1024,
+		RangeSize:   8 * 1024 * 1024,
+	}}, s.parallelChunkReadSeen(), "the input reader must be opened once, with the default read options")
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsFollowConfig() {
+	cfg := &paramtable.Get().DataNodeCfg
+	paramtable.Get().Save(cfg.SortReadConcurrency.Key, "3")
+	defer paramtable.Get().Reset(cfg.SortReadConcurrency.Key)
+	paramtable.Get().Save(cfg.SortReadBufferSize.Key, "16m")
+	defer paramtable.Get().Reset(cfg.SortReadBufferSize.Key)
+	paramtable.Get().Save(cfg.SortReadRangeSize.Key, "0")
+	defer paramtable.Get().Reset(cfg.SortReadRangeSize.Key)
+
+	s.Equal([]storage.ParallelChunkRead{{
+		Concurrency: 3,
+		BufferSize:  16 * 1024 * 1024,
+		RangeSize:   0,
+	}}, s.parallelChunkReadSeen())
 }
 
 func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {

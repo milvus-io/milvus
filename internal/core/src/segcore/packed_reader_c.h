@@ -57,10 +57,11 @@ NewPackedReaderWithProperties(char** paths,
  * @param path The root path of the packed files to read.
  * @param schema The original schema of data.
  * @param buffer_size The max buffer size of the packed reader.
- * @param eager_range_size_bytes When > 0, every byte range of a read is cut at
- *        this size and fetched concurrently instead of one range at a time;
- *        <= 0 keeps the configured lazy reads. Same meaning for every
- *        NewPackedReader* constructor.
+ * @param eager_range_size_bytes When > 0, all byte ranges of a read are fetched
+ *        concurrently instead of one at a time, and this value bounds how far
+ *        adjacent ranges are coalesced into one request. A single range larger
+ *        than it is still one request. <= 0 keeps the configured lazy reads.
+ *        Same meaning for every NewPackedReader* constructor.
  * @param c_packed_reader The output pointer of the packed reader.
  */
 CStatus
