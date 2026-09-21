@@ -22,6 +22,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -160,6 +162,403 @@ func testMilvusTableTargetRefreshSchema() *schemapb.CollectionSchema {
 	schema.ExternalSource = "s3://bucket/snapshots/1/metadata/10.json"
 	schema.ExternalSpec = `{"format":"milvus-table","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`
 	return schema
+}
+
+func TestRefreshMilvusTableInvalidMetadataFailsJob(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		data           string
+		validFirst     bool
+		failStateWrite bool
+		reason         string
+	}{
+		{"truncated_json", `{"corrupt manifest`, false, false, "failed to parse metadata JSON"},
+		{"empty_metadata", "", false, false, "failed to parse metadata JSON"},
+		{"unsupported_version", `{"format_version":99999}`, false, false, "snapshot format version 99999 is too new"},
+		{"corrupted_between_validation_and_explore", `{"corrupt manifest`, true, false, "failed to parse metadata JSON"},
+		{"failed_state_persistence_retried", `{"corrupt manifest`, false, true, "failed to parse metadata JSON"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			refreshMeta := createTestRefreshMeta(t)
+			scheduler := newStubScheduler()
+			schema := testMilvusTableTargetRefreshSchema()
+			previousSchema := proto.Clone(schema)
+			mt := &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](), segments: NewSegmentsInfo()}
+			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: schema})
+			previousSegment := &datapb.SegmentInfo{ID: 10, CollectionID: 100, NumOfRows: 32, State: commonpb.SegmentState_Flushed}
+			mt.segments.SetSegment(10, NewSegmentInfo(proto.Clone(previousSegment).(*datapb.SegmentInfo)))
+			validMetadata, err := protojson.Marshal(&datapb.SnapshotMetadata{
+				Collection: &datapb.CollectionDescription{Schema: testMilvusTableRefreshSchema(false)},
+			})
+			require.NoError(t, err)
+			var reads atomic.Int32
+			read := mockey.Mock(packed.ReadFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, _ string, _ packed.ExternalSpecContext) ([]byte, error) {
+				if reads.Add(1) == 1 && tc.validFirst {
+					return validMetadata, nil
+				}
+				return []byte(tc.data), nil
+			}).Build()
+			defer read.UnPatch()
+			var persisted *datapb.ExternalCollectionRefreshJob
+			failStateWrite := tc.failStateWrite
+			save := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshJob).To(func(_ *stubCatalog, _ context.Context, job *datapb.ExternalCollectionRefreshJob) error {
+				if job.GetState() == indexpb.JobState_JobStateFailed && failStateWrite {
+					failStateWrite = false
+					return merr.WrapErrServiceUnavailable("metadata store unavailable")
+				}
+				persisted = proto.Clone(job).(*datapb.ExternalCollectionRefreshJob)
+				return nil
+			}).Build()
+			defer save.UnPatch()
+			var schemaUpdates atomic.Int32
+			manager := NewExternalCollectionRefreshManager(ctx, mt, scheduler, &stubAllocator{nextID: 1000},
+				refreshMeta, nil, testCollectionGetter(mt), func(context.Context, int64, string, string) error {
+					schemaUpdates.Add(1)
+					return nil
+				}, nil).(*externalCollectionRefreshManager)
+			defer manager.Stop()
+
+			jobID, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, schema.GetName(),
+				"s3://bucket/snapshots/2/metadata/20.json", schema.GetExternalSpec())
+			require.NoError(t, err)
+			manager.wg.Wait()
+			if tc.failStateWrite {
+				job := refreshMeta.GetJob(jobID)
+				require.Equal(t, indexpb.JobState_JobStateInit, job.GetState())
+				require.Equal(t, indexpb.JobState_JobStateInit, persisted.GetState())
+				manager.checker.processJob(job)
+				manager.wg.Wait()
+			}
+			job, err := manager.GetJobProgress(ctx, jobID)
+			require.NoError(t, err)
+			require.Equal(t, indexpb.JobState_JobStateFailed, job.GetState())
+			require.True(t, proto.Equal(job, persisted), "failure reason and terminal state must be persisted together")
+			assert.Contains(t, job.GetFailReason(), tc.reason)
+			assert.Contains(t, job.GetFailReason(), "external collection 100")
+			assert.Contains(t, job.GetFailReason(), "/snapshots/2/metadata/20.json")
+			assert.NotZero(t, job.GetEndTime())
+			assert.Empty(t, job.GetTaskIds())
+			assert.Empty(t, refreshMeta.GetTasksByJobID(jobID))
+			assert.Zero(t, scheduler.GetEnqueueCount())
+			assert.Nil(t, refreshMeta.GetActiveJobByCollectionID(100))
+			assert.True(t, proto.Equal(previousSchema, mt.GetCollection(100).Schema))
+			assert.True(t, proto.Equal(previousSegment, mt.segments.GetSegment(10).SegmentInfo))
+			assert.Zero(t, schemaUpdates.Load())
+
+			// Terminal jobs must not re-read the invalid object on later ticks.
+			readCount := reads.Load()
+			manager.checker.processJob(job)
+			manager.wg.Wait()
+			assert.Equal(t, readCount, reads.Load())
+			if tc.validFirst || tc.failStateWrite {
+				assert.EqualValues(t, 2, readCount)
+			} else {
+				assert.EqualValues(t, 1, readCount)
+			}
+		})
+	}
+}
+
+func TestExploreExternalFilesErrorPropagation(t *testing.T) {
+	for _, scenario := range []string{"invalid_source", "invalid_spec", "missing_collection", "read_timeout", "service_unavailable", "success"} {
+		t.Run(scenario, func(t *testing.T) {
+			job := &datapb.ExternalCollectionRefreshJob{
+				CollectionId:   100,
+				ExternalSource: "s3://bucket/data",
+				ExternalSpec:   `{"format":"parquet","extfs":{"cloud_provider":"aws","region":"us-west-2","access_key_id":"ak","access_key_value":"sk"}}`,
+			}
+			mt := &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+			mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: testMilvusTableTargetRefreshSchema()})
+			var exploreErr error
+			switch scenario {
+			case "invalid_source":
+				job.ExternalSource = "file:///tmp/data"
+			case "invalid_spec":
+				job.ExternalSource, job.ExternalSpec = "", "{"
+			case "missing_collection":
+				job.CollectionId = 999
+			case "read_timeout":
+				exploreErr = context.DeadlineExceeded
+			case "service_unavailable":
+				exploreErr = merr.WrapErrServiceUnavailable("storage unavailable")
+			}
+			explore := mockey.Mock(packed.ExploreFilesReturnManifestPath).
+				Return([]packed.FileInfo{{FilePath: "a.parquet", NumRows: 10}}, "manifest.json", exploreErr).Build()
+			defer explore.UnPatch()
+			manager := &externalCollectionRefreshManager{mt: mt, allocator: &stubAllocator{nextID: 1000}}
+
+			files, manifest, err := manager.exploreExternalFiles(context.Background(), job)
+			if scenario == "success" {
+				require.NoError(t, err)
+				require.Len(t, files, 1)
+				assert.Equal(t, "a.parquet", files[0].GetFilePath())
+				assert.EqualValues(t, 10, files[0].GetNumRows())
+				assert.Equal(t, "manifest.json", manifest)
+				return
+			}
+			require.Error(t, err)
+			assert.Empty(t, files)
+			assert.Empty(t, manifest)
+			if exploreErr != nil {
+				assert.ErrorIs(t, err, exploreErr)
+				assert.Equal(t, merr.Code(exploreErr), merr.Code(err))
+				// Neither timeout nor a retriable service failure may terminate the job.
+				_, err = manager.createTasksForJob(context.Background(), job)
+				var terminal *nonRetriableJobError
+				assert.False(t, errors.As(err, &terminal))
+			} else {
+				assert.Zero(t, explore.Times(), "reject invalid jobs before accessing storage")
+				if scenario == "missing_collection" {
+					assert.ErrorIs(t, err, merr.ErrCollectionNotFound)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateTasksForJobSnapshotErrorCodes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		data    string
+		wantErr error
+	}{
+		{"corrupt_metadata", `{`, merr.ErrDataIntegrity},
+		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
+	} {
+		for _, failDuringExplore := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/explore=%t", tc.name, failDuringExplore), func(t *testing.T) {
+				schema := testMilvusTableTargetRefreshSchema()
+				mt := &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+				mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: schema})
+				validMetadata, err := protojson.Marshal(&datapb.SnapshotMetadata{
+					Collection: &datapb.CollectionDescription{Schema: testMilvusTableRefreshSchema(false)},
+				})
+				require.NoError(t, err)
+				reads := 0
+				read := mockey.Mock(packed.ReadFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, _ string, _ packed.ExternalSpecContext) ([]byte, error) {
+					reads++
+					if failDuringExplore && reads == 1 {
+						return validMetadata, nil
+					}
+					return []byte(tc.data), nil
+				}).Build()
+				defer read.UnPatch()
+				manager := &externalCollectionRefreshManager{mt: mt, allocator: &stubAllocator{nextID: 1000}}
+				job := &datapb.ExternalCollectionRefreshJob{
+					CollectionId: 100, ExternalSource: schema.GetExternalSource(), ExternalSpec: schema.GetExternalSpec(),
+				}
+				_, _, exploreErr := manager.exploreExternalFiles(context.Background(), job)
+				require.ErrorIs(t, exploreErr, tc.wantErr)
+				assert.Equal(t, merr.Code(tc.wantErr), merr.Code(exploreErr))
+				reads = 0
+
+				tasks, err := manager.createTasksForJob(context.Background(), job)
+				var terminal *nonRetriableJobError
+				require.ErrorAs(t, err, &terminal)
+				assert.Contains(t, err.Error(), exploreErr.Error())
+				assert.Empty(t, tasks)
+				if failDuringExplore {
+					assert.Equal(t, 2, reads)
+				} else {
+					assert.Equal(t, 1, reads)
+				}
+			})
+		}
+	}
+}
+
+func TestRefreshMilvusTableMetadataReadTimeoutRetries(t *testing.T) {
+	ctx := context.Background()
+	refreshMeta := createTestRefreshMeta(t)
+	schema := testMilvusTableTargetRefreshSchema()
+	mt := &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
+	mt.collections.Insert(100, &collectionInfo{ID: 100, Schema: schema})
+	var reads atomic.Int32
+	read := mockey.Mock(packed.ReadFileWithExternalSpec).To(func(_ *indexpb.StorageConfig, _ string, _ packed.ExternalSpecContext) ([]byte, error) {
+		if reads.Add(1) == 1 {
+			return nil, context.DeadlineExceeded
+		}
+		return []byte(`{"corrupt manifest`), nil
+	}).Build()
+	defer read.UnPatch()
+	manager := NewExternalCollectionRefreshManager(ctx, mt, newStubScheduler(), &stubAllocator{nextID: 1000},
+		refreshMeta, nil, testCollectionGetter(mt), nil, nil).(*externalCollectionRefreshManager)
+	defer manager.Stop()
+	_, err := manager.SubmitRefreshJobWithID(ctx, 1, 100, schema.GetName(), "", "")
+	require.NoError(t, err)
+	manager.wg.Wait()
+	job := refreshMeta.GetJob(1)
+	require.Equal(t, indexpb.JobState_JobStateInit, job.GetState())
+	assert.Empty(t, job.GetFailReason())
+
+	manager.checker.processJob(job)
+	manager.wg.Wait()
+	assert.EqualValues(t, 2, reads.Load())
+	assert.Equal(t, indexpb.JobState_JobStateFailed, refreshMeta.GetJob(1).GetState())
+}
+
+func TestCreateTasksForJobInvalidMetadataRedactsSource(t *testing.T) {
+	read := mockey.Mock(packed.ReadFileWithExternalSpec).Return([]byte(`{"corrupt manifest`), nil).Build()
+	defer read.UnPatch()
+	_, metadataErr := packed.ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+		`{"format":"milvus-table"}`, nil, packed.ExternalSpecContext{})
+	require.ErrorIs(t, metadataErr, merr.ErrDataIntegrity)
+	// Source validation rejects userinfo before reading. Inject only the
+	// dependency's real parse error here to test diagnostic redaction in isolation.
+	explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).
+		Return(nil, "", metadataErr).Build()
+	defer explore.UnPatch()
+	for _, source := range []string{
+		"s3://user:secret@bucket/snapshots/2/metadata/20.json?token=secret#secret",
+		"s3://bucket/%zz?token=secret",
+	} {
+		t.Run(source, func(t *testing.T) {
+			manager := &externalCollectionRefreshManager{}
+			_, err := manager.createTasksForJob(context.Background(), &datapb.ExternalCollectionRefreshJob{
+				CollectionId: 100, ExternalSource: source,
+			})
+			require.Error(t, err)
+			var perm *nonRetriableJobError
+			require.ErrorAs(t, merr.Wrap(err, "outer context"), &perm)
+			assert.Contains(t, err.Error(), metadataErr.Error())
+			assert.NotContains(t, err.Error(), "secret")
+			assert.NotContains(t, err.Error(), "user")
+		})
+	}
+}
+
+func TestEnsureTasksForInitJobRechecksState(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		fresh *datapb.ExternalCollectionRefreshJob
+	}{
+		{"removed", nil},
+		{"failed", &datapb.ExternalCollectionRefreshJob{JobId: 1, State: indexpb.JobState_JobStateFailed}},
+		{"tasks_created", &datapb.ExternalCollectionRefreshJob{JobId: 1, State: indexpb.JobState_JobStateInit, TaskIds: []int64{10}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reads atomic.Int32
+			getJob := mockey.Mock((*externalCollectionRefreshMeta).GetJob).To(func(_ *externalCollectionRefreshMeta, _ int64) *datapb.ExternalCollectionRefreshJob {
+				if reads.Add(1) == 1 {
+					return &datapb.ExternalCollectionRefreshJob{JobId: 1, State: indexpb.JobState_JobStateInit}
+				}
+				return tc.fresh
+			}).Build()
+			defer getJob.UnPatch()
+			scheduler := newStubScheduler()
+			manager := NewExternalCollectionRefreshManager(context.Background(), nil, scheduler, nil,
+				createTestRefreshMeta(t), nil, nil, nil, nil).(*externalCollectionRefreshManager)
+			defer manager.Stop()
+			manager.ensureTasksForInitJob(1)
+			manager.wg.Wait()
+			assert.EqualValues(t, 2, reads.Load())
+			assert.Zero(t, scheduler.GetEnqueueCount())
+			assert.Empty(t, manager.initJobsInFlight)
+		})
+	}
+}
+
+func TestEnsureTasksForInitJobDeduplicatesExplore(t *testing.T) {
+	refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{
+		{JobId: 1, State: indexpb.JobState_JobStateInit},
+	}, nil)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var explores atomic.Int32
+	explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).To(
+		func(_ *externalCollectionRefreshManager, _ context.Context, _ *datapb.ExternalCollectionRefreshJob) ([]*datapb.ExternalFileInfo, string, error) {
+			explores.Add(1)
+			close(entered)
+			<-release
+			return nil, "", context.DeadlineExceeded
+		}).Build()
+	defer explore.UnPatch()
+	manager := NewExternalCollectionRefreshManager(context.Background(), nil, newStubScheduler(), nil,
+		refreshMeta, nil, nil, nil, nil).(*externalCollectionRefreshManager)
+	defer func() {
+		close(release)
+		manager.Stop()
+	}()
+	manager.ensureTasksForInitJob(1)
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("explore did not start")
+	}
+	manager.ensureTasksForInitJob(1)
+	assert.EqualValues(t, 1, explores.Load())
+}
+
+func TestCreateTasksForJobPlanningFailures(t *testing.T) {
+	for _, failure := range []string{"empty_source", "allocate_id", "publish_tasks"} {
+		t.Run(failure, func(t *testing.T) {
+			refreshMeta := createTestRefreshMeta(t)
+			files := []*datapb.ExternalFileInfo{{FilePath: "a.parquet"}}
+			if failure == "empty_source" {
+				files = nil
+			}
+			explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).Return(files, "manifest", nil).Build()
+			defer explore.UnPatch()
+			cause := merr.WrapErrServiceUnavailable("metadata unavailable")
+			switch failure {
+			case "allocate_id":
+				patch := mockey.Mock((*stubAllocator).AllocID).Return(int64(0), cause).Build()
+				defer patch.UnPatch()
+			case "publish_tasks":
+				patch := mockey.Mock((*externalCollectionRefreshMeta).AddTasksToJob).Return(cause).Build()
+				defer patch.UnPatch()
+			}
+			manager := &externalCollectionRefreshManager{
+				mt: &meta{segments: NewSegmentsInfo()}, refreshMeta: refreshMeta, allocator: &stubAllocator{nextID: 10},
+			}
+			_, err := manager.createTasksForJob(context.Background(), &datapb.ExternalCollectionRefreshJob{JobId: 1})
+			require.Error(t, err)
+			if failure == "empty_source" {
+				var terminal *nonRetriableJobError
+				assert.ErrorAs(t, err, &terminal)
+			} else {
+				assert.ErrorIs(t, err, cause)
+			}
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
+}
+
+func TestCreateTasksForJobFileRanges(t *testing.T) {
+	param := &paramtable.Get().DataCoordCfg.ExternalCollectionFilesPerTask
+	original := param.GetValue()
+	defer paramtable.Get().Save(param.Key, original)
+	for _, size := range []string{"2", "10"} {
+		t.Run(size, func(t *testing.T) {
+			require.NoError(t, paramtable.Get().Save(param.Key, size))
+			job := &datapb.ExternalCollectionRefreshJob{JobId: 1, State: indexpb.JobState_JobStateInit}
+			refreshMeta := createTestRefreshMetaWithJobs(t, []*datapb.ExternalCollectionRefreshJob{job}, nil)
+			files := make([]*datapb.ExternalFileInfo, 5)
+			for i := range files {
+				files[i] = &datapb.ExternalFileInfo{FilePath: fmt.Sprintf("file-%d.parquet", i)}
+			}
+			explore := mockey.Mock((*externalCollectionRefreshManager).exploreExternalFiles).Return(files, "manifest", nil).Build()
+			defer explore.UnPatch()
+			manager := NewExternalCollectionRefreshManager(context.Background(), &meta{segments: NewSegmentsInfo()}, newStubScheduler(), &stubAllocator{},
+				refreshMeta, nil, nil, nil, nil).(*externalCollectionRefreshManager)
+			defer manager.Stop()
+			tasks, err := manager.createTasksForJob(context.Background(), job)
+			require.NoError(t, err)
+			if size == "2" {
+				require.Len(t, tasks, 3)
+			} else {
+				require.Len(t, tasks, 1)
+			}
+			var next int64
+			for _, id := range refreshMeta.GetJob(1).GetTaskIds() {
+				planned := refreshMeta.GetTask(id)
+				assert.Equal(t, next, planned.GetFileIndexBegin())
+				next = planned.GetFileIndexEnd()
+			}
+			assert.EqualValues(t, len(files), next)
+		})
+	}
 }
 
 func TestSubmitRefreshJobWithIDStoresJobMetadata(t *testing.T) {
