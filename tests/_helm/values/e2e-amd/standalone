@@ -39,6 +39,7 @@ extraConfigFiles:
     grpc:
       client:
         compressionEnabled: true
+        compressionAlgorithm: s2
     dataCoord:
       gc:
         interval: 1800

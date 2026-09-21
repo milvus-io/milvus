@@ -72,6 +72,7 @@ extraConfigFiles:
     grpc:
       client:
         compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       storage:
         enablev2: true

@@ -22,6 +22,7 @@ extraConfigFiles:
     grpc:
       client:
         compressionEnabled: true
+        compressionAlgorithm: s2
     etcd:
       use:
         embed: true
@@ -46,6 +47,7 @@ extraConfigFiles:
     grpc:
       client:
         compressionEnabled: true
+        compressionAlgorithm: s2
     indexCoord:
       scheduler:
         interval: 100
