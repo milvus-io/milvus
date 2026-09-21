@@ -130,6 +130,20 @@ func (t *importTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(t, t.importMeta))
 }
 
+// GetTaskResource prices an import by one read buffer per file, mirroring
+// what the worker allocates (importTaskResource). It is not cached, and does
+// not need to be: the inputs are the task's file stats and three cheap job
+// fields, so re-reading them every round costs nothing a cache would save, and
+// a job amended between enqueue and dispatch is priced on what it will
+// actually run with.
+func (t *importTask) GetTaskResource() (taskcommon.Resource, bool) {
+	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
+	if job == nil {
+		return defaultTaskResource(), false
+	}
+	return importTaskResource(importBufferedBytes(t.GetFileStats(), importFileBufferSize(job))), true
+}
+
 func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	mlog.Info(context.TODO(), "processing pending import task...", WrapTaskLog(t)...)
 	job := t.importMeta.GetJob(context.TODO(), t.GetJobID())
@@ -158,7 +172,8 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 		t.retryTimes++
 		return
 	}
-	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot())
+	resource, _ := t.GetTaskResource()
+	err = cluster.CreateImport(nodeID, req, t.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "import failed", WrapTaskLog(t, mlog.Err(err))...)
 		t.retryTimes++

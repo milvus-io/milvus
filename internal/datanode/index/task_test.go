@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
+	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/metric"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -144,7 +145,7 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
 	suite.NoError(err)
 
-	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil)
+	t := NewIndexBuildTask(ctx, cancel, req, cm, NewTaskManager(context.Background()), nil, taskcommon.Resource{})
 
 	err = t.PreExecute(context.Background())
 	suite.NoError(err)
@@ -204,7 +205,7 @@ func (suite *IndexBuildTaskSuite) TestExecuteDoesNotLogStorageCredentials() {
 		ExternalSpec:   externalSpec,
 	}
 
-	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(ctx), nil)
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(ctx), nil, taskcommon.Resource{})
 	task.newIndexParams = map[string]string{
 		common.IndexTypeKey:  "FLAT",
 		common.MetricTypeKey: metric.L2,
@@ -245,7 +246,7 @@ func (suite *IndexBuildTaskSuite) TestPostExecuteAcceptsEmptyIndexStats() {
 		CurrentIndexVersion:       currentIndexVersion,
 		CurrentScalarIndexVersion: currentScalarIndexVersion,
 	}
-	task := NewIndexBuildTask(ctx, cancel, req, nil, manager, nil)
+	task := NewIndexBuildTask(ctx, cancel, req, nil, manager, nil, taskcommon.Resource{})
 	index := &emptyIndex{}
 	task.index = index
 
@@ -288,7 +289,7 @@ func (suite *IndexBuildTaskSuite) TestMaxConnectionsReachesCreateIndex() {
 			MaxConnections: 237,
 		},
 	}
-	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil)
+	task := NewIndexBuildTask(ctx, cancel, req, nil, NewTaskManager(context.Background()), nil, taskcommon.Resource{})
 	task.newIndexParams = map[string]string{common.IndexTypeKey: "FLAT"}
 	task.newTypeParams = map[string]string{"dim": "128"}
 	task.tr = timerecord.NewTimeRecorder("test-max-connections")

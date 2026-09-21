@@ -138,6 +138,61 @@ func (_c *MockTask_GetTaskID_Call) RunAndReturn(run func() int64) *MockTask_GetT
 	return _c
 }
 
+// GetTaskResource provides a mock function with no fields
+func (_m *MockTask) GetTaskResource() (taskcommon.Resource, bool) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetTaskResource")
+	}
+
+	var r0 taskcommon.Resource
+	var r1 bool
+	if rf, ok := ret.Get(0).(func() (taskcommon.Resource, bool)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() taskcommon.Resource); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(taskcommon.Resource)
+	}
+
+	if rf, ok := ret.Get(1).(func() bool); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
+}
+
+// MockTask_GetTaskResource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTaskResource'
+type MockTask_GetTaskResource_Call struct {
+	*mock.Call
+}
+
+// GetTaskResource is a helper method to define mock.On call
+func (_e *MockTask_Expecter) GetTaskResource() *MockTask_GetTaskResource_Call {
+	return &MockTask_GetTaskResource_Call{Call: _e.mock.On("GetTaskResource")}
+}
+
+func (_c *MockTask_GetTaskResource_Call) Run(run func()) *MockTask_GetTaskResource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTask_GetTaskResource_Call) Return(_a0 taskcommon.Resource, _a1 bool) *MockTask_GetTaskResource_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockTask_GetTaskResource_Call) RunAndReturn(run func() (taskcommon.Resource, bool)) *MockTask_GetTaskResource_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetTaskSlot provides a mock function with no fields
 func (_m *MockTask) GetTaskSlot() int64 {
 	ret := _m.Called()
@@ -436,7 +491,8 @@ func (_c *MockTask_SetTaskTime_Call) RunAndReturn(run func(taskcommon.TimeType, 
 func NewMockTask(t interface {
 	mock.TestingT
 	Cleanup(func())
-}) *MockTask {
+},
+) *MockTask {
 	mock := &MockTask{}
 	mock.Mock.Test(t)
 
