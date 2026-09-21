@@ -59,8 +59,8 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	store, err := loadmgr.RecoverLoadConfigStore(ctx, querycoord.NewCatalog(nil))
 	require.NoError(t, err)
 	// Use real replaying source hooks; mock only the node source boundary.
-	nodes := &fakeNodeProvider{}
-	nodePatch := mockey.Mock((*fakeNodeProvider).RegisterNodeListener).To(func(_ *fakeNodeProvider, listener balancercache.NodeListener) func() {
+	nodes := &testNodePublisher{}
+	nodePatch := mockey.Mock((*testNodePublisher).RegisterNodeListener).To(func(_ *testNodePublisher, listener balancercache.NodeListener) func() {
 		listener(1, &NodeInfo{NodeID: 1, Alive: true})
 		return func() {}
 	}).Build()
@@ -78,7 +78,9 @@ func TestBalancerConsumesRealDataViewManager(t *testing.T) {
 	require.Equal(t, int64(42), cache.GetNode(1).Info().PendingRowCount)
 }
 
+type testNodePublisher struct{}
+
 // Patched with mockey: there is no hand-written node source behavior.
-func (*fakeNodeProvider) RegisterNodeListener(balancercache.NodeListener) func() {
+func (*testNodePublisher) RegisterNodeListener(balancercache.NodeListener) func() {
 	panic("mock with mockey")
 }
