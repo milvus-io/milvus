@@ -106,6 +106,18 @@ class File {
     std::string filepath_;
 };
 
+// Best-effort eviction of a file's pages from the OS page cache.
+inline void
+EvictFilePageCache(int fd) noexcept {
+#if defined(__linux__)
+    (void)posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+#elif defined(__APPLE__)
+    (void)fcntl(fd, F_NOCACHE, 1);
+#else
+    (void)fd;
+#endif
+}
+
 class MmapFileRAII {
  public:
     MmapFileRAII(const std::string& filepath) : file_path_(filepath) {
