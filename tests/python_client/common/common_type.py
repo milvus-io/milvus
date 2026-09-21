@@ -581,6 +581,8 @@ class CaseLabel:
             loadbalance testcases which need to be run in multi query nodes
         ClusterOnly:
             For functions only suitable to cluster mode
+        SparkBackfill:
+            Dedicated Spark-Milvus Backfill E2E tests
         GPU:
             For GPU supported cases
     """
@@ -592,6 +594,7 @@ class CaseLabel:
     RBAC = "RBAC"
     Loadbalance = "Loadbalance"  # loadbalance testcases which need to be run in multi query nodes
     ClusterOnly = "ClusterOnly"  # For functions only suitable to cluster mode
+    SparkBackfill = "SparkBackfill"  # Dedicated Spark-Milvus Backfill E2E tests
     MultiQueryNodes = "MultiQueryNodes"  # for 8 query nodes configs tests, such as resource group
     GPU = "GPU"
     CDC = "CDC"
