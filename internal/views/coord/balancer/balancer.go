@@ -33,19 +33,12 @@ type DefaultBalancer struct {
 	reconcileMu    sync.Mutex
 	viewRegistry   *coordview.ShardViewRegistry
 	policy         BalancePolicy
-	discovery      DiscoveryPublisher
 	queue          *triggerQueue
 	tickerInterval time.Duration
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-}
-
-// SetDiscoveryPublisher connects the component-level discovery boundary. Call
-// before Start. Production transport/subscription wiring is supplied separately.
-func (b *DefaultBalancer) SetDiscoveryPublisher(p DiscoveryPublisher) {
-	b.discovery = p
 }
 
 // NewDefaultBalancer constructs the standard Balancer controller.
@@ -195,29 +188,9 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		return nil
 	}
 	var errs []error
-	blocked := make(map[int64]bool)
-	if b.discovery != nil {
-		for _, update := range plan.Discovery {
-			if !b.discovery.UpdateCollectionDiscovery(update) {
-				blocked[update.CollectionID] = true
-				b.Trigger(TriggerScope{DirtyCollections: []int64{update.CollectionID}})
-				errs = append(errs, merr.WrapErrServiceUnavailableMsg("collection %d discovery inputs changed during balance", update.CollectionID))
-			}
-		}
-	}
-	isBlocked := func(id qviews.ShardID) bool {
-		collectionID, ok := parseShardCollection(id)
-		if !ok {
-			collectionID, _ = b.cache.CollectionForReplica(id.ReplicaID)
-		}
-		return blocked[collectionID]
-	}
 	batch := b.viewRegistry.Begin()
 	defer batch.Commit()
 	for _, shardID := range plan.Releases {
-		if isBlocked(shardID) {
-			continue
-		}
 		mgr := b.viewRegistry.Get(shardID)
 		if mgr == nil {
 			continue
@@ -228,7 +201,7 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 		}
 	}
 	for shardID, builder := range plan.Prepares {
-		if builder == nil || isBlocked(shardID) {
+		if builder == nil {
 			continue
 		}
 		mgr := b.viewRegistry.Ensure(shardID)

@@ -2,7 +2,6 @@ package balancer
 
 import (
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
-	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
@@ -27,8 +26,6 @@ type BalancePolicy interface {
 // A shard listed in neither Prepares nor Releases is implicitly a no-op for
 // this batch.
 type BalancePlan struct {
-	// Discovery is published before releasing retired/suspended views.
-	Discovery []loadmgr.CollectionDiscoveryUpdate
 	// Retries could not be allocated because desired inputs or eligible nodes were unavailable.
 	Retries []qviews.ShardID
 	// Prepares lists shards that should receive a new Preparing view.
@@ -36,6 +33,6 @@ type BalancePlan struct {
 	Prepares map[qviews.ShardID]*qviews.QueryViewAtCoordBuilder
 
 	// Releases lists shards whose existing views should be released
-	// (desired state absent but current views still exist).
+	// (desired state absent or a suspended replica can safely drain).
 	Releases []qviews.ShardID
 }

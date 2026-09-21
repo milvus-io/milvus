@@ -12,9 +12,8 @@ import (
 // DefaultBalancePolicy retains target layouts across batches. Actual facts and
 // row predictions remain in the cache and call-local planning context respectively.
 type DefaultBalancePolicy struct {
-	mu                sync.Mutex
-	layouts           layoutManager
-	discoveryRevision uint64
+	mu      sync.Mutex
+	layouts layoutManager
 }
 
 // NewDefaultBalancePolicy creates the standard balance policy.
@@ -103,8 +102,6 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	sort.Slice(plan.Releases, func(i, j int) bool {
 		return shardLess(plan.Releases[i], plan.Releases[j])
 	})
-	p.discoveryRevision++
-	plan.Discovery = planDiscovery(snap, plan.Releases, p.discoveryRevision)
 	return plan
 }
 
