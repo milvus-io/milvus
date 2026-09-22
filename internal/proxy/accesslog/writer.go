@@ -22,6 +22,8 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,9 +162,16 @@ type RotateWriter struct {
 }
 
 func NewRotateWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.MinioConfig) (*RotateWriter, error) {
+	localPath := logCfg.LocalPath.GetValue()
+	fileName := logCfg.Filename.GetValue()
+
+	if err := validateLogPath(localPath, fileName); err != nil {
+		return nil, err
+	}
+
 	logger := &RotateWriter{
-		localPath:   logCfg.LocalPath.GetValue(),
-		fileName:    logCfg.Filename.GetValue(),
+		localPath:   localPath,
+		fileName:    fileName,
 		rotatedTime: logCfg.RotatedTime.GetAsInt64(),
 		maxSize:     logCfg.MaxSize.GetAsInt(),
 		maxBackups:  logCfg.MaxBackups.GetAsInt(),
@@ -397,6 +406,33 @@ func (l *RotateWriter) start() {
 
 func (l *RotateWriter) max() int64 {
 	return int64(l.maxSize) * int64(megabyte)
+}
+
+var allowedLogDirs = []string{
+	"/tmp",
+	"/var/lib/milvus",
+	"/milvus",
+}
+
+func validateLogPath(localPath string, fileName string) error {
+	if localPath == "" {
+		return nil
+	}
+	cleaned := filepath.Clean(localPath)
+	allowed := false
+	for _, dir := range allowedLogDirs {
+		if cleaned == dir || strings.HasPrefix(cleaned, dir+string(filepath.Separator)) {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return merr.WrapErrParameterInvalidMsg("access log path %s is not under an allowed directory", cleaned)
+	}
+	if strings.Contains(fileName, "..") || strings.Contains(fileName, string(filepath.Separator)) {
+		return merr.WrapErrParameterInvalidMsg("access log filename %s must not contain path separators or '..'", fileName)
+	}
+	return nil
 }
 
 func (l *RotateWriter) dir() string {
