@@ -921,7 +921,7 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 		err := buffer.writer.Close()
 		buffer.lock.Unlock()
 		if err != nil {
-			mlog.Warn(ctx, "failed to close clustering compaction writer during cleanup", mlog.Int("bufferID", buffer.id), mlog.Err(err))
+			mlog.RatedWarn(ctx, 1.0, "failed to close clustering compaction writer during cleanup", mlog.Int("bufferID", buffer.id), mlog.Err(err))
 		}
 	}
 	if t.mappingPool != nil {
