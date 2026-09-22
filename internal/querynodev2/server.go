@@ -31,6 +31,7 @@ import "C"
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -342,8 +343,12 @@ func (node *QueryNode) Init() error {
 
 		err = node.initHook()
 		if err != nil {
-			// auto index cannot work if hook init failed
-			if paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
+			// A hook configured both ways is a contradiction in the
+			// deployment, not an optional plug-in that is absent: refuse to
+			// start whatever autoIndex.enable says. Any other failure keeps
+			// the old rule - auto index cannot work without a hook, so it is
+			// fatal only when auto index is on.
+			if hookInitIsFatal(err) {
 				mlog.Error(node.ctx, "QueryNode init hook failed", mlog.Err(err))
 				initError = err
 				return
@@ -635,21 +640,37 @@ func (node *QueryNode) SetAddress(address string) {
 	node.address = address
 }
 
+// errQueryHookConflict is returned when a compiled-in query hook and
+// queryNode.soPath are both configured. A hook that fails to load is an
+// optional plug-in that may be absent, but this is a contradiction in the
+// deployment, so Init refuses to start on it whatever autoIndex.enable says.
+var errQueryHookConflict = errors.New("queryNode.soPath and a compiled-in query hook are both configured")
+
+// hookInitIsFatal reports whether an initHook error must stop the QueryNode.
+// A queryNode.soPath configured beside a compiled-in hook is a contradiction
+// and is always fatal; any other failure - no path at all, a plug-in that
+// does not load - is fatal only when auto index is on, because that is the
+// only feature that needs a hook.
+func hookInitIsFatal(err error) bool {
+	return errors.Is(err, errQueryHookConflict) || paramtable.Get().AutoIndexConfig.Enable.GetAsBool()
+}
+
 // initHook installs the parameter tuning hook: the one compiled into this
 // binary if a distribution installed one, otherwise the plug-in at
 // queryNode.soPath.
 //
 // A compiled-in hook is used in preference to the plug-in, and a deployment
-// that configures both is refused: both would tune every search, and picking
-// silently would make which one wins depend on start-up order rather than on
-// the deployment. It is otherwise treated exactly as the plug-in is: the same
-// two Init calls with the autoIndex configuration, the same watchers.
+// that configures both is refused (errQueryHookConflict): both would tune
+// every search, and picking silently would make which one wins depend on
+// start-up order rather than on the deployment. It is otherwise treated
+// exactly as the plug-in is: the same two Init calls with the autoIndex
+// configuration, the same watchers.
 func (node *QueryNode) initHook() error {
 	path := paramtable.Get().QueryNodeCfg.SoPath.GetValue()
 
 	if compiled := extension.InstalledQueryHook(); compiled != nil {
 		if path != "" {
-			return merr.WrapErrServiceInternalMsg(
+			return merr.Wrapf(errQueryHookConflict,
 				"queryNode.soPath is set to %q and a query hook is also compiled in; "+
 					"both tune every search, and only one can", path)
 		}
