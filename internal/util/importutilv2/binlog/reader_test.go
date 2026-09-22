@@ -2771,14 +2771,15 @@ func TestBinlogReader_InitDependencyErrors(t *testing.T) {
 				paths = paths[:1]
 			}
 			err := r.init(paths, 0, math.MaxUint64)
-			if name == "no_delta" {
+			switch name {
+			case "no_delta":
 				require.NoError(t, err)
 				require.NotNil(t, r.dr)
-			} else if name == "walk_delta" {
+			case "walk_delta":
 				// The shared walk helper classifies raw backend failures as IO.
 				require.ErrorIs(t, err, merr.ErrIoFailed)
 				require.ErrorContains(t, err, cause.Error())
-			} else {
+			default:
 				require.ErrorIs(t, err, cause)
 			}
 		})
