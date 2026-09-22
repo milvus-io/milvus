@@ -1840,7 +1840,7 @@ func (node *QueryNode) DropIndex(ctx context.Context, req *querypb.DropIndexRequ
 			return merr.Status(err), nil
 		}
 	}
-	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()))
+	segments, err := node.manager.Segment.GetAndPinBy(segments.WithID(req.GetSegmentID()), segments.WithType(segments.SegmentTypeSealed))
 	if err != nil {
 		return merr.Status(err), nil
 	}

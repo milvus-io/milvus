@@ -599,7 +599,10 @@ func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
 func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 	action := task.Actions()[step].(*DropIndexAction)
 	defer action.rpcReturned.Store(true)
-	ctx := task.Context()
+	// A stalled response must not retain the segment's scheduler key forever.
+	// The deadline bounds the RPC; it does not drain native work on the node.
+	ctx, cancel := context.WithTimeout(task.Context(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
 	log := log.Ctx(ctx).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),

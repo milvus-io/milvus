@@ -38,6 +38,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -341,6 +342,7 @@ type LocalSegment struct {
 	insertCount *atomic.Int64
 
 	deltaMut           sync.Mutex
+	indexDropSem       *semaphore.Weighted
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo] // indexID -> IndexedFieldInfo
@@ -412,6 +414,7 @@ func NewSegment(ctx context.Context,
 		lastDeltaTimestamp: atomic.NewUint64(0),
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
+		indexDropSem:       semaphore.NewWeighted(1),
 		fieldJSONStats:     make(map[int64]*querypb.JsonStatsInfo),
 
 		memSize:     atomic.NewInt64(-1),
@@ -608,6 +611,15 @@ func (s *LocalSegment) HasFieldData(fieldID int64) bool {
 }
 
 func (s *LocalSegment) DropIndex(ctx context.Context, indexID int64) error {
+	// Native drops cannot be canceled. A retry must recheck index metadata
+	// after its predecessor finishes, before resolving an index ID to a field.
+	if err := s.indexDropSem.Acquire(ctx, 1); err != nil {
+		return err
+	}
+	defer s.indexDropSem.Release(1)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !s.ptrLock.PinIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
