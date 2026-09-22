@@ -444,6 +444,58 @@ TEST_F(ChunkedColumnGroupTest, DeferredBulkReadPassesContextAndAllowsRetry) {
     EXPECT_EQ(factory_calls, 2);
 }
 
+TEST_F(ChunkedColumnGroupTest, DeferredScanPassesContextAndAllowsRetry) {
+    int factory_calls = 0;
+    OpContext* observed_ctx = nullptr;
+    auto group =
+        std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext* op_ctx) {
+            observed_ctx = op_ctx;
+            ++factory_calls;
+            segcore::CheckCancellation(
+                op_ctx, 1, "DeferredScanPassesContextAndAllowsRetry");
+            return MakeGroupTranslator("deferred-scan-cancellation-retry");
+        });
+    std::shared_ptr<ChunkedColumnInterface> column =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    const auto options = ChunkedColumnInterface::ScanOptions::ForData(
+        1, ChunkedColumnInterface::TargetType::Int64);
+
+    folly::CancellationSource pre_cancelled;
+    pre_cancelled.requestCancellation();
+    OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+    try {
+        column->Scan(&pre_cancelled_ctx, options);
+        FAIL() << "expected cancelled scan initialization";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(observed_ctx, &pre_cancelled_ctx);
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 1);
+
+    OpContext fresh_ctx;
+    auto cursor = column->Scan(&fresh_ctx, options);
+    ASSERT_NE(cursor, nullptr);
+    EXPECT_EQ(observed_ctx, &fresh_ctx);
+    EXPECT_TRUE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 2);
+    EXPECT_EQ(cursor->Position(), 1);
+
+    ChunkedColumnInterface::ScanBatch batch;
+    ASSERT_TRUE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(batch.row_id_start, 1);
+    ASSERT_EQ(batch.size, 4);
+    const auto* values = batch.values.data_as<int64_t>();
+    for (int64_t i = 0; i < batch.size; ++i) {
+        EXPECT_EQ(values[i], int64_data[i + 1]);
+    }
+    EXPECT_EQ(cursor->Position(), 5);
+    EXPECT_FALSE(cursor->Next(
+        5, ChunkedColumnInterface::ScanReadMode::DataAndValidity, &batch));
+    EXPECT_EQ(factory_calls, 2);
+}
+
 TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     chunks[FieldId(1)] = int64_chunk;

@@ -414,6 +414,12 @@ class ProxyChunkColumn : public ChunkedColumnInterface {
         }
     }
 
+    ScanResult
+    Scan(milvus::OpContext* op_ctx, const ScanOptions& options) const override {
+        group_->Prepare(op_ctx);
+        return ChunkedColumnInterface::Scan(op_ctx, options);
+    }
+
     PinWrapper<const char*>
     DataOfChunk(milvus::OpContext* op_ctx, int chunk_id) const override {
         auto group_chunk = group_->GetGroupChunk(op_ctx, chunk_id);
