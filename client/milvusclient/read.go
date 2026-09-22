@@ -318,20 +318,19 @@ func newEmptyStructArrayColumn(field *entity.Field, selectedSubFields map[string
 		return nil, errors.Newf("struct array field %q has no struct schema", field.Name)
 	}
 
-	subColumns := make([]column.Column, 0, len(field.StructSchema.Fields))
+	selectedSchema := entity.NewStructSchema()
 	for _, subField := range field.StructSchema.Fields {
 		if selectedSubFields != nil {
 			if _, ok := selectedSubFields[subField.Name]; !ok {
 				continue
 			}
 		}
-		subColumn, err := newStructSubColumn(subField)
-		if err != nil {
-			return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
-		}
-		subColumns = append(subColumns, subColumn)
+		selectedSchema.WithField(subField)
 	}
-	col := column.NewColumnStructArray(field.Name, subColumns)
+	col, err := column.NewColumnStructArrayFromSchema(field.Name, selectedSchema)
+	if err != nil {
+		return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
+	}
 	col.SetNullable(field.Nullable)
 	if err := col.ValidateNullable(); err != nil {
 		return nil, errors.Wrapf(err, "create empty struct array field %q", field.Name)
