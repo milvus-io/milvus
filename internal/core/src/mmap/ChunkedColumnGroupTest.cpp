@@ -496,6 +496,55 @@ TEST_F(ChunkedColumnGroupTest, DeferredScanPassesContextAndAllowsRetry) {
     EXPECT_EQ(factory_calls, 2);
 }
 
+TEST_F(ChunkedColumnGroupTest, DeferredTakePassesContextAndAllowsRetry) {
+    int factory_calls = 0;
+    OpContext* observed_ctx = nullptr;
+    auto group =
+        std::make_shared<ChunkedColumnGroup>(5, 2, [&](OpContext* op_ctx) {
+            observed_ctx = op_ctx;
+            ++factory_calls;
+            segcore::CheckCancellation(
+                op_ctx, 1, "DeferredTakePassesContextAndAllowsRetry");
+            return MakeGroupTranslator("deferred-take-cancellation-retry");
+        });
+    std::shared_ptr<ChunkedColumnInterface> column =
+        std::make_shared<ProxyChunkColumn>(group, FieldId(1), int64_field_meta);
+    const std::vector<int64_t> offsets{4, 1, 4, 0};
+    const ChunkedColumnInterface::TakeOptions options{
+        ChunkedColumnInterface::OffsetView::From(
+            offsets.data(), static_cast<int64_t>(offsets.size())),
+        ChunkedColumnInterface::TargetType::Int64};
+
+    folly::CancellationSource pre_cancelled;
+    pre_cancelled.requestCancellation();
+    OpContext pre_cancelled_ctx(pre_cancelled.getToken());
+    try {
+        column->Take(&pre_cancelled_ctx, options);
+        FAIL() << "expected cancelled take initialization";
+    } catch (const SegcoreError& error) {
+        EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+    }
+    EXPECT_EQ(observed_ctx, &pre_cancelled_ctx);
+    EXPECT_FALSE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 1);
+
+    OpContext fresh_ctx;
+    auto take = column->Take(&fresh_ctx, options);
+    ASSERT_NE(take, nullptr);
+    EXPECT_EQ(observed_ctx, &fresh_ctx);
+    EXPECT_TRUE(group->IsMaterialized());
+    EXPECT_EQ(factory_calls, 2);
+    ASSERT_EQ(take->Size(), static_cast<int64_t>(offsets.size()));
+    for (int64_t i = 0; i < take->Size(); ++i) {
+        const auto item = take->Get<int64_t>(i);
+        EXPECT_TRUE(item.is_valid);
+        EXPECT_FALSE(item.data_skipped);
+        ASSERT_TRUE(item.value.has_value());
+        EXPECT_EQ(*item.value, int64_data[offsets[i]]);
+    }
+    EXPECT_EQ(factory_calls, 2);
+}
+
 TEST_F(ChunkedColumnGroupTest, ProxyChunkColumn) {
     std::unordered_map<FieldId, std::shared_ptr<Chunk>> chunks;
     chunks[FieldId(1)] = int64_chunk;
