@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	milvusmock "github.com/milvus-io/milvus/internal/util/mock"
@@ -932,6 +933,7 @@ func Test_NewServer_HTTPServer_TimeoutConfigOverrides(t *testing.T) {
 
 func startProxyHTTPServerForTest(t *testing.T, server *Server) {
 	t.Helper()
+	accesslog.InitAccessLogger(paramtable.Get())
 
 	listener, err := netutil.NewListener()
 	assert.NoError(t, err)
