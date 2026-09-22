@@ -63,6 +63,21 @@ StorageV2FSCache::Get(const Key& key) {
         props[PROPERTY_FS_TLS_MIN_VERSION] = key.tls_min_version;
     }
     props[PROPERTY_FS_USE_CRC32C_CHECKSUM] = key.use_crc32c_checksum;
+    if (key.storage_type != "local") {
+        props[PROPERTY_FS_TALON_MODE] = key.talon_mode;
+        props[PROPERTY_FS_TALON_COORDINATOR] = key.talon_coordinator;
+        if (key.talon_small_read_threshold > 0) {
+            props[PROPERTY_FS_TALON_SMALL_READ_THRESHOLD] =
+                key.talon_small_read_threshold;
+        }
+        if (key.talon_block_size > 0) {
+            props[PROPERTY_FS_TALON_BLOCK_SIZE] = key.talon_block_size;
+        }
+        if (key.talon_max_idle_per_addr > 0) {
+            props[PROPERTY_FS_TALON_MAX_IDLE_PER_ADDR] =
+                key.talon_max_idle_per_addr;
+        }
+    }
 
     LOG_INFO(
         "StorageV2FSCache::Get: address={}, bucket={}, key_prefix={}, "

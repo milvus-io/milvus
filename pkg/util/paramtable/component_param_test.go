@@ -234,6 +234,34 @@ func TestComponentParam_StorageIopsParams(t *testing.T) {
 	}
 }
 
+func TestComponentParam_StorageTalonParams(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
+	assert.False(t, params.CommonCfg.StorageTalonEnableForExternalTable.GetAsBool())
+	assert.Equal(t, uint32(524288), params.CommonCfg.StorageTalonSmallReadThreshold.GetAsUint32())
+	for _, tc := range []struct {
+		item    *ParamItem
+		valid   string
+		want    uint32
+		invalid []string
+	}{
+		{&params.CommonCfg.StorageTalonMode, "2", 2, []string{"-1", "3", "4294967296", "invalid"}},
+		{&params.CommonCfg.StorageTalonSmallReadThreshold, "65536", 65536, []string{"0", "1048577", "4294967296"}},
+		{&params.CommonCfg.StorageTalonBlockSize, "8388608", 8388608, []string{"0", "-1", "4294967296"}},
+		{&params.CommonCfg.StorageTalonMaxIdlePerAddr, "32", 32, []string{"0", "-1", "4294967296"}},
+	} {
+		t.Run(tc.item.Key, func(t *testing.T) {
+			require.NoError(t, params.Save(tc.item.Key, tc.valid))
+			assert.Equal(t, tc.want, tc.item.GetAsUint32())
+			for _, invalid := range tc.invalid {
+				require.NoError(t, params.Save(tc.item.Key, invalid))
+				assert.Panics(t, func() { tc.item.GetAsUint32() }, invalid)
+			}
+			require.NoError(t, params.Reset(tc.item.Key))
+		})
+	}
+}
+
 func TestLoadAdmissionAsyncMemoryDefault(t *testing.T) {
 	pt := &ComponentParam{}
 	pt.Init(NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil)))
