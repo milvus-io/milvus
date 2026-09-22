@@ -257,6 +257,15 @@ pulsar:
   # If these options is zero, no subscription will be created, so pulsar cluster must close the backlog protection, otherwise the milvus can not recovered if backlog exceed.
   # If this option is zero or negative, it will be ignored and the default value (100m) will be used.
   backlogAutoClearBytes: 100m
+  # The access mode of the pulsar producer that a streaming node creates for a wal topic, shared or exclusive.
+  # exclusive: the producer creation fails while another producer is connected to the topic, and the streaming node retries it.
+  # shared: multiple producers can write to the topic at the same time.
+  # exclusive access is enforced by pulsar broker 2.8.0 or later.
+  producerAccessMode: exclusive
+  # The max time that a streaming node retries creating the pulsar producer when it opens a wal, 1m by default.
+  # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+  # When it is exceeded, the wal open fails and the streaming coord retries the assignment later. 0 disables the limit.
+  producerCreateTimeout: 1m
 
 # If you want to enable kafka, needs to comment the pulsar configs
 # kafka:
@@ -955,6 +964,32 @@ grpc:
   gracefulStopTimeout: 3 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
+    # The compression tier for gRPC messages: fastest, default, better, best.
+    # snappy and s2 have three tiers rather than four, so fastest and default behave identically for them.
+    compressionLevel: default
+    # The gRPC compression algorithm: zstd, snappy, or s2.
+    # Only zstd is understood by every Milvus version. A node that has not been upgraded yet has no snappy or s2 decompressor
+    # and rejects those encodings, failing every RPC sent to it, and there is no automatic fallback.
+    # Change this only after every node in the cluster has been upgraded.
+    compressionAlgorithm: zstd
+    # Whether the zstd encoder embeds a per-frame checksum. Off by default: it costs throughput on every message,
+    # while TCP already checksums the link and zstd's entropy decoding rejects a damaged frame rather than
+    # returning garbage. Turn it on where a verified end-to-end integrity check on the payload is worth the cost.
+    # Frames a peer wrote with a checksum are still verified either way.
+    compressionCRC: false
+    # Size of the zstd encoder state pool, as a multiple of GOMAXPROCS (default 2). It also sizes the free
+    # lists every codec parks its per-message writers and readers in, so it is the one ceiling on how much
+    # memory compression holds.
+    # Compression always runs inline on the gRPC goroutine handling the RPC; this is not a thread count.
+    # For the zstd encoder it is the ceiling on how many RPCs may compress at the same time: once every state is
+    # borrowed, further callers block until one is returned, so too small a pool costs throughput under load.
+    # Decoding does not draw on it -- an inbound message takes a pooled streaming decoder instead.
+    # The encoder pool is allocated on the first message this process compresses -- nothing at startup, then all of
+    # it at once -- and costs this value x GOMAXPROCS x the per-state size: roughly 2.6MB at fastest, 3.6MB at
+    # default, 6.5MB at better and 36MB at best. Most of a state is its history buffer, which is only allocated
+    # once that state sees a message above 128KB, so RSS reaches that figure in two steps.
+    # Raising this at a high compressionLevel is therefore expensive.
+    compressionConcurrency: 2
     dialTimeout: 200
     keepAliveTime: 10000
     keepAliveTimeout: 20000
@@ -1342,6 +1377,11 @@ streaming:
     # The timeout of wal balancer operation, 30m by default.
     # If the operation exceeds this timeout, it will be canceled.
     operationTimeout: 30m
+    # The wait time before assigning the pchannels of a streaming node that has left the session view to another streaming node, 5s by default.
+    # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration
+    # It gives the old streaming node time to exit before another streaming node writes to the same wal.
+    # It lowers the chance of two writers on one wal but does not rule it out. 0 disables the wait.
+    nodeLostGracePeriod: 5s
     balancePolicy:
       name: vchannelFair # The multiplier of balance task trigger backoff, 2 by default
       # Whether to allow rebalance, true by default.

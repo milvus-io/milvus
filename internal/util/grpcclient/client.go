@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -116,6 +117,7 @@ type ClientBase[T interface {
 	ClientMaxSendSize      int
 	ClientMaxRecvSize      int
 	CompressionEnabled     bool
+	CompressionAlgorithm   string
 	RetryServiceNameConfig string
 
 	DialTimeout      time.Duration
@@ -155,6 +157,7 @@ func NewClientBase[T interface {
 		InitialBackoff:          config.InitialBackoff.GetAsFloat(),
 		MaxBackoff:              config.MaxBackoff.GetAsFloat(),
 		CompressionEnabled:      config.CompressionEnabled.GetAsBool(),
+		CompressionAlgorithm:    config.CompressionAlgorithm.GetValue(),
 		minResetInterval:        config.MinResetInterval.GetAsDuration(time.Millisecond),
 		minSessionCheckInterval: config.MinSessionCheckInterval.GetAsDuration(time.Millisecond),
 		maxCancelError:          config.MaxCancelError.GetAsInt32(),
@@ -266,7 +269,17 @@ func (c *ClientBase[T]) connect(ctx context.Context) error {
 	var conn *grpc.ClientConn
 	compress := None
 	if c.CompressionEnabled {
-		compress = Zstd
+		compress = c.CompressionAlgorithm
+		if encoding.GetCompressor(compress) == nil {
+			// grpc fails every RPC on the connection with "Compressor is not
+			// installed" for an encoding it does not know, so degrade to the
+			// algorithm every build registers rather than taking the client down.
+			// An empty algorithm lands here too, and would otherwise disable
+			// compression silently despite CompressionEnabled being set.
+			log.Warn("no compressor registered for the configured grpc compression algorithm, falling back to zstd",
+				zap.String("compressionAlgorithm", c.CompressionAlgorithm))
+			compress = Zstd
+		}
 	}
 	if c.encryption {
 		log.Ctx(ctx).Debug("Running in internalTLS mode with encryption enabled")

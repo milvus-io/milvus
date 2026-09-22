@@ -26,6 +26,10 @@ etcd:
   replicaCount: 1
 extraConfigFiles:
   user.yaml: |
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     etcd:
       use:
         embed: true
@@ -47,6 +51,10 @@ indexCoordinator:
     interval: 1
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     indexCoord:
       scheduler:
         interval: 100
