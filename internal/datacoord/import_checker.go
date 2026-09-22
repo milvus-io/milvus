@@ -82,6 +82,14 @@ type importChecker struct {
 
 	closeOnce sync.Once
 	closeChan chan struct{}
+
+	// Preparation owns no worker tasks until its complete plan is durable.
+	// Bound source I/O separately from the state-machine loop and stop all
+	// attempts before releasing this checker on leadership loss/shutdown.
+	prepareMu     sync.Mutex
+	preparing     map[int64]context.CancelFunc
+	prepareWG     sync.WaitGroup
+	prepareClosed bool
 }
 
 func NewImportChecker(ctx context.Context,
@@ -129,6 +137,7 @@ func (c *importChecker) runStateMachineLoop() {
 			mlog.Info(c.ctx, "import checker state-machine loop exited")
 			return
 		case <-ticker.C:
+			c.cancelInactiveSnapshotPreparations()
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
@@ -192,7 +201,14 @@ func (c *importChecker) runGCLoop() {
 
 func (c *importChecker) Close() {
 	c.closeOnce.Do(func() {
+		c.prepareMu.Lock()
+		c.prepareClosed = true
+		for _, cancel := range c.preparing {
+			cancel()
+		}
 		close(c.closeChan)
+		c.prepareMu.Unlock()
+		c.prepareWG.Wait()
 	})
 }
 
@@ -266,12 +282,16 @@ func (c *importChecker) getLackFilesForImports(job ImportJob) []*datapb.ImportFi
 }
 
 func (c *importChecker) checkPendingJob(job ImportJob) {
+	if importutilv2.IsSnapshotPreparation(job.GetFiles()) {
+		c.scheduleSnapshotPreparation(job)
+		return
+	}
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
 	lacks := c.getLackFilesForPreImports(job)
 	if len(lacks) == 0 {
 		return
 	}
-	fileGroups := lo.Chunk(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
+	fileGroups := groupPreImportFiles(lacks, Params.DataCoordCfg.FilesPerPreImportTask.GetAsInt())
 
 	newTasks, err := NewPreImportTasks(fileGroups, job, c.alloc, c.importMeta)
 	if err != nil {

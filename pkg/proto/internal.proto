@@ -400,6 +400,16 @@ enum ImportJobState {
   AssigningIDRange = 10;
 }
 
+// Immutable, coordinator-expanded input for snapshot import.
+message SnapshotImportSource {
+  uint32 version = 1;
+  string manifest_path = 2;
+  // Versions 3/4 carry an explicit destination in instance/external storage.
+  int64 target_partition_id = 6;
+  // Version 9 is Pending-only metadata, replaced before worker dispatch.
+  bytes snapshot_metadata = 9;
+}
+
 message ImportFile {
   int64 id = 1;
   // A singular row-based file or multiple column-based files.
@@ -416,6 +426,9 @@ message ImportFile {
   // the cross-cluster divergence authority each cluster checks its local count against.
   // Unset on backup / L0 / legacy imports.
   common.IDRange id_range = 4;
+  // Mutually exclusive with paths. Empty legacy paths make old consumers fail
+  // closed instead of ignoring the snapshot source contract.
+  SnapshotImportSource snapshot_source = 5;
 }
 
 message ImportRequestInternal {

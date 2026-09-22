@@ -1,20 +1,31 @@
 package testcases
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	miniogo "github.com/minio/minio-go/v7"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/client/v3/bulkwriter"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	pkcommon "github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
 	hp "github.com/milvus-io/milvus/tests/go_client/testcases/helper"
@@ -95,6 +106,145 @@ func waitForExportComplete(ctx context.Context, mc *base.MilvusClient, jobID int
 		}
 	}
 	return nil, fmt.Errorf("timeout waiting for export to complete: jobID=%d", jobID)
+}
+
+func waitForSnapshotImportState(
+	ctx context.Context,
+	baseURL string,
+	apiKey string,
+	jobID string,
+	wantState string,
+	timeout time.Duration,
+) (*bulkwriter.ImportProgressData, error) {
+	deadline := time.Now().Add(timeout)
+	var lastState string
+	for time.Now().Before(deadline) {
+		resp, err := bulkwriter.GetImportProgress(ctx,
+			bulkwriter.NewGetImportProgressOption(baseURL, jobID).WithAPIKey(apiKey))
+		if err != nil {
+			return nil, fmt.Errorf("failed to get import state for job %s: %w", jobID, err)
+		}
+		if resp.Data == nil {
+			return nil, fmt.Errorf("import state response has no data for job %s", jobID)
+		}
+		lastState = resp.Data.State
+		if lastState == wantState {
+			return resp.Data, nil
+		}
+		if lastState == "Failed" {
+			return resp.Data, fmt.Errorf("import job %s failed: %s", jobID, resp.Data.Reason)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return nil, fmt.Errorf("timeout waiting for import job %s to reach %s, last state: %s", jobID, wantState, lastState)
+}
+
+func snapshotImportRESTConfig() (string, string) {
+	baseURL := strings.TrimRight(hp.GetURI(), "/")
+	if !strings.Contains(baseURL, "://") {
+		baseURL = "http://" + baseURL
+	}
+	apiKey := hp.GetToken()
+	if apiKey == "" && (hp.GetUser() != "" || hp.GetPassword() != "") {
+		apiKey = hp.GetUser() + ":" + hp.GetPassword()
+	}
+	return baseURL, apiKey
+}
+
+func relocateSnapshotBundle(
+	ctx context.Context,
+	minioClient *miniogo.Client,
+	bucket string,
+	metadataURI string,
+	sourcePrefix string,
+	targetPrefix string,
+) (string, error) {
+	sourcePrefix = strings.TrimRight(sourcePrefix, "/") + "/"
+	targetPrefix = strings.TrimRight(targetPrefix, "/") + "/"
+
+	sourceObjects := make([]string, 0)
+	metadataObject := ""
+	for object := range minioClient.ListObjects(ctx, bucket, miniogo.ListObjectsOptions{
+		Prefix:    sourcePrefix,
+		Recursive: true,
+	}) {
+		if object.Err != nil {
+			return "", fmt.Errorf("failed to list snapshot export object: %w", object.Err)
+		}
+		sourceObjects = append(sourceObjects, object.Key)
+		if strings.HasSuffix(metadataURI, object.Key) {
+			metadataObject = object.Key
+		}
+	}
+	if len(sourceObjects) == 0 {
+		return "", fmt.Errorf("snapshot export prefix %s is empty", sourcePrefix)
+	}
+	if metadataObject == "" {
+		return "", fmt.Errorf("snapshot metadata URI %s does not identify an object under %s", metadataURI, sourcePrefix)
+	}
+
+	relocatedMetadataObject := ""
+	for _, sourceObject := range sourceObjects {
+		relativePath := strings.TrimPrefix(sourceObject, sourcePrefix)
+		if relativePath == sourceObject {
+			return "", fmt.Errorf("snapshot export object %s is outside prefix %s", sourceObject, sourcePrefix)
+		}
+		targetObject := targetPrefix + relativePath
+		_, err := minioClient.CopyObject(ctx,
+			miniogo.CopyDestOptions{Bucket: bucket, Object: targetObject},
+			miniogo.CopySrcOptions{Bucket: bucket, Object: sourceObject})
+		if err != nil {
+			return "", fmt.Errorf("failed to relocate snapshot object %s to %s: %w", sourceObject, targetObject, err)
+		}
+		if _, err := minioClient.StatObject(ctx, bucket, targetObject, miniogo.StatObjectOptions{}); err != nil {
+			return "", fmt.Errorf("failed to verify relocated snapshot object %s: %w", targetObject, err)
+		}
+		if sourceObject == metadataObject {
+			relocatedMetadataObject = targetObject
+		}
+	}
+
+	// Remove the original bundle before Import starts so success proves that
+	// SnapshotReader rebases every self-contained reference to the new root.
+	for _, sourceObject := range sourceObjects {
+		if err := minioClient.RemoveObject(ctx, bucket, sourceObject, miniogo.RemoveObjectOptions{}); err != nil {
+			return "", fmt.Errorf("failed to remove original snapshot object %s: %w", sourceObject, err)
+		}
+	}
+	if object, ok := <-minioClient.ListObjects(ctx, bucket, miniogo.ListObjectsOptions{
+		Prefix:    sourcePrefix,
+		Recursive: true,
+	}); ok {
+		if object.Err != nil {
+			return "", fmt.Errorf("failed to verify original snapshot prefix removal: %w", object.Err)
+		}
+		return "", fmt.Errorf("original snapshot object still exists after relocation: %s", object.Key)
+	}
+
+	return strings.TrimSuffix(metadataURI, metadataObject) + relocatedMetadataObject, nil
+}
+
+func newSnapshotImportSchema() *entity.Schema {
+	return entity.NewSchema().
+		WithDynamicFieldEnabled(false).
+		WithField(entity.NewField().
+			WithName("id").
+			WithDataType(entity.FieldTypeInt64).
+			WithIsPrimaryKey(true)).
+		WithField(entity.NewField().
+			WithName("tag").
+			WithDataType(entity.FieldTypeVarChar).
+			WithMaxLength(64)).
+		WithField(entity.NewField().
+			WithName("phase").
+			WithDataType(entity.FieldTypeInt64)).
+		WithField(entity.NewField().
+			WithName("document").
+			WithDataType(entity.FieldTypeText)).
+		WithField(entity.NewField().
+			WithName("vector").
+			WithDataType(entity.FieldTypeFloatVector).
+			WithDim(8))
 }
 
 // waitForAllIndexesBuilt polls DescribeIndex for each index in the collection until all indexes
@@ -500,6 +650,678 @@ func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
 
 	err = mc.DropSnapshot(ctx, client.NewDropSnapshotOption(snapshotName, collName))
 	common.CheckErr(t, err, true)
+}
+
+func TestImportStorageV3SnapshotSource(t *testing.T) {
+	runStorageV3SnapshotImport(t, false, "")
+}
+
+func TestImportStorageV3SnapshotSourceCrossBucket(t *testing.T) {
+	t.Run("without_l0", func(t *testing.T) { runStorageV3SnapshotImport(t, true, "") })
+}
+
+func TestImportStorageV3SnapshotSourceBackupSchema(t *testing.T) {
+	// Both layouts exercise manual commit. The first case keeps source PKs
+	// despite target AutoID and fills missing optional/dynamic fields; the second
+	// projects away source-only columns in the extended delete scenarios.
+	t.Run("target_optional", func(t *testing.T) { runStorageV3SnapshotImport(t, false, "target_optional") })
+}
+
+func TestImportStorageV3SnapshotSourcePartitionMapping(t *testing.T) {
+	runStorageV3SnapshotImport(t, false, "partition_mapping")
+}
+
+// Ignoring a plaintext source's EZK needs no cipher plugin and runs in the ordinary
+// suite. The source must actually be plaintext, not merely in a database whose
+// name happens to be "default".
+func TestImportStorageV3SnapshotSourcePlaintextIgnoresEZK(t *testing.T) {
+	ctx := hp.CreateContext(t, 10*time.Minute)
+	db, mc := createSnapshotImportPlaintextDatabase(t, ctx)
+	for _, layout := range []string{"referenced", "self_contained"} {
+		t.Run(layout, func(t *testing.T) {
+			for _, tc := range []struct{ name, ezk string }{
+				{name: "valid", ezk: base64.StdEncoding.EncodeToString([]byte(`{"ez_id":1}`))},
+				{name: "malformed", ezk: "not-base64"},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					runSnapshotImportPlaintextIgnoresEZK(t, ctx, mc, db, layout, tc.ezk)
+				})
+			}
+		})
+	}
+}
+
+// Use test-owned databases even when the cluster encrypts new databases by
+// default. Child-case cleanup runs before these parent database cleanups.
+func createSnapshotImportPlaintextDatabase(t *testing.T, ctx context.Context) (string, *base.MilvusClient) {
+	t.Helper()
+	admin := hp.CreateDefaultMilvusClient(ctx, t)
+	db := common.GenRandomString("snapshot_import_db", 8)
+	require.NoError(t, admin.CreateDatabase(ctx, client.NewCreateDatabaseOption(db).
+		WithProperty(pkcommon.EncryptionEnabledKey, "false")))
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		assert.NoError(t, admin.DropDatabase(cleanupCtx, client.NewDropDatabaseOption(db)))
+	})
+	return db, hp.CreateMilvusClient(ctx, t, &client.ClientConfig{DBName: db})
+}
+
+func runSnapshotImportPlaintextIgnoresEZK(t *testing.T, ctx context.Context, mc *base.MilvusClient,
+	targetDB, layout, ezk string,
+) {
+	t.Helper()
+	sourceName := common.GenRandomString("snapshot_plaintext_ezk_source", 8)
+	targetName := common.GenRandomString("snapshot_plaintext_ezk_target", 8)
+	snapshotName := common.GenRandomString("snapshot_plaintext_ezk", 8)
+	baseURL, apiKey := snapshotImportRESTConfig()
+	jobID := ""
+	snapshotCreated := false
+	sourceCreated, targetCreated := false, false
+	var exportClient *miniogo.Client
+	var exportBucket, exportPrefix string
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		if jobID != "" {
+			_, err := snapshotImportDatabaseRequest(cleanupCtx, baseURL, apiKey, targetDB, "abort", map[string]any{"jobId": jobID})
+			assert.NoError(t, err)
+		}
+		if snapshotCreated {
+			// Export publishes Completed before asynchronously releasing its pin.
+			// Retry only that precise transient state; do not force-unpin a job
+			// or hide unrelated cleanup errors. This is not a data-GC wait.
+			pinCtx, cancelPinWait := context.WithTimeout(cleanupCtx, 20*time.Second)
+			var dropErr error
+		pinWait:
+			for {
+				dropErr = mc.DropSnapshot(pinCtx, client.NewDropSnapshotOption(snapshotName, sourceName))
+				if client.ErrorCode(dropErr) != merr.Code(merr.ErrSnapshotPinned) {
+					break
+				}
+				select {
+				case <-pinCtx.Done():
+					break pinWait
+				case <-time.After(time.Second):
+				}
+			}
+			cancelPinWait()
+			assert.NoError(t, dropErr)
+		}
+		if sourceCreated {
+			assert.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(sourceName)))
+		}
+		if targetCreated {
+			assert.NoError(t, mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(targetName)))
+		}
+		if exportClient != nil {
+			for object := range exportClient.ListObjects(cleanupCtx, exportBucket, miniogo.ListObjectsOptions{Prefix: exportPrefix + "/", Recursive: true}) {
+				if assert.NoError(t, object.Err) {
+					assert.NoError(t, exportClient.RemoveObject(cleanupCtx, exportBucket, object.Key, miniogo.RemoveObjectOptions{}))
+				}
+			}
+		}
+	})
+	newSchema := func() *entity.Schema {
+		return entity.NewSchema().WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("document").WithDataType(entity.FieldTypeText)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(8))
+	}
+	for _, name := range []string{sourceName, targetName} {
+		require.NoError(t, mc.CreateCollection(ctx, client.NewCreateCollectionOption(name, newSchema()).
+			WithConsistencyLevel(entity.ClStrong).
+			WithIndexOptions(client.NewCreateIndexOption(name, "vector", index.NewAutoIndex(entity.L2)))))
+		if name == sourceName {
+			sourceCreated = true
+		} else {
+			targetCreated = true
+		}
+		info, err := mc.DescribeCollection(ctx, client.NewDescribeCollectionOption(name))
+		require.NoError(t, err)
+		require.Empty(t, info.Properties[pkcommon.EncryptionEzIDKey], "collection must be unencrypted")
+	}
+	// Cover both inline TEXT and an out-of-line LOB: a forwarded EZK would
+	// select the unsupported CMEK+TEXT path instead of the plaintext reader.
+	documents := []string{"inline text", strings.Repeat("plaintext-lob-", 6000)}
+	_, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceName).
+		WithInt64Column("id", []int64{11, 22}).
+		WithTextColumn("document", documents).
+		WithFloatVectorColumn("vector", 8, [][]float32{{1, 2, 3, 4, 5, 6, 7, 8}, {8, 7, 6, 5, 4, 3, 2, 1}}))
+	require.NoError(t, err)
+	require.NoError(t, flushWithRetry(ctx, mc, sourceName))
+	require.NoError(t, mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceName)))
+	snapshotCreated = true
+	info, err := mc.DescribeSnapshot(ctx, client.NewDescribeSnapshotOption(snapshotName, sourceName))
+	require.NoError(t, err)
+	metadataURI := info.GetS3Location()
+	if layout == "self_contained" {
+		cfg := getMinIOConfig()
+		exportClient, err = newMinIOClient(cfg)
+		require.NoError(t, err)
+		exportBucket, exportPrefix = cfg.bucket, common.GenRandomString("snapshot_plaintext_ezk_export", 8)
+		exportID, err := mc.ExportSnapshot(ctx, client.NewExportSnapshotOption(snapshotName, sourceName, exportPrefix))
+		require.NoError(t, err)
+		exported, err := waitForExportComplete(ctx, mc, exportID, 2*time.Minute)
+		require.NoError(t, err)
+		metadataURI = exported.GetSnapshotMetadataUri()
+	}
+	require.NotEmpty(t, metadataURI)
+	resp, err := snapshotImportDatabaseRequest(ctx, baseURL, apiKey, targetDB, "create", map[string]any{
+		"collectionName": targetName, "files": [][]string{{metadataURI}},
+		"options": map[string]string{"backup": "true", "source_type": "snapshot", "ezk": ezk},
+	})
+	require.NoError(t, err)
+	jobID = resp.Data.JobID
+	require.Zero(t, resp.Code, resp.Message)
+	require.NotEmpty(t, jobID)
+	// Keep progress polling in the same test-owned database as admission.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		progress, err := snapshotImportDatabaseRequest(ctx, baseURL, apiKey, targetDB, "describe", map[string]any{"jobId": jobID})
+		require.NoError(c, err)
+		require.Zero(c, progress.Code, progress.Message)
+		require.Equal(c, "Completed", progress.Data.State, progress.Data.Reason)
+	}, 3*time.Minute, time.Second)
+	jobID = "" // Completed imports need no abort during cleanup.
+	loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetName))
+	require.NoError(t, err)
+	require.NoError(t, loadTask.Await(ctx))
+	rows, err := mc.Query(ctx, client.NewQueryOption(targetName).
+		WithFilter("id in [11, 22]").WithOutputFields("id", "document").WithConsistencyLevel(entity.ClStrong))
+	require.NoError(t, err)
+	require.Equal(t, 2, rows.Len())
+	seen := make(map[int64]string, 2)
+	for i := 0; i < rows.Len(); i++ {
+		id, err := rows.GetColumn("id").GetAsInt64(i)
+		require.NoError(t, err)
+		document, err := rows.GetColumn("document").GetAsString(i)
+		require.NoError(t, err)
+		seen[id] = document
+	}
+	require.Equal(t, map[int64]string{11: documents[0], 22: documents[1]}, seen)
+}
+
+type snapshotImportDatabaseResponse struct {
+	Code    int                           `json:"code"`
+	Message string                        `json:"message"`
+	Data    bulkwriter.ImportProgressData `json:"data"`
+}
+
+// BulkImportOption currently has no dbName field and its response decodes
+// "status" instead of native REST "code". Keep this database-aware adapter in
+// the test; do not mutate the shared HTTP client or change the public SDK.
+func snapshotImportDatabaseRequest(ctx context.Context, baseURL, apiKey, db, operation string, body map[string]any) (snapshotImportDatabaseResponse, error) {
+	var result snapshotImportDatabaseResponse
+	body["dbName"] = db
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return result, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v2/vectordb/jobs/import/"+operation, bytes.NewReader(payload))
+	if err != nil {
+		return result, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := (&http.Client{Timeout: time.Minute}).Do(req)
+	if err != nil {
+		return result, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return result, fmt.Errorf("snapshot import %s returned HTTP %d", operation, resp.StatusCode)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	return result, err
+}
+
+// Reuse the ordinary Import lifecycle without changing the no-L0 regression
+// scenario. Environment configuration and service ownership stay with the suite.
+func runStorageV3SnapshotImport(t *testing.T, crossBucket bool, schemaCase string) {
+	layouts := []string{"referenced", "self_contained"}
+	if crossBucket {
+		// Export is the supported way to construct a portable bundle. Do not
+		// copy the live instance's data root to manufacture a foreign fixture.
+		layouts = []string{"self_contained"}
+	}
+	for _, layout := range layouts {
+		t.Run(layout, func(t *testing.T) {
+			ctx := hp.CreateContext(t, time.Second*common.DefaultTimeout)
+			mc := hp.CreateDefaultMilvusClient(ctx, t)
+			baseURL, apiKey := snapshotImportRESTConfig()
+
+			sourceCollection := common.GenRandomString("snapshot_import_source", 6)
+			targetCollection := common.GenRandomString("snapshot_import_target", 6)
+			snapshotName := common.GenRandomString("snapshot_import", 6)
+			collectionsToClean := []string{sourceCollection, targetCollection}
+			snapshotCreated := false
+			importJobID := ""
+			var minioClient *miniogo.Client
+			var minioBucket string
+			exportPrefixes := make([]string, 0, 2)
+			foreignBucket, externalSpec := "", ""
+
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				if importJobID != "" {
+					_, _ = bulkwriter.AbortImport(cleanupCtx,
+						bulkwriter.NewAbortImportOption(baseURL, importJobID).WithAPIKey(apiKey))
+				}
+				if snapshotCreated {
+					_ = mc.DropSnapshot(cleanupCtx, client.NewDropSnapshotOption(snapshotName, sourceCollection))
+				}
+				for _, collectionName := range collectionsToClean {
+					_ = mc.DropCollection(cleanupCtx, client.NewDropCollectionOption(collectionName))
+				}
+				if minioClient != nil {
+					for _, prefix := range exportPrefixes {
+						cleanupMinIOPrefix(cleanupCtx, minioClient, minioBucket, strings.TrimRight(prefix, "/")+"/")
+					}
+					if foreignBucket != "" {
+						require.NoError(t, minioClient.RemoveBucket(cleanupCtx, foreignBucket))
+					}
+				}
+			})
+
+			targetTag := "tag"
+			for _, collectionName := range collectionsToClean {
+				schema := newSnapshotImportSchema()
+				if schemaCase == "target_optional" && collectionName == targetCollection {
+					// Preserve field positions/IDs, not names. New columns are
+					// appended so they cannot alias an existing source column.
+					targetTag = "renamed_tag"
+					schema.Fields[0].WithIsAutoID(true)
+					schema.Fields[1].WithName(targetTag)
+					schema.WithDynamicFieldEnabled(true).
+						WithField(entity.NewField().WithName("added_default").WithDataType(entity.FieldTypeInt64).WithDefaultValueLong(42)).
+						WithField(entity.NewField().WithName("added_nullable").WithDataType(entity.FieldTypeInt64).WithNullable(true))
+				}
+				if schemaCase == "source_extra" && collectionName == sourceCollection {
+					schema.WithField(entity.NewField().WithName("source_only").WithDataType(entity.FieldTypeInt64).WithDefaultValueLong(99))
+				}
+				vectorIndex := client.NewCreateIndexOption(collectionName, "vector", index.NewAutoIndex(entity.L2))
+				err := mc.CreateCollection(ctx,
+					client.NewCreateCollectionOption(collectionName, schema).
+						WithConsistencyLevel(entity.ClStrong).
+						WithIndexOptions(vectorIndex))
+				require.NoError(t, err)
+			}
+
+			if schemaCase == "partition_mapping" {
+				for _, name := range []string{"target_extra", "target_third"} {
+					require.NoError(t, mc.CreatePartition(ctx, client.NewCreatePartitionOption(targetCollection, name)))
+				}
+			}
+			loadTask, err := mc.LoadCollection(ctx, client.NewLoadCollectionOption(targetCollection))
+			require.NoError(t, err)
+			require.NoError(t, loadTask.Await(ctx))
+
+			const (
+				rowCount = 12
+				firstID  = int64(30400)
+			)
+			ids := make([]int64, rowCount)
+			tags := make([]string, rowCount)
+			phases := make([]int64, rowCount)
+			documents := make([]string, rowCount)
+			vectors := make([][]float32, rowCount)
+			expectedTags := make(map[int64]string, rowCount)
+			expectedPhases := make(map[int64]int64, rowCount)
+			expectedDocuments := make(map[int64]string, rowCount)
+			for i := 0; i < rowCount; i++ {
+				id := firstID + int64(i)
+				ids[i] = id
+				tags[i] = fmt.Sprintf("tag-%d", id)
+				phases[i] = 304
+				documents[i] = fmt.Sprintf("snapshot-lob-%d-", id) + strings.Repeat("x", 70*1024)
+				vectors[i] = []float32{
+					float32(i), float32(i + 1), float32(i + 2), float32(i + 3),
+					float32(i + 4), float32(i + 5), float32(i + 6), float32(i + 7),
+				}
+				expectedTags[id] = tags[i]
+				expectedPhases[id] = phases[i]
+				expectedDocuments[id] = documents[i]
+			}
+
+			// Default routing merges all source partitions; explicit mapping
+			// routes each source partition to the selected target instead.
+			sourcePartitions := []string{"_default", "source_extra"}
+			if schemaCase == "partition_mapping" {
+				sourcePartitions = append(sourcePartitions, "source_third")
+			}
+			for _, name := range sourcePartitions[1:] {
+				require.NoError(t, mc.CreatePartition(ctx, client.NewCreatePartitionOption(sourceCollection, name)))
+			}
+			for i, partition := range sourcePartitions {
+				begin, end := i*rowCount/len(sourcePartitions), (i+1)*rowCount/len(sourcePartitions)
+				insertResult, err := mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceCollection).
+					WithPartition(partition).
+					WithInt64Column("id", ids[begin:end]).
+					WithVarcharColumn("tag", tags[begin:end]).
+					WithInt64Column("phase", phases[begin:end]).
+					WithTextColumn("document", documents[begin:end]).
+					WithFloatVectorColumn("vector", 8, vectors[begin:end]))
+				require.NoError(t, err)
+				require.EqualValues(t, end-begin, insertResult.InsertCount)
+			}
+			require.NoError(t, flushWithRetry(ctx, mc, sourceCollection))
+			require.NoError(t, waitForAllIndexesBuilt(ctx, mc, sourceCollection, 2*time.Minute))
+			expectedImportRows, expectedBeforeCommit := rowCount, 0
+
+			err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceCollection).
+				WithDescription("StorageV3 snapshot-source Import coverage"))
+			require.NoError(t, err)
+			snapshotCreated = true
+
+			snapshotInfo, err := mc.DescribeSnapshot(ctx,
+				client.NewDescribeSnapshotOption(snapshotName, sourceCollection))
+			require.NoError(t, err)
+			require.Equal(t, snapshotName, snapshotInfo.GetName())
+			require.Equal(t, sourceCollection, snapshotInfo.GetCollectionName())
+			snapshotSource := snapshotInfo.GetS3Location()
+			require.NotEmpty(t, snapshotSource)
+			var snapshotStorageCfg minioConfig
+			if layout == "self_contained" {
+				snapshotStorageCfg = snapshotFixtureStorageConfig(t, getMinIOConfig(), snapshotSource)
+			}
+
+			if layout == "self_contained" {
+				minioCfg := getMinIOConfig()
+				minioClient, err = newMinIOClient(minioCfg)
+				require.NoError(t, err)
+				minioBucket = minioCfg.bucket
+				skipIfMinIOUnreachable(ctx, t, minioClient, minioBucket)
+
+				exportPrefix := common.GenRandomString("snapshot_import_export", 8)
+				relocatedPrefix := common.GenRandomString("snapshot_import_relocated", 8)
+				exportPrefixes = append(exportPrefixes, exportPrefix, relocatedPrefix)
+				exportTarget := exportPrefix
+				if crossBucket {
+					bucketName := strings.ToLower(strings.ReplaceAll(common.GenRandomString("snapshot-import", 10), "_", "-"))
+					require.NoError(t, minioClient.MakeBucket(ctx, bucketName, miniogo.MakeBucketOptions{}))
+					foreignBucket = bucketName
+					minioBucket = foreignBucket
+					snapshotStorageCfg.bucket = foreignBucket
+					externalSpec = extTestSpec(snapshotStorageCfg, "parquet")
+					exportTarget = extTestURI(snapshotStorageCfg, exportPrefix)
+				}
+				exportJobID, err := mc.ExportSnapshot(ctx,
+					client.NewExportSnapshotOption(snapshotName, sourceCollection, exportTarget).WithExternalSpec(externalSpec))
+				require.NoError(t, err)
+				require.NotZero(t, exportJobID)
+
+				exportInfo, err := waitForExportComplete(ctx, mc, exportJobID, 2*time.Minute)
+				require.NoError(t, err)
+				require.Positive(t, exportInfo.GetTotalBytes())
+				require.NotEmpty(t, exportInfo.GetSnapshotMetadataUri())
+				require.NotEqual(t, snapshotSource, exportInfo.GetSnapshotMetadataUri())
+
+				snapshotSource, err = relocateSnapshotBundle(
+					ctx,
+					minioClient,
+					minioBucket,
+					exportInfo.GetSnapshotMetadataUri(),
+					exportPrefix,
+					relocatedPrefix,
+				)
+				require.NoError(t, err)
+
+			}
+
+			// Import is exposed by the Go SDK through the REST-backed bulkwriter
+			// package; the surrounding snapshot and data operations use milvusclient.
+			importOption := bulkwriter.NewBulkImportOption(baseURL, targetCollection, [][]string{{snapshotSource}}).
+				WithOption("auto_commit", "false").
+				WithOption("backup", "true").
+				WithOption("source_type", "snapshot").
+				WithAPIKey(apiKey)
+			if schemaCase == "partition_mapping" {
+				// Deliberately permute destinations so index/ID-order routing
+				// cannot accidentally pass this test.
+				importOption.WithOption("partition_mapping", `{"_default":"target_third","source_extra":"_default","source_third":"target_extra"}`)
+			}
+			if crossBucket {
+				// Without opt-in the foreign URI must still fail before a job is
+				// admitted. Bad credentials must not fall back to instance access.
+				rejected, err := bulkwriter.BulkImport(ctx, importOption)
+				require.NoError(t, err)
+				// BulkImport currently decodes "status", while native REST uses
+				// "code". Inspect the rejection reason and absence of a job ID.
+				require.Contains(t, rejected.Message, "snapshot metadata URI must match instance storage when external_spec is absent")
+				require.Empty(t, rejected.Data.JobID)
+				importOption.WithOption("external_spec", `{"extfs":{"access_key_id":"invalid-key","access_key_value":"invalid-secret"}}`)
+				rejected, err = bulkwriter.BulkImport(ctx, importOption)
+				require.NoError(t, err)
+				require.Contains(t, rejected.Message, "failed to read snapshot import source")
+				require.Empty(t, rejected.Data.JobID)
+				importOption.WithOption("external_spec", externalSpec)
+			}
+			importResp, err := bulkwriter.BulkImport(ctx, importOption)
+			require.NoError(t, err)
+			require.Empty(t, importResp.Message)
+			require.NotEmpty(t, importResp.Data.JobID)
+			importJobID = importResp.Data.JobID
+
+			progress, err := waitForSnapshotImportState(
+				ctx, baseURL, apiKey, importJobID, "Uncommitted", 3*time.Minute)
+			require.NoError(t, err)
+			require.EqualValues(t, expectedImportRows, progress.ImportedRows)
+
+			idFilter := fmt.Sprintf("id >= %d && id < %d", firstID, firstID+rowCount)
+			beforeCommit, err := mc.Query(ctx, client.NewQueryOption(targetCollection).
+				WithFilter(idFilter).
+				WithOutputFields("id").
+				WithLimit(rowCount).
+				WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Equal(t, expectedBeforeCommit, beforeCommit.Len(), "only preexisting target data may be visible before commit")
+
+			_, err = bulkwriter.CommitImport(ctx,
+				bulkwriter.NewCommitImportOption(baseURL, importJobID).WithAPIKey(apiKey))
+			require.NoError(t, err)
+			_, err = waitForSnapshotImportState(
+				ctx, baseURL, apiKey, importJobID, "Completed", 3*time.Minute)
+			require.NoError(t, err)
+			if crossBucket {
+				// The destination must own rewritten data and LOBs. Remove only
+				// this test's exported bundle before reading the target again.
+				for _, prefix := range exportPrefixes {
+					cleanupMinIOPrefix(ctx, minioClient, foreignBucket, strings.TrimRight(prefix, "/")+"/")
+				}
+				for object := range minioClient.ListObjects(ctx, foreignBucket, miniogo.ListObjectsOptions{Recursive: true}) {
+					require.NoError(t, object.Err)
+					t.Fatalf("unexpected object in source bucket after import: %s", object.Key)
+				}
+			}
+
+			refreshTask, err := mc.RefreshLoad(ctx, client.NewRefreshLoadOption(targetCollection))
+			require.NoError(t, err)
+			require.NoError(t, refreshTask.Await(ctx))
+			if schemaCase == "partition_mapping" {
+				for i, target := range []string{"target_third", "_default", "target_extra"} {
+					rows, err := mc.Query(ctx, client.NewQueryOption(targetCollection).WithPartitions(target).
+						WithFilter(idFilter).WithOutputFields("id").WithLimit(rowCount).WithConsistencyLevel(entity.ClStrong))
+					require.NoError(t, err)
+					actual := make([]int64, 0, rows.Len())
+					for j := 0; j < rows.Len(); j++ {
+						id, err := rows.GetColumn("id").GetAsInt64(j)
+						require.NoError(t, err)
+						actual = append(actual, id)
+					}
+					require.ElementsMatch(t, ids[i*rowCount/3:(i+1)*rowCount/3], actual, "target partition %s", target)
+				}
+			}
+
+			outputFields := []string{"id", targetTag, "phase", "document"}
+			if schemaCase == "target_optional" {
+				outputFields = append(outputFields, "added_default", "added_nullable", "$meta")
+			}
+			afterCommit, err := mc.Query(ctx, client.NewQueryOption(targetCollection).
+				WithFilter(idFilter).
+				WithOutputFields(outputFields...).
+				WithLimit(rowCount).
+				WithConsistencyLevel(entity.ClStrong))
+			require.NoError(t, err)
+			require.Equal(t, rowCount, afterCommit.Len())
+			seenIDs := make(map[int64]bool, rowCount)
+
+			idColumn := afterCommit.GetColumn("id")
+			tagColumn := afterCommit.GetColumn(targetTag)
+			phaseColumn := afterCommit.GetColumn("phase")
+			documentColumn := afterCommit.GetColumn("document")
+			require.NotNil(t, idColumn)
+			require.NotNil(t, tagColumn)
+			require.NotNil(t, phaseColumn)
+			require.NotNil(t, documentColumn)
+			for i := 0; i < afterCommit.Len(); i++ {
+				id, err := idColumn.GetAsInt64(i)
+				require.NoError(t, err)
+				require.False(t, seenIDs[id], "a deleted old version must not accompany its reinsert")
+				seenIDs[id] = true
+				tag, err := tagColumn.GetAsString(i)
+				require.NoError(t, err)
+				phase, err := phaseColumn.GetAsInt64(i)
+				require.NoError(t, err)
+				document, err := documentColumn.GetAsString(i)
+				require.NoError(t, err)
+				require.Equal(t, expectedTags[id], tag)
+				require.Equal(t, expectedPhases[id], phase)
+				require.Equal(t, expectedDocuments[id], document)
+				if schemaCase == "target_optional" {
+					defaultColumn := afterCommit.GetColumn("added_default")
+					nullableColumn := afterCommit.GetColumn("added_nullable")
+					metaColumn := afterCommit.GetColumn("$meta")
+					require.NotNil(t, defaultColumn)
+					require.NotNil(t, nullableColumn)
+					require.NotNil(t, metaColumn)
+					value, err := defaultColumn.GetAsInt64(i)
+					require.NoError(t, err)
+					require.EqualValues(t, 42, value)
+					isNull, err := nullableColumn.IsNull(i)
+					require.NoError(t, err)
+					require.True(t, isNull)
+					meta, err := metaColumn.Get(i)
+					require.NoError(t, err)
+					require.JSONEq(t, "{}", string(meta.([]byte)))
+				}
+			}
+		})
+	}
+}
+
+// Keep the server's storage identity separate from the client's dial address.
+// CI clients use a namespace-qualified MinIO hostname, while the server uses
+// the short service name. Export/Import enforce exact endpoint identity, and
+// nested snapshot references must still match the endpoint reported by Milvus.
+// Only URI checks/construction use this config; object I/O keeps the dial config.
+func snapshotFixtureStorageConfig(t *testing.T, cfg minioConfig, metadataURI string) minioConfig {
+	t.Helper()
+	u, err := url.Parse(metadataURI)
+	require.NoError(t, err)
+	require.Equal(t, "minio", u.Scheme, "this fixture requires MinIO storage")
+	_, err = snapshotFixtureObjectKey(metadataURI, cfg.bucket, u.Host, "", "")
+	require.NoError(t, err)
+	cfg.address = u.Host
+	return cfg
+}
+
+func TestSnapshotFixtureStorageConfig(t *testing.T) {
+	cfg := minioConfig{address: "gosdk-14906-minio.jenkins-milvus-ci:9000", bucket: "source"}
+	metadataURI := "minio://gosdk-14906-minio:9000/source/files/snapshots/1/metadata/2.json"
+	serverCfg := snapshotFixtureStorageConfig(t, cfg, metadataURI)
+	require.Equal(t, "gosdk-14906-minio.jenkins-milvus-ci:9000", cfg.address)
+	key, err := snapshotFixtureObjectKey(metadataURI, cfg.bucket, serverCfg.address, "", "")
+	require.NoError(t, err)
+	require.Equal(t, "files/snapshots/1/metadata/2.json", key)
+	serverCfg.bucket = "destination"
+	require.Equal(t, "minio://gosdk-14906-minio:9000/destination/export", extTestURI(serverCfg, "export"))
+	_, err = snapshotFixtureObjectKey("minio://other:9000/source/files/delta", cfg.bucket, serverCfg.address, "", "")
+	require.Error(t, err, "a foreign endpoint must not be accepted as a DNS alias")
+}
+
+// DescribeSnapshot returns an endpoint-style minio URI, while Avro references
+// can be object keys or bucket-style s3 URIs. GetObject requires only the key.
+// Keep this fixture Go-only; the server's snapshot storage package also links
+// C++. Validate the location before rebasing so a foreign URI cannot silently
+// read a same-named object from this fixture's bucket/endpoint.
+func snapshotFixtureObjectKey(raw, bucket, endpoint, oldPrefix, newPrefix string) (string, error) {
+	key := raw
+	if strings.Contains(raw, "://") {
+		u, err := url.Parse(raw)
+		if err != nil {
+			return "", merr.Wrap(err, "invalid snapshot fixture URI")
+		}
+		if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Host == "" {
+			return "", merr.WrapErrServiceInternalMsg("invalid snapshot fixture URI authority or suffix")
+		}
+		var uriBucket string
+		switch u.Scheme {
+		case "s3":
+			uriBucket, key = u.Host, strings.TrimPrefix(u.Path, "/")
+		case "minio", "http", "https":
+			if !strings.EqualFold(u.Host, endpoint) {
+				return "", merr.WrapErrServiceInternalMsg("snapshot fixture endpoint mismatch: %s", u.Host)
+			}
+			uriBucket, key, _ = strings.Cut(strings.TrimPrefix(u.Path, "/"), "/")
+		default:
+			return "", merr.WrapErrServiceInternalMsg("unsupported snapshot fixture URI scheme: %s", u.Scheme)
+		}
+		if uriBucket != bucket {
+			return "", merr.WrapErrServiceInternalMsg("snapshot fixture bucket mismatch: %s", uriBucket)
+		}
+	}
+	if key == "" {
+		return "", merr.WrapErrServiceInternalMsg("snapshot fixture object key is empty")
+	}
+	if oldPrefix != "" && strings.HasPrefix(key, oldPrefix+"/") {
+		key = newPrefix + strings.TrimPrefix(key, oldPrefix)
+	}
+	return key, nil
+}
+
+func TestSnapshotFixtureObjectKey(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, oldPrefix, newPrefix, want string
+		wantError                             bool
+	}{
+		{name: "minio_metadata", raw: "minio://localhost:9000/a-bucket/files/snapshots/1/metadata/2.json", want: "files/snapshots/1/metadata/2.json"},
+		{name: "s3", raw: "s3://a-bucket/files/delta", want: "files/delta"},
+		{name: "http", raw: "http://localhost:9000/a-bucket/files/delta", want: "files/delta"},
+		{name: "https", raw: "https://localhost:9000/a-bucket/files/delta", want: "files/delta"},
+		{name: "key", raw: "files/delta", want: "files/delta"},
+		{name: "escaped_uri", raw: "minio://localhost:9000/a-bucket/files/a%20b", want: "files/a b"},
+		{name: "literal_key", raw: "files/a%20b?c#d", want: "files/a%20b?c#d"},
+		{name: "rebase_uri", raw: "minio://localhost:9000/a-bucket/export/delta", oldPrefix: "export", newPrefix: "relocated", want: "relocated/delta"},
+		{name: "rebase_key", raw: "export/delta", oldPrefix: "export", newPrefix: "relocated", want: "relocated/delta"},
+		{name: "rebase_boundary", raw: "export-other/delta", oldPrefix: "export", newPrefix: "relocated", want: "export-other/delta"},
+		{name: "already_relocated", raw: "relocated/delta", oldPrefix: "export", newPrefix: "relocated", want: "relocated/delta"},
+		{name: "bucket_mismatch", raw: "s3://other/files/delta", wantError: true},
+		{name: "minio_bucket_mismatch", raw: "minio://localhost:9000/other/files/delta", wantError: true},
+		{name: "endpoint_mismatch", raw: "minio://other:9000/a-bucket/files/delta", wantError: true},
+		{name: "credentials", raw: "minio://user:pass@localhost:9000/a-bucket/key", wantError: true},
+		{name: "query", raw: "s3://a-bucket/key?x=y", wantError: true},
+		{name: "empty_query", raw: "s3://a-bucket/key?", wantError: true},
+		{name: "fragment", raw: "s3://a-bucket/key#x", wantError: true},
+		{name: "empty_host", raw: "s3:///key", wantError: true},
+		{name: "invalid_url", raw: "minio://%/a-bucket/key", wantError: true},
+		{name: "empty_key", raw: "s3://a-bucket/", wantError: true},
+		{name: "missing_key", raw: "minio://localhost:9000/a-bucket", wantError: true},
+		{name: "empty", wantError: true},
+		{name: "unsupported_scheme", raw: "ftp://a-bucket/key", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := snapshotFixtureObjectKey(tc.raw, "a-bucket", "localhost:9000", tc.oldPrefix, tc.newPrefix)
+			if tc.wantError {
+				require.Error(t, err)
+				require.Empty(t, key)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, key)
+		})
+	}
 }
 
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations

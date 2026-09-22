@@ -27,11 +27,15 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -39,21 +43,33 @@ import (
 )
 
 type reader struct {
-	ctx            context.Context
-	cm             storage.ChunkManager
-	storageConfig  *indexpb.StorageConfig
-	schema         *schemapb.CollectionSchema
-	storageVersion int64
-	importEz       string
+	ctx              context.Context
+	cm               storage.ChunkManager
+	storageConfig    *indexpb.StorageConfig
+	schema           *schemapb.CollectionSchema
+	storageVersion   int64
+	importEz         string
+	sourceEncryption SourceEncryption
 
-	fileSize      *atomic.Int64
-	bufferSize    int
-	retryAttempts uint
-	deleteData    map[any]typeutil.Timestamp // pk2ts
-	insertLogs    map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
+	fileSize         *atomic.Int64
+	bufferSize       int
+	retryAttempts    uint
+	deleteData       map[any]typeutil.Timestamp // pk2ts
+	insertLogs       map[int64][]string         // fieldID (or fieldGroupID if storage v2) -> binlogs
+	storageV3Files   []string                   // exact manifest data files plus LOB files without reported sizes
+	storageV3LobSize int64                      // manifest-reported LOB size when available
+	validatePath     func(string) error
 
 	filters []Filter
 	dr      storage.DeserializeReader[*storage.Value]
+}
+
+// SourceEncryption is resolved by the task's factory, not by each record reader.
+// Encrypted is independent of PluginContext: an encrypted source may resolve to
+// a nil context when the cluster encryption plugin is disabled.
+type SourceEncryption struct {
+	Encrypted     bool
+	PluginContext *indexcgopb.StoragePluginContext
 }
 
 func NewReader(ctx context.Context,
@@ -67,6 +83,89 @@ func NewReader(ctx context.Context,
 	bufferSize int,
 	importEz string,
 ) (*reader, error) {
+	r := newReader(ctx, cm, schema, storageConfig, storageVersion, bufferSize, importEz)
+	err := r.init(paths, tsStart, tsEnd)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// NewStorageV3ManifestReader opens one exact manifest captured by snapshot
+// metadata. Keeping this constructor distinct from legacy path-based backup
+// import prevents an object key from being interpreted through content-shaped
+// path heuristics and prevents fallback to ManifestLatest.
+// source carries external storage or explicit destination routing context.
+func NewStorageV3ManifestReader(ctx context.Context,
+	cm storage.ChunkManager,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	manifestPath string,
+	tsStart,
+	tsEnd uint64,
+	bufferSize int,
+	encryption SourceEncryption,
+	source *internalpb.SnapshotImportSource,
+	validate func(string) error,
+) (*reader, error) {
+	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize, "")
+	r.sourceEncryption = encryption
+	r.validatePath = validate
+	return initStorageV3ManifestReader(r, manifestPath, tsStart, tsEnd, source)
+}
+
+func initStorageV3ManifestReader(r *reader, manifestPath string, tsStart, tsEnd uint64,
+	source *internalpb.SnapshotImportSource,
+) (*reader, error) {
+	if source != nil {
+		// Versions 3/4 add coordinator-owned partition routing; row
+		// decoding remains identical to versions 1/2.
+		if source.GetVersion() < 1 || source.GetVersion() > 4 {
+			return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported snapshot import source version %d", source.GetVersion())
+		}
+		if source.GetManifestPath() != manifestPath {
+			return nil, merr.WrapErrServiceInternalMsg("snapshot import source does not match the selected manifest")
+		}
+	}
+	if tsStart != 0 || tsEnd != math.MaxUint64 {
+		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
+	}
+	if err := validateStorageV3ManifestPath(manifestPath, r.validatePath); err != nil {
+		return nil, err
+	}
+	if err := r.initStorageV3Manifest(manifestPath, tsStart, tsEnd); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func validateStorageV3ManifestPath(manifestPath string, validate func(string) error) error {
+	if strings.TrimSpace(manifestPath) == "" {
+		return merr.WrapErrImportFailed("no StorageV3 manifest to import")
+	}
+	base, version, err := packed.UnmarshalManifestPath(manifestPath)
+	if err != nil {
+		return merr.WrapErrImportFailedMsg("invalid StorageV3 manifest path: %s", err)
+	}
+	if version == packed.ManifestLatest {
+		return merr.WrapErrImportFailedMsg(
+			"snapshot-source import requires an exact StorageV3 manifest version",
+		)
+	}
+	if validate != nil {
+		return validate(base)
+	}
+	return nil
+}
+
+func newReader(ctx context.Context,
+	cm storage.ChunkManager,
+	schema *schemapb.CollectionSchema,
+	storageConfig *indexpb.StorageConfig,
+	storageVersion int64,
+	bufferSize int,
+	importEz string,
+) *reader {
 	systemFieldsAbsent := true
 	for _, field := range schema.Fields {
 		if field.GetFieldID() < 100 {
@@ -88,11 +187,7 @@ func NewReader(ctx context.Context,
 		importEz:       importEz,
 		retryAttempts:  paramtable.Get().CommonCfg.StorageReadRetryAttempts.GetAsUint(),
 	}
-	err := r.init(paths, tsStart, tsEnd)
-	if err != nil {
-		return nil, err
-	}
-	return r, nil
+	return r
 }
 
 func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
@@ -108,6 +203,12 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return merr.WrapErrImportFailedMsg("too many input paths for binlog import. "+
 			"Valid paths length should be one or two, but got paths:%s", paths)
 	}
+	if r.storageVersion == storage.StorageV3 {
+		return merr.WrapErrImportFailedMsg(
+			"StorageV3 backup import requires an exact manifest from a snapshot source",
+		)
+	}
+
 	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0], r.retryAttempts)
 	if err != nil {
 		return err
@@ -186,6 +287,154 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 		return err
 	}
 	r.filters = append(r.filters, deleteFilter)
+	return nil
+}
+
+func (r *reader) prepareStorageV3Manifest(manifestPath string) ([]storage.RwOption, error) {
+	// Use the same physical-ID selection as V1 backup import. Select before
+	// checking CMEK/TEXT or enabling LOB resolution: a target-only nullable TEXT
+	// field needs no source LOB reader and is filled with NULL by Import later.
+	// Keep the task's full target schema unchanged; both phases project only
+	// this reader's schema using the same exact manifest.
+	present, err := packed.GetManifestFieldIDs(manifestPath, r.storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	readSchema, err := selectImportFields(r.schema, func(id int64) bool {
+		_, ok := present[id]
+		return ok
+	})
+	if err != nil {
+		return nil, err
+	}
+	r.schema = readSchema
+
+	rwOptions := []storage.RwOption{
+		storage.WithVersion(storage.StorageV3),
+		storage.WithBufferSize(32 * 1024 * 1024),
+		storage.WithStorageConfig(r.storageConfig),
+		storage.WithPresentFields(present),
+	}
+
+	if r.sourceEncryption.Encrypted {
+		// TEXT is physically stored as LOB references and therefore needs
+		// SegmentReader. Its current C API cannot accept the source key-retriever
+		// context. Keep CMEK support on the existing PackedReader path until that
+		// shared API grows the required context; do not add an Import-only reader.
+		if typeutil.HasTextField(r.schema) {
+			return nil, merr.WrapErrOperationNotSupportedMsg(
+				"CMEK-protected snapshot-source import does not support TEXT/LOB fields",
+			)
+		}
+	}
+
+	// Always mark the source context as resolved, including an explicit nil.
+	// Never fall back to destination CMEK properties. A nil context alone does
+	// not prove the source is plaintext; the factory also supplies Encrypted.
+	// The target writer resolves its own key independently.
+	rwOptions = append(rwOptions, storage.WithPluginContext(r.sourceEncryption.PluginContext))
+	if typeutil.HasTextField(r.schema) {
+		rwOptions = append(rwOptions, storage.WithResolveTextLob())
+	}
+
+	// Validate all discovered references before constructing a data reader.
+	// In particular SegmentReader may resolve LOB references during reads.
+	if err := r.collectStorageV3Files(manifestPath); err != nil {
+		return nil, err
+	}
+	return rwOptions, nil
+}
+
+func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint64) error {
+	rwOptions, err := r.prepareStorageV3Manifest(manifestPath)
+	if err != nil {
+		return err
+	}
+	deltaPaths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, r.storageConfig)
+	if err != nil {
+		return merr.Wrap(err, "failed to read StorageV3 deltalogs from manifest")
+	}
+	// Snapshot import must not resurrect deleted rows before folding is
+	// supported. Check the exact source manifest during worker preparation.
+	if len(deltaPaths) != 0 {
+		return merr.WrapErrOperationNotSupportedMsg("snapshot import does not yet support manifest deletes")
+	}
+	rr, err := storage.NewManifestRecordReader(r.ctx, manifestPath, r.schema, rwOptions...)
+	if err != nil {
+		return err
+	}
+	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
+		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
+	})
+	return nil
+}
+
+func (r *reader) collectStorageV3Files(manifestPath string) error {
+	r.storageV3LobSize = 0
+	files := make(map[string]struct{})
+	fragments, err := packed.ReadFragmentsFromManifest(manifestPath, r.storageConfig, nil)
+	if err != nil {
+		return merr.Wrap(err, "failed to read StorageV3 data files from manifest")
+	}
+	for _, fragment := range fragments {
+		if strings.TrimSpace(fragment.FilePath) == "" {
+			return merr.WrapErrDataIntegrityMsg(
+				"StorageV3 manifest %s contains a data fragment without a path",
+				manifestPath,
+			)
+		}
+		if r.validatePath != nil {
+			if err := r.validatePath(fragment.FilePath); err != nil {
+				return err
+			}
+		}
+		files[snapshotstorage.NormalizeSnapshotObjectPath(fragment.FilePath)] = struct{}{}
+	}
+	if !typeutil.HasTextField(r.schema) {
+		r.storageV3Files = lo.Keys(files)
+		return nil
+	}
+
+	lobFiles, err := packed.GetManifestLobFiles(manifestPath, r.storageConfig)
+	if err != nil {
+		return merr.Wrap(err, "failed to read StorageV3 LOB files from manifest")
+	}
+	for _, lobFile := range lobFiles {
+		if r.validatePath != nil {
+			if err := r.validatePath(lobFile.Path); err != nil {
+				return err
+			}
+			// Positive manifest-reported sizes bypass Size() object lookups.
+			// Check these too, even if all rows referencing the LOB are deleted.
+			exists, err := r.cm.Exist(r.ctx, snapshotstorage.NormalizeSnapshotObjectPath(lobFile.Path))
+			if err != nil {
+				return merr.Wrap(err, "failed to check snapshot LOB")
+			}
+			if !exists {
+				return merr.WrapErrDataIntegrityMsg("snapshot LOB does not exist: %s", lobFile.Path)
+			}
+		}
+		if strings.TrimSpace(lobFile.Path) == "" {
+			return merr.WrapErrDataIntegrityMsg(
+				"StorageV3 manifest %s contains a LOB file without a path",
+				manifestPath,
+			)
+		}
+		if lobFile.FileSizeBytes < 0 {
+			return merr.WrapErrDataIntegrityMsg(
+				"StorageV3 manifest %s contains LOB file %s with negative size %d",
+				manifestPath,
+				lobFile.Path,
+				lobFile.FileSizeBytes,
+			)
+		}
+		if lobFile.FileSizeBytes > 0 {
+			r.storageV3LobSize += lobFile.FileSizeBytes
+			continue
+		}
+		files[snapshotstorage.NormalizeSnapshotObjectPath(lobFile.Path)] = struct{}{}
+	}
+	r.storageV3Files = lo.Keys(files)
 	return nil
 }
 
@@ -280,6 +529,10 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 // except permanent/validation ones (permission denied, bucket not found, etc.),
 // matching the strategy used by parquet/json/csv imports via RetryableReader.
 func (r *reader) multiReadWithRetry(ctx context.Context, paths []string) ([][]byte, error) {
+	return multiReadWithRetry(ctx, r.cm, r.retryAttempts, paths)
+}
+
+func multiReadWithRetry(ctx context.Context, cm storage.ChunkManager, attempts uint, paths []string) ([][]byte, error) {
 	var result [][]byte
 	representative := ""
 	if len(paths) > 0 {
@@ -287,7 +540,7 @@ func (r *reader) multiReadWithRetry(ctx context.Context, paths []string) ([][]by
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		var e error
-		result, e = r.cm.MultiRead(ctx, paths)
+		result, e = cm.MultiRead(ctx, paths)
 		if e == nil {
 			return false, nil
 		}
@@ -296,7 +549,7 @@ func (r *reader) multiReadWithRetry(ctx context.Context, paths []string) ([][]by
 			return false, e
 		}
 		return true, e
-	}, retry.Attempts(r.retryAttempts))
+	}, retry.Attempts(attempts))
 	return result, err
 }
 
@@ -386,12 +639,24 @@ func (r *reader) Size() (int64, error) {
 	if size := r.fileSize.Load(); size != 0 {
 		return size, nil
 	}
-	size, err := storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
+	paths := lo.Flatten(lo.Values(r.insertLogs))
+	baseSize := int64(0)
+	if r.storageVersion == storage.StorageV3 {
+		paths = r.storageV3Files
+		baseSize = r.storageV3LobSize
+	}
+	size, err := storage.GetFilesSize(r.ctx, paths, r.cm)
 	if err != nil {
 		return 0, err
 	}
+	size += baseSize
 	r.fileSize.Store(size)
 	return size, nil
 }
 
-func (r *reader) Close() {}
+func (r *reader) Close() {
+	if r.dr != nil {
+		_ = r.dr.Close()
+		r.dr = nil
+	}
+}
