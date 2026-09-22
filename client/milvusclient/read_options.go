@@ -63,6 +63,7 @@ type searchOption struct {
 	namespace                  *string
 	outputFields               []string
 	searchAggregation          *SearchAggregation
+	highlighter                Highlighter
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
 }
@@ -85,6 +86,7 @@ type AnnRequest struct {
 	templateParams  map[string]any
 
 	functionScore *entity.FunctionScore
+	highlighter   Highlighter
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -178,6 +180,14 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 			return nil, errors.New("FunctionScore has no functions")
 		}
 		request.FunctionScore = r.functionScore.ProtoMessage()
+	}
+
+	if r.highlighter != nil {
+		highlighter, err := r.highlighter.protoMessage()
+		if err != nil {
+			return nil, err
+		}
+		request.Highlighter = highlighter
 	}
 
 	return request, nil
@@ -398,6 +408,16 @@ func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
 	return r
 }
 
+// WithHighlighter attaches a Highlighter (e.g. NewLexicalHighlighter) to the
+// per-sub-request level. Used by hybrid search to carry a highlighter on
+// each AnnRequest; the server currently rejects hybrid + highlighter
+// (internal/proxy/task_search.go:415), so this is mostly reserved for
+// future support and parity with the proto's per-request field.
+func (r *AnnRequest) WithHighlighter(h Highlighter) *AnnRequest {
+	r.highlighter = h
+	return r
+}
+
 // The returned request is NOT a snapshot of slice-valued template parameters:
 // it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
 // valid only while those slices are unmodified.
@@ -434,6 +454,16 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 			return nil, err
 		}
 		request.SearchAggregation = searchAggregation
+	}
+	if opt.highlighter != nil {
+		if opt.searchAggregation != nil {
+			return nil, errors.New("highlighter and search_aggregation cannot be used simultaneously")
+		}
+		highlighter, err := opt.highlighter.protoMessage()
+		if err != nil {
+			return nil, err
+		}
+		request.Highlighter = highlighter
 	}
 
 	return request, nil
@@ -522,6 +552,15 @@ func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
 
 func (opt *searchOption) WithSearchAggregation(agg *SearchAggregation) *searchOption {
 	opt.searchAggregation = agg
+	return opt
+}
+
+// WithHighlighter attaches a Highlighter (e.g. NewLexicalHighlighter) to the
+// search request. The server uses the highlighter to annotate matched terms
+// in the returned text fields. Currently mutually exclusive with
+// WithSearchAggregation and unsupported on the search iterator.
+func (opt *searchOption) WithHighlighter(h Highlighter) *searchOption {
+	opt.highlighter = h
 	return opt
 }
 
