@@ -161,3 +161,24 @@ func TestVerify_StorageV2V3_NullableVectorOptional(t *testing.T) {
 		assert.ErrorContains(t, err, "no binlog for field:vec", "version %d", version)
 	}
 }
+
+func TestVerify_MissingSystemFields(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version int64
+		logs    map[int64][]string
+		message string
+	}{
+		{"v1_row_id", storage.StorageV1, map[int64][]string{1: {"timestamp"}}, "RowID"},
+		{"v2_system_group", storage.StorageV2, nil, "system fields"},
+		{"v3_system_group", storage.StorageV3, nil, "system fields"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs, schema, err := verify(&schemapb.CollectionSchema{}, tc.version, tc.logs)
+			assert.ErrorIs(t, err, merr.ErrImportFailed)
+			assert.ErrorContains(t, err, tc.message)
+			assert.Nil(t, logs)
+			assert.Nil(t, schema)
+		})
+	}
+}

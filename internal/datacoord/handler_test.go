@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -2540,6 +2541,66 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 	assert.Nil(t, snapshotData)
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	assert.Contains(t, err.Error(), "invalid manifest path for segment 2004")
+}
+
+func TestGenSnapshotDependencyErrors(t *testing.T) {
+	type snapshotBroker struct{ broker.Broker }
+	for _, stage := range []string{"describe", "partitions", "seek", "empty_channel", "decompress", "compact_delta", "success"} {
+		t.Run(stage, func(t *testing.T) {
+			wantErr := merr.ErrServiceNotReady
+			errFor := func(name string) error {
+				if stage == name {
+					return wantErr
+				}
+				return nil
+			}
+			handler := &ServerHandler{s: &Server{broker: &snapshotBroker{}, meta: &meta{
+				indexMeta: &indexMeta{}, chunkManager: storage.NewLocalChunkManager(),
+			}}}
+			describe := mockey.Mock((*snapshotBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{Schema: newTestSchema()}, errFor("describe")).Build()
+			defer describe.UnPatch()
+			partitions := mockey.Mock((*snapshotBroker).ShowPartitions).Return(
+				&milvuspb.ShowPartitionsResponse{PartitionNames: []string{"_default"}, PartitionIDs: []int64{10}}, errFor("partitions")).Build()
+			defer partitions.UnPatch()
+			position := &msgpb.MsgPosition{ChannelName: "v1", Timestamp: 100}
+			if stage == "empty_channel" {
+				position.ChannelName = ""
+			}
+			seek := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).Return([]*msgpb.MsgPosition{position}, uint64(100), errFor("seek")).Build()
+			defer seek.UnPatch()
+			indexes := mockey.Mock((*indexMeta).GetIndexesForCollection).Return([]*model.Index(nil)).Build()
+			defer indexes.UnPatch()
+			segment := NewSegmentInfo(&datapb.SegmentInfo{
+				ID: 1, CollectionID: 2, PartitionID: 10, InsertChannel: "v1", State: commonpb.SegmentState_Flushed,
+				Binlogs:      []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 1}}}},
+				JsonKeyStats: map[int64]*datapb.JsonKeyStats{101: {FieldID: 101}},
+			})
+			segments := mockey.Mock((*meta).SelectSegments).Return([]*SegmentInfo{segment}).Build()
+			defer segments.UnPatch()
+			decompress := mockey.Mock(binlog.DecompressMultiBinLogs).Return(errFor("decompress")).Build()
+			defer decompress.UnPatch()
+			deltas := mockey.Mock((*ServerHandler).GetDeltaLogFromCompactTo).Return([]*datapb.FieldBinlog(nil), errFor("compact_delta")).Build()
+			defer deltas.UnPatch()
+			indexFiles := mockey.Mock(uncompressIndexFiles).Return([]*indexpb.IndexFilePathInfo(nil)).Build()
+			defer indexFiles.UnPatch()
+
+			snapshot, err := handler.GenSnapshot(context.Background(), 2)
+			switch stage {
+			case "compact_delta", "success":
+				// Preserve the existing best-effort compact-to lookup behavior.
+				require.NoError(t, err)
+				require.Len(t, snapshot.Segments, 1)
+				require.Contains(t, snapshot.Segments[0].JsonKeyIndexFiles, int64(101))
+			case "empty_channel":
+				require.ErrorIs(t, err, merr.ErrServiceInternal)
+				require.Nil(t, snapshot)
+			default:
+				require.ErrorIs(t, err, wantErr)
+				require.Nil(t, snapshot)
+			}
+		})
+	}
 }
 
 func TestGenSnapshot_RejectsSegmentWithoutChannelSeekPosition(t *testing.T) {

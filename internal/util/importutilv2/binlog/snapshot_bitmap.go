@@ -211,9 +211,13 @@ func BuildSnapshotDeleteMasks(ctx context.Context, cm storage.ChunkManager, sche
 		// Both projected PackedReader and TEXT SegmentReader use the same
 		// sequential column-group reader. LOB resolution replaces columns only;
 		// it never reorders/filters rows. Do not push predicates into this scan.
-		scans = append(scans, snapshotMaskScan{source: source, mask: mask, options: options,
-			schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pk,
-				{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64}}}})
+		scans = append(scans, snapshotMaskScan{
+			source: source, mask: mask, options: options,
+			schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				pk,
+				{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
+			}},
+		})
 	}
 	merger, err := loadSnapshotL0Deletes(ctx, cm, schema, cfg, l0, start, end, deleteBudget,
 		func(batch map[any]typeutil.Timestamp) error {

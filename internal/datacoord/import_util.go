@@ -448,7 +448,7 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentM
 }
 
 // Group by the immutable source scope before applying phase-specific limits.
-// Legacy inline descriptors and ordinary files retain their existing grouping.
+// Descriptors without shared L0 and ordinary files retain their existing grouping.
 func groupSnapshotImportFiles[T any](files []T, getFile func(T) *internalpb.ImportFile) [][]T {
 	type scope struct {
 		channel     string

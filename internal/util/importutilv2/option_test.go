@@ -56,6 +56,9 @@ func TestSnapshotExternalSourceOptions(t *testing.T) {
 	base := Options{{Key: BackupFlag, Value: "true"}, {Key: SourceType, Value: SourceTypeSnapshot}}
 	spec := &commonpb.KeyValuePair{Key: ExternalSpec, Value: `{"extfs":{"access_key_id":"reader","access_key_value":"secret"}}`}
 	assert.NoError(t, ValidateSnapshotSourceRequest(append(base, spec)))
+	assert.ErrorIs(t, ValidateSnapshotSourceOptions(append(base, nil)), merr.ErrImportFailed)
+	assert.ErrorIs(t, ValidateSnapshotSourceRequest(append(base, nil)), merr.ErrImportFailed)
+	assert.Error(t, ValidateSnapshotSourceOptions(Options{{Key: SnapshotSourceURI, Value: "s3://source/key"}}))
 	for _, options := range []Options{
 		{spec},
 		{{Key: BackupFlag, Value: "true"}, spec},
@@ -63,6 +66,7 @@ func TestSnapshotExternalSourceOptions(t *testing.T) {
 		append(base, &commonpb.KeyValuePair{Key: ExternalSpec, Value: strings.Repeat("x", 64*1024+1)}),
 		append(base, spec, spec),
 		append(base, &commonpb.KeyValuePair{Key: SnapshotSourceURI, Value: "s3://source/key"}),
+		append(base, &commonpb.KeyValuePair{Key: SnapshotLayout, Value: "referenced"}),
 	} {
 		assert.Error(t, ValidateSnapshotSourceRequest(options))
 	}

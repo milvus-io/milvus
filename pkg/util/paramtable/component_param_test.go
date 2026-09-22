@@ -31,6 +31,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
 
+func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.DataNodeCfg
+	for _, invalid := range []string{"0", "-1"} {
+		params.Save(cfg.MaxParallelSyncMgrTasksPerCPUCore.Key, invalid)
+		require.Equal(t, 16, cfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt())
+	}
+	for _, invalid := range []string{"0", "-1", "101"} {
+		params.Save(cfg.ImportMemoryLimitPercentage.Key, invalid)
+		require.Equal(t, float64(10), cfg.ImportMemoryLimitPercentage.GetAsFloat())
+	}
+}
+
 func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))

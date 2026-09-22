@@ -18,6 +18,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestGetRowsStatsMissingPrimaryKey(t *testing.T) {
+	task := NewPreImportTask(&datapb.PreImportRequest{
+		Schema: &schemapb.CollectionSchema{}, PartitionIDs: []int64{1}, Vchannels: []string{"v1"},
+	}, nil, nil)
+	defer task.Cancel()
+
+	stats, err := GetRowsStats(task, &storage.InsertData{})
+	require.Error(t, err)
+	require.Nil(t, stats)
+}
+
 func TestSnapshotImportPartitionKeyRoutingBothPhases(t *testing.T) {
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},

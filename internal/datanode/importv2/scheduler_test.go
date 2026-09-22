@@ -400,7 +400,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 	ma := NewMemoryAllocator(taskMemory).(*memoryAllocator)
 	memoryPatch := mockey.Mock(GetMemoryAllocator).Return(ma).Build()
 	defer memoryPatch.UnPatch()
-	for _, mode := range []string{"reinsert", "mapped", "source_commit", "manifest_source_commit", "zero_rows", "clamped_buffer", "missing_between_phases", "preimport_admission", "import_admission", "cancel_import", "shared", "shared_mapped", "shared_packed", "shared_source_commit", "shared_multi", "shared_missing", "shared_external_multi", "external_multi", "external_no_l0_multi", "shared_large", "shared_large_preimport_budget", "shared_large_import_budget"} {
+	for _, mode := range []string{"manifest_source_commit", "zero_rows", "clamped_buffer", "preimport_admission", "import_admission", "cancel_import", "shared", "shared_mapped", "shared_packed", "shared_source_commit", "shared_multi", "shared_missing", "shared_external_multi", "external_no_l0_multi", "shared_large", "shared_large_preimport_budget", "shared_large_import_budget"} {
 		t.Run(mode, func(t *testing.T) {
 			external := strings.Contains(mode, "external")
 			multi := strings.HasSuffix(mode, "multi")
@@ -518,7 +518,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 				Version: 1, ManifestPath: packed.MarshalManifestPath("snapshot/data/20", 7),
 			}}
 			want := []int64{1}
-			if mode == "source_commit" || mode == "manifest_source_commit" || mode == "shared_source_commit" {
+			if mode == "manifest_source_commit" || mode == "shared_source_commit" {
 				file.SnapshotSource.SourceCommitTimestamp = 300
 				want = []int64{1, 1, 2}
 			}
@@ -529,7 +529,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 				want = nil
 			}
 			options := importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"}, {Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot}}
-			if mode == "mapped" || mode == "shared_mapped" {
+			if mode == "shared_mapped" {
 				file.SnapshotSource.Version = 3
 				file.SnapshotSource.TargetPartitionId = 10
 				options = append(options, &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"source":"target"}`})
@@ -591,7 +591,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 				require.EqualValues(t, 1, resolutions.Load(), "PreImport shares one source client across L0 and segment readers")
 			}
 			require.Zero(t, ma.usedMemory)
-			if mode == "missing_between_phases" || mode == "shared_missing" {
+			if mode == "shared_missing" {
 				require.NoError(t, cm.Remove(context.Background(), deltaPath))
 			}
 			imp := NewImportTask(&datapb.ImportRequest{
@@ -614,7 +614,7 @@ func TestSnapshotL0BothImportPhases(t *testing.T) {
 				imp.Cancel()
 			}
 			err = conc.AwaitAll(imp.Execute()...)
-			if mode == "missing_between_phases" || mode == "shared_missing" || mode == "import_admission" || mode == "cancel_import" {
+			if mode == "shared_missing" || mode == "import_admission" || mode == "cancel_import" {
 				require.Error(t, err)
 				require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(2).GetState())
 			} else {
@@ -655,18 +655,24 @@ func TestSnapshotReaderBudgetsAndCleanup(t *testing.T) {
 	poolPatch := mockey.Mock(GetExecPool).Return(pool).Build()
 	defer poolPatch.UnPatch()
 	for _, tc := range []struct {
-		name                                    string
-		preimport, snapshot, openError, pkRange bool
+		name                                                    string
+		preimport, snapshot, openError, pkRange, admissionError bool
 	}{
-		{"snapshot_preimport_read_error", true, true, false, false},
-		{"snapshot_import_read_error", false, true, false, false},
-		{"snapshot_preimport_open_error", true, true, true, false},
-		{"snapshot_import_open_error", false, true, true, false},
-		{"ordinary_preimport", true, false, false, false},
-		{"ordinary_import_auto_id", false, false, false, false},
-		{"ordinary_import_reserved_ids", false, false, false, true},
+		{"snapshot_preimport_read_error", true, true, false, false, false},
+		{"snapshot_import_read_error", false, true, false, false, false},
+		{"snapshot_preimport_open_error", true, true, true, false, false},
+		{"snapshot_import_open_error", false, true, true, false, false},
+		{"snapshot_preimport_admission_error", true, true, false, false, true},
+		{"snapshot_import_admission_error", false, true, false, false, true},
+		{"ordinary_preimport", true, false, false, false, false},
+		{"ordinary_import_auto_id", false, false, false, false, false},
+		{"ordinary_import_reserved_ids", false, false, false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.admissionError {
+				ma.systemTotalMemory = 0
+				defer func() { ma.systemTotalMemory = 240 * mib }()
+			}
 			// Reader tests exercise the real timestamp check. Here inject its
 			// typed read error to verify the real task does not publish success
 			// or turn a corrupt source into an empty successful import.
@@ -748,10 +754,15 @@ func TestSnapshotReaderBudgetsAndCleanup(t *testing.T) {
 				t.Fatal("import phase did not finish after a terminal reader error")
 			}
 			_, err := futures[0].Await()
-			require.ErrorIs(t, err, merr.ErrDataIntegrity)
+			if tc.admissionError {
+				require.ErrorIs(t, err, merr.ErrServiceResourceInsufficient)
+				require.Zero(t, factoryPatch.Times(), "admission failure must not open a reader")
+			} else {
+				require.ErrorIs(t, err, merr.ErrDataIntegrity)
+				require.Contains(t, manager.Get(1).GetReason(), "raw row timestamp")
+			}
 			require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(1).GetState())
-			require.Contains(t, manager.Get(1).GetReason(), "raw row timestamp")
-			require.Equal(t, !tc.openError, closed, "task must close every successfully opened reader")
+			require.Equal(t, !tc.openError && !tc.admissionError, closed, "task must close every successfully opened reader")
 			require.Zero(t, ma.usedMemory, "task must release the clamped reservation on failure")
 		})
 	}

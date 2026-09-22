@@ -6566,7 +6566,8 @@ func TestLoadableProjectionUsesFinalSegments(t *testing.T) {
 	meta := &meta{ctx: ctx, segments: segments}
 	actual, err := meta.loadableProjection(ctx, 100)
 	require.NoError(t, err)
-	require.Equal(t, []dataview.LoadableSegment{
+	// Segment selection is map-backed, so projection order is unspecified.
+	require.ElementsMatch(t, []dataview.LoadableSegment{
 		{SegmentID: 110, VChannel: "vchan-0", PartitionID: 10},
 		{SegmentID: 120, VChannel: "vchan-0", PartitionID: 10},
 	}, actual)
