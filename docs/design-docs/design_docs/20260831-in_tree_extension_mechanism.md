@@ -303,15 +303,15 @@ them through `user.yaml` or the environment.
   installed - the stock cases assert master's answers (a second replica
   refused for want of a streaming node, a delegator placed on the streaming
   query node, a scoped load that moves the replica, version 0
-  with no session) - plus a request naming no resource group, a load
-  percentage that regresses, the three ways a serving group reads as an
-  unreliable 0 (failed read, no target, a replica that has not reported), a
-  ready group whose percentage sits at 99 for the whole timeout, a group that
-  stays unknown past the load timeout and one that loses its last replica
-  (neither may keep pushing the checkers), a load
-  timeout that may not unload a serving collection, a replayed expansion,
-  the rebuild of scoped load tasks after a restart, and an index engine
-  version override clamped with no QueryNode registered.
+  with no session) - plus a request naming no resource group; the resource
+  group scope of `completePlacementForOutOfScopeResourceGroups` (a named group
+  is an addition, an unnamed one is carried through); the expansion predicate
+  in `job_load.go`, its legs, a request that only adds a replica to an
+  already-loaded group, and a replayed expansion; a scoped
+  `ShowLoadCollections` answered from the group's own figures (100 / -1 /
+  unknown group refused); a delegator placed on a regular query node under a
+  form; and an index engine version override clamped with no QueryNode
+  registered.
 
 ## Rejected alternatives
 
