@@ -585,26 +585,34 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	assert.Equal(t, datapb.CompactionType_SortCompaction, task.GetCompactionType())
 }
 
-func TestWarnIfManifestIgnoresParallelRead(t *testing.T) {
+func TestWarnIfParallelReadIgnored(t *testing.T) {
 	ctx := context.Background()
-	const message = "sort read in parallel is ignored for manifest segments"
+	const message = "sort read in parallel is ignored"
 
 	t.Run("manifest with parallel read warns", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfManifestIgnoresParallelRead(mlog.With(), ctx, 100, "base_path/_metadata/manifest-1", 8)
+		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 8)
 		assert.Contains(t, sink.String(), message)
+		assert.Contains(t, sink.String(), "manifest", "the reason must name the manifest route")
 		assert.Contains(t, sink.String(), "100", "the segment ID must be in the log")
 	})
 
-	t.Run("binlog path does not warn", func(t *testing.T) {
+	t.Run("StorageV1 segment with parallel read warns", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfManifestIgnoresParallelRead(mlog.With(), ctx, 100, "", 8)
+		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV1, "", 8)
+		assert.Contains(t, sink.String(), message)
+		assert.Contains(t, sink.String(), "StorageV1", "the reason must name the V1 route")
+	})
+
+	t.Run("binlog V2 path does not warn", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV2, "", 8)
 		assert.NotContains(t, sink.String(), message)
 	})
 
 	t.Run("concurrency 1 does not warn", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfManifestIgnoresParallelRead(mlog.With(), ctx, 100, "base_path/_metadata/manifest-1", 1)
+		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 1)
 		assert.NotContains(t, sink.String(), message)
 	})
 }

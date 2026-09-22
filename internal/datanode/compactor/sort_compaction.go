@@ -152,15 +152,26 @@ func (t *sortCompactionTask) preCompact() error {
 	return nil
 }
 
-// warnIfManifestIgnoresParallelRead logs that the parallel chunk read option
-// cannot take effect. Only sort compaction sets the option, and a segment with
-// a manifest is read through a manifest reader, which ignores it: the input is
-// read serially and nothing else surfaces the no-op at runtime.
-func warnIfManifestIgnoresParallelRead(log *mlog.Logger, ctx context.Context, segmentID int64, manifest string, concurrency int) {
-	if manifest != "" && concurrency > 1 {
-		log.Warn(ctx, "sort read in parallel is ignored for manifest segments: input is read serially",
-			mlog.Int64("segmentID", segmentID))
+// warnIfParallelReadIgnored logs that the parallel chunk read option cannot
+// take effect for this sort input. Only sort compaction sets the option, and a
+// segment read through a manifest or through the StorageV1 reader ignores it:
+// the input is read serially and nothing else surfaces the no-op at runtime.
+func warnIfParallelReadIgnored(ctx context.Context, log *mlog.Logger, segmentID int64, storageVersion int64, manifest string, concurrency int) {
+	if concurrency <= 1 {
+		return
 	}
+	var reason string
+	switch {
+	case manifest != "":
+		reason = "the segment is read through a manifest"
+	case storageVersion == storage.StorageV1:
+		reason = "the segment uses StorageV1 binlogs"
+	default:
+		return
+	}
+	log.Warn(ctx, "sort read in parallel is ignored: input is read serially",
+		mlog.Int64("segmentID", segmentID),
+		mlog.String("reason", reason))
 }
 
 func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.CompactionPlanResult, error) {
@@ -283,7 +294,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
 		RangeSize:   paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize(),
 	}
-	warnIfManifestIgnoresParallelRead(log, ctx, t.segmentID, t.manifest, parallelRead.Concurrency)
+	warnIfParallelReadIgnored(ctx, log, t.segmentID, t.segmentStorageVersion, t.manifest, parallelRead.Concurrency)
 	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
