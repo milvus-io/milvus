@@ -296,14 +296,14 @@ func TestInitHookWithoutAnExtensionKeepsTheDefault(t *testing.T) {
 }
 
 // common.panicWhenPluginFail lets a deployment carry on without a plug-in that
-// failed to load; it does not reach a compiled-in hook. A proxy serving through
-// the default hook beside coordinators that run the distribution's behaviors
-// would be half of that distribution, so a compiled-in hook that cannot
-// initialize, or is configured beside a plug-in, stops the proxy whatever the
-// setting says. A plug-in's failure keeps the setting's meaning
-// (TestHookInitLogError). The gate is a form installed, not a hook alone: a
-// distribution that installs a hook without switching the coordinators'
-// behaviors on is free to follow panicWhenPluginFail.
+// failed to load. A compiled-in hook is treated by two rules. Setting
+// proxy.soPath beside it is a contradiction in the deployment - both answer
+// VerifyAPIKey and the request interception - so it stops the proxy whatever
+// the setting says, form or not. Any other failure of a compiled-in hook stops
+// the proxy only when a form is installed: the distribution switched the
+// coordinators' behaviors on too, so serving through the default hook would
+// run half of it. A plug-in's failure keeps the setting's meaning
+// (TestHookInitLogError).
 func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t *testing.T) {
 	paramtable.Init()
 	p := paramtable.Get()
@@ -322,9 +322,10 @@ func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t 
 			InitOnceHook()
 		})
 	})
+	// No form here: the soPath conflict is fatal on its own, not by way of the
+	// form rule.
 	t.Run("it is configured beside a plug-in", func(t *testing.T) {
 		installHook(t, MockAPIHook{User: "root"})
-		ext.SetForm()
 		require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/some-hook.so"))
 		t.Cleanup(func() { p.Reset(p.ProxyCfg.SoPath.Key) })
 		assert.Panics(t, func() {
@@ -335,8 +336,9 @@ func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t 
 }
 
 // A distribution that installs a hook WITHOUT declaring a form has switched
-// nothing in the coordinators, so its hook's failure is a plug-in's failure:
-// it follows panicWhenPluginFail instead of always stopping the proxy.
+// nothing in the coordinators, so a hook that cannot initialize is a plug-in's
+// failure: it follows panicWhenPluginFail instead of always stopping the
+// proxy. (A soPath beside it is still fatal - see the test above.)
 func TestInitOnceHookFollowsPanicWhenPluginFailWithoutAForm(t *testing.T) {
 	paramtable.Init()
 	p := paramtable.Get()
