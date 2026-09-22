@@ -115,6 +115,7 @@ type ClusterBuffer struct {
 	id                      int
 	writer                  *MultiSegmentWriter
 	builder                 *storage.RecordBuilder
+	appendErr               error
 	clusteringKeyFieldStats *storage.FieldStats
 
 	lock sync.RWMutex
@@ -125,10 +126,17 @@ type ClusterBuffer struct {
 func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
+	if b.appendErr != nil {
+		return b.appendErr
+	}
 	if b.builder == nil {
 		b.builder = storage.NewRecordBuilder(b.writer.schema)
 	}
 	if err := b.builder.Append(r, row, row+1); err != nil {
+		// Append can leave columns at different lengths. Poison this bucket
+		// before another mapping worker can acquire it, and discard the batch.
+		b.appendErr = err
+		b.releaseBuilder()
 		return err
 	}
 	// Leave room for buffering in the underlying writer.
@@ -141,6 +149,9 @@ func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 // writeRecord requires b.lock. Submitting a Record may transfer its buffers to
 // the writer; it does not imply that the underlying writer released memory.
 func (b *ClusterBuffer) writeRecord() error {
+	if b.appendErr != nil {
+		return b.appendErr
+	}
 	if b.builder == nil || b.builder.GetRowNum() == 0 {
 		return nil
 	}
@@ -162,10 +173,11 @@ func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	defer b.releaseBuilder()
-	if err := b.writeRecord(); err != nil {
-		return err
-	}
-	return b.writer.Close()
+	err := b.writeRecord()
+	closeErr := b.writer.Close()
+	// Keep the write/append failure as the primary cause while retaining any
+	// close failure. Closing must release the writer even after a failed flush.
+	return merr.Combine(closeErr, err)
 }
 
 func (b *ClusterBuffer) releaseBuilder() {
@@ -532,16 +544,29 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, fmt.Sprintf("mapping-%d", t.GetPlanID()))
 	defer span.End()
 	inputSegments := t.plan.GetSegmentBinlogs()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	mapStart := time.Now()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	for _, segment := range inputSegments {
 		future := t.mappingPool.Submit(func() (any, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			err := t.mappingSegment(ctx, segment)
+			if err != nil {
+				cancel(err)
+			}
 			return struct{}{}, err
 		})
 		futures = append(futures, future)
 	}
 	if err := conc.BlockOnAll(futures...); err != nil {
+		// A sibling may return context.Canceled before the failed future is
+		// visited. Preserve the failure that triggered cancellation.
+		if cause := context.Cause(ctx); cause != nil {
+			return nil, nil, cause
+		}
 		return nil, nil, err
 	}
 
@@ -656,7 +681,13 @@ func (t *clusteringCompactionTask) mappingSegment(
 	}
 
 	offset := int64(-1)
+	done := ctx.Done()
 	for {
+		select {
+		case <-done:
+			return ctx.Err()
+		default:
+		}
 		r, err := rr.Next()
 		if err != nil {
 			if err == sio.EOF {
@@ -669,6 +700,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 		pkColumn := r.Column(t.primaryKeyField.GetFieldID())
 		tsColumn := r.Column(common.TimeStampField).(*array.Int64)
 		for row := 0; row < r.Len(); row++ {
+			select {
+			case <-done:
+				return ctx.Err()
+			default:
+			}
 			offset++
 			pk, err := clusteringScalarValue(pkColumn, t.primaryKeyField, row)
 			if err != nil {
@@ -879,7 +915,13 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 	for _, buffer := range t.clusterBuffers {
 		buffer.lock.Lock()
 		buffer.releaseBuilder()
+		// Mapping has joined all workers. Discard pending rows on failure and
+		// close any writer that flushAll did not reach.
+		err := buffer.writer.Close()
 		buffer.lock.Unlock()
+		if err != nil {
+			mlog.Warn(ctx, "failed to close clustering compaction writer during cleanup", mlog.Int("bufferID", buffer.id), mlog.Err(err))
+		}
 	}
 	if t.mappingPool != nil {
 		t.mappingPool.Release()
