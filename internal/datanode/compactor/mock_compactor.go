@@ -5,7 +5,6 @@ package compactor
 import (
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	indexpb "github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
-
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -20,6 +19,38 @@ type MockCompactor_Expecter struct {
 
 func (_m *MockCompactor) EXPECT() *MockCompactor_Expecter {
 	return &MockCompactor_Expecter{mock: &_m.Mock}
+}
+
+// Cancel provides a mock function with no fields
+func (_m *MockCompactor) Cancel() {
+	_m.Called()
+}
+
+// MockCompactor_Cancel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Cancel'
+type MockCompactor_Cancel_Call struct {
+	*mock.Call
+}
+
+// Cancel is a helper method to define mock.On call
+func (_e *MockCompactor_Expecter) Cancel() *MockCompactor_Cancel_Call {
+	return &MockCompactor_Cancel_Call{Call: _e.mock.On("Cancel")}
+}
+
+func (_c *MockCompactor_Cancel_Call) Run(run func()) *MockCompactor_Cancel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactor_Cancel_Call) Return() *MockCompactor_Cancel_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCompactor_Cancel_Call) RunAndReturn(run func()) *MockCompactor_Cancel_Call {
+	_c.Run(run)
+	return _c
 }
 
 // Compact provides a mock function with no fields

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	"github.com/tikv/client-go/v2/txnkv"
@@ -322,7 +323,9 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
-	s.initCompaction()
+	if err = s.initCompaction(); err != nil {
+		return err
+	}
 	mlog.Info(s.ctx, "init compaction done")
 
 	s.initAnalyzeInspector()
@@ -346,8 +349,8 @@ func (s *Server) initDataCoord() error {
 
 	s.importInspector = NewImportInspector(s.ctx, s.meta, s.importMeta, s.globalScheduler)
 
-	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, importCheckerHooks{
-		commitImport:         s.broadcastCommitImportMessage,
+	s.importChecker = NewImportChecker(s.ctx, s.meta, s.broker, s.allocator, s.importMeta, s.compactionInspector, s.handler, s.cluster2, s.globalScheduler, importCheckerHooks{
+		commitImport:         s.commitImport,
 		rollbackImport:       s.broadcastRollbackImportMessage,
 		isReplicatingCluster: s.isReplicatingClusterNow,
 	})
@@ -375,6 +378,8 @@ func (s *Server) initDataCoord() error {
 		s.broker,
 		s.allocator,
 		s.copySegmentMeta,
+		s.cluster2,
+		s.globalScheduler,
 	)
 	mlog.Info(s.ctx, "init copy segment inspector and checker done")
 
@@ -424,6 +429,9 @@ func (s *Server) startDataCoord() {
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
+	if s.snapshotExportManager != nil {
+		s.snapshotExportManager.Start()
+	}
 	sessionutil.SaveServerInfo(typeutil.MixCoordRole, s.session.GetServerID())
 }
 
@@ -491,9 +499,28 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
+	var dropIndexTask func(nodeID, buildID int64) error
+	if s.cluster2 != nil && s.globalScheduler != nil {
+		dropIndexTask = func(_ int64, buildID int64) error {
+			var dropErr error
+			s.globalScheduler.Finalize(buildID, func() {
+				// Assign/Create may have finished while Finalize drained an
+				// in-flight callback. Use the fenced owner, not the GC scan's
+				// earlier NodeID snapshot.
+				latest, ok := s.meta.indexMeta.GetIndexJob(buildID)
+				if !ok || latest.NodeID <= 0 {
+					return
+				}
+				dropErr = s.cluster2.DropIndex(latest.NodeID, buildID)
+			})
+			return dropErr
+		}
+	}
 	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
 		cli:              cli,
 		broker:           s.broker,
+		importMeta:       s.importMeta,
+		dropIndexTask:    dropIndexTask,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
 		checkInterval:    Params.DataCoordCfg.GCInterval.GetAsDuration(time.Second),
 		scanInterval:     Params.DataCoordCfg.GCScanIntervalInHour.GetAsDuration(time.Hour),
@@ -589,7 +616,7 @@ func (s *Server) rewatchDataNodes(sessions map[string]*sessionutil.Session) erro
 
 func (s *Server) initSegmentManager() error {
 	if s.segmentManager == nil {
-		manager, err := newSegmentManager(s.meta, s.allocator)
+		manager, err := newSegmentManager(s.meta, s.allocator, withCollectionHandler(s.handler))
 		if err != nil {
 			return err
 		}
@@ -652,14 +679,19 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		return err
 	}
 	// Retry each recovery phase independently: a later metadata error must
-	// not repeat newMeta's successful object-storage manifest scan.
+	// not repeat newMeta's successful object-storage manifest scan. The
+	// collection snapshot is read from RootCoord and used only to seed
+	// DataView recovery; DataCoord keeps no collection cache of its own
+	// (see getCollectionFromRootCoord).
+	var collections []*collectionInfo
 	if err := retry.Do(s.ctx, func() error {
-		return recoveredMeta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+		var err error
+		collections, err = s.listCollectionsFromRootCoord(s.ctx)
+		return err
 	}, retry.Attempts(connMetaMaxRetryTime)); err != nil {
 		return err
 	}
 
-	collections := recoveredMeta.GetCollections()
 	collectionIDs := lo.Map(collections, func(c *collectionInfo, _ int) int64 { return c.ID })
 	collectionVChannels := lo.SliceToMap(collections, func(c *collectionInfo) (int64, []string) {
 		return c.ID, c.VChannelNames
@@ -689,7 +721,7 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 
 func (s *Server) initAnalyzeInspector() {
 	if s.analyzeInspector == nil {
-		s.analyzeInspector = newAnalyzeInspector(s.ctx, s.meta, s.globalScheduler)
+		s.analyzeInspector = newAnalyzeInspector(s.ctx, s.meta, s.globalScheduler, s.handler)
 	}
 }
 
@@ -701,7 +733,7 @@ func (s *Server) initIndexInspector(storageCli storage.ChunkManager) {
 
 func (s *Server) initStatsInspector() {
 	if s.statsInspector == nil {
-		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
+		s.statsInspector = newStatsInspector(s.ctx, s.meta, s.globalScheduler, s.cluster2, s.allocator, s.handler, s.compactionInspector, s.indexEngineVersionManager)
 	}
 }
 
@@ -713,13 +745,16 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 	}
 }
 
-func (s *Server) initCompaction() {
-	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
-	cph.loadMeta()
+func (s *Server) initCompaction() error {
+	cph := newCompactionInspector(s.ctx, s.meta, s.allocator, s.handler, s.cluster2, s.globalScheduler, s.indexEngineVersionManager)
+	if err := cph.loadMeta(); err != nil {
+		return err
+	}
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
 	s.compactionTriggerManager.InitForceMergeMemoryQuerier(s.nodeManager, s.mixCoord, s.session)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionInspector, s.allocator, s.handler, s.indexEngineVersionManager)
+	return nil
 }
 
 func (s *Server) stopCompaction() {
@@ -735,11 +770,14 @@ func (s *Server) stopCompaction() {
 	}
 }
 
+// startCompaction starts the parts that produce brand-new compaction work.
+// compactionInspector is not among them: it always runs (see startServerLoop),
+// since recovery -- releasing worker-side plan entries, finishing cleanup that
+// still owes input segments their visibility back -- must not depend on
+// dataCoord.enableCompaction. Tying either to the switch would leak plan
+// entries until the DataNode restarts, or leave sort inputs invisible for as
+// long as compaction stays off.
 func (s *Server) startCompaction() {
-	if s.compactionInspector != nil {
-		s.compactionInspector.start()
-	}
-
 	if s.compactionTrigger != nil {
 		s.compactionTrigger.start()
 	}
@@ -750,6 +788,11 @@ func (s *Server) startCompaction() {
 }
 
 func (s *Server) startServerLoop() {
+	// Unconditional: see startCompaction's doc comment. stopCompaction stops
+	// this unconditionally too, so shutdown is symmetric.
+	if s.compactionInspector != nil {
+		s.compactionInspector.start()
+	}
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.startCompaction()
 	}
@@ -763,13 +806,10 @@ func (s *Server) startServerLoop() {
 
 	// Start copy segment inspector and checker
 	go s.copySegmentInspector.Start()
-	go s.copySegmentChecker.Start()
+	s.copySegmentChecker.Start()
 
 	// Start external collection refresh manager (includes inspector and checker)
 	s.externalCollectionRefreshManager.Start()
-	if s.snapshotExportManager != nil {
-		s.snapshotExportManager.Start()
-	}
 
 	// The DataView recompute worker was already started at RecoverManager
 	// construction (bounded by s.ctx); nothing to do here.
@@ -1220,24 +1260,59 @@ func (s *Server) registerMetricsRequest() {
 	mlog.Info(s.ctx, "register metrics actions finished")
 }
 
-// loadCollectionFromRootCoord communicates with RootCoord and asks for collection information.
-// collection information will be added to server meta info.
-func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID int64) error {
+// listCollectionsFromRootCoord enumerates every collection RootCoord currently
+// owns. Like getCollectionFromRootCoord it returns a snapshot for the caller's
+// current operation: nothing here is cached in DataCoord. It is used by startup
+// DataView recovery, which needs the full collection/vchannel set before any
+// task metadata exists to read it from.
+func (s *Server) listCollectionsFromRootCoord(ctx context.Context) ([]*collectionInfo, error) {
+	dbResp, err := s.broker.ListDatabases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	collections := make([]*collectionInfo, 0)
+	for _, dbName := range lo.Uniq(dbResp.GetDbNames()) {
+		showResp, err := s.broker.ShowCollections(ctx, dbName)
+		if err != nil {
+			return nil, err
+		}
+		for _, collectionID := range showResp.GetCollectionIds() {
+			collection, err := s.getCollectionFromRootCoord(ctx, collectionID)
+			if err != nil {
+				// The collection was dropped between ShowCollections and the
+				// describe: it owns no DataView to recover, so skip it rather
+				// than failing the whole recovery phase.
+				if errors.Is(err, merr.ErrCollectionNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			collections = append(collections, collection)
+		}
+	}
+	return collections, nil
+}
+
+// getCollectionFromRootCoord reads collection information from its authoritative
+// owner. DataCoord deliberately does not retain a second collection metadata
+// cache: callers either use this snapshot for the current operation or persist
+// the fields they need in their own task metadata.
+func (s *Server) getCollectionFromRootCoord(ctx context.Context, collectionID int64) (*collectionInfo, error) {
 	has, err := s.broker.HasCollection(ctx, collectionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !has {
-		return merr.WrapErrCollectionNotFound(collectionID)
+		return nil, merr.WrapErrCollectionNotFound(collectionID)
 	}
 
 	resp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	partitionIDs, err := s.broker.ShowPartitionsInternal(ctx, collectionID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	properties := make(map[string]string)
@@ -1245,7 +1320,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	collInfo := &collectionInfo{
+	return &collectionInfo{
 		ID:             resp.CollectionID,
 		Schema:         resp.Schema,
 		Partitions:     partitionIDs,
@@ -1255,9 +1330,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		DatabaseName:   resp.GetDbName(),
 		DatabaseID:     resp.GetDbId(),
 		VChannelNames:  resp.GetVirtualChannelNames(),
-	}
-	s.meta.AddCollection(collInfo)
-	return nil
+	}, nil
 }
 
 func (s *Server) updateBalanceConfigLoop(ctx context.Context) {

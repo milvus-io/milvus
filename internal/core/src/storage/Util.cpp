@@ -2653,7 +2653,9 @@ ValidateFixedSizeBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
         std::static_pointer_cast<arrow::FixedSizeBinaryArray>(array);
     int byte_width = GetDataTypeSize(data_type, dim);
     if (!(fsb_array->byte_width() == byte_width)) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
+        // A byte-width mismatch is a dimension mismatch at the byte level:
+        // DimNotMatch, not a general type error.
+        ThrowInfo(ErrorCode::DimNotMatch,
                   "vector byte width mismatch{}, expected {} bytes for "
                   "dim {}, actual {} bytes",
                   FieldErrorSuffix(field_meta),
@@ -2676,7 +2678,7 @@ ValidateBinaryVectorWidth(const std::shared_ptr<arrow::Array>& array,
         }
         auto actual_width = binary_array->value_length(i);
         if (!(actual_width == byte_width)) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
+            ThrowInfo(ErrorCode::DimNotMatch,
                       "vector byte width mismatch{}, expected {} bytes for "
                       "dim {}, actual {} bytes at row {}",
                       FieldErrorSuffix(field_meta),
@@ -2819,7 +2821,7 @@ ValidateVectorListElementType(
         CanTreatVectorListAsRawBytes(data_type, actual_type)) {
         return;
     }
-    ThrowInfo(ErrorCode::DataFormatBroken,
+    ThrowInfo(ErrorCode::DataTypeInvalid,
               "vector element type mismatch{}, expected {} or raw uint8 "
               "bytes, actual {}",
               FieldErrorSuffix(field_meta),
@@ -2956,7 +2958,7 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
                     auto actual_length =
                         list_array->value_offset(i + 1) - offset;
                     if (!(actual_length == expected_list_length)) {
-                        ThrowInfo(ErrorCode::DataFormatBroken,
+                        ThrowInfo(ErrorCode::DimNotMatch,
                                   "vector list length mismatch{}, expected {}, "
                                   "actual {} at row {}",
                                   FieldErrorSuffix(field_meta),
@@ -2995,7 +2997,7 @@ NormalizeVectorArraysToFixedSizeBinary(const arrow::ArrayVector& arrays,
             int elem_byte_size = elem_bit_width / 8;
             if (!(fsl_array->value_length() == expected_list_length)) {
                 ThrowInfo(
-                    ErrorCode::DataFormatBroken,
+                    ErrorCode::DimNotMatch,
                     "vector list length mismatch{}, expected {}, actual {}",
                     FieldErrorSuffix(field_meta),
                     expected_list_length,
@@ -3569,7 +3571,7 @@ ConvertListToProtobufBinary(const arrow::ArrayVector& arrays,
             ArrowListElementTypeToMilvus(list_arr->values(), field_meta);
         if (!(IsCompatibleArrayElementType(actual_element_type,
                                            element_type))) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
+            ThrowInfo(ErrorCode::DataTypeInvalid,
                       "array element type mismatch{}, expected {}, actual {}",
                       FieldErrorSuffix(field_meta),
                       element_type,
@@ -3756,7 +3758,11 @@ ValidateScalarArrowType(DataType data_type,
         return;
     }
     if (!(array->type()->Equals(*expected_type))) {
-        ThrowInfo(ErrorCode::DataFormatBroken,
+        // The caller supplied data whose shape disagrees with the declared
+        // field type. That is a request error (InputError family), not
+        // corrupted storage: DataFormatBroken would make the import/refresh
+        // retry a failure that is deterministic and caller-owned.
+        ThrowInfo(ErrorCode::DataTypeInvalid,
                   "field type mismatch{}, expected Arrow {}, actual Arrow {}",
                   FieldErrorSuffix(field_meta),
                   expected_type->ToString(),
@@ -3768,7 +3774,7 @@ void
 AssertExternalArrowType(const std::shared_ptr<arrow::Array>& array,
                         const std::string& expected,
                         const FieldMeta& field_meta) {
-    ThrowInfo(ErrorCode::Unsupported,
+    ThrowInfo(ErrorCode::DataTypeInvalid,
               "field type mismatch{}, expected Arrow {}, actual Arrow {}",
               FieldErrorSuffix(field_meta),
               expected,

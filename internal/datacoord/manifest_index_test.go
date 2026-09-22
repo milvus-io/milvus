@@ -63,15 +63,10 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 		buildID      = int64(102)
 	)
 	basePath := "files/insert_log/1/2/3"
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collectionID, &collectionInfo{
-		ID: collectionID,
-		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
-			{FieldID: fieldID, Name: "vector"},
-		}},
-	})
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: fieldID, Name: "vector"},
+	}}
 	m := &meta{
-		collections:  collections,
 		chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -112,7 +107,7 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 		IndexFileKeys:             []string{"0", "1"},
 	}
 
-	info, err := buildManifestIndexInfo(m, segment, segIdx)
+	info, err := buildManifestIndexInfo(m, schema, segment, segIdx)
 	require.NoError(t, err)
 	require.Equal(t, "vector", info.ColumnName)
 	require.Equal(t, "vector_hnsw", info.IndexName)
@@ -142,9 +137,7 @@ func TestBuildManifestIndexInfoFromDataCoordMetadata(t *testing.T) {
 // TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride covers a segment
 // whose index type was downgraded away from the collection definition.
 func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
 	m := &meta{
-		collections:  collections,
 		chunkManager: storage.NewLocalChunkManager(objectstorage.RootPath("files")),
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -163,7 +156,7 @@ func TestBuildManifestIndexInfoRespectsSegmentIndexTypeOverride(t *testing.T) {
 		StorageVersion: storage.StorageV3,
 		ManifestPath:   packed.MarshalManifestPath("files/insert_log/1/2/3", 7),
 	}}
-	info, err := buildManifestIndexInfo(m, segment, &model.SegmentIndex{
+	info, err := buildManifestIndexInfo(m, nil, segment, &model.SegmentIndex{
 		CollectionID: 1, PartitionID: 2, SegmentID: 3, IndexID: 101, BuildID: 102,
 		IndexVersion: 4, IndexType: "FLAT",
 		IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
@@ -860,7 +853,7 @@ func TestCommitSegmentManifestTakesKeyLockBeforeSegMu(t *testing.T) {
 		IndexFileKeys: []string{"0", "1"},
 	})
 	require.NoError(t, err)
-	entry, err := buildManifestIndexInfo(m, m.GetSegment(ctx, restartSegID), finished)
+	entry, err := buildManifestIndexInfo(m, nil, m.GetSegment(ctx, restartSegID), finished)
 	require.NoError(t, err)
 
 	// Stand in for any index writer holding the build's key lock - exactly the

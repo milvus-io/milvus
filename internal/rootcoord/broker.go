@@ -54,7 +54,7 @@ type Broker interface {
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
-	// notify observer to clean their meta cache
+	// notify DataCoord that RootCoord's collection update is visible
 	BroadcastAlteredCollection(ctx context.Context, collectionID UniqueID) error
 	ShowResourceGroups(ctx context.Context) ([]string, error)
 }

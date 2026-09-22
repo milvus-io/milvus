@@ -30,7 +30,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | AlterRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | DropRLSMetadata | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 | BatchUpdateManifest | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
-| RefreshExternalCollection | Broadcast: CChannel | No | — |
+| RefreshExternalCollection | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName |
 
 ## Message Descriptions
 
@@ -50,7 +50,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **AlterRLSMetadata**: Persists a complete row-policy or principal-tag post-image in the ACK callback. Policy mutations invalidate the collection policy cache. Principal-tag mutations invalidate only that principal, including creation so an in-flight lookup cannot publish a pre-create miss. CChannel-only and serialized with collection/schema DDL; cache invalidation failures are retried by the broadcaster callback.
 - **DropRLSMetadata**: Drops a row policy or principal-tag record by stable logical identity in the ACK callback. A policy name resolves through RootCoord's collection metadata to its internal policy ID, allowing the callback to remove the single ID-keyed etcd record without a prefix scan. Policy drops invalidate the collection policy cache, while principal drops invalidate only that principal. CChannel-only and serialized with collection/schema DDL; cache invalidation failures are retried by the broadcaster callback.
 - **BatchUpdateManifest**: Updates segment manifest versions in batch. Used after compaction or index building. CChannel-only.
-- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only.
+- **RefreshExternalCollection**: Submits an external collection refresh job using a pre-allocated job ID from the WAL message. CChannel-only and serialized with other DDL on the same collection.
 
 RLS cache invalidation does not fetch metadata in the ACK callback. Policy
 metadata remains collection-scoped. Principal tags are cached by

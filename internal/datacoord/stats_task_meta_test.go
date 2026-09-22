@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -145,49 +146,21 @@ func (s *statsTaskMetaSuite) Test_Method() {
 		})
 	})
 
-	s.Run("UpdateVersion", func() {
-		s.Run("normal case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
-
-			s.NoError(m.UpdateVersion(1, 1180))
-			task, ok := m.tasks.Get(1)
-			s.True(ok)
-			s.Equal(int64(1), task.GetVersion())
-		})
-
-		s.Run("task not exist", func() {
-			_, ok := m.tasks.Get(100)
-			s.False(ok)
-
-			s.Error(m.UpdateVersion(100, 1180))
-		})
-
-		s.Run("failed case", func() {
-			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
-
-			s.Error(m.UpdateVersion(1, 1180))
-			task, ok := m.tasks.Get(1)
-			s.True(ok)
-			// still 1
-			s.Equal(int64(1), task.GetVersion())
-		})
-	})
-
 	s.Run("UpdateBuildingTask", func() {
 		s.Run("failed case", func() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
-			s.Error(m.UpdateBuildingTask(1))
+			s.Error(m.UpdateBuildingTask(1, 1180))
 			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(indexpb.JobState_JobStateInit, task.GetState())
-			s.Equal(int64(1180), task.GetNodeID())
+			s.Zero(task.GetNodeID())
 		})
 
 		s.Run("normal case", func() {
 			catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Once()
 
-			s.NoError(m.UpdateBuildingTask(1))
+			s.NoError(m.UpdateBuildingTask(1, 1180))
 			task, ok := m.tasks.Get(1)
 			s.True(ok)
 			s.Equal(indexpb.JobState_JobStateInProgress, task.GetState())
@@ -198,7 +171,7 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			_, ok := m.tasks.Get(100)
 			s.False(ok)
 
-			s.Error(m.UpdateBuildingTask(100))
+			s.Error(m.UpdateBuildingTask(100, 1180))
 		})
 	})
 
@@ -311,6 +284,68 @@ func (s *statsTaskMetaSuite) Test_Method() {
 			s.NoError(m.DropStatsTask(context.TODO(), 1000))
 		})
 	})
+}
+
+func (s *statsTaskMetaSuite) TestReplaceRetryTask() {
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil).Once()
+	catalog.EXPECT().SaveStatsTask(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	m, err := newStatsTaskMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.Require().NoError(m.AddStatsTask(&indexpb.StatsTask{
+		CollectionID: s.collectionID,
+		PartitionID:  s.partitionID,
+		SegmentID:    s.segmentID,
+		TaskID:       1,
+		Version:      9,
+		NodeID:       100,
+		SubJobType:   indexpb.StatsSubJob_TextIndexJob,
+	}))
+	s.Require().NoError(m.UpdateTaskState(1, indexpb.JobState_JobStateRetry, "worker unavailable"))
+
+	var actions []metastore.UpdateAction
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, got ...metastore.UpdateAction) error {
+			actions = got
+			return nil
+		}).Once()
+
+	replacement, replaced, err := m.ReplaceRetryTask(context.Background(), 1, 2)
+	s.Require().NoError(err)
+	s.True(replaced)
+	s.Require().NotNil(replacement)
+	s.Equal(int64(2), replacement.GetTaskID())
+	s.Zero(replacement.GetVersion())
+	s.Zero(replacement.GetNodeID())
+	s.Equal(indexpb.JobState_JobStateInit, replacement.GetState())
+	s.Empty(replacement.GetFailReason())
+	s.Nil(m.GetStatsTask(1))
+	s.Same(replacement, m.GetStatsTask(2))
+	s.Same(replacement, m.GetStatsTaskBySegmentID(s.segmentID, indexpb.StatsSubJob_TextIndexJob))
+
+	s.Require().Len(actions, 2)
+	drop, ok := actions[0].Entry.(metastore.StatsTaskEntry)
+	s.True(ok)
+	s.Equal(int64(1), drop.TaskID)
+	add, ok := actions[1].Entry.(metastore.StatsTaskEntry)
+	s.True(ok)
+	s.Equal(int64(2), add.Task.GetTaskID())
+}
+
+func (s *statsTaskMetaSuite) TestGetPendingTaskCountFromPersistedMeta() {
+	catalog := mocks.NewDataCoordCatalog(s.T())
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return([]*indexpb.StatsTask{
+		{TaskID: 1, SegmentID: 1, SubJobType: indexpb.StatsSubJob_TextIndexJob, State: indexpb.JobState_JobStateInit},
+		{TaskID: 2, SegmentID: 2, SubJobType: indexpb.StatsSubJob_TextIndexJob, State: indexpb.JobState_JobStateRetry},
+		{TaskID: 3, SegmentID: 3, SubJobType: indexpb.StatsSubJob_TextIndexJob, State: indexpb.JobState_JobStateInProgress},
+		{TaskID: 4, SegmentID: 4, SubJobType: indexpb.StatsSubJob_TextIndexJob, State: indexpb.JobState_JobStateFinished},
+		{TaskID: 5, SegmentID: 5, SubJobType: indexpb.StatsSubJob_TextIndexJob, State: indexpb.JobState_JobStateFailed},
+	}, nil).Once()
+
+	m, err := newStatsTaskMeta(context.Background(), catalog)
+	s.Require().NoError(err)
+	s.Equal(2, m.GetPendingTaskCount())
 }
 
 func Test_statsTaskMeta(t *testing.T) {
