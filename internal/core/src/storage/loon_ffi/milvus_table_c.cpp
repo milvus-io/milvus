@@ -815,31 +815,28 @@ AppendSourceDeltalogs(LoonTransactionHandle transaction,
 
 }  // namespace
 
-// loon_milvus_table_create_manifest_from_segment_manifests creates one target
-// StorageV3 manifest from source StorageV3 segment manifests. Real-PK mode also
-// imports source deltalogs and bloom-filter stats; virtual-PK mode leaves delete
-// translation to DataNode.
+// Stage source column groups on a caller-owned transaction without committing.
+// DataNode can add translated deletes and retained Function output/stats before
+// the single commit, so refresh never needs an incomplete intermediate manifest.
+// Only bloom-filter stats are imported from the source; text/JSON stats remain
+// target-owned and are supplied by the caller.
 extern "C" LoonFFIResult
-loon_milvus_table_create_manifest_from_segment_manifests(
-    const char* base_path,
-    char** source_manifest_paths,
-    const int64_t* source_row_counts,
-    size_t num_source_manifests,
-    char** target_columns,
-    size_t num_target_columns,
-    const char* external_source,
-    const LoonProperties* properties,
-    int has_external_primary_key,
-    char** out_manifest_path) {
-    if (base_path == nullptr || source_manifest_paths == nullptr ||
+loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
+                                          char** source_manifest_paths,
+                                          const int64_t* source_row_counts,
+                                          size_t num_source_manifests,
+                                          char** target_columns,
+                                          size_t num_target_columns,
+                                          const char* external_source,
+                                          const LoonProperties* properties,
+                                          int has_external_primary_key) {
+    if (transaction == 0 || source_manifest_paths == nullptr ||
         source_row_counts == nullptr || num_source_manifests == 0 ||
-        target_columns == nullptr || num_target_columns == 0 ||
-        out_manifest_path == nullptr) {
+        target_columns == nullptr || num_target_columns == 0) {
         RETURN_ERROR(LOON_INVALID_ARGS,
-                     "base_path, source_manifest_paths, source_row_counts, "
-                     "target_columns, and out_manifest_path must not be empty");
+                     "transaction, source_manifest_paths, source_row_counts, "
+                     "and target_columns must not be empty");
     }
-    *out_manifest_path = nullptr;
 
     try {
         std::unordered_set<std::string> target_column_set;
@@ -851,16 +848,6 @@ loon_milvus_table_create_manifest_from_segment_manifests(
             }
             target_column_set.emplace(target_columns[i]);
         }
-
-        TransactionGuard transaction;
-        ThrowIfFFIError(
-            loon_transaction_begin(base_path,
-                                   properties,
-                                   0,
-                                   LOON_TRANSACTION_RESOLVE_OVERWRITE,
-                                   10,
-                                   &transaction.handle),
-            "open milvus-table target manifest transaction");
 
         std::unordered_set<std::string> added_delta_paths;
         std::unordered_set<std::string> added_stat_paths;
@@ -893,12 +880,12 @@ loon_milvus_table_create_manifest_from_segment_manifests(
             }
 
             auto target_groups = MaterializeColumnGroups(target_groups_data);
-            ThrowIfFFIError(loon_transaction_append_files(transaction.handle,
+            ThrowIfFFIError(loon_transaction_append_files(transaction,
                                                           target_groups.groups),
                             "append milvus-table source column groups");
 
             if (has_external_primary_key) {
-                AppendSourceDeltalogs(transaction.handle,
+                AppendSourceDeltalogs(transaction,
                                       source_manifest.manifest->delta_logs,
                                       external_source,
                                       properties,
@@ -911,21 +898,7 @@ loon_milvus_table_create_manifest_from_segment_manifests(
             }
         }
 
-        AppendImportedStats(transaction.handle, imported_stats);
-
-        int64_t committed_version = 0;
-        ThrowIfFFIError(
-            loon_transaction_commit(transaction.handle, &committed_version),
-            "commit milvus-table target manifest");
-        json manifest_path = {
-            {"base_path", std::string(base_path)},
-            {"ver", committed_version},
-        };
-        *out_manifest_path = strdup(manifest_path.dump().c_str());
-        if (*out_manifest_path == nullptr) {
-            RETURN_ERROR(LOON_MEMORY_ERROR,
-                         "failed to allocate milvus-table manifest path");
-        }
+        AppendImportedStats(transaction, imported_stats);
         RETURN_SUCCESS();
     } catch (const LoonFFIError& e) {
         // Preserve the producer's own err_code instead of collapsing to

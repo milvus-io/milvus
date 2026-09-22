@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -197,67 +196,56 @@ func stringSetEqual(left, right map[string]struct{}) bool {
 	return true
 }
 
-// refreshMilvusTableSegmentManifest rebuilds a target segment manifest from the
-// latest source fragments and stores the new manifest path on SegmentInfo.
+// refreshMilvusTableSegmentManifest replaces the delete set and retains derived
+// artifacts in one manifest commit. outputColumns is resolved once by
+// organizeSegments for both the segment-reuse check and artifact retention.
 func (t *RefreshExternalCollectionTask) refreshMilvusTableSegmentManifest(
 	ctx context.Context,
 	seg *datapb.SegmentInfo,
 	fragments []packed.Fragment,
+	outputColumns []string,
 ) (*datapb.SegmentInfo, error) {
+	basePath, _, err := packed.UnmarshalManifestPath(seg.GetManifestPath())
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "parse refresh manifest path")
+	}
 	workFragments, err := t.prepareMilvusTableDeltalogFragments(fragments)
 	if err != nil {
 		return nil, err
 	}
-	rebuiltManifestPath, err := t.createManifestForSegment(ctx, seg.GetID(), workFragments)
+	var deltas []packed.DeltaLogEntry
+	if packed.HasExternalPrimaryKey(t.req.GetSchema()) {
+		deltas, err = t.prepareMilvusTableL0Deltalogs(ctx, workFragments)
+	} else {
+		deltas, err = t.prepareMilvusTableVirtualPKDeltalogs(ctx, basePath, seg.GetID(), workFragments)
+	}
 	if err != nil {
 		return nil, err
 	}
-	var outputColumns []string
-	if t.hasFunctions() {
-		outputColumns, err = functionOutputColumnNames(t.req.GetSchema())
-		if err != nil {
-			return nil, merr.Wrap(err, "resolve function output columns")
-		}
+	result, err := packed.RefreshMilvusTableManifest(ctx, seg.GetManifestPath(),
+		t.columns, workFragments, t.req.GetStorageConfig(), packed.ExternalSpecContext{
+			CollectionID:      t.req.GetCollectionID(),
+			Source:            t.req.GetExternalSource(),
+			Spec:              t.req.GetExternalSpec(),
+			MilvusTablePKMode: packed.MilvusTablePrimaryKeyModeFromSchema(t.req.GetSchema()),
+		}, outputColumns, deltas)
+	if err != nil {
+		return nil, merr.Wrapf(err, "refresh milvus-table manifest for segment %d", seg.GetID())
 	}
+	// No intermediate manifest exists. On failure/cancellation, retain any
+	// translated logs or possibly committed manifest for segment-drop GC:
+	// deterministic delta paths may still be live, and removing the latest
+	// manifest could reuse its version and alias Loon's path-keyed cache.
 	if err := ensureContext(ctx); err != nil {
 		return nil, err
 	}
-	// createManifestForSegment owns the refreshed deltalogs. Carry only the
-	// artifacts derived from unchanged L1 rows; source deltalogs must not return.
-	carryResult, err := packed.CarryManifestArtifacts(
-		seg.GetManifestPath(),
-		rebuiltManifestPath,
-		t.req.GetStorageConfig(),
-		outputColumns,
-	)
-	if err != nil {
-		return nil, merr.Wrapf(err, "carry milvus-table derived artifacts for segment %d", seg.GetID())
-	}
-	// Remove the intermediate snapshot only after carry succeeds and retains a
-	// higher version. On any failure (including reading stats after carry commits),
-	// leave all generated manifests for dropped-segment GC. Loon allocates versions
-	// as the highest existing version plus one and caches manifests by file path;
-	// deleting the latest version could reuse its path and return stale cached data.
-	if carryResult.ManifestPath != rebuiltManifestPath {
-		// Delete only the manifest, never its referenced files. Translated deltalogs
-		// use deterministic paths and may still be referenced by a live snapshot.
-		// Unreferenced failure artifacts remain until GC removes the dropped segment's
-		// whole V3 base path; that storage cost is safer than deleting a live file.
-		if err := packed.RemoveUnpublishedManifest(rebuiltManifestPath, t.req.GetStorageConfig()); err != nil {
-			mlog.Warn(ctx, "failed to remove unpublished refresh manifest",
-				mlog.FieldSegmentID(seg.GetID()),
-				mlog.String("manifestPath", rebuiltManifestPath),
-				mlog.Err(err))
-		}
-	}
 	updated := proto.Clone(seg).(*datapb.SegmentInfo)
-	updated.ManifestPath = carryResult.ManifestPath
+	updated.ManifestPath = result.ManifestPath
 	updated.StorageVersion = storage.StorageV3
-	// These placeholders are parsed from the final manifest rather than copied
-	// from the source SegmentInfo. This keeps target-wins stat replacement and
-	// DataCoord's scheduling metadata in the same generation.
-	updated.TextStatsLogs = carryResult.TextStatsLogs
-	updated.JsonKeyStats = carryResult.JSONKeyStats
+	// Derived from the stats staged in the final transaction, not from possibly
+	// stale/missing SegmentInfo placeholders. Source imports only bloom stats.
+	updated.TextStatsLogs = result.TextStatsLogs
+	updated.JsonKeyStats = result.JSONKeyStats
 	return updated, nil
 }
 
