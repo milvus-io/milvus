@@ -8928,6 +8928,7 @@ type UpdateIndexRequest_Action struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Op:
+	//
 	//	*UpdateIndexRequest_Action_AddIndexRequest
 	//	*UpdateIndexRequest_Action_DropIndexRequest
 	Op isUpdateIndexRequest_Action_Op `protobuf_oneof:"op"`

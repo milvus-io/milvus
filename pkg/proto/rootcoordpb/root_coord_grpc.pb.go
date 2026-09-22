@@ -109,56 +109,56 @@ type RootCoordClient interface {
 	GetComponentStates(ctx context.Context, in *milvuspb.GetComponentStatesRequest, opts ...grpc.CallOption) (*milvuspb.ComponentStates, error)
 	GetTimeTickChannel(ctx context.Context, in *internalpb.GetTimeTickChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(ctx context.Context, in *internalpb.GetStatisticsChannelRequest, opts ...grpc.CallOption) (*milvuspb.StringResponse, error)
-	//*
+	// *
 	// @brief This method is used to create collection
 	//
 	// @param CreateCollectionRequest, use to provide collection information to be created.
 	//
 	// @return Status
 	CreateCollection(ctx context.Context, in *milvuspb.CreateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to delete collection.
 	//
 	// @param DropCollectionRequest, collection name is going to be deleted.
 	//
 	// @return Status
 	DropCollection(ctx context.Context, in *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to clear a collection.
 	//
 	// @param TruncateCollectionRequest, collection name is going to be cleared.
 	//
 	// @return Status
 	TruncateCollection(ctx context.Context, in *milvuspb.TruncateCollectionRequest, opts ...grpc.CallOption) (*milvuspb.TruncateCollectionResponse, error)
-	//*
+	// *
 	// @brief This method is used to add collection field.
 	//
 	// @param AddCollectionFieldRequest, field schema is going to be added.
 	//
 	// @return Status
 	AddCollectionField(ctx context.Context, in *milvuspb.AddCollectionFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to add collection struct field.
 	//
 	// @param AddCollectionStructFieldRequest, struct field schema is going to be added.
 	//
 	// @return Status
 	AddCollectionStructField(ctx context.Context, in *milvuspb.AddCollectionStructFieldRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to add/drop collection field/function.
 	//
 	// @param AlterCollectionSchemaRequest, field schema is going to be added.
 	//
 	// @return AlterCollectionSchemaResponse
 	AlterCollectionSchema(ctx context.Context, in *milvuspb.AlterCollectionSchemaRequest, opts ...grpc.CallOption) (*milvuspb.AlterCollectionSchemaResponse, error)
-	//*
+	// *
 	// @brief This method is used to test collection existence.
 	//
 	// @param HasCollectionRequest, collection name is going to be tested.
 	//
 	// @return BoolResponse
 	HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to get collection schema.
 	//
 	// @param DescribeCollectionRequest, target collection name.
@@ -171,7 +171,7 @@ type RootCoordClient interface {
 	AlterAlias(ctx context.Context, in *milvuspb.AlterAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DescribeAlias(ctx context.Context, in *milvuspb.DescribeAliasRequest, opts ...grpc.CallOption) (*milvuspb.DescribeAliasResponse, error)
 	ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest, opts ...grpc.CallOption) (*milvuspb.ListAliasesResponse, error)
-	//*
+	// *
 	// @brief This method is used to list all collections.
 	//
 	// @return StringListResponse, collection name list
@@ -182,23 +182,23 @@ type RootCoordClient interface {
 	AddCollectionFunction(ctx context.Context, in *milvuspb.AddCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	AlterCollectionFunction(ctx context.Context, in *milvuspb.AlterCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	DropCollectionFunction(ctx context.Context, in *milvuspb.DropCollectionFunctionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to create partition
 	//
 	// @return Status
 	CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
 	CreatePartitionV2(ctx context.Context, in *milvuspb.CreatePartitionRequest, opts ...grpc.CallOption) (*CreatePartitionResponse, error)
-	//*
+	// *
 	// @brief This method is used to drop partition
 	//
 	// @return Status
 	DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to test partition existence.
 	//
 	// @return BoolResponse
 	HasPartition(ctx context.Context, in *milvuspb.HasPartitionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to show partition information
 	//
 	// @param ShowPartitionRequest, target collection name.
@@ -970,56 +970,56 @@ type RootCoordServer interface {
 	GetComponentStates(context.Context, *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error)
 	GetTimeTickChannel(context.Context, *internalpb.GetTimeTickChannelRequest) (*milvuspb.StringResponse, error)
 	GetStatisticsChannel(context.Context, *internalpb.GetStatisticsChannelRequest) (*milvuspb.StringResponse, error)
-	//*
+	// *
 	// @brief This method is used to create collection
 	//
 	// @param CreateCollectionRequest, use to provide collection information to be created.
 	//
 	// @return Status
 	CreateCollection(context.Context, *milvuspb.CreateCollectionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to delete collection.
 	//
 	// @param DropCollectionRequest, collection name is going to be deleted.
 	//
 	// @return Status
 	DropCollection(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to clear a collection.
 	//
 	// @param TruncateCollectionRequest, collection name is going to be cleared.
 	//
 	// @return Status
 	TruncateCollection(context.Context, *milvuspb.TruncateCollectionRequest) (*milvuspb.TruncateCollectionResponse, error)
-	//*
+	// *
 	// @brief This method is used to add collection field.
 	//
 	// @param AddCollectionFieldRequest, field schema is going to be added.
 	//
 	// @return Status
 	AddCollectionField(context.Context, *milvuspb.AddCollectionFieldRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to add collection struct field.
 	//
 	// @param AddCollectionStructFieldRequest, struct field schema is going to be added.
 	//
 	// @return Status
 	AddCollectionStructField(context.Context, *milvuspb.AddCollectionStructFieldRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to add/drop collection field/function.
 	//
 	// @param AlterCollectionSchemaRequest, field schema is going to be added.
 	//
 	// @return AlterCollectionSchemaResponse
 	AlterCollectionSchema(context.Context, *milvuspb.AlterCollectionSchemaRequest) (*milvuspb.AlterCollectionSchemaResponse, error)
-	//*
+	// *
 	// @brief This method is used to test collection existence.
 	//
 	// @param HasCollectionRequest, collection name is going to be tested.
 	//
 	// @return BoolResponse
 	HasCollection(context.Context, *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to get collection schema.
 	//
 	// @param DescribeCollectionRequest, target collection name.
@@ -1032,7 +1032,7 @@ type RootCoordServer interface {
 	AlterAlias(context.Context, *milvuspb.AlterAliasRequest) (*commonpb.Status, error)
 	DescribeAlias(context.Context, *milvuspb.DescribeAliasRequest) (*milvuspb.DescribeAliasResponse, error)
 	ListAliases(context.Context, *milvuspb.ListAliasesRequest) (*milvuspb.ListAliasesResponse, error)
-	//*
+	// *
 	// @brief This method is used to list all collections.
 	//
 	// @return StringListResponse, collection name list
@@ -1043,23 +1043,23 @@ type RootCoordServer interface {
 	AddCollectionFunction(context.Context, *milvuspb.AddCollectionFunctionRequest) (*commonpb.Status, error)
 	AlterCollectionFunction(context.Context, *milvuspb.AlterCollectionFunctionRequest) (*commonpb.Status, error)
 	DropCollectionFunction(context.Context, *milvuspb.DropCollectionFunctionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to create partition
 	//
 	// @return Status
 	CreatePartition(context.Context, *milvuspb.CreatePartitionRequest) (*commonpb.Status, error)
 	CreatePartitionV2(context.Context, *milvuspb.CreatePartitionRequest) (*CreatePartitionResponse, error)
-	//*
+	// *
 	// @brief This method is used to drop partition
 	//
 	// @return Status
 	DropPartition(context.Context, *milvuspb.DropPartitionRequest) (*commonpb.Status, error)
-	//*
+	// *
 	// @brief This method is used to test partition existence.
 	//
 	// @return BoolResponse
 	HasPartition(context.Context, *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)
-	//*
+	// *
 	// @brief This method is used to show partition information
 	//
 	// @param ShowPartitionRequest, target collection name.

@@ -3125,13 +3125,15 @@ type AlterAliasMessageHeader struct {
 	CollectionName string `protobuf:"bytes,4,opt,name=collection_name,json=collectionName,proto3" json:"collection_name,omitempty"`
 	Alias          string `protobuf:"bytes,5,opt,name=alias,proto3" json:"alias,omitempty"`
 	// The collection the alias pointed to BEFORE this alter. Sentinel-encoded:
-	//   > 0  the known old target -- cache expiration evicts it by id;
-	//   == 0 UNKNOWN: either a new AlterAlias whose broadcast could not resolve
-	//        the old target, OR an older producer that predates this field. The
-	//        proxy falls back to an O(N) holder scan, so 0 is the safe default;
-	//   < 0  the "no old target" sentinel that CreateAlias sets -- it provably
-	//        has none, so it must NOT trigger the scan. A CreateAlias producer
-	//        MUST use this, NOT 0 (0 would O(N)-scan every create).
+	//
+	//	> 0  the known old target -- cache expiration evicts it by id;
+	//	== 0 UNKNOWN: either a new AlterAlias whose broadcast could not resolve
+	//	     the old target, OR an older producer that predates this field. The
+	//	     proxy falls back to an O(N) holder scan, so 0 is the safe default;
+	//	< 0  the "no old target" sentinel that CreateAlias sets -- it provably
+	//	     has none, so it must NOT trigger the scan. A CreateAlias producer
+	//	     MUST use this, NOT 0 (0 would O(N)-scan every create).
+	//
 	// Carried in the header -- computed once under the broadcaster's database
 	// lock -- so cache expiration can evict the old target by id even when a
 	// concurrent describe has already re-pointed the proxy's alias resolution to
@@ -5894,6 +5896,7 @@ type CacheExpiration struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Cache:
+	//
 	//	*CacheExpiration_LegacyProxyCollectionMetaCache
 	Cache isCacheExpiration_Cache `protobuf_oneof:"cache"`
 }
@@ -7089,6 +7092,7 @@ type AlterRLSMetadataMessageBody struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Metadata:
+	//
 	//	*AlterRLSMetadataMessageBody_Policy
 	//	*AlterRLSMetadataMessageBody_Principal
 	Metadata isAlterRLSMetadataMessageBody_Metadata `protobuf_oneof:"metadata"`
@@ -7388,6 +7392,7 @@ type DropRLSMetadataMessageBody struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Metadata:
+	//
 	//	*DropRLSMetadataMessageBody_PolicyName
 	//	*DropRLSMetadataMessageBody_PrincipalName
 	Metadata isDropRLSMetadataMessageBody_Metadata `protobuf_oneof:"metadata"`
