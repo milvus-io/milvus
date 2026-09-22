@@ -69,7 +69,9 @@ class MemFileManagerImpl : public FileManagerImpl {
     bool
     AddTextLog(const BinarySet& binary_set);
 
-    std::map<std::string, int64_t>
+    // Borrows manager-owned state; the view reflects later updates. Copy for
+    // an independent snapshot. Do not read concurrently with updates.
+    const std::map<std::string, int64_t>&
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
     }

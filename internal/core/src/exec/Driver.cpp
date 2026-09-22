@@ -493,7 +493,7 @@ SplitPlan(const std::shared_ptr<const plan::PlanNode>& plannode,
         driver_factories->back()->consumer_node_ = consumer_node;
     }
 
-    auto sources = plannode->sources();
+    const auto& sources = plannode->sources();
     if (sources.empty()) {
         driver_factories->back()->is_input_driver_ = true;
     } else {

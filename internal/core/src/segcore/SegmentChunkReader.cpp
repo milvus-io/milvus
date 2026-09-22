@@ -157,7 +157,7 @@ SegmentChunkReader::GetMultipleChunkStringDataAccessor(
                 if (!raw.has_value()) {
                     return std::nullopt;
                 }
-                return raw.value();
+                return std::move(raw.value());
             };
         }
     }
@@ -409,7 +409,7 @@ SegmentChunkReader::GetChunkDataAccessor<std::string>(
                 if (!raw.has_value()) {
                     return std::nullopt;
                 }
-                return raw.value();
+                return std::move(raw.value());
             };
     }
     auto num_chunks = NumChunkData(field_id);
