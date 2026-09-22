@@ -87,7 +87,8 @@ type upsertTask struct {
 	// Allocated AutoIDs indexed by original request row, stable across retries.
 	partialUpdateAllocatedIDs map[int]int64
 	// Complete destination IDs in request order, saved after each PK allocation.
-	partialUpdateResultIDs *schemapb.IDs
+	partialUpdateResultIDs  *schemapb.IDs
+	fieldPartialUpdatePlans map[string]*fieldPartialUpdatePlan
 
 	storageCost segcore.StorageCost
 }
@@ -359,6 +360,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 
 	upsertIDSize := typeutil.GetSizeOfIDs(upsertIDs)
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && uint64(it.req.GetNumRows()) != uint64(upsertIDSize) {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"PATH_REPLACE num_rows %d does not match primary key count %d", it.req.GetNumRows(), upsertIDSize)
+	}
 	if upsertIDSize == 0 {
 		it.deletePKs = &schemapb.IDs{}
 		it.insertFieldData = it.req.GetFieldsData()
@@ -382,6 +387,22 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 	// Both modes rely on the standard Query contract for PK type and lookup scope.
 	existFieldData := resp.GetFieldsData()
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
+		retrievedFields := make(map[string]struct{}, len(existFieldData))
+		for _, field := range existFieldData {
+			if _, duplicate := retrievedFields[field.GetFieldName()]; duplicate {
+				return nil, merr.WrapErrServiceInternalMsg("retrieve by primary key returned duplicate field %q", field.GetFieldName())
+			}
+			retrievedFields[field.GetFieldName()] = struct{}{}
+		}
+		for fieldName, plan := range it.fieldPartialUpdatePlans {
+			if plan.isPathReplace() {
+				if _, ok := retrievedFields[fieldName]; !ok {
+					return nil, merr.WrapErrServiceInternalMsg("retrieve by primary key omitted PATH_REPLACE field %q", fieldName)
+				}
+			}
+		}
+	}
 	pkFieldData, err := typeutil.GetPrimaryFieldData(existFieldData, primaryFieldSchema)
 	if err != nil {
 		return nil, err
@@ -429,7 +450,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		it.insertFieldData = it.upsertMsg.InsertMsg.GetFieldsData()
 		return insertIdxInUpsert, nil
 	}
-
 	// set field id for user passed field data, prepare for merge logic
 	if len(it.upsertMsg.InsertMsg.GetFieldsData()) == 0 {
 		return nil, merr.WrapErrParameterInvalidMsg("upsert field data is empty")
@@ -446,6 +466,16 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		if structSchema := it.schema.SchemaHelper.GetStructArrayFieldFromName(fieldName); structSchema != nil {
 			fieldData.FieldId = structSchema.GetFieldID()
 			fieldData.FieldName = fieldName
+			if plan := it.fieldPartialUpdatePlans[fieldName]; plan.isPathReplace() {
+				for _, subField := range fieldData.GetStructArrays().GetFields() {
+					subFieldSchema := findStructChildSchema(structSchema, subField.GetFieldName())
+					if subFieldSchema == nil {
+						return nil, merr.WrapErrParameterInvalidMsg("child %q not found in struct field %q", subField.GetFieldName(), fieldName)
+					}
+					subField.FieldId = subFieldSchema.GetFieldID()
+				}
+				continue
+			}
 			if err := validateWholeStructFieldDataForPartialUpdate(it.schema.SchemaHelper, structSchema, fieldData, upsertIDSize); err != nil {
 				return nil, err
 			}
@@ -520,6 +550,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		return nil, err
 	}
 
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) && len(insertIdxInUpsert) > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE requires every primary key in the request to exist")
+	}
+
 	if len(insertIdxInUpsert) > 0 {
 		// Missing rows need complete insert fields, regardless of AutoID.
 		lackOfFieldErr := LackOfFieldsDataBySchema(it.schema.CollectionSchema, it.upsertMsg.InsertMsg.GetFieldsData(), false, true)
@@ -565,29 +599,41 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		}
 		it.partialUpdateCASGroups = groups
 	}
-
 	// 2. merge field data on update semantic
 	// Scalar nullable payloads are expanded before merge. Nullable vector payloads
 	// must remain compact: ValidData tracks logical rows, and vector data stores
 	// only valid rows.
+	var pathReplaceMergeRecorder *timerecord.TimeRecorder
+	if hasPathReplacePlan(it.fieldPartialUpdatePlans) {
+		pathReplaceMergeRecorder = timerecord.NewTimeRecorder("Proxy-Upsert-PATH_REPLACE-merge")
+		defer func() {
+			metrics.ProxyPathReplaceMergeLatency.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				it.req.GetDbName(),
+				it.req.GetCollectionName(),
+			).Observe(float64(pathReplaceMergeRecorder.ElapseSpan().Milliseconds()))
+		}()
+	}
 	it.insertFieldData = typeutil.PrepareResultFieldData(existFieldData, int64(upsertIDSize))
 
 	if len(updateIdxInUpsert) > 0 {
 		upsertFieldMap := lo.SliceToMap(it.upsertMsg.InsertMsg.GetFieldsData(), func(field *schemapb.FieldData) (int64, *schemapb.FieldData) {
 			return field.FieldId, field
 		})
-		// fieldOpMap resolves per-field FieldPartialUpdateOp directives
-		// attached to UpsertRequest.field_ops. Empty / missing entries
-		// fall back to REPLACE.
-		fieldOpMap := buildFieldOpMap(it.req)
-
 		// Build mapping from existing primary keys to their positions in query result
 		// This ensures we can correctly locate data even if query results are not in the same order as request
 		existIDsLen := typeutil.GetSizeOfIDs(existIDs)
 		existPKToIndex := make(map[interface{}]int, existIDsLen)
 		for i := 0; i < existIDsLen; i++ {
 			pk := typeutil.GetPK(existIDs, int64(i))
+			if _, duplicate := existPKToIndex[pk]; duplicate {
+				return nil, merr.WrapErrServiceInternalMsg("retrieve by primary key returned duplicate primary key %v", pk)
+			}
 			existPKToIndex[pk] = i
+		}
+		if hasPathReplacePlan(it.fieldPartialUpdatePlans) && existIDsLen != upsertIDSize {
+			return nil, merr.WrapErrServiceInternalMsg(
+				"retrieve by primary key returned %d rows for %d PATH_REPLACE entities", existIDsLen, upsertIDSize)
 		}
 
 		existIndices := make([]int64, len(updateIdxInUpsert))
@@ -595,7 +641,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			oldPK := typeutil.GetPK(upsertIDs, int64(upsertIdx))
 			idx, ok := existPKToIndex[oldPK]
 			if !ok {
-				return nil, merr.WrapErrParameterInvalidMsg("upsert pk %v not found in query result", oldPK)
+				return nil, merr.WrapErrServiceInternalMsg("upsert pk %v disappeared from the retrieved primary-key map", oldPK)
 			}
 			existIndices[i] = int64(idx)
 		}
@@ -608,19 +654,34 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			dstField := it.insertFieldData[fieldIdx]
 			upsertField := upsertFieldMap[existField.FieldId]
 
+			plan := it.fieldPartialUpdatePlans[existField.GetFieldName()]
 			op := schemapb.FieldPartialUpdateOp_REPLACE
-			if fieldOpMap != nil {
-				if resolved, ok := fieldOpMap[existField.GetFieldName()]; ok {
-					op = resolved
-				}
+			if plan != nil {
+				op = plan.op
+			}
+			if plan.isPathReplace() && upsertField == nil {
+				return nil, merr.WrapErrServiceInternalMsg("PATH_REPLACE operand field %q disappeared after validation", existField.GetFieldName())
 			}
 
 			if it.schema.SchemaHelper.GetStructArrayFieldFromName(existField.GetFieldName()) != nil {
 				if upsertField != nil {
-					if op != schemapb.FieldPartialUpdateOp_REPLACE {
+					if plan.isPathReplace() {
+						if err := validateExistingStructPathRows(existField, plan, existIndices); err != nil {
+							return nil, err
+						}
+						typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
+						dstIndices := make([]int64, len(updateIdxInUpsert))
+						for i := range dstIndices {
+							dstIndices[i] = int64(i)
+						}
+						if err := applyStructPathReplace(dstField, upsertField, plan, dstIndices, upsertRows); err != nil {
+							return nil, err
+						}
+					} else if op != schemapb.FieldPartialUpdateOp_REPLACE {
 						return nil, merr.WrapErrParameterInvalidMsg("op %s is not supported for struct field %q", op.String(), existField.GetFieldName())
+					} else {
+						typeutil.AppendFieldDataByColumn(dstField, upsertField, upsertRows)
 					}
-					typeutil.AppendFieldDataByColumn(dstField, upsertField, upsertRows)
 				} else {
 					typeutil.AppendFieldDataByColumn(dstField, existField, existIndices)
 				}
@@ -655,7 +716,11 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				for i, upsertIdx := range updateIdxInUpsert {
 					upsertSrcIndices[i] = upsertComputer.Compute(int64(upsertIdx))[0]
 				}
-				if isNullableVector {
+				if plan != nil && len(plan.jsonPath) != 0 {
+					if err := materializeJSONPathReplace(dstField, existField, upsertField, plan.jsonPath, existSrcIndices, existIndices, upsertSrcIndices); err != nil {
+						return nil, err
+					}
+				} else if isNullableVector {
 					// For nullable vector: only copy data for non-null rows
 					upsertRowIndices := make([]int64, len(updateIdxInUpsert))
 					validDataIndices := make([]int64, 0, len(updateIdxInUpsert))
@@ -667,22 +732,32 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 					}
 					typeutil.AppendFieldDataByColumn(dstField, upsertField, validDataIndices, upsertRowIndices)
 				} else {
+					if plan.isPathReplace() {
+						if err := validateExistingArrayPathRows(existField, existSrcIndices, existIndices, plan); err != nil {
+							return nil, err
+						}
+					}
 					typeutil.AppendFieldDataByColumn(dstField, existField, existSrcIndices)
 					dstIndices := make([]int64, len(updateIdxInUpsert))
 					for i := range dstIndices {
 						dstIndices[i] = int64(i)
 					}
-					if op == schemapb.FieldPartialUpdateOp_REPLACE {
-						if err := typeutil.UpdateFieldDataByColumn(dstField, upsertField, dstIndices, upsertSrcIndices); err != nil {
-							return nil, err
+					var pathIndex []int
+					if plan.isPathReplace() {
+						pathIndex = []int{plan.index}
+					}
+					if err := typeutil.UpdateArrayFieldByColumnWithOp(
+						dstField, upsertField, dstIndices, upsertSrcIndices, op, readMaxCapacity(fieldSchema), pathIndex...,
+					); err != nil {
+						// PATH_REPLACE operands and existing targets were validated
+						// above; a merge failure now indicates an internal invariant
+						// violation. APPEND can still exceed max_capacity after merge,
+						// so its input error must pass through without reclassification.
+						if plan.isPathReplace() {
+							log.Warn(ctx, "failed to materialize PATH_REPLACE field", mlog.String("fieldName", fieldSchema.GetName()), mlog.Err(err))
+							return nil, merr.WrapErrServiceInternalErr(err, "failed to materialize PATH_REPLACE field %q", fieldSchema.GetName())
 						}
-					} else {
-						maxCap := readMaxCapacity(fieldSchema)
-						if err := typeutil.UpdateArrayFieldByColumnWithOp(
-							dstField, upsertField, dstIndices, upsertSrcIndices, op, maxCap,
-						); err != nil {
-							return nil, err
-						}
+						return nil, err
 					}
 				}
 			} else {
@@ -1791,15 +1866,16 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}
-
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
 	// A non-REPLACE op implicitly promotes the request to partial_update=true
 	// so users do not need to set both fields explicitly.
-	nonReplaceSeen, err := validateFieldPartialUpdateOps(it.req, schema.CollectionSchema)
+	partialUpdatePlans, nonReplaceSeen, err := resolveFieldPartialUpdateOps(it.req, schema.CollectionSchema)
 	if err != nil {
 		log.Warn(ctx, "validate field partial update ops failed", mlog.Err(err))
 		return err
 	}
+	it.fieldPartialUpdatePlans = partialUpdatePlans
+	observePathReplaceParentOperations(it.req, partialUpdatePlans)
 	if nonReplaceSeen && !it.req.GetPartialUpdate() {
 		it.req.PartialUpdate = true
 	}

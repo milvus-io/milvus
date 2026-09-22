@@ -53,6 +53,48 @@ func TestGetRegisterer(t *testing.T) {
 	assert.Equal(t, r, register)
 }
 
+func TestPathReplaceMetricsCleanup(t *testing.T) {
+	for _, scope := range []string{"collection", "database"} {
+		t.Run(scope, func(t *testing.T) {
+			registry := prometheus.NewRegistry()
+			registry.MustRegister(ProxyPathReplaceParentOperations, ProxyPathReplaceMergeLatency)
+			const database = "path_replace_cleanup"
+			for _, node := range []string{"1", "2"} {
+				for _, db := range []string{database, "path_replace_keep"} {
+					for _, collection := range []string{"drop", "keep"} {
+						for _, parent := range []string{"array", "struct_array", "json"} {
+							ProxyPathReplaceParentOperations.WithLabelValues(node, db, collection, parent).Inc()
+						}
+						ProxyPathReplaceMergeLatency.WithLabelValues(node, db, collection).Observe(1)
+					}
+				}
+			}
+			t.Cleanup(func() {
+				for _, node := range []int64{1, 2} {
+					CleanupProxyDBMetrics(node, database)
+					CleanupProxyDBMetrics(node, "path_replace_keep")
+				}
+			})
+			wantSeries := 7
+			if scope == "database" {
+				CleanupProxyDBMetrics(1, database)
+				wantSeries = 6
+			} else {
+				CleanupProxyCollectionMetrics(1, database, "drop")
+			}
+			families, err := registry.Gather()
+			assert.NoError(t, err)
+			for _, family := range families {
+				want := wantSeries
+				if family.GetName() == "milvus_proxy_path_replace_parent_operations_total" {
+					want *= 3
+				}
+				assert.Len(t, family.GetMetric(), want)
+			}
+		})
+	}
+}
+
 func TestRegisterRuntimeInfo(t *testing.T) {
 	g := &errgroup.Group{}
 	g.Go(func() error {
