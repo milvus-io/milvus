@@ -1,83 +1,164 @@
-# QueryNode 多副本节点分配算法
+# QueryNode Replica Placement Algorithm
 
-节点均衡、稳定性优先于加载成本。实现与 [Balancer](balancer_design.md) 和 [Cache](balancer_cache.md) 对接。当前接口没有节点容量，第一版采用同规格 QueryNode、相同 collection 副本需求模型。
+Node balance and stability take priority over loading cost. The implementation
+integrates with the [Balancer](balancer_design.md) and
+[Cache](balancer_cache.md). The current interfaces do not expose node capacity,
+so the first version assumes homogeneous QueryNodes and identical resource
+requirements for replicas of the same collection.
 
-## 1. 规划对象与不变量
+## 1. Planning Domain and Invariants
 
-独立规划域为 `(CollectionID, ResourceGroup)`。N 是该 RG 内 Alive 且非 Stopping 的 QueryNode 数，R 是该 collection 在该 RG 的期望 replica 数。不同 collection 可以使用相同节点，不引入全局独占节点。
+Each `(CollectionID, ResourceGroup)` is an independent planning domain. Let N
+be the number of Alive, non-Stopping QueryNodes in that resource group, and R
+the desired number of replicas for the collection in that resource group.
+Different collections may share nodes; there is no global exclusive ownership.
 
-R > 0 时统一使用以下配额规则（N 可以小于 R）：
+For R > 0, the following quota rules apply, including when N < R:
 
-- 每个节点在本规划域只归属一个目标 replica；每个 replica 的所有 vchannel 使用同一个目标节点集合。
-- 每个 replica 分到 floor(N/R) 或 ceil(N/R) 个节点，所有 N 个节点都在目标中；分配了节点不意味着必须往每个节点加载 segment。
-- 对已有唯一归属，优先最小化仍存活且仍属于本域的节点的归属变化数，然后启发式降低加载行数。
-- 目标约束新视图；旧视图可暂时在目标之外，直到安全替换和清理完成。
+- Each node has exactly one target replica owner within the domain. All
+  vchannels of a replica use the same target node set.
+- Each replica receives floor(N/R) or ceil(N/R) nodes, and all N nodes belong
+  to a target set. Assignment does not require loading segments onto every node.
+- Given existing unique ownership, first minimize ownership changes for nodes
+  that remain alive and within the domain, then heuristically reduce the number
+  of rows that must be loaded.
+- Targets constrain new views. Existing views may remain outside their targets
+  until safe replacement and cleanup complete.
 
-按最新决策，N < R 时不再长期共用节点维持所有 replica。此时 floor(N/R)=0，恰有 N 个 replica 获得一个节点，其余 R-N 个 replica 配额为 0，暂时停用。期望 LoadConfig、ReplicaID 和 RG 归属不变，节点恢复后自动补齐。Active 表示有非空目标节点集合，不代表已经 Serving；对外必须区分 Desired、Active、Serving 数量。
+When N < R, the scheduler temporarily suspends excess replicas instead of
+maintaining all replicas through permanent node sharing. Since floor(N/R)=0,
+exactly N replicas receive one node each; the remaining R-N replicas receive a
+zero quota. Desired LoadConfig, ReplicaID, and resource group membership remain
+unchanged. Replicas are restored automatically when nodes recover. Active means
+that a replica has a nonempty target node set, not that it is already Serving.
+Externally reported counts must distinguish Desired, Active, and Serving.
 
-已持有健康节点的副本优先保留，继续使用第 4 节 gain 配额算法，不按 ReplicaID 截断。候选配额的保留收益和原有配额稳定性相同、且尚未冻结目标时，可优先保留完整可服务副本，再以稳定散列决胜。视图普通进度不触发重新竞选 Active 集合。资源不足时不轮换公平性，避免健康副本反复被停用。
+Replicas that already own healthy nodes are preferred, using the gain-based
+quota algorithm in Section 4 rather than truncating by ReplicaID. When retention
+gain and previous quota stability are equal and targets have not yet been
+frozen, prefer fully serving replicas, then use a stable hash to break ties.
+Ordinary view progress does not trigger reelection of the Active set. During a
+resource shortage, do not rotate replicas for fairness: that would repeatedly
+suspend healthy replicas.
 
-配额为 0 是目标状态，不要求立即销毁旧视图。旧副本经 Draining 到 Suspended：先保证保留副本能够承接相应 shard 的服务，再沿现有视图生命周期释放被停用副本。仍可服务且是某个 shard 唯一覆盖的旧视图需暂时保留，不能因缩减 Active 集合制造停机；无法服务的旧视图无须等待这种屏障。允许这段交接期间临时共用节点。
+A zero quota is a target state and does not require immediate destruction of
+existing views. A replica moves through Draining to Suspended: first ensure
+that a retained replica can serve the corresponding shard, then release the
+suspended replica through the existing view lifecycle. Retain an existing
+healthy view temporarily if it is the only serving coverage for a shard;
+shrinking the Active set must not cause an outage. Views that cannot serve do
+not need to wait for this barrier. Temporary node sharing is allowed during
+this handover.
 
-N = 0 时没有非空数据的可行新分配，保留已有生命周期状态并等待节点事件/重试；不产生非法目标。R = 0 时回收目标，清理残留视图。
+When N = 0, no valid new placement exists for nonempty data. Preserve lifecycle
+state and wait for node events or retries without generating invalid targets.
+When R = 0, discard targets and clean up residual views.
 
-可行性仍要求目标节点能够加载数据。现有接口没有容量准入能力，不能仅凭节点数量保证内存足够。特别是 N < R 时每个 Active replica 只有一个目标节点，如果完整副本装不下，min(N,R) 只是节点数量给出的上限，不能保证这些副本最终可服务。当前算法不自动根据内存失败进一步缩减 Active 数量；那需要另外的容量模型。加载失败不应使目标反复跳动，也不能因此先删掉仍可服务的旧 Up。
+Feasibility still requires target nodes to load the data. The current interfaces
+provide no capacity admission control, so node count alone cannot guarantee
+sufficient memory. In particular, when N < R, each Active replica has only one
+target node. If a complete replica does not fit, min(N,R) is only the upper
+bound implied by node count, not a guarantee that all selected replicas will
+serve. The algorithm does not further reduce the Active count automatically
+in response to memory failures; that requires a separate capacity model.
+Loading failures must neither destabilize targets nor cause premature removal
+of an existing serving Up view.
 
-## 2. 状态和接口
+## 2. State and Interfaces
 
-DefaultBalancePolicy 在其互斥锁保护下持有 LayoutManager，跨 reconcile 保留目标；Balancer 的 reconcileMu 串行化规划与执行，cache 只保存事实。
+DefaultBalancePolicy owns LayoutManager under its mutex and retains targets
+across reconciles. The Balancer's reconcileMu serializes planning and execution.
+The cache stores facts only.
 
 ```go
 type CollectionLayout struct {
-    // Fingerprint 只包含 replica/RG 意图和 eligible topology；
-    // 不包含普通 DataVersion、行数和 Ready/Up 进度。
+    // Fingerprint contains only replica/RG intent and eligible topology,
+    // excluding ordinary DataVersion, row count, and Ready/Up progress changes.
     Fingerprint LayoutFingerprint
     Owner map[NodeID]ReplicaID
-    NodesByReplica map[ReplicaID][]NodeID // 空集合表示目标 Suspended
+    NodesByReplica map[ReplicaID][]NodeID // An empty set targets Suspended.
 }
 ```
 
-概念接口：`EnsureLayout(collection, eligibleNodes, previous, facts) -> (layout, changedNodes, affectedReplicas)`。先完整构造再替换目标，apply 部分失败不回滚目标。目标先于本轮新 AddPreparing 可见给后续 reconcile，但不是已加载事实；实际 cache 仍只由 runtime 同步 hook 更新。
+The conceptual interface is
+`EnsureLayout(collection, eligibleNodes, previous, facts) -> (layout, changedNodes, affectedReplicas)`.
+Construct the complete layout before replacing the previous target. A partial
+apply failure does not roll back the target. Retain the target before issuing
+this batch's AddPreparing calls so subsequent reconciles can reuse it. The
+target is not a loaded-state fact; only synchronous runtime hooks update actual
+state in the cache.
 
-cache 需提供小粒度事实：每 shard 的 Up/Preparing/保留引用节点集合，node -> replica 的引用汇总，以及去重的 node -> compatible resource 索引。资源复用必须有兼容性证据，不能只看 SegmentID。当前 SegmentDataView 只有 ID、PartitionID、RowNum，merged ShardStats 也不能完整表达资源兼容身份和 Dropping 引用，需要在内部接口补齐或保守地判定为不可复用。
+The cache needs fine-grained facts: each shard's Up, Preparing, and retained
+reference node sets; aggregated node-to-replica references; and a deduplicated
+node-to-compatible-resource index. Resource reuse requires evidence of
+compatibility, not just a matching SegmentID. SegmentDataView exposes only ID,
+PartitionID, and RowNum. Merged ShardStats alone cannot fully describe resource
+compatibility and Dropping references, so the internal interfaces must provide
+these facts or conservatively treat the resource as non-reusable.
 
-本轮用对象局部 immutable Get，不要求全局快照。并发变化由下一轮事件修复，目标在下一轮比较 fingerprint。RG 失效事件必须覆盖该 RG 的 desired collections，不能只通知已有视图使用该节点的 shards。
+Each reconcile uses Get to read immutable objects without requiring a global
+snapshot. Subsequent events repair concurrent changes, and the next reconcile
+compares the layout fingerprint. Resource group eligibility loss must notify
+the group's desired collections, not only shards whose existing views use the
+affected node.
 
-## 3. 保留可用目标
+## 3. Retaining Valid Targets
 
-如果 fingerprint 相同且目标不变量成立，直接复用目标，不扫描 segment。
+If the fingerprint is unchanged and target invariants hold, reuse the layout
+without scanning segments.
 
-fingerprint 变化时，保留仍 eligible 且 replica 仍在本域的 owner。新节点、被删除 replica 的节点、从其他 RG 进入的节点加入 Unowned。离开本域的节点剔除。之前已经发出 Preparing 的目标仍以 prior target 为基准，不能被旧 Up 拉回。
+When the fingerprint changes, retain owners whose nodes remain eligible and
+whose replicas remain in the domain. New nodes, nodes owned by removed replicas,
+and nodes entering from another resource group become Unowned. Remove nodes
+that leave the domain. For targets that already have Preparing views, keep the
+previous target as the baseline; an older Up view must not pull ownership back.
 
-首次启动/恢复没有目标时：
+On initial startup or recovery without retained targets:
 
-1. 没有跨 replica 占用冲突的节点，以实际 Up 归属作为 seed；仅有健康 Preparing 时可用它作为 seed。
-2. 冲突节点按保留服务中 shard-node 关系数、Preparing 关系数的字典序选一个暂定 owner，再用 collection/replica/node 的稳定散列打破平局。
-3. 没有引用的节点为 Unowned；退役 replica 的引用不产生新 owner。
-4. 下面的配额修复生成均衡目标，并在恢复后的进程内冻结。
+1. For nodes without conflicting replica references, seed ownership from
+   actual Up views. If only healthy Preparing views exist, use those as seeds.
+2. For conflicting nodes, select a provisional owner by lexicographically
+   maximizing retained serving shard-node relationships, then Preparing
+   relationships. Break ties with a stable collection/replica/node hash.
+3. Nodes without references are Unowned. References from retired replicas do
+   not establish new ownership.
+4. The quota repair below produces a balanced target and freezes it within the
+   recovered process.
 
-首次恢复存在冲突时 seed 是启发式，不能宣称相对所有历史视图全局最少迁移。明确的最少迁移保证适用于已有唯一目标归属；所有实际旧视图都继续受生命周期保护，不会因 seed 选择被直接撤销。
+Seeding during recovery with conflicts is heuristic. It does not guarantee
+globally minimal movement relative to every historical view. The minimum
+movement guarantee applies to existing unique target ownership. Existing views
+remain protected by their lifecycle and are not revoked directly by seed
+selection.
 
-## 4. 配额：先精确确定最少节点转移
+## 4. Quotas: Determine the Minimum Number of Node Transfers
 
-令 `b = N / R`，`k = N % R`。必须恰有 k 个 replica 获得 b+1，其余 b。
+Let `b = N / R` and `k = N % R`. Exactly k replicas must receive b+1 nodes; all
+others receive b.
 
-`c[r]` 为清理非法 owner 后，r 当前拥有的节点数；Unowned 不计入 c。对于候选 quota：
+Let `c[r]` be the number of nodes currently owned by replica r after removing
+invalid owners. Unowned nodes do not contribute to c. For a candidate quota:
 
 ```
 Retained(quota) = sum_r min(c[r], quota[r])
 Moved(quota)    = sum_r max(c[r] - quota[r], 0)
 ```
 
-给 r 额外一个名额带来的保留收益恰好为：
+The retention gain from assigning r one extra slot is exactly:
 
 ```
-gain[r] = min(c[r], b+1) - min(c[r], b) // 0 或 1
+gain[r] = min(c[r], b+1) - min(c[r], b) // 0 or 1
 ```
 
-按 `(gain 降序, 原先是否多一份配额优先, 完整可服务优先, 稳定散列)` 选 k 个 replica。第一项精确最大化 Retained、最小化 Moved；第二项稳定余数归属。加载成本阶段不能推翻已经满足这些更高优先级的决策。无需搜索全部 quota 组合。N < R 时该规则自然选出有节点的 Active replica，其余副本 quota=0；后者仍在 desired config 中。
+Select k replicas by `(gain descending, previously held an extra slot first,
+fully serving first, stable hash)`. The first criterion exactly maximizes
+Retained and minimizes Moved; the second stabilizes remainder allocation.
+Loading cost optimization cannot override these higher-priority decisions.
+There is no need to enumerate all quota combinations. When N < R, this rule
+naturally selects Active replicas with nodes and assigns quota=0 to the others,
+which remain in desired config.
 
-随后计算：
+Then compute:
 
 ```
 excess[r]  = max(c[r] - quota[r], 0)
@@ -85,28 +166,43 @@ deficit[r] = max(quota[r] - c[r], 0)
 M          = sum(excess)
 ```
 
-第一步分配全部 Unowned，第二步从 excess replica 向 deficit replica 转移恰好 M 个节点。每个既有节点最多转移一次。由于本域所有节点对所有 replica 都合法，填补 deficit 不会因候选约束死锁。
+First assign all Unowned nodes, then transfer exactly M nodes from replicas
+with excess to replicas with deficits. Each previously owned node moves at
+most once. Every node in the domain is eligible for every replica in that
+domain, so candidate constraints cannot prevent filling the deficits.
 
-N 个节点中只有 `sum(c)` 个已有合法 owner，因此 `sum(deficit) = len(Unowned) + M`。这既是可构造性检查，也是最少迁移的证明：每个 donor 至少要交出 excess 个节点，算法正好交出这些节点。
+Only `sum(c)` of the N nodes have valid owners, hence
+`sum(deficit) = len(Unowned) + M`. This both establishes feasibility and proves
+minimal movement: each donor must release at least its excess nodes, and the
+algorithm transfers exactly that many.
 
-## 5. 最后优化加载成本：有预算的确定性贪心
+## 5. Loading Cost: Deterministic Greedy Selection Within a Budget
 
-节点均衡和最少转移数量已确定。只在可行的 Unowned 分配和 donor -> receiver 转移中比较加载成本，不为加载成本额外交换已经稳定的节点。
+Node balance and the minimum transfer count are already fixed. Compare loading
+costs only among valid Unowned assignments and donor-to-receiver transfers.
+Do not swap additional stable nodes to reduce loading cost.
 
-### 5.1 按资源覆盖估价
+### 5.1 Estimating Resource Coverage
 
-同一个资源按兼容的 materialization identity 区分，RowNum 为原始行数。共享且兼容的已加载资源不区分 view/replica 所有者。已进入释放、兼容性未知、失败的资源不能算保证可复用；正在加载的资源只有能保证请求合并时才算一次加载。
+Identify resources by compatible materialization identity, using raw RowNum
+values. Shared, compatible loaded resources are reusable regardless of their
+view or replica owner. Resources being released, resources with unknown
+compatibility, and failed resources cannot receive guaranteed reuse credit.
+In-flight loading can count as a single load only if request coalescing is
+guaranteed.
 
-对暂定目标建立稀疏覆盖计数：
+Build sparse coverage counts for the tentative targets:
 
 ```
-cover[r,s] = r 的目标节点中，持有兼容资源 s 的节点数
+cover[r,s] = number of target nodes of r holding compatible resource s
 Missing(T) = sum_active_r sum_desired_s rows(s) * [cover[r,s] == 0]
 ```
 
-不会建立 `N * R * S` 矩阵。当前同 collection 的 replica 需求相同，遍历去重的 node-resource 稀疏索引即可建立 coverage。
+Do not construct an `N * R * S` matrix. Replicas of the same collection
+currently have identical requirements, so coverage can be built by traversing
+the deduplicated sparse node-resource index.
 
-移交节点 n 从 a 到 b 的即时边际估计为：
+The immediate marginal estimate for transferring node n from a to b is:
 
 ```
 loss(n,a) = sum_{s on n} rows(s) * [cover[a,s] == 1]
@@ -114,23 +210,55 @@ gain(n,b) = sum_{s on n} rows(s) * [cover[b,s] == 0]
 delta    = loss(n,a) - gain(n,b)
 ```
 
-没有 owner 的节点 loss 为 0。这是目标集合缺失资源行数的变化，不是该节点的总行数，也不是最终真实 I/O 的精确值。节点集合内部的负载调整仍可能需要额外加载。
+For an Unowned node, loss is zero. This estimates the change in missing resource
+rows across target sets, not the node's total rows or exact eventual I/O.
+Balancing within a target set may still require additional loading.
 
-### 5.2 可实现的选择过程
+### 5.2 Selection Procedure
 
-第一版使用两轮固定评分贪心，避免动态失效堆导致难以界定的重复资源遍历：
+The first version uses two greedy passes with fixed scores to avoid repeated
+resource traversal from dynamically invalidated heap entries:
 
-1. 对 Unowned -> deficit replica 构造候选边，基于当前 coverage 算 `-gain`，按 `(cost, stable hash, IDs)` 排序；顺序接受尚未分配且目标未满的边。分配完全部 Unowned。
-2. 更新一次 coverage。对所有 donor 节点 -> 仍 deficit 的 replica 构造候选边，算 `loss-gain` 并排序。顺序接受未转移、donor 还有 excess、receiver 还有 deficit 的边，直到转移 M 次。
-3. 某条边被接受后不重新排序所有边；固定评分可能过时，因此明确只保证加载成本启发式，不保证 Missing 全局最优。结构约束保证所有 deficit 最终填满，与成本排序无关。
-4. 构造最终 coverage 和 Missing。可做一次有界改良：交换两个已转移节点的目的 replica；或用同一 donor 的一个保留节点替换其已转出的节点。只接受 quota 不变、相对原 owner 的总变化数不增加、精确 Missing 严格下降的方案。不触碰不存在迁移需求的稳定布局。
-5. 改良的候选数和资源访问数均设硬上限；一次交换用涉及节点资源的计数差量计算精确收益，先计算再提交。到预算就停止，当前方案仍完整可用。第一版也可关闭这一步，功能正确性不依赖它。
+1. Build candidate edges from Unowned nodes to replicas with deficits. Compute
+   `-gain` using current coverage, sort by `(cost, stable hash, IDs)`, and accept
+   edges whose node remains unassigned and whose target still has capacity.
+   Assign every Unowned node.
+2. Refresh coverage once. Build candidate edges from donor nodes to replicas
+   with remaining deficits, compute `loss-gain`, and sort. Accept edges while
+   the node has not moved, the donor still has excess, and the receiver still
+   has a deficit, until exactly M transfers have been selected.
+3. Do not re-sort all edges after accepting one. Fixed scores may become stale,
+   so loading cost remains heuristic; Missing is not guaranteed to be globally
+   optimal. Structural constraints ensure that all deficits are filled,
+   independently of cost ordering.
+4. Build final coverage and Missing. An optional bounded improvement pass may
+   swap the destination replicas of two transferred nodes, or replace a
+   transferred node with a retained node from the same donor. Accept only
+   changes that preserve quotas, do not increase ownership changes relative
+   to original owners, and strictly reduce exact Missing. Leave stable layouts
+   with no required transfers untouched.
+5. Put hard limits on both candidate count and resource accesses for the
+   improvement pass. Evaluate each swap using coverage-count deltas for the
+   affected resources before applying it. Stop at the budget limit; the layout
+   remains complete. This optional pass may be disabled in the first version
+   without affecting correctness.
 
-若预估候选边数或资源访问量超过本次成本优化预算，直接使用稳定顺序分配 Unowned，再选择 donor 节点填 deficit；不产生半个目标、不延迟必要迁移。预算只影响最低优先级的加载成本，不影响均衡、最少转移和可用性。可从内部固定预算开始，经 benchmark 调整；不为此引入新的用户配置。
+If estimated candidate edges or resource accesses exceed the cost optimization
+budget, assign Unowned nodes in stable order, then select donor nodes to fill
+deficits. Do not produce partial targets or delay required transfers. The
+budget affects only loading cost, the lowest-priority objective; balance,
+minimum movement, and availability are preserved. Start with internal fixed
+budgets and tune them with benchmarks without adding user-facing configuration.
 
-复杂度：基础 quota/repair 为 `O(N + R log R)`（稳定节点有序索引可复用，否则加 `N log N`）。启用全候选评分时为 `O(F*R + N*R*log(N*R))`，临时内存 `O(F + N*R)`，F 是本 collection 在本 RG 的去重可复用 node-resource 关系数。候选生成/资源访问预算限制这部分额外工作；不扫描其他 collection。资源 coverage 建立本身也属于预算，预算不足时不建立它。
+Basic quota repair costs `O(N + R log R)` if a stable sorted node index can be
+reused; otherwise add `N log N`. Full candidate scoring costs
+`O(F*R + N*R*log(N*R))` with `O(F + N*R)` temporary memory, where F is the number
+of deduplicated reusable node-resource relationships for this collection in
+this resource group. Candidate generation and resource access budgets bound
+this additional work. Other collections are not scanned. Building resource
+coverage itself consumes the budget and is skipped if the budget is insufficient.
 
-## 6. 接入 shard 批量规划
+## 6. Integration with Batch Shard Planning
 
 ```
 WaitForReady()
@@ -145,38 +273,112 @@ allocate each shard within NodesByReplica[replica]
 Apply batch through existing lifecycle
 ```
 
-所有 shard 候选仍先完成整个 batch 的规划，再 Apply；不改成每 collection 立即提交。
+Plan all shard candidates for the entire batch before Apply. Do not switch to
+immediate application after planning each collection.
 
-目标变更时，用 per-shard footprint 找出引用已转出节点的 shards，作为 Must。新增候选节点会影响相关 replica 的所有 shards 的可选负载优化；也需要重新考虑此前不可分配或无视图的 shards，不能只依赖现有引用索引。普通进度事件只重算脏 shard，复用 collection layout。
+When targets change, use per-shard footprints to identify shards referencing
+transferred nodes and classify them as Must. Newly eligible nodes affect
+optional optimization for all shards of the corresponding replicas. Reconsider
+previously unallocatable shards and shards without views as well; existing
+reference indexes alone are insufficient. Ordinary progress events only
+recompute dirty shards and reuse the collection layout.
 
-当前 `hasPreparing -> None` 必须细化：健康且允许完成的 Preparing 不重复创建；引用 lost/ineligible 节点的 Preparing 必须能替换。健康但不属于新目标的 Preparing 可先完成，然后通过后续 Must 迁移进入稳定目标，不能永远被 early return 屏蔽。
+Refine the `hasPreparing -> None` rule: do not duplicate a healthy Preparing
+view that can finish, but allow replacement of Preparing views referencing
+lost or ineligible nodes. A healthy Preparing view outside its new target may
+finish first, then converge through a subsequent Must migration. An early
+return must not indefinitely prevent convergence.
 
-classify 在“desired 存在但没有 Up -> Must”之前处理 quota=0：没有旧视图则 NoOp；仍有旧视图则受服务交接屏障约束地 RequestRelease。它不是分配失败，不能加入普通失败重试队列，更不能下一轮因 LoadConfig 仍包含该 replica 而重新 AddPreparing。停用状态由 Balancer 内部的目标节点集合表达，不写回 LoadConfigStore，也不通知 CollectionLoadManager。配额重新变正后触发其所有 desired shards，沿正常 Preparing/Up 流程恢复服务。
+Classification handles quota=0 before the rule "desired exists but no Up ->
+Must." With no existing views, emit NoOp; otherwise RequestRelease subject to
+the serving handover barrier. Suspension is not an allocation failure and must
+not enter the normal failure retry queue. The next reconcile must not issue
+AddPreparing merely because LoadConfig still contains the replica. The
+Balancer's internal target node sets represent suspension; do not write it
+back to LoadConfigStore or notify CollectionLoadManager. When the quota becomes
+positive again, trigger all desired shards for that replica and restore service
+through the normal Preparing/Up lifecycle.
 
-Balancer 只输出视图 Prepare/Release 和必要的重试，不维护或发布另一份 discovery 集合。实际可服务状态应由 QueryView 生命周期反映；服务发现订阅与下发的生产 wiring 留到后续，不作为本次 Balance 执行的前置条件。在途请求保护和视图租约继续由既有生命周期承担。
+The Balancer emits only view Prepare/Release operations and necessary retries.
+It does not maintain or publish a separate discovery set. The QueryView
+lifecycle should reflect actual serving state. Production discovery
+subscriptions and publication wiring remain deferred and are not prerequisites
+for this Balance execution. Existing lifecycle mechanisms continue to protect
+in-flight requests and enforce view leases.
 
-跨 replica 复用查询改成 node/resource 索引；生命周期、assignment equality 仍按 ShardID。共享 projectedRows 保持当前逻辑行数口径，不能只把实际统计改成物理去重而继续减去完整 shard 贡献。本版只给已就绪、版本完全匹配的资源复用收益，不预设正在加载的请求能够合并。新目标跨副本分离，且一个 segment 只属于一个 vchannel，因此同一 collection 的本轮新分配不会跨 shard 重复申请同一 node/resource。
+Use the node/resource index for reuse across replicas. Lifecycle and assignment
+equality remain scoped by ShardID. Shared projectedRows retains the current
+logical row accounting: do not deduplicate actual physical resources while
+still subtracting each shard's full contribution. This version gives reuse
+credit only to ready resources with exactly matching versions and does not
+assume in-flight loads can be coalesced. New targets are disjoint across
+replicas, and a segment belongs to only one vchannel, so this batch's new
+placements for the same collection do not request the same node/resource
+across shards.
 
-## 7. 应用与收敛
+## 7. Application and Convergence
 
-- AddPreparing 同步发布 cache，再进入异步加载/同步流程；目标未变时下一轮继续相同节点集合。
-- 新 Up 前保留旧 Up，允许目标节点被其他 replica 的旧视图同时引用；不能等对方释放后才允许获取，否则无空闲节点时可能互等。
-- 新 Up 后旧视图沿既有 Down/Dropping 流程退出。服务布局进入目标，与物理引用完成清理分开统计；Dropping 仍可能占用资源，不能用 PendingRows=0 判定隔离完成。
-- Load/DataView 的普通资源变动不重选 owner；replica/RG/topology 变化才修复目标。目标节点行数忽高忽低不会触发归属抖动。
-- Suspended 恢复 Active 时先产生目标，再逐 shard 加载、达到 Up 后恢复服务。加载失败保留旧的可服务视图，重试同一目标；不会因一次失败无限在多个布局间跳转。
-- 前提是拓扑/意图最终稳定、目标资源可加载、重试和清理最终推进。在这些前提下固定目标 + Must 迁移 + 旧引用清理给出最终物理隔离。
+- AddPreparing publishes to the cache synchronously before asynchronous loading
+  and synchronization. If the target is unchanged, the next reconcile uses the
+  same node set.
+- Retain the old Up view until the new view reaches Up. Other replicas' old
+  views may still reference target nodes. Do not wait for those references to
+  be released before acquiring resources; without spare nodes, such waiting
+  could deadlock migrations.
+- After the new Up view is ready, old views exit through the existing
+  Down/Dropping lifecycle. Track convergence of serving placement separately
+  from cleanup of physical references. Dropping views may still hold resources;
+  PendingRows=0 does not prove that physical isolation is complete.
+- Ordinary Load/DataView resource changes do not reelect owners. Only
+  replica, resource group, or topology changes repair targets. Fluctuating row
+  counts on target nodes do not cause ownership churn.
+- When a Suspended replica becomes Active, establish its target first, then
+  load each shard and restore service after Up. Loading failures preserve
+  existing serving views and retry the same target rather than repeatedly
+  switching layouts.
+- Convergence assumes that topology and intent eventually stabilize, target
+  resources can be loaded, and retries and cleanup eventually progress. Under
+  these assumptions, fixed targets, Must migrations, and old-reference cleanup
+  provide eventual physical isolation.
 
-## 8. 验证矩阵
+## 8. Validation Matrix
 
-配额和稳定性：任意 N/R 的 floor/ceil、所有节点唯一归属、最少转移下界；6 节点 4/2 -> 3/3 恰一次转移；5 节点 3/2 保持不变；新增第六节点分给较小副本而不转移旧节点；缩容、replica 增减、RG 移动；恢复时多 replica 交叉占用。
+**Quotas and stability:** floor/ceil quotas for arbitrary N/R; unique ownership
+of every node; the minimum transfer bound; exactly one transfer for six nodes
+from 4/2 to 3/3; unchanged 3/2 allocation for five nodes; assigning a sixth node
+to the smaller replica without moving existing nodes; scale-down; replica
+addition/removal; resource group changes; and conflicting replica references
+during recovery.
 
-成本：跨 replica 复用；同一资源多份只计一次覆盖；移出最后两份资源时固定评分误差与有界改良；不同 manifest/加载需求不可误判兼容；优化预算为 0 仍正确完成目标；大 RowNum 不被饱和归一化抹平。
+**Cost:** reuse across replicas; counting multiple copies of a resource as a
+single covered resource; fixed-score error and bounded improvement when moving
+the last two copies; rejecting false compatibility across different manifests
+or loading requirements; completing targets with a zero optimization budget;
+and preserving large RowNum differences without saturation normalization.
 
-生命周期：节点不足时 Active=min(N,R)、其余 Suspended、desired 不变；不轮换健康 Active；停用副本不反复 Prepare/Retry；最后服务覆盖保护；停用不反向更新加载配置管理；节点恢复后原 ReplicaID 自动补齐；无备用节点交叉迁移；partial Apply；目标外健康 Preparing 与丢节点 Preparing；掉电恢复；Dropping 延迟清理；新增节点即使无旧视图也能触发相关 collection；普通进度不扫描完整资源集。
+**Lifecycle:** Active=min(N,R) with excess replicas Suspended and desired state
+unchanged; no rotation of healthy Active replicas; no repeated Prepare/Retry
+for suspended replicas; protection of the last serving cover; no suspension
+updates back to load configuration management; automatic restoration of the
+original ReplicaID when nodes recover; migrations without spare nodes;
+partial Apply; healthy Preparing views outside targets and Preparing views on
+lost nodes; crash recovery; delayed Dropping cleanup; new nodes triggering
+relevant collections even without existing views; and ordinary progress not
+scanning the full resource set.
 
-性能：独立测 layout fast path、纯配额修复、资源估价预算上限，区分原有 shard allocator 的复杂度。本设计不宣称修复现有 `CurrentRows` 扫描所有节点及每 shard 复制 projectedRows 的开销。
+**Performance:** benchmark the layout fast path, quota-only repair, and resource
+cost estimation budget limits separately from the existing shard allocator's
+complexity. This design does not claim to eliminate the existing CurrentRows
+scan over all nodes or the per-shard copy of projectedRows.
 
+Implementation choices: readiness and an exact match of
+`(PartitionID, SegmentID, DataVersion, LoadInfoVersion)` are sufficient for reuse
+credit. Compatible resources across DataVersions do not receive credit yet;
+this conservative estimate avoids incorrect reuse without materialization
+identity evidence. The first version disables the optional local improvement
+pass. The default policy's dedicated LayoutManager retains target layouts and
+serializes Plan; the custom policy interface remains unchanged.
 
-实现选择：资源复用以 `(PartitionID, SegmentID, DataVersion, LoadInfoVersion)` 完全一致且已就绪为充分条件。跨 DataVersion 的兼容资源暂不计入复用收益；这是保守估计，避免缺少 materialization 身份时错误复用。第一版不启用可选的局部改良。目标布局由默认策略的专用 LayoutManager 保存，Plan 串行化；自定义策略接口保持不变。
-
-视图与 cache 的组件级实现不新增 RPC 或 Replica 节点列表。目标以 immutable layout 对象保留，不另加持久化 generation 或 discovery revision。
+The view and cache component implementation introduces neither new RPCs nor
+replica node lists. Targets are retained as immutable layout objects without
+additional persisted generations or discovery revisions.
