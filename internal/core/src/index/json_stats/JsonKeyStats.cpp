@@ -280,9 +280,8 @@ JsonKeyStats::TraverseJsonForStats(const char* json,
                        tokens[j].size,
                        std::string(json + tokens[j].start,
                                    tokens[j].end - tokens[j].start));
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
+            path.emplace_back(json + tokens[j].start,
+                              tokens[j].end - tokens[j].start);
             j++;
             int consumed = 0;
             TraverseJsonForStats(json, tokens + j, consumed, path, infos);
@@ -535,9 +534,8 @@ JsonKeyStats::TraverseJsonForBuildStats(
                        std::string(json + tokens[j].start,
                                    tokens[j].end - tokens[j].start));
 
-            std::string key(json + tokens[j].start,
-                            tokens[j].end - tokens[j].start);
-            path.push_back(key);
+            path.emplace_back(json + tokens[j].start,
+                              tokens[j].end - tokens[j].start);
             j++;
             int consumed = 0;
             TraverseJsonForBuildStats(json, tokens + j, consumed, path, values);
@@ -1003,7 +1001,7 @@ JsonKeyStats::GetCommonMetaFromParquet(const std::string& file) {
 
 void
 JsonKeyStats::LoadShreddingMeta(
-    std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+    const std::vector<std::pair<int64_t, std::vector<int64_t>>>& sorted_files,
     const std::string& override_prefix) {
     if (sorted_files.empty()) {
         return;
@@ -1445,10 +1443,11 @@ JsonKeyStats::Upload(const Config& config) {
                segment_id_);
 
     // upload parquet file, parquet writer has already upload file to remote
-    auto shredding_remote_paths_to_size = parquet_writer_->GetPathsToSize();
-    auto shared_key_index_remote_paths_to_size =
+    const auto& shredding_remote_paths_to_size =
+        parquet_writer_->GetPathsToSize();
+    const auto& shared_key_index_remote_paths_to_size =
         bson_index_stats->GetSerializedIndexFileInfo();
-    auto meta_remote_paths_to_size =
+    const auto& meta_remote_paths_to_size =
         disk_file_manager_->GetRemotePathsToFileSize();
 
     // get all index files for meta

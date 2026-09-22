@@ -539,7 +539,7 @@ GroupChunkTranslator::load_group_chunk(
                                     load_priority_,
                                     writeback_mode_);
     }
-    return std::make_unique<milvus::GroupChunk>(chunks);
+    return std::make_unique<milvus::GroupChunk>(std::move(chunks));
 }
 
 int64_t

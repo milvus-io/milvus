@@ -128,7 +128,7 @@ struct RoaringMembershipProbe {
 template <typename LogicalExpr, typename ProbePolicy>
 class PhyMembershipFilterExpr : public SegmentExpr {
  public:
-    PhyMembershipFilterExpr(const std::vector<std::shared_ptr<Expr>>& input,
+    PhyMembershipFilterExpr(std::vector<std::shared_ptr<Expr>> input,
                             const std::shared_ptr<const LogicalExpr>& expr,
                             const std::string& name,
                             milvus::OpContext* op_ctx,

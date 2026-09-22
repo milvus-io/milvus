@@ -159,7 +159,8 @@ BsonInvertedIndex::UploadIndex() {
         }
     }
 
-    auto remote_paths_to_size = disk_file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        disk_file_manager_->GetRemotePathsToFileSize();
 
     std::vector<SerializedIndexFileInfo> index_files;
     index_files.reserve(remote_paths_to_size.size());

@@ -2958,7 +2958,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
             storage::SortByPath(file_infos);
 
-            auto field_meta = schema_snapshot->operator[](field_id);
+            const auto& field_meta = schema_snapshot->operator[](field_id);
             auto warmup_policy =
                 resolve_field_data_warmup_policy(field_id,
                                                  segment_load_info,
@@ -3120,7 +3120,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
             storage::SortByPath(file_infos);
 
-            auto field_meta = schema_snapshot->operator[](field_id);
+            const auto& field_meta = schema_snapshot->operator[](field_id);
             std::unique_ptr<cachinglayer::Translator<milvus::Chunk>>
                 translator =
                     std::make_unique<storagev1translator::ChunkTranslator>(
