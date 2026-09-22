@@ -78,6 +78,11 @@ func (s *BloomMatchTestSuite) SetupSuite() {
 	// raw data. Must be set before the cluster starts.
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.IndexOffsetCacheEnabled.Key, "true")
 	s.WithMilvusConfig(paramtable.Get().AutoIndexConfig.ScalarAutoIndexParams.Key, scalarAutoIndexBuildParams)
+	// JSON HYBRID indexes require version 4; the 3.0 default is version 3,
+	// which makes DataCoord downgrade AUTOINDEX to INVERTED. Opt in so the
+	// JSON index matrix exercises the intended HYBRID path.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TargetScalarIndexVersion.Key,
+		fmt.Sprint(common.MinScalarIndexVersionForJsonPathMultiType))
 	s.MiniClusterSuite.SetupSuite()
 	s.dbName = ""
 	s.dim = 128
@@ -811,8 +816,8 @@ func (s *BloomMatchTestSuite) TestQueryJsonPathIndexTypeMatrix() {
 
 // TestSearchRecallWithinThreshold exercises the ANN path (IVF index): a filtered vector
 // search with bloom_match should recall almost all of the members that the exact `in`
-// filtered search returns. Because these are two independent APPROXIMATE searches
-// (differing filter selectivity → different graph traversal, plus topK-nearest
+// filtered search returns for the same query vector. Because these are APPROXIMATE searches
+// (differing filter selectivity → different index traversal, plus topK-nearest
 // displacement by false positives), an exact superset is NOT guaranteed here, so we
 // assert a recall threshold rather than zero misses. The deterministic zero-false-
 // negative guarantee lives in the query-based test above.
@@ -825,9 +830,23 @@ func (s *BloomMatchTestSuite) TestSearchRecallWithinThreshold() {
 	blob := s.bloomBlobInt64(memberSet)
 	topK := s.rowNum // large topK to minimize truncation; remaining diff is ANN recall
 
-	exactRes := s.search(collectionName, fmt.Sprintf("%s in %s", creatorIDField, lit), topK, []string{creatorIDField}, nil)
+	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
+	exactReq := integration.ConstructSearchRequest(s.dbName, collectionName,
+		fmt.Sprintf("%s in %s", creatorIDField, lit), integration.FloatVecField,
+		schemapb.DataType_FloatVector, []string{creatorIDField}, metric.L2, params, 1, s.dim, topK, -1)
+	// ConstructSearchRequest generates random query vectors, so clone the exact
+	// request to compare the filters with identical search inputs and parameters.
+	bloomReq := proto.Clone(exactReq).(*milvuspb.SearchRequest)
+	bloomReq.Dsl = fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField)
+	bloomReq.ExprTemplateValues = bfParam(blob)
+	s.Require().Equal(exactReq.GetPlaceholderGroup(), bloomReq.GetPlaceholderGroup(),
+		"recall comparison must use the same query vector")
+
+	exactRes, err := s.Cluster.MilvusClient.Search(context.Background(), exactReq)
+	s.Require().NoError(err)
 	s.Require().NoError(merr.Error(exactRes.GetStatus()))
-	bloomRes := s.search(collectionName, fmt.Sprintf("membership_match(%s, {bf}, type=bloom)", creatorIDField), topK, []string{creatorIDField}, bfParam(blob))
+	bloomRes, err := s.Cluster.MilvusClient.Search(context.Background(), bloomReq)
+	s.Require().NoError(err)
 	s.Require().NoError(merr.Error(bloomRes.GetStatus()))
 
 	exactPKs := resultPKs(exactRes)
