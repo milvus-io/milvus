@@ -647,11 +647,8 @@ func (c *Core) initRbac(initCtx context.Context) error {
 	}
 
 	if Params.RoleCfg.Enabled.GetAsBool() {
-		if err := c.initBuiltinRoles(initCtx); err != nil {
-			return err
-		}
+		return c.initBuiltinRoles(initCtx)
 	}
-
 	return nil
 }
 
