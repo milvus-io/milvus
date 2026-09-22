@@ -553,3 +553,19 @@ func TestExternalCollectionManager_DeleteNonExistent(t *testing.T) {
 	info := manager.Delete(clusterID, taskID)
 	assert.Nil(t, info)
 }
+
+func TestExternalCollectionManager_SubmitUnmappedResult(t *testing.T) {
+	manager := NewExternalCollectionManager(context.Background(), 1)
+	defer manager.Close()
+	req := &datapb.RefreshExternalCollectionTaskRequest{TaskID: 1, CollectionID: 100}
+	require.NoError(t, manager.SubmitTask("cluster", req, func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error) {
+		return &datapb.RefreshExternalCollectionTaskResponse{State: indexpb.JobState_JobStateFinished, AllFragmentsUnmapped: true}, nil
+	}))
+	require.Eventually(t, func() bool {
+		info := manager.Get("cluster", 1)
+		return info != nil && info.State == indexpb.JobState_JobStateFinished
+	}, time.Second, time.Millisecond)
+	require.True(t, manager.Get("cluster", 1).AllFragmentsUnmapped)
+	manager.UpdateResult("cluster", 1, indexpb.JobState_JobStateFailed, "retry failed", nil, nil, false)
+	require.False(t, manager.Get("cluster", 1).AllFragmentsUnmapped)
+}

@@ -250,6 +250,69 @@ func TestRecordToInsertData(t *testing.T) {
 	require.Contains(t, err.Error(), "required field text")
 }
 
+func TestRecordToInsertDataWithDefaults(t *testing.T) {
+	pool := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	defer pool.AssertSize(t, 0)
+	alloc := mockey.MockValue(&memory.DefaultAllocator).To(pool)
+	defer alloc.UnPatch()
+	input := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar,
+		Nullable: true, DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}}}
+	output := &schemapb.FieldSchema{FieldID: 101, Name: "output", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{input, output}}
+	// A separate physical column carries the rows while field 100 is absent.
+	anchorBuilder := array.NewInt64Builder(pool)
+	defer anchorBuilder.Release()
+	anchorBuilder.AppendValues([]int64{1, 2}, nil)
+	anchor := anchorBuilder.NewArray()
+	defer anchor.Release()
+	missingArrow := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "anchor", Type: arrow.PrimitiveTypes.Int64}}, nil), []arrow.Array{anchor}, 2)
+	missingRecord := NewSimpleArrowRecord(missingArrow, map[FieldID]int{999: 0})
+	defer missingRecord.Release()
+
+	// Physical NULLs use a different record and must survive default resolution.
+	builder := array.NewStringBuilder(pool)
+	defer builder.Release()
+	builder.AppendNulls(2)
+	col := builder.NewArray()
+	defer col.Release()
+	ar := array.NewRecord(arrow.NewSchema([]arrow.Field{{Name: "physical", Type: arrow.BinaryTypes.String, Nullable: true}}, nil), []arrow.Array{col}, 2)
+	rec := NewSimpleArrowRecord(ar, map[FieldID]int{100: 0})
+	defer rec.Release()
+	for _, nullable := range []bool{true, false} {
+		input.Nullable = nullable
+		data, err := RecordToInsertDataWithDefaults(missingRecord, schema, typeutil.NewSet[int64](100), []*schemapb.FieldSchema{input})
+		require.NoError(t, err)
+		require.Equal(t, []string{"fallback", "fallback"}, data.Data[100].(*StringFieldData).Data)
+		require.Zero(t, data.Data[101].RowNum())
+	}
+	input.Nullable = true
+	data, err := RecordToInsertDataWithDefaults(rec, schema, typeutil.NewSet[int64](100), nil)
+	require.NoError(t, err)
+	require.Equal(t, []bool{false, false}, data.Data[100].(*StringFieldData).ValidData)
+	// A second missing field makes conversion use the overlay while retaining
+	// the physical input's NULLs and leaving function outputs unmaterialized.
+	other := &schemapb.FieldSchema{FieldID: 102, Name: "other", DataType: schemapb.DataType_Int64, Nullable: true}
+	schema.Fields = append(schema.Fields, other)
+	data, err = RecordToInsertDataWithDefaults(rec, schema, nil, []*schemapb.FieldSchema{other})
+	require.NoError(t, err)
+	require.Equal(t, []bool{false, false}, data.Data[100].(*StringFieldData).ValidData)
+	require.Zero(t, data.Data[101].RowNum())
+	_, err = RecordToInsertDataWithDefaults(nil, schema, nil, []*schemapb.FieldSchema{input})
+	require.NoError(t, err)
+	// Errors release any arrays already allocated; the caller retains its record.
+	bad := &schemapb.FieldSchema{FieldID: 103, Name: "required", DataType: schemapb.DataType_Int64}
+	_, err = RecordToInsertDataWithDefaults(missingRecord, schema, nil, []*schemapb.FieldSchema{input, bad})
+	require.ErrorContains(t, err, "missing field data required")
+	columns, err := GenerateMissingFieldArrays([]*schemapb.FieldSchema{input, input}, 2)
+	require.NoError(t, err)
+	columns[100].Release()
+	input.DefaultValue = nil
+	input.DataType = schemapb.DataType_Text
+	data, err = RecordToInsertDataWithDefaults(missingRecord, schema, nil, []*schemapb.FieldSchema{input})
+	require.NoError(t, err)
+	require.Equal(t, []bool{false, false}, data.Data[100].(*StringFieldData).ValidData)
+}
+
 type recordToInsertSparseRecord struct {
 	arr arrow.Array
 }

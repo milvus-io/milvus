@@ -1975,14 +1975,6 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         bool is_replace,
         StagedStateCommitter& committer);
 
-    // Load external collection column groups from staged segment load info.
-    void
-    LoadColumnGroups(const SegmentLoadInfo& segment_load_info,
-                     const SchemaPtr& schema_snapshot,
-                     milvus::OpContext* op_ctx,
-                     bool is_replace,
-                     StagedStateCommitter& committer);
-
     void
     LoadColumnGroup(
         const std::shared_ptr<milvus_storage::api::ColumnGroups>& column_groups,
@@ -2238,6 +2230,15 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         runtime->reader =
             std::shared_ptr<milvus_storage::api::Reader>(std::move(r));
         PublishRuntimeStateLocked(ToConstRuntimeState(std::move(runtime)));
+    }
+
+    void
+    SetDefaultFieldsForTesting(const std::vector<FieldId>& fields) {
+        std::lock_guard<std::mutex> guard(reopen_mutex_);
+        MutatePublishedStateLocked([&](PublishedSegmentState& state) {
+            state.load_info =
+                CloneLoadInfoWithDefaultFilled(state.load_info, fields);
+        });
     }
 
     // Wrappers for protected methods to enable direct unit testing.

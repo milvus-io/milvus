@@ -633,6 +633,20 @@ class DefaultValueChunkTranslatorMmapTest : public ::testing::Test {
         }
     }
 
+    std::filesystem::path
+    FindMmapFile(int64_t field_id) const {
+        auto prefix = fmt::format("seg_{}_f_{}_def_", segment_id_, field_id);
+        std::filesystem::path result;
+        for (const auto& entry :
+             std::filesystem::directory_iterator(temp_dir_)) {
+            if (entry.path().filename().string().find(prefix) == 0) {
+                EXPECT_TRUE(result.empty()) << "Unexpected duplicate mmap file";
+                result = entry.path();
+            }
+        }
+        return result;
+    }
+
     std::filesystem::path temp_dir_;
     int64_t segment_id_ = 99999;
 };
@@ -663,8 +677,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapCreatesFile) {
     ASSERT_EQ(cells.size(), 1);
 
     // Verify file was created
-    auto expected_file =
-        temp_dir_ / fmt::format("seg_{}_f_{}_def", segment_id_, field_id);
+    auto expected_file = FindMmapFile(field_id);
     EXPECT_TRUE(std::filesystem::exists(expected_file))
         << "Expected mmap file to be created at: " << expected_file;
 
@@ -707,8 +720,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestNoMmapNoFile) {
     ASSERT_EQ(cells.size(), 1);
 
     // Verify no file was created (memory-only mode)
-    auto unexpected_file =
-        temp_dir_ / fmt::format("seg_{}_f_{}_def", segment_id_, field_id);
+    auto unexpected_file = FindMmapFile(field_id);
     EXPECT_FALSE(std::filesystem::exists(unexpected_file))
         << "Expected no mmap file when use_mmap=false, but found: "
         << unexpected_file;
@@ -750,8 +762,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithString) {
     ASSERT_EQ(cells.size(), 1);
 
     // Verify file was created
-    auto expected_file =
-        temp_dir_ / fmt::format("seg_{}_f_{}_def", segment_id_, field_id);
+    auto expected_file = FindMmapFile(field_id);
     EXPECT_TRUE(std::filesystem::exists(expected_file))
         << "Expected mmap file for string type at: " << expected_file;
 
@@ -787,8 +798,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapWithNullableField) {
     ASSERT_EQ(cells.size(), 1);
 
     // Verify file was created
-    auto expected_file =
-        temp_dir_ / fmt::format("seg_{}_f_{}_def", segment_id_, field_id);
+    auto expected_file = FindMmapFile(field_id);
     EXPECT_TRUE(std::filesystem::exists(expected_file))
         << "Expected mmap file for nullable field at: " << expected_file;
 
@@ -835,8 +845,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapMultipleCells) {
     ASSERT_EQ(cells.size(), cids.size());
 
     // Verify file was created (all cells share the same buffer/file)
-    auto expected_file =
-        temp_dir_ / fmt::format("seg_{}_f_{}_def", segment_id_, field_id);
+    auto expected_file = FindMmapFile(field_id);
     EXPECT_TRUE(std::filesystem::exists(expected_file))
         << "Expected mmap file at: " << expected_file;
 
@@ -877,8 +886,7 @@ TEST_F(DefaultValueChunkTranslatorMmapTest, TestMmapFileSize) {
     auto cells = translator->get_cells(nullptr, cids);
     ASSERT_EQ(cells.size(), 1);
 
-    auto expected_file =
-        temp_dir_ / fmt::format("seg_{}_f_{}_def", segment_id_, field_id);
+    auto expected_file = FindMmapFile(field_id);
     ASSERT_TRUE(std::filesystem::exists(expected_file));
 
     // File size should be at least row_count * sizeof(int64_t)
@@ -1196,4 +1204,27 @@ TEST_P(DefaultValueChunkTranslatorTest, TestNullableSparseVector) {
     }
 
     EXPECT_EQ(total_rows, row_count);
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, ReplacementKeepsOldBuffersReadable) {
+    auto make_translator = [&](int64_t value) {
+        DefaultValueType def;
+        def.set_long_data(value);
+        FieldMeta meta(
+            FieldName("revision"), FieldId(1203), DataType::INT64, false, def);
+        FieldDataInfo info(1203, 32, getMmapDirPath());
+        return MakeDefaultValueChunkTranslatorForTest(
+            segment_id_, meta, info, GetParam(), true);
+    };
+    auto old = make_translator(17);
+    auto old_cells = old->get_cells(nullptr, {0});
+    auto next = make_translator(29);
+    auto next_cells = next->get_cells(nullptr, {0});
+    auto* old_chunk = static_cast<FixedWidthChunk*>(old_cells[0].second.get());
+    auto* next_chunk =
+        static_cast<FixedWidthChunk*>(next_cells[0].second.get());
+    EXPECT_EQ(static_cast<const int64_t*>(old_chunk->Span().data())[0], 17);
+    EXPECT_EQ(static_cast<const int64_t*>(next_chunk->Span().data())[0], 29);
+    next.reset();
+    EXPECT_EQ(static_cast<const int64_t*>(old_chunk->Span().data())[31], 17);
 }

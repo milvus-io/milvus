@@ -40,6 +40,9 @@
 #include "storage/Types.h"
 #include "storage/Util.h"
 #include "segcore/SegmentGrowingImpl.h"
+#include "segcore/ChunkedSegmentSealedImpl.h"
+#include "segcore/external_utils_c.h"
+#include "query/PlanImpl.h"
 #include "segcore/Utils.h"
 #include "segcore/segment_c.h"
 #include "storage/ChunkManager.h"
@@ -60,6 +63,7 @@
 #include "storage/storage_c.h"
 #include "test_utils/Constants.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/c_api_test_utils.h"
 
 // Test-only subclass that exposes the protected ApplyChecksumConfigOverrides
 // and NeedChecksumOverride helpers so we can assert their behavior directly.
@@ -1429,4 +1433,297 @@ TEST(MinioChecksumConfig, NeedChecksumOverrideDispatch) {
     EXPECT_FALSE(Mgr::NeedChecksumOverride("aws"));
     EXPECT_FALSE(Mgr::NeedChecksumOverride(""));
     EXPECT_FALSE(Mgr::NeedChecksumOverride("unknown"));
+}
+
+// Exercise the real local manifest/Reader path for both internal and snapshot
+// external tables. No object-store service or shared Milvus instance is used.
+TEST_F(StorageTest, UnifiedManifestLoadHistoricalDefaultsAndReopen) {
+    const auto root = std::filesystem::path(
+        "unified_manifest_" +
+        std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()));
+    auto disk_root = std::filesystem::path(TestLocalPath) / root;
+    std::filesystem::create_directories(disk_root);
+    auto cleanup = std::shared_ptr<void>(nullptr, [disk_root](void*) {
+        std::filesystem::remove_all(disk_root);
+    });
+    constexpr int N = 3;
+    proto::schema::CollectionSchema source_proto;
+    for (auto [id, name] : std::vector<std::pair<int64_t, std::string>>{
+             {0, "RowID"}, {1, "Timestamp"}, {100, "pk"}}) {
+        auto* field = source_proto.add_fields();
+        field->set_fieldid(id);
+        field->set_name(name);
+        field->set_data_type(proto::schema::DataType::Int64);
+        field->set_is_primary_key(id == 100);
+    }
+    auto write_manifest = [&](const auto& proto, const std::string& name) {
+        auto schema = Schema::ParseFrom(proto);
+        auto source = CreateGrowingSegment(schema, empty_index_meta);
+        std::vector<int64_t> row_ids{0, 1, 2}, pks{10, 20, 30};
+        std::vector<Timestamp> timestamps{100, 101, 102};
+        InsertRecordProto data;
+        data.set_num_rows(N);
+        data.mutable_fields_data()->AddAllocated(
+            CreateDataArrayFrom(pks.data(), nullptr, N, (*schema)[FieldId(100)])
+                .release());
+        if (schema->has_field(FieldId(102))) {
+            int64_t revisions[N] = {42, 43, 44};
+            bool valid[N] = {true, true, true};
+            data.mutable_fields_data()->AddAllocated(
+                CreateDataArrayFrom(
+                    revisions, valid, N, (*schema)[FieldId(102)])
+                    .release());
+        }
+        if (schema->has_field(FieldId(104))) {
+            std::vector<std::string> text(N, "fresh");
+            bool valid[N] = {true, true, true};
+            data.mutable_fields_data()->AddAllocated(
+                CreateDataArrayFrom(
+                    text.data(), valid, N, (*schema)[FieldId(104)])
+                    .release());
+        }
+        source->PreInsert(N);
+        source->Insert(0, N, row_ids.data(), timestamps.data(), &data);
+        auto path = (disk_root / name).string();
+        auto blob = proto.SerializeAsString();
+        CFlushConfig config{};
+        config.segment_path = path.c_str();
+        config.read_version = -1;
+        config.retry_limit = 3;
+        config.schema_blob = blob.data();
+        config.schema_length = blob.size();
+        config.schema_based_pattern =
+            schema->has_field(FieldId(102)) ? "0|1|100,102,104" : "0|1|100";
+        CFlushResult result{};
+        auto status =
+            FlushGrowingSegmentData(source.get(), 0, N, &config, &result);
+        EXPECT_EQ(status.error_code, Success) << status.error_msg;
+        auto manifest = "{\"base_path\":\"" + path + "\",\"ver\":" +
+                        std::to_string(result.committed_version) + "}";
+        FreeFlushResult(&result);
+        FreeErrorStatus(status);
+        return manifest;
+    };
+    auto old_manifest = write_manifest(source_proto, "old");
+    auto target_proto = source_proto;
+    auto* revision = target_proto.add_fields();
+    revision->set_fieldid(102);
+    revision->set_name("revision");
+    revision->set_data_type(proto::schema::DataType::Int64);
+    revision->set_nullable(true);
+    auto* text = target_proto.add_fields();
+    text->set_fieldid(104);
+    text->set_name("text");
+    text->set_data_type(proto::schema::DataType::VarChar);
+    text->set_nullable(true);
+    text->mutable_default_value()->set_string_data("historical");
+    for (auto [key, value] : std::vector<std::pair<std::string, std::string>>{
+             {"max_length", "100"},
+             {"enable_match", "true"},
+             {"enable_analyzer", "true"}}) {
+        auto* param = text->add_type_params();
+        param->set_key(key);
+        param->set_value(value);
+    }
+    auto new_manifest = write_manifest(target_proto, "new");
+
+    auto& mmap_config = MmapManager::GetInstance().GetMmapConfig();
+    const auto old_mmap = mmap_config.GetScalarIndexEnableMmap();
+    auto restore_mmap = std::shared_ptr<void>(nullptr, [&](void*) {
+        mmap_config.scalar_index_enable_mmap = old_mmap;
+    });
+
+    for (const std::string format : {"milvus-table", "parquet", ""}) {
+        const bool external = !format.empty();
+        for (bool with_default : {false, true}) {
+            mmap_config.scalar_index_enable_mmap = with_default;
+            SCOPED_TRACE(::testing::Message() << "external=" << external
+                                              << " default=" << with_default);
+            auto schema_proto = target_proto;
+            if (with_default) {
+                schema_proto.mutable_fields(3)
+                    ->mutable_default_value()
+                    ->set_long_data(7);
+            }
+            if (external) {
+                schema_proto.set_external_source("milvus://snapshot");
+                schema_proto.set_external_spec("{\"format\":\"" + format +
+                                               "\"}");
+                if (format == "parquet") {
+                    for (auto& field : *schema_proto.mutable_fields()) {
+                        if (field.fieldid() >= START_USER_FIELDID) {
+                            field.set_external_field(
+                                std::to_string(field.fieldid()));
+                        }
+                    }
+                }
+            }
+            auto schema = Schema::ParseFrom(schema_proto);
+            auto sealed = CreateSealedSegment(schema, nullptr, 123);
+            auto* segment =
+                dynamic_cast<ChunkedSegmentSealedImpl*>(sealed.get());
+            proto::segcore::SegmentLoadInfo info;
+            info.set_segmentid(123);
+            info.set_collectionid(1);
+            info.set_storageversion(STORAGE_V3);
+            info.set_num_of_rows(N);
+            info.set_manifest_path(old_manifest);
+            info.set_use_take_for_output(true);
+            auto* fake = info.add_binlog_paths();
+            fake->set_fieldid(0);
+            fake->add_child_fields(100);
+            fake->add_child_fields(102);
+            segment->SetLoadInfo(info);
+            tracer::TraceContext trace;
+            ASSERT_NO_THROW(segment->Load(trace, nullptr));
+            EXPECT_EQ(segment->get_row_count(), N);
+            int64_t offsets[N] = {0, 1, 2};
+            OpContext ctx;
+            auto check_defaults = [&] {
+                auto index = segment->GetTextIndex(&ctx, FieldId(104));
+                EXPECT_EQ(index.get()->MatchQuery("historical", 1).count(), N);
+                EXPECT_EQ(index.get()->MatchQuery("fresh", 1).count(), 0);
+                auto values =
+                    segment->bulk_subscript(&ctx, FieldId(102), offsets, N);
+                const auto& valid_data = GetFieldDataRowValidData(*values);
+                ASSERT_EQ(valid_data.size(), N);
+                for (int i = 0; i < N; ++i) {
+                    EXPECT_EQ(valid_data[i], with_default);
+                    if (with_default) {
+                        EXPECT_EQ(values->scalars().long_data().data(i), 7);
+                    }
+                }
+            };
+            check_defaults();
+            auto retrieve_plan = std::make_unique<query::RetrievePlan>(schema);
+            retrieve_plan->field_ids_ = {FieldId(100), FieldId(102)};
+            retrieve_plan->access_entries_ = retrieve_plan->field_ids_;
+            auto check_c_api_retrieve = [&] {
+                CRetrieveResult* result = nullptr;
+                auto status = CRetrieveByOffsets(
+                    segment, retrieve_plan.get(), offsets, N, &result);
+                EXPECT_EQ(status.error_code, Success) << status.error_msg;
+                EXPECT_NE(result, nullptr);
+                if (result != nullptr) {
+                    DeleteRetrieveResult(result);
+                }
+                FreeErrorStatus(status);
+            };
+            check_c_api_retrieve();
+            auto retrieve = std::make_unique<proto::segcore::RetrieveResults>();
+            EXPECT_FALSE(segment->TryTakeForRetrieve(
+                retrieve_plan.get(), retrieve, offsets, N, false, false));
+            EXPECT_EQ(retrieve->fields_data_size(), 0);
+            auto search_plan = std::make_unique<query::Plan>(schema);
+            search_plan->target_entries_ = {FieldId(100), FieldId(102)};
+            SearchResult results;
+            EXPECT_FALSE(segment->TestTryTakeForSearch(
+                search_plan.get(), offsets, N, results));
+            EXPECT_TRUE(results.output_fields_data_.empty());
+
+            auto before_schema = segment->TestGetPublishedStateSnapshot();
+            auto later_proto = schema_proto;
+            auto* later_field = later_proto.add_fields();
+            later_field->set_fieldid(103);
+            later_field->set_name("later");
+            later_field->set_data_type(proto::schema::DataType::Int64);
+            later_field->set_nullable(true);
+            if (format == "parquet")
+                later_field->set_external_field("103");
+            auto later_schema = Schema::ParseFrom(later_proto);
+            later_schema->set_schema_version(schema->get_schema_version() + 1);
+            ASSERT_NO_THROW(segment->Reopen(later_schema));
+            auto after_schema = segment->TestGetPublishedStateSnapshot();
+            EXPECT_NE(before_schema->runtime->reader,
+                      after_schema->runtime->reader);
+            EXPECT_EQ(before_schema->runtime->fields.at(FieldId(100)),
+                      after_schema->runtime->fields.at(FieldId(100)));
+            EXPECT_TRUE(
+                after_schema->load_info->GetFieldsFilledWithDefault().count(
+                    FieldId(103)));
+            check_c_api_retrieve();
+
+            // Replace default with physical data, then back to the old snapshot.
+            auto next = info;
+            next.set_manifest_path(new_manifest);
+            if (format == "milvus-table" && !with_default) {
+                // Fail after the next Reader has been staged. Required source
+                // timestamps force a physical read even with warmup disabled.
+                auto manifest = GetLoonManifest(
+                    new_manifest,
+                    LoonFFIPropertiesSingleton::GetInstance().GetProperties());
+                std::string data_path;
+                for (const auto& group : manifest->columnGroups()) {
+                    if (std::find(group->columns.begin(),
+                                  group->columns.end(),
+                                  "1") != group->columns.end()) {
+                        data_path = (std::filesystem::path(TestLocalPath) /
+                                     group->files.front().path)
+                                        .string();
+                        break;
+                    }
+                }
+                ASSERT_FALSE(data_path.empty());
+                auto moved = data_path + ".unavailable";
+                std::filesystem::rename(data_path, moved);
+                auto restore = std::shared_ptr<void>(nullptr, [&](void*) {
+                    std::filesystem::rename(moved, data_path);
+                });
+                auto before_failure = segment->TestGetPublishedStateSnapshot();
+                EXPECT_ANY_THROW(segment->Reopen(&ctx, next));
+                EXPECT_EQ(before_failure,
+                          segment->TestGetPublishedStateSnapshot());
+                check_defaults();
+            }
+            ASSERT_NO_THROW(segment->Reopen(&ctx, next));
+            auto physical =
+                segment->bulk_subscript(&ctx, FieldId(102), offsets, N);
+            ASSERT_EQ(physical->scalars().long_data().data_size(), N);
+            EXPECT_EQ(physical->scalars().long_data().data(0), 42);
+            auto held_text_index = segment->GetTextIndex(&ctx, FieldId(104));
+            EXPECT_EQ(held_text_index.get()->MatchQuery("fresh", 1).count(), N);
+            EXPECT_EQ(
+                held_text_index.get()->MatchQuery("historical", 1).count(), 0);
+            auto held_state = segment->TestGetPublishedStateSnapshot();
+            auto held_column = held_state->runtime->fields.at(FieldId(102));
+            auto pin = held_column->Span(&ctx, 0);
+            ASSERT_NO_THROW(segment->Reopen(&ctx, info));
+            check_defaults();
+            EXPECT_EQ(held_text_index.get()->MatchQuery("fresh", 1).count(), N);
+            EXPECT_EQ(milvus::Span<int64_t>(pin.get())[0], 42);
+            EXPECT_NE(segment->TestGetPublishedStateSnapshot()->runtime->reader,
+                      held_state->runtime->reader);
+
+            if (external) {
+                const char* keys[] = {loon_properties_fs_storage_type,
+                                      loon_properties_fs_root_path};
+                // The fixture manifest and files already use absolute paths.
+                const char* values[] = {"local", "/"};
+                LoonProperties properties{};
+                auto result =
+                    loon_properties_create(keys, values, 2, &properties);
+                ASSERT_NE(loon_ffi_is_success(&result), 0);
+                loon_ffi_free_result(&result);
+                auto properties_guard = std::shared_ptr<void>(
+                    nullptr, [&](void*) { loon_properties_free(&properties); });
+                auto blob = schema_proto.SerializeAsString();
+                CProto schema_c{blob.data(), static_cast<int64_t>(blob.size())};
+                CFieldMemSizeList sizes{};
+                auto status = SampleExternalSegmentFieldSizes(
+                    old_manifest.c_str(), N, 1, &properties, schema_c, &sizes);
+                ASSERT_EQ(status.error_code, Success) << status.error_msg;
+                bool found = false;
+                for (int i = 0; i < sizes.count; ++i) {
+                    if (std::string(sizes.sizes[i].field_name) == "102") {
+                        found = true;
+                        EXPECT_GT(sizes.sizes[i].avg_mem_bytes, 0);
+                    }
+                }
+                EXPECT_TRUE(found);
+                FreeCFieldMemSizeList(&sizes);
+                FreeErrorStatus(status);
+            }
+        }
+    }
 }

@@ -989,55 +989,94 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, RetrieveByOffsetsChecksExternalLoadedManifest) {
-    auto schema = std::make_shared<Schema>();
-    auto pk_field = FieldId(100);
-    auto missing_field = FieldId(101);
-    schema->AddField(FieldMeta(FieldName("pk"),
-                               pk_field,
-                               DataType::INT64,
-                               false,
-                               std::nullopt,
-                               "pk_col"));
-    schema->AddField(FieldMeta(FieldName("new_field"),
-                               missing_field,
-                               DataType::INT64,
-                               false,
-                               std::nullopt,
-                               "new_col"));
-    schema->set_primary_field_id(pk_field);
-    schema->set_external_source("s3://bucket/table");
+TEST(CApiTest, RetrieveByOffsetsChecksExternalFieldSources) {
+    for (bool milvus_table : {false, true}) {
+        SCOPED_TRACE(milvus_table);
+        auto schema = std::make_shared<Schema>();
+        auto pk_field = FieldId(100);
+        auto missing_field = FieldId(101);
+        schema->AddField(FieldMeta(FieldName("pk"),
+                                   pk_field,
+                                   DataType::INT64,
+                                   false,
+                                   std::nullopt,
+                                   "pk_col"));
+        schema->AddField(FieldMeta(FieldName("new_field"),
+                                   missing_field,
+                                   DataType::INT64,
+                                   milvus_table,
+                                   std::nullopt,
+                                   "new_col"));
+        schema->set_primary_field_id(pk_field);
+        schema->set_external_source("s3://bucket/table");
+        if (milvus_table) {
+            schema->set_external_spec(R"({"format":"milvus-table"})");
+        }
+        EXPECT_EQ(schema->CanFillMissingExternalField(missing_field),
+                  milvus_table);
 
-    auto segment = CreateSealedSegment(schema);
-    auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
-    ASSERT_NE(sealed, nullptr);
+        auto segment = CreateSealedSegment(schema);
+        auto* sealed = dynamic_cast<ChunkedSegmentSealedImpl*>(segment.get());
+        ASSERT_NE(sealed, nullptr);
 
-    proto::segcore::SegmentLoadInfo load_info;
-    load_info.set_segmentid(1);
-    load_info.set_num_of_rows(1);
-    load_info.set_manifest_path("/manifest/v1");
-    sealed->SetLoadInfo(load_info);
+        proto::segcore::SegmentLoadInfo load_info;
+        load_info.set_segmentid(1);
+        load_info.set_num_of_rows(1);
+        load_info.set_manifest_path("/manifest/v1");
+        sealed->SetLoadInfo(load_info);
 
-    auto plan = std::make_unique<query::RetrievePlan>(schema);
-    plan->field_ids_ = {missing_field};
-    plan->access_entries_ = {missing_field};
+        auto plan = std::make_unique<query::RetrievePlan>(schema);
+        plan->field_ids_ = {missing_field};
+        plan->access_entries_ = {missing_field};
 
-    int64_t offsets[] = {0};
-    CRetrieveResult* retrieve_result = nullptr;
-    auto status =
-        CRetrieveByOffsets(static_cast<CSegmentInterface>(segment.get()),
-                           plan.get(),
-                           offsets,
-                           1,
-                           &retrieve_result);
+        int64_t offsets[] = {0};
+        CRetrieveResult* retrieve_result = nullptr;
+        auto status =
+            CRetrieveByOffsets(static_cast<CSegmentInterface>(segment.get()),
+                               plan.get(),
+                               offsets,
+                               1,
+                               &retrieve_result);
 
-    ASSERT_EQ(status.error_code, FieldNotLoaded);
-    ASSERT_NE(status.error_msg, nullptr);
-    EXPECT_NE(std::string(status.error_msg).find("RefreshExternalCollection"),
-              std::string::npos)
-        << status.error_msg;
-    EXPECT_EQ(retrieve_result, nullptr);
-    free(const_cast<char*>(status.error_msg));
+        ASSERT_EQ(status.error_code, FieldNotLoaded);
+        ASSERT_NE(status.error_msg, nullptr);
+        EXPECT_NE(
+            std::string(status.error_msg).find("RefreshExternalCollection"),
+            std::string::npos)
+            << status.error_msg;
+        EXPECT_EQ(retrieve_result, nullptr);
+        free(const_cast<char*>(status.error_msg));
+
+        // The manifest stays unchanged. A loaded scalar index supplies raw
+        // values without any field data or runtime default marker.
+        int64_t values[] = {7};
+        auto index = milvus::index::CreateScalarIndexSort<int64_t>();
+        index->Build(1, values);
+        LoadIndexInfo index_info;
+        index_info.field_id = missing_field.get();
+        index_info.field_type = DataType::INT64;
+        index_info.index_params = GenIndexParams(index.get());
+        index_info.cache_index =
+            CreateTestCacheIndex("external_missing", std::move(index));
+        sealed->LoadIndex(index_info);
+        EXPECT_FALSE(sealed->HasFieldData(missing_field));
+        auto load_info_snapshot = sealed->TestGetLoadInfoSnapshot();
+        ASSERT_NE(load_info_snapshot, nullptr);
+        EXPECT_FALSE(
+            load_info_snapshot->IsFieldFilledWithDefault(missing_field));
+        EXPECT_FALSE(sealed->HasColumnInLoadedManifest("new_col"));
+        EXPECT_TRUE(sealed->IndexHasRawData(missing_field));
+        status = CRetrieveByOffsets(
+            segment.get(), plan.get(), offsets, 1, &retrieve_result);
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+        ASSERT_NE(retrieve_result, nullptr);
+        proto::segcore::RetrieveResults result;
+        ASSERT_TRUE(result.ParseFromArray(retrieve_result->proto_blob,
+                                          retrieve_result->proto_size));
+        ASSERT_EQ(result.fields_data_size(), 1);
+        EXPECT_EQ(result.fields_data(0).scalars().long_data().data(0), 7);
+        DeleteRetrieveResult(retrieve_result);
+    }
 }
 
 TEST(CApiTest, GetMemoryUsageInBytesTest) {

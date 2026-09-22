@@ -187,7 +187,7 @@ func TestGenerateEmptyArray(t *testing.T) {
 			expectErr: true,
 		},
 		{
-			tag: "invalid_schema_nullable",
+			tag: "nonnullable_with_default",
 			field: &schemapb.FieldSchema{
 				DataType: schemapb.DataType_Int8,
 				Nullable: false,
@@ -197,7 +197,19 @@ func TestGenerateEmptyArray(t *testing.T) {
 					},
 				},
 			},
-			expectErr: true,
+			expectValue: int8(10),
+		},
+		{
+			tag: "nonnullable_timestamp_default",
+			field: &schemapb.FieldSchema{DataType: schemapb.DataType_Timestamptz,
+				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: 123}}},
+			expectValue: int64(123),
+		},
+		{
+			tag: "nullable_vector_array",
+			field: &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector,
+				Nullable: true, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}}},
+			expectNull: true,
 		},
 		{
 			tag: "internal_default_json",

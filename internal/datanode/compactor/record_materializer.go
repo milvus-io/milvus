@@ -22,6 +22,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -249,7 +250,10 @@ func newSelectedRecord(base storage.Record, schema *schemapb.CollectionSchema, p
 }
 
 func buildSelectedColumn(base storage.Record, field *schemapb.FieldSchema, selection *recordSelection) (arrow.Array, error) {
-	builder := storage.NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}})
+	// Preserve stored NULLs; the reader has already filled absent fields.
+	selectedField := proto.Clone(field).(*schemapb.FieldSchema)
+	selectedField.DefaultValue = nil
+	builder := storage.NewRecordBuilder(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{selectedField}})
 	defer builder.Release()
 	for _, rowRange := range selection.ranges {
 		if err := builder.Append(base, rowRange.start, rowRange.end); err != nil {
@@ -381,8 +385,8 @@ func newMinHashFunctionMaterializer(schema *schemapb.CollectionSchema, runner fu
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrFunctionFailedMsg("input field not found in schema")
 		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar {
-			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar for minhash function materialization; text input requires LOB decoding")
+		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
+			return nil, merr.WrapErrFunctionFailedMsg("input field data type must be varchar or text for minhash function materialization")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
@@ -428,8 +432,8 @@ func newBM25FunctionMaterializer(schema *schemapb.CollectionSchema, runner funct
 		if inputField == nil || typeutil.GetField(schema, inputField.GetFieldID()) == nil {
 			return nil, merr.WrapErrParameterInvalidMsg("input field not found in schema")
 		}
-		if inputField.GetDataType() != schemapb.DataType_VarChar {
-			return nil, merr.WrapErrParameterInvalidMsg("input field data type must be varchar for bm25 function materialization; text input requires LOB decoding")
+		if inputField.GetDataType() != schemapb.DataType_VarChar && inputField.GetDataType() != schemapb.DataType_Text {
+			return nil, merr.WrapErrParameterInvalidMsg("input field data type must be varchar or text for bm25 function materialization")
 		}
 		inputFieldIDs = append(inputFieldIDs, inputField.GetFieldID())
 	}
@@ -601,6 +605,11 @@ func stringInputsFromRecord(rec storage.Record, fieldID int64) ([]string, error)
 			}
 		}
 	case *array.Binary:
+		// Missing nullable TEXT fields use the storage binary representation.
+		// No LOB decoding is needed for all-NULL input; BM25/MinHash use empty text.
+		if values.NullN() == values.Len() {
+			return inputs, nil
+		}
 		return nil, merr.WrapErrFunctionFailedMsg("cannot materialize bm25 from text binary values without lob decoding")
 	default:
 		return nil, merr.WrapErrFunctionFailedMsg("input field %d data type must be varchar or text for bm25 function materialization, got %T", fieldID, col)

@@ -11,6 +11,7 @@ import (
 	"github.com/apache/arrow/go/v17/arrow/array"
 	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/samber/lo"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -97,7 +98,11 @@ func ExecuteFunctionsForSegment(
 		return "", err
 	}
 
-	reader, err := openInputReader(ctx, schema, inputManifestPath, inputSchema, storageConfig, collectionID)
+	readSchema, missingInputs, err := resolveFunctionInputSchema(schema, inputSchema, inputManifestPath, storageConfig)
+	if err != nil {
+		return "", err
+	}
+	reader, err := openInputReader(ctx, schema, inputManifestPath, readSchema, storageConfig, collectionID)
 	if err != nil {
 		return "", err
 	}
@@ -108,14 +113,23 @@ func ExecuteFunctionsForSegment(
 	if err != nil {
 		return "", merr.Wrap(err, "open output writer")
 	}
+	defer writer.Destroy()
 	writer.AsNewColumnGroups()
 
 	bm25Acc := newBM25Accumulators(schema)
 
 	totalRows, err := streamBatches(ctx, schema, executionSchema, outputSchema, outputArrow,
-		requiredInputFields, reader, writer, bm25Acc, clusterID)
+		requiredInputFields, reader, writer, bm25Acc, clusterID, missingInputs...)
 	if err != nil {
 		return "", err
+	}
+
+	var expectedRows int64
+	for _, fragment := range fragments {
+		expectedRows += fragment.RowCount
+	}
+	if totalRows != expectedRows {
+		return "", merr.WrapErrServiceInternalMsg("function input row count mismatch: got %d, expected %d", totalRows, expectedRows)
 	}
 
 	output, err := writer.Close()
@@ -325,6 +339,53 @@ func buildFunctionExecutionSchema(
 	return inputSchema, executionSchema, requiredInputFields, nil
 }
 
+// resolveFunctionInputSchema projects only physical inputs. Missing inputs are
+// filled before execution, never inferred from NULL values returned by a reader.
+// Refresh groups fragments by physical columns before invoking this executor.
+func resolveFunctionInputSchema(schema, inputSchema *schemapb.CollectionSchema, manifestPath string, config *indexpb.StorageConfig) (*schemapb.CollectionSchema, []*schemapb.FieldSchema, error) {
+	resolver := typeutil.NewStorageColumnResolver(schema)
+	readSchema := proto.Clone(inputSchema).(*schemapb.CollectionSchema)
+	readSchema.Fields = nil
+	var missing []*schemapb.FieldSchema
+	for _, field := range inputSchema.GetFields() {
+		column, _ := resolver.ManifestStoredColumnName(field)
+		present, err := packed.ManifestHasColumns(manifestPath, config, []string{column})
+		if err != nil {
+			return nil, nil, merr.Wrap(err, "resolve physical function inputs")
+		}
+		if present {
+			readSchema.Fields = append(readSchema.Fields, field)
+			continue
+		}
+		if !field.GetNullable() && field.GetDefaultValue() == nil {
+			return nil, nil, merr.WrapErrParameterInvalidMsg("function input field %s is physically missing and has neither a default nor nullable enabled", field.GetName())
+		}
+		missing = append(missing, field)
+	}
+	if len(readSchema.Fields) == 0 {
+		// Another mapped business column admitted these rows. Read one such
+		// column to preserve their count and order; it is not a function input.
+		for _, field := range schema.GetFields() {
+			column, ok := resolver.SourceDataColumnName(field)
+			if !ok {
+				continue
+			}
+			present, err := packed.ManifestHasColumns(manifestPath, config, []string{column})
+			if err != nil {
+				return nil, nil, merr.Wrap(err, "resolve function row count column")
+			}
+			if present {
+				readSchema.Fields = append(readSchema.Fields, field)
+				break
+			}
+		}
+		if len(readSchema.Fields) == 0 {
+			return nil, nil, merr.WrapErrServiceInternalMsg("function segment has no physically mapped source column")
+		}
+	}
+	return readSchema, missing, nil
+}
+
 func streamBatches(
 	ctx context.Context,
 	schema *schemapb.CollectionSchema,
@@ -336,6 +397,7 @@ func streamBatches(
 	writer *packed.FFIPackedWriter,
 	bm25Acc map[int64]*storage.BM25Stats,
 	clusterID string,
+	missingInputs ...*schemapb.FieldSchema,
 ) (int64, error) {
 	var totalRows int64
 	for {
@@ -350,7 +412,8 @@ func streamBatches(
 			break
 		}
 
-		batch, err := storage.RecordToInsertData(rec, executionSchema, requiredInputFields)
+		numRows := rec.Len()
+		batch, err := storage.RecordToInsertDataWithDefaults(rec, executionSchema, requiredInputFields, missingInputs)
 		if err != nil {
 			return totalRows, merr.Wrap(err, "record to InsertData")
 		}
@@ -365,6 +428,13 @@ func streamBatches(
 			return totalRows, merr.Wrap(err, "execute functions")
 		}
 
+		for _, field := range outputSchema.GetFields() {
+			output := batch.Data[field.GetFieldID()]
+			if output == nil || output.RowNum() != numRows {
+				return totalRows, merr.WrapErrServiceInternalMsg("function output field %s must contain %d rows", field.GetName(), numRows)
+			}
+		}
+
 		if err := accumulateBM25Stats(batch, bm25Acc); err != nil {
 			return totalRows, err
 		}
@@ -372,7 +442,7 @@ func streamBatches(
 		if err := writeOutputBatch(batch, outputSchema, outputArrow, writer); err != nil {
 			return totalRows, merr.Wrap(err, "write output batch")
 		}
-		totalRows += int64(batch.GetRowNum())
+		totalRows += int64(numRows)
 	}
 	return totalRows, nil
 }
