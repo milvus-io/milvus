@@ -15,8 +15,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-const defaultTickerInterval = 10 * time.Second
-
 // Balancer is the scheduling controller that reconciles dirty shards into
 // QueryView prepare/release operations.
 type Balancer interface {
@@ -29,12 +27,12 @@ type Balancer interface {
 // decisions are delegated to BalancePolicy; this type reads the cache,
 // drains dirty work, and applies the resulting BalancePlan.
 type DefaultBalancer struct {
-	cache          *balancercache.Cache
-	reconcileMu    sync.Mutex
-	viewRegistry   *coordview.ShardViewRegistry
-	policy         BalancePolicy
-	queue          *triggerQueue
-	tickerInterval time.Duration
+	cache         *balancercache.Cache
+	reconcileMu   sync.Mutex
+	viewRegistry  *coordview.ShardViewRegistry
+	policy        BalancePolicy
+	queue         *triggerQueue
+	configChanged chan struct{}
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -50,16 +48,12 @@ func NewDefaultBalancer(
 	if policy == nil {
 		policy = NewDefaultBalancePolicy()
 	}
-	interval := defaultTickerInterval
-	if cache != nil && cache.GetBalanceConfig().TickerInterval > 0 {
-		interval = cache.GetBalanceConfig().TickerInterval
-	}
 	balancer := &DefaultBalancer{
-		cache:          cache,
-		viewRegistry:   registry,
-		policy:         policy,
-		queue:          newTriggerQueue(),
-		tickerInterval: interval,
+		cache:         cache,
+		viewRegistry:  registry,
+		policy:        policy,
+		queue:         newTriggerQueue(),
+		configChanged: make(chan struct{}, 1),
 	}
 	if cache != nil {
 		cache.SetNotifier(func(scope TriggerScope) { balancer.Trigger(scope) })
@@ -103,22 +97,30 @@ func (b *DefaultBalancer) Trigger(scopes ...TriggerScope) {
 func (b *DefaultBalancer) loop(ctx context.Context) {
 	defer b.wg.Done()
 
-	ticker := time.NewTicker(b.tickerInterval)
+	unwatch := b.watchBalanceConfig(ctx, paramtable.Get())
+	defer unwatch()
+	interval := DefaultBalanceConfig().TickerInterval
+	if b.cache != nil {
+		interval = b.cache.GetBalanceConfig().TickerInterval
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	resetTicker := func() {
+		next := b.cache.GetBalanceConfig().TickerInterval
+		if next != interval {
+			interval = next
+			ticker.Reset(interval)
+		}
+	}
 
 	retryDelay := 100 * time.Millisecond
 	for {
-		interval := paramtable.Get().QueryCoordCfg.QueryViewFullReconsileInterval.GetAsDuration(time.Second)
-		if b.cache != nil && b.cache.GetBalanceConfig().TickerInterval > 0 {
-			interval = b.cache.GetBalanceConfig().TickerInterval
-		}
-		if interval != b.tickerInterval {
-			b.tickerInterval = interval
-			ticker.Reset(interval)
-		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-b.configChanged:
+			resetTicker()
+			continue
 		case <-b.queue.signalCh():
 		case <-ticker.C:
 			b.queue.add()
@@ -131,11 +133,17 @@ func (b *DefaultBalancer) loop(ctx context.Context) {
 			}
 			mlog.Warn(ctx, "query view balance will retry", mlog.Err(err))
 			timer := time.NewTimer(retryDelay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
+			waiting := true
+			for waiting {
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				case <-b.configChanged:
+					resetTicker()
+				case <-timer.C:
+					waiting = false
+				}
 			}
 			retryDelay = min(5*time.Second, retryDelay*2)
 		} else {

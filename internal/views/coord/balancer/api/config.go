@@ -1,6 +1,9 @@
 package api
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // BalanceNode combines a QueryNode's identity and health with cross-shard
 // aggregated row load derived from the ShardViewRegistry.
@@ -24,6 +27,8 @@ type BalanceNode struct {
 
 // BalanceConfig is the tunable parameter set for the allocation algorithm.
 type BalanceConfig struct {
+	// AutoBalance gates optional optimization, never mandatory work or releases.
+	AutoBalance bool
 	// Normalized scoring weights. Each component is bounded in [0, 1] before
 	// its weight is applied.
 	StickinessWeight float64
@@ -35,7 +40,7 @@ type BalanceConfig struct {
 	// TargetRowsPerShardNode controls the data-derived free fanout budget.
 	TargetRowsPerShardNode int64
 
-	// Full-scan interval for the reconcile loop (ticker fallback).
+	// Positive full-scan interval for the reconcile loop.
 	TickerInterval time.Duration
 }
 
@@ -43,10 +48,25 @@ type BalanceConfig struct {
 // homogeneous QueryNodes. RowNum is the sole load metric.
 func DefaultBalanceConfig() *BalanceConfig {
 	return &BalanceConfig{
+		AutoBalance:            true,
+		TickerInterval:         time.Minute,
 		StickinessWeight:       1,
 		NodeLoadWeight:         1,
 		FanoutWeight:           1,
 		StickyRowsScale:        1_000_000,
 		TargetRowsPerShardNode: 100_000,
 	}
+}
+
+// Valid checks the complete configuration before publication. Invalid dynamic
+// updates must leave the previous effective configuration intact.
+func (c *BalanceConfig) Valid() bool {
+	for _, weight := range []float64{c.StickinessWeight, c.NodeLoadWeight, c.FanoutWeight} {
+		if math.IsNaN(weight) || math.IsInf(weight, 0) || weight < 0 {
+			return false
+		}
+	}
+	sum := c.StickinessWeight + c.NodeLoadWeight + c.FanoutWeight
+	return sum > 0 && !math.IsInf(sum, 0) && c.StickyRowsScale > 0 &&
+		c.TargetRowsPerShardNode > 0 && c.TickerInterval > 0
 }

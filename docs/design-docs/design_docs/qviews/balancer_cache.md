@@ -422,7 +422,9 @@ Key implementation packages are `internal/views/coord/balancer/cache/`,
   the entry while sharing its reference counter; old readers remain immutable.
 - `NewDefaultBalancer` consumes the cache, and failed allocation/apply work is
   requeued with a 100 ms to 5 s loop backoff. `UpdateBalanceConfig` publishes
-  a new immutable configuration and requests a full pass.
+  a validated immutable configuration, ignores identical/invalid updates, and
+  requests a full pass only for policy changes. The controller subscribes to
+  ParamTable and separately wakes/resets its timer on interval changes.
 - Per-collection replica-use counts avoid scanning resident shards while
   publishing one shard or removing desired config. Empty Collection/Node/RG
   entries are reclaimed once their desired/actual references disappear.

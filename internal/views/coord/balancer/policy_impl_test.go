@@ -13,13 +13,7 @@ import (
 )
 
 func policyTestConfig() *BalanceConfig {
-	return &BalanceConfig{
-		StickinessWeight:       1,
-		NodeLoadWeight:         1,
-		FanoutWeight:           1,
-		StickyRowsScale:        1_000_000,
-		TargetRowsPerShardNode: 100_000,
-	}
+	return DefaultBalanceConfig()
 }
 
 func distinctAssignmentNodes(assignments map[int64]int64) map[int64]struct{} {
@@ -554,7 +548,9 @@ func TestDefaultBalancePolicy_MandatorySameAssignmentStillEmits(t *testing.T) {
 }
 
 func TestDefaultBalancePolicy_MandatoryPrecedesLargerOptionalShard(t *testing.T) {
-	c := balancercache.New(&BalanceConfig{NodeLoadWeight: 1})
+	config := DefaultBalanceConfig()
+	config.StickinessWeight, config.FanoutWeight = 0, 0
+	c := balancercache.New(config)
 	mandatory, optional := cacheShard(1, 10), cacheShard(2, 20)
 	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
 	c.PublishLoadConfig(2, cfgFor(2, 20, nil, nil), 1)
@@ -577,7 +573,9 @@ func TestDefaultBalancePolicy_MandatoryPrecedesLargerOptionalShard(t *testing.T)
 }
 
 func TestDefaultBalancePolicy_LargerShardPrecedesSmallerShard(t *testing.T) {
-	c := balancercache.New(&BalanceConfig{NodeLoadWeight: 1})
+	config := DefaultBalanceConfig()
+	config.StickinessWeight, config.FanoutWeight = 0, 0
+	c := balancercache.New(config)
 	small, large := cacheShard(1, 10), cacheShard(2, 20)
 	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
 	c.PublishLoadConfig(2, cfgFor(2, 20, nil, nil), 1)
