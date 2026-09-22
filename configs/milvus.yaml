@@ -924,6 +924,30 @@ dataCoord:
     # Concurrency of StorageV3 manifest index reads during startup and snapshot restore. Each read blocks a native thread. Values are clamped to [1, 256], and the process-wide limit is also capped by positive minio.maxConnections values. Zero leaves the storage default in effect. Restore assembly and verification share the same budget.
     # Startup processes fixed-size batches and retries failed reads per segment. An exhausted read or invalid manifest fails startup without replaying successful reads through the metastore retry loop. Recovery follows the durable manifest_has_index marker independently of the current write-mode switch.
     segmentIndexManifestLoadConcurrency: 64
+    manifestIndexBackfill:
+      # Whether DataCoord migrates historical finished StorageV3 SegmentIndex rows from etcd into segment manifests. OFF by default and inert unless writeSegmentIndexToManifest is also true.
+      # Each eligible row is retired by the same catalog transaction that publishes its manifest entry and sets manifest_has_index. There is no separate index-prune phase, and mixed historical placement remains safe while this optional migration is incomplete.
+      # Enable only after every DataCoord replica that can become leader supports manifest-index reload. Once a row is migrated, rolling DataCoord back to an older version is unsupported because disabling this switch does not recreate the row.
+      # This switch is read at startup. Watch milvus_datacoord_manifest_index_backfill_pending_records; zero means no eligible historical row remains.
+      enabled: false
+      # Interval in seconds between in-memory backlog scans.
+      interval: 60
+      # Maximum number of SegmentIndex rows migrated per scan. The pending gauge counts the full backlog.
+      batchSize: 1000
+      # Number of segments processed in parallel. Records belonging to one segment are committed sequentially under its manifest lock.
+      concurrency: 16
+    manifestIndexRollback:
+      # Restore manifest index records to etcd and atomically remove manifest entries. Index files keep their current paths.
+      # This restart-scoped switch overrides writeSegmentIndexToManifest and forward backfill; new completions use etcd.
+      # Wait for milvus_datacoord_manifest_index_rollback_ready=1, then disable both forward switches before downgrading.
+      # The target version must support StorageV3 and the existing index artifact layouts. Unfinished copy tasks also block readiness.
+      enabled: false
+      # Seconds between scans. Nonpositive durations use 60 seconds.
+      interval: 60
+      # Maximum segments visited per scan; each visit restores at most maxEtcdTxnNum-1 indexes in one transaction.
+      batchSize: 1000
+      # Concurrent segments, clamped to [1, 256].
+      concurrency: 8
   enableGarbageCollection: true # Switch value to control if to enable garbage collection to clear the discarded data in MinIO or S3 service.
   gc:
     interval: 3600 # The interval at which data coord performs garbage collection, unit: second.

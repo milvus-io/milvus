@@ -2580,7 +2580,7 @@ func TestGarbageCollector_recycleDroppedSegments_NoIndexCollection(t *testing.T)
 
 			recycled := make([]int64, 0, 1)
 			mockRecycle := mockey.Mock((*garbageCollector).recycleDroppedSegment).
-				To(func(_ *garbageCollector, _ context.Context, segmentID int64, _ *SegmentInfo) {
+				To(func(_ *garbageCollector, _ context.Context, segmentID int64) {
 					recycled = append(recycled, segmentID)
 				}).Build()
 			defer mockRecycle.UnPatch()
@@ -2904,7 +2904,7 @@ func TestGarbageCollector_recycleDroppedSegment_DropSegmentFailure(t *testing.T)
 	mockDropSegment := mockey.Mock((*meta).DropSegment).Return(errors.New("drop segment failed")).Build()
 	defer mockDropSegment.UnPatch()
 
-	gc.recycleDroppedSegment(ctx, segment.ID, segment)
+	gc.recycleDroppedSegment(ctx, segment.ID)
 
 	assert.NotNil(t, m.GetSegment(ctx, segment.ID))
 }
@@ -2969,7 +2969,7 @@ func TestGarbageCollector_recycleDroppedSegment_CancellationShortCircuit(t *test
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		gc.recycleDroppedSegment(ctx, segment.ID, segment)
+		gc.recycleDroppedSegment(ctx, segment.ID)
 
 		assert.False(t, removeCalled.Load(), "file removal must be skipped when ctx is canceled before the files step")
 		assert.NotNil(t, m.GetSegment(context.Background(), segment.ID))
@@ -2998,7 +2998,7 @@ func TestGarbageCollector_recycleDroppedSegment_CancellationShortCircuit(t *test
 			}).Build()
 		defer mockIdx.UnPatch()
 
-		gc.recycleDroppedSegment(ctx, segment.ID, segment)
+		gc.recycleDroppedSegment(ctx, segment.ID)
 
 		assert.False(t, indexMetaCalled.Load(), "index meta step must be skipped when ctx is canceled mid-segment")
 		// segment meta should still exist since DropSegment never ran.
@@ -4715,7 +4715,7 @@ func TestGarbageCollector_recycleDroppedSegment_MissingLocalV3DataStillRemovesMe
 	require.NoError(t, cli.Write(ctx, sibling, []byte("keep sibling")))
 	require.NoDirExists(t, basePath)
 
-	gc.recycleDroppedSegment(ctx, segment.ID, segment)
+	gc.recycleDroppedSegment(ctx, segment.ID)
 
 	assert.Nil(t, m.GetSegment(ctx, segment.ID))
 	assert.Empty(t, m.indexMeta.GetAllSegmentIndexes(segment.ID))
@@ -5322,7 +5322,7 @@ func TestGarbageCollector_recycleDroppedSegment_CtxCanceledBeforeDrop(t *testing
 		}).Build()
 	defer mockDrop.UnPatch()
 
-	gc.recycleDroppedSegment(ctx, segment.ID, segment)
+	gc.recycleDroppedSegment(ctx, segment.ID)
 
 	assert.Equal(t, int32(1), indexMetaCalls.Load())
 	assert.Equal(t, int32(0), dropCalls.Load(),
@@ -5990,7 +5990,7 @@ func TestGarbageCollector_getDroppedSegmentIndexFiles_InvalidManifestEntryBlocks
 
 	// The block holds through recycleDroppedSegment: nothing is deleted and
 	// the segment meta survives for the cycle after the manifest is repaired.
-	gc.recycleDroppedSegment(context.TODO(), segmentID, m.GetSegment(context.TODO(), segmentID))
+	gc.recycleDroppedSegment(context.TODO(), segmentID)
 	assert.NotNil(t, m.GetSegment(context.TODO(), segmentID))
 }
 

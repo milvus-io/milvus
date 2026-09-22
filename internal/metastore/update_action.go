@@ -243,6 +243,12 @@ func DropSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
 	return UpdateAction{Type: ActionDelete, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
 }
 
+// SaveSegmentIndex restores a catalog record atomically with the segment
+// manifest revision that relinquishes its artifact metadata to etcd.
+func SaveSegmentIndex(segIdx *model.SegmentIndex) UpdateAction {
+	return UpdateAction{Type: ActionUpdate, Entry: SegmentIndexEntry{SegmentIndex: segIdx}}
+}
+
 // AlterSegment returns an UpdateAction that rewrites an existing segment's
 // record using the legacy AlterSegments encoding. For a Dropped segment it
 // additionally persists the GC-compat binlog KVs a pre-binlog-prefix segment
