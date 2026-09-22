@@ -152,6 +152,17 @@ func (t *sortCompactionTask) preCompact() error {
 	return nil
 }
 
+// warnIfManifestIgnoresParallelRead logs that the parallel chunk read option
+// cannot take effect. Only sort compaction sets the option, and a segment with
+// a manifest is read through a manifest reader, which ignores it: the input is
+// read serially and nothing else surfaces the no-op at runtime.
+func warnIfManifestIgnoresParallelRead(log *mlog.Logger, ctx context.Context, segmentID int64, manifest string, concurrency int) {
+	if manifest != "" && concurrency > 1 {
+		log.Warn(ctx, "sort read in parallel is ignored for manifest segments: input is read serially",
+			mlog.Int64("segmentID", segmentID))
+	}
+}
+
 func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.CompactionPlanResult, error) {
 	log := mlog.With(
 		mlog.Int64("planID", t.plan.GetPlanID()),
@@ -267,6 +278,12 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		srw.Close()
 		return nil, err
 	}
+	parallelRead := storage.ParallelChunkRead{
+		Concurrency: paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt(),
+		BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
+		RangeSize:   paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize(),
+	}
+	warnIfManifestIgnoresParallelRead(log, ctx, t.segmentID, t.manifest, parallelRead.Concurrency)
 	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithVersion(t.segmentStorageVersion),
 		storage.WithDownloader(t.binlogIO.Download),
@@ -277,11 +294,7 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		// readers that stream their input must not do this. What reading ahead
 		// does add is the raw bytes of the rounds in flight, bounded by
 		// sortReadConcurrency * sortReadBufferSize.
-		storage.WithParallelChunkRead(storage.ParallelChunkRead{
-			Concurrency: paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt(),
-			BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
-			RangeSize:   paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize(),
-		}),
+		storage.WithParallelChunkRead(parallelRead),
 	)
 	if err != nil {
 		log.Warn(ctx, "error creating insert binlog reader", mlog.Err(err))
