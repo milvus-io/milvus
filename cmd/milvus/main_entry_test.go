@@ -37,3 +37,24 @@ func TestMainDoesNotModifyCallerArgs(t *testing.T) {
 	Main(args)
 	assert.Equal(t, want, args)
 }
+
+// The one in-place change Main used to make - deleting the subprocess marker -
+// now lives in a pure helper, so it is tested here without exec'ing a
+// subprocess: the marker is stripped from a copy, and the caller's vector is
+// returned untouched.
+func TestSubprocessArgsStripsTheMarker(t *testing.T) {
+	args := []string{"milvus", "--run-with-subprocess", "run", "--config", "x"}
+	want := append([]string(nil), args...)
+
+	subArgs, ok := subprocessArgs(args)
+	assert.True(t, ok)
+	assert.Equal(t, []string{"milvus", "run", "--config", "x"}, subArgs)
+	assert.Equal(t, want, args, "the caller's vector must be untouched")
+}
+
+func TestSubprocessArgsWithoutTheMarker(t *testing.T) {
+	args := []string{"milvus", "run"}
+	subArgs, ok := subprocessArgs(args)
+	assert.False(t, ok)
+	assert.Equal(t, args, subArgs, "no marker means no strip")
+}

@@ -36,29 +36,26 @@ import (
 // is the former cmd/main.go moved unchanged apart from three adaptations: it
 // reads args instead of the os.Args global (with the inner slice renamed to
 // subArgs), the original if/else became an if block that always returns
-// followed by an unconditional tail call, and args is copied on entry.
+// followed by an unconditional tail call, and the subprocess marker is
+// stripped into a copy of args rather than in place.
 //
 // args is the full argument vector, program name first, as os.Args is. Main
-// does not modify the caller's slice: the subprocess branch below deletes an
-// element in place, which on os.Args was invisible and on an exported API
-// would hand the caller back a shortened vector with a cleared tail.
+// does not modify the caller's slice: the subprocess branch deletes an element,
+// which on os.Args was invisible and on an exported API would hand the caller
+// back a shortened vector with a cleared tail, so it deletes from a copy.
 //
 // A distribution installs its compiled-in hook and coordinator engine
 // (pkg/extension) before calling Main; nothing runs earlier than the first
 // line here except package initialization.
 func Main(args []string) {
-	args = slices.Clone(args)
-
 	// after 2.6.0, we enable streaming service by default.
 	// TODO: after remove all streamingutil.IsStreamingServiceEnabled(), we can remove this code.
 	streamingutil.SetStreamingServiceEnabled()
 
 	defer asan.LsanDoLeakCheck()
-	idx := slices.Index(args, "--run-with-subprocess")
 
 	// execute command as a subprocess if the command contains "--run-with-subprocess"
-	if idx > 0 {
-		subArgs := slices.Delete(args, idx, idx+1)
+	if subArgs, runSubprocess := subprocessArgs(args); runSubprocess {
 		log.Println("run subprocess with cmd:", subArgs) //nolint:gosec // args are from os.Args, not user input
 
 		/* #nosec G204 */
@@ -117,4 +114,17 @@ func Main(args []string) {
 	}
 
 	RunMilvus(args)
+}
+
+// subprocessArgs returns args with the --run-with-subprocess marker removed,
+// and whether the marker was present. It deletes from a copy, never from args,
+// which is what lets Main hand a caller its own argument vector back untouched.
+func subprocessArgs(args []string) ([]string, bool) {
+	idx := slices.Index(args, "--run-with-subprocess")
+	if idx <= 0 {
+		// idx == 0 is the program name, which is never the marker.
+		return args, false
+	}
+	stripped := slices.Clone(args)
+	return slices.Delete(stripped, idx, idx+1), true
 }
