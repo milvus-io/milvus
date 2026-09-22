@@ -140,7 +140,7 @@ func newRecoveryStorage(channel types.PChannelInfo, cp *utility.WALCheckpoint, o
 	if rs.nodeScheduler == nil {
 		rs.nodeScheduler = nodescheduler.Get()
 	}
-	rs.taskScheduler = newScopedTaskScheduler(rs.nodeScheduler, cfg.taskConcurrency)
+	rs.taskScheduler = newScopedTaskScheduler(rs.nodeScheduler)
 	rs.broadcastAck = newBroadcastAckModule(moduleapi.Runtime{
 		Scheduler: rs.taskScheduler,
 		Notifier:  rs,

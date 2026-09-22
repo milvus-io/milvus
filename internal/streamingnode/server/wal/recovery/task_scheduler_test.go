@@ -75,35 +75,31 @@ func TestScopedTaskSchedulerTracksDelayedTaskUntilSuccess(t *testing.T) {
 	require.NoError(t, scheduler.WaitIdle(context.Background()))
 }
 
-func TestScopedTaskSchedulerHonorsMaxRunningLimit(t *testing.T) {
-	inner := nodescheduler.New(2)
+func TestScopedTaskSchedulerUsesNodeConcurrency(t *testing.T) {
+	// One WAL can use all available workers, including more than the former
+	// per-PChannel default of 16.
+	const concurrency = 20
+	inner := nodescheduler.New(concurrency)
 	defer inner.Close()
-	scheduler := newScopedTaskScheduler(inner, 1)
-
-	firstStarted := make(chan struct{})
-	firstRelease := make(chan struct{})
-	secondStarted := make(chan struct{})
-
-	scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
-		close(firstStarted)
-		select {
-		case <-ctx.Done():
+	scheduler := newScopedTaskScheduler(inner)
+	defer scheduler.Close()
+	started := make(chan struct{}, concurrency)
+	for range concurrency {
+		scheduler.Submit(nodeschedulerTaskFunc(func(ctx context.Context) error {
+			started <- struct{}{}
+			<-ctx.Done()
 			return ctx.Err()
-		case <-firstRelease:
-			return nil
+		}))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for range concurrency {
+		select {
+		case <-started:
+		case <-ctx.Done():
+			t.Fatal("WAL tasks did not use all available node scheduler workers")
 		}
-	}))
-	scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
-		close(secondStarted)
-		return nil
-	}))
-
-	require.Eventually(t, closed(firstStarted), time.Second, time.Millisecond)
-	require.Never(t, closed(secondStarted), 20*time.Millisecond, time.Millisecond)
-
-	close(firstRelease)
-	require.Eventually(t, closed(secondStarted), time.Second, time.Millisecond)
-	require.NoError(t, scheduler.WaitIdle(context.Background()))
+	}
 }
 
 func TestScopedTaskSchedulerCloseCancelsDelayedTask(t *testing.T) {
@@ -129,21 +125,10 @@ func (f nodeschedulerTaskFunc) Execute(ctx context.Context) error {
 	return f(ctx)
 }
 
-func closed(ch <-chan struct{}) func() bool {
-	return func() bool {
-		select {
-		case <-ch:
-			return true
-		default:
-			return false
-		}
-	}
-}
-
-func TestScopedTaskSchedulerRetryBackoffReleasesSlot(t *testing.T) {
+func TestScopedTaskSchedulerDelegatesDelayedRetry(t *testing.T) {
 	inner := nodescheduler.New(1)
 	defer inner.Close()
-	scheduler := newScopedTaskScheduler(inner, 1)
+	scheduler := newScopedTaskScheduler(inner)
 	defer scheduler.Close()
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -170,12 +155,12 @@ func TestScopedTaskSchedulerRetryBackoffReleasesSlot(t *testing.T) {
 	require.NoError(t, first.Wait(ctx))
 	require.NoError(t, second.Wait(ctx))
 	require.Len(t, attempts, 2)
-	require.GreaterOrEqual(t, attempts[1].Sub(attempts[0]), scopedTaskRetryDelay)
+	require.GreaterOrEqual(t, attempts[1].Sub(attempts[0]), 100*time.Millisecond)
 	require.Equal(t, []string{"retry", "other", "retry"}, order)
 	require.NoError(t, scheduler.WaitIdle(ctx))
 }
 
-func TestScopedTaskSchedulerCancelsRetryTimer(t *testing.T) {
+func TestScopedTaskSchedulerCancelsDelayedTask(t *testing.T) {
 	for _, closeScheduler := range []bool{false, true} {
 		name := "cancel"
 		if closeScheduler {
@@ -184,35 +169,79 @@ func TestScopedTaskSchedulerCancelsRetryTimer(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			inner := nodescheduler.New(1)
 			defer inner.Close()
-			scheduler := newScopedTaskScheduler(inner, 1)
+			scheduler := newScopedTaskScheduler(inner)
 			defer scheduler.Close()
 			attempts := atomic.Int32{}
 			handle := scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
 				attempts.Add(1)
 				return nodescheduler.ErrDelay
-			})).(scopedTaskHandle)
-			require.Eventually(t, func() bool {
-				scheduler.mu.Lock()
-				defer scheduler.mu.Unlock()
-				return handle.entry.retryTimer != nil
-			}, time.Second, time.Millisecond)
+			}))
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			// A task on the same worker proves the first attempt returned and
+			// NodeScheduler is now responsible for its delayed retry.
+			require.NoError(t, inner.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+				return nil
+			})).Wait(ctx))
+			require.Positive(t, attempts.Load())
 			if closeScheduler {
 				scheduler.Close()
 			} else {
 				handle.Cancel()
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
 			require.NoError(t, handle.Wait(ctx))
 			require.NoError(t, scheduler.WaitIdle(ctx))
-			// A timer callback already waiting for the lock must not resurrect work.
-			scheduler.requeue(handle.entry.id)
-			require.NoError(t, scheduler.WaitIdle(ctx))
-			scheduler.mu.Lock()
-			require.Nil(t, handle.entry.retryTimer)
-			require.Empty(t, scheduler.pending)
-			scheduler.mu.Unlock()
-			require.Equal(t, int32(1), attempts.Load())
+			count := attempts.Load()
+			require.Never(t, func() bool {
+				return attempts.Load() != count
+			}, 150*time.Millisecond, time.Millisecond)
+			// Closing one WAL must not close the shared executor.
+			require.NoError(t, inner.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+				return nil
+			})).Wait(ctx))
 		})
 	}
+}
+
+func TestScopedTaskSchedulerCancelQueuedTask(t *testing.T) {
+	inner := nodescheduler.New(1)
+	defer inner.Close()
+	scheduler := newScopedTaskScheduler(inner)
+	defer scheduler.Close()
+	release := make(chan struct{})
+	unrelated := inner.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+		<-release
+		return nil
+	}))
+	ran := atomic.Bool{}
+	handle := scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+		ran.Store(true)
+		return nil
+	}))
+	handle.Cancel()
+	close(release)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, handle.Wait(ctx))
+	require.NoError(t, scheduler.WaitIdle(ctx))
+	require.NoError(t, unrelated.Wait(ctx))
+	require.False(t, ran.Load())
+}
+
+func TestScopedTaskSchedulerSubmitAfterClose(t *testing.T) {
+	inner := nodescheduler.New(1)
+	defer inner.Close()
+	scheduler := newScopedTaskScheduler(inner)
+	scheduler.Close()
+	ran := atomic.Bool{}
+	handle := scheduler.Submit(nodeschedulerTaskFunc(func(context.Context) error {
+		ran.Store(true)
+		return nil
+	}))
+	handle.Cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, handle.Wait(ctx))
+	require.NoError(t, scheduler.WaitIdle(ctx))
+	require.False(t, ran.Load())
 }

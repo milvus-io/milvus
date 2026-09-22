@@ -61,6 +61,12 @@ There is no generic top-level recovery-module interface. The PChannel manager,
 BroadcastAck, SegmentView, and L0Materializer keep separate APIs because their
 ownership and completion conditions differ.
 
+Asynchronous recovery tasks share the process-level NodeScheduler, which owns
+execution concurrency and delayed retries. Each RecoveryStorage keeps a scoped
+task tracker only to cancel and wait for its own tasks during shutdown; it has
+no per-PChannel concurrency limit or separate pending queue. Scheduling fairness
+between PChannels is future work in NodeScheduler.
+
 ## 3. One Global Checkpoint
 
 A PChannel has exactly one global recovery checkpoint:

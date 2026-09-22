@@ -13,7 +13,6 @@ func newConfig() *config {
 	persistInterval := params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse()
 	ackStallTimeout := params.DataNodeCfg.SyncPeriod.GetAsDuration(time.Second)
 	maxDirtyMessages := params.StreamingCfg.WALRecoveryMaxDirtyMessage.GetAsInt()
-	taskConcurrency := params.StreamingCfg.WALRecoveryTaskConcurrency.GetAsInt()
 	tailLowWatermark := params.StreamingCfg.WALRecoveryTailLowWatermark.GetAsSize()
 	tailSoftWatermark := params.StreamingCfg.WALRecoveryTailSoftWatermark.GetAsSize()
 	tailHighWatermark := params.StreamingCfg.WALRecoveryTailHighWatermark.GetAsSize()
@@ -21,7 +20,6 @@ func newConfig() *config {
 		persistInterval:        persistInterval,
 		ackStallTimeout:        ackStallTimeout,
 		maxDirtyMessages:       maxDirtyMessages,
-		taskConcurrency:        taskConcurrency,
 		tailLowWatermarkBytes:  nonNegativeSize(tailLowWatermark),
 		tailSoftWatermarkBytes: nonNegativeSize(tailSoftWatermark),
 		tailHighWatermarkBytes: nonNegativeSize(tailHighWatermark),
@@ -44,7 +42,6 @@ type config struct {
 	persistInterval        time.Duration // persistInterval is the interval to persist the dirty recovery snapshot.
 	ackStallTimeout        time.Duration // ackStallTimeout is the maximum wait before requesting VChannel data persistence.
 	maxDirtyMessages       int           // maxDirtyMessages is the maximum number of dirty messages to be persisted.
-	taskConcurrency        int           // taskConcurrency is the max number of async recovery tasks running concurrently.
 	tailLowWatermarkBytes  uint64        // tailLowWatermarkBytes releases append pressure after checkpoint publication catches up.
 	tailSoftWatermarkBytes uint64        // tailSoftWatermarkBytes triggers VChannel persistence and append slowdown.
 	tailHighWatermarkBytes uint64        // tailHighWatermarkBytes rejects new DML appends.

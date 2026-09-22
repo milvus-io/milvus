@@ -8850,7 +8850,6 @@ type streamingConfig struct {
 	WALRecoveryMaxDirtyMessage           ParamItem `refreshable:"true"`
 	WALRecoveryGracefulCloseTimeout      ParamItem `refreshable:"true"`
 	WALRecoverySchemaExpirationTolerance ParamItem `refreshable:"true"`
-	WALRecoveryTaskConcurrency           ParamItem `refreshable:"true"`
 	WALRecoveryTailLowWatermark          ParamItem `refreshable:"true"`
 	WALRecoveryTailSoftWatermark         ParamItem `refreshable:"true"`
 	WALRecoveryTailHighWatermark         ParamItem `refreshable:"true"`
@@ -9329,15 +9328,6 @@ This no-op setting is retained so existing configurations remain loadable.`,
 		Export:       true,
 	}
 	p.WALRecoveryGracefulCloseTimeout.Init(base.mgr)
-
-	p.WALRecoveryTaskConcurrency = ParamItem{
-		Key:          "streaming.walRecovery.taskConcurrency",
-		Version:      "2.6.10",
-		Doc:          `The max number of recovery storage async tasks running concurrently per pchannel, 16 by default. Non-positive value means unlimited.`,
-		DefaultValue: "16",
-		Export:       true,
-	}
-	p.WALRecoveryTaskConcurrency.Init(base.mgr)
 
 	p.WALRecoveryTailLowWatermark = ParamItem{
 		Key:          "streaming.walRecovery.tail.lowWatermark",

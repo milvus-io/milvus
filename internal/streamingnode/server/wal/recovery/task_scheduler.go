@@ -27,54 +27,41 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
+// scopedTaskScheduler tracks one WAL's tasks without owning execution resources.
+// Concurrency and delayed retries are managed by the shared NodeScheduler.
 type scopedTaskScheduler struct {
-	inner      nodescheduler.Scheduler
-	maxRunning int
+	inner nodescheduler.Scheduler
 
 	mu      sync.Mutex
 	nextID  uint64
 	tasks   map[uint64]*scopedTaskEntry
-	pending []*scopedTaskEntry
-	running int
 	changed chan struct{}
 	closed  bool
 }
 
-func newScopedTaskScheduler(inner nodescheduler.Scheduler, maxRunning ...int) *scopedTaskScheduler {
-	limit := 0
-	if len(maxRunning) > 0 {
-		limit = maxRunning[0]
-	}
+func newScopedTaskScheduler(inner nodescheduler.Scheduler) *scopedTaskScheduler {
 	return &scopedTaskScheduler{
-		inner:      inner,
-		maxRunning: limit,
-		tasks:      make(map[uint64]*scopedTaskEntry),
-		changed:    make(chan struct{}),
+		inner:   inner,
+		tasks:   make(map[uint64]*scopedTaskEntry),
+		changed: make(chan struct{}),
 	}
 }
 
 func (s *scopedTaskScheduler) Submit(task nodescheduler.Task) nodescheduler.TaskHandle {
-	entry := &scopedTaskEntry{
-		task: task,
-		done: make(chan struct{}),
-	}
-	entry.ctx, entry.cancel = context.WithCancel(context.Background()) //nolint:gosec // cancel is stored and called when the task finishes
-
+	entry := &scopedTaskEntry{done: make(chan struct{})}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.closed {
-		s.mu.Unlock()
 		entry.finish()
 		return scopedTaskHandle{owner: s, entry: entry}
 	}
 
-	id := s.nextID
+	entry.id = s.nextID
 	s.nextID++
-	entry.id = id
-	s.tasks[id] = entry
-	s.pending = append(s.pending, entry)
-	s.signalChangedLocked()
-	s.dispatchLocked()
-	s.mu.Unlock()
+	s.tasks[entry.id] = entry
+	// TODO: Add fairness between PChannels in NodeScheduler so a busy WAL
+	// cannot monopolize the shared queue and workers.
+	entry.inner = s.inner.Submit(&trackedTask{owner: s, id: entry.id, task: task})
 	return scopedTaskHandle{owner: s, entry: entry}
 }
 
@@ -102,13 +89,10 @@ func (s *scopedTaskScheduler) WaitIdle(ctx context.Context) error {
 // otherwise hang Close forever.
 const closeWaitTimeout = 30 * time.Second
 
-// Delayed tasks release their per-WAL slot. Re-submitting them must still
-// preserve a pause between attempts, just like NodeScheduler's ErrDelay path.
-const scopedTaskRetryDelay = 100 * time.Millisecond
-
 func (s *scopedTaskScheduler) Close() {
 	ctx, cancel := context.WithTimeout(context.Background(), closeWaitTimeout)
 	defer cancel()
+
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -120,25 +104,16 @@ func (s *scopedTaskScheduler) Close() {
 	s.closed = true
 	handles := make(map[uint64]nodescheduler.TaskHandle, len(s.tasks))
 	for id, entry := range s.tasks {
-		entry.cancel()
-		if entry.running {
-			handles[id] = entry.inner
-			continue
-		}
-		s.finishEntryLocked(entry)
+		handles[id] = entry.inner
 	}
 	s.mu.Unlock()
 
 	for _, handle := range handles {
-		if handle != nil {
-			handle.Cancel()
-		}
+		handle.Cancel()
 	}
 	for id, handle := range handles {
-		if handle != nil {
-			if err := handle.Wait(ctx); err != nil {
-				mlog.Warn(ctx, "scoped task scheduler close: wait task timeout", mlog.Uint64("taskID", id), mlog.Err(err))
-			}
+		if err := handle.Wait(ctx); err != nil {
+			mlog.Warn(ctx, "scoped task scheduler close: wait task timeout", mlog.Uint64("taskID", id), mlog.Err(err))
 		}
 		s.finish(id)
 	}
@@ -146,123 +121,23 @@ func (s *scopedTaskScheduler) Close() {
 
 func (s *scopedTaskScheduler) finish(id uint64) {
 	s.mu.Lock()
-	if entry, ok := s.tasks[id]; ok {
-		s.finishEntryLocked(entry)
-		s.dispatchLocked()
-	}
-	s.mu.Unlock()
-}
-
-func (s *scopedTaskScheduler) delay(id uint64) {
-	s.mu.Lock()
-	if entry, ok := s.tasks[id]; ok {
-		if entry.running {
-			s.running--
-			entry.running = false
-			entry.inner = nil
-		}
-		if s.closed || entry.ctx.Err() != nil {
-			s.finishEntryLocked(entry)
-		} else {
-			entry.retryTimer = time.AfterFunc(scopedTaskRetryDelay, func() { s.requeue(id) })
-		}
-		s.dispatchLocked()
-	}
-	s.mu.Unlock()
-}
-
-func (s *scopedTaskScheduler) requeue(id uint64) {
-	s.mu.Lock()
 	defer s.mu.Unlock()
 	if entry, ok := s.tasks[id]; ok {
-		entry.retryTimer = nil
-		s.pending = append(s.pending, entry)
-		s.dispatchLocked()
+		delete(s.tasks, id)
+		entry.finish()
+		close(s.changed)
+		s.changed = make(chan struct{})
 	}
-}
-
-func (s *scopedTaskScheduler) cancel(id uint64) nodescheduler.TaskHandle {
-	s.mu.Lock()
-	entry, ok := s.tasks[id]
-	if !ok {
-		s.mu.Unlock()
-		return nil
-	}
-	entry.cancel()
-	if !entry.running {
-		s.finishEntryLocked(entry)
-		s.dispatchLocked()
-		s.mu.Unlock()
-		return nil
-	}
-	handle := entry.inner
-	s.mu.Unlock()
-	return handle
-}
-
-func (s *scopedTaskScheduler) finishEntryLocked(entry *scopedTaskEntry) {
-	if _, ok := s.tasks[entry.id]; !ok {
-		return
-	}
-	delete(s.tasks, entry.id)
-	if entry.retryTimer != nil {
-		entry.retryTimer.Stop()
-		entry.retryTimer = nil
-	}
-	if entry.running {
-		s.running--
-		entry.running = false
-	}
-	entry.finish()
-	s.signalChangedLocked()
-}
-
-func (s *scopedTaskScheduler) dispatchLocked() {
-	for len(s.pending) > 0 && (s.maxRunning <= 0 || s.running < s.maxRunning) && !s.closed {
-		entry := s.pending[0]
-		s.pending[0] = nil
-		s.pending = s.pending[1:]
-		if _, ok := s.tasks[entry.id]; !ok {
-			continue
-		}
-		if entry.ctx.Err() != nil {
-			s.finishEntryLocked(entry)
-			continue
-		}
-		entry.running = true
-		s.running++
-		entry.inner = s.inner.Submit(&trackedTask{
-			owner: s,
-			id:    entry.id,
-			task:  entry.task,
-		})
-	}
-}
-
-func (s *scopedTaskScheduler) signalChangedLocked() {
-	close(s.changed)
-	s.changed = make(chan struct{})
 }
 
 type scopedTaskEntry struct {
-	id   uint64
-	task nodescheduler.Task
-
-	ctx      context.Context
-	cancel   context.CancelFunc
-	done     chan struct{}
-	doneOnce sync.Once
-
-	running    bool
-	inner      nodescheduler.TaskHandle
-	retryTimer *time.Timer
+	id    uint64
+	inner nodescheduler.TaskHandle
+	done  chan struct{}
 }
 
 func (e *scopedTaskEntry) finish() {
-	e.doneOnce.Do(func() {
-		e.cancel()
-		close(e.done)
-	})
+	close(e.done)
 }
 
 type scopedTaskHandle struct {
@@ -271,13 +146,14 @@ type scopedTaskHandle struct {
 }
 
 func (h scopedTaskHandle) Cancel() {
-	handle := h.owner.cancel(h.entry.id)
-	if handle == nil {
+	// A submission rejected after Close never enters the shared scheduler.
+	if h.entry.inner == nil {
 		return
 	}
-	handle.Cancel()
+	h.entry.inner.Cancel()
 	go func() {
-		_ = handle.Wait(context.Background())
+		// A canceled task may be skipped without Execute being called.
+		_ = h.entry.inner.Wait(context.Background())
 		h.owner.finish(h.entry.id)
 	}()
 }
@@ -305,10 +181,8 @@ type trackedTask struct {
 
 func (t *trackedTask) Execute(ctx context.Context) error {
 	err := t.task.Execute(ctx)
-	if errors.Is(err, nodescheduler.ErrDelay) {
-		t.owner.delay(t.id)
-		return nil
+	if !errors.Is(err, nodescheduler.ErrDelay) {
+		t.owner.finish(t.id)
 	}
-	t.owner.finish(t.id)
 	return err
 }
