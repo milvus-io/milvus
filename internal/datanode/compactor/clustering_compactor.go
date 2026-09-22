@@ -132,7 +132,7 @@ func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 		return err
 	}
 	// Leave room for buffering in the underlying writer.
-	if b.builder.GetSize() >= max(uint64(1), b.writer.binLogMaxSize/2) {
+	if b.builder.GetMemorySize() >= max(uint64(1), b.writer.binLogMaxSize/2) {
 		return b.writeRecord()
 	}
 	return nil
@@ -186,7 +186,7 @@ func (b *ClusterBuffer) GetBufferSize() uint64 {
 	defer b.lock.RUnlock()
 	size := b.writer.GetBufferUncompressed()
 	if b.builder != nil {
-		size += b.builder.GetSize()
+		size += b.builder.GetMemorySize()
 	}
 	return size
 }

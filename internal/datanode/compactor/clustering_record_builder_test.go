@@ -262,11 +262,11 @@ func TestClusterBufferRecordBatches(t *testing.T) {
 	for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			schema := clusteringWideSchema()
-			// Half of the 32 KiB binlog budget is for the builder. Each wide
-			// row exceeds 8 KiB, so submit two rows per Record.
-			buffer, observer := newClusteringTestBuffer(t, schema, 32<<10, version)
+			// Half of the 64 KiB binlog budget is for allocated Arrow buffers.
+			// The third wide row grows their capacity past 32 KiB.
+			buffer, observer := newClusteringTestBuffer(t, schema, 64<<10, version)
 			observer.captureValues = true
-			for i := 0; i < 5; i++ {
+			for i := 0; i < 7; i++ {
 				record := clusteringTestRecord(t, schema, i, 1)
 				require.NoError(t, buffer.WriteRecord(record, 0))
 				record.Release() // bucket must own copies across input lifetimes
@@ -274,11 +274,11 @@ func TestClusterBufferRecordBatches(t *testing.T) {
 					require.Empty(t, observer.rows)
 				}
 			}
-			require.Equal(t, []int{2, 2}, observer.rows)
+			require.Equal(t, []int{3, 3}, observer.rows)
 			require.GreaterOrEqual(t, buffer.GetBufferSize(), uint64(8192))
 			require.NoError(t, buffer.Close())
-			require.Equal(t, []int{2, 2, 1}, observer.rows)
-			require.Len(t, observer.values, 5)
+			require.Equal(t, []int{3, 3, 1}, observer.rows)
+			require.Len(t, observer.values, 7)
 			for i, value := range observer.values {
 				require.Equal(t, int64(i), value.PK.GetValue())
 				row := value.Value.(map[int64]interface{})
@@ -454,4 +454,34 @@ func TestClusterBufferFlushChunkAndCleanup(t *testing.T) {
 	task.cleanUp(context.Background())
 	require.Nil(t, buffer.builder, "cleanup discards an unfinished batch on task failure")
 	require.Equal(t, []int{1}, observer.rows)
+}
+
+func TestClusterBufferAccountsForNullColumns(t *testing.T) {
+	schema := clusteringWideSchema()
+	for id := int64(112); id < 352; id++ {
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID: id, Name: fmt.Sprint(id), DataType: schemapb.DataType_Double, Nullable: true,
+		})
+	}
+	buffer, observer := newClusteringTestBuffer(t, schema, 2<<20, storage.StorageV1)
+	record := clusteringTestRecord(t, schema, 0, 1)
+	defer record.Release()
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	original := memory.DefaultAllocator
+	memory.DefaultAllocator = checked
+	buffer.builder = storage.NewRecordBuilder(schema)
+	memory.DefaultAllocator = original
+	defer func() {
+		require.NoError(t, buffer.Close())
+		checked.AssertSize(t, 0)
+	}()
+	for range 32 {
+		require.NoError(t, buffer.WriteRecord(record, 0))
+	}
+	require.Empty(t, observer.rows)
+	require.EqualValues(t, checked.CurrentAlloc(), buffer.GetBufferSize(), "pressure accounting must include all null column buffers")
+	for range 33 {
+		require.NoError(t, buffer.WriteRecord(record, 0))
+	}
+	require.NotEmpty(t, observer.rows, "allocated capacity must trigger a batch before payload bytes reach the threshold")
 }

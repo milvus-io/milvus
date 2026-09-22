@@ -18,6 +18,7 @@ package storage
 
 import (
 	"strconv"
+	"sync/atomic"
 
 	"github.com/apache/arrow/go/v17/arrow"
 	"github.com/apache/arrow/go/v17/arrow/array"
@@ -448,9 +449,35 @@ type RecordBuilder struct {
 	arrowFields []arrow.Field
 	builders    []array.Builder
 	defaults    []appendValueDefault
+	allocator   *recordBuilderAllocator
 
 	nRows int
 	size  uint64
+}
+
+// Each output batch has its own allocator counter. Records handed to a writer
+// can outlive the builder and can be released from another goroutine.
+type recordBuilderAllocator struct {
+	memory.Allocator
+	size atomic.Int64
+}
+
+func (a *recordBuilderAllocator) Allocate(size int) []byte {
+	buf := a.Allocator.Allocate(size)
+	a.size.Add(int64(len(buf)))
+	return buf
+}
+
+func (a *recordBuilderAllocator) Reallocate(size int, buf []byte) []byte {
+	oldSize := len(buf)
+	buf = a.Allocator.Reallocate(size, buf)
+	a.size.Add(int64(len(buf) - oldSize))
+	return buf
+}
+
+func (a *recordBuilderAllocator) Free(buf []byte) {
+	a.Allocator.Free(buf)
+	a.size.Add(-int64(len(buf)))
 }
 
 func (b *RecordBuilder) prepareAppendDefaults() error {
@@ -486,7 +513,7 @@ func (b *RecordBuilder) Append(rec Record, start, end int) error {
 					// Missing TEXT fields can have been filled with binary nulls.
 					nulls := builder.Len()
 					builder.Release()
-					builder = array.NewBuilder(memory.DefaultAllocator, col.DataType())
+					builder = array.NewBuilder(b.allocator, col.DataType())
 					builder.AppendNulls(nulls)
 					b.builders[i] = builder
 				} else if col.IsNull(offset) {
@@ -511,6 +538,13 @@ func (b *RecordBuilder) GetRowNum() int {
 
 func (b *RecordBuilder) GetSize() uint64 {
 	return b.size
+}
+
+func (b *RecordBuilder) GetMemorySize() uint64 {
+	// Count allocated Arrow buffers, including null slots, validity/offset
+	// buffers and spare capacity. Payload bytes alone can severely undercount
+	// wide nullable schemas. This excludes batches already handed to writers.
+	return uint64(b.allocator.size.Load())
 }
 
 func (b *RecordBuilder) Release() {
@@ -540,6 +574,15 @@ func (b *RecordBuilder) Build() Record {
 	}
 	b.nRows = 0
 	b.size = 0
+	// NewArray transfers the buffers but keeps the allocator on each builder.
+	// Start fresh builders/counters so retained output Records cannot affect
+	// the next batch's accounting when their buffers are eventually released.
+	b.allocator = &recordBuilderAllocator{Allocator: b.allocator.Allocator}
+	for i, builder := range b.builders {
+		dataType := builder.Type()
+		builder.Release()
+		b.builders[i] = array.NewBuilder(b.allocator, dataType)
+	}
 	return rec
 }
 
@@ -553,6 +596,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 
 	builders := make([]array.Builder, len(fields))
 	arrowFields := make([]arrow.Field, len(fields))
+	allocator := &recordBuilderAllocator{Allocator: memory.DefaultAllocator}
 	for i, field := range fields {
 		dim, _ := typeutil.GetDim(field)
 
@@ -561,14 +605,14 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			elementType = field.GetElementType()
 		}
 		if field.GetNullable() && isNullableDenseVectorArrowType(field.DataType) {
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else if field.DataType == schemapb.DataType_Text {
 			// TEXT fields are stored as binary (LOB references) in manifest storage,
 			// so the builder must use binary type to match what the reader returns.
-			builders[i] = array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else {
 			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType, field.GetElementNullable())
-			builders[i] = array.NewBuilder(memory.DefaultAllocator, arrowType)
+			builders[i] = array.NewBuilder(allocator, arrowType)
 		}
 		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType)
 	}
@@ -577,6 +621,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 		fields:      fields,
 		arrowFields: arrowFields,
 		builders:    builders,
+		allocator:   allocator,
 	}
 }
 

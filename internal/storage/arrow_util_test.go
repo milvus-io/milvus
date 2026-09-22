@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -753,4 +754,58 @@ func TestRecordBuilderBuildReleasesCreatorRefs(t *testing.T) {
 		rec.Release()
 	}()
 	alloc.AssertSize(t, 0)
+}
+
+func TestRecordBuilderAccountsForNullBuffers(t *testing.T) {
+	fields := make([]*schemapb.FieldSchema, 243)
+	arrowFields := make([]arrow.Field, len(fields))
+	field2Col := make(map[FieldID]int, len(fields))
+	for i := range fields {
+		fields[i] = &schemapb.FieldSchema{FieldID: int64(i), Name: fmt.Sprint(i), DataType: schemapb.DataType_Double, Nullable: true}
+		arrowFields[i] = arrow.Field{Name: fields[i].Name, Type: arrow.PrimitiveTypes.Float64, Nullable: true}
+		if i < 3 {
+			fields[i].DataType = schemapb.DataType_Int64
+			arrowFields[i].Type = arrow.PrimitiveTypes.Int64
+		}
+		field2Col[int64(i)] = i
+	}
+	input := array.NewRecordBuilder(memory.DefaultAllocator, arrow.NewSchema(arrowFields, nil))
+	for i := range fields {
+		if i < 3 {
+			for row := range 4096 {
+				input.Field(i).(*array.Int64Builder).Append(int64(row))
+			}
+		} else {
+			input.Field(i).AppendNulls(4096)
+		}
+	}
+	source := NewSimpleArrowRecord(input.NewRecord(), field2Col)
+	input.Release()
+	defer source.Release()
+
+	checked := memory.NewCheckedAllocator(memory.DefaultAllocator)
+	original := memory.DefaultAllocator
+	memory.DefaultAllocator = checked
+	rb := NewRecordBuilder(&schemapb.CollectionSchema{Fields: fields})
+	memory.DefaultAllocator = original
+	defer func() { rb.Release(); checked.AssertSize(t, 0) }()
+	require.NoError(t, rb.Append(source, 0, source.Len()))
+	require.EqualValues(t, checked.CurrentAlloc(), rb.GetMemorySize(), "batching must include null slots, validity buffers and capacity growth")
+	first := rb.Build()
+	defer func() {
+		if first != nil {
+			first.Release()
+		}
+	}()
+	require.Zero(t, rb.GetMemorySize(), "transferred records are no longer pending builder memory")
+	retained := checked.CurrentAlloc()
+	require.NoError(t, rb.Append(source, 0, source.Len()))
+	require.EqualValues(t, checked.CurrentAlloc()-retained, rb.GetMemorySize())
+	first.Release()
+	first = nil
+	require.EqualValues(t, checked.CurrentAlloc(), rb.GetMemorySize(), "late releases must not change the next batch's counter")
+	second := rb.Build()
+	require.Zero(t, rb.GetMemorySize())
+	second.Release()
+	checked.AssertSize(t, 0)
 }
