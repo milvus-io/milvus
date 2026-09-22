@@ -447,7 +447,8 @@ func (h *Handlers) handleGetPersistentSegmentInfo(c *gin.Context) (interface{}, 
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.GetPersistentSegmentInfo(c, &req)
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), c.GetString(ContextUsername), req.GetDbName())
+	return h.proxy.GetPersistentSegmentInfo(ctx, &req)
 }
 
 func (h *Handlers) handleGetQuerySegmentInfo(c *gin.Context) (interface{}, error) {
@@ -456,7 +457,8 @@ func (h *Handlers) handleGetQuerySegmentInfo(c *gin.Context) (interface{}, error
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.GetQuerySegmentInfo(c, &req)
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), c.GetString(ContextUsername), req.GetDbName())
+	return h.proxy.GetQuerySegmentInfo(ctx, &req)
 }
 
 func (h *Handlers) handleGetReplicas(c *gin.Context) (interface{}, error) {
@@ -465,7 +467,8 @@ func (h *Handlers) handleGetReplicas(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.GetReplicas(c, &req)
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), c.GetString(ContextUsername), req.GetDbName())
+	return h.proxy.GetReplicas(ctx, &req)
 }
 
 func (h *Handlers) handleGetMetrics(c *gin.Context) (interface{}, error) {

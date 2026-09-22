@@ -4363,6 +4363,11 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	}
 	method := "GetPersistentSegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
+	ctx, err := node.authorizeCollectionMetadata(ctx, req)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 
 	// list segments
 	collectionID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
@@ -4538,6 +4543,11 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 
 	method := "GetQuerySegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
+	ctx, err := node.authorizeCollectionMetadata(ctx, req)
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 
 	collID, err := node.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.CollectionName)
 	if err != nil {
@@ -4818,6 +4828,11 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		mlog.Bool("with shard nodes", req.GetWithShardNodes()))
 	resp := &milvuspb.GetReplicasResponse{}
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+	ctx, err := node.authorizeCollectionMetadata(ctx, req)
+	if err != nil {
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
