@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -92,6 +93,14 @@ func (it *importTask) OnEnqueue() error {
 func (it *importTask) PreExecute(ctx context.Context) error {
 	req := it.req
 	node := it.node
+
+	// Before any option is read, including the isBackup/isL0Import decision that
+	// selects the privilege gate below. Datacoord re-checks this; refusing here
+	// too keeps the rejection at the API boundary where the caller can see it.
+	if err := importutilv2.ValidateNoDuplicateKeys(req.GetOptions()); err != nil {
+		return err
+	}
+
 	collectionID, err := globalMetaCache.GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
 		return err
@@ -113,6 +122,19 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 
 	isBackup := importutilv2.IsBackup(req.GetOptions())
 	isL0Import := importutilv2.IsL0Import(req.GetOptions())
+
+	// A binlog or L0 import reads Milvus's own internal storage layout, which
+	// lies outside the target collection's namespace. The collection-level
+	// Import privilege that authorized this RPC does not cover that, so require
+	// a cluster-level privilege on top.
+	if isBackup || isL0Import {
+		if err := CheckClusterPrivilege(ctx, req,
+			milvuspb.MilvusService_Import_FullMethodName,
+			commonpb.ObjectPrivilege_PrivilegeImportBinlog.String()); err != nil {
+			return err
+		}
+	}
+
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 
 	var partitionIDs []int64
