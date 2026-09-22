@@ -51,26 +51,21 @@
 
 namespace milvus::index {
 
-// Count UTF-8 code points by counting non-continuation bytes.
-// The tantivy ngram tokenizer counts the literal in unicode chars, so the
-// pre-checks against min_gram must use char count instead of byte length,
-// otherwise a single multi-byte char (e.g. "）" = 1 char / 3 bytes) slips
-// through and trips the rust-side assert, which aborts the process since
-// the panic crosses an extern "C" boundary.
+// Number of UTF-8 characters in `literal`. The rust binding checks min_gram
+// against `str::chars().count()`, so the gate on this side must count
+// characters too, not bytes: a single 3-byte character passes a byte-length
+// check against min_gram=2 and then trips the rust-side check. Invalid
+// UTF-8 needs no special handling here; the FFI shim rejects it before the
+// rust-side check runs.
 inline size_t
-Utf8CharCount(const char* str, size_t len) {
+Utf8LiteralLength(const std::string& literal) {
     size_t count = 0;
-    for (size_t i = 0; i < len; i++) {
-        if ((static_cast<unsigned char>(str[i]) & 0xC0) != 0x80) {
-            count++;
+    for (unsigned char c : literal) {
+        if ((c & 0xC0) != 0x80) {
+            ++count;
         }
     }
     return count;
-}
-
-inline size_t
-Utf8LiteralLength(const std::string& literal) {
-    return Utf8CharCount(literal.data(), literal.size());
 }
 
 const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME = "ngram_avg_row_size";
