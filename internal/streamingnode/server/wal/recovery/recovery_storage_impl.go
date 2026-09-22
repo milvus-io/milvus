@@ -206,10 +206,7 @@ func (r *recoveryStorageImpl) installCheckpoint(checkpoint *WALCheckpoint) {
 			r.tailController.UpdateTrackerFrontiers(observed, completed)
 		}
 		r.notifyPersist()
-	}, composedPersistRequester{
-		vchannelManager: r.vchannelManager,
-		summaryManager:  r.summaryManager,
-	})
+	}, r.vchannelManager)
 	r.ackTracker = tracker
 	if r.tailController != nil {
 		r.tailController.Reset()
@@ -394,11 +391,9 @@ func (r *recoveryStorageImpl) startSummaryBacklog() {
 		if r.tailController != nil {
 			underPressure = r.tailController.UnderSoftPressure
 		}
-		maxAge := r.cfg.ackStallTimeout
-		if maxAge <= 0 {
-			maxAge = r.cfg.persistInterval
-		}
-		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), maxAge, underPressure)
+		// Summary checks tail pressure independently of AckTracker stalls. The
+		// current WAL L0 materializer owns its own consumption age policy.
+		r.summaryManager.Run(r.backgroundTaskNotifier.Context(), 0, underPressure)
 	}()
 }
 
@@ -564,23 +559,6 @@ func (r *recoveryStorageImpl) observeModulesMessage(
 		r.summaryManager.ObserveMessage(ctx, retained.Message())
 	}
 	r.vchannelManager.ObserveMessage(ctx, retained)
-}
-
-// composedPersistRequester fans a tracker stall / under-pressure request out
-// to both the vchannel segments and the pchannel summary: the WAL checkpoint
-// must not advance until the buffered data of the stalled vchannel is durable
-// on every write path. The summary handles the request at the pchannel level
-// (a chunk is pchannel-scoped, see walsummary.Manager.RequestFlushThrough).
-type composedPersistRequester struct {
-	vchannelManager *vchannel.PChannelRecoveryManager
-	summaryManager  *walsummary.Manager
-}
-
-func (r composedPersistRequester) RequestPersistThrough(vchannelName string, targetTimeTick uint64) {
-	r.vchannelManager.RequestPersistThrough(vchannelName, targetTimeTick)
-	if r.summaryManager != nil {
-		r.summaryManager.RequestFlushThrough(targetTimeTick)
-	}
 }
 
 // startLiveScanner continues the same stream after its startup barrier.

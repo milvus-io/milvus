@@ -15,11 +15,13 @@ import (
 
 // Run governs persistence and Delete-consumption backlog independently of
 // source-message acknowledgements. Uploaded Deletes remain consumption backlog
-// until materialized. Chunk and manifest I/O and retries use the scheduler.
-func (m *Manager) Run(ctx context.Context, maxAge time.Duration, underPressure func() bool) {
+// until materialized. materializationMaxAge only controls Delete consumption;
+// staged records seal on size or WAL tail pressure, never age. Chunk and manifest
+// I/O and retries use the scheduler.
+func (m *Manager) Run(ctx context.Context, materializationMaxAge time.Duration, underPressure func() bool) {
 	interval := time.Second
-	if maxAge > 0 && maxAge < interval {
-		interval = maxAge
+	if materializationMaxAge > 0 && materializationMaxAge < interval {
+		interval = materializationMaxAge
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -29,16 +31,18 @@ func (m *Manager) Run(ctx context.Context, maxAge time.Duration, underPressure f
 			return
 		case now := <-ticker.C:
 			force := underPressure != nil && underPressure()
-			m.flushBacklog(now, maxAge, force)
-			m.requestMaterializationBacklog(ctx, now, maxAge)
+			m.flushBacklog(force)
+			m.requestMaterializationBacklog(ctx, now, materializationMaxAge)
 		}
 	}
 }
 
-func (m *Manager) flushBacklog(now time.Time, maxAge time.Duration, force bool) {
+func (m *Manager) flushBacklog(underPressure bool) {
+	if !underPressure {
+		return
+	}
 	m.mu.Lock()
-	if len(m.pending) == 0 || m.terminalErr != nil ||
-		(!force && (maxAge <= 0 || now.Sub(m.pendingSince) < maxAge)) {
+	if len(m.pending) == 0 || m.terminalErr != nil {
 		m.mu.Unlock()
 		return
 	}

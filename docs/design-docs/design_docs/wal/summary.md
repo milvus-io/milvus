@@ -59,7 +59,6 @@ vchannel:
 ```text
 walsummary.Manager (one per pchannel)
   +-- pending: ordered records not yet sealed
-  +-- pendingSince: age of the oldest staged record, independent of message Ack
   +-- upload state: sealed chunks and their independent upload completions
   +-- continuous durable frontier: the prefix with no missing chunk
   +-- manifest: retained chunk/section index and data coverage boundaries
@@ -226,19 +225,19 @@ NodeScheduler manifest publication task
 
 ### 3.1 Ordered Publication After Concurrent Uploads
 
-`FlushMaxBytes` and `RequestFlushThrough` trigger sealing and scheduling.
-`Manager.Run` independently checks staged backlog at most one second apart.
-The oldest record's age is not reset by later records. Once it reaches the
-configured wait, or the recovery tail is under soft pressure, the manager
-requests a flush through its observed frontier. RecoveryStorage supplies the
-existing `dataNode.segment.syncPeriod` wait (falling back to the checkpoint persistence
-interval if it is disabled), and cancels/joins this worker during Close.
+`FlushMaxBytes` triggers sealing when staged bytes reach the threshold.
+`Manager.Run` independently checks WAL recovery-tail pressure once per second
+and requests a flush through the observed frontier under soft pressure. This
+works even when AckTracker has no incomplete entries or no new messages arrive.
+AckTracker stall requests target only VChannel consumers and never seal Summary.
+Neither `dataNode.segment.syncPeriod` nor the checkpoint persistence interval
+is a Summary sealing trigger. Small low-traffic batches may remain in memory,
+backed by WAL, and pin the global checkpoint until size or tail pressure requires
+persistence. This does not weaken the Summary confirmation bound.
 
-This trigger requires neither an incomplete AckTracker entry nor another WAL
-message. In particular, a small Delete-only workload followed by silence still
-seals and publishes. Sealed chunks and dirty manifests continue on their own
-scheduler retry paths; periodic checks do not manufacture completion or bypass
-the first-manifest requirement. Empty backlog produces no new chunk.
+Sealed chunks and dirty manifests continue on their own scheduler retry paths;
+periodic pressure checks do not manufacture completion or bypass the first-manifest
+requirement. Empty backlog produces no new chunk.
 Observation retains no source WAL handle and performs no object-storage I/O.
 In the target read integration, Summary installs records and their complete
 readable coverage before VChannel observation can advance L0Materializer's
@@ -257,7 +256,9 @@ L0Materializer introduces no age/idle timer; long-standing unmaterialized data
 is handled through this Summary-owned mechanism. `Manager.Run` performs both
 persistence and consumption checks. Consumption age uses the original WAL
 physical time of the earliest outstanding Delete and the worker's existing
-backlog age budget. Retention pressure requests only the oldest blocking chunk.
+materialization age budget, separate from Summary sealing. The current WAL
+consumer does not wire this callback or age budget. Retention pressure requests
+only the oldest blocking chunk.
 `ReportMaterialized` suppresses redundant consumption before metadata is saved;
 only `AdvanceGCTimeTick` from durable metadata authorizes release.
 See [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
@@ -919,8 +920,9 @@ coalesced manifest publication and retries, restore without inline writes,
 continuous tail probing across numeric-prefix boundaries and mixed terms,
 empty-manifest coverage, same-term writer rejection, byte/count retention,
 transform GC frontiers, reader pins, failed-deletion rediscovery and retention
-across restart. Backlog tests cover source Ack followed by silence, oldest-record
-age, pressure-triggered sealing and cancellation. Recovery tests cover retained
+across restart. Backlog tests cover source Ack followed by silence,
+pressure-triggered sealing, absence of age-triggered sealing, and cancellation.
+Recovery tests cover retained
 idempotency history before the checkpoint, staged/sealed replay at the barrier,
 and WAL-open failure on unreadable history; interceptor-builder tests verify
 that recovered keys return the original append result without another append.

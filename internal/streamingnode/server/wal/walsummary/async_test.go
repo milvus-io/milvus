@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
-func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
+func TestSummaryBacklogRequiresPressureAfterSourceAck(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	manager, store := newTransformTestManagerWithStore(t)
@@ -35,10 +36,11 @@ func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
 	require.Zero(t, tracker.Pending())
 	require.Equal(t, uint64(100), tracker.CompletedPoint().TimeTick)
 	require.Less(t, manager.LastAcked(), uint64(100))
+	var pressure atomic.Bool
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		manager.Run(ctx, time.Millisecond, nil)
+		manager.Run(ctx, time.Millisecond, pressure.Load)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -48,6 +50,9 @@ func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
 			t.Error("summary backlog worker did not stop")
 		}
 	})
+	// Even an expired consumption age budget must not seal Summary storage.
+	require.Never(t, func() bool { return manager.LastAcked() == 100 }, 30*time.Millisecond, time.Millisecond)
+	pressure.Store(true)
 	require.Eventually(t, func() bool {
 		return manager.LastAcked() == 100 && !manager.HasPendingWork()
 	}, 5*time.Second, time.Millisecond)
@@ -59,26 +64,19 @@ func TestSummaryBacklogFlushesAfterSourceAckWithoutNewMessages(t *testing.T) {
 	require.Equal(t, uint64(100), entries[0].GetTimeTick())
 }
 
-func TestSummaryBacklogAgeAndPressure(t *testing.T) {
+func TestSummaryBacklogPressure(t *testing.T) {
 	manager, _ := newTransformTestManagerWithStore(t)
 	ctx := context.Background()
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 100, 10, 1))
-	start := manager.pendingSince
 	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v2", 200, 10, 2))
-	require.Equal(t, start, manager.pendingSince, "new traffic must not postpone the oldest record")
-	manager.flushBacklog(start.Add(time.Second), time.Minute, false)
+	manager.flushBacklog(false)
 	require.Empty(t, manager.pendingSealed)
-	manager.flushBacklog(start.Add(time.Minute), time.Minute, false)
-	require.Len(t, manager.pendingSealed, 1)
-	require.True(t, manager.pendingSince.IsZero())
-	require.NoError(t, drainSummary(ctx, manager))
-	manager.ObserveMessage(ctx, newTestDeleteMessage(t, "v1", 300, 10, 3))
-	manager.flushBacklog(manager.pendingSince, time.Hour, true)
-	require.Len(t, manager.pendingSealed, 1, "pressure must flush a young small batch")
-	manager.flushBacklog(time.Now(), time.Hour, true)
+	manager.flushBacklog(true)
+	require.Len(t, manager.pendingSealed, 1, "pressure must flush a small batch")
+	manager.flushBacklog(true)
 	require.Len(t, manager.pendingSealed, 1, "an empty backlog creates no duplicate chunk")
 	require.NoError(t, drainSummary(ctx, manager))
-	require.Equal(t, uint64(300), manager.LastAcked())
+	require.Equal(t, uint64(200), manager.LastAcked())
 }
 
 func TestAsyncSchedulerPersistsAndRestores(t *testing.T) {

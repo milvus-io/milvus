@@ -1255,7 +1255,7 @@ func newSummaryManagerWithStagedDelete(t *testing.T, vchannel string, timetick u
 	return manager
 }
 
-func TestRecoverySummaryBacklogUnblocksCandidateWithoutTrackerStall(t *testing.T) {
+func TestRecoverySummaryBacklogRequiresTailPressure(t *testing.T) {
 	for _, timeout := range []time.Duration{time.Millisecond, 0} {
 		t.Run(timeout.String(), func(t *testing.T) {
 			rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{
@@ -1277,13 +1277,55 @@ func TestRecoverySummaryBacklogUnblocksCandidateWithoutTrackerStall(t *testing.T
 				rs.closeRecoveryResources()
 			})
 			rs.startSummaryBacklog()
+			require.Never(t, func() bool {
+				return rs.summaryManager.LastAcked() == 50
+			}, 1100*time.Millisecond, time.Millisecond,
+				"neither syncPeriod nor the checkpoint interval may seal Summary")
+			rs.tailController.UpdateTrackerFrontiers(rs.cfg.tailSoftWatermarkBytes, rs.cfg.tailSoftWatermarkBytes)
 			require.Eventually(t, func() bool {
 				return rs.summaryManager.LastAcked() == 50
-			}, time.Second, time.Millisecond)
+			}, 3*time.Second, time.Millisecond)
 			require.Equal(t, uint64(50), rs.consumeDirtySnapshot().Checkpoint.TimeTick,
 				"summary-only backlog must release the candidate without new WAL messages")
 		})
 	}
+}
+
+func TestAckTrackerStallDoesNotFlushSummary(t *testing.T) {
+	rs := newTestRecoveryStorage(t, &utility.WALCheckpoint{
+		MessageID: walimplstest.NewTestMessageID(1),
+		TimeTick:  10,
+		Magic:     utility.RecoveryMagicRecoveryStorageV2,
+	})
+	rs.summaryManager = newSummaryManagerWithStagedDelete(t, "test-vchannel", 50)
+	rs.installCheckpoint(rs.checkpoint)
+	rs.cfg.ackStallTimeout = time.Millisecond
+	owner := rs.ackTracker.Track(newRecoveryTestDeleteMessage(t, "test-vchannel", 50))
+	defer owner.Release()
+	requested := make(chan uint64, 1)
+	mock := mockey.Mock((*vchannel.PChannelRecoveryManager).RequestPersistThrough).To(func(
+		_ *vchannel.PChannelRecoveryManager, _ string, through uint64,
+	) {
+		requested <- through
+	}).Build()
+	defer mock.UnPatch()
+	defer func() {
+		rs.backgroundTaskNotifier.Cancel()
+		rs.ackTrackerWG.Wait()
+		rs.closeRecoveryResources()
+	}()
+	rs.startAckTracker()
+	select {
+	case through := <-requested:
+		require.Equal(t, uint64(50), through)
+	case <-time.After(time.Second):
+		t.Fatal("stalled VChannel did not receive a persistence request")
+	}
+	rs.backgroundTaskNotifier.Cancel()
+	rs.ackTrackerWG.Wait()
+	require.Equal(t, uint64(49), rs.summaryManager.LastAcked(),
+		"VChannel persistence requests must not seal the staged Summary")
+	require.Empty(t, rs.summaryManager.Manifest().GetChunks())
 }
 
 // TestConsumeDirtySnapshotMergesSummaryLastAcked verifies the persisted

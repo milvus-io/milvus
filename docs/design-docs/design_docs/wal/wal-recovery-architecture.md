@@ -215,9 +215,10 @@ recovery_tail_bytes = observed_tail_offset - published_checkpoint_offset
 ```
 
 AckTracker requests persistence from VChannels blocking the oldest incomplete
-prefix. Summary independently checks staged-record age and tail pressure, so
-already released messages do not hide its backlog. SegmentView and Summary own
-their batching decisions; the current WALMaterializer batches retained Deletes without waiting for L1
+prefix. These requests do not trigger Summary sealing. Summary seals on staged
+size or independent tail-pressure checks, so already released messages do not
+hide its backlog; elapsed time alone does not seal a chunk. SegmentView and
+Summary own their batching decisions; the current WALMaterializer batches retained Deletes without waiting for L1
 final flush. Its shared age check also makes progress during idle traffic. RecoveryStorage does not aggregate
 objects across segments.
 

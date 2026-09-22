@@ -21,7 +21,6 @@ import (
 	"math"
 	"sort"
 	"sync"
-	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -61,7 +60,6 @@ type Manager struct {
 	cfg                   ManagerConfig
 	pending               []stagedRecord
 	pendingBytes          uint64
-	pendingSince          time.Time
 	pendingSealed         []*SealedChunk
 	pendingFlushTimeTick  uint64
 	nextGeneration        uint64
@@ -171,9 +169,6 @@ func (m *Manager) stageRecordLocked(
 		timeTick:    msg.TimeTick(),
 		idempotency: idempotency,
 		insert:      insert,
-	}
-	if len(m.pending) == 0 {
-		m.pendingSince = time.Now()
 	}
 	if entry != nil {
 		addTransformSize(m.pendingTransforms, msg.VChannel(), entry)
@@ -385,7 +380,6 @@ func (m *Manager) sealLocked() (*SealedChunk, error) {
 	}
 	m.pending = nil
 	m.pendingBytes = 0
-	m.pendingSince = time.Time{}
 	m.pendingSealed = append(m.pendingSealed, sc)
 	m.pendingFlushTimeTick = sc.MaxTimeTick
 	return sc, nil

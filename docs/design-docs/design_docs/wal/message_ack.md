@@ -194,10 +194,10 @@ For each VChannel, Tracker requests the largest TimeTick that currently
 satisfies the stall timeout. It does not pass message objects and does not route
 through RecoveryStorageImpl.
 
-Summary runs its own backlog check based on the oldest staged record's age or
-tail pressure. It can flush even when Tracker has no pending entries, including
-low-traffic Deletes followed by no new messages. Chunk/manifest retries remain
-owned by the scheduler. BroadcastAck and catalog publication have separate
+Tracker stall requests target only VChannel consumers. Summary seals on staged
+size or its independent WAL tail-pressure check, even when Tracker has no pending
+entries and no new messages arrive. Elapsed time alone never seals Summary.
+Chunk/manifest retries remain owned by the scheduler. BroadcastAck and catalog publication have separate
 retry paths; explicit blocker-category reporting is not yet implemented.
 
 ## 8. Broadcast Ack And Retry

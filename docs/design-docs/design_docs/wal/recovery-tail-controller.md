@@ -90,8 +90,9 @@ Components implement idempotency:
 - a covered target is a no-op;
 - an existing task is widened or reused when safe;
 - SegmentView batches only its own segment data;
-- Summary seals its own PChannel staging buffer; it also runs independent
-  age/pressure checks so summary-only backlog cannot be hidden by completed Ack;
+- Summary is not a recipient of Tracker stall requests. It seals its own
+  PChannel staging buffer on size or independent tail-pressure checks, so
+  summary-only backlog cannot be hidden by completed Ack;
 - the currently wired [WAL L0 materializer](l0_materializer.md) handles the
   same RequestPersistThrough contract as SegmentView and holds source Delete
   handles until output/registration and dirty metadata installation;
