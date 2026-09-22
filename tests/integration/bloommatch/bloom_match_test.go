@@ -19,6 +19,7 @@ package bloommatch
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -78,6 +79,13 @@ func (s *BloomMatchTestSuite) SetupSuite() {
 	// raw data. Must be set before the cluster starts.
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.IndexOffsetCacheEnabled.Key, "true")
 	s.WithMilvusConfig(paramtable.Get().AutoIndexConfig.ScalarAutoIndexParams.Key, scalarAutoIndexBuildParams)
+	// 3.0 pins CurrentScalarIndexEngineVersion to 3 (#51929), while a JSON path
+	// index on HYBRID needs MinScalarIndexVersionForJsonPathMultiType (4);
+	// below that datacoord silently downgrades the AutoIndex request to
+	// INVERTED. Opt this cluster into engine version 4 (every node here
+	// supports it, MaximumScalarIndexEngineVersion is 4) so the HYBRID round
+	// of TestQueryJsonPathIndexTypeMatrix really builds a HYBRID index.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.TargetScalarIndexVersion.Key, strconv.Itoa(int(common.MinScalarIndexVersionForJsonPathMultiType)))
 	s.MiniClusterSuite.SetupSuite()
 	s.dbName = ""
 	s.dim = 128
