@@ -4349,7 +4349,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetPersistentSegmentInfo")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.String("db", req.DbName),
 		mlog.Any("collection", req.CollectionName))
@@ -4363,6 +4363,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 	}
 	method := "GetPersistentSegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
+	req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
 	ctx, err := node.authorizeCollectionMetadata(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -4405,7 +4406,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		IncludeUnHealthy: lo.Contains(states, commonpb.SegmentState_Dropped),
 	})
 	if err != nil {
-		mlog.Warn(context.TODO(), "GetPersistentSegmentInfo fail",
+		mlog.Warn(ctx, "GetPersistentSegmentInfo fail",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
@@ -4415,7 +4416,7 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	mlog.Debug(context.TODO(), "GetPersistentSegmentInfo",
+	mlog.Debug(ctx, "GetPersistentSegmentInfo",
 		mlog.Int("len(infos)", len(infoResp.Infos)),
 		mlog.Any("status", infoResp.Status))
 	persistentInfos := make([]*milvuspb.PersistentSegmentInfo, 0, len(infoResp.Infos))
@@ -4528,7 +4529,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetQuerySegmentInfo")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "GetQuerySegmentInfo",
+	mlog.Debug(ctx, "GetQuerySegmentInfo",
 		mlog.String("role", typeutil.ProxyRole),
 		mlog.String("db", req.DbName),
 		mlog.Any("collection", req.CollectionName))
@@ -4543,6 +4544,7 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 
 	method := "GetQuerySegmentInfo"
 	tr := timerecord.NewTimeRecorder(method)
+	req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
 	ctx, err := node.authorizeCollectionMetadata(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -4565,12 +4567,12 @@ func (node *Proxy) GetQuerySegmentInfo(ctx context.Context, req *milvuspb.GetQue
 		err = merr.Error(infoResp.GetStatus())
 	}
 	if err != nil {
-		mlog.Error(context.TODO(), "Failed to get segment info from QueryCoord",
+		mlog.Error(ctx, "Failed to get segment info from QueryCoord",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	mlog.Debug(context.TODO(), "GetQuerySegmentInfo",
+	mlog.Debug(ctx, "GetQuerySegmentInfo",
 		mlog.Any("infos", infoResp.Infos),
 		mlog.Any("status", infoResp.Status))
 	queryInfos := make([]*milvuspb.QuerySegmentInfo, len(infoResp.Infos))
@@ -4823,7 +4825,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-GetReplicas")
 	defer sp.End()
 
-	mlog.Debug(context.TODO(), "received get replicas request",
+	mlog.Debug(ctx, "received get replicas request",
 		mlog.Int64("collection", req.GetCollectionID()),
 		mlog.Bool("with shard nodes", req.GetWithShardNodes()))
 	resp := &milvuspb.GetReplicasResponse{}
@@ -4831,6 +4833,7 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	req.DbName = GetCurDBNameFromRequestOrContext(ctx, req)
 	ctx, err := node.authorizeCollectionMetadata(ctx, req)
 	if err != nil {
 		resp.Status = merr.Status(err)
@@ -4853,12 +4856,12 @@ func (node *Proxy) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReq
 
 	r, err := node.mixCoord.GetReplicas(ctx, req)
 	if err != nil {
-		mlog.Warn(context.TODO(), "Failed to get replicas from Query Coordinator",
+		mlog.Warn(ctx, "Failed to get replicas from Query Coordinator",
 			mlog.Err(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
-	mlog.Debug(context.TODO(), "received get replicas response", mlog.String("resp", r.String()))
+	mlog.Debug(ctx, "received get replicas response", mlog.String("resp", r.String()))
 	return r, nil
 }
 

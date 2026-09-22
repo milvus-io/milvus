@@ -61,8 +61,18 @@ func (c *metadataPrivilegeCoordinator) DescribeCollection(_ context.Context, req
 	if req.GetCollectionID() != 41 && req.GetCollectionName() != "records" && req.GetCollectionName() != "records_alias" {
 		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.WrapErrCollectionNotFound("unknown"))}, nil
 	}
+	dbName, collectionID := "tenant_b", int64(41)
+	if req.GetCollectionID() == 0 {
+		dbName = req.GetDbName()
+		switch dbName {
+		case "", util.DefaultDBName:
+			dbName, collectionID = util.DefaultDBName, 42
+		case "tenant_a":
+			collectionID = 43
+		}
+	}
 	return &milvuspb.DescribeCollectionResponse{
-		Status: merr.Success(), CollectionID: 41, DbName: "tenant_b",
+		Status: merr.Success(), CollectionID: collectionID, DbName: dbName,
 		Schema: &schemapb.CollectionSchema{Name: "records"}, Aliases: []string{"records_alias"},
 	}, nil
 }
@@ -292,4 +302,60 @@ func TestProxyCollectionMetadataAuthorizedCalls(t *testing.T) {
 	require.NoError(t, merr.Error(replicas.GetStatus()))
 	require.Equal(t, 4, coord.metadataCalls)
 	require.Equal(t, []int64{41, 41, 41}, coord.collectionIDs)
+}
+
+func TestProxyCollectionMetadataDatabaseContext(t *testing.T) {
+	for _, method := range []string{"persistent", "query", "replicas"} {
+		for _, tc := range []struct {
+			name      string
+			contextDB string
+			requestDB string
+			grantDB   string
+			wantID    int64
+		}{
+			{"context_database", "tenant_b", "", "tenant_b", 41},
+			{"request_database", "tenant_a", "tenant_b", "tenant_b", 41},
+			{"default_database", "", "", util.DefaultDBName, 42},
+			{"deny_other_database", "tenant_b", "", util.DefaultDBName, 0},
+			{"deny_request_database", "tenant_b", "tenant_a", "tenant_b", 0},
+		} {
+			t.Run(method+"/"+tc.name, func(t *testing.T) {
+				coord, setPolicy := setupMetadataPrivileges(t)
+				setPolicy(tc.grantDB, commonpb.ObjectPrivilege_PrivilegeGetStatistics, commonpb.ObjectPrivilege_PrivilegeGetLoadState)
+				cache, err := metacache.NewMetaCache(coord)
+				require.NoError(t, err)
+				t.Cleanup(cache.Close)
+				node := &Proxy{metaCache: cache, mixCoord: coord}
+				node.UpdateStateCode(commonpb.StateCode_Healthy)
+				ctx := NewContextWithMetadata(context.Background(), "reader", tc.contextDB)
+				// Repeat against the warm cache as well as the cold lookup. The
+				// coordinator distinguishes identically named collections by DB.
+				for range 2 {
+					coord.collectionIDs = nil
+					var result *commonpb.Status
+					switch method {
+					case "persistent":
+						resp, callErr := node.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{DbName: tc.requestDB, CollectionName: "records"})
+						require.NoError(t, callErr)
+						result = resp.GetStatus()
+					case "query":
+						resp, callErr := node.GetQuerySegmentInfo(ctx, &milvuspb.GetQuerySegmentInfoRequest{DbName: tc.requestDB, CollectionName: "records"})
+						require.NoError(t, callErr)
+						result = resp.GetStatus()
+					case "replicas":
+						resp, callErr := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{DbName: tc.requestDB, CollectionName: "records", CollectionID: 999})
+						require.NoError(t, callErr)
+						result = resp.GetStatus()
+					}
+					if tc.wantID == 0 {
+						require.ErrorIs(t, merr.Error(result), merr.ErrPrivilegeNotPermitted)
+						require.Zero(t, coord.metadataCalls)
+					} else {
+						require.NoError(t, merr.Error(result))
+						require.Equal(t, []int64{tc.wantID}, coord.collectionIDs)
+					}
+				}
+			})
+		}
+	}
 }
