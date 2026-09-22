@@ -401,10 +401,6 @@ rootCoord:
 
 # Related configuration of proxy, used to validate client requests and reduce the returned results.
 proxy:
-  # Whether Proxy keeps the legacy row-based size packing before sending messages to StreamingNode.
-  # Keep this enabled until chunk writing is enabled and observed on every StreamingNode that can own a pchannel.
-  # For migration, enable streaming.splitChunkSN first, then disable proxy.splitChunk. Both parameters support live refresh.
-  splitChunk: true
   timeTickInterval: 200 # The interval at which proxy synchronizes the time tick, unit: ms.
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
   msgStream:
@@ -1604,10 +1600,6 @@ streamingNode:
 
 # Any configuration related to the streaming service.
 streaming:
-  # Whether StreamingNode splits oversized logical messages into physical WAL records.
-  # Enable this on every StreamingNode and confirm the live update before disabling proxy.splitChunk.
-  # Once chunk records have been written, do not roll StreamingNode back to a version that cannot reassemble them. Both parameters support live refresh.
-  splitChunkSN: false
   walBalancer:
     # The interval of balance task trigger at background, 1 min by default.
     # It's ok to set it into duration string, such as 30s or 1m30s, see time.ParseDuration

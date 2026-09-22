@@ -54,6 +54,13 @@ type ParamChangeCallback func(ctx context.Context, key, oldValue, newValue strin
 // configured value is left untouched for callers that need to detect the
 // sentinel (e.g. the version gate confirmator).
 //
+// DependsOn/DependsOnValue express an ordering dependency between gates: the
+// confirmator only flips this gate once the config-center key DependsOn holds
+// DependsOnValue (typically written by another gate's flip). This replaces a
+// time-based assumption with a real state check — the dependent gate keeps
+// waiting, without flip backoff, until the dependency is confirmed. Both
+// fields must be set together; empty DependsOn means no dependency.
+//
 // nil means no version gating (default, backward compatible).
 type VersionGateSwitcher struct {
 	EnableAutoSwitchValue string        // sentinel value: configuring this value triggers AutoSwitch
@@ -61,6 +68,8 @@ type VersionGateSwitcher struct {
 	GateVersion           string        // minimum cluster version (semver) required to switch
 	TargetValue           string        // effective value after AutoSwitch takes effect
 	SwitchDelay           time.Duration // stability window to wait after cluster-wide confirmation before switching
+	DependsOn             string        // optional: config key that must hold DependsOnValue in the config center before flipping
+	DependsOnValue        string        // optional: required config-center value of DependsOn (both must be set together)
 
 	// localSatisfied is set by StartVersionGateSwitcher for embedded-etcd
 	// (single-process) deployments: the local process is the entire cluster, so
@@ -98,6 +107,9 @@ func (sw *VersionGateSwitcher) Validate() {
 	}
 	if sw.SwitchDelay < 0 {
 		panic("version gate: SwitchDelay must not be negative")
+	}
+	if (sw.DependsOn == "") != (sw.DependsOnValue == "") {
+		panic("version gate: DependsOn and DependsOnValue must be set together")
 	}
 }
 

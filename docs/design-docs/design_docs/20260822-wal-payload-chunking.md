@@ -92,16 +92,26 @@ requires the `_ci`/`_ct` pair to be valid.
 
 ### 2.2 Write path
 
-Two independent, live-refreshable switches control the write path:
+Two live-refreshable, internal version-gated switches control the write path.
+They are not exported to the shipped `configs/milvus.yaml`:
 
-- `proxy.splitChunk` defaults to `true`. While true, Proxy retains the
-  legacy row-based size packing path; while false, it builds one logical
-  message per channel/partition.
-- `streaming.splitChunkSN` defaults to `false`. While false, StreamingNode calls
+- `proxy.splitChunk` defaults to `auto`, whose pre-switch value is `true`.
+  While true, Proxy retains the legacy row-based size packing path; while false,
+  it builds one logical message per channel/partition. Once the cluster version
+  has remained at least 3.1.0 for five minutes, it automatically flips to
+  `false`, but only after the config center contains
+  `streaming.splitChunkSN=true`.
+- `streaming.splitChunkSN` defaults to `auto`, whose pre-switch value is
+  `false`. After the cluster version has remained at least 3.1.0 for one minute,
+  it automatically flips to `true`. While false, StreamingNode calls
   `appendOneWithRetry` without creating physical chunks; while true, it computes
   the backend payload budget and runs
   `SplitIntoChunks(msg, chunkPayloadSize())` → `appendOneWithRetry` per chunk →
   return chunk 0's ID.
+
+Explicit boolean values bypass their respective gates. In particular,
+`streaming.splitChunkSN=false` is an escape hatch that prevents the dependent
+Proxy gate from flipping.
 
 Records that fit, and backends without a per-record cap, still use the
 single-record path. Separating the switches gives the rollout a safe bridge
@@ -274,9 +284,8 @@ or the broker envelope.
 
 ## 4. Activation switches
 
-Chunk records are readable only by StreamingNodes carrying this change.
-Instead of deriving that fact from the cumulative StreamingVersion ladder, two
-explicit switches independently control the producing roles:
+Chunk records are readable only by StreamingNodes carrying this change. Two
+version-gated switches control the producing roles:
 
 | `proxy.splitChunk` | `streaming.splitChunkSN` | Write behavior | Rollout state |
 |---|---|---|---|
@@ -287,18 +296,18 @@ explicit switches independently control the producing roles:
 
 The reader always runs `ChunkAssembler`, independently of both switches.
 Turning `streaming.splitChunkSN` off stops creation of new chunks but must not
-make historical chunk records unreadable. Both parameters support live refresh.
-A config update may therefore change subsequent writes without restarting the
-role, which makes ordering mandatory: first set `streaming.splitChunkSN=true`
-and confirm that every possible pchannel owner has observed it; only then set
-`proxy.splitChunk=false`. Propagation may temporarily mix old and new values
-within one role, but each intermediate state is safe in that order.
+make historical chunk records unreadable. Both parameters support live refresh,
+so a config update may change subsequent writes without restarting the role.
 
-This is an operational compatibility boundary, not an automatic capability
-barrier. Before any Proxy observes `proxy.splitChunk=false`, every StreamingNode
-that can own a pchannel must be upgraded and must have observed
-`streaming.splitChunkSN=true`. The cumulative global streaming version and
-StreamingCoord assignment metadata are unchanged.
+The version-gate confirmator enforces the safe write order in etcd: it first
+writes `streaming.splitChunkSN=true`; it may write `proxy.splitChunk=false` only
+after reading that exact dependency value from the config center. The longer
+Proxy delay is a propagation buffer between the writes. This deliberately does
+not implement distributed two-phase confirmation or collect an acknowledgement
+from every StreamingNode, so it does not prove that every possible pchannel
+owner has already observed the first update. That residual propagation risk is
+an accepted implementation tradeoff. The cumulative global streaming version
+and StreamingCoord assignment metadata remain unchanged.
 
 ## 5. Alternatives rejected
 
@@ -340,35 +349,38 @@ StreamingCoord assignment metadata are unchanged.
 
 This is an additive WAL property encoding (`_ci`/`_ct`) with no protobuf schema
 change. New StreamingNodes can read old complete records and new chunk records;
-old StreamingNodes cannot interpret chunk records. New configs
-(`proxy.splitChunk`, `streaming.splitChunkSN`,
-`woodpecker.maxMessageSize`, and `pulsar.messageReserveSize`) use safe shipped
-defaults. Numeric Pulsar, Kafka, and Woodpecker message-size values below
+old StreamingNodes cannot interpret chunk records. The internal
+`proxy.splitChunk` and `streaming.splitChunkSN` switches are not exported to the
+shipped configuration; their `ParamItem` defaults are `auto`, which resolves to
+the safe initial values `true` and `false`, respectively, before the 3.1 gate.
+The exported `woodpecker.maxMessageSize` and `pulsar.messageReserveSize`
+configurations retain their safe shipped defaults. Numeric Pulsar, Kafka, and
+Woodpecker message-size values below
 256 KiB are clamped to 256 KiB; parse errors use the backend default. A reserve
 that is too small or does not fit under the active limit falls back rather than
 producing a budget with no envelope headroom (§2.1).
 
-The intended live-write rollout order is:
+The automatic live-write rollout is:
 
-1. Deploy binaries containing chunk read/write support with the shipped
-   defaults: `proxy.splitChunk=true` and
+1. Deploy binaries containing chunk read/write support with the shipped `auto`
+   defaults. Until the cluster has remained at version 3.1.0 or later for the
+   stability window, they resolve to `proxy.splitChunk=true` and
    `streaming.splitChunkSN=false`. Proxy continues legacy row packing and no SN
-   creates chunk records. This state is safe while binaries roll in any order.
-2. Set `streaming.splitChunkSN=true`. Wait until every StreamingNode that can
-   own a pchannel has upgraded and observed the new value. Proxy remains on
-   `proxy.splitChunk=true`, so traffic remains safe while SN configuration
-   propagation is mixed.
-3. Set `proxy.splitChunk=false` only after step 2 is confirmed. Mixed
-   Proxies are safe in this phase: Proxies still observing `true` keep sending
-   packed messages, while those observing `false` send logical messages to SNs
-   that all chunk oversized WAL payloads.
+   creates chunk records.
+2. After one minute at the required cluster version, the confirmator writes
+   `streaming.splitChunkSN=true` to the config center. Proxy remains on legacy
+   packing while that update propagates.
+3. After its five-minute stability window, the Proxy gate reads the dependency
+   key directly from the config center. Only when the key is exactly `true`
+   does it write `proxy.splitChunk=false`.
 
 The two switches remove any dependency on Deployment restart order for the
-initial binary rollout, including Helm's unordered Deployments. They do not
-provide an automatic capability barrier: an operator or rollout controller must
-confirm step 2 before step 3. Disabling Proxy packing while any possible SN
-owner is legacy or still observes `streaming.splitChunkSN=false` is unsupported
-because a large logical record can take the unsplit backend path.
+initial binary rollout, including Helm's unordered Deployments. The dependency
+check strictly orders the etcd writes but does not form a distributed two-phase
+barrier: there is no per-node acknowledgement that every StreamingNode has
+observed `streaming.splitChunkSN=true`. The five-minute gap is an operational
+propagation allowance. An explicit `streaming.splitChunkSN=false` prevents the
+automatic Proxy flip; explicit booleans otherwise bypass the gates.
 
 To return to the compatibility write mode while retaining the new binaries,
 reverse the transition safely: first set `proxy.splitChunk=true` and confirm all
@@ -424,6 +436,9 @@ that requires a separate drain/watermark protocol.
   indivisible allocation that crosses its soft target, rejects later
   allocations, seals an over-target segment immediately after recovery, and
   recovers a dropped capacity notification through the periodic scan.
-- `pkg/util/paramtable/component_param_test.go` verifies that
-  `proxy.splitChunk` defaults to true,
-  `streaming.splitChunkSN` defaults to false, and both values can be refreshed.
+- `pkg/util/paramtable/{component_param,param_item_version_gate,version_gate}_test.go`
+  verifies automatic gate discovery at `ComponentParam` initialization, the
+  internal/non-exported split switches, the `auto` pre-switch values, the 3.1
+  gates, the dependency schema, strict config-center flip ordering independent
+  of registration order, and blocking while the dependency is absent or
+  differs from `true`.
