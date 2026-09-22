@@ -369,6 +369,8 @@ func (node *DataNode) CompactionV2(ctx context.Context, req *datapb.CompactionPl
 			compactionParams,
 			sortFields,
 		)
+	case datapb.CompactionType_ClusterSortCompaction:
+		task = compactor.NewClusterSortCompactionTask(taskCtx, cm, req, compactionParams)
 	case datapb.CompactionType_BumpSchemaVersionCompaction:
 		task = compactor.NewBumpSchemaVersionCompactionTask(taskCtx, cm, req, compactionParams)
 	default:

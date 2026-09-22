@@ -85,7 +85,7 @@ func getTaskSlotUsage(task Compactor) int64 {
 		switch task.GetCompactionType() {
 		case datapb.CompactionType_ClusteringCompaction:
 			taskSlotUsage = paramtable.Get().DataCoordCfg.ClusteringCompactionSlotUsage.GetAsInt64()
-		case datapb.CompactionType_MixCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_ClusterSortCompaction:
 			taskSlotUsage = paramtable.Get().DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
 		case datapb.CompactionType_Level0DeleteCompaction:
 			taskSlotUsage = paramtable.Get().DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
