@@ -351,3 +351,45 @@ func TestClusteringReleasesPendingBuildersOnFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestClusteringTextAddedAfterAllSourceSegments(t *testing.T) {
+	setupBumpUTEnv(t)
+	const textID = int64(105)
+	const rows = 6
+	fixture := buildBumpFixture(t, withRows(rows), withLegacySourceNamespace(),
+		withTargetAddedField(&schemapb.FieldSchema{FieldID: textID, Name: "added_text", DataType: schemapb.DataType_Text, Nullable: true}))
+	plan := proto.Clone(fixture.task.plan).(*datapb.CompactionPlan)
+	plan.Type = datapb.CompactionType_ClusteringCompaction
+	plan.ClusteringKeyField = bumpFxPKField
+	plan.PreferSegmentRows, plan.MaxSegmentRows = 128, 128
+	plan.AnalyzeResultPath = fixture.cfg.RootPath + "/analyze_stats/999"
+	params := fixture.task.compactionParams
+	params.BinLogMaxSize = 1 // Every source row becomes a separate all-null TEXT output batch.
+	task := NewClusteringCompactionTask(context.Background(), binlogio.NewBinlogIO(fixture.task.chunkManager), plan, params)
+	result, err := task.Compact()
+	require.NoError(t, err)
+	require.True(t, task.lobContext.DecodeTextFromSource)
+	require.Len(t, result.Segments, 1)
+	segment := result.Segments[0]
+	require.EqualValues(t, rows, segment.NumOfRows)
+	configs, err := task.lobContext.GetSourceTextColumnConfigs(segment.Manifest)
+	require.NoError(t, err)
+	reader, err := storage.NewTextDecodedManifestRecordReader(context.Background(), segment.Manifest, plan.Schema, configs,
+		storage.WithVersion(storage.StorageV3), storage.WithStorageConfig(fixture.cfg))
+	require.NoError(t, err)
+	defer reader.Close()
+	readRows := 0
+	for {
+		record, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		require.Equal(t, record.Len(), record.Column(textID).NullN())
+		for row := 0; row < record.Len(); row++ {
+			require.EqualValues(t, readRows, record.Column(bumpFxPKField).(*array.Int64).Value(row))
+			readRows++
+		}
+	}
+	require.Equal(t, rows, readRows)
+}

@@ -18,18 +18,20 @@ package compactor
 
 import (
 	"context"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-	"sync"
-	"testing"
-	"time"
 )
 
 type clusteringFailingWriter struct {
@@ -47,6 +49,7 @@ func (w *clusteringFailingWriter) Write(storage.Record) error {
 	w.writes++
 	return w.writeErr
 }
+
 func (w *clusteringFailingWriter) Close() error {
 	w.closes++
 	return w.closeErr
@@ -114,7 +117,7 @@ func TestClusteringMappingCancelsWorkersOnFailure(t *testing.T) {
 	select {
 	case <-exited:
 	default:
-		t.Fatal("mapping returned before the cancelled worker exited")
+		t.Fatal("mapping returned before the canceled worker exited")
 	}
 }
 

@@ -561,6 +561,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 		})
 		futures = append(futures, future)
 	}
+	// Join every worker before Compact's deferred cleanup releases shared buffers.
 	if err := conc.BlockOnAll(futures...); err != nil {
 		// A sibling may return context.Canceled before the failed future is
 		// visited. Preserve the failure that triggered cancellation.
