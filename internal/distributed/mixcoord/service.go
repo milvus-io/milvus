@@ -18,6 +18,7 @@ package grpcmixcoord
 
 import (
 	"context"
+	"os"
 	"sync"
 	"time"
 
@@ -64,6 +65,14 @@ type Server struct {
 
 	grpcWG sync.WaitGroup
 
+	// grpcServing is closed once this server answers gRPC. Work that has to be
+	// able to call the coordinator back - the extension seam's engine - waits
+	// on this rather than on activation, and runs on a goroutine of its own, so
+	// that it can neither call into a listener that is not up yet nor hold up
+	// the activation callbacks it is registered on.
+	grpcServing     chan struct{}
+	grpcServingOnce sync.Once
+
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -81,6 +90,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 		ctx:         ctx1,
 		cancel:      cancel,
 		grpcErrChan: make(chan error),
+		grpcServing: make(chan struct{}),
 	}
 
 	var err error
@@ -180,6 +190,9 @@ func (s *Server) startGrpc() error {
 	go s.startGrpcLoop()
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
+	if err == nil {
+		s.markGrpcServing()
+	}
 	return err
 }
 
@@ -243,6 +256,44 @@ func (s *Server) startGrpcLoop() {
 	}
 }
 
+// markGrpcServing releases everything waiting for this server to answer gRPC.
+func (s *Server) markGrpcServing() {
+	s.grpcServingOnce.Do(func() {
+		if s.grpcServing != nil {
+			close(s.grpcServing)
+		}
+	})
+}
+
+// waitGrpcServing blocks until this server answers gRPC, or ctx ends. A Server
+// built without the channel (a test that never serves) is not gated.
+func (s *Server) waitGrpcServing(ctx context.Context) error {
+	if s.grpcServing == nil {
+		return nil
+	}
+	select {
+	case <-s.grpcServing:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// engineStartFailed ends the process the way a gRPC startup failure after Run()
+// does: this happens on a detached goroutine, so it cannot be returned to the
+// startup path, and a coordinator serving without its engine would accept work
+// nothing accounts for.
+func (s *Server) engineStartFailed(err error) {
+	mlog.Error(s.ctx, "coordinator engine failed to start on activation", mlog.Err(err))
+	go func() {
+		if stopErr := s.Stop(); stopErr != nil {
+			mlog.Warn(s.ctx, "failed to cleanly stop MixCoord after engine startup failure", mlog.Err(stopErr))
+		}
+		mlog.Cleanup()
+		os.Exit(1)
+	}()
+}
+
 func (s *Server) start() error {
 	mlog.Info(s.ctx, "MixCoord Core start ...")
 	if err := s.mixCoord.Register(); err != nil {
@@ -252,6 +303,15 @@ func (s *Server) start() error {
 
 	if err := s.mixCoord.Start(); err != nil {
 		mlog.Error(s.ctx, "MixCoord start service failed", mlog.Err(err))
+		return err
+	}
+
+	// The extension seam registers here; the engine itself starts on its own
+	// goroutine, once this replica is ACTIVE and gRPC is answering. An engine's
+	// first act is usually to read coordinator state, so it must not run on the
+	// activation callback chain.
+	if err := startCoordinatorEngine(s.ctx, s.mixCoord, s.mixCoordClient, s.waitGrpcServing, s.engineStartFailed); err != nil {
+		mlog.Error(s.ctx, "coordinator engine registration failed", mlog.Err(err))
 		return err
 	}
 
@@ -274,6 +334,10 @@ func (s *Server) Stop() (err error) {
 	if s.tikvCli != nil {
 		defer s.tikvCli.Close()
 	}
+
+	// The extension seam sits before the coordinator is torn down, so an
+	// engine still sees a working coordinator while it stops.
+	stopCoordinatorEngine(s.ctx)
 
 	if s.mixCoord != nil {
 		mlog.Info(s.ctx, "graceful stop rootCoord")

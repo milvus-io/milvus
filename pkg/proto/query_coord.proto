@@ -208,12 +208,21 @@ message ShowCollectionsRequest {
     // Not useful for now
     int64 dbID = 2;
     repeated int64 collectionIDs = 3;
+    // When set, inMemory_percentages is the load progress of the replicas that
+    // live in this resource group only, -1 for a collection that has no replica
+    // there. A collection that is not loaded at all answers the same -1, with
+    // query_service_available false, refresh_progress 0 and empty load_fields,
+    // instead of the CollectionNotLoaded error the unscoped call returns.
+    // Empty keeps the collection-wide figure.
+    string resource_group = 4;
 }
 
 message ShowCollectionsResponse {
     common.Status status = 1;
     repeated int64 collectionIDs = 2;
     repeated int64 inMemory_percentages = 3;
+    // Follows the request's scope: with resource_group set it says whether
+    // that group can serve, otherwise whether any replica of the collection can.
     repeated bool query_service_available = 4;
     repeated int64 refresh_progress = 5;
     repeated schema.LongArray load_fields = 6;
