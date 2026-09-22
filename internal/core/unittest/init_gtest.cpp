@@ -37,7 +37,6 @@
 #include "storage/Util.h"
 #include "index/Meta.h"
 #include "test_utils/Constants.h"
-#include "test_utils/storage_test_utils.h"
 
 std::string TestLocalPath;
 std::string TestRemotePath;
@@ -110,9 +109,13 @@ main(int argc, char** argv) {
 
     milvus::storage::LocalChunkManagerSingleton::GetInstance().Init(
         TestLocalPath);
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(
-        get_default_local_storage_config());
-    milvus::storage::MmapManager::GetInstance().Init(get_default_mmap_config());
+    milvus::storage::StorageConfig local_config;
+    local_config.storage_type = "local";
+    local_config.root_path = TestRemotePath;
+    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(local_config);
+    milvus::storage::MmapManager::GetInstance().Init(
+        {"willneed", TestMmapPath, uint64_t{2} * 1024 * 1024 * 1024,
+         uint64_t{4} * 1024 * 1024, false});
 
     CStorageConfig arrow_fs_config = {};
     arrow_fs_config.root_path = TestLocalPath.c_str();

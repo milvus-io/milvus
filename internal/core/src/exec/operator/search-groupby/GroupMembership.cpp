@@ -18,9 +18,13 @@
 
 #include <algorithm>
 #include <memory>
+#include <string_view>
+#include <type_traits>
 #include <unordered_set>
 
-#include "index/ScalarIndex.h"
+#include "exec/expression/IndexPathSelection.h"
+#include "exec/expression/ValueLookupSource.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "segcore/SegmentChunkReader.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/Utils.h"
@@ -36,67 +40,114 @@ IsEligible(const TargetBitmap* base_filter, size_t offset) {
     return base_filter == nullptr || !(*base_filter)[offset];
 }
 
-void
-ApplyBaseFilter(TargetBitmap& membership, const TargetBitmap* base_filter) {
-    if (base_filter == nullptr) {
-        return;
-    }
-    membership -= *base_filter;
-}
+// Index readers express the string families through borrowed views.
+template <typename T>
+using ReaderValueType =
+    std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
 
+// The index-backed membership path, for a field that kept no raw data of its
+// own. #53246 reached straight into a pinned `ScalarIndex<T>` and probed it
+// with `In()` + `IsNull()`; on the refactor's contracts the value source for a
+// group key is `PinnedValueLookup` / `IScalarValueReader<T>` -- the same source
+// SealedDataGetter uses for phase one, so an indexed and a raw scan produce
+// byte-identical group keys, NULL rows included (Lookup/Gather report a NULL
+// row as invalid, which is exactly `GroupKey<T>(std::nullopt)`).
+//
+// `Gather` rather than per-row `Lookup`: one call lets the reader cluster the
+// offsets by its own layout, and its `const T*` views only have to outlive the
+// callback.
+//
+// Every guard below ends in std::nullopt, which makes the caller fall back to
+// the unoptimised iterator. The bitmap this returns is flipped and handed to a
+// fresh vector iterator as an exclusion filter over [0, row_count) in ROW
+// space, so an entry that answers in element space or does not cover the whole
+// searched prefix cannot be used -- it would exclude rows that do belong to an
+// unfinished group. `cheap_value_lookup` is required because this gathers one
+// value per eligible row: a reader whose reverse lookup is not O(1)/O(log n)
+// would cost more than the fallback it is trying to avoid.
 template <typename T>
 std::optional<TargetBitmap>
-BuildIndexMembership(const segcore::PinnedIndexView& pinned_indexes,
+BuildIndexMembership(milvus::OpContext* op_ctx,
+                     const segcore::SegmentInternalInterface& segment,
+                     FieldId field_id,
                      size_t row_count,
                      const std::vector<GroupKey<T>>& groups,
                      const TargetBitmap* base_filter) {
-    if (pinned_indexes.empty()) {
+    using ReaderType = ReaderValueType<T>;
+
+    auto value_type = segment.GetFieldDataType(field_id);
+    if (value_type == DataType::TIMESTAMPTZ) {
+        // Indexed the same way every other value-lookup consumer indexes it.
+        value_type = DataType::INT64;
+    }
+    const ExprIndexRequirement requirement{
+        .field_id = field_id,
+        .reader = RequiredReader::ValueLookup,
+        .value_type = value_type,
+    };
+
+    // Metadata-only pre-check. PinnedValueLookup repeats this selection, but it
+    // does not expose the chosen entry's caps and the cost guard below has to
+    // see them before anything is pinned.
+    const auto capabilities = segment.IndexCapability(field_id);
+    const auto decision = DetermineExecPath(requirement, capabilities);
+    if (!decision.key.has_value()) {
+        return std::nullopt;
+    }
+    const auto* entry = capabilities.Find(*decision.key);
+    if (entry == nullptr || entry->caps.nested || entry->caps.json_paths ||
+        !entry->caps.cheap_value_lookup) {
         return std::nullopt;
     }
 
-    // Avoid vector<bool>: ScalarIndex<bool>::In needs a contiguous bool array.
-    auto values = std::make_unique<T[]>(groups.size());
-    size_t value_count = 0;
-    bool include_null = false;
-    for (const auto& group : groups) {
-        if (group.has_value()) {
-            values[value_count++] = *group;
-        } else {
-            include_null = true;
+    // The pin must outlive every Gather callback below.
+    PinnedValueLookup lookup(&segment,
+                             op_ctx,
+                             field_id,
+                             value_type,
+                             static_cast<int64_t>(row_count));
+    if (!lookup.HasReader()) {
+        return std::nullopt;
+    }
+    const auto* reader = lookup.Reader<ReaderType>();
+    if (reader == nullptr) {
+        return std::nullopt;
+    }
+
+    // Only rows the vector search still considers eligible can join a group --
+    // the same decision the raw scan makes with IsEligible, which is why this
+    // path needs no separate base-filter subtraction afterwards.
+    std::vector<int64_t> offsets;
+    offsets.reserve(row_count);
+    for (size_t offset = 0; offset < row_count; ++offset) {
+        if (IsEligible(base_filter, offset)) {
+            offsets.push_back(static_cast<int64_t>(offset));
         }
     }
-    TargetBitmap membership;
-    membership.reserve(row_count);
-    size_t remaining = row_count;
-    for (auto& pinned_index : pinned_indexes) {
-        auto scalar_index =
-            dynamic_cast<const index::ScalarIndex<T>*>(pinned_index.get());
-        if (scalar_index == nullptr) {
-            return std::nullopt;
-        }
-        auto* mutable_index = const_cast<index::ScalarIndex<T>*>(scalar_index);
-        auto chunk_membership =
-            value_count > 0 ? mutable_index->In(value_count, values.get())
-                            : TargetBitmap(mutable_index->Count(), false);
-        if (include_null) {
-            auto matches = mutable_index->IsNull();
-            if (matches.size() != chunk_membership.size()) {
-                return std::nullopt;
+    const auto count = static_cast<int64_t>(offsets.size());
+    // A growing pin covers a contiguous row prefix; a prefix shorter than the
+    // searched range cannot answer for the tail.
+    if (!lookup.Covers(offsets.data(), count)) {
+        return std::nullopt;
+    }
+
+    segcore::CheckCancellation(op_ctx,
+                               segment.get_segment_id(),
+                               field_id.get(),
+                               "strict group membership");
+    std::unordered_set<GroupKey<T>> target_groups(groups.begin(), groups.end());
+    TargetBitmap membership(row_count, false);
+    reader->Gather(
+        offsets.data(),
+        count,
+        [&](int64_t i, const ReaderType* value, bool valid) {
+            auto group = valid && value != nullptr
+                             ? GroupKey<T>(T(*value))
+                             : GroupKey<T>(std::nullopt);
+            if (target_groups.find(group) != target_groups.end()) {
+                membership[offsets[static_cast<size_t>(i)]] = true;
             }
-            chunk_membership |= matches;
-        }
-
-        auto append_size = std::min(remaining, chunk_membership.size());
-        membership.append(chunk_membership, 0, append_size);
-        remaining -= append_size;
-        if (remaining == 0) {
-            break;
-        }
-    }
-    if (membership.size() != row_count) {
-        return std::nullopt;
-    }
-    ApplyBaseFilter(membership, base_filter);
+        });
     return membership;
 }
 
@@ -168,8 +219,7 @@ ScanRawField(milvus::OpContext* op_ctx,
         reader.GetMultipleChunkDataAccessor(segment.GetFieldDataType(field_id),
                                             field_id,
                                             chunk_id,
-                                            chunk_pos,
-                                            segcore::PinnedIndexView{});
+                                            chunk_pos);
     for (size_t offset = 0; offset < row_count; ++offset) {
         if ((offset & 1023) == 0) {
             segcore::CheckCancellation(op_ctx,
@@ -219,8 +269,8 @@ BuildGroupMembership(milvus::OpContext* op_ctx,
             return membership;
         }
     }
-    auto indexes = segment.PinIndex(op_ctx, field_id);
-    return BuildIndexMembership<T>(indexes, count, groups, base_filter);
+    return BuildIndexMembership<T>(
+        op_ctx, segment, field_id, count, groups, base_filter);
 }
 
 template std::optional<TargetBitmap>

@@ -54,6 +54,15 @@ class IndexEntryReader {
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
 
+    // Sequential operations may reuse parsed directory/metadata with a fresh
+    // cancellation token and priority. Never change these during an active read.
+    void
+    SetLoadContext(ThreadPoolPriority priority,
+                   folly::CancellationToken token) {
+        priority_ = priority;
+        cancellation_token_ = std::move(token);
+    }
+
     Entry
     ReadEntry(const std::string& name);
 

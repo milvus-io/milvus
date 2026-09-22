@@ -58,14 +58,7 @@ func (m *statsFileResourceManager) Mode() fileresource.Mode                 { re
 
 type statsFakeTextIndex struct{}
 
-func (statsFakeTextIndex) Build(*indexcgowrapper.Dataset) error        { return nil }
-func (statsFakeTextIndex) Serialize() ([]*indexcgowrapper.Blob, error) { return nil, nil }
-func (statsFakeTextIndex) GetIndexFileInfo() ([]*indexcgowrapper.IndexFileInfo, error) {
-	return nil, nil
-}
-func (statsFakeTextIndex) Load([]*indexcgowrapper.Blob) error { return nil }
-func (statsFakeTextIndex) Delete() error                      { return nil }
-func (statsFakeTextIndex) CleanLocalData() error              { return nil }
+func (statsFakeTextIndex) Delete() error { return nil }
 func (statsFakeTextIndex) UpLoad() (*cgopb.IndexStats, error) {
 	return &cgopb.IndexStats{}, nil
 }

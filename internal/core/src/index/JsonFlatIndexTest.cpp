@@ -42,7 +42,6 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
 #include "index/IndexStats.h"
 #include "index/JsonFlatIndex.h"
 #include "index/Meta.h"
@@ -342,14 +341,14 @@ TEST(JsonFlatIndexExactPathExistsTest, FiltersByComparableTypeFamily) {
     std::string json_path = "/a";
     auto executor = json_index->create_executor<int64_t>(json_path);
 
-    auto any = executor->ExactPathExists(index::JsonValueType::Any);
+    auto any = executor->ExactPathExists(::JsonExistValueType::Any);
     ASSERT_EQ(any.size(), 10);
     EXPECT_EQ(any.count(), 7);
     EXPECT_FALSE(any[7]);
     EXPECT_FALSE(any[8]);
     EXPECT_FALSE(any[9]);
 
-    auto numeric = executor->ExactPathExists(index::JsonValueType::Numeric);
+    auto numeric = executor->ExactPathExists(::JsonExistValueType::Numeric);
     ASSERT_EQ(numeric.size(), 10);
     EXPECT_TRUE(numeric[0]);
     EXPECT_TRUE(numeric[1]);
@@ -362,7 +361,7 @@ TEST(JsonFlatIndexExactPathExistsTest, FiltersByComparableTypeFamily) {
     EXPECT_FALSE(numeric[8]);
     EXPECT_FALSE(numeric[9]);
 
-    auto string = executor->ExactPathExists(index::JsonValueType::String);
+    auto string = executor->ExactPathExists(::JsonExistValueType::String);
     ASSERT_EQ(string.size(), 10);
     EXPECT_FALSE(string[0]);
     EXPECT_FALSE(string[1]);
@@ -375,7 +374,7 @@ TEST(JsonFlatIndexExactPathExistsTest, FiltersByComparableTypeFamily) {
     EXPECT_FALSE(string[8]);
     EXPECT_FALSE(string[9]);
 
-    auto boolean = executor->ExactPathExists(index::JsonValueType::Bool);
+    auto boolean = executor->ExactPathExists(::JsonExistValueType::Bool);
     ASSERT_EQ(boolean.size(), 10);
     EXPECT_FALSE(boolean[0]);
     EXPECT_FALSE(boolean[1]);
@@ -1442,10 +1441,10 @@ TEST_F(JsonFlatIndexExprTest, ReusesValidityAcrossLiteralsAndOperators) {
 
     exec::ExprResCacheManager::Key artifact_key{
         segment_->get_segment_id(),
-        fmt::format("json-flat-validity:v1:field={}:path-length=2:"
+        fmt::format("json-flat-validity:field={}:path-length=2:"
                     "path=/a:family={}",
                     json_fid_.get(),
-                    static_cast<unsigned int>(index::JsonValueType::Numeric))};
+                    static_cast<unsigned int>(DataType::DOUBLE))};
     exec::ExprResCacheManager::Value artifact;
     artifact.active_count = json_data_.size();
     ASSERT_TRUE(cache.Get(artifact_key, artifact));

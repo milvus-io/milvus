@@ -24,7 +24,7 @@
 #include "common/GrowingOffsetMapping.h"
 #include "common/OffsetMapping.h"
 #include "common/SealedOffsetMapping.h"
-#include "index/VectorIndexValidDataUtils.h"
+#include "index/vector/VectorIndexValidDataUtils.h"
 
 namespace milvus {
 

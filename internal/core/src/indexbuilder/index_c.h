@@ -16,9 +16,6 @@ extern "C" {
 #endif
 
 #include <stdint.h>
-#include <stdbool.h>
-
-#include "common/binary_set_c.h"
 #include "common/common_type_c.h"
 #include "common/protobuf_utils_c.h"
 #include "common/type_c.h"
@@ -38,95 +35,7 @@ BuildJsonKeyIndex(ProtoLayoutInterface c_binary_set,
                   const uint64_t len);
 
 CStatus
-CleanLocalData(CIndex index);
-
-CStatus
 SerializeIndexAndUpLoad(CIndex index, ProtoLayoutInterface result);
-
-// =========== Followings are used only in test ==========
-CStatus
-CreateIndexForUT(enum CDataType dtype,
-                 const char* serialized_type_params,
-                 const char* serialized_index_params,
-                 CIndex* res_index);
-
-CStatus
-BuildFloatVecIndex(CIndex index, int64_t float_value_num, const float* vectors);
-
-CStatus
-BuildFloatVecIndexWithValidData(CIndex index,
-                                int64_t float_value_num,
-                                const float* vectors,
-                                const bool* valid_data,
-                                int64_t valid_data_len);
-
-CStatus
-BuildBinaryVecIndex(CIndex index, int64_t data_size, const uint8_t* vectors);
-
-CStatus
-BuildBinaryVecIndexWithValidData(CIndex index,
-                                 int64_t data_size,
-                                 const uint8_t* vectors,
-                                 const bool* valid_data,
-                                 int64_t valid_data_len);
-
-CStatus
-BuildFloat16VecIndex(CIndex index, int64_t data_size, const uint8_t* vectors);
-
-CStatus
-BuildFloat16VecIndexWithValidData(CIndex index,
-                                  int64_t data_size,
-                                  const uint8_t* vectors,
-                                  const bool* valid_data,
-                                  int64_t valid_data_len);
-
-CStatus
-BuildBFloat16VecIndex(CIndex index, int64_t data_size, const uint8_t* vectors);
-
-CStatus
-BuildBFloat16VecIndexWithValidData(CIndex index,
-                                   int64_t data_size,
-                                   const uint8_t* vectors,
-                                   const bool* valid_data,
-                                   int64_t valid_data_len);
-
-CStatus
-BuildSparseFloatVecIndex(CIndex index,
-                         int64_t row_num,
-                         int64_t dim,
-                         const uint8_t* vectors);
-
-CStatus
-BuildSparseFloatVecIndexWithValidData(CIndex index,
-                                      int64_t row_num,
-                                      int64_t dim,
-                                      const uint8_t* vectors,
-                                      const bool* valid_data,
-                                      int64_t valid_data_len);
-
-CStatus
-BuildInt8VecIndex(CIndex index, int64_t data_size, const int8_t* vectors);
-
-CStatus
-BuildInt8VecIndexWithValidData(CIndex index,
-                               int64_t data_size,
-                               const int8_t* vectors,
-                               const bool* valid_data,
-                               int64_t valid_data_len);
-
-// field_data:
-//  1, serialized proto::schema::BoolArray, if type is bool;
-//  2, serialized proto::schema::StringArray, if type is string;
-//  3, raw pointer, if type is of fundamental except bool type;
-// TODO: optimize here if necessary.
-CStatus
-BuildScalarIndex(CIndex c_index, int64_t size, const void* field_data);
-
-CStatus
-SerializeIndexToBinarySet(CIndex index, CBinarySet* c_binary_set);
-
-CStatus
-LoadIndexFromBinarySet(CIndex index, CBinarySet c_binary_set);
 
 #ifdef __cplusplus
 };

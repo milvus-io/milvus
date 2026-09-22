@@ -12,21 +12,12 @@
 #pragma once
 
 #include <memory>
-#include <string_view>
-#include <utility>
 
-#include "common/JsonCastType.h"
-#include "cachinglayer/Utils.h"
 #include "common/LoadInfo.h"
 #include "common/Types.h"
-#include "index/Index.h"
-#include "index/JsonScalarIndexWrapper.h"
-#include "index/JsonFlatIndex.h"
-#include "pb/index_cgo_msg.pb.h"
 #include "pb/segcore.pb.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/Types.h"
-#include "index/NgramInvertedIndex.h"
 
 namespace milvus::segcore {
 
@@ -50,15 +41,6 @@ class SegmentSealed : public SegmentInternalInterface {
                FieldId field_id,
                const int64_t* ids,
                int64_t count) const = 0;
-
-    virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndex(milvus::OpContext* op_ctx,
-                  FieldId field_id) const override = 0;
-
-    virtual PinWrapper<index::NgramInvertedIndex*>
-    GetNgramIndexForJson(milvus::OpContext* op_ctx,
-                         FieldId field_id,
-                         const std::string& nested_path) const override = 0;
 
     SegmentType
     type() const override {

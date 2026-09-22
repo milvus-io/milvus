@@ -33,14 +33,16 @@
 #include "common/Chunk.h"
 #include "common/EasyAssert.h"
 #include "common/Json.h"
+#include "common/JsonCastType.h"
 #include "common/JsonUtils.h"
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "index/Index.h"
-#include "index/ScalarIndex.h"
+#include "exec/expression/IndexPathSelection.h"
+#include "index/contracts/query/IJsonIndexReader.h"
+#include "index/contracts/query/IScalarValueReader.h"
 #include "knowhere/comp/index_param.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "segcore/ConcurrentVector.h"
@@ -184,6 +186,11 @@ class GrowingDataGetter : public DataGetter<OutputType> {
 template <typename OutputType, typename InnerRawType = OutputType>
 class SealedDataGetter : public DataGetter<OutputType> {
  private:
+    using IndexValueType = std::conditional_t<
+        std::is_same_v<OutputType, std::string>,
+        std::string_view,
+        OutputType>;
+
     milvus::OpContext* op_ctx_;
     const segcore::SegmentSealed& segment_;
     const FieldId field_id_;
@@ -195,7 +202,11 @@ class SealedDataGetter : public DataGetter<OutputType> {
     // Sharing a getter across threads would require synchronizing this cache.
     mutable std::unordered_map<int64_t, PinWrapper<Chunk*>> string_chunk_pins_;
 
-    PinWrapper<const index::IndexBase*> index_ptr_;
+    // Keep the parent cell pinned longer than a resolved JSON view. The typed
+    // value interface is borrowed from the root reader or that view.
+    segcore::IndexPin index_pin_;
+    index::JsonResolvedReader json_view_;
+    const index::IScalarValueReader<IndexValueType>* value_reader_{nullptr};
 
     // VARCHAR and raw JSON share StringChunk storage. Keep visited chunks
     // pinned for the getter's lifetime and construct only the requested view.
@@ -228,8 +239,7 @@ class SealedDataGetter : public DataGetter<OutputType> {
         : op_ctx_(op_ctx), segment_(segment), field_id_(field_id) {
         from_data_ = segment_.HasFieldData(field_id_);
         if (!from_data_) {
-            auto index = segment_.PinIndex(op_ctx_, field_id_);
-            if (index.empty()) {
+            if (!InitValueReader(json_path, json_type, strict_cast)) {
                 ThrowInfo(
                     UnexpectedError,
                     "The segment:{} used to init data getter has no effective "
@@ -237,7 +247,6 @@ class SealedDataGetter : public DataGetter<OutputType> {
                     "index or data",
                     segment_.get_segment_id());
             }
-            index_ptr_ = std::move(index[0]);
         }
         this->json_path_ = json_path;
         this->specific_json_type_ = json_type.has_value();
@@ -282,26 +291,88 @@ class SealedDataGetter : public DataGetter<OutputType> {
                 return raw;
             }
         } else {
-            AssertInfo(index_ptr_.get() != nullptr,
-                       "indexed field {} has no valid index pointer",
+            AssertInfo(value_reader_ != nullptr,
+                       "indexed field {} has no typed value reader",
                        field_id_.get());
-            auto chunk_index =
-                dynamic_cast<const index::ScalarIndex<OutputType>*>(
-                    index_ptr_.get());
-            AssertInfo(chunk_index != nullptr,
-                       "index type mismatch for field {}: expected "
-                       "ScalarIndex<OutputType>",
-                       field_id_.get());
-            auto raw = chunk_index->Reverse_Lookup(idx);
-            // A null row has no value in the index (Reverse_Lookup ==
-            // nullopt). Return nullopt so it forms a distinct null group,
-            // consistent with the from-data getter branches above — instead
-            // of asserting and failing the whole group-by query.
-            if (!raw.has_value()) {
-                return std::nullopt;
-            }
-            return raw.value();
+            // Lookup owns string bytes and returns nullopt for NULL rows, so
+            // indexed and raw sources produce the same nullable group key.
+            return value_reader_->Lookup(idx);
         }
+    }
+
+ private:
+    bool
+    InitValueReader(const std::optional<std::string>& json_path,
+                    const std::optional<DataType>& json_type,
+                    bool strict_cast) {
+        constexpr bool is_json =
+            std::is_same_v<InnerRawType, milvus::Json>;
+        if constexpr (is_json) {
+            // The index cannot reproduce at_string_any, strict cast failures,
+            // or the original integer-vs-floating JSON number category from a
+            // projected DOUBLE value. Those cases require raw JSON.
+            if (!json_path.has_value() || !json_type.has_value() ||
+                strict_cast ||
+                (json_type.value() != DataType::BOOL &&
+                 json_type.value() != DataType::VARCHAR)) {
+                return false;
+            }
+        }
+
+        auto value_type = segment_.GetFieldDataType(field_id_);
+        if (value_type == DataType::TIMESTAMPTZ) {
+            value_type = DataType::INT64;
+        }
+        ExprIndexRequirement requirement{
+            .field_id = field_id_,
+            .reader = RequiredReader::ValueLookup,
+            .value_type = value_type,
+        };
+        if constexpr (is_json) {
+            requirement.value_type = json_type.value();
+            requirement.is_json_field = true;
+            requirement.json_path = json_path.value();
+        }
+
+        const auto capabilities = segment_.IndexCapability(field_id_);
+        const auto decision = DetermineExecPath(requirement, capabilities);
+        if (!decision.key.has_value()) {
+            return false;
+        }
+        const auto* entry = capabilities.Find(*decision.key);
+        AssertInfo(entry != nullptr,
+                   "selected group-by index for field {} is absent from metadata",
+                   field_id_.get());
+        index_pin_ = segment_.PinIndex(op_ctx_, *decision.key);
+        if (!index_pin_) {
+            return false;
+        }
+        AssertInfo(segcore::SameCaps(entry->caps, index_pin_->Caps()),
+                   "group-by index metadata for field {} does not match reader "
+                   "capabilities",
+                   field_id_.get());
+
+        const index::IIndexReaderBase* reader = index_pin_.get();
+        if constexpr (is_json) {
+            if (entry->caps.json_paths) {
+                auto* json_reader =
+                    dynamic_cast<const index::IJsonIndexReader*>(reader);
+                AssertInfo(json_reader != nullptr,
+                           "selected JSON group-by index has no path reader");
+                json_view_ = json_reader->Resolve(requirement.json_path,
+                                                  entry->json_cast_type);
+                if (!json_view_) {
+                    return false;
+                }
+                reader = json_view_.get();
+            }
+        }
+        value_reader_ =
+            dynamic_cast<const index::IScalarValueReader<IndexValueType>*>(reader);
+        AssertInfo(value_reader_ != nullptr,
+                   "selected group-by index for field {} has no value reader",
+                   field_id_.get());
+        return true;
     }
 };
 
