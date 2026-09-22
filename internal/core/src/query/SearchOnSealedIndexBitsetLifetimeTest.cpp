@@ -530,7 +530,7 @@ SearchSealedNullableRawBruteForce(const NullableRawVectorFixture& fixture,
 
 }  // namespace
 
-TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
+TEST(StrictGroupHnswSearch, PreservesParametersForIndependentPhaseTwo) {
     constexpr int64_t n = 1000;
     auto schema = std::make_shared<Schema>();
     auto vector_field = schema->AddDebugField(
@@ -556,14 +556,8 @@ TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
     auto entry = MakeSealedIndexingEntry(
         knowhere::metric::COSINE,
         CreateTestCacheIndex("strict-hnsw-ef-regression", std::move(index)));
-    for (const auto& [ef, as_string] :
-         std::vector<std::pair<int, bool>>{{0, false},
-                                           {2, false},
-                                           {4, false},
-                                           {16, false},
-                                           {2, true},
-                                           {4, true},
-                                           {16, true}}) {
+    for (const auto& [ef, as_string] : std::vector<std::pair<int, bool>>{
+             {0, false}, {32, false}, {64, false}, {32, true}, {64, true}}) {
         SCOPED_TRACE(ef);
         auto info = MakeGroupBySearchInfo(
             vector_field, group_field, knowhere::metric::COSINE);
@@ -589,15 +583,18 @@ TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
         result.total_data_cnt_ = n;
         ASSERT_TRUE(result.CanSearchFilteredVectors());
         auto filter = std::make_shared<TargetBitmap>(n, false);
-        // Also exceed the backend's small-k default: it must choose a valid
-        // search budget from the new k without Milvus knowing about ef.
+        // Inherited explicit parameters are valid for both quotas. When ef is
+        // absent, leave default selection to the backend.
         for (int64_t remaining : {4, 32}) {
             auto completed = result.SearchFilteredVectors(filter, remaining);
             ASSERT_TRUE(completed);
             ASSERT_EQ((**completed).seg_offsets_.size(), remaining);
             for (auto id : (**completed).seg_offsets_) EXPECT_GE(id, 0);
             const auto phase2 = StrictGroupSearchInfo(info, remaining);
-            EXPECT_FALSE(phase2.search_params_.contains("ef"));
+            auto expected_params = original_params;
+            expected_params[knowhere::meta::TOPK] = remaining;
+            expected_params["skip_refine"] = false;
+            EXPECT_EQ(phase2.search_params_, expected_params);
         }
         std::vector<CompositeGroupKey> groups;
         std::vector<int64_t> offsets;
@@ -639,7 +636,7 @@ TEST(StrictGroupHnswSearch, UsesBackendDefaultsForIndependentPhaseTwo) {
     }
 }
 
-TEST(StrictGroupIvfSearch, IndependentPhaseTwoUsesDefaultProbes) {
+TEST(StrictGroupIvfSearch, IndependentPhaseTwoPreservesSearchParameters) {
     constexpr int64_t n = 2000;
     auto schema = std::make_shared<Schema>();
     auto field = schema->AddDebugField(
@@ -670,8 +667,10 @@ TEST(StrictGroupIvfSearch, IndependentPhaseTwoUsesDefaultProbes) {
     ASSERT_EQ((**completed).seg_offsets_.size(), 4);
     for (auto id : (**completed).seg_offsets_) EXPECT_GT(id, 0);
     const auto phase2 = StrictGroupSearchInfo(info, 4);
-    EXPECT_FALSE(phase2.search_params_.contains("nprobe"));
-    EXPECT_FALSE(phase2.search_params_.contains("ef"));
+    auto expected_params = params;
+    expected_params[knowhere::meta::TOPK] = 4;
+    expected_params["skip_refine"] = false;
+    EXPECT_EQ(phase2.search_params_, expected_params);
     EXPECT_EQ(info.search_params_, params);
 }
 
