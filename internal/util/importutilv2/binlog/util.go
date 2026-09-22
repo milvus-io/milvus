@@ -165,6 +165,27 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 		return insertLogs, schema, nil
 	}
 
+	readSchema, err := selectImportFields(schema, func(id int64) bool {
+		_, ok := insertLogs[id]
+		return ok
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	validInsertLogs := make(map[int64][]string)
+	for _, field := range typeutil.GetAllFieldSchemas(readSchema) {
+		validInsertLogs[field.GetFieldID()] = insertLogs[field.GetFieldID()]
+	}
+	return validInsertLogs, readSchema, nil
+}
+
+// selectImportFields shares the V1 backup import field-selection contract with
+// snapshot manifests. Columns are identified by physical FieldID, never by name.
+// Leave absent optional fields out of the read schema: the existing Import task
+// fills defaults, nullable fields and dynamic JSON using the full target schema.
+// In particular, do not let the manifest reader synthesize a missing dynamic
+// column as NULL or require it to be nullable before FillDynamicData can run.
+func selectImportFields(schema *schemapb.CollectionSchema, hasField func(int64) bool) (*schemapb.CollectionSchema, error) {
 	// Goal: support import binlog files to a different schema collection.
 	//
 	// What we know:
@@ -187,17 +208,13 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 	// Here we copy the schema for reading part of collection's data. The storage.NewBinlogRecordReader() requires
 	// a schema and the schema must be consistent with the binglog files([]*datapb.FieldBinlog)
 	cloneSchema := typeutil.Clone(schema)
-	cloneSchema.Fields = []*schemapb.FieldSchema{}                       // the Fields will be reset according to the validInsertLogs
-	cloneSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{} // the StructArrayFields will be reset according to the validInsertLogs
-	cloneSchema.EnableDynamicField = false                               // this flag will be reset
-
-	// this loop will reset the cloneSchema.Fields and return validInsertLogs
-	validInsertLogs := make(map[int64][]string)
+	cloneSchema.Fields = []*schemapb.FieldSchema{}
+	cloneSchema.StructArrayFields = []*schemapb.StructArrayFieldSchema{}
+	cloneSchema.EnableDynamicField = false // this flag will be reset
 
 	for _, field := range schema.GetFields() {
 		id := field.GetFieldID()
-		logs, ok := insertLogs[id]
-		if !ok {
+		if !hasField(id) {
 			// dynamic field, nullable field, default value field, optional, no need to check
 			// they will be filled by AppendNullableDefaultFieldsData
 			if field.GetIsDynamic() || field.GetNullable() || field.GetDefaultValue() != nil {
@@ -206,11 +223,8 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 			// primary key is required
 			// function output field is also required
 			// the other field must be provided
-			return nil, nil, merr.WrapErrImportFailedMsg("no binlog for field:%s", field.GetName())
+			return nil, merr.WrapErrImportFailedMsg("no binlog for field:%s", field.GetName())
 		} else {
-			// these binlogs are intend to be imported
-			validInsertLogs[id] = logs
-
 			// reset the cloneSchema.Fields
 			cloneSchema.Fields = append(cloneSchema.Fields, field)
 			if field.IsDynamic {
@@ -221,28 +235,21 @@ func verify(schema *schemapb.CollectionSchema, storageVersion int64, insertLogs 
 
 	for _, structArrayField := range schema.GetStructArrayFields() {
 		missingFields := make([]string, 0)
-		presentLogs := make(map[int64][]string, len(structArrayField.GetFields()))
 		for _, field := range structArrayField.GetFields() {
 			id := field.GetFieldID()
-			logs, ok := insertLogs[id]
-			if !ok {
+			if !hasField(id) {
 				missingFields = append(missingFields, field.GetName())
-				continue
 			}
-			presentLogs[id] = logs
 		}
 
 		if len(missingFields) == len(structArrayField.GetFields()) && structArrayField.GetNullable() {
 			continue
 		}
 		if len(missingFields) > 0 {
-			return nil, nil, merr.WrapErrImportFailedMsg("no binlog for struct field:%s", missingFields[0])
-		}
-		for id, logs := range presentLogs {
-			validInsertLogs[id] = logs
+			return nil, merr.WrapErrImportFailedMsg("no binlog for struct field:%s", missingFields[0])
 		}
 		cloneSchema.StructArrayFields = append(cloneSchema.StructArrayFields, structArrayField)
 	}
 
-	return validInsertLogs, cloneSchema, nil
+	return cloneSchema, nil
 }

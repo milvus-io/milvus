@@ -325,6 +325,10 @@ message TxnMessageHeader {}
 message ImportMessageHeader {
     // Absent on legacy jobs, whose commit is completed by per-channel RPCs.
     bool commit_by_coordinator = 1;
+  // When present, one descriptor per ImportMsg.files entry in the same order.
+  // Kept in the replicated header because the public ImportFile has no internal
+  // snapshot descriptor. ACK attaches each descriptor before allocating IDs.
+  repeated internal.SnapshotImportSource snapshot_sources = 2;
 }
 
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.

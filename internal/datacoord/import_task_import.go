@@ -137,13 +137,13 @@ func (t *importTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster) {
 	req, err := AssembleImportRequest(t, job, t.meta, t.alloc)
 	if err != nil {
 		mlog.Warn(context.TODO(), "assemble import request failed", WrapTaskLog(t, mlog.Err(err))...)
-		if errors.Is(err, importid.ErrIDRangeTooSmall) {
-			// The one assemble failure a retry cannot fix: the per-file range reserved
-			// fewer ids than the file's row count, so the datanode cursor cannot cover
-			// it. Neither number changes by rescheduling, so fail the job now with the
-			// precise reason -- otherwise the job stays Importing (checkImportingJob only
-			// advances once every task is Completed) until tryTimeoutJob replaces the
-			// reason with a generic timeout message.
+		if errors.Is(err, importid.ErrIDRangeTooSmall) || errors.Is(err, errSnapshotTaskSource) {
+			// Immutable source mismatches and insufficient reservations cannot
+			// be repaired by retrying. Neither the source nor the per-file range
+			// and row count changes by rescheduling, so fail the job now
+			// and keep the precise reason -- otherwise the job stays Importing
+			// (checkImportingJob only advances once every task is Completed) until
+			// tryTimeoutJob overwrites the reason with a generic timeout message.
 			//
 			// Only the job is updated, as in preimport: the checker's tryFailingTasks
 			// marks this task Failed on the next tick.

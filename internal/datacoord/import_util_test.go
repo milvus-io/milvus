@@ -251,7 +251,8 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 		importMeta: importMeta,
 	}
 	pt.(*preImportTask).task.Store(preImportTaskProto)
-	preimportReq := AssemblePreImportRequest(pt, job)
+	preimportReq, err := AssemblePreImportRequest(pt, job)
+	assert.NoError(t, err)
 	assert.Equal(t, pt.GetJobID(), preimportReq.GetJobID())
 	assert.Equal(t, pt.GetTaskID(), preimportReq.GetTaskID())
 	assert.Equal(t, pt.GetCollectionID(), preimportReq.GetCollectionID())
@@ -331,7 +332,8 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 		importMeta: importMeta,
 	}
 	pt.(*preImportTask).task.Store(preImportTaskProto)
-	preimportReq := AssemblePreImportRequest(pt, job)
+	preimportReq, err := AssemblePreImportRequest(pt, job)
+	assert.NoError(t, err)
 	assert.Equal(t, pt.GetJobID(), preimportReq.GetJobID())
 	assert.Equal(t, pt.GetTaskID(), preimportReq.GetTaskID())
 	assert.Equal(t, pt.GetCollectionID(), preimportReq.GetCollectionID())

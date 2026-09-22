@@ -137,6 +137,14 @@ func (t *PreImportTask) Clone() Task {
 }
 
 func (t *PreImportTask) Execute() []*conc.Future[any] {
+	if err := importutilv2.ValidateSnapshotTaskPartitions(t.req.GetImportFiles(), t.GetPartitionIDs()); err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
+	if err := importutilv2.ValidateSnapshotImportTask(t.req.GetImportFiles(), t.req.GetOptions()); err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
 	bufferSize := int(t.GetBufferSize())
 	mlog.Info(t.ctx, "start to preimport", WrapLogFields(t,
 		mlog.Int("bufferSize", bufferSize),
@@ -149,9 +157,10 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
+	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, t.req.GetStorageConfig(), t.options)
 
 	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.options, bufferSize, t.req.GetStorageConfig())
+		reader, err := readers.NewReader(t.ctx, t.GetSchema(), file, bufferSize)
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())

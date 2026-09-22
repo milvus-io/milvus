@@ -27,6 +27,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -42,8 +43,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
+
+func TestSnapshotPartitionMappingTaskMismatch(t *testing.T) {
+	paramtable.Init()
+	file := &internalpb.ImportFile{SnapshotSource: &internalpb.SnapshotImportSource{Version: 3, TargetPartitionId: 20}}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+	for _, partitions := range [][]int64{{10}, {10, 20}} {
+		manager := NewTaskManager()
+		pre := NewPreImportTask(&datapb.PreImportRequest{TaskID: 1, Schema: schema, PartitionIDs: partitions, ImportFiles: []*internalpb.ImportFile{file}}, manager, nil)
+		imp := NewImportTask(&datapb.ImportRequest{TaskID: 2, Schema: schema, PartitionIDs: partitions, Files: []*internalpb.ImportFile{file}}, manager, nil, nil)
+		for _, task := range []Task{pre, imp} {
+			manager.Add(task)
+			require.ErrorIs(t, conc.AwaitAll(task.Execute()...), merr.ErrServiceInternal)
+			require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(task.GetTaskID()).GetState())
+			task.Cancel()
+		}
+	}
+}
 
 type sampleRow struct {
 	FieldString      string    `json:"pk,omitempty"`

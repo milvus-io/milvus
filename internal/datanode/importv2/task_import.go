@@ -167,6 +167,14 @@ func (t *ImportTask) Clone() Task {
 }
 
 func (t *ImportTask) Execute() []*conc.Future[any] {
+	if err := importutilv2.ValidateSnapshotTaskPartitions(t.req.GetFiles(), t.GetPartitionIDs()); err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
+	if err := importutilv2.ValidateSnapshotImportTask(t.req.GetFiles(), t.req.GetOptions()); err != nil {
+		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
+	}
 	bufferSize := t.GetBufferSize()
 	mlog.Info(t.ctx, "start to import", WrapLogFields(t,
 		mlog.Int64("bufferSize", bufferSize),
@@ -177,9 +185,10 @@ func (t *ImportTask) Execute() []*conc.Future[any] {
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := t.req
+	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, req.GetStorageConfig(), req.GetOptions())
 
 	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, req.GetOptions(), int(bufferSize), t.req.GetStorageConfig())
+		reader, err := readers.NewReader(t.ctx, t.GetSchema(), file, int(bufferSize))
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
