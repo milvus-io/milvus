@@ -64,17 +64,8 @@ ApplyStrictGroupSkipRefine(const SearchInfo& info,
 inline SearchInfo
 StrictGroupSearchInfo(const SearchInfo& original, int64_t remaining_topk) {
     auto info = original;
-    // Phase two is an independent filtered Search. Do not inherit iterator
-    // tuning (ef, nprobe, search_list, etc.); let the backend choose defaults
-    // for the new quota. Retain the typed query context and metric.
-    info.search_params_ = knowhere::Json::object();
-    // BM25's collection-level statistic is part of the scoring context, not
-    // an index tuning parameter. Keep scores comparable across both phases.
-    if (original.metric_type_ == knowhere::metric::BM25 &&
-        original.search_params_.contains(knowhere::meta::BM25_AVGDL)) {
-        info.search_params_[knowhere::meta::BM25_AVGDL] =
-            original.search_params_[knowhere::meta::BM25_AVGDL];
-    }
+    // Inherit all query parameters. Only override per-group execution settings;
+    // backend-specific parameter interpretation and validation stay in Knowhere.
     // Providers are registered only for nq=1. Set the backend parameter before
     // converting per-group completion into an ordinary (non-grouped) Search.
     ApplyStrictGroupSkipRefine(original, 1, info.search_params_);
