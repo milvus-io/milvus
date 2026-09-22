@@ -1923,6 +1923,134 @@ func TestBuildMilvusTableFileInfosFromSnapshotMetadata_NoStorageV2(t *testing.T)
 	assert.Contains(t, err.Error(), "common.storage.useLoonFFI=true")
 }
 
+func TestBuildMilvusTableFileInfosFromSnapshotMetadata_SegmentFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+	}{
+		{"no_reader", "requires source segment manifests"},
+		{"read_error", "read source segment manifest"},
+		{"empty_segment", "empty segment"},
+		{"empty_manifest", "empty storagev2 manifest"},
+		{"resolve_error", "resolve source segment manifest"},
+		{"missing_segment", "no source segment manifest"},
+		{"zero_rows", "non-positive row count"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			metadata := &datapb.SnapshotMetadata{
+				ManifestList: []string{"segment.avro"},
+				Storagev2ManifestList: []*datapb.StorageV2SegmentManifest{
+					{SegmentId: 10, Manifest: MarshalManifestPath("source/10", 1)},
+				},
+			}
+			read := func(string, int32) (*datapb.SegmentDescription, error) {
+				switch tc.name {
+				case "read_error":
+					return nil, context.DeadlineExceeded
+				case "empty_segment":
+					return nil, nil
+				case "missing_segment":
+					return &datapb.SegmentDescription{SegmentId: 20, NumOfRows: 1}, nil
+				case "zero_rows":
+					return &datapb.SegmentDescription{SegmentId: 10}, nil
+				default:
+					return &datapb.SegmentDescription{SegmentId: 10, NumOfRows: 1}, nil
+				}
+			}
+			if tc.name == "no_reader" {
+				read = nil
+			}
+			if tc.name == "empty_manifest" {
+				metadata.Storagev2ManifestList[0].Manifest = ""
+			}
+			resolve := func(manifest string) (string, error) {
+				if tc.name == "resolve_error" {
+					return "", context.DeadlineExceeded
+				}
+				return manifest, nil
+			}
+			data, err := protojson.Marshal(metadata)
+			require.NoError(t, err)
+			_, err = buildMilvusTableFileInfosFromSnapshotMetadata(data, read, resolve)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.reason)
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
+}
+
+func TestMilvusTableSnapshotMetadataInvalid(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		data    string
+		wantErr error
+	}{
+		{"truncated_json", `{"corrupt manifest`, merr.ErrDataIntegrity},
+		{"empty_object", "", merr.ErrDataIntegrity},
+		{"invalid_field_type", `{"format_version":"invalid"}`, merr.ErrDataIntegrity},
+		{"unsupported_version", `{"format_version":99999}`, merr.ErrOperationNotSupported},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Exercise both consumers with real parsing. Only object I/O is patched.
+			read := mockey.Mock(readExternalSourceFile).Return([]byte(tc.data), nil).Build()
+			defer read.UnPatch()
+			_, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.Error(t, err)
+			assert.ErrorIs(t, merr.Wrap(err, "outer context"), tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Code(err))
+			assert.Contains(t, err.Error(), "parse milvus snapshot metadata")
+
+			_, err = buildMilvusTableFileInfosFromSnapshotMetadata([]byte(tc.data), nil, nil)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.wantErr)
+			assert.Equal(t, merr.Code(tc.wantErr), merr.Code(err))
+		})
+	}
+}
+
+func TestReadMilvusTableSnapshotMetadata_ReadFailureIsNotInvalidMetadata(t *testing.T) {
+	for _, readErr := range []error{context.DeadlineExceeded, ErrLoonTransient} {
+		t.Run(readErr.Error(), func(t *testing.T) {
+			read := mockey.Mock(readExternalSourceFile).Return(nil, readErr).Build()
+			defer read.UnPatch()
+			_, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+				`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+			require.Error(t, err)
+			assert.ErrorIs(t, err, readErr)
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
+}
+
+func TestReadMilvusTableSnapshotMetadata_ValidMetadata(t *testing.T) {
+	read := mockey.Mock(readExternalSourceFile).Return([]byte(`{"format_version":2}`), nil).Build()
+	defer read.UnPatch()
+	metadata, err := ReadMilvusTableSnapshotMetadata("s3://bucket/metadata.json",
+		`{"format":"milvus-table"}`, nil, ExternalSpecContext{})
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), metadata.GetFormatVersion())
+}
+
+func TestReadMilvusTableSnapshotMetadata_InvalidSource(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		spec   string
+	}{
+		{"s3://bucket/directory", `{"format":"milvus-table"}`},
+		{"s3://bucket/metadata.json", `{`},
+	} {
+		t.Run(tc.source, func(t *testing.T) {
+			_, err := ReadMilvusTableSnapshotMetadata(tc.source, tc.spec, nil, ExternalSpecContext{})
+			require.Error(t, err)
+			assert.NotErrorIs(t, err, merr.ErrDataIntegrity)
+			assert.NotErrorIs(t, err, merr.ErrOperationNotSupported)
+		})
+	}
+}
+
 func TestBuildMilvusTableFileInfosFromSnapshotMetadata_SourceSegmentDeltalogsSkipped(t *testing.T) {
 	metadata := &datapb.SnapshotMetadata{
 		FormatVersion: 2,
