@@ -318,9 +318,12 @@ class PositionedFileWriter {
     PositionedFileWriter&
     operator=(const PositionedFileWriter&) = delete;
 
+    // Concurrent calls must write disjoint ranges. DIRECT mode requires aligned
+    // offsets and non-tail sizes; an unaligned source is copied internally.
     void
     WriteAt(size_t file_offset, const void* data, size_t size);
 
+    // Call only after every WriteAt has drained; truncates padding and closes.
     size_t
     Finish();
 

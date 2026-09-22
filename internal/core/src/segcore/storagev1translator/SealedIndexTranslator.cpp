@@ -1,4 +1,6 @@
 #include "segcore/storagev1translator/SealedIndexTranslator.h"
+#include "folly/coro/BlockingWait.h"
+#include "storage/AsyncLoadExecutor.h"
 
 #include <filesystem>
 #include <optional>
@@ -85,7 +87,38 @@ SealedIndexTranslator::SealedIndexTranslator(
     const bool use_async_load = file_manager_context_.use_async_load.value_or(
         storagev2translator::StorageV2AsyncLoadEnabled());
     file_manager_context_.use_async_load = use_async_load;
+    const auto version =
+        milvus::index::GetValueFromConfig<int32_t>(
+            config_, milvus::index::SCALAR_INDEX_ENGINE_VERSION)
+            .value_or(1);
     const bool is_vector = IsVectorDataType(index_load_info_.field_type);
+    const bool inspect_legacy =
+        is_vector || (version < 3 && index_info_.index_type !=
+                                         milvus::index::FMINDEX_INDEX_TYPE);
+    if (inspect_legacy && file_manager_context_.Valid() &&
+        !index_load_info_.index_files.empty()) {
+        auto files = index_load_info_.index_files;
+        if (index_info_.index_type == milvus::index::RTREE_INDEX_TYPE) {
+            storage::MemFileManagerImpl manager(file_manager_context_);
+            for (auto& file : files) {
+                if (file.find('/') == std::string::npos) {
+                    file = manager.GetRemoteIndexObjectPrefix() + "/" + file;
+                }
+            }
+        }
+        auto inspect = [&]() {
+            return storage::InspectLegacyIndexFilesAsync(
+                files,
+                file_manager_context_.chunkManagerPtr,
+                file_manager_context_.fs,
+                proto::common::LoadPriority::HIGH);
+        };
+        file_manager_context_.legacy_index_files =
+            use_async_load ? folly::coro::blockingWait(inspect().scheduleOn(
+                                 storage::ResolveAsyncLoadExecutor(
+                                     {}, proto::common::LoadPriority::HIGH)))
+                           : folly::coro::blockingWait(inspect());
+    }
     if (!is_vector) {
         auto resources =
             milvus::index::IndexFactory::GetInstance()
@@ -111,7 +144,9 @@ SealedIndexTranslator::SealedIndexTranslator(
             index_load_info_.index_params,
             index_load_info_.enable_mmap,
             index_load_info_.num_rows,
-            index_load_info_.dim);
+            index_load_info_.dim,
+            index_load_info_.index_files,
+            file_manager_context_);
     load_resource_request_ =
         index_load_info_.load_resource_request.value_or(estimated);
 }
@@ -195,7 +230,7 @@ SealedIndexTranslator::get_cells(milvus::OpContext* ctx,
         index->LoadUnified(config_, ctx);
     } else {
         LOG_INFO("load index with configs: {}", config_.dump());
-        index->Load(ctx_, config_);
+        index->Load(ctx_, config_, ctx);
     }
 
     std::vector<std::pair<cid_t, std::unique_ptr<milvus::index::IndexBase>>>

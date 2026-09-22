@@ -14,10 +14,15 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <shared_mutex>
+#include <folly/coro/BlockingWait.h>
 
 #include "index/TextMatchIndex.h"
+#include "common/OpContext.h"
 #include "index/InvertedIndexUtil.h"
 #include "index/Utils.h"
+#include "segcore/storagev2translator/StorageV2Config.h"
+#include "storage/AsyncLoadExecutor.h"
+#include "storage/EntryStreamUtils.h"
 #include "storage/ThreadPools.h"
 
 namespace milvus::index {
@@ -187,6 +192,9 @@ TextMatchIndex::UploadUnified(const Config& config) {
 
 void
 TextMatchIndex::Load(const Config& config, milvus::OpContext* op_ctx) {
+    const auto token =
+        op_ctx ? op_ctx->cancellation_token : folly::CancellationToken{};
+    storage::ThrowIfCancelled(token, "TextMatchIndex::Load");
     auto index_files =
         GetValueFromConfig<std::vector<std::string>>(config, INDEX_FILES);
     AssertInfo(index_files.has_value(),
@@ -220,6 +228,27 @@ TextMatchIndex::Load(const Config& config, milvus::OpContext* op_ctx) {
                "stats_base_path is required for loading text index");
     for (auto& f : files_value) {
         f = base_path + "/" + f;
+    }
+
+    const bool use_async_load =
+        disk_file_manager_->GetAsyncLoadEnabled().value_or(
+            segcore::storagev2translator::StorageV2AsyncLoadEnabled());
+    if (use_async_load) {
+        auto load_config = config;
+        load_config[INDEX_FILES] = std::move(files_value);
+        try {
+            // The inherited Tantivy loader selects the text directory via
+            // is_index_file_. Opening the engine stays on the async worker.
+            folly::coro::blockingWait(
+                LoadLegacyAsync(load_config, token)
+                    .scheduleOn(
+                        storage::ResolveAsyncLoadExecutor({}, load_priority)));
+        } catch (const std::bad_alloc& error) {
+            throw SegcoreError(MemAllocateFailed, error.what());
+        } catch (const folly::OperationCancelled& error) {
+            throw SegcoreError(FollyCancel, error.what());
+        }
+        return;
     }
 
     // Reuse the base metadata loader so both the legacy single null-offset

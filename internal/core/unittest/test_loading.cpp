@@ -127,7 +127,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"M", "30"},
          {"mmap", "true"},
          {"field_type", "vector_float"}},
-        {1UL * 1024 * 1024 * 1024 / 8,
+        {DEFAULT_FIELD_MAX_MEMORY_LIMIT +
+             milvus::storage::FileWriter::MAX_BUFFER_SIZE,
          1UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
@@ -147,7 +148,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"M", "30"},
          {"mmap", "true"},
          {"field_type", "vector_fp16"}},
-        {1UL * 1024 * 1024 * 1024 / 8,
+        {DEFAULT_FIELD_MAX_MEMORY_LIMIT +
+             milvus::storage::FileWriter::MAX_BUFFER_SIZE,
          1UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,
@@ -167,7 +169,8 @@ static const auto kIndexLoadTestValues = ::testing::Values(
          {"M", "30"},
          {"mmap", "true"},
          {"field_type", "vector_int8"}},
-        {1UL * 1024 * 1024 * 1024 / 8,
+        {DEFAULT_FIELD_MAX_MEMORY_LIMIT +
+             milvus::storage::FileWriter::MAX_BUFFER_SIZE,
          1UL * 1024 * 1024 * 1024,
          0UL,
          1UL * 1024 * 1024 * 1024,

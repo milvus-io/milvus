@@ -15,6 +15,12 @@
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "storage/AsyncLoadExecutor.h"
 #include "folly/system/ThreadName.h"
+#include <future>
+#include <filesystem>
+#include "arrow/filesystem/localfs.h"
+#include "folly/ScopeGuard.h"
+#include "common/OpContext.h"
+#include "storage/FileWriter.h"
 #include <nlohmann/detail/iterators/iteration_proxy.hpp>
 #include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
@@ -585,29 +591,36 @@ TEST(TextMatch, V2LoadSlicedNullOffsets) {
     ASSERT_TRUE(found_slice_meta);
 
     storage::DiskFileManagerImpl file_manager(ctx);
-    for (bool mmap_enabled : {false, true}) {
-        Config config;
-        config[index::INDEX_FILES] = files;
-        config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
-        config[index::ENABLE_MMAP] = mmap_enabled;
+    const auto old_enabled = storagev2translator::StorageV2AsyncLoadEnabled();
+    const auto restore = folly::makeGuard([&] {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled);
+    });
+    for (const bool enabled : {false, true}) {
+        storagev2translator::SetStorageV2AsyncLoadEnabled(enabled);
+        for (bool mmap_enabled : {false, true}) {
+            Config config;
+            config[index::INDEX_FILES] = files;
+            config[STATS_BASE_PATH_KEY] = file_manager.GetRemoteTextLogPrefix();
+            config[index::ENABLE_MMAP] = mmap_enabled;
 
-        auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
-        loaded->Load(config);
+            auto loaded = std::make_unique<index::TextMatchIndex>(ctx);
+            loaded->Load(config);
 
-        EXPECT_EQ(loaded->ValidityBitmapByteSize(),
-                  TargetBitmap(kRows).size_in_bytes());
-        auto nulls = loaded->IsNull();
-        ASSERT_EQ(nulls.size(), kRows);
-        EXPECT_EQ(nulls.count(), kRows);
+            EXPECT_EQ(loaded->ValidityBitmapByteSize(),
+                      TargetBitmap(kRows).size_in_bytes());
+            auto nulls = loaded->IsNull();
+            ASSERT_EQ(nulls.size(), kRows);
+            EXPECT_EQ(nulls.count(), kRows);
 
-        auto valid = loaded->IsNotNull();
-        ASSERT_EQ(valid.size(), kRows);
-        EXPECT_EQ(valid.count(), 0);
+            auto valid = loaded->IsNotNull();
+            ASSERT_EQ(valid.size(), kRows);
+            EXPECT_EQ(valid.count(), 0);
 
-        std::string excluded = "alpha";
-        auto not_in = loaded->NotIn(1, &excluded);
-        ASSERT_EQ(not_in.size(), kRows);
-        EXPECT_EQ(not_in.count(), 0);
+            std::string excluded = "alpha";
+            auto not_in = loaded->NotIn(1, &excluded);
+            ASSERT_EQ(not_in.size(), kRows);
+            EXPECT_EQ(not_in.count(), 0);
+        }
     }
 }
 
@@ -657,12 +670,14 @@ TEST(TextMatch, TranslatorResourceAccountsForValidityBitmap) {
         if (mmap_enabled) {
             EXPECT_EQ(estimated_loaded.memory_bytes, bitmap_bytes);
             EXPECT_EQ(estimated_loaded.file_bytes, index_size);
-            EXPECT_EQ(estimated_overhead.memory_bytes, index_size);
+            EXPECT_GE(estimated_overhead.memory_bytes,
+                      storage::FileWriter::MAX_BUFFER_SIZE);
             EXPECT_EQ(estimated_overhead.file_bytes, 0);
         } else {
             EXPECT_EQ(estimated_loaded.memory_bytes, index_size + bitmap_bytes);
             EXPECT_EQ(estimated_loaded.file_bytes, 0);
-            EXPECT_EQ(estimated_overhead.memory_bytes, 0);
+            EXPECT_GE(estimated_overhead.memory_bytes,
+                      storage::FileWriter::MAX_BUFFER_SIZE);
             EXPECT_EQ(estimated_overhead.file_bytes, index_size);
         }
 
@@ -694,8 +709,9 @@ class ObservedTextMatchIndex : public index::TextMatchIndex {
         TextMatchIndex::ComputeByteSize();
     }
     std::string
-    LocalDirectory() const {
-        return disk_file_manager_->GetLocalIndexObjectPrefix();
+    LocalDirectory(bool packed) const {
+        return packed ? disk_file_manager_->GetLocalIndexObjectPrefix()
+                      : disk_file_manager_->GetLocalTextIndexPrefix();
     }
     std::string finalizer_thread;
     std::function<void()> on_finalize;
@@ -715,11 +731,19 @@ class TextMatchNativeFileSystem : public arrow::fs::SubTreeFileSystem {
             MakeFinished(std::static_pointer_cast<arrow::io::RandomAccessFile>(
                 files.at(path)));
     }
+
+    arrow::Result<std::shared_ptr<arrow::io::RandomAccessFile>>
+    OpenInputFile(const std::string& path) override {
+        EXPECT_TRUE(folly::getCurrentThreadName().value_or("").starts_with(
+            "MILVUS_ASYNC"));
+        return std::static_pointer_cast<arrow::io::RandomAccessFile>(
+            files.at(path));
+    }
     std::map<std::string, std::shared_ptr<test::ControlledDirectReadFile>>
         files;
 };
 
-class PackedTextMatchAsyncLoadTest : public ::testing::Test {
+class TextMatchAsyncLoadTest : public ::testing::Test {
  protected:
     void
     SetUp() override {
@@ -744,7 +768,7 @@ class PackedTextMatchAsyncLoadTest : public ::testing::Test {
         storagev2translator::SetStorageV2AsyncLoadEnabled(old_enabled_);
     }
     Config
-    Upload(const storage::FileManagerContext& ctx) {
+    Upload(const storage::FileManagerContext& ctx, bool packed) {
         index::TextMatchIndex builder(ctx,
                                       index::TANTIVY_INDEX_LATEST_VERSION,
                                       "milvus_tokenizer",
@@ -756,7 +780,8 @@ class PackedTextMatchAsyncLoadTest : public ::testing::Test {
             DataType::VARCHAR, DataType::NONE, true, 1, texts.size());
         data->FillFieldData(texts.data(), &valid, texts.size(), 0);
         builder.BuildIndexFromFieldData({data}, true, 0);
-        const auto stats = builder.UploadUnified({});
+        const auto stats =
+            packed ? builder.UploadUnified({}) : builder.Upload({});
         index_size_ = stats->GetMemSize();
         std::vector<std::string> files;
         for (const auto& file : stats->GetSerializedIndexFileInfo())
@@ -785,10 +810,11 @@ class PackedTextMatchAsyncLoadTest : public ::testing::Test {
     size_t old_slots_{};
 };
 
-TEST_F(PackedTextMatchAsyncLoadTest, HeapAndMmapReloadAcrossRolloutChanges) {
-    {
-        auto ctx = CreateTextMatchTestFileManagerContext(1011);
-        auto config = Upload(ctx);
+TEST_F(TextMatchAsyncLoadTest, HeapAndMmapReloadAcrossRolloutChanges) {
+    FileSliceSizeGuard slices(32);  // Exercise sliced Tantivy files.
+    for (const bool packed : {false, true}) {
+        auto ctx = CreateTextMatchTestFileManagerContext(1010 + packed);
+        auto config = Upload(ctx, packed);
         for (const bool mmap : {false, true}) {
             config[index::ENABLE_MMAP] = mmap;
             for (const bool planning_enabled : {false, true}) {
@@ -823,29 +849,37 @@ TEST_F(PackedTextMatchAsyncLoadTest, HeapAndMmapReloadAcrossRolloutChanges) {
                         direct.finalizer_thread.starts_with("MILVUS_ASYNC"),
                         enabled);
                     CheckQuery(direct);
-                    EXPECT_EQ(std::filesystem::exists(direct.LocalDirectory()),
-                              mmap);
+                    EXPECT_EQ(
+                        std::filesystem::exists(direct.LocalDirectory(packed)),
+                        mmap);
                 }
             }
         }
     }
 }
 
-TEST_F(PackedTextMatchAsyncLoadTest,
-       TranslatorNativeReadSuspendsAndDrainsOnCancel) {
-    {
-        auto ctx = CreateTextMatchTestFileManagerContext(1013);
-        auto config = Upload(ctx);
+TEST_F(TextMatchAsyncLoadTest, TranslatorNativeReadSuspendsAndDrainsOnCancel) {
+    for (const bool packed : {false, true}) {
+        auto ctx = CreateTextMatchTestFileManagerContext(1012 + packed);
+        auto config = Upload(ctx, packed);
         auto fs = std::make_shared<TextMatchNativeFileSystem>();
         for (const auto& file :
              config.at(index::INDEX_FILES).get<std::vector<std::string>>()) {
             const auto path =
                 config.at(STATS_BASE_PATH_KEY).get<std::string>() + "/" + file;
             std::vector<uint8_t> bytes;
-            auto input = ctx.fs->OpenInputFile(path).ValueOrDie();
-            const auto size = input->GetSize().ValueOrDie();
-            bytes.resize(size);
-            ASSERT_EQ(input->ReadAt(0, size, bytes.data()).ValueOrDie(), size);
+            if (packed) {
+                auto input = ctx.fs->OpenInputFile(path).ValueOrDie();
+                const auto size = input->GetSize().ValueOrDie();
+                bytes.resize(size);
+                ASSERT_EQ(input->ReadAt(0, size, bytes.data()).ValueOrDie(),
+                          size);
+            } else {
+                bytes.resize(ctx.chunkManagerPtr->Size(path));
+                ASSERT_EQ(
+                    ctx.chunkManagerPtr->Read(path, bytes.data(), bytes.size()),
+                    bytes.size());
+            }
             fs->files.emplace(path,
                               std::make_shared<test::ControlledDirectReadFile>(
                                   std::move(bytes)));
@@ -853,7 +887,11 @@ TEST_F(PackedTextMatchAsyncLoadTest,
         ctx.fs = fs;
         storagev1translator::TextMatchIndexTranslator translator(
             {true, 3, 101, "{}", index_size_, 3, "", ""}, ctx, config);
-        const auto first_path = fs->files.begin()->first;
+        // Legacy reads metadata before disk payloads. V3 starts with its footer.
+        const auto first_path =
+            packed ? fs->files.begin()->first
+                   : config.at(STATS_BASE_PATH_KEY).get<std::string>() + "/" +
+                         index::INDEX_NULL_OFFSET_FILE_NAME;
         auto first = fs->files.at(first_path);
         first->ResetCounters();
         first->SetAutoComplete(false);
@@ -869,13 +907,17 @@ TEST_F(PackedTextMatchAsyncLoadTest,
                 first->Complete(i);
             pending.wait();
         });
-        // Opening reads magic, footer and directory without admission. Wait
-        // for the admitted _meta payload before probing cancellation and slots.
-        for (size_t i = 0; i < 3; ++i) {
-            ASSERT_TRUE(first->WaitForCallCount(i + 1));
-            first->Complete(i);
+        if (packed) {
+            // Opening reads magic, footer and directory without admission. Wait
+            // for the admitted _meta payload before probing cancellation and slots.
+            for (size_t i = 0; i < 3; ++i) {
+                ASSERT_TRUE(first->WaitForCallCount(i + 1));
+                first->Complete(i);
+            }
+            ASSERT_TRUE(first->WaitForCallCount(4));
+        } else {
+            ASSERT_TRUE(first->WaitForCallCount(1));
         }
-        ASSERT_TRUE(first->WaitForCallCount(4));
         auto probe = std::make_shared<std::promise<void>>();
         auto ready = probe->get_future();
         storage::ResolveAsyncLoadExecutor({}, proto::common::LoadPriority::LOW)
@@ -892,7 +934,7 @@ TEST_F(PackedTextMatchAsyncLoadTest,
         EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(30)),
                   std::future_status::timeout);
         first->SetAutoComplete(true);
-        first->Complete(3);
+        first->Complete(packed ? 3 : 0);
         pending.wait();
         drain.dismiss();
         try {
@@ -908,10 +950,10 @@ TEST_F(PackedTextMatchAsyncLoadTest,
     }
 }
 
-TEST_F(PackedTextMatchAsyncLoadTest, FinalizerCancellationCleansFiles) {
-    {
-        auto ctx = CreateTextMatchTestFileManagerContext(1015);
-        auto config = Upload(ctx);
+TEST_F(TextMatchAsyncLoadTest, FinalizerCancellationCleansFiles) {
+    for (const bool packed : {false, true}) {
+        auto ctx = CreateTextMatchTestFileManagerContext(1014 + packed);
+        auto config = Upload(ctx, packed);
         for (const bool mmap : {false, true}) {
             config[index::ENABLE_MMAP] = mmap;
             folly::CancellationSource cancel;
@@ -925,7 +967,8 @@ TEST_F(PackedTextMatchAsyncLoadTest, FinalizerCancellationCleansFiles) {
             } catch (const SegcoreError& error) {
                 EXPECT_EQ(error.get_error_code(), FollyCancel);
             }
-            EXPECT_FALSE(std::filesystem::exists(loaded.LocalDirectory()));
+            EXPECT_FALSE(
+                std::filesystem::exists(loaded.LocalDirectory(packed)));
         }
     }
 }

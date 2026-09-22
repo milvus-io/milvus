@@ -368,6 +368,7 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto uuid_string = boost::uuids::to_string(uuid);
     // TODO: change the mmap path of marisa index
     auto file_name = std::string("/tmp/") + uuid_string;
+    auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
 
     auto index = set.GetByName(MARISA_TRIE_INDEX);
     auto len = index->size;
@@ -384,7 +385,6 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     }
 
     if (config.contains(MMAP_FILE_PATH)) {
-        auto trie_file_raii = std::make_unique<MmapFileRAII>(file_name);
         try {
             trie_.mmap(file_name.c_str());
         } catch (const marisa::Exception& e) {
@@ -411,10 +411,15 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
         mmap_file_raii_ = nullptr;
     }
 
-    if (!config.contains(MMAP_FILE_PATH)) {
-        unlink(file_name.c_str());
-    }
+    // The local guard removes the temporary file in memory mode, including
+    // failures while writing or opening the trie. Mmap mode owns it above.
+    trie_file_raii.reset();
 
+    FinishLegacyLoad(set);
+}
+
+void
+StringIndexMarisa::FinishLegacyLoad(const BinarySet& set) {
     auto str_ids = set.GetByName(MARISA_STR_IDS);
     auto str_ids_len = str_ids->size;
     ValidateMarisaEntryElementSize(
@@ -429,6 +434,57 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     built_ = true;
     total_size_ = CalculateTotalSize();
     ComputeByteSize();
+}
+
+folly::coro::Task<void>
+StringIndexMarisa::FinishLegacyLoadAsync(BinarySet binary,
+                                         const Config& config,
+                                         folly::CancellationToken token) {
+    token = folly::cancellation_token_merge(
+        token, co_await folly::coro::co_current_cancellation_token);
+    storage::ThrowIfCancelled(token, "Marisa::FinalizeLegacy");
+    const auto file_name =
+        "/tmp/" + boost::uuids::to_string(boost::uuids::random_generator()());
+    const auto priority =
+        GetValueFromConfig<proto::common::LoadPriority>(config, LOAD_PRIORITY)
+            .value_or(proto::common::LoadPriority::HIGH);
+    const auto index = binary.GetByName(MARISA_TRIE_INDEX);
+    std::unique_ptr<MmapFileRAII> staged_file;
+    std::exception_ptr failure;
+    try {
+        co_await storage::RunLocalFileIOAsync(
+            [&] {
+                storage::ThrowIfCancelled(token, "Marisa::WriteLegacy");
+                staged_file = std::make_unique<MmapFileRAII>(file_name);
+                storage::FileWriter writer(
+                    file_name,
+                    storage::io::GetPriorityFromLoadPriority(priority));
+                writer.Write(index->data.get(), index->size);
+                writer.Finish();
+            },
+            priority);
+        storage::ThrowIfCancelled(token, "Marisa::FinalizeLegacy");
+        if (config.contains(MMAP_FILE_PATH)) {
+            trie_.mmap(file_name.c_str());
+        } else {
+            auto file = File::Open(file_name, O_RDONLY);
+            trie_.read(file.Descriptor());
+        }
+        FinishLegacyLoad(binary);
+        storage::ThrowIfCancelled(token, "Marisa::FinalizeLegacy");
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    // File ownership transfers only after successful engine work. On failure,
+    // the trie has returned and no writer can still reference this path.
+    if (!failure && config.contains(MMAP_FILE_PATH)) {
+        mmap_file_raii_.swap(staged_file);
+    }
+    co_await storage::RunLocalFileIOAsync([&] { staged_file.reset(); },
+                                          priority);
+    if (failure) {
+        std::rethrow_exception(failure);
+    }
 }
 
 void

@@ -92,6 +92,8 @@ using RustArrayWrapper = milvus::tantivy::RustArrayWrapper;
 template <typename T>
 class InvertedIndexTantivy : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
+
     using MemFileManager = storage::MemFileManagerImpl;
     using MemFileManagerPtr = std::shared_ptr<MemFileManager>;
     using DiskFileManager = storage::DiskFileManagerImpl;
@@ -122,6 +124,10 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
 
     void
     Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
+
+    folly::coro::Task<void>
+    LoadLegacyAsync(const Config& config,
+                    folly::CancellationToken token) override;
 
     /*
      * deprecated.
@@ -381,6 +387,18 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     virtual void
     LoadIndexMetas(const std::vector<std::string>& index_files,
                    const Config& config);
+
+    // Restores already materialized legacy sidecars, without remote I/O.
+    virtual void
+    LoadIndexMetas(const BinarySet& metadata, const Config& config);
+
+    // Opens the completed local directory and restores sealed validity.
+    void
+    FinishLegacyLoad(const std::string& prefix, const Config& config);
+
+    // Remove this load's staging directory after the engine has released it.
+    void
+    RemoveLegacyFiles();
 
     // Filters out index files that are not belong to tantivy index.
     // For example, index files of json index may contain null offset files.

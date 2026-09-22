@@ -81,7 +81,7 @@ class TextMatchIndexTranslator
     milvus::Config config_;
     std::string key_;
     milvus::cachinglayer::Meta meta_;
-    std::optional<LoadResourceRequest> packed_load_resource_request_;
+    LoadResourceRequest load_resource_request_{};
 };
 
 }  // namespace milvus::segcore::storagev1translator

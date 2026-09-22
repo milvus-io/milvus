@@ -46,6 +46,8 @@ enum class BitmapIndexBuildMode {
 template <typename T>
 class BitmapIndex : public ScalarIndex<T> {
  public:
+    using ScalarIndex<T>::Load;
+
     explicit BitmapIndex(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext(),
@@ -227,6 +229,13 @@ class BitmapIndex : public ScalarIndex<T> {
     folly::coro::Task<void>
     FinishLoadAsync(IndexLoadPlan& plan, const Config& config) override;
 
+ protected:
+    folly::coro::Task<void>
+    FinishLegacyLoadAsync(BinarySet binary,
+                          const Config& config,
+                          folly::CancellationToken token) override;
+
+ public:
     bool
     SupportPatternMatch() const override {
         return std::is_same_v<T, std::string>;
@@ -470,6 +479,11 @@ class BitmapIndex : public ScalarIndex<T> {
                        size_t index_length,
                        proto::common::LoadPriority priority,
                        bool rebuild_validity_from_postings);
+    std::pair<size_t, bool>
+    LoadLegacyMetadata(const BinarySet& binary);
+    void
+    FinishLegacyLoad(const Config& config);
+
     void
     MMapIndexData(const std::string& filepath,
                   const uint8_t* data,

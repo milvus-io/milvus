@@ -56,6 +56,9 @@ class NgramInvertedIndex : public InvertedIndexTantivy<std::string> {
                    const Config& config) override;
 
     void
+    LoadIndexMetas(const BinarySet& metadata, const Config& config) override;
+
+    void
     RetainTantivyIndexFiles(std::vector<std::string>& index_files) override;
 
     void
