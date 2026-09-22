@@ -152,18 +152,19 @@ routes it to the leaders whose replica lives in that group
 (`ShardLeadersList.resource_groups`) and the proxy attributes its latency to
 that group. Nothing in a stock binary sets it.
 
-### Hook-gated behaviors
+### Form-gated behaviors
 
-The hook is also the mark of an installed form: `extension.FormInstalled()`
-answers true once `SetHook` has been called, and three behaviors in the
-coordinators are switched on by that answer alone. They exist for the
+A distribution declares the deployment shape its coordinator behaviors are
+written for with `extension.SetForm()`; `extension.FormInstalled()` reads that
+declaration, independent of `SetHook`. Three behaviors in the coordinators are
+switched on by `FormInstalled()` alone. They exist for the
 deployment shape a distribution runs - one streaming node kept for DDL and the
 write ahead log while queries are served from resource groups of regular query
 nodes, one collection loaded into several of those groups independently,
 every role rolled from one image - and a stock binary, which
 answers false, keeps master's behavior exactly. Because the query coordinator
-and the data coordinator read the mark too, a distribution must install its
-hook in every role it runs, not only in the proxy.
+and the data coordinator read the mark too, a distribution must make the
+declaration in every role it runs, not only in the proxy.
 
 - **Delegator placement** (`streamingutil.UseStreamingQueryNodeAsDelegator`).
   With the streaming service on, the query coordinator places shard delegators
@@ -177,6 +178,22 @@ hook in every role it runs, not only in the proxy.
   node filter, the channel balance helpers and the manual channel transfer ask
   this one question; each already carried both placements. Stock: exactly the
   streaming gate's answer, as before.
+
+  A delegator that does not share a process with the WAL trades two QueryNode
+  shortcuts for that separation. On a stock replica, where they do share one:
+  `delegator.GetLatestMVCCTimestampIfLocal` reads the WAL directly and lets a
+  Strong-consistency search be answered without waiting for tsafe to catch up;
+  `PrepareReleaseManualFlushIfLocal` runs the manual-flush prepare step in
+  place. A form's delegator, reading the WAL remotely, gets an error from the
+  first (`it does not run beside the WAL`), so every Strong search waits for
+  the channel's tsafe instead; and the second hits
+  `isReleaseManualFlushPrepareUnavailable`, which logs a warning and
+  unsubscribes without the prepare step. Neither is a bug - the WAL is being
+  read remotely by design - but both are the difference between a delegator on
+  a streaming node and one on a regular query node, and both paths run on the
+  2.5-compat branches (`utils.GetChannelRWAndRONodesFor260`,
+  `utils.filterNodeLessThan260` and the checkers' non-streaming-query-node
+  branches) that `cmd/milvus/main_entry.go` already marks for removal.
 
 - **Resource-group-scoped load placement** (`completePlacementForOutOfScopeResourceGroups`).
   With a form installed, a load request naming resource groups only ever
@@ -282,7 +299,7 @@ them through `user.yaml` or the environment.
   the hook, and every stream the service declares is one of them.
 - mixcoord: the engine starts on activation only, receives the coordinator
   client, and is stopped once.
-- querycoord / datacoord: each hook-gated behavior with and without a form
+- querycoord / datacoord: each form-gated behavior with and without a form
   installed - the stock cases assert master's answers (a second replica
   refused for want of a streaming node, a delegator placed on the streaming
   query node, a scoped load that moves the replica, version 0
