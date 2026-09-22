@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
@@ -657,6 +658,50 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
 	sps.Equal(1, len(sps.sealedSegments[1].Segments))
 	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
+}
+
+func (sps *SegmentPrunerSuite) TestPruneSegmentsResolvesClusteringKeyOnce() {
+	paramtable.Init()
+	sps.SetupForClustering("age")
+
+	var scalarKey, vectorKey *schemapb.FieldSchema
+	for _, field := range sps.schema.GetFields() {
+		switch field.GetName() {
+		case "age":
+			scalarKey = field
+		case "vec":
+			vectorKey = field
+		}
+	}
+	sps.Require().NotNil(scalarKey)
+	sps.Require().NotNil(vectorKey)
+
+	keyCalls := 0
+	patch := mockey.Mock(clustering.GetClusteringKeyField).To(
+		func(*schemapb.CollectionSchema) *schemapb.FieldSchema {
+			keyCalls++
+			if keyCalls == 1 {
+				return scalarKey
+			}
+			return vectorKey
+		}).Build()
+	defer patch.UnPatch()
+
+	// The first lookup selects a scalar key. If the grouped-request guard and
+	// pruning resolved the refreshable key independently, the second lookup
+	// would switch this same call to unsafe branch-0 vector pruning.
+	err := pruneSegments(
+		context.TODO(),
+		sps.partitionStats,
+		&internalpb.SearchRequest{},
+		nil,
+		sps.schema,
+		sps.sealedSegments,
+		PruneInfo{filterRatio: 1},
+		true,
+	)
+	sps.NoError(err)
+	sps.Equal(1, keyCalls)
 }
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {

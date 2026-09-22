@@ -127,12 +127,12 @@ func searchSegmentsGroupedAttempt(ctx context.Context, mgr *Manager, segments []
 		totalNq += searchReq.GetNumOfQuery()
 	}
 
-	// The scheduler admits this whole call as one task, however many branches
-	// and segments it covers, so the two bounds below are what keep it inside
-	// what was admitted. branchLimiter is shared by every segment here, so the
-	// task never has more than GetCPUNum() branch searches in flight no matter
-	// how the fan-out is shaped; the segment loop is capped at the same width
-	// further down, so no more than that many segments sit between phase 1 and
+	// The scheduler sees this whole call as one task, however many branches and
+	// segments it covers. The two bounds below prevent that task from turning
+	// the full branch-by-segment fan-out into in-flight work at once:
+	// branchLimiter is shared by every segment, so the task never has more than
+	// GetCPUNum() branch searches in flight, while the segment loop is capped at
+	// the same width so no more than that many segments sit between phase 1 and
 	// phase 2 holding a filter bitset. Both are for grouped requests only: an
 	// ungrouped one evaluates no shared bitset and keeps the unbounded segment
 	// fan-out it has always had.
