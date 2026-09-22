@@ -134,24 +134,9 @@ message SyncResponse {
 // SyncQueryViewsResponse reports the follower's latest local states.
 message SyncQueryViewsResponse {
     repeated QueryViewOfShard query_views = 1;
-    // Balance attributes reported by the node for coord's balancer decision-making.
-    oneof balance_attributes {
-        StreamingNodeBalanceAttributes streaming_node = 2;
-        QueryNodeBalanceAttributes query_node = 3;
-    }
 }
 
 message SyncCloseResponse {
-}
-
-// StreamingNodeBalanceAttributes carries streaming node metrics for balance decisions.
-message StreamingNodeBalanceAttributes {
-}
-
-// QueryNodeBalanceAttributes carries query node resource usage metrics for balance decisions.
-message QueryNodeBalanceAttributes {
-    int64 memory_usage = 1;  // Current memory usage in bytes.
-    int64 disk_usage = 2;    // Current disk usage in bytes.
 }
 
 // ShardID identifies one shard within a replica.
