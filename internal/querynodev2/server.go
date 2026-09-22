@@ -31,7 +31,6 @@ import "C"
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,6 +38,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
 	clientv3 "go.etcd.io/etcd/client/v3"
