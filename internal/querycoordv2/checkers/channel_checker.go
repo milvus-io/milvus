@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -124,12 +125,14 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 			// Only update version cache if no tasks were generated
 			// If tasks were generated, we need to re-check next time.
 			//
-			// A replica that wanted a delegator and had no node to put it on
-			// is not converged either, and must not be cached as such: a
-			// deployment that starts a replica's nodes on demand spawns the
+			// Under a form, a replica that wanted a delegator and had no node
+			// to put it on is not converged either, and must not be cached as
+			// such: a form starts a replica's nodes on demand and spawns the
 			// replica before they register, and their arrival moves neither
-			// version the cache keys on.
-			if !hasTask && !unplaced {
+			// version the cache keys on. A stock binary keeps master's answer:
+			// the unplaced shape does not hold the cache open, so a replica
+			// waiting for a node there is cached like any other empty diff.
+			if versionCacheMayUpdate(hasTask, unplaced) {
 				c.updateVersionCache(cid, currentTargetVersion, currentDistVersion)
 			}
 		}
@@ -160,6 +163,17 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 	return tasks
+}
+
+// versionCacheMayUpdate reports whether a tick may cache a collection's target
+// and channel-distribution versions as converged. A tick that produced tasks
+// is not converged. Under a form, neither is a replica that wanted a delegator
+// and had no node to put it on (unplaced): the form starts a replica's nodes
+// on demand, so the replica is spawned before they register, and their arrival
+// moves neither version the cache keys on. A stock binary keeps master's
+// answer - the unplaced shape does not hold the cache open.
+func versionCacheMayUpdate(hasTask, unplaced bool) bool {
+	return !hasTask && (!unplaced || !extension.FormInstalled())
 }
 
 // isCollectionSynced checks if target and dist versions are unchanged since last check

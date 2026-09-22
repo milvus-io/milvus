@@ -115,3 +115,21 @@ func (suite *ChannelCheckerTestSuite) TestOnAStockBinaryADelegatorGoesToTheStrea
 
 	suite.EqualValues(1051, suite.channelOnAQueryCluster(11, 1051, 1007))
 }
+
+// The version-cache bypass for a replica that is unplaced is a form's: a stock
+// binary caches that shape like any other tick that produced no task, as
+// master did, while a form holds the cache open until a node arrives.
+func (suite *ChannelCheckerTestSuite) TestTheUnplacedVersionCacheBypassIsAForms() {
+	ext.ResetForTest()
+	suite.T().Cleanup(ext.ResetForTest)
+
+	suite.True(versionCacheMayUpdate(false, false), "a converged tick is cached")
+	suite.True(versionCacheMayUpdate(false, true),
+		"a stock binary caches the unplaced shape, as master did")
+	suite.False(versionCacheMayUpdate(true, false), "a tick that produced tasks is never cached")
+
+	ext.SetForm()
+	suite.False(versionCacheMayUpdate(false, true),
+		"a form must not cache a replica that is waiting for a node")
+	suite.True(versionCacheMayUpdate(false, false), "a form still caches a converged tick")
+}
