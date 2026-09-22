@@ -211,9 +211,8 @@ import (
 // proto field, no persisted state, and no change to the replica model.
 //
 // The figure is the minimum of ReplicaLoadPercentagesByResourceGroup, which
-// is where the walk lives; a caller that needs to know WHICH replica holds
-// the group back -- the load timeout, which releases the replicas that
-// stalled and not the group -- reads that one instead.
+// is where the walk lives; the per-replica split exists so the min is taken
+// across one consistent snapshot of the targets and the distribution.
 func LoadPercentageByResourceGroup(
 	ctx context.Context,
 	m *meta.Meta,
