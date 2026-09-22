@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func TestFieldStatsUpdate(t *testing.T) {
@@ -711,6 +712,39 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 	assert.NoError(t, stats4.UnmarshalJSON(bytes2))
 	assert.Equal(t, 2, len(stats4.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
+}
+
+func TestLowPrecisionVectorFieldStatsMarshal(t *testing.T) {
+	values := []float32{1, 2, 3, 4}
+	for _, test := range []struct {
+		name     string
+		dataType schemapb.DataType
+		centroid VectorFieldValue
+	}{
+		{
+			name:     "float16",
+			dataType: schemapb.DataType_Float16Vector,
+			centroid: NewFloat16VectorFieldValue(typeutil.Float32ArrayToFloat16Bytes(values)),
+		},
+		{
+			name:     "bfloat16",
+			dataType: schemapb.DataType_BFloat16Vector,
+			centroid: NewBFloat16VectorFieldValue(typeutil.Float32ArrayToBFloat16Bytes(values)),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stats, err := NewFieldStats(1, test.dataType, 1)
+			assert.NoError(t, err)
+			stats.SetVectorCentroids(test.centroid)
+
+			blob, err := json.Marshal(stats)
+			assert.NoError(t, err)
+			var decoded FieldStats
+			assert.NoError(t, decoded.UnmarshalJSON(blob))
+			assert.Equal(t, test.dataType, decoded.Type)
+			assert.Equal(t, []VectorFieldValue{test.centroid}, decoded.Centroids)
+		})
+	}
 }
 
 // TestVectorFieldStatsDecodeIntoZeroValue covers the path production actually takes: a

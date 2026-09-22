@@ -112,7 +112,18 @@ func (csm *compactionTaskMeta) reloadFromKV() error {
 	return nil
 }
 
-// GetCompactionTasks returns clustering compaction tasks from local cache
+// GetCompactionTask returns a cloned task by globally unique plan ID.
+func (csm *compactionTaskMeta) GetCompactionTask(planID int64) *datapb.CompactionTask {
+	csm.RLock()
+	defer csm.RUnlock()
+	for _, tasks := range csm.compactionTasks {
+		if task := tasks[planID]; task != nil {
+			return proto.Clone(task).(*datapb.CompactionTask)
+		}
+	}
+	return nil
+}
+
 func (csm *compactionTaskMeta) GetCompactionTasks() map[int64][]*datapb.CompactionTask {
 	csm.RLock()
 	defer csm.RUnlock()
