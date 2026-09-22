@@ -117,7 +117,7 @@ func (fc *FuncChain) addWithError(op Operator, err error) *FuncChain {
 func (fc *FuncChain) Validate() error {
 	// Check for errors accumulated during fluent API calls
 	if fc.buildError != nil {
-		return merr.WrapErrServiceInternalMsg("chain build error: %v", fc.buildError)
+		return merr.Wrap(fc.buildError, "chain build error")
 	}
 
 	// Stage is required

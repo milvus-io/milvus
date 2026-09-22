@@ -29,12 +29,16 @@ import (
 type functionChainRerankMeta struct {
 	inputFieldNames []string
 	inputFieldIDs   []int64
+	inputPlan       *chain.DataFrameInputPlan
 	chainPB         *schemapb.FunctionChain
 	repr            *chain.ChainRepr
 }
 
 func (m *functionChainRerankMeta) GetInputFieldNames() []string { return m.inputFieldNames }
 func (m *functionChainRerankMeta) GetInputFieldIDs() []int64    { return m.inputFieldIDs }
+func (m *functionChainRerankMeta) GetInputPlan() *chain.DataFrameInputPlan {
+	return m.inputPlan
+}
 
 func hasFunctionRerank(request *milvuspb.SearchRequest) bool {
 	return request.GetFunctionScore() != nil || len(request.GetFunctionChains()) > 0
@@ -66,7 +70,7 @@ func selectHybridRerankMeta(request *milvuspb.SearchRequest, schema *schemaInfo)
 					"function_score cannot be used with function_chains in sub-search[%d]", index)
 			}
 		}
-		return newRerankMeta(schema.CollectionSchema, request.GetFunctionScore()), nil
+		return newRerankMeta(schema.CollectionSchema, request.GetFunctionScore())
 	}
 	return newRerankMetaFromLegacy(request.GetSearchParams()), nil
 }
@@ -194,7 +198,7 @@ func parseL2FunctionChain(chains []*schemapb.FunctionChain) (*schemapb.FunctionC
 		if err != nil {
 			return nil, nil, merr.Wrapf(err, "function chain[%d]", i)
 		}
-		if err := validateL2RerankSystemNames(r); err != nil {
+		if err := validateL2RerankSystemOutputs(r); err != nil {
 			return nil, nil, merr.Wrapf(err, "function chain[%d]", i)
 		}
 		chainPB = pb
@@ -226,84 +230,45 @@ func validateHybridL2FunctionChain(repr *chain.ChainRepr, subSearchCount int) er
 }
 
 func buildFunctionChainRerankMeta(chainPB *schemapb.FunctionChain, repr *chain.ChainRepr, schema *schemaInfo) (*functionChainRerankMeta, error) {
-	inputFieldNames, inputFieldIDs, err := planL2FunctionChainInputs(repr, schema)
+	inputPlan, err := planL2FunctionChainInputs(repr, schema)
 	if err != nil {
 		return nil, err
 	}
 
 	return &functionChainRerankMeta{
-		inputFieldNames: inputFieldNames,
-		inputFieldIDs:   inputFieldIDs,
+		inputFieldNames: inputPlan.PhysicalFieldNames(),
+		inputFieldIDs:   inputPlan.PhysicalFieldIDs(),
+		inputPlan:       inputPlan,
 		chainPB:         chainPB,
 		repr:            repr,
 	}, nil
 }
 
-func planL2FunctionChainInputs(repr *chain.ChainRepr, schema *schemaInfo) ([]string, []int64, error) {
+func planL2FunctionChainInputs(repr *chain.ChainRepr, schema *schemaInfo) (*chain.DataFrameInputPlan, error) {
 	if repr == nil {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("function chain repr is nil")
+		return nil, merr.WrapErrParameterInvalidMsg("function chain repr is nil")
 	}
-
-	inputFieldNames := make([]string, 0)
-	inputFieldIDs := make([]int64, 0)
-	seenInputFields := make(map[string]struct{})
-
-	for _, input := range repr.Info.RequiredInputs {
-		if chain.IsFunctionChainSystemName(input) {
-			if err := validateL2RerankSystemInput(input); err != nil {
-				return nil, nil, err
-			}
-			continue
-		}
-
-		_, fieldID, err := getFunctionChainInputField(schema, input)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		if _, ok := seenInputFields[input]; ok {
-			continue
-		}
-		seenInputFields[input] = struct{}{}
-		inputFieldNames = append(inputFieldNames, input)
-		inputFieldIDs = append(inputFieldIDs, fieldID)
+	if schema == nil || schema.CollectionSchema == nil {
+		return nil, merr.WrapErrParameterInvalidMsg("collection schema is nil")
 	}
-
-	return inputFieldNames, inputFieldIDs, nil
+	return chain.CompileDataFrameInputPlan(repr, schema.CollectionSchema)
 }
 
-func validateL2RerankSystemNames(repr *chain.ChainRepr) error {
+func validateL2RerankSystemOutputs(repr *chain.ChainRepr) error {
 	if repr == nil {
 		return merr.WrapErrParameterInvalidMsg("function chain repr is nil")
 	}
-	for opIdx, op := range repr.Info.Ops {
-		for _, input := range op.ReadNames {
-			if !chain.IsFunctionChainSystemName(input) {
-				continue
-			}
-			if err := validateL2RerankSystemInput(input); err != nil {
-				return merr.WrapErrParameterInvalidMsg("op[%d] input %q: %v", opIdx, input, err)
-			}
-		}
-		for _, output := range repr.Operators[opIdx].Outputs {
+	for opIdx, op := range repr.Operators {
+		for _, output := range op.Outputs {
 			if !chain.IsFunctionChainSystemName(output) {
 				continue
 			}
 			if err := validateL2RerankSystemOutput(output); err != nil {
-				return merr.WrapErrParameterInvalidMsg("op[%d] output %q: %v", opIdx, output, err)
+				return merr.Wrapf(err, "op[%d] output %q", opIdx, output)
 			}
 		}
 	}
 	return nil
-}
-
-func validateL2RerankSystemInput(name string) error {
-	switch name {
-	case chaintypes.IDFieldName, chaintypes.ScoreFieldName:
-		return nil
-	default:
-		return merr.WrapErrParameterInvalidMsg("system input %q is not supported by L2 rerank function chain", name)
-	}
 }
 
 func validateL2RerankSystemOutput(name string) error {
@@ -313,24 +278,4 @@ func validateL2RerankSystemOutput(name string) error {
 	default:
 		return merr.WrapErrParameterInvalidMsg("system output %q is not writable by L2 rerank function chain", name)
 	}
-}
-
-func getFunctionChainInputField(schema *schemaInfo, name string) (*schemapb.FieldSchema, int64, error) {
-	if schema == nil || schema.SchemaHelper == nil {
-		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", name)
-	}
-
-	field, err := schema.SchemaHelper.GetFieldFromName(name)
-	if err != nil {
-		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q is neither a previous output nor a collection field", name)
-	}
-
-	return validateFunctionChainInputField(name, field, field.GetFieldID())
-}
-
-func validateFunctionChainInputField(name string, field *schemapb.FieldSchema, fieldID int64) (*schemapb.FieldSchema, int64, error) {
-	if _, err := chain.ToArrowType(field.GetDataType()); err != nil {
-		return nil, 0, merr.WrapErrParameterInvalidMsg("function chain input %q has unsupported field type %s", name, field.GetDataType().String())
-	}
-	return field, fieldID, nil
 }

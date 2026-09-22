@@ -37,7 +37,7 @@ import (
 // PrepareSearchResultsForExport runs the pre-export reduce phase on all
 // per-segment SearchResults: filter invalid rows, optionally apply Global
 // Refine (truncate + refine), then fill primary keys. Call this before
-// ExportSearchResultAsArrowRecordBatch so the exported DataFrames reflect the
+// ExportSearchResultAsArrowRecordBatchWithInputPlan so the exported DataFrames reflect the
 // refined scores and truncated candidate count.
 //
 // Internally wraps the C++ ReduceHelper::PreReduce. When global refine is
