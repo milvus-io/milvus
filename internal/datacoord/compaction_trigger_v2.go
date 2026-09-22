@@ -260,6 +260,12 @@ func (m *CompactionTriggerManager) loop(ctx context.Context) {
 			}
 		case segID := <-getStatsTaskChSingleton():
 			log.Info(ctx, "receive new segment to trigger sort compaction", mlog.Int64("segmentID", segID))
+			if segment := m.meta.GetSegment(ctx, segID); segment != nil && segment.GetClusterStats() != nil {
+				if err := m.submitClusterSort(ctx, segment); err != nil {
+					log.Warn(ctx, "submit cluster sort failed", mlog.FieldSegmentID(segID), mlog.Err(err))
+				}
+				continue
+			}
 			view := m.singlePolicy.triggerSegmentSortCompaction(ctx, segID)
 			if view == nil {
 				log.Warn(ctx, "segment no need to do sort compaction", mlog.Int64("segmentID", segID))

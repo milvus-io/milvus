@@ -46,6 +46,7 @@ var maxCompactionTaskExecutionDuration = map[datapb.CompactionType]time.Duration
 	datapb.CompactionType_Level0DeleteCompaction:      30 * time.Minute,
 	datapb.CompactionType_ClusteringCompaction:        60 * time.Minute,
 	datapb.CompactionType_SortCompaction:              20 * time.Minute,
+	datapb.CompactionType_ClusterSortCompaction:       60 * time.Minute,
 	datapb.CompactionType_BumpSchemaVersionCompaction: 30 * time.Minute,
 }
 
@@ -230,7 +231,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_ClusterSortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
 			mixChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			mixLabelExcludes.Insert(t.GetLabel())
 		case datapb.CompactionType_ClusteringCompaction:
@@ -266,7 +267,7 @@ func (c *compactionInspector) schedule() []CompactionTask {
 			}
 			l0ChannelExcludes.Insert(t.GetTaskProto().GetChannel())
 			selected = append(selected, t)
-		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
+		case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_ClusterSortCompaction, datapb.CompactionType_BumpSchemaVersionCompaction:
 			// BumpSchemaVersionCompaction shares the same exclusion rules as Mix/Sort:
 			// - Channel-level mutual exclusion with L0 (L0 may write delta logs to any segment on the channel)
 			// - Label-level exclusion registered for Clustering awareness
@@ -455,6 +456,12 @@ func (c *compactionInspector) cleanCompactionTaskMeta() {
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_cleaned {
+				if task.GetType() == datapb.CompactionType_ClusterSortCompaction {
+					parent := c.meta.GetCompactionTaskMeta().GetCompactionTask(task.TriggerID)
+					if parent != nil && !isCompactionTaskFinished(parent) {
+						continue
+					}
+				}
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
 				if duration > Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second).Seconds() {
 					// try best to delete meta
@@ -622,6 +629,16 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 	}
 	if err = c.submitTask(t); err != nil {
 		log.Warn(context.TODO(), "submit compaction task failed", mlog.Err(err))
+		if task.GetType() == datapb.CompactionType_ClusterSortCompaction {
+			// The task is already durable. Keep it in the cleanup loop until
+			// its failed attempt is durably retired; otherwise the parent's
+			// deduplication would wait forever on an unqueued pipelining task.
+			t.SetTask(t.ShadowClone(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error())))
+			c.cleaningGuard.Lock()
+			c.cleaningTasks[t.GetTaskProto().GetPlanID()] = t
+			c.cleaningGuard.Unlock()
+			return err
+		}
 		c.meta.SetSegmentsCompacting(context.Background(), t.GetTaskProto().GetInputSegments(), false)
 		return err
 	}
@@ -633,7 +650,7 @@ func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) err
 func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (CompactionTask, error) {
 	var task CompactionTask
 	switch t.GetType() {
-	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction:
+	case datapb.CompactionType_MixCompaction, datapb.CompactionType_SortCompaction, datapb.CompactionType_ClusterSortCompaction:
 		task = newMixCompactionTask(t, c.allocator, c.meta, c.ievm)
 	case datapb.CompactionType_Level0DeleteCompaction:
 		task = newL0CompactionTask(t, c.allocator, c.meta)
@@ -646,6 +663,12 @@ func (c *compactionInspector) createCompactTask(t *datapb.CompactionTask) (Compa
 	}
 	// Revalidate input and snapshot state at admission so a protection change
 	// after planning cannot enter the task queue unchecked.
+	if t.GetType() == datapb.CompactionType_ClusterSortCompaction && (t.GetClusterSortCompleted() || t.GetClusterSortPendingResult() != nil) {
+		// This is a durable result replay, not a new worker assignment. Some
+		// inputs may already be retired by the catalog's ordered fallback.
+		c.meta.SetSegmentsCompacting(context.TODO(), t.GetInputSegments(), true)
+		return task, nil
+	}
 	if err := c.meta.ValidateSegmentStateBeforeCompleteCompactionMutation(t); err != nil {
 		return nil, err
 	}
