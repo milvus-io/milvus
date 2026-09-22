@@ -48,6 +48,7 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 	// marker. Closed and tombstoned recovery metadata remains persisted until
 	// the growing-module cleanup task explicitly includes its removal here.
 	removes := make([]string, 0, len(snapshot.RemovedSegmentIDs))
+	schemaSaves := make(map[string]string)
 	vchannelSaves := make(map[string]string, len(snapshot.VChannels)+len(snapshot.VChannelBaseMetas))
 	segmentSaves := make(map[string]string, len(snapshot.SegmentAssignments))
 	for _, info := range snapshot.SegmentAssignments {
@@ -67,8 +68,11 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			return err
 		}
 		removes = append(removes, vremoves...)
+		baseKey := buildVChannelKey(pChannelName, info.GetVchannel())
+		vchannelSaves[baseKey] = kvs[baseKey]
+		delete(kvs, baseKey)
 		for k, v := range kvs {
-			vchannelSaves[k] = v
+			schemaSaves[k] = v
 		}
 	}
 	for _, info := range snapshot.VChannelBaseMetas {
@@ -97,14 +101,19 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			removes = append(removes, key)
 			// A schema change can be frozen after cleanup selected these durable
 			// tombstones. Do not rewrite them from that newer full snapshot.
-			delete(vchannelSaves, key)
+			delete(schemaSaves, key)
 		}
 	}
 	for _, r := range removes {
 		b.Remove(r)
 	}
-	// Persist vchannel ownership before its dependent segment metadata on the
-	// chunked fallback path. Atomic commits are unaffected.
+	// On chunked fallback, schemas must land before the base that publishes
+	// their visibility through its checkpoint. Recovery ignores schemas ahead
+	// of that checkpoint if a crash interrupts publication. The base must in
+	// turn precede dependent segments. Atomic commits are unaffected.
+	for k, v := range schemaSaves {
+		b.Save(k, v)
+	}
 	for k, v := range vchannelSaves {
 		b.Save(k, v)
 	}
@@ -155,7 +164,7 @@ func (c *catalog) SaveRecoverySnapshot(ctx context.Context, pChannelName string,
 			return err
 		}
 		if errors.Is(err, merr.ErrIoKeyNotFound) {
-			if len(removes)+len(vchannelSaves)+len(segmentSaves) != 0 || snapshot.SalvageCheckpoint != nil {
+			if len(removes)+len(schemaSaves)+len(vchannelSaves)+len(segmentSaves) != 0 || snapshot.SalvageCheckpoint != nil {
 				return merr.WrapErrServiceInternalMsg("initialize consume checkpoint before publishing components of pchannel %s", pChannelName)
 			}
 			checkpointFirstCreation = true

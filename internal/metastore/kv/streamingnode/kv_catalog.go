@@ -104,15 +104,23 @@ func (c *catalog) newVChannelMetaFromKV(prefix string, keys []string, values []s
 	}
 	vchannelsWithSchemas := make([]*streamingpb.VChannelMeta, 0, len(vchannels))
 	for vchannelName, vchannel := range vchannels {
-		schemas, ok := schemas[vchannelName]
-		if !ok {
+		// Schema writes precede the base during a chunked snapshot. Only the
+		// base checkpoint publishes them; a newer schema left by an interrupted
+		// snapshot must be reconstructed by WAL replay instead of loaded here.
+		visibleSchemas := make([]*streamingpb.CollectionSchemaOfVChannel, 0, len(schemas[vchannelName]))
+		for _, schema := range schemas[vchannelName] {
+			if schema.GetCheckpointTimeTick() <= vchannel.GetCheckpointTimeTick() {
+				visibleSchemas = append(visibleSchemas, schema)
+			}
+		}
+		if len(visibleSchemas) == 0 {
 			return nil, merr.WrapErrDataIntegrityMsg("vchannel %s missing schemas in recovery info", vchannelName)
 		}
-		sort.Slice(schemas, func(i, j int) bool {
+		sort.Slice(visibleSchemas, func(i, j int) bool {
 			// order by checkpoint time tick.
-			return schemas[i].CheckpointTimeTick < schemas[j].CheckpointTimeTick
+			return visibleSchemas[i].CheckpointTimeTick < visibleSchemas[j].CheckpointTimeTick
 		})
-		vchannel.CollectionInfo.Schemas = schemas
+		vchannel.CollectionInfo.Schemas = visibleSchemas
 		vchannelsWithSchemas = append(vchannelsWithSchemas, vchannel)
 	}
 	return vchannelsWithSchemas, nil

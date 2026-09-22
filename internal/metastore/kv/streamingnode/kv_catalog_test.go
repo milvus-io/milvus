@@ -322,7 +322,8 @@ func TestCatalogListRecoveryMetaWithRootPath(t *testing.T) {
 	require.NoError(t, kv.Save(ctx, buildSegmentAssignmentKey("p1", 10), string(segmentValue)))
 
 	vchannel := &streamingpb.VChannelMeta{
-		Vchannel: "p1_1v0",
+		Vchannel:           "p1_1v0",
+		CheckpointTimeTick: 1,
 		CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 			Schemas: []*streamingpb.CollectionSchemaOfVChannel{{
 				State:              streamingpb.VChannelSchemaState_VCHANNEL_SCHEMA_STATE_NORMAL,
@@ -540,8 +541,9 @@ func TestCatalogDropsTombstonedRecoveryMeta(t *testing.T) {
 			CheckpointTimeTick: 100,
 		},
 		"vchannel-2": {
-			Vchannel: "vchannel-2",
-			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			Vchannel:           "vchannel-2",
+			CheckpointTimeTick: 30,
+			State:              streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 				CollectionId: 101,
 				Schemas: []*streamingpb.CollectionSchemaOfVChannel{
@@ -629,8 +631,9 @@ func TestCatalogVChannel(t *testing.T) {
 
 	vchannelMetas := map[string]*streamingpb.VChannelMeta{
 		"vchannel-1": {
-			Vchannel: "vchannel-1",
-			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			Vchannel:           "vchannel-1",
+			CheckpointTimeTick: 101,
+			State:              streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 				CollectionId: 100,
 				Partitions: []*streamingpb.PartitionInfoOfVChannel{
@@ -835,8 +838,9 @@ func TestCatalogSaveRecoverySnapshotRoundTrip(t *testing.T) {
 		},
 		VChannels: map[string]*streamingpb.VChannelMeta{
 			"vchannel-1": {
-				Vchannel: "vchannel-1",
-				State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+				Vchannel:           "vchannel-1",
+				CheckpointTimeTick: 1,
+				State:              streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
 				CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
 					CollectionId: 100,
 					Schemas: []*streamingpb.CollectionSchemaOfVChannel{

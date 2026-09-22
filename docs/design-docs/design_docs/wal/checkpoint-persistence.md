@@ -159,7 +159,19 @@ checkpoint are committed atomically.
 
 When the operation count exceeds the transaction limit, catalog may write
 component deltas in chunks, but it must write the checkpoint only after all
-component chunks succeed.
+component chunks succeed. Within those chunks, persist Schema keys before
+VChannel base metadata, then dependent Segment metadata. The base's
+`checkpoint_time_tick` is the visibility boundary for its Schema keys: recovery
+loads only Schema versions at or below that checkpoint and ignores Schema keys
+without a base. A base without any visible Schema remains a data-integrity
+error.
+
+If a crash occurs after writing Schema keys but before updating the base,
+recovery uses the old base and its visible Schemas, then replays the Schema
+change from WAL. If the base landed before the global checkpoint, all Schemas
+it needs are already durable and its component checkpoint suppresses duplicate
+effects during replay. Schema GC continues to use the already published global
+replay floor and retained Segment dependencies, not the candidate checkpoint.
 
 Crash behavior:
 
