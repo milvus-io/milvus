@@ -25,17 +25,15 @@
 
 // milvus_table_c.cpp exports this without a header of its own.
 extern "C" LoonFFIResult
-loon_milvus_table_create_manifest_from_segment_manifests(
-    const char* base_path,
-    char** source_manifest_paths,
-    const int64_t* source_row_counts,
-    size_t num_source_manifests,
-    char** target_columns,
-    size_t num_target_columns,
-    const char* external_source,
-    const LoonProperties* properties,
-    int has_external_primary_key,
-    char** out_manifest_path);
+loon_milvus_table_append_source_manifests(LoonTransactionHandle transaction,
+                                          char** source_manifest_paths,
+                                          const int64_t* source_row_counts,
+                                          size_t num_source_manifests,
+                                          char** target_columns,
+                                          size_t num_target_columns,
+                                          const char* external_source,
+                                          const LoonProperties* properties,
+                                          int has_external_primary_key);
 
 // The err_code a loon FFI call reports must survive milvus's OWN C-ABI export
 // layer (milvus_table_c.cpp), whose tail returns a LoonFFIResult. That tail
@@ -57,10 +55,18 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
     std::vector<char*> manifests{missing_manifest.data()};
     std::vector<int64_t> row_counts{1};
     std::vector<char*> columns{column.data()};
-    char* out_manifest_path = nullptr;
+    LoonTransactionHandle transaction = 0;
+    auto begin = loon_transaction_begin(base_path.c_str(),
+                                        nullptr,
+                                        0,
+                                        LOON_TRANSACTION_RESOLVE_OVERWRITE,
+                                        10,
+                                        &transaction);
+    ASSERT_NE(loon_ffi_is_success(&begin), 0);
+    loon_ffi_free_result(&begin);
 
-    auto result = loon_milvus_table_create_manifest_from_segment_manifests(
-        base_path.c_str(),
+    auto result = loon_milvus_table_append_source_manifests(
+        transaction,
         manifests.data(),
         row_counts.data(),
         manifests.size(),
@@ -68,8 +74,8 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
         columns.size(),
         /*external_source=*/nullptr,
         /*properties=*/nullptr,
-        /*has_external_primary_key=*/0,
-        &out_manifest_path);
+        /*has_external_primary_key=*/0);
+    loon_transaction_destroy(transaction);
 
     ASSERT_EQ(loon_ffi_is_success(&result), 0)
         << "a missing source manifest must fail";
@@ -82,7 +88,4 @@ TEST(LoonFFIErrorPassthrough, NestedErrCodeSurvivesTheExportBoundary) {
     EXPECT_NE(milvus::storage::LoonErrCodeToErrorCode(result.err_code),
               milvus::ErrorCode::UnexpectedError);
     loon_ffi_free_result(&result);
-    if (out_manifest_path != nullptr) {
-        free(out_manifest_path);
-    }
 }
