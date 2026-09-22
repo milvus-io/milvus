@@ -2030,10 +2030,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	mlog.Info(context.TODO(), "receive import request from proxy",
+	mlog.Info(ctx, "receive import request from proxy",
 		mlog.Int("fileNum", len(in.GetFiles())),
 		mlog.Any("files", in.GetFiles()),
-		mlog.Any("options", in.GetOptions()))
+		mlog.Any("options", importutilv2.RedactOptions(in.GetOptions())))
 
 	// Validate timeout before allocating resources
 	// Full validation will happen during broadcast
@@ -2122,7 +2122,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 // retryable error: ack callbacks retry forever while holding the collection
 // resource guard. The terminal job also keeps the failure visible through
 // GetImportProgress.
-func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
+func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal, commitByCoordinator bool, bindingErr error) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
 			Status: merr.Status(err),
@@ -2133,15 +2133,28 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		Status: merr.Success(),
 	}
 
-	mlog.Info(context.TODO(), "creating import job from ack callback",
+	mlog.Info(ctx, "creating import job from ack callback",
 		mlog.Int("fileNum", len(in.GetFiles())),
 		mlog.Any("files", in.GetFiles()),
-		mlog.Any("options", in.GetOptions()))
+		mlog.Any("options", importutilv2.RedactOptions(in.GetOptions())))
 
+	files := in.GetFiles()
+	sourceErr := bindingErr
+	if sourceErr == nil {
+		sourceErr = importutilv2.ValidateSnapshotImportPlan(files, in.GetOptions())
+	}
 	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
-		return resp, nil
+		if sourceErr == nil && !importutilv2.IsSnapshotSource(in.GetOptions()) {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
+			return resp, nil
+		}
+		// A corrupt snapshot ACK is already durable. Even malformed options
+		// must reach the terminal-job path rather than retry forever.
+		if sourceErr == nil {
+			sourceErr = err
+		}
+		timeoutTs = math.MaxUint64
 	}
 
 	// See the function comment: an L0 import reaching this callback while the
@@ -2155,9 +2168,8 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
 	}
 
-	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled && rlsErr == nil {
+	if isBackup && !importutilv2.IsSnapshotSource(in.GetOptions()) && !l0ImportDisabled && sourceErr == nil && rlsErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2172,6 +2184,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 	files = lo.Map(files, func(importFile *internalpb.ImportFile, i int) *internalpb.ImportFile {
+		if importFile == nil {
+			importFile = &internalpb.ImportFile{}
+		}
 		importFile.Id = idStart + int64(i) + 1
 		return importFile
 	})
@@ -2228,6 +2243,12 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()), mlog.Err(rlsErr))
 		UpdateJobState(internalpb.ImportJobState_Failed)(job)
 		UpdateJobReason(rlsErr.Error())(job)
+	}
+	if sourceErr != nil {
+		// ACK callbacks retry indefinitely. Persist malformed/lost source
+		// context as a terminal job instead of retrying or omitting deletes.
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(sourceErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

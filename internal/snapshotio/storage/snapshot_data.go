@@ -25,6 +25,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	snapshotio "github.com/milvus-io/milvus/internal/snapshotio"
 	milvusstorage "github.com/milvus-io/milvus/internal/storage"
@@ -405,6 +406,16 @@ func NewSnapshotReader(cm milvusstorage.ChunkManager) *SnapshotReader {
 
 // ReadSnapshot reads a snapshot by metadata path.
 func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath string, includeSegments bool) (*SnapshotData, error) {
+	metadata, err := r.ReadMetadata(ctx, metadataFilePath)
+	if err != nil {
+		return nil, err
+	}
+	return r.ReadSnapshotFromMetadata(ctx, metadataFilePath, metadata, includeSegments)
+}
+
+// ReadMetadata performs only the top-level object read. Import captures its
+// result in the WAL before asynchronously loading any segment descriptors.
+func (r *SnapshotReader) ReadMetadata(ctx context.Context, metadataFilePath string) (*datapb.SnapshotMetadata, error) {
 	if metadataFilePath == "" {
 		return nil, merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")
 	}
@@ -417,6 +428,16 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 	if err != nil {
 		return nil, merr.Wrap(err, "failed to read metadata file")
 	}
+	return metadata, nil
+}
+
+// ReadSnapshotFromMetadata never rereads the top-level metadata. Clone before
+// rebasing so retries and CDC consumers keep the same immutable input.
+func (r *SnapshotReader) ReadSnapshotFromMetadata(ctx context.Context, metadataFilePath string, metadata *datapb.SnapshotMetadata, includeSegments bool) (*SnapshotData, error) {
+	if metadata == nil {
+		return nil, merr.WrapErrDataIntegrityMsg("snapshot metadata cannot be nil")
+	}
+	metadata = proto.Clone(metadata).(*datapb.SnapshotMetadata)
 	if metadata.GetSnapshotInfo() == nil {
 		return nil, merr.WrapErrDataIntegrityMsg("invalid snapshot metadata: snapshot info cannot be nil")
 	}

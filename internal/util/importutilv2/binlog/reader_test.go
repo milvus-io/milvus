@@ -19,24 +19,33 @@ package binlog
 import (
 	"context"
 	"fmt"
+	"io"
 	"math"
+	"path"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/testutils"
@@ -62,6 +71,31 @@ type ReaderSuite struct {
 
 	tsStart uint64
 	tsEnd   uint64
+}
+
+type storageV3DeltaRecordReader struct {
+	record storage.Record
+	read   bool
+}
+
+func (r *storageV3DeltaRecordReader) Next() (storage.Record, error) {
+	if r.read {
+		if r.record != nil {
+			r.record.Release()
+			r.record = nil
+		}
+		return nil, io.EOF
+	}
+	r.read = true
+	return r.record, nil
+}
+
+func (r *storageV3DeltaRecordReader) Close() error {
+	if r.record != nil {
+		r.record.Release()
+		r.record = nil
+	}
+	return nil
 }
 
 func (suite *ReaderSuite) SetupSuite() {
@@ -833,6 +867,451 @@ func (suite *ReaderSuite) TestZeroDeltaRead() {
 
 func TestBinlogReader(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
+}
+
+func TestSnapshotManifestDeletesRequireFolding(t *testing.T) {
+	manifest := packed.MarshalManifestPath("snapshot/data", 7)
+	fields := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{0: {}, 1: {}, 100: {}}, nil).Build()
+	defer fields.UnPatch()
+	fragments := mockey.Mock(packed.ReadFragmentsFromManifest).Return(nil, nil).Build()
+	defer fragments.UnPatch()
+	deltas := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string{"snapshot/delete"}, nil).Build()
+	defer deltas.UnPatch()
+	open := mockey.Mock(storage.NewManifestRecordReader).Return(nil, io.EOF).Build()
+	defer open.UnPatch()
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	}}
+	reader, err := NewStorageV3ManifestReader(context.Background(), nil, schema, nil,
+		manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, nil)
+	require.Nil(t, reader)
+	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	require.Zero(t, open.Times(), "no rows may be emitted while deletes are unsupported")
+}
+
+func TestSelectImportFields_BackupCompatibility(t *testing.T) {
+	base := typeutil.AppendSystemFields(&schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "renamed", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "nullable", DataType: schemapb.DataType_Int64, Nullable: true},
+			{
+				FieldID: 103, Name: "default", DataType: schemapb.DataType_Int64,
+				DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_LongData{LongData: 42}},
+			},
+			{FieldID: 104, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	})
+	for _, tc := range []struct {
+		name    string
+		present []int64
+		mutate  func(*schemapb.CollectionSchema)
+		want    []int64
+		errText string
+	}{
+		{name: "omit_optional_and_extra", present: []int64{100, 101, 999}, want: []int64{0, 1, 100, 101}},
+		{name: "retain_present_optional", present: []int64{100, 101, 102, 103, 104}, want: []int64{0, 1, 100, 101, 102, 103, 104}},
+		{name: "required_missing", present: []int64{100}, errText: "no binlog for field:renamed"},
+		{name: "autoid_still_requires_pk", present: []int64{101}, mutate: func(s *schemapb.CollectionSchema) {
+			typeutil.GetField(s, 100).AutoID = true
+		}, errText: "no binlog for field:pk"},
+		{name: "function_output_required", present: []int64{100}, mutate: func(s *schemapb.CollectionSchema) {
+			typeutil.GetField(s, 101).IsFunctionOutput = true
+		}, errText: "no binlog for field:renamed"},
+		{name: "nullable_struct_absent", present: []int64{100, 101}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b"},
+			}}}
+		}, want: []int64{0, 1, 100, 101}},
+		{name: "struct_present", present: []int64{100, 101, 201, 202}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b"},
+			}}}
+		}, want: []int64{0, 1, 100, 101, 201, 202}},
+		{name: "partial_struct_rejected", present: []int64{100, 101, 201}, mutate: func(s *schemapb.CollectionSchema) {
+			s.StructArrayFields = []*schemapb.StructArrayFieldSchema{{FieldID: 200, Nullable: true, Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "a"}, {FieldID: 202, Name: "b"},
+			}}}
+		}, errText: "no binlog for struct field:b"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := typeutil.Clone(base)
+			if tc.mutate != nil {
+				tc.mutate(schema)
+			}
+			before := typeutil.Clone(schema)
+			logs := map[int64][]string{0: {"rowid"}, 1: {"timestamp"}}
+			for _, id := range tc.present {
+				logs[id] = []string{fmt.Sprint(id)}
+			}
+			readSchema, err := selectImportFields(schema, func(id int64) bool { _, ok := logs[id]; return ok })
+			validLogs, legacySchema, legacyErr := verify(schema, storage.StorageV1, logs)
+			require.Equal(t, before, schema, "selection must not change the task's target schema")
+			if tc.errText != "" {
+				require.ErrorIs(t, err, merr.ErrImportFailed)
+				require.ErrorContains(t, err, tc.errText)
+				require.ErrorIs(t, legacyErr, merr.ErrImportFailed)
+				require.ErrorContains(t, legacyErr, tc.errText)
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, legacyErr)
+			require.Equal(t, legacySchema, readSchema)
+			require.ElementsMatch(t, tc.want, lo.Keys(validLogs))
+			_, dynamicPresent := logs[104]
+			require.Equal(t, dynamicPresent, readSchema.GetEnableDynamicField())
+		})
+	}
+}
+
+func patchStorageV3TestFieldIDs(t *testing.T, ids ...int64) {
+	t.Helper()
+	present := map[int64]struct{}{common.RowIDField: {}, common.TimeStampField: {}}
+	for _, id := range ids {
+		present[id] = struct{}{}
+	}
+	p := mockey.Mock(packed.GetManifestFieldIDs).Return(present, nil).Build()
+	t.Cleanup(func() { p.UnPatch() })
+}
+
+func TestStorageV3Reader_ManifestFieldSelectionErrors(t *testing.T) {
+	paramtable.Init()
+	for _, tc := range []struct {
+		name    string
+		readErr error
+		want    error
+	}{
+		{"read_error", merr.WrapErrIoKeyNotFound("manifest unavailable"), merr.ErrIoKeyNotFound},
+		{"missing_required", nil, merr.ErrImportFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := mockey.Mock(packed.GetManifestFieldIDs).
+				Return(map[int64]struct{}{common.RowIDField: {}, common.TimeStampField: {}}, tc.readErr).Build()
+			defer p.UnPatch()
+			r, err := NewStorageV3ManifestReader(context.Background(), nil,
+				&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}},
+				nil, packed.MarshalManifestPath("snapshot/segment/10", 7), 0, math.MaxUint64, 1024, SourceEncryption{}, nil, nil)
+			require.Nil(t, r)
+			require.ErrorIs(t, err, tc.want)
+		})
+	}
+}
+
+func TestStorageV3Reader_UsesExactSnapshotManifest(t *testing.T) {
+	patchStorageV3TestFieldIDs(t, 100)
+	segmentPath := "snapshot/files/segment/10"
+	exactManifest := packed.MarshalManifestPath(segmentPath, 7)
+	var openedManifest string
+
+	manifestReaderPatch := mockey.Mock(storage.NewManifestRecordReader).To(
+		func(_ context.Context, manifestPath string, _ *schemapb.CollectionSchema, _ ...storage.RwOption) (storage.RecordReader, error) {
+			openedManifest = manifestPath
+			return &storageV3DeltaRecordReader{read: true}, nil
+		}).Build()
+	defer manifestReaderPatch.UnPatch()
+	fragmentsPatch := mockey.Mock(packed.ReadFragmentsFromManifest).
+		Return([]packed.Fragment(nil), nil).Build()
+	defer fragmentsPatch.UnPatch()
+	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
+	defer lobPatch.UnPatch()
+	deltaPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	defer deltaPatch.UnPatch()
+
+	r, err := NewStorageV3ManifestReader(
+		context.Background(),
+		nil,
+		&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		}},
+		&indexpb.StorageConfig{},
+		exactManifest,
+		0,
+		math.MaxUint64,
+		1024,
+		SourceEncryption{},
+		nil,
+		nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, exactManifest, openedManifest)
+	r.Close()
+
+	_, err = NewStorageV3ManifestReader(
+		context.Background(),
+		nil,
+		&schemapb.CollectionSchema{},
+		&indexpb.StorageConfig{},
+		packed.MarshalManifestPath(segmentPath, packed.ManifestLatest),
+		0,
+		math.MaxUint64,
+		1024,
+		SourceEncryption{},
+		nil,
+		nil,
+	)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.ErrorContains(t, err, "exact StorageV3 manifest version")
+}
+
+func TestStorageV3Reader_CMEKWithoutTextUsesPackedReaderContext(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("snapshot/files/segment/10", 7)
+	expectedContext := &indexcgopb.StoragePluginContext{
+		EncryptionZoneId: 10,
+		EncryptionKey:    "encoded-source-key",
+	}
+
+	// The constructor consumes explicit dependencies; neither EZK parsing nor
+	// source/target key lookup belongs to a per-segment reader anymore.
+	parsePatch := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(0), merr.ErrServiceInternal).Build()
+	defer parsePatch.UnPatch()
+	contextPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(nil, merr.ErrServiceInternal).Build()
+	defer contextPatch.UnPatch()
+	encryptionPatch := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
+	defer encryptionPatch.UnPatch()
+	fieldIDsPatch := mockey.Mock(packed.GetManifestFieldIDs).
+		Return(map[int64]struct{}{common.RowIDField: {}, common.TimeStampField: {}, 100: {}}, nil).Build()
+	defer fieldIDsPatch.UnPatch()
+
+	var capturedContext *indexcgopb.StoragePluginContext
+	innerReaderPatch := mockey.Mock(storage.NewRecordReaderFromManifest).To(
+		func(_ string,
+			schema *schemapb.CollectionSchema,
+			_ int64,
+			_ *indexpb.StorageConfig,
+			pluginContext *indexcgopb.StoragePluginContext,
+			_ ...storage.RwOption,
+		) (storage.RecordReader, error) {
+			capturedContext = pluginContext
+			require.False(t, typeutil.HasTextField(schema), "absent target-only TEXT must not select the LOB reader")
+			record, err := storage.ValueSerializer([]*storage.Value{{Value: map[int64]any{
+				common.RowIDField: int64(1), common.TimeStampField: int64(100), 100: int64(42),
+			}}}, schema)
+			return &storageV3DeltaRecordReader{record: record}, err
+		}).Build()
+	defer innerReaderPatch.UnPatch()
+	fragmentsPatch := mockey.Mock(packed.ReadFragmentsFromManifest).
+		Return([]packed.Fragment(nil), nil).Build()
+	defer fragmentsPatch.UnPatch()
+	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo(nil), nil).Build()
+	defer lobPatch.UnPatch()
+	deltaPatch := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	defer deltaPatch.UnPatch()
+
+	for _, tc := range []struct {
+		name       string
+		encryption SourceEncryption
+		addedText  bool
+	}{
+		{"cmek", SourceEncryption{Encrypted: true, PluginContext: expectedContext}, false},
+		{"cmek_nullable_text", SourceEncryption{Encrypted: true, PluginContext: expectedContext}, true},
+		{"cmek_disabled_plugin", SourceEncryption{Encrypted: true}, false},
+		{"plaintext", SourceEncryption{}, false},
+		{"plaintext_nullable_text", SourceEncryption{}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			}, Properties: []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "99"}}}
+			if tc.addedText {
+				schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+					FieldID: 101, Name: "target_only_text", DataType: schemapb.DataType_Text, Nullable: true,
+				})
+			}
+			capturedContext = &indexcgopb.StoragePluginContext{EncryptionZoneId: 99}
+			r, err := NewStorageV3ManifestReader(context.Background(), nil, schema, &indexpb.StorageConfig{},
+				manifestPath, 0, math.MaxUint64, 1024, tc.encryption, nil, nil)
+			require.NoError(t, err)
+			defer r.Close()
+			require.Equal(t, tc.encryption.PluginContext, capturedContext, "an explicit nil must not fall back to the target key")
+			data, err := r.Read()
+			require.NoError(t, err)
+			require.Equal(t, int64(42), data.Data[100].GetRow(0))
+			require.NotContains(t, data.Data, int64(101), "Import fills the absent nullable field later")
+			require.Equal(t, tc.addedText, typeutil.HasTextField(schema), "keep the target schema for NULL filling")
+		})
+	}
+	require.Zero(t, parsePatch.Times())
+	require.Zero(t, contextPatch.Times())
+}
+
+func TestStorageV3Reader_CMEKWithTextIsUnsupported(t *testing.T) {
+	patchStorageV3TestFieldIDs(t, 100, 101)
+	openPatch := mockey.Mock(storage.NewManifestRecordReader).To(func(_ context.Context, _ string,
+		_ *schemapb.CollectionSchema, _ ...storage.RwOption,
+	) (storage.RecordReader, error) {
+		t.Fatal("encrypted TEXT must be rejected before opening the data reader")
+		return nil, nil
+	}).Build()
+	defer openPatch.UnPatch()
+	for _, nullable := range []bool{false, true} {
+		t.Run(fmt.Sprintf("present_text_nullable=%t", nullable), func(t *testing.T) {
+			_, err := NewStorageV3ManifestReader(
+				context.Background(),
+				nil,
+				&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					{FieldID: 101, DataType: schemapb.DataType_Text, Nullable: nullable},
+				}},
+				&indexpb.StorageConfig{},
+				packed.MarshalManifestPath("snapshot/files/segment/10", 7),
+				0,
+				math.MaxUint64,
+				1024,
+				SourceEncryption{Encrypted: true},
+				nil,
+				nil,
+			)
+			assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
+			assert.ErrorContains(t, err, "TEXT/LOB")
+		})
+	}
+}
+
+func TestStorageV3Reader_RejectsLegacyPathInput(t *testing.T) {
+	r := &reader{storageVersion: storage.StorageV3}
+	err := r.init([]string{"backup/insert_log/1/2/3"}, 0, math.MaxUint64)
+	assert.ErrorIs(t, err, merr.ErrImportFailed)
+	assert.ErrorContains(t, err, "exact manifest from a snapshot source")
+}
+
+func TestStorageV3Reader_CollectsManifestReferencedFiles(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	partitionPath := path.Join(root, "backup/insert_log/1/2")
+	segmentPath := path.Join(partitionPath, "10")
+	manifestPath := packed.MarshalManifestPath(segmentPath, 7)
+	segmentDataPath := path.Join(segmentPath, "_data/0.parquet")
+	orphanDataPath := path.Join(segmentPath, "_data/orphan.parquet")
+	lobWithSizePath := path.Join(partitionPath, "lobs/101/_data/a.vx")
+	lobWithoutSizePath := path.Join(partitionPath, "lobs/101/_data/b.vx")
+	cm := storage.NewLocalChunkManager()
+	assert.NoError(t, cm.Write(ctx, segmentDataPath, []byte("segment-10")))
+	assert.NoError(t, cm.Write(ctx, orphanDataPath, []byte("orphan")))
+	assert.NoError(t, cm.Write(ctx, lobWithoutSizePath, []byte("lob")))
+
+	fragmentsPatch := mockey.Mock(packed.ReadFragmentsFromManifest).To(
+		func(gotManifest string, _ *indexpb.StorageConfig, columns []string) ([]packed.Fragment, error) {
+			assert.Equal(t, manifestPath, gotManifest)
+			assert.Nil(t, columns)
+			return []packed.Fragment{{FilePath: segmentDataPath}}, nil
+		}).Build()
+	defer fragmentsPatch.UnPatch()
+
+	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{
+		{Path: lobWithSizePath, FileSizeBytes: 64},
+		{Path: lobWithoutSizePath},
+	}, nil).Build()
+	defer lobPatch.UnPatch()
+
+	r := &reader{
+		ctx:            ctx,
+		cm:             cm,
+		schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{DataType: schemapb.DataType_Text}}},
+		storageVersion: storage.StorageV3,
+		fileSize:       atomic.NewInt64(0),
+	}
+	assert.NoError(t, r.collectStorageV3Files(manifestPath))
+	assert.ElementsMatch(t, []string{
+		segmentDataPath,
+		lobWithoutSizePath,
+	}, r.storageV3Files)
+	assert.NotContains(t, r.storageV3Files, orphanDataPath)
+	assert.Equal(t, int64(64), r.storageV3LobSize)
+	size, err := r.Size()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(len("segment-10")+len("lob"))+64, size)
+}
+
+func TestStorageV3Reader_RejectsInvalidManifestSizeMetadata(t *testing.T) {
+	manifestPath := packed.MarshalManifestPath("backup/insert_log/1/2/3", 7)
+	tests := []struct {
+		name          string
+		fragments     []packed.Fragment
+		lobFiles      []packed.LobFileInfo
+		fragmentErr   error
+		lobErr        error
+		wantError     string
+		dataIntegrity bool
+	}{
+		{
+			name:        "data fragment read failure",
+			fragmentErr: errors.New("fragment read failed"),
+			wantError:   "failed to read StorageV3 data files from manifest",
+		},
+		{
+			name:          "data fragment without path",
+			fragments:     []packed.Fragment{{}},
+			wantError:     "data fragment without a path",
+			dataIntegrity: true,
+		},
+		{
+			name:      "LOB metadata read failure",
+			lobErr:    errors.New("LOB metadata read failed"),
+			wantError: "failed to read StorageV3 LOB files from manifest",
+		},
+		{
+			name:          "LOB file without path",
+			lobFiles:      []packed.LobFileInfo{{FileSizeBytes: 1}},
+			wantError:     "LOB file without a path",
+			dataIntegrity: true,
+		},
+		{
+			name:          "LOB file with negative size",
+			lobFiles:      []packed.LobFileInfo{{Path: "lobs/1", FileSizeBytes: -1}},
+			wantError:     "with negative size",
+			dataIntegrity: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fragmentsPatch := mockey.Mock(packed.ReadFragmentsFromManifest).
+				Return(test.fragments, test.fragmentErr).Build()
+			defer fragmentsPatch.UnPatch()
+			lobPatch := mockey.Mock(packed.GetManifestLobFiles).
+				Return(test.lobFiles, test.lobErr).Build()
+			defer lobPatch.UnPatch()
+
+			r := &reader{ctx: context.Background(), schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{DataType: schemapb.DataType_Text}}}}
+			err := r.collectStorageV3Files(manifestPath)
+			assert.ErrorContains(t, err, test.wantError)
+			if test.dataIntegrity {
+				assert.ErrorIs(t, err, merr.ErrDataIntegrity)
+			}
+		})
+	}
+}
+
+func TestStorageV3Reader_InvalidSourceManifest(t *testing.T) {
+	paramtable.Init()
+	patchStorageV3TestFieldIDs(t)
+	for _, manifest := range []string{"", "not-json", packed.MarshalManifestPath("snapshot/segment/10", packed.ManifestLatest)} {
+		t.Run(manifest, func(t *testing.T) {
+			r, err := NewStorageV3ManifestReader(context.Background(), nil, &schemapb.CollectionSchema{}, nil,
+				manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest}, nil)
+			require.ErrorIs(t, err, merr.ErrImportFailed)
+			require.Nil(t, r)
+		})
+	}
+	manifest := packed.MarshalManifestPath("snapshot/segment/10", 7)
+	openErr := merr.WrapErrIoKeyNotFound("missing source object")
+	fragments := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment(nil), nil).Build()
+	defer fragments.UnPatch()
+	delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string(nil), nil).Build()
+	defer delta.UnPatch()
+	openPatch := mockey.Mock(storage.NewManifestRecordReader).Return(nil, openErr).Build()
+	defer openPatch.UnPatch()
+	r, err := NewStorageV3ManifestReader(context.Background(), nil, &schemapb.CollectionSchema{}, nil,
+		manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest}, nil)
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+	require.Nil(t, r)
+}
+
+func TestStorageV3Reader_DeleteFilterRequiresPrimaryKey(t *testing.T) {
+	f, err := FilterWithDelete(&reader{schema: &schemapb.CollectionSchema{}})
+	require.Error(t, err)
+	require.Nil(t, f)
 }
 
 func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
