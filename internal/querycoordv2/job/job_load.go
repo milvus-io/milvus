@@ -338,20 +338,14 @@ func requestedLoadFields(req *messagespb.AlterLoadConfigMessageHeader) (map[int6
 //   - every existing replica appears in the new set, in the same resource
 //     group: no replica is being released or moved, so no resource group is
 //     losing state that the collection meta still claims it has.
-//   - every added replica lives in a resource group that holds none of this
-//     collection's replicas today: this is the "adds resource groups" part,
-//     and it is what lets the caller cover every added replica with one
-//     observer task per added resource group. An extra replica in a resource
-//     group that is already loaded would be left with no task at all, so that
-//     request keeps the overwrite.
 //
 // The whole path is a form's: it answers false on a stock binary
 // (extension.FormInstalled), which keeps master's behavior exactly - every load
 // of an already-loaded collection, a two-group LoadCollection included, writes
 // the collection back to Loading/0 and the collection-wide observer walks it up
 // again. The deployment shape that loads one collection into several resource
-// groups independently, and cannot afford that reset, is the one a compiled-in
-// form builds.
+// groups independently, and cannot afford that reset, is the one a form
+// builds.
 //
 // The new set need not be LARGER. A request whose replica set is exactly the
 // stored one, on a Loaded collection, is this job's own message replayed: the
@@ -402,10 +396,8 @@ func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadCo
 		return false // a replica is being released
 	}
 	existingRGByReplica := make(map[int64]string, len(existingReplicas))
-	loadedRGs := typeutil.NewSet[string]()
 	for _, replica := range existingReplicas {
 		existingRGByReplica[replica.GetID()] = replica.GetResourceGroup()
-		loadedRGs.Insert(replica.GetResourceGroup())
 	}
 
 	seen := typeutil.NewSet[int64]()
@@ -417,9 +409,6 @@ func (job *LoadCollectionJob) isIncrementalExpansion(req *messagespb.AlterLoadCo
 				return false // an existing replica is being moved to another resource group
 			}
 			continue
-		}
-		if loadedRGs.Contain(replica.GetResourceGroupName()) {
-			return false // an added replica would land in a resource group that has no task of its own
 		}
 	}
 	for _, replica := range existingReplicas {

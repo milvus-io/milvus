@@ -716,22 +716,27 @@ func (suite *IncrementalExpansionSuite) TestAReplayedExpansionKeepsTheCollection
 	suite.Empty(tasks, "the replay registers no second task for rgB")
 }
 
-// TestReplicaNumberIncreaseInSameResourceGroupOverwritesMeta covers the plain
-// replica-number change every upstream deployment can hit: the added replica
-// lands in a resource group that is already loaded, so it would get no
-// resource-group task of its own and must keep today's path.
-func (suite *IncrementalExpansionSuite) TestReplicaNumberIncreaseInSameResourceGroupOverwritesMeta() {
+// TestReplicaNumberIncreaseInSameResourceGroupKeepsTheCollectionLoaded: an
+// added replica that lands in a resource group that already holds the
+// collection is an expansion like any other - the checkers load it, exactly as
+// they load a replica in a group the request newly names. The fast path keeps
+// the collection serving; there is no longer an overwrite leg for this shape
+// to force.
+func (suite *IncrementalExpansionSuite) TestReplicaNumberIncreaseInSameResourceGroupKeepsTheCollectionLoaded() {
 	suite.seedLoadedCollection(1, rgA, 1)
 
 	putCalls, tasks, err := suite.runJob(suite.buildExpansionRequest(
 		replicaConfig(1, rgA), replicaConfig(2, rgA)))
 	suite.NoError(err)
-	suite.Equal(1, putCalls, "a replica-number change must still store the collection meta")
+	suite.Equal(0, putCalls, "adding a replica keeps the collection meta as it is")
 
 	collection := suite.meta.GetCollection(suite.ctx, expansionCollectionID)
-	suite.Equal(querypb.LoadStatus_Loading, collection.GetStatus())
+	suite.Require().NotNil(collection)
+	suite.Equal(querypb.LoadStatus_Loaded, collection.GetStatus(), "the collection stays serving")
+	suite.EqualValues(100, collection.LoadPercentage)
 	suite.EqualValues(2, collection.GetReplicaNumber())
-	suite.Require().Len(tasks, 1, "a load that resets the collection is watched to completion")
+	suite.Len(suite.meta.GetByCollection(suite.ctx, expansionCollectionID), 2)
+	suite.Empty(tasks, "the checkers load the added replica, as they do an added replica in a new group")
 }
 
 // TestReplicaNumberDecreaseOverwritesMeta covers the other direction: the
@@ -916,11 +921,11 @@ func (suite *IncrementalExpansionSuite) TestIsIncrementalExpansionLegs() {
 			expected: false,
 		},
 		{
-			name: "the added replica lands in a loaded resource group",
+			name: "an added replica lands in a loaded resource group",
 			seed: func() { suite.seedLoadedCollection(1, rgA, 1) },
 			request: suite.buildRequest(expansionDbID, []int64{expansionPartitionID}, sameFields,
 				[]*messagespb.LoadReplicaConfig{replicaConfig(1, rgA), replicaConfig(2, rgA)}),
-			expected: false,
+			expected: true,
 		},
 		{
 			name: "an identical replica set on a loaded collection is a replayed expansion",
