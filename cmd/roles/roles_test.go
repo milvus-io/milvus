@@ -81,3 +81,29 @@ func TestCleanLocalDir(t *testing.T) {
 		cleanLocalDir(localPath)
 	})
 }
+
+func TestComponentNum(t *testing.T) {
+	tests := []struct {
+		name  string
+		roles MilvusRoles
+		count int
+	}{
+		{name: "empty"},
+		{name: "proxy", roles: MilvusRoles{EnableProxy: true}, count: 1},
+		{name: "querynode", roles: MilvusRoles{EnableQueryNode: true}, count: 1},
+		{name: "datanode", roles: MilvusRoles{EnableDataNode: true}, count: 1},
+		{name: "streamingnode with embedded querynode", roles: MilvusRoles{EnableStreamingNode: true, EnableQueryNode: true}, count: 2},
+		{name: "mixcoord", roles: MilvusRoles{EnableMixCoord: true}, count: 1},
+		{name: "cdc", roles: MilvusRoles{EnableCDC: true}, count: 1},
+		{name: "standalone", roles: MilvusRoles{EnableMixCoord: true, EnableProxy: true, EnableQueryNode: true, EnableDataNode: true, EnableStreamingNode: true}, count: 5},
+		{name: "legacy mixture coordinators", roles: MilvusRoles{EnableRootCoord: true, EnableQueryCoord: true, EnableDataCoord: true}, count: 1},
+		{name: "overlapping coordinator flags", roles: MilvusRoles{EnableMixCoord: true, EnableRootCoord: true, EnableQueryCoord: true, EnableDataCoord: true}, count: 1},
+		{name: "partial legacy coordinator flags do not start a component", roles: MilvusRoles{EnableRootCoord: true, EnableQueryCoord: true, EnableProxy: true}, count: 1},
+	}
+	for i := range tests {
+		test := &tests[i]
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.count, test.roles.componentNum())
+		})
+	}
+}
