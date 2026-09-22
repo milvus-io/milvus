@@ -145,16 +145,37 @@ func (m *Manager) HasPendingWork() bool {
 }
 
 func (m *Manager) taskError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if !errors.Is(err, ErrStoreCorrupted) {
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	m.mu.Lock()
-	m.terminalErr = err
+	failed := m.setTerminalErrorLocked(err)
 	m.mu.Unlock()
+	if failed {
+		m.reportTerminalError(ctx, err)
+	}
+	return err
+}
+
+func (m *Manager) setTerminalErrorLocked(err error) bool {
+	if m.terminalErr != nil {
+		return false
+	}
+	m.terminalErr = err
+	m.notifyReadersLocked()
+	return true
+}
+
+func (m *Manager) reportTerminalError(ctx context.Context, err error) {
 	if m.cfg.Logger != nil {
 		m.cfg.Logger.Error(ctx, "summary persistence failed", mlog.Err(err))
 	}
-	return err
+	if m.cfg.OnFatal != nil {
+		m.cfg.OnFatal(err)
+	}
 }
 
 type chunkWriteTask struct {
@@ -184,9 +205,17 @@ type manifestWriteTask struct {
 }
 
 func (t *manifestWriteTask) Done() bool { return t.done.Load() }
-func (t *manifestWriteTask) Execute(ctx context.Context) error {
+func (t *manifestWriteTask) Execute(ctx context.Context) (err error) {
 	m := t.manager
-	m.publishMu.Lock()
+	// Report terminal errors only after releasing publication and state locks.
+	defer func() {
+		if err != nil && !errors.Is(err, nodescheduler.ErrDelay) {
+			err = m.taskError(ctx, err)
+		}
+	}()
+	if !m.publishMu.TryLock() {
+		return nodescheduler.ErrDelay
+	}
 	defer m.publishMu.Unlock()
 	if t.Done() {
 		return nil
@@ -207,7 +236,7 @@ func (t *manifestWriteTask) Execute(ctx context.Context) error {
 			if errors.Is(err, ErrStoreCorrupted) {
 				t.done.Store(true)
 			}
-			return m.taskError(ctx, err)
+			return err
 		}
 		m.mu.Lock()
 		m.publishedVersion = version

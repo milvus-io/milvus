@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -285,22 +286,95 @@ func TestGCWaitsForPublicationAndReaders(t *testing.T) {
 	m.cfg.RetentionMaxBytes = 1
 	require.NoError(t, m.GCOnce(ctx))
 	require.NoError(t, m.manifestTask.Execute(ctx))
-	gcDone := make(chan error, 1)
-	go func() { gcDone <- m.gcTask.Execute(ctx) }()
+	requireSummaryError(t, m.gcTask.Execute(ctx), nodescheduler.ErrDelay)
 	exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(0))
 	require.NoError(t, err)
 	require.True(t, exists)
-	select {
-	case <-gcDone:
-		t.Fatal("GC bypassed active reader")
-	case <-time.After(20 * time.Millisecond):
-	}
 	close(release)
 	require.NoError(t, <-readDone)
-	require.NoError(t, <-gcDone)
+	require.NoError(t, m.gcTask.Execute(ctx))
 	exists, err = store.chunkManager.Exist(ctx, store.ChunkKey(0))
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func TestSlowGCDoesNotBlockReadersOrPublication(t *testing.T) {
+	ctx := context.Background()
+	m, store := newTestManagerWithStore(t)
+	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
+	require.NoError(t, stageChunk(t, m, 200).Execute(ctx))
+	require.NoError(t, drainSummary(ctx, m))
+	m.cfg.MaxRetainedChunks = 1
+	require.NoError(t, m.GCOnce(ctx))
+	require.NoError(t, m.manifestTask.Execute(ctx))
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	var original func(*Store, context.Context, uint64, int64) error
+	patch := mockey.Mock((*Store).DeleteChunk).Origin(&original).To(func(s *Store, ctx context.Context, gen uint64, term int64) error {
+		if gen == 0 {
+			close(entered)
+			<-release
+		}
+		return original(s, ctx, gen, term)
+	}).Build()
+	defer patch.UnPatch()
+	done := make(chan struct{})
+	var gcErr error
+	go func() {
+		gcErr = m.gcTask.Execute(ctx)
+		close(done)
+	}()
+	defer func() {
+		unblock()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("GC did not finish after deletion resumed")
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("GC did not start deleting the retired chunk")
+	}
+	require.True(t, m.readMu.TryRLock(), "slow deletion must not block new readers")
+	m.readMu.RUnlock()
+	records, err := m.ReadIdempotencyEntries(ctx, "v1", 0, 200)
+	require.NoError(t, err)
+	require.Len(t, records.Inserts, 1)
+	require.Equal(t, uint64(200), records.Inserts[0].GetSourceTimetick())
+
+	// New covered objects and the still-unpublished tail must both survive
+	// a sweep whose immutable coverage was captured before these uploads.
+	require.NoError(t, stageChunk(t, m, 300).Execute(ctx))
+	require.NoError(t, m.manifestTask.Execute(ctx), "publication must progress during deletion")
+	require.NoError(t, stageChunk(t, m, 400).Execute(ctx))
+	unblock()
+	// Wait for the actual delete loop to finish before checking object safety.
+	<-done
+	require.ErrorIs(t, gcErr, nodescheduler.ErrDelay, "new publications require another sweep snapshot")
+	for generation := uint64(1); generation <= 3; generation++ {
+		exists, err := store.chunkManager.Exist(ctx, store.ChunkKey(generation))
+		require.NoError(t, err)
+		require.True(t, exists, "sweep deleted live generation %d", generation)
+	}
+}
+
+func TestSummaryTasksYieldOnPublicationLock(t *testing.T) {
+	ctx := context.Background()
+	m, _ := newTestManagerWithStore(t)
+	require.NoError(t, stageChunk(t, m, 100).Execute(ctx))
+	require.NoError(t, m.GCOnce(ctx))
+	func() {
+		m.publishMu.Lock()
+		defer m.publishMu.Unlock()
+		require.ErrorIs(t, m.manifestTask.Execute(ctx), nodescheduler.ErrDelay)
+		require.ErrorIs(t, m.gcTask.Execute(ctx), nodescheduler.ErrDelay)
+	}()
+	require.True(t, m.readMu.TryLock(), "delayed GC must release the reader lock")
+	m.readMu.Unlock()
+	require.NoError(t, drainSummary(ctx, m))
 }
 
 func TestGCDeletionFailureIsRediscoveredAfterRestart(t *testing.T) {

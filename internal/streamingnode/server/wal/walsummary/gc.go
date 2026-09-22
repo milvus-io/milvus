@@ -90,21 +90,27 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 		return nil
 	}
 	m := t.manager
-	m.readMu.Lock()
-	defer m.readMu.Unlock()
-	// Holding publication ordering across the sweep prevents deletion using a
-	// snapshot whose successor has not yet been committed to storage.
-	m.publishMu.Lock()
-	defer m.publishMu.Unlock()
+	// Do not occupy a shared scheduler worker waiting for a reader or publisher.
+	if !m.readMu.TryLock() {
+		return nodescheduler.ErrDelay
+	}
+	if !m.publishMu.TryLock() {
+		m.readMu.Unlock()
+		return nodescheduler.ErrDelay
+	}
 	m.mu.Lock()
 	if m.terminalErr != nil {
 		err := m.terminalErr
 		t.done.Store(true)
 		m.mu.Unlock()
+		m.publishMu.Unlock()
+		m.readMu.Unlock()
 		return err
 	}
 	if !m.manifestPublished || m.manifestVersion != m.publishedVersion {
 		m.mu.Unlock()
+		m.publishMu.Unlock()
+		m.readMu.Unlock()
 		return nodescheduler.ErrDelay
 	}
 	refs := make(map[ChunkRef]struct{}, len(m.manifest.Chunks))
@@ -117,6 +123,14 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 		coverage = proto.Clone(m.manifest.Coverage).(*streamingpb.SummaryCoverage)
 	}
 	m.mu.Unlock()
+	m.publishMu.Unlock()
+	m.readMu.Unlock()
+	// Reference retirement is published and all older local readers have left.
+	// New readers cannot capture the retired objects. New chunks have generations
+	// beyond this frozen coverage and the sweep excludes them, even if they are
+	// published during deletion. References from older terms are only inherited
+	// at Restore, never added by this live manager. Keep the frozen refs/coverage
+	// throughout I/O; cross-owner deletion fencing remains a separate TODO.
 	_, finished, err := m.cfg.Store.sweepGarbage(ctx, m.cfg.Term, coverage, refs, orphanSweepBudget)
 	if err != nil {
 		return errors.Mark(err, nodescheduler.ErrDelay)

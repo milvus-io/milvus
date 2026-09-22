@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
@@ -694,6 +695,43 @@ func TestPersistenceFailureNotifiesWALOwner(t *testing.T) {
 			require.Same(t, snapshot, storage.pendingPersistSnapshot, "failure preserves the frozen batch")
 			require.Equal(t, uint64(10), storage.checkpoint.TimeTick, "failed publication cannot advance checkpoint")
 			require.Zero(t, testutil.ToFloat64(storage.metrics.isOnPersisting))
+		})
+	}
+}
+
+func TestSummaryFailureNotifiesWALOwner(t *testing.T) {
+	resource.InitForTest(t)
+	for _, closing := range []bool{false, true} {
+		name := "terminal_error"
+		if closing {
+			name = "close"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
+			storage := newTestRecoveryStorage(t, checkpoint)
+			t.Cleanup(storage.metrics.Close)
+			t.Cleanup(storage.taskScheduler.Close)
+			t.Cleanup(storage.backgroundTaskNotifier.Cancel)
+			reported := make(chan error, 1)
+			WithRecoveryFatalHandler(func(err error) { reported <- err })(storage)
+			storage.summaryManager = storage.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
+			storage.summaryManager.InitLastAcked(10)
+			patch := mockey.Mock((*walsummary.Store).WriteChunk).Return(nil, uint64(0), walsummary.ErrStoreCorrupted).Build()
+			defer patch.UnPatch()
+			if closing {
+				storage.backgroundTaskNotifier.Cancel()
+			}
+			storage.summaryManager.ObserveMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
+			storage.summaryManager.RequestFlushThrough(20)
+			if closing {
+				require.Empty(t, reported)
+			} else {
+				require.Len(t, reported, 1)
+				require.ErrorIs(t, <-reported, walsummary.ErrStoreCorrupted)
+			}
+			require.Equal(t, uint64(10), storage.summaryManager.LastAcked())
+			require.Equal(t, uint64(10), storage.GetCheckpoint(ctx).TimeTick)
 		})
 	}
 }

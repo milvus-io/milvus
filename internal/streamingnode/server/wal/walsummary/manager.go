@@ -104,6 +104,9 @@ type ManagerConfig struct {
 	// count and the number of object reads recovery pays. Zero disables it.
 	MaxRetainedChunks int
 	Logger            *mlog.Logger
+	// OnFatal marks the owning WAL unavailable. It must not close or wait for
+	// this manager's tasks; the callback runs on the failing task's goroutine.
+	OnFatal func(error)
 	// RequestMaterialization routes a bounded consumption request to its VChannel.
 	RequestMaterialization func(vchannel string, through uint64)
 }
@@ -136,6 +139,10 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 		entry = messageutil.BuildTransformLogEntry(msg, messageutil.TransformEntryOption{})
 	}
 	m.mu.Lock()
+	if m.terminalErr != nil {
+		m.mu.Unlock()
+		return
+	}
 	m.lastObserved = max(m.lastObserved, msg.TimeTick())
 	if msg.VChannel() != "" && !funcutil.IsControlChannel(msg.VChannel()) && (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
 		m.stageRecordLocked(msg, idempotency, insert, entry)
@@ -343,21 +350,26 @@ func messageIDProto(id message.MessageID) *commonpb.MessageID {
 // ObserveMessage); the vchannel grouping is the only organization left.
 func (m *Manager) seal() *SealedChunk {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	sc, err := m.sealLocked()
+	failed := err != nil && m.setTerminalErrorLocked(err)
+	m.mu.Unlock()
+	if failed {
+		m.reportTerminalError(context.TODO(), err)
+	}
+	return sc
+}
+
+func (m *Manager) sealLocked() (*SealedChunk, error) {
 	if len(m.pending) == 0 || m.terminalErr != nil {
-		return nil
+		return nil, nil
 	}
 	if m.reopenedTerm {
 		// Read-only same-term recovery is allowed, but a writer must use a new
 		// assignment term: old objects may exist beyond the first recovered gap.
-		m.terminalErr = storeCorruptedf("summary writes after recovery require a fresh assignment term")
-		m.notifyReadersLocked()
-		return nil
+		return nil, storeCorruptedf("summary writes after recovery require a fresh assignment term")
 	}
 	if m.generationExhausted {
-		m.terminalErr = storeCorruptedf("summary generation exhausted")
-		m.notifyReadersLocked()
-		return nil
+		return nil, storeCorruptedf("summary generation exhausted")
 	}
 	// Keep removal and queue insertion atomic: observers must never see a gap
 	// where an unwritten chunk appears to have no pending records.
@@ -376,7 +388,7 @@ func (m *Manager) seal() *SealedChunk {
 	m.pendingSince = time.Time{}
 	m.pendingSealed = append(m.pendingSealed, sc)
 	m.pendingFlushTimeTick = sc.MaxTimeTick
-	return sc
+	return sc, nil
 }
 
 // buildSealedChunk organizes one chunk span by grouping records by vchannel.

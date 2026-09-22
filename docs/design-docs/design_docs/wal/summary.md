@@ -278,6 +278,13 @@ conditional writes, so an older snapshot cannot overwrite a newer one.
 Transient failures retry the same immutable chunk content. A failed predecessor
 pins the continuous frontier; later completed uploads cannot bypass it.
 
+A terminal Summary error pins confirmation and stops further observation and
+readable-coverage advancement. All terminal transitions, including sealing
+invariant failures, notify the owning RecoveryStorage once outside Summary
+locks. The owner marks the WAL unavailable through its existing fatal handler;
+it does not synchronously close the WAL from the failing task. Ordinary storage
+outages remain retryable and normal shutdown does not report a fatal failure.
+
 ### 3.2 Confirmation And The First Publication Of A Term
 
 `LastAcked` exposes a continuous TimeTick that the specified recovery algorithm
@@ -402,10 +409,17 @@ retained index. The sweep must distinguish obsolete objects from in-flight or
 recoverable unpublished tails, respect reader lifetimes, and obey term
 ownership. It must not delete every unreferenced object indiscriminately.
 Its scan cost is outside the Restore path. The local implementation pins reader
-snapshots with `readMu`, orders deletion against publication with `publishMu`,
-and rediscovers unreferenced objects in bounded deletion rounds. It excludes
-newer terms and the current term's unpublished tail. These locks protect only
-one manager; cross-owner deletion safety remains the TODO in §9.
+snapshots with `readMu` and captures a fully published retained index and coverage
+under `publishMu`. Acquiring the exclusive reader lock proves that readers of
+older snapshots have finished. Scheduler tasks yield for retry rather than wait
+for either lock. GC releases both locks before object listing and deletion,
+using the frozen index and coverage throughout the sweep: retired references
+cannot reappear in this manager, previous-term references are inherited only
+during Restore, and new current-term generations beyond the captured coverage
+are excluded even if uploaded or published during the sweep. New readers
+therefore cannot reference candidates, while new publication proceeds during
+slow deletion. Garbage is rediscovered in bounded deletion rounds. These rules
+protect only one manager; cross-owner deletion safety remains the TODO in §9.
 
 The manifest's published coverage boundary never moves backward when retention
 removes chunks, including the last chunk. Recovery only adopts objects after
