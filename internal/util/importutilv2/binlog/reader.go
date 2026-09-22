@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	importcommon "github.com/milvus-io/milvus/internal/util/importutilv2/common"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexcgopb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -62,6 +63,15 @@ type reader struct {
 
 	filters []Filter
 	dr      storage.DeserializeReader[*storage.Value]
+
+	// Coordinator-expanded jobs with applicable L0, nonzero source commit
+	// timestamps, or external storage carry this context. Segment-local deletes
+	// need the same commit-time override as standalone L0 deletes.
+	snapshotSource *internalpb.SnapshotImportSource
+	readErr        error
+	deleteBudget   int64
+	deleteMask     *rowDeleteMask
+	rawRow         int64
 }
 
 // SourceEncryption is resolved by the task's factory, not by each record reader.
@@ -95,7 +105,9 @@ func NewReader(ctx context.Context,
 // metadata. Keeping this constructor distinct from legacy path-based backup
 // import prevents an object key from being interpreted through content-shaped
 // path heuristics and prevents fallback to ManifestLatest.
-// source carries external storage or explicit destination routing context.
+// source is nil only when neither L0, commit-time overrides nor external storage
+// require context. Any descriptor activates bounded reads and preserves source
+// commit timestamps. L0 deletes are supplied only through task-prepared bitmaps.
 func NewStorageV3ManifestReader(ctx context.Context,
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
@@ -106,25 +118,65 @@ func NewStorageV3ManifestReader(ctx context.Context,
 	bufferSize int,
 	encryption SourceEncryption,
 	source *internalpb.SnapshotImportSource,
+	snapshotDeleteBudget int64,
 	validate func(string) error,
 ) (*reader, error) {
 	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize, "")
 	r.sourceEncryption = encryption
 	r.validatePath = validate
-	return initStorageV3ManifestReader(r, manifestPath, tsStart, tsEnd, source)
+	return initStorageV3ManifestReader(r, manifestPath, tsStart, tsEnd, source, snapshotDeleteBudget, nil)
+}
+
+// NewStorageV3ManifestReaderWithSharedL0 borrows a prepared bitmap containing
+// shared L0 and segment-local deletes, evaluated at the source's timestamp.
+func NewStorageV3ManifestReaderWithSharedL0(ctx context.Context, cm storage.ChunkManager,
+	schema *schemapb.CollectionSchema, storageConfig *indexpb.StorageConfig, manifestPath string,
+	tsStart, tsEnd uint64, bufferSize int, encryption SourceEncryption, source *internalpb.SnapshotImportSource,
+	snapshotDeleteBudget int64, shared *SnapshotL0Deletes,
+	validate func(string) error,
+) (*reader, error) {
+	if shared == nil {
+		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires prepared bitmaps")
+	}
+	r := newReader(ctx, cm, schema, storageConfig, storage.StorageV3, bufferSize, "")
+	r.sourceEncryption = encryption
+	r.validatePath = validate
+	return initStorageV3ManifestReader(r, manifestPath, tsStart, tsEnd, source, snapshotDeleteBudget, shared)
 }
 
 func initStorageV3ManifestReader(r *reader, manifestPath string, tsStart, tsEnd uint64,
-	source *internalpb.SnapshotImportSource,
+	source *internalpb.SnapshotImportSource, snapshotDeleteBudget int64, shared *SnapshotL0Deletes,
 ) (*reader, error) {
 	if source != nil {
-		// Versions 3/4 add coordinator-owned partition routing; row
+		// Versions 3/4 add coordinator-owned partition routing; row/delete
 		// decoding remains identical to versions 1/2.
 		if source.GetVersion() < 1 || source.GetVersion() > 4 {
 			return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported snapshot import source version %d", source.GetVersion())
 		}
+		// Reject development-version inline inventories before any storage IO.
+		// Ignoring them would resurrect deleted rows; reopening them here would
+		// restore the per-segment L0 loading that task sharing replaces.
+		if len(source.GetLegacyL0Deltalogs())+len(source.GetManifestL0Deltalogs()) != 0 {
+			return nil, merr.Wrapf(merr.ErrServiceUnimplemented, "snapshot import tasks with inline L0 are no longer supported; resubmit the snapshot import")
+		}
 		if source.GetManifestPath() != manifestPath {
 			return nil, merr.WrapErrServiceInternalMsg("snapshot import source does not match the selected manifest")
+		}
+		r.snapshotSource = source
+		// Both phases pass the exact budget reserved before opening us. Do not
+		// reread configuration here: a refresh must not change that reservation.
+		r.deleteBudget = snapshotDeleteBudget
+		if r.deleteBudget <= 0 {
+			return nil, merr.Wrapf(merr.ErrServiceResourceInsufficient, "snapshot delete-map budget must be positive")
+		}
+	}
+	if shared != nil {
+		if source == nil {
+			return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires a typed source")
+		}
+		r.deleteMask = shared.masks[maskKey(source)]
+		if r.deleteMask == nil {
+			return nil, merr.WrapErrServiceInternalMsg("snapshot task has no prepared bitmap for source manifest")
 		}
 	}
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
@@ -350,14 +402,20 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 	if err != nil {
 		return err
 	}
-	deltaPaths, err := packed.GetDeltaLogPathsFromManifest(manifestPath, r.storageConfig)
+	var deltaPaths []string
+	if r.deleteMask == nil {
+		deltaPaths, err = packed.GetDeltaLogPathsFromManifest(manifestPath, r.storageConfig)
+	}
 	if err != nil {
 		return merr.Wrap(err, "failed to read StorageV3 deltalogs from manifest")
 	}
-	// Snapshot import must not resurrect deleted rows before folding is
-	// supported. Check the exact source manifest during worker preparation.
-	if len(deltaPaths) != 0 {
-		return merr.WrapErrOperationNotSupportedMsg("snapshot import does not yet support manifest deletes")
+	for i, path := range deltaPaths {
+		if r.validatePath != nil {
+			if err := r.validatePath(path); err != nil {
+				return err
+			}
+			deltaPaths[i] = snapshotstorage.NormalizeSnapshotObjectPath(path)
+		}
 	}
 	rr, err := storage.NewManifestRecordReader(r.ctx, manifestPath, r.schema, rwOptions...)
 	if err != nil {
@@ -366,6 +424,25 @@ func (r *reader) initStorageV3Manifest(manifestPath string, tsStart, tsEnd uint6
 	r.dr = storage.NewDeserializeReader(rr, func(record storage.Record, v []*storage.Value) error {
 		return storage.ValueDeserializerWithSchema(record, v, r.schema, true)
 	})
+	if r.deleteMask != nil {
+		return nil // Both shared and segment-local deletes are already folded.
+	}
+
+	if len(deltaPaths) == 0 && r.snapshotSource == nil {
+		return nil
+	}
+
+	r.deleteData, err = r.readDeleteV3(deltaPaths, tsStart, tsEnd)
+	if err != nil {
+		r.dr.Close()
+		return err
+	}
+	deleteFilter, err := FilterWithDelete(r)
+	if err != nil {
+		r.dr.Close()
+		return err
+	}
+	r.filters = append(r.filters, deleteFilter)
 	return nil
 }
 
@@ -525,6 +602,68 @@ func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (map[any]
 	return deleteData, nil
 }
 
+func (r *reader) readDeleteV3(
+	deltaPaths []string,
+	tsStart, tsEnd uint64,
+) (map[any]typeutil.Timestamp, error) {
+	pkField, err := typeutil.GetPrimaryFieldSchema(r.schema)
+	if err != nil {
+		return nil, err
+	}
+	if r.snapshotSource != nil {
+		merger, err := NewDeleteMerger(r.cm, r.storageConfig, pkField.GetDataType(), r.retryAttempts, r.deleteBudget)
+		if err != nil {
+			return nil, err
+		}
+		return merger.Merge(r.ctx, deltaPaths, tsStart, tsEnd, false)
+	}
+	options := []storage.RwOption{
+		storage.WithVersion(storage.StorageV3),
+		storage.WithStorageConfig(r.storageConfig),
+	}
+	// GetDeltaLogPathsFromManifest has already removed zero-entry manifest
+	// markers. Read the remaining physical files through the shared path reader
+	// so task cancellation is checked between files.
+	reader, err := storage.NewDeltalogReader(r.ctx, pkField.DataType, deltaPaths, options...)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	deleteData := make(map[any]typeutil.Timestamp)
+	for {
+		record, err := reader.Next()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		// RecordReader owns this borrowed record and releases it on the next
+		// Next or Close. Releasing it here would double-release Arrow buffers.
+		for i := 0; i < record.Len(); i++ {
+			ts := typeutil.Timestamp(record.Column(common.TimeStampField).(*array.Int64).Value(i))
+			if ts < tsStart || ts > tsEnd {
+				continue
+			}
+			var pk any
+			switch pkField.DataType {
+			case schemapb.DataType_Int64:
+				pk = record.Column(0).(*array.Int64).Value(i)
+			case schemapb.DataType_VarChar:
+				pk = strings.Clone(record.Column(0).(*array.String).Value(i))
+			default:
+				return nil, merr.WrapErrDataIntegrityMsg("unsupported primary key type %s in StorageV3 deltalog", pkField.DataType.String())
+			}
+			if existing, ok := deleteData[pk]; ok && existing > ts {
+				continue
+			}
+			deleteData[pk] = ts
+		}
+	}
+	return deleteData, nil
+}
+
 // multiReadWithRetry wraps MultiRead with denylist retry: retries all errors
 // except permanent/validation ones (permission denied, bucket not found, etc.),
 // matching the strategy used by parquet/json/csv imports via RetryableReader.
@@ -554,14 +693,29 @@ func multiReadWithRetry(ctx context.Context, cm storage.ChunkManager, attempts u
 }
 
 func (r *reader) Read() (*storage.InsertData, error) {
+	if r.readErr != nil {
+		return nil, r.readErr
+	}
 	insertData, err := storage.NewInsertDataWithFunctionOutputField(r.schema)
 	if err != nil {
 		return nil, err
 	}
 	rowNum := 0
 	for {
+		if r.snapshotSource != nil {
+			if err := r.ctx.Err(); err != nil {
+				r.readErr = err
+				r.Close()
+				return nil, err
+			}
+		}
 		v, err := r.dr.NextValue()
 		if err == io.EOF {
+			if r.deleteMask != nil && r.rawRow != r.deleteMask.rows {
+				r.readErr = merr.WrapErrDataIntegrityMsg("snapshot raw row count changed after bitmap preparation")
+				r.Close()
+				return nil, r.readErr
+			}
 			if insertData.GetRowNum() == 0 {
 				return nil, io.EOF
 			}
@@ -570,6 +724,27 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Validate before any range/delete filter can hide an invalid row.
+		if err := validateSnapshotRowTimestamp(r.snapshotSource, uint64((*v).Timestamp)); err != nil {
+			r.readErr = err
+			// A caller must not retry Read and advance past the corrupt row.
+			// Close the borrowed-record owner and keep the failure sticky.
+			r.Close()
+			return nil, r.readErr
+		}
+		if r.deleteMask != nil {
+			if r.rawRow >= r.deleteMask.rows {
+				r.readErr = merr.WrapErrDataIntegrityMsg("snapshot raw row count increased after bitmap preparation")
+				r.Close()
+				return nil, r.readErr
+			}
+			deleted := r.deleteMask.deleted(r.rawRow)
+			r.rawRow++ // Count even deleted or out-of-range rows across Read calls.
+			if deleted {
+				continue
+			}
+		}
+		row := (*v).Value.(map[int64]any)
 		allFields := typeutil.GetAllFieldSchemas(r.schema)
 		// convert record to fieldData
 		for _, field := range allFields {
@@ -582,7 +757,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 				insertData.Data[field.GetFieldID()] = fieldData
 			}
 
-			err := fieldData.AppendRow((*v).Value.(map[int64]any)[field.GetFieldID()])
+			err := fieldData.AppendRow(row[field.GetFieldID()])
 			if err != nil {
 				return nil, err
 			}
@@ -658,5 +833,9 @@ func (r *reader) Close() {
 	if r.dr != nil {
 		_ = r.dr.Close()
 		r.dr = nil
+	}
+	if r.snapshotSource != nil {
+		r.deleteData = nil
+		r.deleteMask = nil
 	}
 }

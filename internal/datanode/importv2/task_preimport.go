@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -141,7 +142,7 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
 	}
-	if err := importutilv2.ValidateSnapshotImportTask(t.req.GetImportFiles(), t.req.GetOptions()); err != nil {
+	if err := importutilv2.ValidateSnapshotImportTask(t.req.GetImportFiles(), t.req.GetOptions(), t.req.GetSnapshotL0Source()); err != nil {
 		t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
 		return []*conc.Future[any]{conc.Go(func() (any, error) { return nil, err })}
 	}
@@ -159,8 +160,8 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		})
 	readers := importutilv2.NewReaderFactory(t.ctx, t.cm, t.req.GetStorageConfig(), t.options)
 
-	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := readers.NewReader(t.ctx, t.GetSchema(), file, bufferSize)
+	fn := func(ctx context.Context, i int, file *internalpb.ImportFile, rowBuffer int, deleteBudget int64, shared *binlog.SnapshotL0Deletes) error {
+		reader, err := readers.NewReader(ctx, t.GetSchema(), file, rowBuffer, deleteBudget, shared)
 		if err != nil {
 			mlog.Warn(t.ctx, "new reader failed", WrapLogFields(t, mlog.String("file", file.String()), mlog.Err(err))...)
 			reason := fmt.Sprintf("error: %v, file: %s", err, file.String())
@@ -181,6 +182,16 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 		return nil
 	}
 
+	if source := t.req.GetSnapshotL0Source(); source != nil {
+		return executeSnapshotSharedRead(t.ctx, t, t.manager, len(files),
+			func(ctx context.Context, budget, bitmapBudget int64) (*binlog.SnapshotL0Deletes, error) {
+				return readers.PrepareSnapshotDeletes(ctx, t.GetSchema(), files, source, budget, bitmapBudget)
+			},
+			func(ctx context.Context, i int, rowBuffer, budget int64, shared *binlog.SnapshotL0Deletes) error {
+				return fn(ctx, i, files[i], int(rowBuffer), budget, shared)
+			})
+	}
+
 	futures := make([]*conc.Future[any], 0, len(files))
 	for i, file := range files {
 		i := i
@@ -189,7 +200,19 @@ func (t *PreImportTask) Execute() []*conc.Future[any] {
 			defer func() {
 				debug.FreeOSMemory()
 			}()
-			err := fn(i, file)
+			var deleteBudget int64
+			rowBuffer := bufferSize
+			if file.GetSnapshotSource() != nil {
+				reservedRow, budget, release, err := reserveSnapshotRead(t.ctx, t.GetTaskID(), int64(bufferSize))
+				if err != nil {
+					t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+					return nil, err
+				}
+				defer release() // fn closes the reader before this reservation.
+				rowBuffer = int(reservedRow)
+				deleteBudget = budget
+			}
+			err := fn(t.ctx, i, file, rowBuffer, deleteBudget, nil)
 			return err, err
 		})
 		futures = append(futures, f)
