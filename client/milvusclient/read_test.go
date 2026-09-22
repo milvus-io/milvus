@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/column"
@@ -617,6 +618,106 @@ func (s *ReadSuite) TestQuery() {
 
 		_, err := s.client.Query(ctx, NewQueryOption(collectionName).WithFilter("id > {tmpl_id}").WithTemplateParam("tmpl_id", struct{}{}))
 		s.Error(err)
+	})
+}
+
+func (s *ReadSuite) TestSearchWithHighlighter() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("lexical_with_highlight_results", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(8)).
+			WithField(entity.NewField().WithName("text").WithDataType(entity.FieldTypeVarChar))
+		s.setupCache(collectionName, schema)
+
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				s.Require().NotNil(sr.GetHighlighter())
+				s.Equal(HighlightTypeLexical, sr.GetHighlighter().GetType())
+				return &milvuspb.SearchResults{
+					Status: merr.Success(),
+					Results: &schemapb.SearchResultData{
+						NumQueries: 1,
+						TopK:       2,
+						FieldsData: []*schemapb.FieldData{
+							s.getInt64FieldData("ID", []int64{1, 2}),
+						},
+						Ids: &schemapb.IDs{
+							IdField: &schemapb.IDs_IntId{
+								IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+							},
+						},
+						Scores: []float32{0.1, 0.2},
+						Topks:  []int64{2},
+						HighlightResults: []*commonpb.HighlightResult{
+							{FieldName: "text", Datas: []*commonpb.HighlightData{
+								{Fragments: []string{"<em>hello</em> row 1"}, Scores: []float32{0.7}},
+								{Fragments: []string{"row 2 with <em>hello</em>"}, Scores: []float32{0.6}},
+							}},
+						},
+					},
+				}, nil
+			}).Once()
+
+		rss, err := s.client.Search(ctx,
+			NewSearchOption(collectionName, 2,
+				[]entity.Vector{entity.FloatVector([]float32{0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8})}).
+				WithANNSField("vector").
+				WithOutputFields("text").
+				WithHighlighter(NewLexicalHighlighter().
+					WithQuery("text", "hello", "TextMatch").
+					WithHighlightSearchText(true)))
+		s.NoError(err)
+		s.Require().Len(rss, 1)
+		s.Require().Contains(rss[0].Highlights, "text")
+		s.Require().Len(rss[0].Highlights["text"], 2)
+		s.Equal([]string{"<em>hello</em> row 1"}, rss[0].Highlights["text"][0].Fragments)
+		s.Equal([]float32{0.7}, rss[0].Highlights["text"][0].Scores)
+		s.Equal([]string{"row 2 with <em>hello</em>"}, rss[0].Highlights["text"][1].Fragments)
+
+		// Slice keeps highlights in lockstep with the row window.
+		half := rss[0].Slice(0, 1)
+		s.Require().Len(half.Highlights["text"], 1)
+		s.Equal([]string{"<em>hello</em> row 1"}, half.Highlights["text"][0].Fragments)
+	})
+
+	s.Run("no_highlight_results_passes_through", func() {
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collectionName, s.schema)
+		s.mock.EXPECT().Search(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, sr *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
+				s.Require().NotNil(sr.GetHighlighter())
+				return &milvuspb.SearchResults{
+					Status: merr.Success(),
+					Results: &schemapb.SearchResultData{
+						NumQueries: 1,
+						TopK:       5,
+						FieldsData: []*schemapb.FieldData{
+							s.getInt64FieldData("ID", []int64{1, 2, 3, 4, 5}),
+						},
+						Ids: &schemapb.IDs{
+							IdField: &schemapb.IDs_IntId{
+								IntId: &schemapb.LongArray{Data: []int64{1, 2, 3, 4, 5}},
+							},
+						},
+						Scores: []float32{0.1, 0.2, 0.3, 0.4, 0.5},
+						Topks:  []int64{5},
+					},
+				}, nil
+			}).Once()
+
+		rss, err := s.client.Search(ctx,
+			NewSearchOption(collectionName, 5, []entity.Vector{
+				entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 { return rand.Float32() })),
+			}).
+				WithANNSField("Vector").
+				WithHighlighter(NewLexicalHighlighter().WithQuery("text", "hi", "TextMatch")))
+		s.NoError(err)
+		s.Require().Len(rss, 1)
+		s.Nil(rss[0].Highlights)
 	})
 }
 

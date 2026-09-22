@@ -57,6 +57,9 @@ func (opt *searchIteratorOption) ValidateParams() error {
 	if opt.searchAggregation != nil {
 		return fmt.Errorf("search_aggregation is not supported with search iterator")
 	}
+	if opt.highlighter != nil {
+		return fmt.Errorf("highlighter is not supported with search iterator")
+	}
 	return nil
 }
 
