@@ -99,7 +99,9 @@ TEST_F(MinioEndpointAuthGuardDeathTest, PrecheckReturnsCStatusNotSignal) {
                 EXPECT_NE(std::string(status.error_msg ? status.error_msg : "")
                               .find("empty signer"),
                           std::string::npos);
-                std::free(status.error_msg);
+                if (status.error_code != static_cast<int>(ErrorCode::Success)) {
+                    std::free(const_cast<char*>(status.error_msg));
+                }
             }
             Aws::ShutdownAPI(options);
             const auto* result = ::testing::UnitTest::GetInstance()
