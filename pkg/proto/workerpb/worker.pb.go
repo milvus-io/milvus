@@ -1404,6 +1404,7 @@ type CreateJobV2Request struct {
 	TaskID    int64           `protobuf:"varint,2,opt,name=taskID,proto3" json:"taskID,omitempty"`
 	JobType   indexpb.JobType `protobuf:"varint,3,opt,name=job_type,json=jobType,proto3,enum=milvus.proto.index.JobType" json:"job_type,omitempty"`
 	// Types that are assignable to Request:
+	//
 	//	*CreateJobV2Request_AnalyzeRequest
 	//	*CreateJobV2Request_IndexRequest
 	//	*CreateJobV2Request_StatsRequest
@@ -2078,6 +2079,7 @@ type QueryJobsV2Response struct {
 	Status    *commonpb.Status `protobuf:"bytes,1,opt,name=status,proto3" json:"status,omitempty"`
 	ClusterID string           `protobuf:"bytes,2,opt,name=clusterID,proto3" json:"clusterID,omitempty"`
 	// Types that are assignable to Result:
+	//
 	//	*QueryJobsV2Response_IndexJobResults
 	//	*QueryJobsV2Response_AnalyzeJobResults
 	//	*QueryJobsV2Response_StatsJobResults

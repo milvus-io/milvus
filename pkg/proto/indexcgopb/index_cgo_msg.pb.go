@@ -689,7 +689,7 @@ type BuildIndexInfo struct {
 	Dim                 int64    `protobuf:"varint,9,opt,name=dim,proto3" json:"dim,omitempty"`
 	IndexFilePrefix     string   `protobuf:"bytes,10,opt,name=index_file_prefix,json=indexFilePrefix,proto3" json:"index_file_prefix,omitempty"`
 	InsertFiles         []string `protobuf:"bytes,11,rep,name=insert_files,json=insertFiles,proto3" json:"insert_files,omitempty"`
-	//  repeated int64 data_ids = 12;
+	// repeated int64 data_ids = 12;
 	FieldSchema   *schemapb.FieldSchema    `protobuf:"bytes,12,opt,name=field_schema,json=fieldSchema,proto3" json:"field_schema,omitempty"`
 	StorageConfig *StorageConfig           `protobuf:"bytes,13,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
 	IndexParams   []*commonpb.KeyValuePair `protobuf:"bytes,14,rep,name=index_params,json=indexParams,proto3" json:"index_params,omitempty"`

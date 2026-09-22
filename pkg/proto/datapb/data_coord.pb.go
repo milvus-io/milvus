@@ -6475,6 +6475,7 @@ type CompactionSegment struct {
 	//     this field at all: it derives its own delta Stats directly from the
 	//     deltalogs array. L0 is therefore neither of the two buckets above in
 	//     practice; do not assume this field is consumed on that path.
+	//
 	// nil always means "no change". A producer that writes only part of a
 	// segment must ship an increment: it cannot compute an absolute value,
 	// because the input's FieldBinlog arrays are empty for StorageV3 segments
@@ -14617,9 +14618,10 @@ type CommitBackfillResultRequest struct {
 
 	Base *commonpb.MsgBase `protobuf:"bytes,1,opt,name=base,proto3" json:"base,omitempty"`
 	// Accepted forms:
-	//   s3a://<bucket>/<key>   (canonical form produced by Spark)
-	//   s3://<bucket>/<key>
-	//   /<key>                 (bucket implied)
+	//
+	//	s3a://<bucket>/<key>   (canonical form produced by Spark)
+	//	s3://<bucket>/<key>
+	//	/<key>                 (bucket implied)
 	ResultPath string `protobuf:"bytes,2,opt,name=result_path,json=resultPath,proto3" json:"result_path,omitempty"`
 }
 
