@@ -92,11 +92,12 @@ func (c *importChecker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 	err := proto.Unmarshal(job.GetFiles()[0].GetSnapshotSource().GetSnapshotMetadata(), metadata)
 	var files []*internalpb.ImportFile
 	var options importutilv2.Options
+	var sources []*internalpb.SnapshotImportL0Source
 	if err != nil {
 		err = merr.Wrap(err, "invalid captured snapshot metadata")
 	} else {
 		uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(importutilv2.SnapshotSourceURI, job.GetOptions())
-		files, options, err = expandSnapshotImportFiles(ctx, job.GetPartitionIDs(), c.meta.chunkManager, job.GetSchema(),
+		files, options, sources, err = expandSnapshotImportFiles(ctx, job.GetPartitionIDs(), c.meta.chunkManager, job.GetSchema(),
 			uri, job.GetOptions(), metadata)
 	}
 	if ctx.Err() != nil {
@@ -114,7 +115,7 @@ func (c *importChecker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 		// Expansion can rebase paths and add external/routing descriptors after
 		// its intermediate checks. Validate the complete durable plan, including
 		// allocated IDs, before publishing any executable files to the checker.
-		err = importutilv2.ValidateSnapshotImportPlan(files, options)
+		err = importutilv2.ValidateSnapshotImportPlan(files, options, sources)
 	}
 	if ctx.Err() != nil {
 		return
@@ -139,7 +140,7 @@ func (c *importChecker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 			return
 		}
 		j := current.(*importJob)
-		j.Files, j.Options = files, options
+		j.Files, j.Options, j.SnapshotL0Sources = files, options, sources
 	})
 	if err != nil {
 		mlog.Warn(ctx, "failed to persist expanded snapshot import", mlog.FieldJobID(job.GetJobID()), mlog.Err(err))
@@ -245,12 +246,12 @@ func expandSnapshotImportFiles(
 	metadataURI string,
 	options importutilv2.Options,
 	captured *datapb.SnapshotMetadata,
-) ([]*internalpb.ImportFile, importutilv2.Options, error) {
+) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
 	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if cm == nil {
-		return nil, nil, merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
+		return nil, nil, nil, merr.WrapErrServiceInternalMsg("chunk manager cannot be nil")
 	}
 
 	metadataPath := strings.TrimSpace(metadataURI)
@@ -259,72 +260,78 @@ func expandSnapshotImportFiles(
 	// skip preparation and retain their existing representation.
 	bucket, _, _, err := storage.ParseForeignURI(metadataPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if bucket == "" {
-		return nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import requires a complete metadata URI; bare object keys are not supported")
+		return nil, nil, nil, merr.WrapErrParameterInvalidMsg("snapshot-source import requires a complete metadata URI; bare object keys are not supported")
 	}
 	if !importutilv2.HasExternalSource(options) {
 		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), metadataPath); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 	cm, _, err = importutilv2.ResolveSnapshotImportStorage(ctx, cm, nil, metadataPath, options)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot_source", metadataPath, ""); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	reader := storage.NewSnapshotReader(cm)
 	snapshot, err := reader.ReadSnapshotFromMetadata(ctx, metadataPath, captured, true)
 	if err != nil {
-		return nil, nil, merr.Wrap(err, "failed to read snapshot import source")
+		return nil, nil, nil, merr.Wrap(err, "failed to read snapshot import source")
 	}
 	if snapshot == nil {
-		return nil, nil, merr.WrapErrImportSysFailed("snapshot reader returned no data")
+		return nil, nil, nil, merr.WrapErrImportSysFailed("snapshot reader returned no data")
 	}
 	if err := storage.ValidateSnapshotMetadataLocation(metadataPath, snapshot.SnapshotInfo); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if snapshot.Layout != datapb.SnapshotLayout_SnapshotLayoutReferenced &&
 		snapshot.Layout != datapb.SnapshotLayout_SnapshotLayoutSelfContained {
-		return nil, nil, merr.WrapErrImportFailedMsg("unsupported snapshot layout: %s", snapshot.Layout.String())
+		return nil, nil, nil, merr.WrapErrImportFailedMsg("unsupported snapshot layout: %s", snapshot.Layout.String())
 	}
+	// Import accepts old snapshots and uses captured commit timestamps as-is.
+	// Old producers omitted commit timestamps, so a zero may mean either
+	// an ordinary segment or a lost commit-time override. In the latter case,
+	// deletes are compared against raw row timestamps and can remove rows that
+	// should survive (row=100, actual commit=300, delete=200). This is an accepted
+	// historical snapshot limitation, not permission to skip any delete input.
+	// Neither scanning manifests nor re-exporting can recover the missing time;
+	// do not probe manifests or infer it from the live catalog/destination job.
 	options, err = prepareSnapshotImportOptions(targetSchema, snapshot.Collection.GetSchema(), options)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	partitionMapping, err := resolveSnapshotPartitionMapping(snapshot.Collection.GetPartitions(), targetPartitionIDs, targetSchema, options)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	// The snapshot defines the source scope. Import all data partitions;
-	// target placement follows ordinary Import routing or explicit mapping.
+	// The snapshot defines the source scope. Import all data partitions while
+	// retaining their original IDs/channels for L0 matching; target placement
+	// is independent and follows ordinary Import target partition routing.
 	segments := make([]*datapb.SegmentDescription, 0)
 	for _, segment := range snapshot.Segments {
 		if segment == nil {
-			return nil, nil, merr.WrapErrImportFailed("snapshot contains a nil segment")
+			return nil, nil, nil, merr.WrapErrImportFailed("snapshot contains a nil segment")
 		}
-		// Until delete folding is available, never import a snapshot while
-		// silently omitting its standalone delete segments.
-		if segment.GetSegmentLevel() == datapb.SegmentLevel_L0 {
-			return nil, nil, merr.WrapErrOperationNotSupportedMsg("snapshot import does not yet support L0 deletes")
+		if segment.GetSegmentLevel() != datapb.SegmentLevel_L0 {
+			if partitionMapping != nil && partitionMapping[segment.GetPartitionId()] == 0 {
+				return nil, nil, nil, merr.WrapErrImportFailedMsg("snapshot segment %d belongs to an unknown source partition %d", segment.GetSegmentId(), segment.GetPartitionId())
+			}
+			segments = append(segments, segment)
 		}
-		if partitionMapping != nil && partitionMapping[segment.GetPartitionId()] == 0 {
-			return nil, nil, merr.WrapErrImportFailedMsg("snapshot segment %d belongs to an unknown source partition %d", segment.GetSegmentId(), segment.GetPartitionId())
-		}
-		segments = append(segments, segment)
 	}
 	if len(segments) == 0 {
-		return nil, nil, merr.WrapErrImportFailedMsg("snapshot contains no data segments")
+		return nil, nil, nil, merr.WrapErrImportFailedMsg("snapshot contains no data segments")
 	}
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].GetSegmentId() < segments[j].GetSegmentId()
 	})
 	if len(segments) > paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
-		return nil, nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
+		return nil, nil, nil, merr.WrapErrImportFailedMsg("The max number of import files should not exceed %d, but got %d",
 			paramtable.Get().DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(segments))
 	}
 
@@ -332,37 +339,42 @@ func expandSnapshotImportFiles(
 	result := make([]*internalpb.ImportFile, 0, len(segments))
 	for _, segment := range segments {
 		if segment.GetStorageVersion() != milvusstorage.StorageV3 {
-			return nil, nil, merr.WrapErrOperationNotSupportedMsg(
+			return nil, nil, nil, merr.WrapErrOperationNotSupportedMsg(
 				"snapshot-source import only supports StorageV3 segments, segment %d uses storage version %d",
 				segment.GetSegmentId(), segment.GetStorageVersion(),
 			)
 		}
 		manifestPath := segment.GetManifestPath()
 		if manifestPath == "" {
-			return nil, nil, merr.WrapErrImportFailedMsg(
+			return nil, nil, nil, merr.WrapErrImportFailedMsg(
 				"StorageV3 segment %d has no manifest path", segment.GetSegmentId(),
 			)
 		}
 		_, version, err := packed.UnmarshalManifestPath(manifestPath)
 		if err != nil {
-			return nil, nil, merr.WrapErrImportFailedMsg(
+			return nil, nil, nil, merr.WrapErrImportFailedMsg(
 				"invalid manifest path for StorageV3 segment %d: %s", segment.GetSegmentId(), err,
 			)
 		}
 		if version == packed.ManifestLatest {
-			return nil, nil, merr.WrapErrImportFailedMsg(
+			return nil, nil, nil, merr.WrapErrImportFailedMsg(
 				"snapshot segment %d must reference an exact manifest version", segment.GetSegmentId(),
 			)
 		}
 		if _, ok := seenManifests[manifestPath]; ok {
-			return nil, nil, merr.WrapErrImportFailedMsg(
+			return nil, nil, nil, merr.WrapErrImportFailedMsg(
 				"snapshot source contains duplicate manifest for segment %d", segment.GetSegmentId(),
 			)
 		}
 		seenManifests[manifestPath] = struct{}{}
 		result = append(result, &internalpb.ImportFile{Paths: []string{manifestPath}})
 	}
-	validationSegments := segments
+	applicable, err := snapshotImportL0Segments(snapshot.Segments, segments)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	validationSegments := append([]*datapb.SegmentDescription(nil), segments...)
+	validationSegments = append(validationSegments, applicable...)
 	// Validate metadata references without listing prefixes or opening physical
 	// manifests. Batch the references so the metadata manifest list is scanned
 	// only once, not once per segment. Workers validate discovered references.
@@ -373,18 +385,32 @@ func expandSnapshotImportFiles(
 		}
 		base, _, err := packed.UnmarshalManifestPath(segment.GetManifestPath())
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		refs = append(refs, storage.SnapshotFileRef{Path: base, NormalizedPath: storage.NormalizeSnapshotObjectPath(base)})
 	}
 	if err := storage.ValidateExternalSnapshotPaths(metadataPath, snapshot, refs); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	needsSourceContext := len(applicable) != 0
+	for _, segment := range segments {
+		// Compaction can move L0 deletes into a data segment's manifest. The
+		// commit-time override still applies after the standalone L0 disappears;
+		// never choose delete semantics based on where the deletes are stored.
+		needsSourceContext = needsSourceContext || segment.GetCommitTimestamp() != 0
+	}
+	var l0Sources []*internalpb.SnapshotImportL0Source
+	if needsSourceContext {
+		l0Sources, err = attachSnapshotImportSources(ctx, cm, metadataPath, snapshot, segments, applicable, result)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	external := importutilv2.HasExternalSource(options)
 	if external || partitionMapping != nil {
-		// Select the complete contract once: external storage adds 1 and target
-		// routing adds 2 to the base version. Older workers must reject
-		// capabilities they cannot preserve, never ignore them.
+		// Select the complete contract once: external storage adds 1, target
+		// routing adds 2, and shared L0 adds 4 to the base version. Older workers
+		// must reject capabilities they cannot preserve, never ignore them.
 		version := uint32(1)
 		if external {
 			version++
@@ -392,10 +418,14 @@ func expandSnapshotImportFiles(
 		if partitionMapping != nil {
 			version += 2
 		}
+		if len(l0Sources) != 0 {
+			version += 4
+		}
 		for i, file := range result {
 			if file.SnapshotSource == nil {
 				file.SnapshotSource = &internalpb.SnapshotImportSource{ManifestPath: file.GetPaths()[0]}
 			}
+			// Preserve the commit timestamp and source scope attached above.
 			file.SnapshotSource.Version = version
 			if partitionMapping != nil {
 				file.SnapshotSource.TargetPartitionId = partitionMapping[segments[i].GetPartitionId()]
@@ -403,7 +433,7 @@ func expandSnapshotImportFiles(
 			file.Paths = nil
 		}
 	}
-	return result, options, nil
+	return result, options, l0Sources, nil
 }
 
 func resolveSnapshotPartitionMapping(sourcePartitions map[string]int64, targetIDs []int64,
@@ -477,6 +507,168 @@ func (s *Server) validateSnapshotPartitionTargets(ctx context.Context, collectio
 		}
 	}
 	return nil
+}
+
+// Match L0 against original source partitions/channels, including collection-wide
+// deletes. Empty markers still activate the job.
+func snapshotImportL0Segments(all, data []*datapb.SegmentDescription) ([]*datapb.SegmentDescription, error) {
+	var result []*datapb.SegmentDescription
+	for _, delta := range all {
+		if delta.GetSegmentLevel() != datapb.SegmentLevel_L0 {
+			continue
+		}
+		for _, segment := range data {
+			if delta.GetPartitionId() != common.AllPartitionsID && delta.GetPartitionId() != segment.GetPartitionId() {
+				continue
+			}
+			if delta.GetChannelName() == "" || segment.GetChannelName() == "" {
+				return nil, merr.WrapErrImportFailedMsg("snapshot L0 matching requires source channel identity")
+			}
+			if delta.GetChannelName() != segment.GetChannelName() {
+				continue
+			}
+			switch delta.GetStorageVersion() {
+			case milvusstorage.StorageV1, milvusstorage.StorageV2:
+			case milvusstorage.StorageV3:
+				base, version, err := packed.UnmarshalManifestPath(delta.GetManifestPath())
+				if err != nil || base == "" || version == packed.ManifestLatest {
+					return nil, merr.WrapErrImportFailedMsg("snapshot L0 requires an exact manifest")
+				}
+			default:
+				return nil, merr.WrapErrOperationNotSupportedMsg("unsupported snapshot L0 storage version %d", delta.GetStorageVersion())
+			}
+			result = append(result, delta)
+			break
+		}
+	}
+	return result, nil
+}
+
+// Attach timestamp context per segment, but retain L0 paths once per source
+// scope. Channel-wide deletes stay separate in the durable job and are merged
+// with partition-local deletes only when constructing a worker task.
+// Enforce incremental size limits here; prepareSnapshotJob validates the final
+// plan with real options after external/routing transforms and ID allocation.
+func attachSnapshotImportSources(ctx context.Context, cm milvusstorage.ChunkManager, metadataPath string,
+	snapshot *storage.SnapshotData, data, deltas []*datapb.SegmentDescription, files []*internalpb.ImportFile,
+) ([]*internalpb.SnapshotImportL0Source, error) {
+	type scope struct {
+		channel     string
+		partitionID int64
+	}
+	groups := make(map[scope]*internalpb.SnapshotImportL0Source)
+	seen := make(map[scope]map[string]bool)
+	planSize := 0
+	groupFor := func(channel string, partitionID int64) *internalpb.SnapshotImportL0Source {
+		key := scope{channel, partitionID}
+		if group := groups[key]; group != nil {
+			return group
+		}
+		group := &internalpb.SnapshotImportL0Source{SourceChannel: channel, SourcePartitionId: partitionID}
+		groups[key] = group
+		seen[key] = make(map[string]bool)
+		planSize += proto.Size(group) + 16
+		return group
+	}
+	for i, segment := range data {
+		source := &internalpb.SnapshotImportSource{
+			Version: 1, ManifestPath: segment.GetManifestPath(), SourceCommitTimestamp: segment.GetCommitTimestamp(),
+		}
+		if len(deltas) != 0 {
+			source.Version = 5
+			source.SourceChannel = segment.GetChannelName()
+			source.SourcePartitionId = segment.GetPartitionId()
+			groupFor(source.SourceChannel, source.SourcePartitionId)
+		}
+		files[i].SnapshotSource = source
+		files[i].Paths = nil // Old workers must not ignore timestamp/delete semantics.
+		planSize += proto.Size(files[i]) + 16
+		if planSize > importutilv2.SnapshotSourcePlanMaxBytes {
+			return nil, merr.WrapErrImportFailedMsg("snapshot source plan exceeds 256 KiB")
+		}
+	}
+	kinds := make(map[string]bool)
+	// The caller has already checked the full metadata manifest list. Retain
+	// the layout/root boundary for each L0 reference without rescanning it.
+	pathBoundary := &storage.SnapshotData{Layout: snapshot.Layout}
+	for _, delta := range deltas {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		group := groupFor(delta.GetChannelName(), delta.GetPartitionId())
+		groupSeen := seen[scope{delta.GetChannelName(), delta.GetPartitionId()}]
+		packedDelta := delta.GetStorageVersion() == milvusstorage.StorageV3
+		var paths []string
+		if packedDelta {
+			base, version, err := packed.UnmarshalManifestPath(delta.GetManifestPath())
+			if err != nil || base == "" || version == packed.ManifestLatest {
+				return nil, merr.WrapErrDataIntegrityMsg("snapshot L0 requires an exact manifest version")
+			}
+			paths = []string{delta.GetManifestPath()}
+		} else {
+			for _, field := range delta.GetDeltalogs() {
+				for _, log := range field.GetBinlogs() {
+					// A legacy zero count does not imply an empty object.
+					if strings.TrimSpace(log.GetLogPath()) == "" {
+						return nil, merr.WrapErrDataIntegrityMsg("snapshot L0 deltalog has no object path")
+					}
+					paths = append(paths, log.GetLogPath())
+				}
+			}
+		}
+		for _, path := range paths {
+			objectPath := path
+			if packedDelta {
+				objectPath, _, _ = packed.UnmarshalManifestPath(path)
+			}
+			if err := storage.ValidateSnapshotObjectPathForBucket(cm, "snapshot L0", objectPath, ""); err != nil {
+				return nil, err
+			}
+			if err := storage.ValidateExternalSnapshotPaths(metadataPath, pathBoundary, []storage.SnapshotFileRef{{
+				Path: objectPath, NormalizedPath: storage.NormalizeSnapshotObjectPath(objectPath), Type: storage.SnapshotFileTypeDeltaBinlog,
+			}}); err != nil {
+				return nil, err
+			}
+			// Validate the URI before normalizing it; both phases read the same
+			// object key and must agree on its decoder even across source scopes.
+			if packedDelta {
+				_, version, _ := packed.UnmarshalManifestPath(path)
+				path = packed.MarshalManifestPath(storage.NormalizeSnapshotObjectPath(objectPath), version)
+			} else {
+				path = storage.NormalizeSnapshotObjectPath(path)
+			}
+			if previous, ok := kinds[path]; ok && previous != packedDelta {
+				return nil, merr.WrapErrDataIntegrityMsg("snapshot delete object has conflicting decoder contracts")
+			}
+			kinds[path] = packedDelta
+			if _, ok := groupSeen[path]; ok {
+				continue
+			}
+			planSize += len(path) + 16
+			if planSize > importutilv2.SnapshotSourcePlanMaxBytes {
+				return nil, merr.WrapErrImportFailedMsg("snapshot source plan exceeds 256 KiB")
+			}
+			groupSeen[path] = packedDelta
+			if packedDelta {
+				group.ManifestL0Paths = append(group.ManifestL0Paths, path)
+			} else {
+				group.LegacyL0Deltalogs = append(group.LegacyL0Deltalogs, path)
+			}
+		}
+	}
+	sources := make([]*internalpb.SnapshotImportL0Source, 0, len(groups))
+	for _, group := range groups {
+		sort.Strings(group.LegacyL0Deltalogs)
+		sort.Strings(group.ManifestL0Paths)
+		sources = append(sources, group)
+	}
+	sort.Slice(sources, func(i, j int) bool {
+		if sources[i].SourceChannel != sources[j].SourceChannel {
+			return sources[i].SourceChannel < sources[j].SourceChannel
+		}
+		return sources[i].SourcePartitionId < sources[j].SourcePartitionId
+	})
+	return sources, nil
 }
 
 // normalizeSnapshotImportEncryption uses source metadata, not the presence of

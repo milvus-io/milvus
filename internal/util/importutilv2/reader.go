@@ -20,6 +20,8 @@ import (
 	"context"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -96,8 +98,11 @@ func NewReaderFactory(ctx context.Context, cm storage.ChunkManager, cfg *indexpb
 }
 
 func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.CollectionSchema, file *internalpb.ImportFile,
-	bufferSize int,
+	bufferSize int, deleteBudget int64, shared *binlog.SnapshotL0Deletes,
 ) (Reader, error) {
+	if shared != nil && !SnapshotSourceUsesSharedL0(file.GetSnapshotSource()) {
+		return nil, merr.WrapErrServiceInternalMsg("shared L0 reader requires a task-shared snapshot descriptor and prepared bitmaps")
+	}
 	if err := ValidateSnapshotSourceOptions(f.options); err != nil {
 		return nil, err
 	}
@@ -120,9 +125,40 @@ func (f *ReaderFactory) NewReader(ctx context.Context, schema *schemapb.Collecti
 			return nil, err
 		}
 	}
-	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, resolved.encryption)
+	return newReader(ctx, resolved.cm, schema, file, f.options, bufferSize, resolved.cfg, deleteBudget, shared, resolved.encryption)
 }
 
+// PrepareSnapshotDeletes is task-local and shared by PreImport and Import. The
+// existing private-map reservation becomes the bitmap pool; neither the wire
+// task nor coordinator grouping/slot calculation needs a new field or knob.
+func (f *ReaderFactory) PrepareSnapshotDeletes(ctx context.Context, schema *schemapb.CollectionSchema,
+	files []*internalpb.ImportFile, source *internalpb.SnapshotImportL0Source, deleteBudget, bitmapBudget int64,
+) (*binlog.SnapshotL0Deletes, error) {
+	if err := ValidateSnapshotImportTask(files, f.options, source); err != nil {
+		return nil, err
+	}
+	start, end, err := ParseTimeRange(f.options)
+	if err != nil {
+		return nil, err
+	}
+	resolved, err := f.storage()
+	if err != nil {
+		return nil, err
+	}
+	validate, err := SnapshotPathValidator(f.options, resolved.cm)
+	if err != nil {
+		return nil, err
+	}
+	sources := make([]*internalpb.SnapshotImportSource, len(files))
+	for i, file := range files {
+		sources[i] = file.GetSnapshotSource()
+	}
+	return binlog.BuildSnapshotDeleteMasks(ctx, resolved.cm, schema, resolved.cfg, sources, source,
+		start, end, deleteBudget, bitmapBudget, resolved.encryption, validate)
+}
+
+// NewReader requires the caller's reserved positive delete budget for typed
+// snapshot sources. Other inputs do not use that budget and pass zero.
 func NewReader(ctx context.Context,
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
@@ -130,15 +166,26 @@ func NewReader(ctx context.Context,
 	options Options,
 	bufferSize int,
 	storageConfig *indexpb.StorageConfig,
+	snapshotDeleteBudget int64,
 ) (Reader, error) {
-	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize)
+	return NewReaderFactory(ctx, cm, storageConfig, options).NewReader(ctx, schema, importFile, bufferSize, snapshotDeleteBudget, nil)
 }
 
 func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema,
 	importFile *internalpb.ImportFile, options Options, bufferSize int, storageConfig *indexpb.StorageConfig,
+	snapshotDeleteBudget int64, shared *binlog.SnapshotL0Deletes,
 	encryption binlog.SourceEncryption,
 ) (Reader, error) {
 	source := importFile.GetSnapshotSource()
+	if shared != nil {
+		// Adapt only the validated reader view. Never expand L0 paths back
+		// into a segment or mutate the persisted descriptor: the reader must
+		// borrow the task's prepared bitmap instead of opening L0 again.
+		source = proto.Clone(source).(*internalpb.SnapshotImportSource)
+		source.Version -= 4
+		source.SourceChannel = ""
+		source.SourcePartitionId = 0
+	}
 	if IsBackup(options) {
 		tsStart, tsEnd, err := ParseTimeRange(options)
 		if err != nil {
@@ -151,8 +198,12 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				return nil, err
 			}
 			if source != nil {
+				if shared != nil {
+					return binlog.NewStorageV3ManifestReaderWithSharedL0(ctx, cm, schema, storageConfig,
+						source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, shared, validate)
+				}
 				return binlog.NewStorageV3ManifestReader(
-					ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, validate,
+					ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, validate,
 				)
 			}
 			// DataCoord broadcasts captured metadata, then expands and persists
@@ -165,7 +216,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 				)
 			}
 			return binlog.NewStorageV3ManifestReader(
-				ctx, cm, schema, storageConfig, paths[0], tsStart, tsEnd, bufferSize, encryption, nil, validate,
+				ctx, cm, schema, storageConfig, paths[0], tsStart, tsEnd, bufferSize, encryption, nil, 0, validate,
 			)
 		}
 		storageVersion, err := GetStorageVersion(options)

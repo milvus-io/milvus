@@ -2143,7 +2143,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	files := in.GetFiles()
 	sourceErr := bindingErr
 	if sourceErr == nil {
-		sourceErr = importutilv2.ValidateSnapshotImportPlan(files, in.GetOptions())
+		sourceErr = importutilv2.ValidateSnapshotImportPlan(files, in.GetOptions(), nil)
 	}
 	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
 	if err != nil {
