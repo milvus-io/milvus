@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <limits>
 #include <string>
 
@@ -36,16 +37,21 @@ class PlanNodeIdGenerator {
     explicit PlanNodeIdGenerator(int start_id = 0) : next_id_(start_id) {
     }
 
+    // Plans are built concurrently -- every search request parses its own,
+    // and a shared-filter search rebinds one per branch per segment -- so the
+    // counter must be atomic. Ids only need to be distinct within a plan;
+    // wrapping is harmless.
     PlanNodeId
     Next() {
-        if (next_id_ >= std::numeric_limits<int>::max()) {
-            next_id_ = 0;
+        auto id = next_id_.fetch_add(1, std::memory_order_relaxed);
+        if (id == std::numeric_limits<int>::max()) {
+            next_id_.store(0, std::memory_order_relaxed);
         }
-        return fmt::format("{}", next_id_++);
+        return fmt::format("{}", id);
     }
 
  private:
-    int next_id_;
+    std::atomic<int> next_id_;
 };
 
 inline PlanNodeId
