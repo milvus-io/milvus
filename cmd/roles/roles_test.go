@@ -22,12 +22,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/storagev2"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
@@ -94,6 +97,28 @@ func TestFilesystemMetricsRegisteredWithRolesRegistry(t *testing.T) {
 		}
 	}
 	require.Empty(t, missingFamilies)
+}
+
+func TestSetupLoggerUsesAsyncWriteNonDroppableLevelConfig(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.LogCfg.AsyncWriteNonDroppableLevel.Key, "warn"))
+	t.Cleanup(func() {
+		params.Reset(params.LogCfg.AsyncWriteNonDroppableLevel.Key)
+	})
+
+	var capturedConfig *mlog.Config
+	setupLoggerMock := mockey.Mock(logutil.SetupLogger).To(func(cfg *mlog.Config) {
+		copied := *cfg
+		capturedConfig = &copied
+	}).Build()
+	t.Cleanup(func() { setupLoggerMock.UnPatch() })
+
+	var mr MilvusRoles
+	mr.setupLogger()
+
+	require.NotNil(t, capturedConfig)
+	assert.Equal(t, "warn", capturedConfig.AsyncWriteNonDroppableLevel)
 }
 
 func TestResolveFileResourceMode(t *testing.T) {

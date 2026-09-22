@@ -319,13 +319,14 @@ func (mr *MilvusRoles) setupLogger() {
 			MaxDays:    params.LogCfg.MaxAge.GetAsInt(),
 			MaxBackups: params.LogCfg.MaxBackups.GetAsInt(),
 		},
-		AsyncWriteEnable:         params.LogCfg.AsyncWriteEnable.GetAsBool(),
-		AsyncWriteFlushInterval:  params.LogCfg.AsyncWriteFlushInterval.GetAsDurationByParse(),
-		AsyncWriteDroppedTimeout: params.LogCfg.AsyncWriteDroppedTimeout.GetAsDurationByParse(),
-		AsyncWriteStopTimeout:    params.LogCfg.AsyncWriteStopTimeout.GetAsDurationByParse(),
-		AsyncWritePendingLength:  params.LogCfg.AsyncWritePendingLength.GetAsInt(),
-		AsyncWriteBufferSize:     int(params.LogCfg.AsyncWriteBufferSize.GetAsSize()),
-		AsyncWriteMaxBytesPerLog: int(params.LogCfg.AsyncWriteMaxBytesPerLog.GetAsSize()),
+		AsyncWriteEnable:            params.LogCfg.AsyncWriteEnable.GetAsBool(),
+		AsyncWriteFlushInterval:     params.LogCfg.AsyncWriteFlushInterval.GetAsDurationByParse(),
+		AsyncWriteDroppedTimeout:    params.LogCfg.AsyncWriteDroppedTimeout.GetAsDurationByParse(),
+		AsyncWriteNonDroppableLevel: params.LogCfg.AsyncWriteNonDroppableLevel.GetValue(),
+		AsyncWriteStopTimeout:       params.LogCfg.AsyncWriteStopTimeout.GetAsDurationByParse(),
+		AsyncWritePendingLength:     params.LogCfg.AsyncWritePendingLength.GetAsInt(),
+		AsyncWriteBufferSize:        int(params.LogCfg.AsyncWriteBufferSize.GetAsSize()),
+		AsyncWriteMaxBytesPerLog:    int(params.LogCfg.AsyncWriteMaxBytesPerLog.GetAsSize()),
 	}
 	id := paramtable.GetNodeID()
 	roleName := paramtable.GetRole()
