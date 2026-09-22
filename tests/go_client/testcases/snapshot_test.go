@@ -1141,7 +1141,9 @@ func runStorageV3SnapshotImport(t *testing.T, withL0, crossBucket bool, schemaCa
 				importOption.WithOption("external_spec", `{"extfs":{"access_key_id":"invalid-key","access_key_value":"invalid-secret"}}`)
 				rejected, err = bulkwriter.BulkImport(ctx, importOption)
 				require.NoError(t, err)
-				require.Contains(t, rejected.Message, "failed to read snapshot import source")
+				// Invalid credentials fail during synchronous metadata capture,
+				// before Pending preparation or any import task is admitted.
+				require.Contains(t, rejected.Message, "failed to capture snapshot import source")
 				require.Empty(t, rejected.Data.JobID)
 				importOption.WithOption("external_spec", externalSpec)
 			}
