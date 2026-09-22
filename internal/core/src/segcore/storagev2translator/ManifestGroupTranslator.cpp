@@ -821,7 +821,7 @@ ManifestGroupTranslator::load_group_chunk(
                                     writeback_mode_);
     }
 
-    return std::make_unique<milvus::GroupChunk>(chunks);
+    return std::make_unique<milvus::GroupChunk>(std::move(chunks));
 }
 
 int64_t

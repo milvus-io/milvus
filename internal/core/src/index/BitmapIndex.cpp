@@ -454,7 +454,8 @@ BitmapIndex<T>::Upload(const Config& config) {
 
     this->file_manager_->AddFile(binary_set);
 
-    auto remote_path_to_size = this->file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_path_to_size =
+        this->file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(
         this->file_manager_->GetAddedTotalMemSize(), remote_path_to_size);
 }
