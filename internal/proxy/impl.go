@@ -4935,6 +4935,14 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	}
 	req.CollectionId = 0
 	if req.GetCollectionName() != "" {
+		// GetCompactionPlansRequest has both legacy job-ID lookup and collection
+		// lookup modes, so authorize only the collection-scoped mode explicitly.
+		if _, err := authorizeCollectionPrivilege(ctx, node.GetMetaCache, req,
+			commonpb.ObjectPrivilege_PrivilegeCompaction, 3, // collection_name
+		); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 		if err := validateCollectionName(req.GetCollectionName()); err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil

@@ -61,15 +61,37 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 }
 
 func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc {
+	return privilegeInterceptorWithMetaCache(GetMetaCache, nil)
+}
+
+func authorizeCollectionPrivilege(ctx context.Context, getMetaCache func() Cache, req interface{}, objectPrivilege commonpb.ObjectPrivilege, objectNameIndex int32) (context.Context, error) {
+	nextCtx, err := privilegeInterceptorWithMetaCache(getMetaCache, &commonpb.PrivilegeExt{
+		ObjectType:      commonpb.ObjectType_Collection,
+		ObjectPrivilege: objectPrivilege,
+		ObjectNameIndex: objectNameIndex,
+	})(ctx, req)
+	if err == nil || status.Code(err) != codes.PermissionDenied {
+		return nextCtx, err
+	}
+	return ctx, merr.WrapErrPrivilegeNotPermitted("%s is required", objectPrivilege.String())
+}
+
+func privilegeInterceptorWithMetaCache(GetMetaCache func() Cache, privilegeOverride *commonpb.PrivilegeExt) PrivilegeFunc {
 	return func(ctx context.Context, req interface{}) (context.Context, error) {
 		if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 			return ctx, nil
 		}
 		mlog.RatedDebug(ctx, rate.Limit(60), "PrivilegeInterceptor", mlog.String("type", reflect.TypeOf(req).String()))
-		privilegeExt, err := funcutil.GetPrivilegeExtObj(req)
-		if err != nil {
-			mlog.RatedInfo(ctx, rate.Limit(60), "GetPrivilegeExtObj err", mlog.Err(err))
-			return ctx, nil
+		var privilegeExt *commonpb.PrivilegeExt
+		if privilegeOverride == nil {
+			ext, err := funcutil.GetPrivilegeExtObj(req)
+			if err != nil {
+				mlog.RatedInfo(ctx, rate.Limit(60), "GetPrivilegeExtObj err", mlog.Err(err))
+				return ctx, nil
+			}
+			privilegeExt = &ext
+		} else {
+			privilegeExt = privilegeOverride
 		}
 		username, password, err := contextutil.GetAuthInfoFromContext(ctx)
 		if err != nil {
