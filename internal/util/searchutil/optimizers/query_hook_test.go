@@ -358,6 +358,36 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 		return values
 	}
 	raw := `{"large":9007199254740993,"text":"0.5","strict_group_strategy":"invalid-client"}`
+	suite.Run("knowhere_defaults_preserve_strict_group_settings", func() {
+		prefix := cfg.KnowhereConfig.IndexParam.KeyPrefix + "STRICT_TEST_INDEX.search."
+		cfg.Save(cfg.AutoIndexConfig.Enable.Key, "true")
+		cfg.Save(cfg.KnowhereConfig.Enable.Key, "true")
+		cfg.Save(prefix+"default_param", "0.5")
+		cfg.Save(prefix+common.StrictGroupStrategyKey, "invalid-default")
+		cfg.Save(sKey, "per_group")
+		defer cfg.Reset(cfg.KnowhereConfig.Enable.Key)
+		defer cfg.Remove(prefix + "default_param")
+		defer cfg.Remove(prefix + common.StrictGroupStrategyKey)
+		for _, withHook := range []bool{false, true} {
+			var hook QueryHook
+			expectedDefault := "0.5"
+			if withHook {
+				h := mock_optimizers.NewMockQueryHook(suite.T())
+				h.EXPECT().Run(mock.Anything).Run(func(p map[string]any) {
+					p[common.SearchParamKey] = `{"default_param":0.8,"strict_group_strategy":"invalid-hook"}`
+				}).Return(nil)
+				hook = h
+				expectedDefault = "0.8"
+			}
+			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1, "STRICT_TEST_INDEX")
+			suite.Require().NoError(err)
+			values := readParams(req)
+			suite.Equal(expectedDefault, string(values["default_param"]))
+			suite.Equal(`"per_group"`, string(values[common.StrictGroupStrategyKey]))
+			suite.Equal("0", string(values[common.StrictGroupPhase1CandidateWeightKey]))
+			suite.Equal("false", string(values[common.StrictGroupSkipRefineKey]))
+		}
+	})
 	// Exercise no hook, AutoIndex disabled, a hook dropping all caller keys,
 	// and a hook injecting conflicting/invalid values.
 	for _, enabled := range []string{"false", "true"} {
@@ -374,7 +404,7 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 				hook = h
 			}
 			cfg.Save(sKey, "per_group")
-			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1)
+			req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), hook, 1, "")
 			suite.Require().NoError(err)
 			values := readParams(req)
 			suite.Equal(`"per_group"`, string(values[common.StrictGroupStrategyKey]))
@@ -382,26 +412,26 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 			suite.Equal(`"0.5"`, string(values["text"]))
 			// Updating config affects a later request, not the serialized snapshot.
 			cfg.Save(sKey, "original")
-			next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
+			next, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, "")
 			suite.Require().NoError(err)
 			suite.Equal(`"original"`, string(readParams(next)[common.StrictGroupStrategyKey]))
 			suite.Equal(`"per_group"`, string(readParams(req)[common.StrictGroupStrategyKey]))
 		}
 	}
 	cfg.Reset(sKey)
-	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1)
+	defaultReq, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, "")
 	suite.Require().NoError(err)
 	suite.Equal(`"per_group"`, string(readParams(defaultReq)[common.StrictGroupStrategyKey]))
 	// Both strategies are server controlled.
 	for _, strategy := range []string{"per_group", "original"} {
 		cfg.Save(sKey, strategy)
-		req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
+		req, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, "")
 		suite.Require().NoError(err)
 		suite.Equal(strconv.Quote(strategy), string(readParams(req)[common.StrictGroupStrategyKey]))
 	}
 	cfg.Reset(sKey)
 	// Caller-controlled values are removed even on non-strict queries.
-	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1)
+	plain, err := OptimizeSearchParams(context.Background(), makeRequest(false, raw), nil, 1, "")
 	suite.Require().NoError(err)
 	suite.NotContains(readParams(plain), common.StrictGroupStrategyKey)
 	for key, badValues := range map[string][]string{
@@ -409,13 +439,13 @@ func (suite *QueryHookSuite) TestStrictGroupServerSettings() {
 	} {
 		for _, value := range badValues {
 			cfg.Save(key, value)
-			_, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1)
+			_, err := OptimizeSearchParams(context.Background(), makeRequest(true, "{}"), nil, 1, "")
 			suite.ErrorIs(err, merr.ErrServiceUnavailable)
 			cfg.Reset(key)
 		}
 	}
 	for _, raw := range []string{"invalid", "[]", "1"} {
-		_, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1)
+		_, err := OptimizeSearchParams(context.Background(), makeRequest(true, raw), nil, 1, "")
 		suite.Error(err)
 	}
 }
