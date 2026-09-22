@@ -25,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -92,6 +93,10 @@ func TestResourceGroupHandlerV2(t *testing.T) {
 		path:        versionalV2(ResourceGroupCategory, CreateAction),
 		requestBody: []byte(`{"name":"test"}`),
 	})
+	testCases = append(testCases, requestBodyTestCase{
+		path:        versionalV2(ResourceGroupCategory, CreateAction),
+		requestBody: []byte(`{"name":"test","config":null}`),
+	})
 
 	// test case: create resource group with name and config
 	requestBodyInJSON := `{"name":"test","config":{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_from":[{"resource_group":"__default_resource_group"}],"transfer_to":[{"resource_group":"__default_resource_group"}]}}`
@@ -140,7 +145,14 @@ func TestResourceGroupHandlerV2(t *testing.T) {
 		errMsg:      "missing required parameters, error: Key: 'UpdateResourceGroupReq.ResourceGroups' Error:Field validation for 'ResourceGroups' failed on the 'required' tag",
 	})
 
-	// test case: update resource group with resource groups
+	// test case: reject the empty config from issue #53614
+	testCases = append(testCases, requestBodyTestCase{
+		path:        versionalV2(ResourceGroupCategory, AlterAction),
+		requestBody: []byte(`{"resource_groups":{"group_a":{}}}`),
+		errCode:     1802,
+		errMsg:      "missing required parameters, error: Key: 'UpdateResourceGroupReq.ResourceGroups[group_a].Requests' Error:Field validation for 'Requests' failed on the 'required' tag\nKey: 'UpdateResourceGroupReq.ResourceGroups[group_a].Limits' Error:Field validation for 'Limits' failed on the 'required' tag",
+	})
+
 	requestBodyInJSON = `{"resource_groups":{"test":{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_from":[{"resource_group":"__default_resource_group"}],"transfer_to":[{"resource_group":"__default_resource_group"}]}}}`
 	testCases = append(testCases, requestBodyTestCase{
 		path:        versionalV2(ResourceGroupCategory, AlterAction),
@@ -164,4 +176,94 @@ func TestResourceGroupHandlerV2(t *testing.T) {
 
 	// verify test case
 	validateRequestBodyTestCases(t, testServer, testCases, false)
+}
+
+func TestResourceGroupHandlerV2InvalidConfig(t *testing.T) {
+	testCases := []struct {
+		name   string
+		config string
+		field  string
+	}{
+		{"empty config", `{}`, "Requests"},
+		{"missing requests", `{"limits":{"node_num":1}}`, "Requests"},
+		{"missing limits", `{"requests":{"node_num":1}}`, "Limits"},
+		{"null requests", `{"requests":null,"limits":{"node_num":1}}`, "Requests"},
+		{"null limits", `{"requests":{"node_num":1},"limits":null}`, "Limits"},
+		{"null transfer from", `{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_from":[null]}`, "TransferFrom[0]"},
+		{"null transfer to", `{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_to":[null]}`, "TransferTo[0]"},
+		{"empty transfer from", `{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_from":[{}]}`, "ResourceGroup"},
+		{"empty transfer to", `{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_to":[{}]}`, "ResourceGroup"},
+		{"null config", `null`, "ResourceGroups[group_a]"},
+	}
+	for _, action := range []string{CreateAction, AlterAction} {
+		for _, tc := range testCases {
+			// Creating a group without a config uses the backend's default config.
+			if action == CreateAction && tc.config == "null" {
+				continue
+			}
+			t.Run(action+"/"+tc.name, func(t *testing.T) {
+				mockProxy := mocks.NewMockProxy(t)
+				testServer := initHTTPServerV2(mockProxy, false)
+				body := fmt.Sprintf(`{"name":"group_a","config":%s}`, tc.config)
+				if action == AlterAction {
+					// A valid sibling must not let an invalid config bypass validation.
+					body = fmt.Sprintf(`{"resource_groups":{"group_a":%s,"group_b":{"requests":{},"limits":{}}}}`, tc.config)
+				}
+				w := httptest.NewRecorder()
+				testServer.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+					versionalV2(ResourceGroupCategory, action), bytes.NewBufferString(body)))
+				require.Equal(t, http.StatusOK, w.Code)
+				var response ReturnErrMsg
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+				assert.Equal(t, merr.Code(merr.ErrMissingRequiredParameters), response.Code)
+				assert.Contains(t, response.Message, tc.field)
+				mockProxy.AssertNotCalled(t, "CreateResourceGroup", mock.Anything, mock.Anything)
+				mockProxy.AssertNotCalled(t, "UpdateResourceGroups", mock.Anything, mock.Anything)
+			})
+		}
+	}
+}
+
+func TestResourceGroupHandlerV2ZeroNodeConfig(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key) })
+
+	configs := []string{
+		`{"requests":{"node_num":0},"limits":{"node_num":0}}`,
+		`{"requests":{},"limits":{}}`,
+		`{"requests":{},"limits":{},"transfer_from":[],"transfer_to":[]}`,
+		`{"requests":{},"limits":{},"transfer_from":null,"transfer_to":null}`,
+		`{"requests":{},"limits":{},"node_filter":{}}`,
+		`{"requests":{},"limits":{},"node_filter":{"node_labels":null}}`,
+	}
+	for _, action := range []string{CreateAction, AlterAction} {
+		for _, config := range configs {
+			t.Run(action+"/"+config, func(t *testing.T) {
+				mockProxy := mocks.NewMockProxy(t)
+				body := fmt.Sprintf(`{"name":"group_a","config":%s}`, config)
+				if action == CreateAction {
+					mockProxy.EXPECT().CreateResourceGroup(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateResourceGroupRequest) bool {
+						cfg := req.GetConfig()
+						return cfg.GetRequests() != nil && cfg.GetLimits() != nil &&
+							cfg.GetRequests().GetNodeNum() == 0 && cfg.GetLimits().GetNodeNum() == 0
+					})).Return(merr.Success(), nil).Once()
+				} else {
+					body = fmt.Sprintf(`{"resource_groups":{"group_a":%s}}`, config)
+					mockProxy.EXPECT().UpdateResourceGroups(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpdateResourceGroupsRequest) bool {
+						cfg := req.GetResourceGroups()["group_a"]
+						return cfg.GetRequests() != nil && cfg.GetLimits() != nil &&
+							cfg.GetRequests().GetNodeNum() == 0 && cfg.GetLimits().GetNodeNum() == 0
+					})).Return(merr.Success(), nil).Once()
+				}
+				w := httptest.NewRecorder()
+				initHTTPServerV2(mockProxy, false).ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+					versionalV2(ResourceGroupCategory, action), bytes.NewBufferString(body)))
+				require.Equal(t, http.StatusOK, w.Code)
+				var response ReturnErrMsg
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+				assert.Zero(t, response.Code, response.Message)
+			})
+		}
+	}
 }
