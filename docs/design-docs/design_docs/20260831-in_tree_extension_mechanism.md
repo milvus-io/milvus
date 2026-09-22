@@ -267,9 +267,11 @@ them through `user.yaml` or the environment.
 
 ## Compatibility
 
-- `ShowCollectionsRequest.resource_group` and `ShardLeadersList.resource_groups`
-  are appended proto fields; an old peer leaves them empty and both sides read
-  empty as "no scope".
+- `ShowCollectionsRequest.resource_group` is the only proto field this PR
+  appends; an old peer leaves it empty and the reader treats empty as "no
+  scope". `ShardLeadersList.resource_groups`, which the query mark also reads,
+  was added on master by #52716, not here; an old peer leaves it empty too and
+  empty is read as "unknown".
 - Every configuration item defaults to the stock behavior.
 - `hook.Hook` is milvus-proto's and unchanged.
 - `hook.Cipher` is milvus-proto's and unchanged; `cipherPlugin.soPathCpp`
