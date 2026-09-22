@@ -1,23 +1,30 @@
-# Retire legacy REST routes and make V1 APIs optional
+# MEP: Retire legacy REST routes and make V1 APIs optional
 
 - **Created:** 2026-09-22
-- **Author:** @liliu-z
+- **Author(s):** @liliu-z
 - **Status:** Under Review
-- **Related issue:** [#49846](https://github.com/milvus-io/milvus/issues/49846)
+- **Component:** Proxy
+- **Related Issues:** #49846
 
-## Problem and scope
+## Summary
+
+Remove the non-underscore `/api/v1/*` routes from the Proxy metrics port and
+add `proxy.http.enableV1` to control registration of the remaining V1 vector
+and console APIs. The switch defaults to `true`; V2, listeners, probes, and
+metrics keep their existing behavior.
+
+## Motivation
 
 The Proxy publishes three older HTTP surfaces across two listeners. The
 non-underscore `/api/v1/*` routes expose protobuf-shaped business operations on
 the metrics port, alongside the underscore console APIs. The main HTTP listener
 also exposes the simpler `/v1/vector/*` REST API alongside V2.
 
-Remove the non-underscore business routes from production registration, including
-`/api/v1/health`. Add one opt-out switch for the V1 vector and console APIs.
-This follows the management-plane authentication work by allowing operators to
-reduce the HTTP surface without disabling the listeners or V2.
+Operators need to retire the old business routes, including `/api/v1/health`,
+and reduce the remaining V1 surface without disabling the listeners or V2.
+This follows the management-plane authentication work.
 
-## Configuration and routing
+## Public Interfaces
 
 ```yaml
 proxy:
@@ -40,6 +47,11 @@ each Proxy to apply. It controls route registration, not socket binding.
 separate HTTP listener. The metrics port can also be configured. The existing
 `proxy.http.enabled` listener switch remains independent of `enableV1`.
 
+No proto, SDK, metric name, or stored-data format changes are part of this
+design.
+
+## Design Details
+
 The Proxy no longer calls the legacy `Handlers.RegisterRoutesTo` registrar.
 `newMetricsPortEngine` mounts only console APIs when `enableV1` is true.
 `startHTTPServer` conditionally registers V1 and always registers V2. The
@@ -51,7 +63,7 @@ it requires root and applies the browser request checks; otherwise it follows
 authentication branches and the old health-route exception. V1/V2 data-plane
 authentication is unchanged.
 
-## Compatibility and migration
+## Compatibility, Deprecation, and Migration Plan
 
 This deliberately removes the old non-underscore API even with default
 configuration. Clients must migrate to `/v2/vectordb/*` on the Proxy HTTP port
@@ -75,7 +87,13 @@ Unregistered paths are handled as unknown routes. Existing global middleware
 can still reject a request first, for example an unauthenticated request on the
 main HTTP listener. There is no redirect or automatic conversion to V2.
 
-## Validation
+To restore the optional V1 vector and console routes after disabling them, set
+`proxy.http.enableV1: true` and restart each Proxy. That switch cannot restore
+the removed non-underscore routes; rollback of that removal requires running a
+version that still registers them. Migrate their clients and probes before
+upgrading.
+
+## Test Plan
 
 - Configuration tests cover the YAML default, the default when the key is
   absent, and explicit disabling without disabling the HTTP listener.
@@ -94,3 +112,15 @@ main HTTP listener. There is no redirect or automatic conversion to V2.
 Proxy tests require Milvus native libraries. Local validation and any dependency
 limitations are recorded in the PR; these tests do not substitute for a deployed
 cluster or browser acceptance test.
+
+## Rejected Alternatives
+
+- Keep the non-underscore routes behind `enableV1`: this would retain the
+  business API that this change retires.
+- Use separate switches for the console and vector V1 routes: one setting
+  matches the requested operational choice to disable both surfaces together.
+
+## References
+
+- [Issue #49846](https://github.com/milvus-io/milvus/issues/49846)
+- [Management-plane authentication MEP](20260912-management-plane-authentication.md)
