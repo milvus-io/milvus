@@ -31,6 +31,7 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "common/BitsetView.h"
@@ -46,6 +47,7 @@
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"
 #include "mmap/ChunkedColumn.h"
+#include "mmap/ChunkedColumnGroup.h"
 #include "query/SearchOnGrowing.h"
 #include "query/SearchOnSealed.h"
 #include "segcore/SegmentGrowing.h"
@@ -1476,6 +1478,110 @@ TEST(SearchOnGrowingBitsetLifetime,
 TEST(SearchOnGrowingBitsetLifetime,
      NonNullableGrowingIndexEmptyBitsetHonorsPlannedPrefix) {
     AssertGrowingIndexEmptyBitsetHonorsPlannedPrefix(false);
+}
+
+TEST(SearchOnSealedColumnCancellation,
+     LazyMaterializationUsesCallerContextAndAllowsRetry) {
+    for (const bool nullable : {false, true}) {
+        SCOPED_TRACE(nullable);
+        constexpr int64_t num_rows = 3;
+        constexpr int64_t dim = 2;
+        Schema schema;
+        const auto field_id = schema.AddDebugField("vector",
+                                                   DataType::VECTOR_FLOAT,
+                                                   dim,
+                                                   knowhere::metric::L2,
+                                                   nullable);
+        const std::vector<float> vectors =
+            nullable ? std::vector<float>{0, 0, 2, 0}
+                     : std::vector<float>{0, 0, 1, 0, 2, 0};
+        const size_t bitmap_bytes = nullable ? 1 : 0;
+        std::vector<char> buffer(bitmap_bytes + vectors.size() * sizeof(float));
+        if (nullable) {
+            buffer[0] = 0b00000101;
+        }
+        std::memcpy(buffer.data() + bitmap_bytes,
+                    vectors.data(),
+                    vectors.size() * sizeof(float));
+        auto chunk = std::make_shared<FixedWidthChunk>(
+            num_rows,
+            dim,
+            buffer.data(),
+            buffer.size(),
+            sizeof(float),
+            nullable,
+            std::make_shared<ChunkMmapGuard>(nullptr, 0, ""));
+        int factory_calls = 0;
+        OpContext* observed_ctx = nullptr;
+        auto group = std::make_shared<ChunkedColumnGroup>(
+            num_rows, 1, [&](OpContext* op_ctx) {
+                observed_ctx = op_ctx;
+                ++factory_calls;
+                segcore::CheckCancellation(op_ctx, 1, "lazy vector search");
+                std::unordered_map<FieldId, std::shared_ptr<Chunk>> fields;
+                fields.emplace(field_id, chunk);
+                std::vector<std::unique_ptr<GroupChunk>> chunks;
+                chunks.push_back(std::make_unique<GroupChunk>(fields));
+                return std::make_unique<TestGroupChunkTranslator>(
+                    1,
+                    std::vector<int64_t>{num_rows},
+                    nullable ? "lazy-nullable-search-ctx" : "lazy-search-ctx",
+                    std::move(chunks));
+            });
+        std::shared_ptr<ChunkedColumnInterface> column =
+            std::make_shared<ProxyChunkColumn>(
+                group, field_id, schema[field_id]);
+        auto search_info = MakeNullableRawVectorSearchInfo(field_id, 2);
+        const std::vector<float> query_vector{2, 0};
+        auto search = [&](OpContext* op_ctx) {
+            SearchResult result;
+            SearchOnSealedColumn(schema,
+                                 column.get(),
+                                 search_info,
+                                 {},
+                                 query_vector.data(),
+                                 nullptr,
+                                 1,
+                                 num_rows,
+                                 BitsetView{},
+                                 op_ctx,
+                                 result);
+            return result;
+        };
+
+        folly::CancellationSource cancelled;
+        cancelled.requestCancellation();
+        OpContext cancelled_ctx(cancelled.getToken());
+        try {
+            search(&cancelled_ctx);
+            FAIL() << "expected cancelled lazy vector initialization";
+        } catch (const SegcoreError& error) {
+            EXPECT_EQ(error.get_error_code(), ErrorCode::FollyCancel);
+        }
+        EXPECT_EQ(observed_ctx, &cancelled_ctx);
+        EXPECT_FALSE(group->IsMaterialized());
+        EXPECT_FALSE(column->GetOffsetMapping().IsEnabled());
+        EXPECT_EQ(factory_calls, 1);
+
+        OpContext fresh_ctx;
+        auto result = search(&fresh_ctx);
+        EXPECT_EQ(observed_ctx, &fresh_ctx);
+        EXPECT_TRUE(group->IsMaterialized());
+        EXPECT_EQ(factory_calls, 2);
+        ASSERT_EQ(result.seg_offsets_.size(), 2);
+        EXPECT_EQ(result.seg_offsets_[0], 2);
+        EXPECT_EQ(result.seg_offsets_[1], nullable ? 0 : 1);
+        ASSERT_EQ(result.distances_.size(), 2);
+        EXPECT_FLOAT_EQ(result.distances_[0], 0);
+        EXPECT_FLOAT_EQ(result.distances_[1], nullable ? 4 : 1);
+        if (nullable) {
+            const auto& mapping = column->GetOffsetMapping();
+            EXPECT_TRUE(mapping.IsEnabled());
+            EXPECT_EQ(mapping.GetValidCount(), 2);
+            EXPECT_EQ(mapping.GetPhysicalOffset(1), -1);
+            EXPECT_EQ(mapping.GetPhysicalOffset(2), 1);
+        }
+    }
 }
 
 TEST(SearchOnSealedColumnNullableRawBruteForce,
