@@ -130,6 +130,23 @@ message SubSearchRequest {
   bool ignore_growing = 13;
   string analyzer_name = 14;
   SearchType search_type = 15;
+  // Groups sub-requests of one hybrid search whose filter predicate is
+  // identical, so the query node can evaluate that filter once per segment
+  // instead of once per sub-request.
+  //
+  // Assigned by the proxy, which parses each sub-request's `Dsl` and template
+  // values into a plan anyway: equal non-zero values mean the predicates came
+  // from identical (Dsl, expr_template_values) inputs through the same parser
+  // and the same schema, hence are byte-identical. 0 means the sub-request
+  // cannot share a filter at all -- no predicate, or an iterative filter,
+  // which has no shared prefix subtree to reuse. Numbering is per request and
+  // carries no meaning across requests.
+  //
+  // The query node still decides whether to group: it owns the segment
+  // distribution and the MVCC pin, and it additionally splits on
+  // `ignore_growing`. This field only saves it from unmarshalling every
+  // sub-request's plan to compare predicates on every shard.
+  int32 filter_sharing_group = 16;
 }
 
 message SearchRequest {
