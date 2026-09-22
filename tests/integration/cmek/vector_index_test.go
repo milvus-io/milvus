@@ -62,16 +62,12 @@ type VectorIndexV2Suite struct {
 
 func (s *VectorIndexV2Suite) SetupSuite() {
 	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
-	s.WithMilvusConfig("common.storage.useLoonFFI", "false")
-	s.WithMilvusConfig("dataNode.storage.format", "parquet")
-	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", "false")
 	s.WithMilvusConfig("dataCoord.targetVecIndexVersion", strconv.Itoa(int(vectorIndexVersion)))
 	s.WithMilvusConfig("dataCoord.forceRebuildSegmentIndex", "true")
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", "64")
 	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorIndex", common.WarmupSync)
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.evictionEnabled", "false")
-	s.WithMilvusConfig("queryNode.preferFieldDataWhenIndexHasRawData", "false")
 	s.WithMilvusConfig("queryNode.enableSegmentPrune", "false")
 	s.WithMilvusConfig("queryNode.enableSegmentFilter", "false")
 	s.WithMilvusConfig("proxy.partialResultRequiredDataRatio", "1")
@@ -310,6 +306,7 @@ func loadedVectorIndexesMatch(segments []*metricsinfo.Segment, sets []inspector.
 		for _, field := range segment.IndexedFields {
 			if field.IndexFieldID == want.FieldID && field.IndexID == want.IndexID {
 				matches++
+				// On 2.6, HasRawData reflects HNSW retaining raw vectors as an index capability.
 				if field.BuildID != want.BuildID || !field.IsLoaded || !field.HasRawData {
 					return false
 				}
