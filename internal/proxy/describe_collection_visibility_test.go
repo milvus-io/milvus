@@ -20,6 +20,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -66,6 +67,12 @@ func TestDescribeCollectionCachedVisibility(t *testing.T) {
 						if req.GetCollectionID() == 0 || req.GetCollectionName() == "" {
 							// Shared cache fills are internal metadata reads. The user
 							// must still pass the separate authoritative check below.
+							// Model a real RPC: an outgoing user would make RootCoord
+							// apply that user's grants even during a cache fill.
+							md, _ := metadata.FromOutgoingContext(ctx)
+							if len(md.Get(util.HeaderAuthorize)) != 0 {
+								return &milvuspb.DescribeCollectionResponse{Status: merr.Status(merr.ErrPrivilegeNotPermitted)}, nil
+							}
 							describes++
 							return resp, nil
 						}
@@ -102,13 +109,12 @@ func TestDescribeCollectionCachedVisibility(t *testing.T) {
 				original := proto.Clone(req)
 				ctx := NewContextWithMetadata(context.Background(), "alice", "tenant_a")
 				// Existing outgoing metadata must not override the authenticated user.
-				ctx = metadata.AppendToOutgoingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode("root:root"))
-				for _, grant := range []bool{false, true, false} {
+				ctx = metadata.AppendToOutgoingContext(ctx, util.HeaderAuthorize, crypto.Base64Encode("stale_user:stale_user"))
+				for _, grant := range []bool{true, false, true, false} {
 					allowed = grant
 					before := visibilityChecks
 					resp, err := node.DescribeCollection(ctx, req)
 					require.NoError(t, err)
-					require.Equal(t, before+1, visibilityChecks, "check each response, including after revoke on the same hot cache")
 					if grant {
 						require.NoError(t, merr.Error(resp.GetStatus()))
 						require.Equal(t, collectionID, resp.GetCollectionID())
@@ -118,6 +124,7 @@ func TestDescribeCollectionCachedVisibility(t *testing.T) {
 						require.Nil(t, resp.GetSchema())
 						require.Zero(t, resp.GetCollectionID())
 					}
+					require.Equal(t, before+1, visibilityChecks, "check each response, including after revoke on the same hot cache")
 					require.True(t, proto.Equal(original, req), "authorization must not mutate the request")
 				}
 				require.Equal(t, 1, describes, "metadata remains shared and cached; authorization does not")
@@ -202,4 +209,34 @@ func TestDescribeCollectionRemoteForwardsAuthenticatedIdentity(t *testing.T) {
 	require.NoError(t, task.Execute(ctx))
 	require.ErrorIs(t, merr.Error(task.result.GetStatus()), merr.ErrPrivilegeNotPermitted)
 	require.Nil(t, task.result.GetSchema())
+}
+
+func TestDescribeCollectionRPCContextPreservesRequest(t *testing.T) {
+	type requestKey struct{}
+	parent, cancel := context.WithTimeout(context.WithValue(context.Background(), requestKey{}, "request-value"), time.Minute)
+	defer cancel()
+	ctx := NewContextWithMetadata(parent, "alice", "tenant_a")
+	staleIdentity := crypto.Base64Encode("root:root")
+	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs(
+		util.HeaderAuthorize, staleIdentity,
+		"request-id", "describe-request",
+	))
+
+	rpcCtx := describeCollectionRPCContext(ctx)
+	md, ok := metadata.FromOutgoingContext(rpcCtx)
+	require.True(t, ok)
+	require.Equal(t, []string{crypto.Base64Encode("alice:alice")}, md.Get(util.HeaderAuthorize))
+	require.Equal(t, []string{"describe-request"}, md.Get("request-id"))
+	require.Equal(t, "request-value", rpcCtx.Value(requestKey{}))
+	wantDeadline, _ := parent.Deadline()
+	deadline, ok := rpcCtx.Deadline()
+	require.True(t, ok)
+	require.Equal(t, wantDeadline, deadline)
+
+	// A forwarded identity must not mutate metadata held by another user of
+	// the parent context, and disconnects must still cancel the coordinator RPC.
+	original, _ := metadata.FromOutgoingContext(ctx)
+	require.Equal(t, []string{staleIdentity}, original.Get(util.HeaderAuthorize))
+	cancel()
+	require.ErrorIs(t, rpcCtx.Err(), context.Canceled)
 }

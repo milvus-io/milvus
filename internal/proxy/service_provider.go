@@ -274,6 +274,10 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	var c *collectionInfo
+	// Shared metadata lookups use the intra-cluster identity. A caller's stale
+	// outgoing authorization must not make cache misses depend on another user.
+	// Keep the original context for the per-request visibility check below.
+	metadataCtx := describeCollectionMetadataContext(ctx)
 
 	resolvedNameByID := collectionName == "" && collectionID > 0
 	if resolvedNameByID {
@@ -281,7 +285,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		// discarded the returned collectionInfo and forced a second describe on a
 		// rolling-upgrade old RootCoord response that omitted DbName (such entries
 		// are deliberately returned uncached because their database is unknown).
-		c, err = node.GetMetaCache().GetCollectionInfo(ctx, request.DbName, "", collectionID)
+		c, err = node.GetMetaCache().GetCollectionInfo(metadataCtx, request.DbName, "", collectionID)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
@@ -298,12 +302,12 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	// Resolve the id and complete entry from the name only when the caller did
 	// not provide an id. The id-only path already has the complete entry above.
 	if !resolvedNameByID {
-		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, request.DbName, collectionName)
+		collectionID, err = node.GetMetaCache().GetCollectionID(metadataCtx, request.DbName, collectionName)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
-		c, err = node.GetMetaCache().GetCollectionInfo(ctx, request.DbName, collectionName, collectionID)
+		c, err = node.GetMetaCache().GetCollectionInfo(metadataCtx, request.DbName, collectionName, collectionID)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
@@ -395,11 +399,15 @@ func (node *CachedProxyServiceProvider) checkCollectionVisibility(ctx context.Co
 	return merr.WrapErrServiceUnavailable("collection changed during visibility check")
 }
 
-func describeCollectionRPCContext(ctx context.Context) context.Context {
+func describeCollectionMetadataContext(ctx context.Context) context.Context {
 	md, _ := metadata.FromOutgoingContext(ctx)
 	md = md.Copy()
 	md.Delete(util.HeaderAuthorize)
-	return AppendUserInfoForRPC(metadata.NewOutgoingContext(ctx, md))
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+func describeCollectionRPCContext(ctx context.Context) context.Context {
+	return AppendUserInfoForRPC(describeCollectionMetadataContext(ctx))
 }
 
 func checkDescribeCollectionUser(ctx context.Context) error {
