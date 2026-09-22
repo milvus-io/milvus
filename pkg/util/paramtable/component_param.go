@@ -1128,9 +1128,7 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		DefaultValue: "false",
 		Doc: `Whether the metrics port (default 9091) requires root HTTP Basic authentication
 for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
-Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
-Legacy /api/v1 data operations keep valid-user/API-key auth when
-common.security.authorizationEnabled is true, and otherwise require root.
+Probes and scrapes remain open; the retired /api/v1/health endpoint is no longer served.
 Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
 Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
 Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for

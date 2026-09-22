@@ -490,6 +490,11 @@ proxy:
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
+    # Register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+    # Restart to apply. Disabling keeps listeners, V2, probes, and metrics available.
+    # The non-underscore /api/v1/* REST API is removed regardless of this setting.
+    # WebUI data and telemetry commands require these APIs; use enableWebUI to hide the pages.
+    enableV1: true
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
@@ -1281,9 +1286,7 @@ common:
     authorizationEnabled: false
     # Whether the metrics port (default 9091) requires root HTTP Basic authentication
     # for /management/*, /log/level, /eventlog, /debug/pprof/* and the web console.
-    # Probes and scrapes remain open; /api/v1/health retains any existing data-plane auth.
-    # Legacy /api/v1 data operations keep valid-user/API-key auth when
-    # common.security.authorizationEnabled is true, and otherwise require root.
+    # Probes and scrapes remain open; the retired /api/v1/health endpoint is no longer served.
     # Requests without Origin or Fetch Metadata must include X-Milvus-Admin-Request: true.
     # Use HTTPS for the browser console and preserve Fetch Metadata at the reverse proxy.
     # Root hashes are cached for 10 seconds; a failed refresh may reuse the last hash for
