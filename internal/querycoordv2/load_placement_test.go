@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -39,18 +38,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// formHook is the smallest thing a distribution can install: the placement
-// only asks whether a hook is there, never what it does.
-type formHook struct{ hook.Hook }
-
-// setForm makes this test's binary one a distribution compiled itself into,
-// or a stock one, and restores a stock binary when the test ends.
+// setForm makes this test's binary one with a form installed, or a stock one,
+// and restores a stock binary when the test ends.
 func setForm(t *testing.T, installed bool) {
 	t.Helper()
 	ext.ResetForTest()
 	t.Cleanup(ext.ResetForTest)
 	if installed {
-		ext.SetHook(formHook{})
+		ext.SetForm()
 	}
 }
 

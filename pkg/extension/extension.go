@@ -38,6 +38,7 @@ var (
 	installedEngine    atomic.Pointer[engineBox]
 	installedQueryHook atomic.Pointer[queryHookBox]
 	installedCipher    atomic.Pointer[cipherBox]
+	formInstalled      atomic.Bool
 )
 
 type (
@@ -50,12 +51,6 @@ type (
 // SetHook installs a compiled-in request hook. hookutil prefers it over
 // proxy.soPath and refuses a deployment that configures both. Call it before
 // milvus starts; a nil hook leaves the stock behavior in place.
-//
-// The hook is also the mark of an installed form: FormInstalled answers true
-// once it is set, and the coordinators read that mark too (see FormInstalled).
-// A distribution must therefore install its hook in EVERY process and role it
-// runs - the query coordinator and the data coordinator as much as the proxy -
-// or those roles behave as a stock binary.
 //
 // Init is called again whenever the hook's configuration is refreshed. A
 // compiled-in hook whose Init returns an error then must leave the
@@ -74,20 +69,25 @@ func InstalledHook() hook.Hook {
 	return nil
 }
 
-// FormInstalled reports whether a distribution has compiled itself into this
-// binary, which is exactly "a hook is installed".
-//
-// A few behaviors in the coordinators exist for the deployment shape such a
-// distribution runs - shard delegators on the regular query nodes of its
-// resource groups, with the streaming node kept for DDL and the write ahead log,
-// a load that names the resource groups it speaks for, an index engine version
-// answered before any QueryNode registers - and are switched on by this
-// answer alone. It is consulted in the query coordinator and the data
-// coordinator, not only in the proxy, so a distribution has to install its
-// hook in every role (see SetHook). A stock binary answers false everywhere and
-// keeps the behavior it always had.
+// SetForm marks this binary as running the deployment form the coordinators'
+// form-gated behaviors are written for: one streaming node, several resource
+// groups loading the same collection, every role from one image. It switches
+// on, in the query coordinator and the data coordinator: shard delegators on
+// the regular query nodes of the resource groups, with the streaming node kept
+// for DDL and the write ahead log, a load that names the resource groups it
+// speaks for, an index engine version answered before any QueryNode registers.
+// Call it in EVERY role, before milvus starts - a role whose main forgets the
+// call runs as stock with no signal at all. It is independent of SetHook: a
+// distribution may install a request hook without switching any coordinator
+// behavior on.
+func SetForm() {
+	formInstalled.Store(true)
+}
+
+// FormInstalled reports whether SetForm was called. A stock binary answers
+// false everywhere and keeps the behavior it always had.
 func FormInstalled() bool {
-	return InstalledHook() != nil
+	return formInstalled.Load()
 }
 
 // SetCoordinatorEngine installs the engine the coordinator starts when it

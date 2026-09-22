@@ -224,7 +224,7 @@ func InitOnceHook() {
 			// of that distribution, with its request policy missing. Its
 			// failure - it cannot initialize, or it is configured beside a
 			// plug-in - is fatal whatever the setting says.
-			if ext.InstalledHook() != nil || paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
+			if ext.FormInstalled() || paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
 				mlog.Panic(context.TODO(), "fail to init hook",
 					mlog.String("so_path", soPath), mlog.String("error", config.RedactedValue))
 			}

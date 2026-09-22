@@ -9,7 +9,6 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -839,17 +838,13 @@ func Test_IndexEngineVersionManager_SessionVersionCleanupOnStartup(t *testing.T)
 	assert.False(t, exists, "offline node should be removed from sessionVersion map")
 }
 
-// formHook is the smallest thing a distribution can install: the version
-// manager only asks whether a hook is there, never what it does.
-type formHook struct{ hook.Hook }
-
-// installForm turns this test's binary into one a distribution has compiled
-// itself into, and turns it back into a stock binary when the test ends.
+// installForm turns this test's binary into a form, and turns it back into a
+// stock binary when the test ends.
 func installForm(t *testing.T) {
 	t.Helper()
 	ext.ResetForTest()
 	t.Cleanup(ext.ResetForTest)
-	ext.SetHook(formHook{})
+	ext.SetForm()
 }
 
 // A stock binary with no QueryNode session answers exactly what master does:

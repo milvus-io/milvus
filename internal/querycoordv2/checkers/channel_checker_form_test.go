@@ -22,7 +22,6 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -38,8 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-type delegatorFormHook struct{ hook.Hook }
 
 // channelOnAQueryCluster loads one channel of collection 1 into a replica that
 // holds a regular query node and a streaming query node, with the WAL on a
@@ -105,7 +102,7 @@ func (suite *ChannelCheckerTestSuite) channelOnAQueryCluster(regular, streamingQ
 func (suite *ChannelCheckerTestSuite) TestUnderAFormADelegatorGoesToARegularQueryNode() {
 	ext.ResetForTest()
 	suite.T().Cleanup(ext.ResetForTest)
-	ext.SetHook(delegatorFormHook{})
+	ext.SetForm()
 
 	suite.EqualValues(11, suite.channelOnAQueryCluster(11, 1051, 1007))
 }

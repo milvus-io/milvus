@@ -21,13 +21,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 )
-
-// formHook is the smallest thing a distribution can install: the question is
-// only whether a hook is there, never what it does.
-type formHook struct{ hook.Hook }
 
 // Delegators live on streaming query nodes exactly when the streaming service
 // is on and no form is installed. A form keeps its one streaming node for DDL
@@ -45,7 +40,7 @@ func TestUseStreamingQueryNodeAsDelegator(t *testing.T) {
 			ext.ResetForTest()
 			t.Cleanup(ext.ResetForTest)
 			if tc.form {
-				ext.SetHook(formHook{})
+				ext.SetForm()
 			}
 			if tc.streaming {
 				t.Setenv(MilvusStreamingServiceEnabled, "1")

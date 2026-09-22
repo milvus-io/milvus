@@ -23,15 +23,12 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	ext "github.com/milvus-io/milvus/pkg/v3/extension"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
-
-type balanceFormHook struct{ hook.Hook }
 
 // The nodes a channel is balanced across follow where delegators live. On a
 // stock binary with the streaming service on that is the replica's streaming
@@ -69,7 +66,7 @@ func TestChannelBalanceNodesFollowWhereDelegatorsLive(t *testing.T) {
 	t.Run("installed form", func(t *testing.T) {
 		ext.ResetForTest()
 		t.Cleanup(ext.ResetForTest)
-		ext.SetHook(balanceFormHook{})
+		ext.SetForm()
 		assert.Equal(t, []int64{11}, helper.GetRWNodesForChannels(replica))
 		rw, ro := helper.GetRWAndRONodesForChannels(replica)
 		assert.Equal(t, []int64{11}, rw)

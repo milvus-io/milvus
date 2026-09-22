@@ -97,15 +97,14 @@ func loadedCollectionIn(rgs ...string) CurrentLoadConfig {
 	}
 }
 
-// setForm makes this test's binary one a distribution compiled itself into
-// (formHook is declared beside the expansion suite), or a stock one, and
-// restores a stock binary when the test ends.
+// setForm makes this test's binary one with a form installed, or a stock one,
+// and restores a stock binary when the test ends.
 func setForm(t *testing.T, installed bool) {
 	t.Helper()
 	ext.ResetForTest()
 	t.Cleanup(ext.ResetForTest)
 	if installed {
-		ext.SetHook(formHook{})
+		ext.SetForm()
 	}
 }
 

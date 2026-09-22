@@ -59,21 +59,35 @@ func TestSetHookInstallsTheHook(t *testing.T) {
 	assert.Nil(t, InstalledCoordinatorEngine(), "installing a hook must not conjure an engine")
 }
 
-// FormInstalled is the one question the coordinators ask, and it must be
-// exactly "is a hook installed": nothing else a distribution sets counts.
-func TestFormInstalledFollowsTheHookAlone(t *testing.T) {
+// FormInstalled is the one question the coordinators ask, and it must follow
+// SetForm alone: nothing else a distribution sets counts, and SetForm must not
+// conjure anything either.
+func TestFormInstalledFollowsSetFormAlone(t *testing.T) {
 	ResetForTest()
 	t.Cleanup(ResetForTest)
 	assert.False(t, FormInstalled(), "a stock binary has no form installed")
 
-	SetCoordinatorEngine(&fakeCoordinatorEngine{})
-	assert.False(t, FormInstalled(), "an engine alone is not a form: the hook is the mark")
-
 	SetHook(stubHook{name: "form"})
-	assert.True(t, FormInstalled())
+	assert.False(t, FormInstalled(), "a hook alone is not a form: the hook is not the mark")
 
-	SetHook(nil)
-	assert.False(t, FormInstalled(), "uninstalling the hook uninstalls the form")
+	SetCoordinatorEngine(&fakeCoordinatorEngine{})
+	assert.False(t, FormInstalled(), "an engine alone is not a form")
+
+	SetForm()
+	assert.True(t, FormInstalled(), "SetForm declares the form")
+
+	ResetForTest()
+	assert.False(t, FormInstalled(), "reset clears the form mark")
+}
+
+func TestSetFormDoesNotConjureAnything(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	SetForm()
+	assert.Nil(t, InstalledHook(), "declaring a form must not conjure a hook")
+	assert.Nil(t, InstalledCoordinatorEngine(), "declaring a form must not conjure an engine")
+	assert.Nil(t, InstalledQueryHook(), "declaring a form must not conjure a query hook")
+	assert.Nil(t, InstalledCipher(), "declaring a form must not conjure a cipher")
 }
 
 func TestSetCoordinatorEngineInstallsTheEngine(t *testing.T) {

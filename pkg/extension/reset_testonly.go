@@ -25,4 +25,5 @@ func ResetForTest() {
 	installedEngine.Store(nil)
 	installedQueryHook.Store(nil)
 	installedCipher.Store(nil)
+	formInstalled.Store(false)
 }

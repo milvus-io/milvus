@@ -301,7 +301,9 @@ func TestInitHookWithoutAnExtensionKeepsTheDefault(t *testing.T) {
 // would be half of that distribution, so a compiled-in hook that cannot
 // initialize, or is configured beside a plug-in, stops the proxy whatever the
 // setting says. A plug-in's failure keeps the setting's meaning
-// (TestHookInitLogError).
+// (TestHookInitLogError). The gate is a form installed, not a hook alone: a
+// distribution that installs a hook without switching the coordinators'
+// behaviors on is free to follow panicWhenPluginFail.
 func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t *testing.T) {
 	paramtable.Init()
 	p := paramtable.Get()
@@ -314,6 +316,7 @@ func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t 
 
 	t.Run("it cannot initialize", func(t *testing.T) {
 		installHook(t, &initRecordingHook{initErr: errors.New("the internal port is taken")})
+		ext.SetForm()
 		assert.Panics(t, func() {
 			initOnce = sync.Once{}
 			InitOnceHook()
@@ -321,11 +324,28 @@ func TestInitOnceHookIsFatalForACompiledInHookWhateverPanicWhenPluginFailSays(t 
 	})
 	t.Run("it is configured beside a plug-in", func(t *testing.T) {
 		installHook(t, MockAPIHook{User: "root"})
+		ext.SetForm()
 		require.NoError(t, p.Save(p.ProxyCfg.SoPath.Key, "/tmp/some-hook.so"))
 		t.Cleanup(func() { p.Reset(p.ProxyCfg.SoPath.Key) })
 		assert.Panics(t, func() {
 			initOnce = sync.Once{}
 			InitOnceHook()
 		})
+	})
+}
+
+// A distribution that installs a hook WITHOUT declaring a form has switched
+// nothing in the coordinators, so its hook's failure is a plug-in's failure:
+// it follows panicWhenPluginFail instead of always stopping the proxy.
+func TestInitOnceHookFollowsPanicWhenPluginFailWithoutAForm(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	require.NoError(t, p.Save(p.CommonCfg.PanicWhenPluginFail.Key, "false"))
+	t.Cleanup(func() { p.Reset(p.CommonCfg.PanicWhenPluginFail.Key) })
+
+	installHook(t, &initRecordingHook{initErr: errors.New("the internal port is taken")})
+	assert.NotPanics(t, func() {
+		initOnce = sync.Once{}
+		InitOnceHook()
 	})
 }

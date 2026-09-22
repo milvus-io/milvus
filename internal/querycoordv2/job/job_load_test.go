@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -467,16 +466,12 @@ func (suite *IncrementalExpansionSuite) SetupSuite() {
 	paramtable.Init()
 }
 
-// formHook is the smallest thing a distribution can install: the fast path
-// only asks whether a hook is there, never what it does.
-type formHook struct{ hook.Hook }
-
-// installForm makes this test's binary one a distribution compiled itself
-// into; the stock cases below uninstall it again.
+// installForm makes this test's binary one with a form installed; the stock
+// cases below uninstall it again.
 func (suite *IncrementalExpansionSuite) installForm() {
 	ext.ResetForTest()
 	suite.T().Cleanup(ext.ResetForTest)
-	ext.SetHook(formHook{})
+	ext.SetForm()
 }
 
 func (suite *IncrementalExpansionSuite) SetupTest() {
