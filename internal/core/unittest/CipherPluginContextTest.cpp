@@ -14,7 +14,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
+
+#include <arrow/util/base64.h>
+#include <folly/ScopeGuard.h>
 
 #include <cstdlib>
 #include <memory>
@@ -26,13 +30,27 @@
 #include "pb/clustering.pb.h"
 #include "pb/index_cgo_msg.pb.h"
 #include "storage/PluginLoader.h"
+#include "storage/loon_ffi/ffi_writer_c.h"
 #include "test_utils/Constants.h"
 
 namespace milvus::storage {
 namespace {
 
+class KeyOnlyEncryptor : public plugin::IEncryptor {
+ public:
+    MOCK_METHOD(std::string, Encrypt, (const std::string&), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (std::string_view), (const, override));
+    MOCK_METHOD(std::string, Encrypt, (const void*, size_t), (const, override));
+    MOCK_METHOD(std::string, GetKey, (), (const, override));
+};
+
 class RecordingCipherPlugin : public plugin::ICipherPlugin {
  public:
+    std::string
+    getPluginName() const override {
+        return "CipherPlugin";
+    }
+
     void
     Update(int64_t ez_id,
            int64_t collection_id,
@@ -45,7 +63,7 @@ class RecordingCipherPlugin : public plugin::ICipherPlugin {
 
     std::pair<std::shared_ptr<plugin::IEncryptor>, std::string>
     GetEncryptor(int64_t, int64_t) const override {
-        return {};
+        return {encryptor, "fixture-edek"};
     }
 
     std::shared_ptr<plugin::IDecryptor>
@@ -57,6 +75,7 @@ class RecordingCipherPlugin : public plugin::ICipherPlugin {
     int64_t updated_ez_id = 0;
     int64_t updated_collection_id = 0;
     std::string updated_key;
+    std::shared_ptr<plugin::IEncryptor> encryptor;
 };
 
 void
@@ -150,6 +169,57 @@ TEST(CipherPluginContextTest, RegistersPluginAndReturnsOnlyIdentifiers) {
 TEST(CipherPluginContextTest, RejectsMissingCipherPlugin) {
     EXPECT_ANY_THROW(PluginLoader::GetInstance().registerCipherPluginContext(
         17, 23, "unsafe-key", std::shared_ptr<plugin::ICipherPlugin>()));
+}
+
+TEST(CipherPluginContextTest, WriterPreservesBinaryKeysAcrossStringBoundary) {
+    auto& loader = PluginLoader::GetInstance();
+    auto previous = loader.getCipherPlugin();
+    auto restore = folly::makeGuard([&] {
+        loader.unregisterPluginForTest("CipherPlugin");
+        if (previous) {
+            loader.registerPluginForTest(previous);
+        }
+    });
+    auto cipher = std::make_shared<RecordingCipherPlugin>();
+    loader.registerPluginForTest(cipher);
+
+    // A NUL at 16 or 24 used to silently select a shorter valid AES key.
+    for (size_t nul_position : {0, 16, 24, 31}) {
+        SCOPED_TRACE(nul_position);
+        std::string key(32, 'k');
+        key[nul_position] = '\0';
+        auto encryptor =
+            std::make_shared<testing::StrictMock<KeyOnlyEncryptor>>();
+        cipher->encryptor = encryptor;
+        EXPECT_CALL(*encryptor, GetKey())
+            .Times(2)
+            .WillRepeatedly(testing::Return(key));
+
+        auto context = loader.registerCipherPluginContext(17, 23, "ez-key");
+        for (const char* imported_key :
+             {static_cast<const char*>(nullptr), "ez-key"}) {
+            SCOPED_TRACE(imported_key == nullptr ? "registered" : "imported");
+            context->key = imported_key;
+            auto previous_updates = cipher->update_count;
+            char* encoded_key = nullptr;
+            char* metadata = nullptr;
+            auto status = GetEncParams(context.get(), &encoded_key, &metadata);
+            auto cleanup = folly::makeGuard([&] {
+                free(encoded_key);
+                free(metadata);
+                if (status.error_code != Success) {
+                    free(const_cast<char*>(status.error_msg));
+                }
+            });
+            ASSERT_EQ(status.error_code, Success);
+            ASSERT_NE(encoded_key, nullptr);
+            ASSERT_NE(metadata, nullptr);
+            EXPECT_EQ(arrow::util::base64_decode(encoded_key), key);
+            EXPECT_STREQ(metadata, "17_23_fixture-edek");
+            EXPECT_EQ(cipher->update_count,
+                      previous_updates + (imported_key != nullptr));
+        }
+    }
 }
 
 }  // namespace

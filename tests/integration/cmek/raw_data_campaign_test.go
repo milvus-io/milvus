@@ -18,9 +18,7 @@ package cmek
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math"
 	"sort"
 	"strconv"
 	"time"
@@ -51,7 +49,6 @@ type rawDataCampaign struct {
 	schema     *schemapb.CollectionSchema
 	fields     []*schemapb.FieldData
 	loadFields []string
-	index      bool
 	search     bool
 }
 
@@ -88,10 +85,8 @@ func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCamp
 		}
 	}
 	s.bindRawDataFieldIDs(description.GetSchema(), c.fields)
-	if c.index {
-		// Finish logical-index broadcasts before insert/flush starts the segment lifecycle.
-		s.createRawVectorIndexes(ctx, collection, description.GetSchema())
-	}
+	// Finish logical-index broadcasts before insert/flush starts the segment lifecycle.
+	s.createRawVectorIndexes(ctx, collection, description.GetSchema())
 	if s.growingSource {
 		status, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 			DbName: s.dbName, CollectionName: collection,
@@ -237,13 +232,7 @@ func (s *rawDataSuite) assertRawDataOracle(ctx context.Context, collection strin
 func (s *rawDataSuite) assertExactFloatSearch(ctx context.Context, collection, field string, vector []float32, ef int) {
 	request := integration.ConstructSearchRequest(s.dbName, collection, "", field, schemapb.DataType_FloatVector,
 		[]string{fixturePrimaryKey}, metric.L2, map[string]any{"ef": ef}, 1, len(vector), 1, -1)
-	value := make([]byte, len(vector)*4)
-	for i, item := range vector {
-		binary.LittleEndian.PutUint32(value[i*4:], math.Float32bits(item))
-	}
-	placeholder, err := proto.Marshal(&commonpb.PlaceholderGroup{Placeholders: []*commonpb.PlaceholderValue{{
-		Tag: "$0", Type: commonpb.PlaceholderType_FloatVector, Values: [][]byte{value},
-	}}})
+	placeholder, err := proto.Marshal(funcutil.Float32VectorsToPlaceholderGroup([][]float32{vector}))
 	s.Require().NoError(err)
 	request.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: placeholder}
 	result, err := s.Cluster.MilvusClient.Search(ctx, request)
@@ -331,7 +320,7 @@ func newRawScalarCampaign() rawDataCampaign {
 	fields = append(fields, vectorSchema("scalar_helper", schemapb.DataType_FloatVector, rawDataDim))
 	data = append(data, deterministicFloatVectors("scalar_helper", rawDataRows, rawDataDim))
 	loadFields = append(loadFields, "scalar_helper")
-	return rawDataCampaign{name: "scalar", schema: &schemapb.CollectionSchema{EnableDynamicField: true, Fields: fields}, fields: data, loadFields: loadFields, index: true}
+	return rawDataCampaign{name: "scalar", schema: &schemapb.CollectionSchema{EnableDynamicField: true, Fields: fields}, fields: data, loadFields: loadFields}
 }
 
 func newRawVectorCampaign() rawDataCampaign {
@@ -354,7 +343,7 @@ func newRawVectorCampaign() rawDataCampaign {
 		data = append(data, deterministicVectorField(item.name, item.typeID, rawDataRows, rawDataDim))
 		loadFields = append(loadFields, item.name)
 	}
-	return rawDataCampaign{name: "vector", schema: &schemapb.CollectionSchema{Fields: fields}, fields: data, loadFields: loadFields, index: true, search: true}
+	return rawDataCampaign{name: "vector", schema: &schemapb.CollectionSchema{Fields: fields}, fields: data, loadFields: loadFields, search: true}
 }
 
 func newStructArrayCampaign() rawDataCampaign {
@@ -395,7 +384,7 @@ func newStructArrayCampaign() rawDataCampaign {
 	return rawDataCampaign{
 		name: "struct_array", schema: schema,
 		fields:     []*schemapb.FieldData{testutils.NewInt64FieldData(fixturePrimaryKey, rawDataRows), deterministicFloatVectors("struct_helper", rawDataRows, rawDataDim), structData},
-		loadFields: []string{fixturePrimaryKey, structField.GetName()}, index: true,
+		loadFields: []string{fixturePrimaryKey, structField.GetName()},
 	}
 }
 

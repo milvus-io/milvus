@@ -1606,15 +1606,12 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 		if err != nil {
 			return nil, err
 		}
-		cWriterProperties, err := packed.MakeProperties(writerProperties)
+		cWriterProperties, cleanup, err := packed.MakeOwnedProperties(writerProperties)
 		if err != nil {
 			return nil, err
 		}
-		defer packed.FreeProperties(cWriterProperties)
-		// CFlushConfig must not contain a pointer to a Go-allocated struct.
-		cConfig.writer_properties = (*C.struct_LoonProperties)(C.malloc(C.sizeof_struct_LoonProperties))
-		defer C.free(unsafe.Pointer(cConfig.writer_properties))
-		*cConfig.writer_properties = *(*C.struct_LoonProperties)(unsafe.Pointer(cWriterProperties))
+		defer cleanup()
+		cConfig.writer_properties = (*C.struct_LoonProperties)(unsafe.Pointer(cWriterProperties))
 	}
 	cSegmentPath := C.CString(config.SegmentBasePath)
 	defer C.free(unsafe.Pointer(cSegmentPath))

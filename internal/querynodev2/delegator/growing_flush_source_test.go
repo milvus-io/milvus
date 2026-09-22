@@ -42,56 +42,6 @@ func newTestGrowingSourceProvider(t *testing.T, segmentManager segments.SegmentM
 	return newDelegatorGrowingSourceProvider(&segments.Manager{Segment: segmentManager, Collection: collectionManager}, 100, waitFence, getTSafe...)
 }
 
-func TestGrowingSourceRetentionKeepsCollectionContextAlive(t *testing.T) {
-	for _, finish := range []string{"commit", "rollback", "close"} {
-		t.Run(finish, func(t *testing.T) {
-			segmentManager := segments.NewMockSegmentManager(t)
-			collectionManager := segments.NewMockCollectionManager(t)
-			segment := segments.NewMockSegment(t)
-			provider := newDelegatorGrowingSourceProvider(&segments.Manager{
-				Segment: segmentManager, Collection: collectionManager,
-			}, 100, nil)
-			refs := 1 // The channel's original reference.
-			collectionManager.EXPECT().Ref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
-				refs++
-				return true
-			}).Once()
-			collectionManager.EXPECT().Unref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
-				refs--
-				return refs == 0
-			}).Twice()
-			segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
-			segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-			segment.EXPECT().InsertCount().Return(int64(20)).Once()
-			segment.EXPECT().MemSize().Return(int64(1024)).Once()
-			segment.EXPECT().Unpin().Run(func() { require.Positive(t, refs) }).Once()
-			snapshot := provider.snapshotRetained([]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1001}})
-			require.NoError(t, provider.registerRetained(1001, 10))
-			require.NoError(t, provider.registerRetained(1001, 20)) // Updating an existing entry does not add a ref.
-			require.Equal(t, 2, refs)
-			collectionManager.Unref(100, 1)
-			require.Equal(t, 1, refs, "retained flush must survive channel release")
-			switch finish {
-			case "commit":
-				segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Run(func(context.Context, segments.Segment) {
-					require.Equal(t, 1, refs, "context must survive until native segment release drains")
-				}).Once()
-				provider.Deactivate()
-				provider.MarkReleaseDetached(1001)
-				provider.releaseRetainedIfComplete(1001, 10)
-				require.Equal(t, 1, refs, "partial commit must retain the context")
-				provider.releaseRetainedIfComplete(1001, 20)
-			case "rollback":
-				provider.rollbackRetained(snapshot)
-			case "close":
-				provider.Close()
-			}
-			require.Zero(t, refs)
-			provider.Close() // Closing again cannot release a second reference.
-		})
-	}
-}
-
 func TestGrowingFlushHoldsCollectionContextDuringWrite(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -434,33 +384,76 @@ func TestDelegatorGrowingSourceProviderDeactivatedOnlyServesRetainedSources(t *t
 }
 
 func TestDelegatorGrowingSourceProviderReleasesWhenDetachedBeforeCommit(t *testing.T) {
-	segmentManager := segments.NewMockSegmentManager(t)
-	segment := segments.NewMockSegment(t)
-	provider := newTestGrowingSourceProvider(t, segmentManager, nil)
+	for _, finish := range []string{"commit", "deactivated commit", "close"} {
+		t.Run(finish, func(t *testing.T) {
+			segmentManager := segments.NewMockSegmentManager(t)
+			collectionManager := segments.NewMockCollectionManager(t)
+			segment := segments.NewMockSegment(t)
+			provider := newDelegatorGrowingSourceProvider(&segments.Manager{
+				Segment: segmentManager, Collection: collectionManager,
+			}, 100, nil)
+			refs := 1 // The channel's original reference.
+			collectionManager.EXPECT().Ref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
+				refs++
+				return true
+			}).Once()
+			collectionManager.EXPECT().Unref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
+				refs--
+				return refs == 0
+			}).Twice()
+			segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
+			segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+			segment.EXPECT().InsertCount().Return(int64(20)).Once()
+			segment.EXPECT().MemSize().Return(int64(1024)).Once()
 
-	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
-	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
-	segment.EXPECT().InsertCount().Return(int64(10)).Once()
-	segment.EXPECT().MemSize().Return(int64(1024)).Once()
+			// Updating an existing handoff must not acquire another collection reference.
+			for _, target := range []int64{10, 20} {
+				require.NoError(t, provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0,
+					[]syncmgr.GrowingSourceReleaseHandoffSegment{{SegmentID: 1001, TargetOffset: target}}))
+			}
+			require.Equal(t, 2, refs)
+			collectionManager.Unref(100, 1)
+			require.Equal(t, 1, refs, "retained flush must survive channel release")
+			if finish != "commit" {
+				provider.Deactivate()
+			}
+			provider.MarkReleaseDetached(1001)
+			provider.releaseRetainedIfComplete(1001, 10)
+			require.Equal(t, 1, refs, "partial commit must retain the context")
+			segmentManager.AssertNotCalled(t, "ReleaseDetached", context.Background(), segment)
 
-	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
-		{SegmentID: 1001, TargetOffset: 10},
-	})
-	require.NoError(t, err)
-
-	provider.MarkReleaseDetached(1001)
-	segmentManager.AssertNotCalled(t, "ReleaseDetached", context.Background(), segment)
-
-	segment.EXPECT().Unpin().Once()
-	segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Once()
-	provider.releaseRetainedIfComplete(1001, 10)
+			segment.EXPECT().Unpin().Run(func() { require.Equal(t, 1, refs) }).Once()
+			if finish != "close" {
+				segmentManager.EXPECT().ReleaseDetached(context.Background(), segment).Run(func(context.Context, segments.Segment) {
+					require.Equal(t, 1, refs, "context must survive until native segment release drains")
+				}).Once()
+				provider.releaseRetainedIfComplete(1001, 20)
+			} else {
+				provider.Close()
+			}
+			require.Zero(t, refs)
+			provider.Close() // Closing again cannot release a second reference.
+		})
+	}
 }
 
 func TestDelegatorGrowingSourceProviderPrepareRollbackOnFailure(t *testing.T) {
 	segmentManager := segments.NewMockSegmentManager(t)
 	segment := segments.NewMockSegment(t)
 	behindSegment := segments.NewMockSegment(t)
-	provider := newTestGrowingSourceProvider(t, segmentManager, nil)
+	collectionManager := segments.NewMockCollectionManager(t)
+	provider := newDelegatorGrowingSourceProvider(&segments.Manager{
+		Segment: segmentManager, Collection: collectionManager,
+	}, 100, nil)
+	refs := 1
+	collectionManager.EXPECT().Ref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
+		refs++
+		return true
+	}).Once()
+	collectionManager.EXPECT().Unref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
+		refs--
+		return false
+	}).Once()
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
 	segment.EXPECT().PinIfNotReleased().Return(nil).Once()
@@ -470,18 +463,20 @@ func TestDelegatorGrowingSourceProviderPrepareRollbackOnFailure(t *testing.T) {
 	behindSegment.EXPECT().PinIfNotReleased().Return(nil).Once()
 	behindSegment.EXPECT().InsertCount().Return(int64(5)).Once()
 	behindSegment.EXPECT().Unpin().Once()
-	segment.EXPECT().Unpin().Once()
+	segment.EXPECT().Unpin().Run(func() { require.Equal(t, 2, refs) }).Once()
 
 	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 200, []syncmgr.GrowingSourceReleaseHandoffSegment{
 		{SegmentID: 1001, TargetOffset: 10},
 		{SegmentID: 1002, TargetOffset: 10},
 	})
 	require.Error(t, err)
+	require.Equal(t, 1, refs, "rollback must release the retained collection reference")
 
 	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
 	source, state := provider.GetGrowingFlushSource(1001, 10, nil)
 	require.Equal(t, syncmgr.GrowingSourceUnavailable, state)
 	require.Nil(t, source)
+	provider.Close()
 }
 
 func TestDelegatorGrowingSourceProviderReleaseAllowedWhenSegmentNotFound(t *testing.T) {

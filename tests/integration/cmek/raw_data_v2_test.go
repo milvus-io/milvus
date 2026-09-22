@@ -59,9 +59,7 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 	description, segments := s.prepareRawDataCampaign(ctx, c)
 	collection, collectionID := description.GetCollectionName(), description.GetCollectionID()
 	s.inspectRawObjects(ctx, segments, collectionID)
-	if c.index {
-		s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
-	}
+	s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(release, err))
 	s.CheckCollectionCacheReleased(collectionID)
@@ -71,9 +69,7 @@ func (s *RawDataV2Suite) runRawDataCampaign(c rawDataCampaign) {
 	s.assertLoadedFields(ctx, collectionID, requestedFieldIDs(description.GetSchema(), c.loadFields))
 	s.assertRawLoadedSegments(ctx, collectionID, segments)
 	s.assertRawDataOracle(ctx, collection, c)
-	if c.index {
-		s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
-	}
+	s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 }
 
 func (s *RawDataV2Suite) inspectRawObjects(ctx context.Context, segments []*datapb.SegmentInfo, collectionID int64) {

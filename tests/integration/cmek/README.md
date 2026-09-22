@@ -62,6 +62,8 @@ The current V2 and testable V3 raw-data scenarios both store Parquet files. Thei
 
 Tool and fixture checks verify the reliability of the IT's supporting code; they are not additional product scenarios. Product acceptance runs through collection, flush/build and release/reload. There is no separate packed-writer regression in this IT suite.
 
+Deterministic binary-key regressions live in the existing unit tests: `internal/core/unittest/CipherPluginContextTest.cpp` checks `GetEncParams` for both imported and registered contexts, and `internal/storagev2/packed/packed_writer_ffi_test.go` verifies Parquet readback with Arrow Go. Both use 32-byte keys whose first NUL is at byte 0, 16, 24, or 31, including the two truncation lengths that remain valid AES keys.
+
 The C++ fixture requires a registered collection context before creating an encryptor and rejects it after unref. Growing-source acceptance therefore depends on QueryNode's real Collection Ref path, including when the writer supplies only lookup IDs.
 
 V3 raw-data Vortex and TEXT/LOB remain outside current coverage. Growing-source coverage is limited to non-TEXT Parquet groups. Start raw-data verification with the V3 scalar scenario, then run the V2/V3 matrix; investigate an unexpected failure before expanding the run.

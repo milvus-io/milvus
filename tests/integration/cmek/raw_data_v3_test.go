@@ -93,25 +93,6 @@ func (s *RawDataV3Suite) runRawDataCampaign(c rawDataCampaign, baselineField str
 	s.reloadRawDataV3(description, c, segments, expected)
 }
 
-func (s *RawDataV3Suite) waitForParquetLoad(ctx context.Context, collection string) {
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		progress, err := s.Cluster.MilvusClient.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
-			DbName: s.dbName, CollectionName: collection,
-		})
-		s.Require().NoError(merr.CheckRPCCall(progress, err), "load encrypted Parquet collection")
-		if progress.GetProgress() == 100 {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			s.Require().NoError(ctx.Err(), "waiting for encrypted Parquet collection to load")
-		case <-ticker.C:
-		}
-	}
-}
-
 type parquetKeySample struct {
 	object inspector.ParquetObjectV3
 	raw    []byte
@@ -264,15 +245,13 @@ func (s *RawDataV3Suite) reloadRawDataV3(description *milvuspb.DescribeCollectio
 	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
 	defer cancel()
 	collection, collectionID := description.GetCollectionName(), description.GetCollectionID()
-	if c.index {
-		s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
-	}
+	s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
 	s.Require().NoError(merr.CheckRPCCall(release, err))
 	s.waitParquetReleased(ctx, collectionID)
 	load, err := s.Cluster.MilvusClient.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{DbName: s.dbName, CollectionName: collection, ReplicaNumber: 1, LoadFields: c.loadFields})
 	s.Require().NoError(merr.CheckRPCCall(load, err))
-	s.waitForParquetLoad(ctx, collection)
+	s.WaitForLoadWithDB(ctx, s.dbName, collection)
 	s.assertLoadedFields(ctx, collectionID, requestedFieldIDs(description.GetSchema(), c.loadFields))
 	before := s.parquetReadSnapshot(ctx, collectionID)
 	current := s.manifestIdentity(s.currentParquetSegments(ctx, collectionID))
@@ -281,9 +260,7 @@ func (s *RawDataV3Suite) reloadRawDataV3(description *milvuspb.DescribeCollectio
 	after := s.parquetReadSnapshot(ctx, collectionID)
 	s.Require().Equal(expected, s.manifestIdentity(s.currentParquetSegments(ctx, collectionID)), "flush manifests changed during read")
 	s.Require().Equal(before, after, "loaded segments changed during read")
-	if c.index {
-		s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
-	}
+	s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 	s.T().Logf("stage=cold-read complete loaded=%+v", after)
 }
 
