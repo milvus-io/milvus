@@ -10,9 +10,10 @@ import (
 )
 
 type broadcasterWithRK struct {
-	broadcaster *broadcastTaskManager
-	broadcastID uint64
-	guards      *lockGuards
+	broadcaster    *broadcastTaskManager
+	broadcastID    uint64
+	controlChannel string
+	guards         *lockGuards
 }
 
 func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
@@ -30,9 +31,11 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 
 	// Stamping the header, opening the span and injecting the trace context all
 	// operate on this call's own values, so they stay outside the manager lock.
+	// Every broadcast goes to the control channel: its ack joins the task into the
+	// ack callback scheduler, and its time tick orders the ack callbacks.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
 	// can still extract it after the original caller span is long gone.
-	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
+	msg = msg.OverwriteBroadcastHeader(b.broadcastID, b.controlChannel, guards.ResourceKeys()...)
 	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)

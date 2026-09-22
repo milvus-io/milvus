@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/resource"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
@@ -116,6 +117,10 @@ type broadcastTaskManager struct {
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
 func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	// Resolved before any lock is taken: it blocks until the first assignment
+	// arrives, and it panics when the streaming client is closing.
+	controlChannel := streaming.WAL().ControlChannel()
+
 	startLockInstant := time.Now()
 	resourceKeys = bm.appendSharedClusterRK(resourceKeys...)
 	guards := bm.resourceKeyLocker.Lock(resourceKeys...)
@@ -134,9 +139,10 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
 
 	return &broadcasterWithRK{
-		broadcaster: bm,
-		broadcastID: id,
-		guards:      guards,
+		broadcaster:    bm,
+		broadcastID:    id,
+		controlChannel: controlChannel,
+		guards:         guards,
 	}, nil
 }
 
@@ -144,6 +150,9 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 // and verifies the cluster is secondary. Returns error if the cluster is primary.
 // This is used for force promote operations that should only be executed on secondary clusters.
 func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Context) (BroadcastAPI, error) {
+	// Resolved before any lock is taken, see WithResourceKeys.
+	controlChannel := streaming.WAL().ControlChannel()
+
 	id, err := resource.Resource().IDAllocator().Allocate(ctx)
 	if err != nil {
 		return nil, merr.Wrapf(err, "allocate new id failed")
@@ -163,9 +172,10 @@ func (bm *broadcastTaskManager) WithSecondaryClusterResourceKey(ctx context.Cont
 	bm.metrics.ObserveAcquireLockDuration(startLockInstant, guards.ResourceKeys())
 
 	return &broadcasterWithRK{
-		broadcaster: bm,
-		broadcastID: id,
-		guards:      guards,
+		broadcaster:    bm,
+		broadcastID:    id,
+		controlChannel: controlChannel,
+		guards:         guards,
 	}, nil
 }
 

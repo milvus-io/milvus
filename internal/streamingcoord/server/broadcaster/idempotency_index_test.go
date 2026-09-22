@@ -108,7 +108,7 @@ func createImportBroadcastTaskProto(
 	if len(rks) == 0 {
 		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
 	}
-	msg := newImportMsgWithKey(key).OverwriteBroadcastHeader(broadcastID, rks...)
+	msg := newImportMsgWithKey(key).OverwriteBroadcastHeader(broadcastID, "", rks...)
 	return createNewWaitAckBroadcastTaskFromMessage(msg, state, bitmap)
 }
 
@@ -122,7 +122,7 @@ func broadcastForTest(
 	rks ...message.ResourceKey,
 ) *types.BroadcastAppendResult {
 	t.Helper()
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, guards: bm.resourceKeyLocker.Lock(rks...)}
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, controlChannel: "by-dev-rootcoord-dml_0_vcchan", guards: bm.resourceKeyLocker.Lock(rks...)}
 	defer api.Close()
 
 	result, err := api.Broadcast(context.Background(), msg)
@@ -236,6 +236,7 @@ func newBroadcastTaskManagerForTest(t *testing.T, protos ...*streamingpb.Broadca
 	resource.InitForTest(resource.OptStreamingCatalog(meta))
 
 	operator := mock_streaming.NewMockWALAccesser(t)
+	operator.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
 	appendFn := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
 		resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
 		for idx := range msgs {
@@ -249,6 +250,8 @@ func newBroadcastTaskManagerForTest(t *testing.T, protos ...*streamingpb.Broadca
 		return resps
 	}
 	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
+	// A new broadcast also goes to the control channel: one more message per append.
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
 	bm := newBroadcastTaskManager(protos)
@@ -270,7 +273,7 @@ func TestBroadcastReturnsDuplicatedOnKeyHit(t *testing.T) {
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_TOMBSTONE, []byte{0x01}, collectionKey))
 
 	guards := bm.resourceKeyLocker.Lock(collectionKey)
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: guards}
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, controlChannel: "by-dev-rootcoord-dml_0_vcchan", guards: guards}
 
 	result, err := api.Broadcast(context.Background(), newImportMsgWithKey("import/1/k"))
 	require.NoError(t, err)
@@ -312,7 +315,7 @@ func TestBroadcastWithoutKeyIsUnaffected(t *testing.T) {
 	bm := newBroadcastTaskManagerForTest(t)
 
 	guards := bm.resourceKeyLocker.Lock(message.NewSharedClusterResourceKey())
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: guards}
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, controlChannel: "by-dev-rootcoord-dml_0_vcchan", guards: guards}
 
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -381,10 +384,10 @@ func TestIdempotencyScopeIgnoresResourceKeys(t *testing.T) {
 	bare := idempotencyScopeOfMessage(msg)
 	require.NotEmpty(t, bare)
 
-	beforeRename := msg.OverwriteBroadcastHeader(100,
+	beforeRename := msg.OverwriteBroadcastHeader(100, "",
 		message.NewSharedDBNameResourceKey("db1"),
 		message.NewExclusiveCollectionNameResourceKey("db1", "coll1"))
-	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(101,
+	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(101, "",
 		message.NewSharedDBNameResourceKey("db1"),
 		message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed"))
 
@@ -492,20 +495,23 @@ func TestDuplicateWaitsForAnInFlightOriginal(t *testing.T) {
 	t.Cleanup(releaseAppends)
 
 	operator := mock_streaming.NewMockWALAccesser(t)
-	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
-			<-release
-			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
-			for idx := range msgs {
-				resps.Responses[idx] = types.AppendResponse{
-					AppendResult: &types.AppendResult{
-						MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
-						TimeTick:  uint64(time.Now().UnixMilli()),
-					},
-				}
+	operator.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
+	appendFn := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+		<-release
+		resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+		for idx := range msgs {
+			resps.Responses[idx] = types.AppendResponse{
+				AppendResult: &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
+					TimeTick:  uint64(time.Now().UnixMilli()),
+				},
 			}
-			return resps
-		}).Maybe()
+		}
+		return resps
+	}
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
+	// A new broadcast also goes to the control channel: one more message per append.
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
 	// The original, holding the pre-rename name's key.
@@ -513,7 +519,7 @@ func TestDuplicateWaitsForAnInFlightOriginal(t *testing.T) {
 	go func() {
 		defer close(originalDone)
 		api := &broadcasterWithRK{
-			broadcaster: bm, broadcastID: 1,
+			broadcaster: bm, broadcastID: 1, controlChannel: "by-dev-rootcoord-dml_0_vcchan",
 			guards: bm.resourceKeyLocker.Lock(message.NewExclusiveCollectionNameResourceKey("db1", "coll1")),
 		}
 		defer api.Close()
@@ -534,7 +540,7 @@ func TestDuplicateWaitsForAnInFlightOriginal(t *testing.T) {
 	go func() {
 		defer close(dupDone)
 		api := &broadcasterWithRK{
-			broadcaster: bm, broadcastID: 2,
+			broadcaster: bm, broadcastID: 2, controlChannel: "by-dev-rootcoord-dml_0_vcchan",
 			guards: bm.resourceKeyLocker.Lock(message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed")),
 		}
 		defer api.Close()
@@ -558,8 +564,9 @@ func TestDuplicateWaitsForAnInFlightOriginal(t *testing.T) {
 	require.Equal(t, uint64(1), dupResult.BroadcastID)
 	// Answered from a completed original, the results are whole -- the property the
 	// wait exists to provide.
-	require.Len(t, dupResult.AppendResults, 1)
+	require.Len(t, dupResult.AppendResults, 2)
 	require.NotNil(t, dupResult.AppendResults["v1"])
+	require.NotNil(t, dupResult.AppendResults["by-dev-rootcoord-dml_0_vcchan"])
 }
 
 // TestDuplicateAgainstUnackedReplicatedOriginalTimesOut covers the other path that can
@@ -578,7 +585,7 @@ func TestDuplicateAgainstUnackedReplicatedOriginalTimesOut(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, guards: bm.resourceKeyLocker.Lock(collKey)}
+	api := &broadcasterWithRK{broadcaster: bm, broadcastID: 999, controlChannel: "by-dev-rootcoord-dml_0_vcchan", guards: bm.resourceKeyLocker.Lock(collKey)}
 	defer api.Close()
 
 	result, err := api.Broadcast(ctx, newImportMsgWithKey("k"))
@@ -600,7 +607,7 @@ func TestDiscardedBroadcastCountsNoPendingTask(t *testing.T) {
 			streamingpb.BroadcastTaskState_BROADCAST_TASK_STATE_PENDING.String()))
 	}
 	broadcast := func(broadcastID uint64, msg message.BroadcastMutableMessage) error {
-		api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, guards: bm.resourceKeyLocker.Lock(collKey)}
+		api := &broadcasterWithRK{broadcaster: bm, broadcastID: broadcastID, controlChannel: "by-dev-rootcoord-dml_0_vcchan", guards: bm.resourceKeyLocker.Lock(collKey)}
 		defer api.Close()
 		_, err := api.Broadcast(context.Background(), msg)
 		return err
@@ -632,7 +639,7 @@ func createBroadcastTaskProtoFromMessage(
 	if len(rks) == 0 {
 		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
 	}
-	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(broadcastID, rks...), state, bitmap)
+	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(broadcastID, "", rks...), state, bitmap)
 }
 
 // TestNonImportBroadcastIsDeduplicated is the acceptance test for this mechanism
@@ -709,19 +716,22 @@ func newBroadcastTaskManagerWithEntrypointForTest(t *testing.T, protos ...*strea
 	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
 
 	operator := mock_streaming.NewMockWALAccesser(t)
-	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(
-		func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
-			resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
-			for idx := range msgs {
-				resps.Responses[idx] = types.AppendResponse{
-					AppendResult: &types.AppendResult{
-						MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
-						TimeTick:  uint64(time.Now().UnixMilli()),
-					},
-				}
+	operator.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
+	appendFn := func(ctx context.Context, msgs ...message.MutableMessage) types.AppendResponses {
+		resps := types.AppendResponses{Responses: make([]types.AppendResponse, len(msgs))}
+		for idx := range msgs {
+			resps.Responses[idx] = types.AppendResponse{
+				AppendResult: &types.AppendResult{
+					MessageID: walimplstest.NewTestMessageID(int64(idx + 1)),
+					TimeTick:  uint64(time.Now().UnixMilli()),
+				},
 			}
-			return resps
-		}).Maybe()
+		}
+		return resps
+	}
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
+	// A new broadcast also goes to the control channel: one more message per append.
+	operator.EXPECT().AppendMessages(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(appendFn).Maybe()
 	streaming.SetWALForTest(operator)
 
 	bm := newBroadcastTaskManager(protos)

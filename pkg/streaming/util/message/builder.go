@@ -205,11 +205,18 @@ func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 }
 
 // WithBroadcast creates a new builder with broadcast property.
+// vchannels holds the data vchannels, the broadcaster adds the control channel when it is missing.
+// A broadcast to the control channel only needs no WithBroadcast, see BuildBroadcast.
 // !!! This method should only be called from coordinator side.
 func (b *mutableMesasgeBuilder[H, B]) WithBroadcast(vchannels []string, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
 	if len(vchannels) < 1 {
 		panic("broadcast message must have at least one vchannel")
 	}
+	return b.withBroadcastHeader(vchannels, opts...)
+}
+
+// withBroadcastHeader sets the broadcast header with the given vchannels.
+func (b *mutableMesasgeBuilder[H, B]) withBroadcastHeader(vchannels []string, opts ...OptBuildBroadcast) *mutableMesasgeBuilder[H, B] {
 	if b.allVChannel {
 		panic("a all vchannel message cannot set up vchannel property")
 	}
@@ -349,11 +356,12 @@ func (b *mutableMesasgeBuilder[H, B]) MustBuildMutable() MutableMessage {
 }
 
 // BuildBroadcast builds a broad mutable message.
+// A builder without WithBroadcast broadcasts to the control channel only, the broadcaster adds it.
 // Panic if not set payload and message type.
 // should only used at client side.
 func (b *mutableMesasgeBuilder[H, B]) BuildBroadcast() (BroadcastMutableMessage, error) {
 	if !b.properties.Exist(messageBroadcastHeader) {
-		panic("a broadcast message builder not ready for vchannel field")
+		b.withBroadcastHeader(nil)
 	}
 
 	msg, err := b.build()
