@@ -796,7 +796,6 @@ type GenericValue struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Val:
-	//
 	//	*GenericValue_BoolVal
 	//	*GenericValue_Int64Val
 	//	*GenericValue_FloatVal
@@ -2930,7 +2929,6 @@ type Expr struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Expr:
-	//
 	//	*Expr_TermExpr
 	//	*Expr_UnaryExpr
 	//	*Expr_BinaryExpr
@@ -3828,7 +3826,6 @@ type PlanNode struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Node:
-	//
 	//	*PlanNode_VectorAnns
 	//	*PlanNode_Predicates
 	//	*PlanNode_Query
