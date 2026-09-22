@@ -71,6 +71,10 @@ SetExternalVectorPartialNullAsRowNull(bool enabled);
 bool
 GetExternalVectorPartialNullAsRowNull();
 
+// Materialize a bounded NULL/default array in the native field representation.
+std::shared_ptr<arrow::Array>
+CreateDefaultArrowArray(const FieldMeta& field_meta, int64_t num_rows);
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 

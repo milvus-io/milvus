@@ -971,6 +971,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 	failReason string,
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	allFragmentsUnmapped bool,
 ) error {
 	currentTask := m.GetTask(taskID)
 	if currentTask == nil {
@@ -1031,6 +1032,7 @@ func (m *externalCollectionRefreshMeta) UpdateTaskResult(
 			task.ResultPath = ""
 			task.ResultChecksum = nil
 		}
+		task.AllFragmentsUnmapped = allFragmentsUnmapped
 		task.ResultReady = true
 		if state == indexpb.JobState_JobStateFinished {
 			task.Progress = 100
@@ -1062,7 +1064,7 @@ func (m *externalCollectionRefreshMeta) ClearTaskResult(taskID int64) error {
 			len(task.GetUpdatedSegments()) == 0 &&
 			task.GetResultStorageVersion() == 0 &&
 			task.GetResultPath() == "" &&
-			len(task.GetResultChecksum()) == 0 {
+			len(task.GetResultChecksum()) == 0 && !task.GetAllFragmentsUnmapped() {
 			return true, nil
 		}
 		resultPath = task.GetResultPath()
@@ -1071,6 +1073,7 @@ func (m *externalCollectionRefreshMeta) ClearTaskResult(taskID int64) error {
 		task.ResultStorageVersion = 0
 		task.ResultPath = ""
 		task.ResultChecksum = nil
+		task.AllFragmentsUnmapped = false
 		return false, nil
 	})
 	if applied {

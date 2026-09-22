@@ -1578,6 +1578,50 @@ TEST_P(ManifestGroupTranslatorTest, TestRowGroupRangesCoverage) {
     EXPECT_EQ(expected_start, meta->total_row_groups_);
 }
 
+TEST_P(ManifestGroupTranslatorTest, NumericExternalNameUsesPlannedMapping) {
+    auto original = test_data_->GetFieldMetas(0);
+    std::unordered_map<FieldId, FieldMeta> mapped;
+    std::unordered_map<std::string, FieldId> columns;
+    for (const auto& [fid, meta] : original) {
+        auto target =
+            fid.get() < START_USER_FIELDID ? fid : FieldId(fid.get() + 1000);
+        auto proto = meta.ToProto();
+        proto.set_fieldid(target.get());
+        proto.set_external_field(std::to_string(fid.get()));
+        mapped.emplace(target, FieldMeta::ParseFrom(proto));
+        columns.emplace(std::to_string(fid.get()), target);
+    }
+    auto translator = std::make_unique<ManifestGroupTranslator>(
+        segment_id_,
+        GroupChunkType::DEFAULT,
+        0,
+        test_data_->CreateChunkReader(0),
+        mapped,
+        test_data_->GetColumnGroups()->at(0)->columns,
+        test_data_->GetColumnGroups()->at(0)->columns,
+        GetParam(),
+        true,
+        mmap_dir_,
+        mapped.size(),
+        proto::common::LoadPriority::LOW,
+        true,
+        "",
+        "",
+        0,
+        "",
+        std::nullopt,
+        MmapChunkWritebackMode::Disabled,
+        false,
+        columns);
+    auto cells = translator->get_cells(nullptr, {0});
+    ASSERT_EQ(cells.size(), 1);
+    for (const auto& [fid, meta] : mapped) {
+        if (fid != RowFieldID) {
+            EXPECT_NE(cells[0].second->GetChunk(fid), nullptr);
+        }
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(ManifestGroupTranslator,
                          ManifestGroupTranslatorTest,
                          testing::Bool());

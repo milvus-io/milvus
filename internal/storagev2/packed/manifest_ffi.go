@@ -41,6 +41,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,6 +71,7 @@ const (
 // Fragment represents a data fragment from an external data source.
 // A large file (e.g., 10M rows) can be split into multiple fragments.
 type Fragment struct {
+	Columns    []string              // Physical source columns, resolved during refresh.
 	FragmentID int64                 // Unique fragment identifier
 	FilePath   string                // File path
 	StartRow   int64                 // Start row index within the file (inclusive)
@@ -328,6 +330,13 @@ func createColumnGroups(
 	format string,
 	fragments []Fragment,
 ) (*C.LoonColumnGroups, error) {
+	if err := validateFragmentColumns(columns, fragments); err != nil {
+		return nil, err
+	}
+	columns = PhysicalFragmentColumns(columns, fragments)
+	if len(columns) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("cannot create external manifest without mapped physical columns")
+	}
 	// Create C string array for columns
 	cColumns := make([]*C.char, len(columns))
 	for i, col := range columns {
@@ -424,10 +433,55 @@ func createColumnGroups(
 	return outColumnGroups, nil
 }
 
+// PhysicalFragmentColumns keeps only requested columns present in the source.
+// Refresh bins contain a single column-presence profile. Nil metadata is kept
+// for callers constructing manifests from already-known column groups.
+func PhysicalFragmentColumns(columns []string, fragments []Fragment) []string {
+	for _, fragment := range fragments {
+		if fragment.Columns == nil {
+			continue
+		}
+		present := make(map[string]struct{}, len(fragment.Columns))
+		for _, name := range fragment.Columns {
+			present[name] = struct{}{}
+		}
+		filtered := make([]string, 0, len(columns))
+		for _, name := range columns {
+			if _, ok := present[name]; ok {
+				filtered = append(filtered, name)
+			}
+		}
+		columns = filtered
+	}
+	return columns
+}
+
+// validateFragmentColumns rejects a mixed group before intersecting its columns.
+// Otherwise, a default for one fragment could silently hide another's real data.
+func validateFragmentColumns(columns []string, fragments []Fragment) error {
+	var profile []string
+	known := false
+	for _, fragment := range fragments {
+		if fragment.Columns == nil {
+			continue
+		}
+		physical := PhysicalFragmentColumns(columns, []Fragment{fragment})
+		if known && !slices.Equal(profile, physical) {
+			return merr.WrapErrServiceInternalMsg("external segment fragments have different physical column sets")
+		}
+		profile, known = physical, true
+	}
+	return nil
+}
+
 // GetManifestFieldIDs reads numeric field IDs stored as column names in a
 // StorageV3 manifest.
 func GetManifestFieldIDs(manifestPath string, storageConfig *indexpb.StorageConfig) (map[int64]struct{}, error) {
-	manifest, err := GetManifestHandle(manifestPath, storageConfig)
+	return getManifestFieldIDsWithExtfs(manifestPath, storageConfig, ExternalSpecContext{})
+}
+
+func getManifestFieldIDsWithExtfs(manifestPath string, storageConfig *indexpb.StorageConfig, extfs ExternalSpecContext) (map[int64]struct{}, error) {
+	manifest, err := GetManifestHandleWithExtfs(manifestPath, storageConfig, extfs)
 	if err != nil {
 		return nil, err
 	}
@@ -818,6 +872,10 @@ func AppendSegmentManifestColumns(
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
+	if err := validateFragmentColumns(columns, fragments); err != nil {
+		return "", err
+	}
+	columns = PhysicalFragmentColumns(columns, fragments)
 	if len(columns) == 0 {
 		return oldManifestPath, nil
 	}

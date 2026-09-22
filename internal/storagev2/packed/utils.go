@@ -16,6 +16,8 @@ package packed
 
 import (
 	"context"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -113,8 +115,8 @@ func (o ExternalFetchOptions) rowLimitOrDefault() int64 {
 const getFileInfoPoolSize = 16
 
 // fetchRowCountsConcurrently returns a rowCounts slice aligned with fileInfos.
-// Entries with NumRows > 0 are taken as-is; zero/negative entries are filled
-// by concurrent GetFileInfo calls via a conc.Pool. Returns the first error
+// Known row counts are retained. Missing row counts or physical column names
+// are resolved concurrently via format metadata. Returns the first error
 // any worker produced, or ctx.Err() if canceled before launching workers.
 func fetchRowCountsConcurrently(
 	ctx context.Context,
@@ -127,7 +129,7 @@ func fetchRowCountsConcurrently(
 	needInfo := make([]int, 0, len(fileInfos))
 	for i, fi := range fileInfos {
 		rowCounts[i] = fi.NumRows
-		if fi.NumRows <= 0 {
+		if fi.NumRows <= 0 || fi.Columns == nil {
 			needInfo = append(needInfo, i)
 		}
 	}
@@ -149,12 +151,21 @@ func fetchRowCountsConcurrently(
 	for k, idx := range needInfo {
 		idx := idx
 		futures[k] = pool.Submit(func() (struct{}, error) {
+			if fileInfos[idx].NumRows > 0 {
+				columns, err := GetExternalFileColumns(format, fileInfos[idx].FilePath, storageConfig, extfs)
+				if err != nil {
+					return struct{}{}, merr.Wrapf(err, "read columns for %s", fileInfos[idx].FilePath)
+				}
+				fileInfos[idx].Columns = columns
+				return struct{}{}, nil
+			}
 			fetchedInfo, err := GetFileInfo(format, fileInfos[idx].FilePath, storageConfig, extfs)
 			if err != nil {
 				return struct{}{}, merr.Wrapf(err, "failed to get file info for %s", fileInfos[idx].FilePath)
 			}
 			// Distinct indexes across workers -> no race on rowCounts.
 			rowCounts[idx] = fetchedInfo.NumRows
+			fileInfos[idx].Columns = fetchedInfo.Columns
 			return struct{}{}, nil
 		})
 	}
@@ -240,6 +251,18 @@ func FetchFragmentsFromExternalSourceWithRange(
 	if isMilvusTableFormat(format) {
 		rowCounts = make([]int64, len(fileInfos))
 		for i, fi := range fileInfos {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			fields, err := getManifestFieldIDsWithExtfs(fi.FilePath, storageConfig, extfs)
+			if err != nil {
+				return nil, merr.Wrapf(err, "read source manifest columns for %s", fi.FilePath)
+			}
+			fileInfos[i].Columns = make([]string, 0, len(fields))
+			for fieldID := range fields {
+				fileInfos[i].Columns = append(fileInfos[i].Columns, strconv.FormatInt(fieldID, 10))
+			}
+			sort.Strings(fileInfos[i].Columns)
 			rowCounts[i] = fi.NumRows
 			if rowCounts[i] <= 0 {
 				return nil, merr.WrapErrServiceInternalMsg("milvus-table source manifest %s has non-positive row count %d", fi.FilePath, rowCounts[i])
@@ -267,10 +290,15 @@ func FetchFragmentsFromExternalSourceWithRange(
 				EndRow:     rowCounts[i],
 				RowCount:   rowCounts[i],
 				Deltalogs:  fi.Deltalogs,
+				Columns:    fi.Columns,
 			})
 			continue
 		}
-		fragments = append(fragments, SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fi.Properties, fragmentIDGenerator)...)
+		split := SplitFileToFragments(fi.FilePath, rowCounts[i], rowLimit, fi.Properties, fragmentIDGenerator)
+		for j := range split {
+			split[j].Columns = fi.Columns
+		}
+		fragments = append(fragments, split...)
 	}
 	if len(fragments) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("no data files in range [%d, %d)", fileIndexBegin, fileIndexEnd)

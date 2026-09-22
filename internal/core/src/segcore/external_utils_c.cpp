@@ -42,6 +42,7 @@
 #include "milvus-storage/ffi_internal/bridge.h"
 #include "milvus-storage/properties.h"
 #include "milvus-storage/reader.h"
+#include "milvus-storage/format/format_reader.h"
 #include "nlohmann/json.hpp"
 #include "pb/schema.pb.h"
 #include "storage/Util.h"
@@ -145,6 +146,48 @@ MakeCStatusError(const char* msg) {
 }
 
 CStatus
+GetExternalFileColumns(const char* format,
+                       const char* path,
+                       const LoonProperties* c_properties,
+                       char** columns_json) {
+    if (columns_json == nullptr) {
+        return MakeCStatusError("columns output is null");
+    }
+    *columns_json = nullptr;
+    try {
+        if (format == nullptr || path == nullptr || c_properties == nullptr) {
+            return MakeCStatusError(
+                "external file metadata arguments are null");
+        }
+        milvus_storage::api::Properties properties;
+        for (size_t i = 0; i < c_properties->count; ++i) {
+            const auto& p = c_properties->properties[i];
+            if (p.key != nullptr && p.value != nullptr) {
+                milvus_storage::api::SetValue(properties, p.key, p.value, true);
+            }
+        }
+        milvus_storage::api::ColumnGroupFile file{path, 0, 0, {}};
+        auto reader = milvus_storage::FormatReader::create(
+            nullptr, format, file, properties, {}, nullptr);
+        if (!reader.ok()) {
+            return MakeCStatusError(reader.status().ToString().c_str());
+        }
+        auto schema = reader.ValueOrDie()->get_schema();
+        if (schema == nullptr) {
+            return MakeCStatusError("external format returned no file schema");
+        }
+        auto json = nlohmann::json(schema->field_names()).dump();
+        *columns_json = strdup(json.c_str());
+        if (*columns_json == nullptr) {
+            return MakeCStatusError("failed to allocate external column names");
+        }
+        return milvus::SuccessCStatus();
+    } catch (const std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
 SampleExternalSegmentFieldSizes(const char* manifest_path,
                                 int sample_rows,
                                 int64_t collection_id,
@@ -209,6 +252,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
         struct SampleField {
             milvus::FieldMeta field_meta;
             std::string column_name;
+            bool can_fill_missing = false;
         };
         std::vector<SampleField> external_fields;
         if (collection_schema.proto_blob != nullptr &&
@@ -219,6 +263,7 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
             if (!ok) {
                 return MakeCStatusError("failed to parse collection schema");
             }
+            auto parsed_schema = milvus::Schema::ParseFrom(schema);
             bool is_milvus_table =
                 milvus::IsMilvusTableExternalSpec(schema.external_spec());
             external_fields.reserve(schema.fields_size());
@@ -241,7 +286,10 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                                        ? std::to_string(field_schema.fieldid())
                                        : field_meta.get_external_field();
                 external_fields.push_back(
-                    {std::move(field_meta), std::move(column_name)});
+                    {std::move(field_meta),
+                     std::move(column_name),
+                     parsed_schema->CanFillMissingExternalField(
+                         milvus::FieldId(field_schema.fieldid()))});
             }
             if (is_milvus_table && uses_external_primary_key) {
                 // Real-PK milvus-table loading also keeps source insert
@@ -290,6 +338,24 @@ SampleExternalSegmentFieldSizes(const char* manifest_path,
                 const auto& field_meta = sample_field.field_meta;
                 const auto& column_name = sample_field.column_name;
                 auto chunked = table->GetColumnByName(column_name);
+                if (chunked == nullptr && sample_field.can_fill_missing) {
+                    bool physically_present = std::any_of(
+                        cgs->begin(), cgs->end(), [&](const auto& group) {
+                            return group && std::find(group->columns.begin(),
+                                                      group->columns.end(),
+                                                      column_name) !=
+                                                group->columns.end();
+                        });
+                    if (!physically_present) {
+                        auto defaults =
+                            milvus::storage::CreateDefaultArrowArray(field_meta,
+                                                                     num_rows);
+                        sampled_sizes.emplace_back(
+                            column_name,
+                            calcArrayDataSize(defaults->data()) / num_rows);
+                        continue;
+                    }
+                }
                 if (chunked == nullptr) {
                     return MakeCStatusError(
                         fmt::format("Column '{}' not found in schema",
