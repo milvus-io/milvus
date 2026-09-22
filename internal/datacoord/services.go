@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/dataview"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -2480,7 +2479,6 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
@@ -2531,7 +2529,6 @@ func (s *Server) BatchUpdateManifest(ctx context.Context, req *datapb.BatchUpdat
 		WithBody(&message.BatchUpdateManifestMessageBody{
 			Items: items,
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
@@ -2635,7 +2632,6 @@ func (s *Server) DropSnapshot(ctx context.Context, req *datapb.DropSnapshotReque
 			CollectionId: req.GetCollectionId(),
 		}).
 		WithBody(&message.DropSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
 		MustBuildBroadcast(),
 	); err != nil {
@@ -3119,7 +3115,6 @@ func (s *Server) RefreshExternalCollection(ctx context.Context, req *datapb.Refr
 			ExternalSpec:   req.GetExternalSpec(),
 		}).
 		WithBody(&message.RefreshExternalCollectionMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
 		MustBuildBroadcast()
 

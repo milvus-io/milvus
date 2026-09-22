@@ -55,6 +55,7 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 			ResourceGroupConfigs: map[string]*rgpb.ResourceGroupConfig{req.GetResourceGroup(): cfg},
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
+		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {
@@ -88,6 +89,7 @@ func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb
 			ResourceGroupConfigs: req.GetResourceGroups(),
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
+		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {
@@ -120,6 +122,7 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 			ResourceGroupConfigs: rgs,
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
+		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {

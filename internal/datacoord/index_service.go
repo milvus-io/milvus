@@ -27,7 +27,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
@@ -351,7 +350,6 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(ctx, "CreateIndex fail", mlog.Err(err))
@@ -511,7 +509,6 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				return model.MarshalIndexModel(index)
 			}),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast alter index message", mlog.Err(err))
@@ -1040,7 +1037,6 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 			IndexIds:     indexIDs,
 		}).
 		WithBody(&message.DropIndexMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {

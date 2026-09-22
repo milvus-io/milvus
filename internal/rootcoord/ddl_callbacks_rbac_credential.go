@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -49,7 +48,6 @@ func (c *Core) broadcastAlterUserForCreateCredential(ctx context.Context, credIn
 		WithBody(&message.AlterUserMessageBody{
 			CredentialInfo: credInfo,
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -75,7 +73,6 @@ func (c *Core) broadcastAlterUserForUpdateCredential(ctx context.Context, credIn
 		WithBody(&message.AlterUserMessageBody{
 			CredentialInfo: credInfo,
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -114,7 +111,6 @@ func (c *Core) broadcastDropUserForDeleteCredential(ctx context.Context, in *mil
 			UserName: in.Username,
 		}).
 		WithBody(&message.DropUserMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

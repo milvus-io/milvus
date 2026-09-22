@@ -20,7 +20,6 @@ import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -44,7 +43,6 @@ func (c *Core) broadcastRestoreRBACV2(ctx context.Context, req *milvuspb.Restore
 		WithBody(&message.RestoreRBACMessageBody{
 			RbacMeta: req.GetRBACMeta(),
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

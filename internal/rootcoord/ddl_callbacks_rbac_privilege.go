@@ -22,7 +22,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -71,7 +70,6 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 				Entity: in.Entity,
 			}).
 			WithBody(&message.AlterPrivilegeMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	case milvuspb.OperatePrivilegeType_Revoke:
 		msg = message.NewDropPrivilegeMessageBuilderV2().
@@ -79,7 +77,6 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 				Entity: in.Entity,
 			}).
 			WithBody(&message.DropPrivilegeMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate privilege type")
@@ -127,7 +124,6 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 			},
 		}).
 		WithBody(&message.AlterPrivilegeGroupMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -155,7 +151,6 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 				},
 			}).
 			WithBody(&message.AlterPrivilegeGroupMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 		msg = message.NewDropPrivilegeGroupMessageBuilderV2().
@@ -166,7 +161,6 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 				},
 			}).
 			WithBody(&message.DropPrivilegeGroupMessageBody{}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate privilege group type")
@@ -200,7 +194,6 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 			},
 		}).
 		WithBody(&message.DropPrivilegeGroupMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
@@ -981,7 +980,6 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 	msg := message.NewRestoreSnapshotMessageBuilderV2().
 		WithHeader(header).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		WithUnreplicable().
 		MustBuildBroadcast()
 
@@ -1233,7 +1231,6 @@ func (sm *snapshotManager) RestoreIndexes(
 			WithBody(&message.CreateIndexMessageBody{
 				FieldIndex: model.MarshalIndexModel(index),
 			}).
-			WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 			MustBuildBroadcast(),
 		)
 		b.Close()

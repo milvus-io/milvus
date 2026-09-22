@@ -53,6 +53,7 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 			ResourceGroupName: req.GetResourceGroup(),
 		}).
 		WithBody(&message.DropResourceGroupMessageBody{}).
+		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
 		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
 		MustBuildBroadcast()
 	if broadcaster == nil {

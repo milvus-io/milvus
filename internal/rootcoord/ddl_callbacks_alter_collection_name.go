@@ -6,7 +6,6 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -76,9 +75,6 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 		updateMask.Paths = append(updateMask.Paths, message.FieldMaskCollectionName)
 	}
 
-	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, coll.VirtualChannelNames...)
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetOldName())
 	if err != nil {
 		return err
@@ -94,7 +90,7 @@ func (c *Core) broadcastAlterCollectionForRenameCollection(ctx context.Context, 
 		WithBody(&message.AlterCollectionMessageBody{
 			Updates: updates,
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(coll.VirtualChannelNames).
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
