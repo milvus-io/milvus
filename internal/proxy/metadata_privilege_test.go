@@ -257,7 +257,7 @@ func TestReplicaPrivilegeFailsClosed(t *testing.T) {
 
 func TestProxyCollectionMetadataRejectsBeforeCoordinator(t *testing.T) {
 	setupMetadataPrivileges(t)
-	node := &Proxy{getMetaCache: func() Cache { return nil }}
+	node := &Proxy{}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	ctx := NewContextWithMetadata(context.Background(), "no_roles", "tenant_b")
 	// mixCoord is deliberately nil: a denied direct call must not dispatch to it.
@@ -278,7 +278,7 @@ func TestProxyCollectionMetadataAuthorizedCalls(t *testing.T) {
 	cache, err := metacache.NewMetaCache(coord)
 	require.NoError(t, err)
 	t.Cleanup(cache.Close)
-	node := &Proxy{getMetaCache: func() Cache { return cache }, mixCoord: coord}
+	node := &Proxy{metaCache: cache, mixCoord: coord}
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	ctx := NewContextWithMetadata(context.Background(), "reader", "tenant_b")
 	persistent, err := node.GetPersistentSegmentInfo(ctx, &milvuspb.GetPersistentSegmentInfoRequest{DbName: "tenant_b", CollectionName: "records"})
