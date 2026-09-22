@@ -225,7 +225,11 @@ func (m *versionManagerImpl) GetMinimalIndexEngineVersion() int32 {
 
 func (m *versionManagerImpl) getMinimalVersion() int32 {
 	if len(m.versions) == 0 {
-		return 0
+		// The same assumption noSessionVersion makes for the current and
+		// maximum versions covers the lower bound too: a QueryNode started
+		// later runs this image, so an override below what this image's
+		// segcore can load is clamped up rather than built.
+		return noSessionVersion(func() int32 { return segcore.GetIndexEngineInfo().MinIndexVersion })
 	}
 
 	minimal := int32(0)

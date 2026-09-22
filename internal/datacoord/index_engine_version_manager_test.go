@@ -894,9 +894,11 @@ func TestEmptySessionSetComesFromThisBinary(t *testing.T) {
 	assert.NotZero(t, vec, "version zero is the misrouting answer the fallback exists to avoid")
 	assert.Equal(t, common.CurrentScalarIndexEngineVersion, m.GetCurrentScalarIndexEngineVersion())
 
-	// Minimal versions keep their native zero: they are compatibility floors,
-	// and an empty set genuinely imposes none.
-	assert.Equal(t, int32(0), m.GetMinimalIndexEngineVersion())
+	// The lower bound comes from this binary too. The assumption that a
+	// QueryNode started later runs this image covers the floor the same way
+	// it covers the ceiling: an override below what this image's segcore can
+	// load would build an index this same image cannot read.
+	assert.Equal(t, segcore.GetIndexEngineInfo().MinIndexVersion, m.GetMinimalIndexEngineVersion())
 
 	paramtable.Get().Save(Params.DataCoordCfg.IndexStorePathVersion.Key, "1")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.IndexStorePathVersion.Key)
