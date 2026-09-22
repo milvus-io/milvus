@@ -117,7 +117,7 @@ func TestMutableBuilderWithBodyEncoder(t *testing.T) {
 
 	insertMsg, err := message.AsMutableInsertMessageV1(msg)
 	require.NoError(t, err)
-	actualBody, err := insertMsg.Body()
+	actualBody, err := insertMsg.Body(context.Background())
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(body, actualBody))
 }

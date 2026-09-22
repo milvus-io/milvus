@@ -500,18 +500,23 @@ lowerString(const std::string& str) {
     return ret;
 }
 
-// Adds unsigned integers and clamps overflow to the type's maximum value.
-template <std::unsigned_integral T>
-[[nodiscard]] constexpr T
-SaturatingAdd(T lhs, T rhs) noexcept {
+// Adds unsigned integers and clamps overflow to the result type's maximum
+// value. Operands may differ in type; the result uses their common type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingAdd(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
     constexpr auto max = std::numeric_limits<T>::max();
     return rhs > max - lhs ? max : lhs + rhs;
 }
 
-// Multiplies unsigned integers and clamps overflow to the type's maximum value.
-template <std::unsigned_integral T>
-[[nodiscard]] constexpr T
-SaturatingMultiply(T lhs, T rhs) noexcept {
+// Multiplies unsigned integers and clamps overflow to the result type's
+// maximum value. Operands may differ in type; the result uses their common
+// type.
+template <std::unsigned_integral L, std::unsigned_integral R>
+[[nodiscard]] constexpr std::common_type_t<L, R>
+SaturatingMultiply(L lhs, R rhs) noexcept {
+    using T = std::common_type_t<L, R>;
     constexpr auto max = std::numeric_limits<T>::max();
     return lhs != 0 && rhs > max / lhs ? max : lhs * rhs;
 }

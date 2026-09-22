@@ -616,7 +616,8 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     void
     LoadShreddingMeta(
-        std::vector<std::pair<int64_t, std::vector<int64_t>>> sorted_files,
+        const std::vector<std::pair<int64_t, std::vector<int64_t>>>&
+            sorted_files,
         const std::string& override_prefix = "");
 
     std::string

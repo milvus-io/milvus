@@ -3182,7 +3182,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
             storage::SortByPath(file_infos);
 
-            auto field_meta = schema_snapshot->operator[](field_id);
+            const auto& field_meta = schema_snapshot->operator[](field_id);
             if (field_meta.is_nested_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
@@ -3350,7 +3350,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
 
             storage::SortByPath(file_infos);
 
-            auto field_meta = schema_snapshot->operator[](field_id);
+            const auto& field_meta = schema_snapshot->operator[](field_id);
             if (field_meta.is_nested_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,

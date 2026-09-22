@@ -30,6 +30,7 @@
 #include "filemanager/InputStream.h"
 #include "nlohmann/json.hpp"
 #include "storage/FileWriter.h"
+#include "storage/IndexEntryFormat.h"
 #include "storage/IndexEntryWriter.h"
 #include "storage/ThreadPools.h"
 #include "storage/plugin/PluginInterface.h"
@@ -43,22 +44,8 @@ struct Entry {
     std::vector<uint8_t> data;
 };
 
-struct EntryStreamLoadInfo {
-    // Exact encrypted-stream task bounds derived from persisted V3 directory
-    // slice metadata. Plaintext files leave both byte counts at zero.
-    bool encrypted{false};
-    size_t total_transient_bytes{0};
-    size_t max_task_transient_bytes{0};
-};
-
 class IndexEntryReader {
  public:
-    static EntryStreamLoadInfo
-    InspectStreamLoadInfo(std::shared_ptr<milvus::InputStream> input,
-                          int64_t file_size,
-                          folly::CancellationToken cancellation_token =
-                              folly::CancellationToken());
-
     static std::unique_ptr<IndexEntryReader>
     Open(std::shared_ptr<milvus::InputStream> input,
          int64_t file_size,
@@ -66,14 +53,6 @@ class IndexEntryReader {
          ThreadPoolPriority priority = ThreadPoolPriority::HIGH,
          folly::CancellationToken cancellation_token =
              folly::CancellationToken());
-
-    const EntryStreamLoadInfo&
-    GetStreamLoadInfo() const {
-        return stream_load_info_;
-    }
-
-    std::vector<std::string>
-    GetEntryNames() const;
 
     Entry
     ReadEntry(const std::string& name);
@@ -116,34 +95,16 @@ class IndexEntryReader {
     size_t
     GetEntrySize(const std::string& name) const;
 
-    /// Check if an entry exists in the index file.
-    bool
-    HasEntry(const std::string& name) const {
-        return entry_index_.find(name) != entry_index_.end();
+    // Immutable metadata available immediately after Open(); no I/O.
+    const IndexEntryDirectory&
+    Directory() const noexcept {
+        return directory_;
     }
 
-    template <typename T>
-    T
-    GetMeta(const std::string& key) const {
-        if (!(meta_json_.contains(key))) {
-            ThrowInfo(
-                ErrorCode::DataFormatBroken, "Meta key not found: {}", key);
-        }
-        return meta_json_[key].get<T>();
-    }
-
-    template <typename T>
-    T
-    GetMeta(const std::string& key, const T& default_value) const {
-        if (!meta_json_.contains(key)) {
-            return default_value;
-        }
-        return meta_json_[key].get<T>();
-    }
-
-    bool
-    HasMeta(const std::string& key) const {
-        return meta_json_.contains(key);
+    // Index properties decoded from the metadata entry (not entry locations).
+    const nlohmann::json&
+    IndexMeta() const noexcept {
+        return metadata_;
     }
 
     IndexEntryReader(const IndexEntryReader&) = delete;
@@ -151,24 +112,6 @@ class IndexEntryReader {
     operator=(const IndexEntryReader&) = delete;
 
  private:
-    struct PlainEntryMeta {
-        uint64_t offset;
-        uint64_t size;
-        uint32_t crc32;
-    };
-
-    struct EncryptedEntryMeta {
-        uint64_t original_size;
-        uint32_t crc32;
-        std::vector<SliceMeta> slices;
-    };
-
-    struct EntryMeta {
-        bool encrypted;
-        PlainEntryMeta plain;
-        EncryptedEntryMeta enc;
-    };
-
     IndexEntryReader() = default;
 
     void
@@ -184,14 +127,14 @@ class IndexEntryReader {
     ReadEncryptedEntry(const EntryMeta& meta);
 
     void
-    ReadPlainEntryStream(const PlainEntryMeta& pm,
+    ReadPlainEntryStream(const EntryMeta& meta,
                          const std::function<void(const uint8_t* data,
                                                   size_t len)>& slice_consumer,
                          size_t slice_size);
 
     void
     ReadEncryptedEntryStream(
-        const EncryptedEntryMeta& em,
+        const EntryMeta& meta,
         const std::function<void(const uint8_t* data, size_t len)>&
             slice_consumer);
 
@@ -266,20 +209,15 @@ class IndexEntryReader {
     ThreadPoolPriority priority_ = ThreadPoolPriority::HIGH;
     folly::CancellationToken cancellation_token_;
 
-    bool is_encrypted_ = false;
-    std::string edek_;
-    int64_t ez_id_ = 0;
-    size_t slice_size_ = 0;
+    std::optional<IndexFileEncryption> encryption_;
 
     std::shared_ptr<plugin::ICipherPlugin> cipher_plugin_;
 
-    std::unordered_map<std::string, EntryMeta> entry_index_;
-    EntryStreamLoadInfo stream_load_info_;
-    std::vector<std::string> entry_names_;
+    IndexEntryDirectory directory_;
+    nlohmann::json metadata_;
 
     static constexpr size_t kSmallEntryCacheThreshold = 1 * 1024 * 1024;
     std::unordered_map<std::string, Entry> small_entry_cache_;
-    nlohmann::json meta_json_;
 };
 
 }  // namespace milvus::storage

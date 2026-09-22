@@ -44,7 +44,7 @@ namespace exec {
 
 class PhyColumnExpr : public Expr {
  public:
-    PhyColumnExpr(const std::vector<std::shared_ptr<Expr>>& input,
+    PhyColumnExpr(std::vector<std::shared_ptr<Expr>> input,
                   const std::shared_ptr<const milvus::expr::ColumnExpr>& expr,
                   const std::string& name,
                   milvus::OpContext* op_ctx,

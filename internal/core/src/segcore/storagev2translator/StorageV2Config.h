@@ -28,7 +28,9 @@ inline constexpr int64_t kDefaultStorageV2AsyncLoadReadWindowSizeBytes =
 [[nodiscard]] bool
 StorageV2AsyncLoadEnabled();
 
-// Atomically enables or disables async loading for subsequently built readers.
+// Selects the load mode and refreshes its overhead policy.
+// Call only while loading and resource-limit updates are quiescent; rebuild
+// readers that captured the previous mode before resuming loading.
 void
 SetStorageV2AsyncLoadEnabled(bool enabled);
 

@@ -848,6 +848,9 @@ message CompactionPlan {
   repeated common.KeyValuePair plugin_context = 29;
   repeated internal.FileResourceInfo file_resources = 30;
   repeated schema.FunctionSchema functions = 31;
+  // The requesting DataCoord can commit schema-bump manifest deltas. Absent
+  // or false preserves the legacy worker-produced complete manifest response.
+  bool enable_manifest_delta = 32;
 }
 
 // ManifestColumnGroupFile is one loon/parquet file belonging to a column

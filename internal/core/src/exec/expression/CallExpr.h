@@ -40,7 +40,7 @@ namespace exec {
 
 class PhyCallExpr : public Expr {
  public:
-    PhyCallExpr(const std::vector<std::shared_ptr<Expr>>& input,
+    PhyCallExpr(std::vector<std::shared_ptr<Expr>> input,
                 const std::shared_ptr<const milvus::expr::CallExpr>& expr,
                 const std::string& name,
                 milvus::OpContext* op_ctx,
@@ -66,7 +66,7 @@ class PhyCallExpr : public Expr {
     void
     MoveCursor() override {
         if (!has_offset_input_) {
-            for (auto input : inputs_) {
+            for (const auto& input : inputs_) {
                 input->MoveCursor();
             }
         }

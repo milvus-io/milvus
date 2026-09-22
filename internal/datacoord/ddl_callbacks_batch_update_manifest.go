@@ -76,6 +76,13 @@ func (c *DDLCallbacks) batchUpdateManifestV2AckCallback(ctx context.Context, res
 			mlog.Warn(ctx, "batch update manifest failed", mlog.Err(err))
 			return err
 		}
+		// The SegmentMeta mutation is committed (manifest versions advanced
+		// for V3 items); reconcile the DataView snapshot asynchronously so
+		// consumers observe the new manifest versions. V2 column-group
+		// updates do not touch the manifest, so only V3 items trigger.
+		if v3Count > 0 {
+			c.meta.recomputeDataView(ctx, result.Message.Header().GetCollectionId())
+		}
 	}
 	mlog.Info(ctx, "batch update manifest handled",
 		mlog.Int("itemCount", len(body.GetItems())),

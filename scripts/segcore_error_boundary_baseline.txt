@@ -176,6 +176,7 @@ milvus_storage	internal/core/src/storage/loon_ffi/property_singleton.h
 milvus_storage	internal/core/src/storage/loon_ffi/util.cpp
 milvus_storage	internal/core/src/storage/loon_ffi/util.h
 milvus_storage	internal/core/src/storage/minio/MinioChunkManager.cpp
+milvus_storage	internal/core/src/storage/RemoteInputStream.cpp
 milvus_storage	internal/core/src/storage/StatusToErrorCode.h
 milvus_storage	internal/core/src/storage/storage_c.cpp
 milvus_storage	internal/core/src/storage/StorageV2FSCache.cpp

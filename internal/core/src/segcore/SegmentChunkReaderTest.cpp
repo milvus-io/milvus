@@ -566,6 +566,32 @@ TEST_P(SegmentChunkReaderStringTest, StringAccessorsUseBoundSnapshot) {
     EXPECT_EQ(stats_->scans, 1);
 }
 
+// The pinned ApplyFieldValidData path must read the validity bitmap from the
+// frozen snapshot column, not from the live segment. A NULL row (row 16 in
+// chunk 0) must be cleared while valid rows stay set; if the write went to the
+// live segment instead, forbid_live_column_read would trip on the fallback.
+TEST_P(SegmentChunkReaderStringTest, ApplyFieldValidDataUsesBoundSnapshot) {
+    if (!std::get<0>(GetParam())) {
+        // Non-nullable columns short-circuit inside ApplyValidDataInChunk.
+        return;
+    }
+    ReaderStringSnapshot snapshot(column_);
+    segment_->forbid_live_column_read = true;
+    SegmentChunkReader reader(nullptr, segment_.get(), expected_.size());
+    reader.SetSnapshot(&snapshot);
+
+    // chunk 0 spans rows [0, 8192); row 16 is NULL, rows 0 and 17 are valid.
+    const int64_t size = 8192;
+    TargetBitmap valid(size, true);
+    reader.ApplyFieldValidData(
+        nullptr, field_, 0, 0, size, TargetBitmapView(valid));
+
+    EXPECT_FALSE(valid[16]);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_TRUE(valid[17]);
+    EXPECT_EQ(snapshot.column_reads, 1);
+}
+
 TEST_P(SegmentChunkReaderStringTest,
        StringExpressionsKeepIndependentScansAcrossWindowsAndOffsets) {
     auto other_stats = std::make_shared<StringReadStats>();

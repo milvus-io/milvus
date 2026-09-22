@@ -164,6 +164,54 @@ The backfill and external-refresh adoption bypasses are described below.
 
 ## API Shape
 
+### Worker protocol compatibility
+
+Moving manifest transactions from DataNode to DataCoord changes the response
+contract even when the protobuf change only adds fields. A pre-framework
+DataCoord requires a complete manifest for schema-bump materialization and
+expects standalone text/JSON stats to have already been added to the returned
+manifest. Unconditionally returning a delta, or returning the unchanged stats
+manifest, breaks those consumers.
+
+The requesting DataCoord opts in through `enable_manifest_delta` on
+`CompactionPlan` and `CreateStatsRequest`. The default is false, including when
+an older sender omits the field. The response is selected per request, not from
+the worker's binary version or a process-wide setting.
+
+| Request / worker | Schema-bump materialization | Standalone text / JSON stats |
+|---|---|---|
+| Legacy request, patched worker | Worker commits new files and BM25 stats against the plan's base; returns `Manifest` and `BaseManifest`, with no `ManifestDelta` | Worker adds stats and returns the resulting manifest plus the existing stats metadata |
+| Opted-in request, patched worker | Returns only `ManifestDelta`; DataCoord commits against the current manifest | Worker returns stats descriptors; DataCoord commits them against the current manifest |
+| New DataCoord, pre-framework worker | Unknown request flag is ignored; DataCoord retains complete-manifest adoption with base/version validation | DataCoord reconstructs stats entries from the legacy result and commits them against the current manifest |
+
+Schema-version-only bumps and full rewrites keep returning complete manifests.
+Sort stats always bake into the target manifest, regardless of the flag.
+StorageV2 stats retain their metadata result path. L0 still returns deltalogs;
+its transaction ownership change is internal to DataCoord. Flush, import and
+copy retain their complete-manifest wire contract. Batch manifest DDL has no
+changed worker response in this migration.
+
+The compatibility path preserves the old coordinator's concurrency checks; it
+does not give an old coordinator the new segment-lock/rebase implementation.
+The worker must not return the unchanged base as if it contained newly written
+files, nor write both a complete manifest and a delta for opted-in requests.
+
+Request negotiation supports rolling upgrades and requests already dispatched
+by an old coordinator. It does not make a pre-framework coordinator able to
+consume delta results already dispatched by a newer coordinator. Before such
+a downgrade, drain schema-bump and standalone stats tasks while the newer
+coordinator is active. Already cached delta-only results from an unpatched
+worker also require task redispatch to a patched worker (or completion by a
+delta-aware coordinator); retrying their publication on the old coordinator
+cannot change the response format.
+
+Regression coverage exercises legacy and opted-in requests, reads real
+worker-created manifests to verify added columns/BM25/text/JSON stats, and
+checks manifest-commit failures. Existing DataCoord coverage must continue to
+exercise legacy manifest adoption, stale-base rejection, replay, structured
+delta commits, and stats rebasing. These tests do not substitute for a mixed
+binary cluster upgrade/downgrade run.
+
 `meta` owns a keyed lock, initialized with the rest of metadata state:
 
 ```go

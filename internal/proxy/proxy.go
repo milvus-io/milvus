@@ -32,6 +32,7 @@ import (
 	internalhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/types"
@@ -194,6 +195,7 @@ func (node *Proxy) Register() error {
 	node.session.Register()
 	metrics.NumNodes.WithLabelValues(paramtable.GetStringNodeID(), typeutil.ProxyRole).Inc()
 	mlog.Info(node.ctx, "Proxy Register Finished")
+
 	// TODO Reset the logger
 	// Params.initLogCfg()
 	return nil
@@ -307,6 +309,12 @@ func (node *Proxy) Init() error {
 	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	mlog.Debug(node.ctx, "create metrics cache manager done", mlog.String("role", typeutil.ProxyRole))
+
+	if err := rls.Init(node.ctx, node.mixCoord); err != nil {
+		mlog.Warn(node.ctx, "failed to init RLS metadata manager", mlog.String("role", typeutil.ProxyRole), mlog.Err(err))
+		return err
+	}
+	mlog.Debug(node.ctx, "init RLS metadata manager done", mlog.String("role", typeutil.ProxyRole))
 
 	node.managementRootVerifier = newManagementRootVerifier(node.mixCoord)
 	internalhttp.RegisterManagementVerifier(internalhttp.VerifierSlotProxy, node.managementRootVerifier.Verify)

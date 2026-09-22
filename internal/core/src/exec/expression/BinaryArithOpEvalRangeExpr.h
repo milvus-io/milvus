@@ -710,7 +710,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
 
  public:
     PhyBinaryArithOpEvalRangeExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
             expr,
         const std::string& name,

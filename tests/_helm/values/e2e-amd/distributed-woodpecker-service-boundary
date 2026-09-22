@@ -79,6 +79,10 @@ log:
   level: debug
 extraConfigFiles:
   user.yaml: |+
+    grpc:
+      client:
+        compressionEnabled: true
+        compressionAlgorithm: s2
     common:
       bloomFilterApplyBatchSize: 511
       storage:

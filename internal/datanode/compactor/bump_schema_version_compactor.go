@@ -1015,6 +1015,7 @@ type bumpSchemaVersionWriterResult struct {
 	columnGroups   []storagecommon.ColumnGroup
 	storageVersion int64
 	basePath       string
+	baseVersion    int64
 	v3Stats        []packed.StatEntry
 	// statsBlobSize tracks the cumulative bloom-filter + BM25 blob memory
 	// committed via addV3Stats. Reported to DataCoord on
@@ -1085,6 +1086,7 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 		columnGroups:   columnGroups,
 		storageVersion: segment.GetStorageVersion(),
 		basePath:       basePath,
+		baseVersion:    baseVersion,
 	}, nil
 }
 
@@ -1341,37 +1343,39 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		return nil, err
 	}
 
-	// The heavy data files are already written to object storage by the writer
-	// above. Instead of committing the manifest transaction here — on the base
-	// version pinned when the plan was built — ship the transaction INPUT (the
-	// serializable descriptors of those files plus the bm25 stat entries) to
-	// DataCoord and let CommitSegmentManifest run the transaction on the
-	// segment's CURRENT manifest. That rebases the column-group / stat adds
-	// against any concurrent commit (e.g. an L0 deltalog add) instead of losing
-	// to it on a stale-base CAS and forcing a full re-materialization.
-	describer, ok := writerOutput.(interface {
-		ColumnGroupEntries() ([]packed.ColumnGroupEntry, error)
-	})
-	if !ok {
-		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization writer output does not expose column group entries")
+	// The request selects the response contract. Old coordinators omit the
+	// capability and require a complete manifest; only an opted-in coordinator
+	// can rebase a delta onto the current manifest under its segment lock.
+	var manifestPath string
+	var manifestDelta *datapb.SegmentManifestDelta
+	if t.plan.GetEnableManifestDelta() {
+		describer, ok := writerOutput.(interface {
+			ColumnGroupEntries() ([]packed.ColumnGroupEntry, error)
+		})
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("schema bump materialization writer output does not expose column group entries")
+		}
+		columnGroupEntries, err := describer.ColumnGroupEntries()
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to read schema bump column group descriptors")
+		}
+		if len(columnGroupEntries) == 0 {
+			return nil, merr.WrapErrServiceInternalMsg("schema bump materialization produced no column groups, planID = %d, segmentID = %d", t.GetPlanID(), segmentID)
+		}
+		manifestDelta = &datapb.SegmentManifestDelta{
+			ColumnGroups: packed.ColumnGroupEntriesToProto(columnGroupEntries),
+			Stats:        packed.StatEntriesToProto(writerResult.v3Stats),
+		}
+	} else {
+		manifestPath, err = packed.CommitManifestUpdates(
+			writerResult.basePath, writerResult.baseVersion,
+			t.compactionParams.StorageConfig,
+			&packed.ManifestUpdates{NewFiles: writerOutput, Stats: writerResult.v3Stats},
+		)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to commit schema bump V3 manifest")
+		}
 	}
-	columnGroupEntries, err := describer.ColumnGroupEntries()
-	if err != nil {
-		return nil, merr.Wrap(err, "failed to read schema bump column group descriptors")
-	}
-	if len(columnGroupEntries) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("schema bump materialization produced no column groups, planID = %d, segmentID = %d", t.GetPlanID(), segmentID)
-	}
-	manifestDelta := &datapb.SegmentManifestDelta{
-		ColumnGroups: packed.ColumnGroupEntriesToProto(columnGroupEntries),
-		Stats:        packed.StatEntriesToProto(writerResult.v3Stats),
-	}
-	log.Info(ctx, "[schema-bump-partial-writer] writer output prepared as manifest delta",
-		mlog.Int64("totalRows", totalRows),
-		mlog.Int("newInsertLogsCount", len(newInsertLogs)),
-		mlog.Int("columnGroupCount", len(manifestDelta.GetColumnGroups())),
-		mlog.Int("v3StatsCount", len(writerResult.v3Stats)),
-	)
 
 	ret := &datapb.CompactionPlanResult{
 		PlanID: t.plan.GetPlanID(),
@@ -1383,11 +1387,9 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 				InsertLogs:     newInsertLogs,
 				Channel:        segment.GetInsertChannel(),
 				StorageVersion: writerResult.storageVersion,
-				// Manifest is intentionally empty: with ManifestDelta set,
-				// DataCoord generates the new manifest revision itself from the
-				// shipped descriptors, on the segment's current base.
-				ManifestDelta: manifestDelta,
-				BaseManifest:  segment.GetManifest(),
+				Manifest:       manifestPath,
+				ManifestDelta:  manifestDelta,
+				BaseManifest:   segment.GetManifest(),
 				// In-place materialization ships an INCREMENT, not an absolute
 				// footprint: DataCoord adds it onto the segment's existing
 				// Stats. Field2StatslogPaths and Deltalogs are deliberately
@@ -1408,6 +1410,8 @@ func (t *bumpSchemaVersionCompactionTask) runAdditivePhysicalReconciliation(ctx 
 		mlog.Int64("numOfRows", totalRows),
 		mlog.Int("newInsertLogsCount", len(newInsertLogs)),
 		mlog.Int("columnGroupCount", len(manifestDelta.GetColumnGroups())),
+		mlog.Bool("manifestDelta", manifestDelta != nil),
+		mlog.String("manifestPath", manifestPath),
 		mlog.Int64("effectiveStorageVersion", writerResult.storageVersion),
 		mlog.Int32("collectionSchemaVersion", t.plan.GetSchema().GetVersion()),
 		mlog.Duration("readDuration", readDuration),
