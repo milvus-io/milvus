@@ -469,6 +469,50 @@ func (s *ScalarSuite) TestSlice() {
 	})
 }
 
+func (s *ScalarSuite) TestTimestamptzAppendValue() {
+	ts := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+	iso := ts.Format(time.RFC3339Nano)
+
+	s.Run("time_and_string_values", func() {
+		for _, column := range []Column{
+			NewColumnTimestamptz("ts", nil),
+			NewColumnTimestamptzIsoString("ts", nil),
+		} {
+			s.NoError(column.AppendValue(ts))
+			s.NoError(column.AppendValue(iso))
+			s.Equal(2, column.Len())
+			for i := 0; i < 2; i++ {
+				v, err := column.GetAsString(i)
+				s.NoError(err)
+				s.Equal(iso, v)
+			}
+			s.Error(column.AppendValue(int64(1)), "non time/string values are still rejected")
+			s.Equal(2, column.Len())
+		}
+	})
+
+	s.Run("nullable_bookkeeping", func() {
+		for _, column := range []Column{
+			NewColumnTimestamptz("ts", nil),
+			NewColumnTimestamptzIsoString("ts", nil),
+		} {
+			column.SetNullable(true)
+			s.NoError(column.AppendValue(ts))
+			s.NoError(column.AppendNull())
+			s.NoError(column.AppendValue(iso))
+			s.Equal(3, column.Len())
+			s.NoError(column.ValidateNullable())
+			isNull, err := column.IsNull(1)
+			s.NoError(err)
+			s.True(isNull)
+			v, err := column.GetAsString(2)
+			s.NoError(err)
+			s.Equal(iso, v)
+			s.Equal([]bool{true, false, true}, column.FieldData().GetScalars().GetValidData())
+		}
+	})
+}
+
 func TestScalarColumn(t *testing.T) {
 	suite.Run(t, new(ScalarSuite))
 }

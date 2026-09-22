@@ -18,11 +18,13 @@ package milvusclient
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
+	"github.com/milvus-io/milvus/client/v3/row"
 )
 
 type ResultSetSuite struct {
@@ -222,6 +224,54 @@ func (s *ResultSetSuite) TestSearchResultUnmarshalPointerPK() {
 		s.Equal(idData[idx], *row.A)
 		s.Equal(vectorData[idx], row.V)
 	}
+}
+
+func (s *ResultSetSuite) TestResultsetUnmarshalTimestamptz() {
+	type Event struct {
+		ID    int64      `milvus:"name:id"`
+		TS    time.Time  `milvus:"name:ts"`
+		OptTS *time.Time `milvus:"name:opt_ts"`
+		Raw   string     `milvus:"name:raw_ts"`
+	}
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("ts").WithDataType(entity.FieldTypeTimestamptz)).
+		WithField(entity.NewField().WithName("opt_ts").WithDataType(entity.FieldTypeTimestamptz).WithNullable(true)).
+		WithField(entity.NewField().WithName("raw_ts").WithDataType(entity.FieldTypeTimestamptz))
+
+	ts := time.Date(2024, 1, 2, 11, 4, 5, 123456000, time.FixedZone("UTC+8", 8*3600))
+	later := ts.Add(time.Hour)
+	iso := ts.Format(time.RFC3339Nano)
+
+	// round trip: rows written from time.Time read back into the same struct
+	columns, err := row.AnyToColumns([]any{
+		&Event{ID: 1, TS: ts, OptTS: &later, Raw: iso},
+		&Event{ID: 2, TS: ts, Raw: iso},
+	}, false, schema)
+	s.Require().NoError(err)
+
+	var receiver []*Event
+	s.Require().NoError(DataSet(columns).Unmarshal(&receiver))
+	s.Require().Len(receiver, 2)
+
+	s.True(ts.Equal(receiver[0].TS))
+	s.Equal(iso, receiver[0].TS.Format(time.RFC3339Nano), "offset is preserved")
+	s.Require().NotNil(receiver[0].OptTS)
+	s.True(later.Equal(*receiver[0].OptTS))
+	s.Equal(iso, receiver[0].Raw, "string receivers are unchanged")
+
+	s.True(ts.Equal(receiver[1].TS))
+	s.Nil(receiver[1].OptTS, "null stays nil")
+	s.Equal(iso, receiver[1].Raw)
+
+	// a malformed value surfaces as an error instead of a panic
+	var bad []*Event
+	err = DataSet([]column.Column{
+		column.NewColumnInt64("id", []int64{1}),
+		column.NewColumnTimestamptzIsoString("ts", []string{"not-a-timestamp"}),
+	}).Unmarshal(&bad)
+	s.Error(err)
+	s.ErrorContains(err, "not-a-timestamp")
 }
 
 func TestResults(t *testing.T) {
