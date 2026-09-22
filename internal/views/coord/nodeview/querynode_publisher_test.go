@@ -12,6 +12,10 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 )
 
+type fakeQueryNodeClient struct{}
+
+type fakeResourceGroupManager struct{}
+
 // Source methods are patched with mockey; no alternative publisher implementation.
 func (*fakeQueryNodeClient) RegisterQueryNodeListener(func(int64, *qnmanager.NodeInfo)) func() {
 	panic("mock with mockey")

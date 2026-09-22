@@ -761,7 +761,7 @@ merged under its cache lock; published descendants remain immutable.
 | Balancer | Resolve queued scopes, call Policy, apply/requeue | Work queue |
 | BalancerCache | Publish readable actual/desired facts and derived indexes | Immutable objects, aggregate contribution indexes |
 | PlanningContext | Reuse per-object reads and coordinate batch predictions | References, candidate-local data, accepted deltas |
-| BalancePolicy | Classify, order, allocate, compare | No cross-call state |
+| BalancePolicy | Classify, order, allocate, compare | Retained replica target layouts |
 | CollectionLoadManager | Desired load lifecycle through LoadConfigStore | Existing store |
 | ShardViewRegistry | Actual manager lifecycle and source publication | Resident managers |
 | ShardViewManager | QueryView state and placement/statistics publication | Per-shard state machines and DataViewRefs |
@@ -770,18 +770,19 @@ merged under its cache lock; published descendants remain immutable.
 
 The existing implementation lives in:
 
-- `internal/views/coord/balancer/`: loop, scope queue, policy and scoring;
-  snapshot_builder.go and snapshot.go currently implement the old read path.
+- `internal/views/coord/balancer/`: loop, scope queue, policy and scoring.
+- `internal/views/coord/balancer/cache/`: resident immutable read objects and source subscriptions.
+- `internal/views/coord/balancer/api/`: shared publication and read types.
 - `internal/views/coord/loadmgr/`: load config owner and lifecycle facade.
 - `internal/views/coord/coordview/`: actual QueryView owners and sync scheduler.
-- `internal/views/coord/nodeview/`: current pull-based topology adapter.
+- `internal/views/coord/nodeview/`: synchronous node/RG publication adapter.
 - `internal/dataview/`: immutable version publication and reference ownership.
 
-Add an isolated cache implementation and dependency-leaf read types, then source
-publication/initialization adapters, then switch Policy to Reader and its private
-PlanningContext. Do not create upstream-to-policy import cycles. Remove the
-snapshot builder from reconcile; compatibility snapshot APIs can remain for
-other consumers. Production runtime wiring is still a separate task.
+The cache subscribes to source publication and initial replay; Policy reads
+Reader through its private PlanningContext. Shared API types avoid upstream-to-policy
+import cycles. The old snapshot builder, DataView snapshot pull APIs, and node
+snapshot adapter have been removed. Production runtime wiring remains a separate
+task.
 
 ## 9. Future Considerations
 
@@ -985,7 +986,8 @@ returned plan itself stores every accepted candidate and segment assignment
 and therefore requires
 `O(L + acceptedCandidates + sum over accepted candidates of S_i)` space.
 
-These bounds exclude snapshot acquisition. `SnapshotBuilder` reads only the
-resolved DataView and ShardView scope, refreshes row counts for dirty shards,
-and uses the row-count ledger to populate cluster-wide node loads. Initial and
-periodic full reconciles rebuild the complete ledger.
+These bounds exclude cache publication and replica layout repair. Planning pins
+immutable collection objects on demand and reads each node once to initialize
+its row baseline. Upstream hooks maintain actual row aggregates before reconcile;
+initial and periodic full reconciles do not rebuild a row ledger or pull source
+snapshots.
