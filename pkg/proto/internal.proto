@@ -400,14 +400,39 @@ enum ImportJobState {
   AssigningIDRange = 10;
 }
 
-// Immutable, coordinator-expanded input for snapshot import.
+// Immutable, coordinator-expanded input for typed snapshot jobs.
 message SnapshotImportSource {
   uint32 version = 1;
   string manifest_path = 2;
-  // Versions 3/4 carry an explicit destination in instance/external storage.
+  uint64 source_commit_timestamp = 3;
+  // Retained only to detect and reject development-version inline L0 tasks.
+  // Both fields must be empty; L0 paths belong to SnapshotImportL0Source.
+  repeated string legacy_l0_deltalogs = 4;
+  repeated string manifest_l0_deltalogs = 5;
+  // Versions 3/7 (instance storage) and 4/8 (external storage) require this
+  // coordinator-resolved destination. Older consumers reject those versions
+  // instead of silently routing mapped files to the job's default partition.
   int64 target_partition_id = 6;
-  // Version 9 is Pending-only metadata, replaced before worker dispatch.
+  // Versions 5-8 use a task-shared L0 inventory instead of fields 4/5.
+  string source_channel = 7;
+  int64 source_partition_id = 8;
+  // Version 9 is a coordinator-only Pending input, never a worker file.
+  // Encoded data.SnapshotMetadata captured once before broadcast; bytes avoid
+  // a proto dependency cycle. Expansion atomically replaces this descriptor.
   bytes snapshot_metadata = 9;
+}
+
+// Stored once per source scope in the job after Pending preparation.
+// Channel-wide deletes use the all-partitions sentinel. Each worker task
+// receives the merged exact scope.
+message SnapshotImportL0Source {
+  string source_channel = 1;
+  int64 source_partition_id = 2;
+  // Decoder contracts, NOT SegmentDescription.storage_version: StorageV2
+  // segments can contain legacy V1 deltalogs.
+  repeated string legacy_l0_deltalogs = 3;
+  // Exact versioned manifests, resolved once by each worker task execution.
+  repeated string manifest_l0_paths = 4;
 }
 
 message ImportFile {
@@ -427,7 +452,7 @@ message ImportFile {
   // Unset on backup / L0 / legacy imports.
   common.IDRange id_range = 4;
   // Mutually exclusive with paths. Empty legacy paths make old consumers fail
-  // closed instead of ignoring the snapshot source contract.
+  // closed instead of importing rows without the snapshot's L0 deletes.
   SnapshotImportSource snapshot_source = 5;
 }
 

@@ -8494,8 +8494,8 @@ if this parameter <= 0, will set it as 10`,
 	p.ImportDeleteBufferSize = ParamItem{
 		Key:          "dataNode.import.readDeleteBufferSizeInMB",
 		Version:      "2.5.14",
-		Doc:          "The delete buffer size (in MB) during import.",
-		DefaultValue: "16",
+		Doc:          "The delete memory budget (in MB) used for legacy L0 import slot estimation and typed snapshot delete maps. Shared-L0 snapshot tasks use bounded delete batches and pool the per-reader delete allowances for bitmaps in both phases; admission also reserves row buffers and requires an import memory allowance greater than twice this budget.",
+		DefaultValue: "128",
 		Formatter: func(v string) string {
 			bufferSize := getAsFloat(v)
 			return fmt.Sprintf("%d", int(megaBytes2Bytes(bufferSize)))

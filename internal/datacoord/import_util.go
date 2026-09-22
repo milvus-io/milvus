@@ -337,21 +337,23 @@ func AssemblePreImportRequest(task ImportTask, job ImportJob) (*datapb.PreImport
 			return fileStats.GetImportFile()
 		})
 
-	if err := importutilv2.ValidateSnapshotImportTask(importFiles, job.GetOptions()); err != nil {
+	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
 		return nil, err
 	}
 	req := &datapb.PreImportRequest{
-		JobID:         task.GetJobID(),
-		TaskID:        task.GetTaskID(),
-		CollectionID:  task.GetCollectionID(),
-		PartitionIDs:  importTaskPartitionIDs(task, job),
-		Vchannels:     job.GetVchannels(),
-		Schema:        job.GetSchema(),
-		ImportFiles:   importFiles,
-		Options:       job.GetOptions(),
-		TaskSlot:      task.GetTaskSlot(),
-		StorageConfig: createStorageConfig(),
-		PluginContext: GetReadPluginContext(job.GetOptions()),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		ImportFiles:      importFiles,
+		Options:          job.GetOptions(),
+		TaskSlot:         task.GetTaskSlot(),
+		StorageConfig:    createStorageConfig(),
+		PluginContext:    GetReadPluginContext(job.GetOptions()),
+		SnapshotL0Source: l0Source,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
@@ -361,10 +363,10 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	importFiles := lo.Map(task.GetFileStats(), func(stat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return stat.GetImportFile()
 	})
-	if err := importutilv2.ValidateSnapshotImportTask(importFiles, job.GetOptions()); err != nil {
+	l0Source, err := importutilv2.SnapshotTaskL0Source(importFiles, job.GetSnapshotL0Sources())
+	if err != nil {
 		return nil, merr.Mark(err, errSnapshotTaskSource)
 	}
-	var err error
 	requestSegments := make([]*datapb.ImportRequestSegment, 0)
 	for _, segmentID := range task.(*importTask).GetSegmentIDs() {
 		segment := meta.GetSegment(context.TODO(), segmentID)
@@ -414,37 +416,68 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 	useLoonFFI := importUseLoonFFI(isL0Import)
 
 	req := &datapb.ImportRequest{
-		ClusterID:       Params.CommonCfg.ClusterPrefix.GetValue(),
-		JobID:           task.GetJobID(),
-		TaskID:          task.GetTaskID(),
-		CollectionID:    task.GetCollectionID(),
-		PartitionIDs:    importTaskPartitionIDs(task, job),
-		Vchannels:       job.GetVchannels(),
-		Schema:          job.GetSchema(),
-		Files:           importFiles,
-		Options:         job.GetOptions(),
-		Ts:              ts,
-		IDRange:         idRange,
-		RequestSegments: requestSegments,
-		StorageConfig:   createStorageConfig(),
-		TaskSlot:        task.GetTaskSlot(),
-		StorageVersion:  storageVersion,
-		PluginContext:   GetReadPluginContext(job.GetOptions()),
-		UseLoonFfi:      useLoonFFI,
+		ClusterID:        Params.CommonCfg.ClusterPrefix.GetValue(),
+		JobID:            task.GetJobID(),
+		TaskID:           task.GetTaskID(),
+		CollectionID:     task.GetCollectionID(),
+		PartitionIDs:     importTaskPartitionIDs(task, job),
+		Vchannels:        job.GetVchannels(),
+		Schema:           job.GetSchema(),
+		Files:            importFiles,
+		Options:          job.GetOptions(),
+		Ts:               ts,
+		IDRange:          idRange,
+		RequestSegments:  requestSegments,
+		StorageConfig:    createStorageConfig(),
+		TaskSlot:         task.GetTaskSlot(),
+		StorageVersion:   storageVersion,
+		PluginContext:    GetReadPluginContext(job.GetOptions()),
+		UseLoonFfi:       useLoonFFI,
+		SnapshotL0Source: l0Source,
 	}
 	WrapPluginContext(task.GetCollectionID(), job.GetSchema().GetProperties(), req)
 	return req, nil
 }
 
 func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
-	if len(files) == 0 {
-		return nil
+	var groups [][]*datapb.ImportFileStats
+	for _, scope := range groupSnapshotImportFiles(files, func(stat *datapb.ImportFileStats) *internalpb.ImportFile { return stat.GetImportFile() }) {
+		groups = append(groups, regroupImportFilesBySize(job, scope, segmentMaxSize)...)
 	}
-	return regroupImportFilesBySize(job, files, segmentMaxSize)
+	return groups
+}
+
+// Group by the immutable source scope before applying phase-specific limits.
+// Legacy inline descriptors and ordinary files retain their existing grouping.
+func groupSnapshotImportFiles[T any](files []T, getFile func(T) *internalpb.ImportFile) [][]T {
+	type scope struct {
+		channel     string
+		partitionID int64
+	}
+	indices := make(map[scope]int)
+	var groups [][]T
+	for _, file := range files {
+		key := scope{}
+		if source := getFile(file).GetSnapshotSource(); importutilv2.SnapshotSourceUsesSharedL0(source) {
+			key = scope{source.GetSourceChannel(), source.GetSourcePartitionId()}
+		}
+		index, ok := indices[key]
+		if !ok {
+			index = len(groups)
+			indices[key] = index
+			groups = append(groups, nil)
+		}
+		groups[index] = append(groups[index], file)
+	}
+	return groups
 }
 
 func groupPreImportFiles(files []*internalpb.ImportFile, count int) [][]*internalpb.ImportFile {
-	return lo.Chunk(files, count)
+	var groups [][]*internalpb.ImportFile
+	for _, scope := range groupSnapshotImportFiles(files, func(file *internalpb.ImportFile) *internalpb.ImportFile { return file }) {
+		groups = append(groups, lo.Chunk(scope, count)...)
+	}
+	return groups
 }
 
 func regroupImportFilesBySize(job ImportJob, files []*datapb.ImportFileStats, segmentMaxSize int) [][]*datapb.ImportFileStats {
@@ -1121,6 +1154,23 @@ func CalculateTaskSlot(task ImportTask, importMeta ImportMeta) int {
 		taskBufferSize = paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
 	}
 	memoryLimitPerSlot := paramtable.Get().DataCoordCfg.ImportMemoryLimitPerSlot.GetAsInt()
+	if files := task.GetFileStats(); !isL0Import && len(files) > 0 && files[0].GetImportFile().GetSnapshotSource() != nil {
+		// Typed tasks are homogeneous. Before selecting a worker we do not know
+		// its pool size or memory allowance, so use the file count as an upper
+		// bound on concurrent readers. The DN allocator remains authoritative
+		// and may admit fewer readers or smaller row buffers.
+		deleteBudget := paramtable.Get().DataNodeCfg.ImportDeleteBufferSize.GetAsInt()
+		taskBufferSize = len(files) * (taskBufferSize + deleteBudget)
+		if importutilv2.SnapshotSourceUsesSharedL0(files[0].GetImportFile().GetSnapshotSource()) {
+			// One delete batch is reserved per task. The per-reader delete
+			// allowances above become the shared task's bitmap pool on the DN.
+			taskBufferSize += deleteBudget
+		}
+		// Round up only for the new snapshot accounting. Keep the existing
+		// ordinary/legacy L0 slot calculation unchanged.
+		memoryBasedSlots := (taskBufferSize-1)/memoryLimitPerSlot + 1
+		return max(cpuBasedSlots, memoryBasedSlots)
+	}
 	memoryBasedSlots := taskBufferSize / memoryLimitPerSlot
 
 	// Return the larger value to ensure both CPU and memory constraints are satisfied

@@ -151,7 +151,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 		}
 		files, err := bindSnapshotImportSources(decoded.MustBody().GetFiles(), decoded.Header().GetSnapshotSources())
 		require.NoError(t, err)
-		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options))
+		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
 		require.True(t, importutilv2.IsSnapshotPreparation(files))
 		captured := &datapb.SnapshotMetadata{}
 		require.NoError(t, proto.Unmarshal(files[0].SnapshotSource.SnapshotMetadata, captured))
@@ -207,14 +207,14 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	require.True(t, api.closeCalled.Load())
 	expansion.UnPatch()
 	invalidExpansion := mockey.Mock(prepareSnapshotImportFiles).Return([]*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
-		Version: 5, ManifestPath: packed.MarshalManifestPath("root/data", 1),
+		Version: 5, ManifestPath: packed.MarshalManifestPath("root/data", 1), SourceChannel: "source", SourcePartitionId: 10,
 	}}}, snapshotImportTestOptions(), nil).Build()
 	defer invalidExpansion.UnPatch()
 	received = nil
 	_, _, err = server.broadcastImport(ctx, "target", 100, partitionIDs,
 		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
 		snapshotImportTestOptions(), &schemapb.CollectionSchema{}, 1000, []string{"target_v1"}, "")
-	require.ErrorContains(t, err, "unsupported snapshot import source version")
+	require.ErrorContains(t, err, "lost its shared L0 inventory")
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
 }
 

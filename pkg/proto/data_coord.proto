@@ -1109,6 +1109,7 @@ message PreImportRequest {
   index.StorageConfig storage_config = 10;
   int64 task_slot = 11;
   repeated common.KeyValuePair plugin_context = 12;
+  internal.SnapshotImportL0Source snapshot_l0_source = 13;
 }
 
 message IDRange {
@@ -1140,6 +1141,7 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
+  internal.SnapshotImportL0Source snapshot_l0_source = 18;
 }
 
 message QueryPreImportRequest {
@@ -1492,6 +1494,7 @@ message ImportJob {
   uint64 data_ts = 18;
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
+  repeated internal.SnapshotImportL0Source snapshot_l0_sources = 21;
 }
 
 enum ImportTaskStateV2 {

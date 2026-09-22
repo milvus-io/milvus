@@ -110,7 +110,7 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	req, err := AssemblePreImportRequest(p, job)
 	if err != nil {
 		// Source inventories are immutable. Retrying the same malformed task
-		// cannot restore its missing source descriptor.
+		// cannot restore its missing scope or deletes.
 		if updateErr := p.importMeta.UpdateJob(context.TODO(), p.GetJobID(),
 			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(err.Error())); updateErr != nil {
 			mlog.Warn(context.TODO(), "failed to mark preimport job failed after assemble error", WrapTaskLog(p, mlog.Err(updateErr))...)

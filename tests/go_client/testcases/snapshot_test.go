@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -13,18 +15,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apache/arrow/go/v17/arrow/array"
+	"github.com/apache/arrow/go/v17/arrow/memory"
+	"github.com/apache/arrow/go/v17/parquet"
+	"github.com/apache/arrow/go/v17/parquet/pqarrow"
 	miniogo "github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/client/v3/bulkwriter"
 	"github.com/milvus-io/milvus/client/v3/column"
 	"github.com/milvus-io/milvus/client/v3/entity"
 	"github.com/milvus-io/milvus/client/v3/index"
 	client "github.com/milvus-io/milvus/client/v3/milvusclient"
+	"github.com/milvus-io/milvus/internal/snapshotio"
 	pkcommon "github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/tests/go_client/base"
 	"github.com/milvus-io/milvus/tests/go_client/common"
@@ -653,22 +662,28 @@ func TestSnapshotRestoreExternalSelfContained(t *testing.T) {
 }
 
 func TestImportStorageV3SnapshotSource(t *testing.T) {
-	runStorageV3SnapshotImport(t, false, "")
+	runStorageV3SnapshotImport(t, false, false, "")
+}
+
+func TestImportStorageV3SnapshotSourceL0(t *testing.T) {
+	runStorageV3SnapshotImport(t, true, false, "")
 }
 
 func TestImportStorageV3SnapshotSourceCrossBucket(t *testing.T) {
-	t.Run("without_l0", func(t *testing.T) { runStorageV3SnapshotImport(t, true, "") })
+	t.Run("without_l0", func(t *testing.T) { runStorageV3SnapshotImport(t, false, true, "") })
+	t.Run("with_l0", func(t *testing.T) { runStorageV3SnapshotImport(t, true, true, "") })
 }
 
 func TestImportStorageV3SnapshotSourceBackupSchema(t *testing.T) {
 	// Both layouts exercise manual commit. The first case keeps source PKs
 	// despite target AutoID and fills missing optional/dynamic fields; the second
-	// projects away source-only columns in the extended delete scenarios.
-	t.Run("target_optional", func(t *testing.T) { runStorageV3SnapshotImport(t, false, "target_optional") })
+	// projects away source-only columns while folding L0 deletes.
+	t.Run("target_optional", func(t *testing.T) { runStorageV3SnapshotImport(t, false, false, "target_optional") })
+	t.Run("source_extra_l0", func(t *testing.T) { runStorageV3SnapshotImport(t, true, false, "source_extra") })
 }
 
 func TestImportStorageV3SnapshotSourcePartitionMapping(t *testing.T) {
-	runStorageV3SnapshotImport(t, false, "partition_mapping")
+	runStorageV3SnapshotImport(t, false, false, "partition_mapping")
 }
 
 // Ignoring a plaintext source's EZK needs no cipher plugin and runs in the ordinary
@@ -878,7 +893,7 @@ func snapshotImportDatabaseRequest(ctx context.Context, baseURL, apiKey, db, ope
 
 // Reuse the ordinary Import lifecycle without changing the no-L0 regression
 // scenario. Environment configuration and service ownership stay with the suite.
-func runStorageV3SnapshotImport(t *testing.T, crossBucket bool, schemaCase string) {
+func runStorageV3SnapshotImport(t *testing.T, withL0, crossBucket bool, schemaCase string) {
 	layouts := []string{"referenced", "self_contained"}
 	if crossBucket {
 		// Export is the supported way to construct a portable bundle. Do not
@@ -1009,6 +1024,28 @@ func runStorageV3SnapshotImport(t *testing.T, crossBucket bool, schemaCase strin
 			require.NoError(t, flushWithRetry(ctx, mc, sourceCollection))
 			require.NoError(t, waitForAllIndexesBuilt(ctx, mc, sourceCollection, 2*time.Minute))
 			expectedImportRows, expectedBeforeCommit := rowCount, 0
+			if withL0 {
+				// Delete an old row and another PK that will be reinserted later.
+				// Existing target rows are outside the source folding operation.
+				_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(targetCollection).
+					WithInt64Column("id", ids[:1]).WithVarcharColumn("tag", []string{"target-existing"}).
+					WithInt64Column("phase", []int64{999}).WithTextColumn("document", []string{"target-existing"}).
+					WithFloatVectorColumn("vector", 8, vectors[:1]))
+				require.NoError(t, err)
+				_, err = mc.Delete(ctx, client.NewDeleteOption(sourceCollection).
+					WithExpr(fmt.Sprintf("id in [%d, %d]", firstID, firstID+1)))
+				require.NoError(t, err)
+				tags[1], phases[1] = "reinserted", 305
+				_, err = mc.Insert(ctx, client.NewColumnBasedInsertOption(sourceCollection).
+					WithInt64Column("id", ids[1:2]).WithVarcharColumn("tag", tags[1:2]).
+					WithInt64Column("phase", phases[1:2]).WithTextColumn("document", documents[1:2]).
+					WithFloatVectorColumn("vector", 8, vectors[1:2]))
+				require.NoError(t, err)
+				require.NoError(t, flushWithRetry(ctx, mc, sourceCollection))
+				expectedTags[firstID], expectedPhases[firstID], expectedDocuments[firstID] = "target-existing", 999, "target-existing"
+				expectedTags[firstID+1], expectedPhases[firstID+1] = tags[1], phases[1]
+				expectedImportRows, expectedBeforeCommit = rowCount-1, 1
+			}
 
 			err = mc.CreateSnapshot(ctx, client.NewCreateSnapshotOption(snapshotName, sourceCollection).
 				WithDescription("StorageV3 snapshot-source Import coverage"))
@@ -1023,8 +1060,16 @@ func runStorageV3SnapshotImport(t *testing.T, crossBucket bool, schemaCase strin
 			snapshotSource := snapshotInfo.GetS3Location()
 			require.NotEmpty(t, snapshotSource)
 			var snapshotStorageCfg minioConfig
-			if layout == "self_contained" {
+			if withL0 || layout == "self_contained" {
 				snapshotStorageCfg = snapshotFixtureStorageConfig(t, getMinIOConfig(), snapshotSource)
+			}
+			if withL0 {
+				cfg := getMinIOConfig()
+				minioClient, err = newMinIOClient(cfg)
+				require.NoError(t, err)
+				minioBucket = cfg.bucket
+				skipIfMinIOUnreachable(ctx, t, minioClient, minioBucket)
+				requireSnapshotL0Delete(t, ctx, minioClient, minioBucket, snapshotStorageCfg.address, snapshotSource, "", "", firstID)
 			}
 
 			if layout == "self_contained" {
@@ -1067,7 +1112,9 @@ func runStorageV3SnapshotImport(t *testing.T, crossBucket bool, schemaCase strin
 					relocatedPrefix,
 				)
 				require.NoError(t, err)
-
+				if withL0 {
+					requireSnapshotL0Delete(t, ctx, minioClient, minioBucket, snapshotStorageCfg.address, snapshotSource, exportPrefix, relocatedPrefix, firstID)
+				}
 			}
 
 			// Import is exposed by the Go SDK through the REST-backed bulkwriter
@@ -1211,6 +1258,62 @@ func runStorageV3SnapshotImport(t *testing.T, crossBucket bool, schemaCase strin
 	}
 }
 
+// Inspect the captured inventory with the shared, Go-only snapshot parser. The
+// root-module dependency is test-only; do not copy Avro schemas into the SDK or
+// introduce a public SDK API for storage internals. Normal Delete/Flush creates
+// V1 L0 even for a V3 collection. This fixture explicitly requires that format;
+// V3 L0 manifest resolution is covered by server tests, not by interpreting its
+// pathless PB summaries as physical files here.
+func requireSnapshotL0Delete(t *testing.T, ctx context.Context, mc *miniogo.Client, bucket, storageEndpoint, metadataURI, oldPrefix, newPrefix string, deletedPK int64) {
+	t.Helper()
+	read := func(objectPath string) []byte {
+		objectPath, err := snapshotFixtureObjectKey(objectPath, bucket, storageEndpoint, oldPrefix, newPrefix)
+		require.NoError(t, err)
+		object, err := mc.GetObject(ctx, bucket, objectPath, miniogo.GetObjectOptions{})
+		require.NoError(t, err)
+		defer object.Close()
+		data, err := io.ReadAll(object)
+		require.NoError(t, err)
+		return data
+	}
+	metadata, err := snapshotio.ParseSnapshotMetadataWithVersionCheck(read(metadataURI))
+	require.NoError(t, err)
+	var segments []*datapb.SegmentDescription
+	for _, manifest := range metadata.GetManifestList() {
+		segment, err := snapshotio.ParseSegmentManifest(read(manifest), int(metadata.GetFormatVersion()))
+		require.NoError(t, err)
+		segments = append(segments, segment)
+	}
+	found := false
+	for _, delta := range segments {
+		if delta.GetSegmentLevel() != datapb.SegmentLevel_L0 {
+			continue
+		}
+		applicable := false
+		for _, segment := range segments {
+			if segment.GetSegmentLevel() != datapb.SegmentLevel_L0 && segment.GetChannelName() == delta.GetChannelName() &&
+				(delta.GetPartitionId() == pkcommon.AllPartitionsID || delta.GetPartitionId() == segment.GetPartitionId()) {
+				applicable = true
+			}
+		}
+		if !applicable {
+			continue
+		}
+		require.Zero(t, delta.GetStorageVersion(), "Delete/Flush fixture must contain V1 L0; update fixture inspection if the producer format changes")
+		require.Empty(t, delta.GetManifestPath(), "V3 L0 paths must be resolved from its exact manifest, not PB deltalog summaries")
+		for _, field := range delta.GetDeltalogs() {
+			for _, log := range field.GetBinlogs() {
+				// EntriesNum=0 is not proof of an empty object. Inspect the data.
+				require.NotEmpty(t, log.GetLogPath())
+				for _, pk := range snapshotL0DeletePKs(t, ctx, read(log.GetLogPath())) {
+					found = found || pk == deletedPK
+				}
+			}
+		}
+	}
+	require.True(t, found, "fixture has no applicable active L0 containing the expected delete; background compaction may have folded it before snapshot capture")
+}
+
 // Keep the server's storage identity separate from the client's dial address.
 // CI clients use a namespace-qualified MinIO hostname, while the server uses
 // the short service name. Export/Import enforce exact endpoint identity, and
@@ -1322,6 +1425,137 @@ func TestSnapshotFixtureObjectKey(t *testing.T) {
 			require.Equal(t, tc.want, key)
 		})
 	}
+}
+
+// V1 framing is MagicNumber followed by a descriptor and delete events. Each
+// event has a 17-byte header (timestamp, type, length, next position); a delete
+// event adds two uint64 timestamps before its Parquet payload. Follow lengths,
+// never scan for PAR1 or pass the enclosing binlog to Arrow: Parquet offsets
+// are relative to the payload. This is a plaintext V1 fixture inspector only,
+// not another Import reader. Golden fixtures come from NewDeltalogWriter.
+func snapshotL0Payloads(data []byte) ([][]byte, bool) {
+	const headerSize, deleteDataSize = 17, 16
+	if len(data) < 4 || binary.LittleEndian.Uint32(data[:4]) != 0xfffabc {
+		return nil, false
+	}
+	data = data[4:]
+	var payloads [][]byte
+	for descriptor := true; len(data) > 0; descriptor = false {
+		if len(data) < headerSize {
+			return nil, false
+		}
+		length := int(binary.LittleEndian.Uint32(data[9:13]))
+		if length < headerSize || length > len(data) {
+			return nil, false
+		}
+		if descriptor {
+			// 52-byte descriptor fixed part, 8 post-header lengths, extra length.
+			if data[8] != 0 || length < headerSize+52+8+4 {
+				return nil, false
+			}
+		} else {
+			if data[8] != 2 || length <= headerSize+deleteDataSize {
+				return nil, false
+			}
+			payloads = append(payloads, data[headerSize+deleteDataSize:length])
+		}
+		data = data[length:]
+	}
+	return payloads, len(payloads) > 0
+}
+
+// TestSnapshotL0FixtureDecoder uses golden bytes from the real StorageV1
+// NewDeltalogWriter (collection/partition/segment/log IDs 1/2/3/4, Int64 PKs
+// 30400/30401, timestamps 200/201). Both dataNode.storage.deltalog formats are
+// represented; no server or object store is needed.
+func TestSnapshotL0FixtureDecoder(t *testing.T) {
+	fixtures := map[string]string{
+		"json":    "vPr/AAAArNxJ9IEGAGcAAABrAAAAAQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA//////////8AAAAAAAAAAAAAAAAAAAAAFAAAADQQEBAQEBAQFgAAAHsib3JpZ2luYWxfc2l6ZSI6Ijc3In0AAKzcSfSBBgK7AQAA/////wEAAAAAAAAAAQAAAAAAAABQQVIxFQQVkAEVfkwVBBUAEgAAKLUv/QQAlQEAZAIgAAAAeyJwayI6MzA0MDAsInRzIjoyMDAsInBrVHlwZSI6NX0xMQMQBYfLIS6P/ARhBKfVFQAVEhUsLBUEFRAVBhUGHDYAFgAYIHsicGsiOjMwNDAxLCJ0cyI6MjAxLCJwa1R5cGUiOjV9GCB7InBrIjozMDQwMCwidHMiOjIwMCwicGtUeXBlIjo1fQAAACi1L/0EAEkAAAIAAAAEAQEDApUZdAEVBBksNQQYBnNjaGVtYRUCABUMJQIYATAlAEwcAAAAFgQZHBkcJoYDHBUMGTUQAAYZGAEwFQwWBBb2Ahb+AiakASYIHDYAFgAYIHsicGsiOjMwNDAxLCJ0cyI6MjAxLCJwa1R5cGUiOjV9GCB7InBrIjozMDQwMCwidHMiOjIwMCwicGtUeXBlIjo1fQAZLBUEFQAVAgAVABUQFQIAAAAW/gIWBCYIFv4CFAAAGQwYGXBhcnF1ZXQtZ28gdmVyc2lvbiAxNy4wLjAZHBwAAADPAAAAUEFSMQ==",
+		"parquet": "vPr/AAAArNxJ9IEGAH8AAACDAAAAAQAAAAAAAAACAAAAAAAAAAMAAAAAAAAA//////////8AAAAAAAAAAAAAAAAAAAAABQAAADQQEBAQEBAQLgAAAHsib3JpZ2luYWxfc2l6ZSI6IjM0IiwidmVyc2lvbiI6Ik1VTFRJX0ZJRUxEIn0AAKzcSfSBBgIZAgAA/////wEAAAAAAAAAAQAAAAAAAABQQVIxFQQVIBUgTBUEFQASAADAdgAAAAAAAMF2AAAAAAAAFQAVBhUGLBUEFRAVBhUGHBgIwXYAAAAAAAAYCMB2AAAAAAAAFgAWABgIwXYAAAAAAAAYCMB2AAAAAAAAAAAAAQMCFQQVIBUgTBUEFQASAADIAAAAAAAAAMkAAAAAAAAAFQAVBhUGLBUEFRAVBhUGHBgIyQAAAAAAAAAYCMgAAAAAAAAAFgAWABgIyQAAAAAAAAAYCMgAAAAAAAAAAAAAAQMCFQQZPDUEGAZzY2hlbWEVBAAVBCUAGAJwayUkTKwTQBEAAAAVBCUAGAJ0cyUkTKwTQBEAAAAWBBkcGSwmyAEcFQQZNRAABhkYAnBrFQAWBBbAARbAASZEJggcGAjBdgAAAAAAABgIwHYAAAAAAAAWABYAGAjBdgAAAAAAABgIwHYAAAAAAAAAGSwVBBUAFQIAFQAVEBUCAAAAJogDHBUEGTUQAAYZGAJ0cxUAFgQWwAEWwAEmhAImyAEcGAjJAAAAAAAAABgIyAAAAAAAAAAWABYAGAjJAAAAAAAAABgIyAAAAAAAAAAAGSwVBBUAFQIAFQAVEBUCAAAAFoADFgQmCBaAAxQAABkMGBlwYXJxdWV0LWdvIHZlcnNpb24gMTcuMC4wGSwcAAAcAAAALAEAAFBBUjE=",
+	}
+	for name, encoded := range fixtures {
+		t.Run(name, func(t *testing.T) {
+			data, err := base64.StdEncoding.DecodeString(encoded)
+			require.NoError(t, err)
+			// Arrow can return an empty table without an error for the enclosing
+			// binlog. Assert actual PKs, not just successful reader construction.
+			require.Equal(t, []int64{30400, 30401}, snapshotL0DeletePKs(t, context.Background(), data))
+			payloads, ok := snapshotL0Payloads(data)
+			require.True(t, ok)
+			require.Len(t, payloads, 1)
+			_, ok = snapshotL0Payloads(payloads[0])
+			require.False(t, ok, "bare Parquet is not a V1 fixture")
+			for end := 0; end < len(data); end++ {
+				_, ok = snapshotL0Payloads(data[:end])
+				require.False(t, ok, "truncation at byte %d", end)
+			}
+			deleteOffset := 4 + int(binary.LittleEndian.Uint32(data[13:17]))
+			// Do not silently ignore another event or trailing damage.
+			multiple := append(bytes.Clone(data), data[deleteOffset:]...)
+			require.Equal(t, []int64{30400, 30401, 30400, 30401}, snapshotL0DeletePKs(t, context.Background(), multiple))
+			for _, mutation := range []struct {
+				name   string
+				offset int
+				value  byte
+			}{
+				{"magic", 0, 0},
+				{"descriptor_type", 12, 2},
+				{"descriptor_short", 13, 17},
+				{"delete_type", deleteOffset + 8, 1},
+				{"delete_length", deleteOffset + 12, 255},
+			} {
+				t.Run(mutation.name, func(t *testing.T) {
+					invalid := bytes.Clone(data)
+					invalid[mutation.offset] = mutation.value
+					_, ok := snapshotL0Payloads(invalid)
+					require.False(t, ok)
+				})
+			}
+			_, ok = snapshotL0Payloads(append(bytes.Clone(data), 1))
+			require.False(t, ok)
+		})
+	}
+}
+
+func snapshotL0DeletePKs(t *testing.T, ctx context.Context, data []byte) []int64 {
+	t.Helper()
+	payloads, ok := snapshotL0Payloads(data)
+	require.True(t, ok, "invalid V1 L0 fixture framing")
+	var result []int64
+	for _, payload := range payloads {
+		func() {
+			table, err := pqarrow.ReadTable(ctx, bytes.NewReader(payload),
+				parquet.NewReaderProperties(memory.DefaultAllocator), pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+			require.NoError(t, err)
+			defer table.Release()
+			require.Positive(t, table.NumCols())
+			for _, chunk := range table.Column(0).Data().Chunks() {
+				require.Zero(t, chunk.NullN())
+				switch pks := chunk.(type) {
+				case *array.Int64: // dataNode.storage.deltalog=parquet (MULTI_FIELD).
+					require.EqualValues(t, 2, table.NumCols())
+					result = append(result, pks.Int64Values()...)
+				case *array.String: // Default V1 stores JSON records inside Parquet.
+					require.EqualValues(t, 1, table.NumCols())
+					for i := 0; i < pks.Len(); i++ {
+						var entry struct {
+							PK     *int64  `json:"pk"`
+							Ts     *uint64 `json:"ts"`
+							PKType int64   `json:"pkType"`
+						}
+						require.NoError(t, json.Unmarshal([]byte(pks.Value(i)), &entry))
+						require.NotNil(t, entry.PK)
+						require.NotNil(t, entry.Ts)
+						require.EqualValues(t, schemapb.DataType_Int64, entry.PKType)
+						result = append(result, *entry.PK)
+					}
+				default:
+					t.Fatalf("unexpected V1 L0 fixture PK column: %T", chunk)
+				}
+			}
+		}()
+	}
+	return result
 }
 
 // TestSnapshotRestoreWithMultiShardMultiPartition tests the complete snapshot restore workflow with data operations

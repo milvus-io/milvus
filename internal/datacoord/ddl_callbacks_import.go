@@ -310,7 +310,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err != nil {
 		return 0, false, merr.Wrap(err, "failed to capture snapshot import source")
 	}
-	if err := importutilv2.ValidateSnapshotImportPlan(files, options); err != nil {
+	if err := importutilv2.ValidateSnapshotImportPlan(files, options, nil); err != nil {
 		return 0, false, err
 	}
 	header := &message.ImportMessageHeader{}

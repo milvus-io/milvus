@@ -163,6 +163,7 @@ type ImportJob interface {
 	GetCreateTime() string
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
+	GetSnapshotL0Sources() []*internalpb.SnapshotImportL0Source
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetTR() *timerecord.TimeRecorder
