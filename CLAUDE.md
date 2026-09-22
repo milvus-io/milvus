@@ -73,6 +73,7 @@ scripts/standalone_embed.sh    # embedded standalone (no external deps)
 - Error handling: use `merr` package, not fmt.Errorf — see mandatory procedure below
 - Logging: use `github.com/milvus-io/milvus/pkg/v3/mlog` only; do not use `pkg/log`, standard `"log"`, direct `zap`, or `fmt.Println`. Every log call must pass a real `ctx` by priority: function parameter ctx > struct ctx > `context.TODO()`. Refer to [logging.md](docs/agent_guides/observability/logging.md).
 - Import order: standard → third-party → github.com/milvus-io (enforced by gci)
+- License header: every new Go source file starts with the Apache-2.0 header ("Licensed to the LF AI & Data foundation…"); copy it from an existing file such as `internal/proxy/proxy.go`. Generated files (mocks, `*.pb.go`) are exempt.
 - Config params: paramtable (`pkg/v2/util/paramtable`), config in `configs/milvus.yaml`
 
 ### Error handling (mandatory when originating, wrapping, or classifying errors)
