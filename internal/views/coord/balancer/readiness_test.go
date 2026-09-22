@@ -12,6 +12,7 @@ import (
 
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Observe entry without replacing the real readiness wait.
@@ -56,6 +57,9 @@ func TestBalancerWaitsForRecoveryWithoutLosingWork(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("controller did not wait for recovery")
 	}
+	params := paramtable.Get()
+	setBalanceParam(t, params, params.QueryViewCfg.BalancerAutoBalance.Key, "false")
+	require.False(t, c.GetBalanceConfig().AutoBalance, "configuration refresh is not blocked by recovery readiness")
 	// No config has recovered yet: planning now would incorrectly release the
 	// existing view. Work arriving during the wait must also survive.
 	b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{added}})

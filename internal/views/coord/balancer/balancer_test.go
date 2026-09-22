@@ -12,6 +12,7 @@ import (
 	balancercache "github.com/milvus-io/milvus/internal/views/coord/balancer/cache"
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 func TestBalancer_ReconcileDirtyShardAppliesPrepare(t *testing.T) {
@@ -135,7 +136,6 @@ func TestBalancer_ReconcileFullScanDoesNotRestackPreparing(t *testing.T) {
 func TestBalancer_StartStop(t *testing.T) {
 	reg := emptyRegistry(t)
 	b := NewDefaultBalancer(nil, reg, nil)
-	assert.Equal(t, 10*time.Second, b.tickerInterval)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -146,20 +146,11 @@ func TestBalancer_StartStop(t *testing.T) {
 	b.Stop()
 }
 
-func TestBalancer_UsesConfiguredTickerInterval(t *testing.T) {
-	reg := emptyRegistry(t)
-	c := balancercache.New(&BalanceConfig{TickerInterval: 5 * time.Minute})
-	b := NewDefaultBalancer(c, reg, nil)
-
-	assert.Equal(t, 5*time.Minute, b.tickerInterval)
-}
-
 func TestBalancerLoopInitialAndPeriodicFullReconcile(t *testing.T) {
 	reg := emptyRegistry(t)
 	c := newTestCache(cfgFor(1, 10, nil, nil))
-	config := policyTestConfig()
-	config.TickerInterval = 10 * time.Millisecond
-	c.UpdateBalanceConfig(config)
+	params := paramtable.Get()
+	setBalanceParam(t, params, params.QueryViewCfg.BalancerReconcileInterval.Key, "10ms")
 	first := cacheShard(1, 10)
 	c.PublishDataView(1, cacheData(1, first.VChannel, 100))
 	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})

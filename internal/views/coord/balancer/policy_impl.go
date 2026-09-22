@@ -59,6 +59,9 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 				size:    shardTotalLoad(snap, shardID),
 			})
 		case actionMayOptimize:
+			if !snap.GetBalanceConfig().AutoBalance {
+				continue
+			}
 			optional = append(optional, balanceCandidate{
 				shardID: shardID,
 				size:    shardTotalLoad(snap, shardID),

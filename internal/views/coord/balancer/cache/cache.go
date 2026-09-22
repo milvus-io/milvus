@@ -115,6 +115,7 @@ type Cache struct {
 
 func New(config *api.BalanceConfig) *Cache {
 	c := &Cache{collections: make(map[int64]*collectionSlot), nodes: make(map[int64]*nodeSlot), replicas: make(map[int64]int64), groups: make(map[string]*ResourceGroupEntry), readyCh: make(chan struct{})}
+	c.config.Store(api.DefaultBalanceConfig())
 	c.UpdateBalanceConfig(config)
 	return c
 }
@@ -182,13 +183,32 @@ func (c *Cache) changed(scope api.TriggerScope) {
 	}
 }
 func (c *Cache) GetBalanceConfig() *api.BalanceConfig { return c.config.Load() }
-func (c *Cache) UpdateBalanceConfig(config *api.BalanceConfig) {
+
+// UpdateBalanceConfig publishes a valid changed config. It returns false for
+// invalid or identical values. Interval-only changes do not enqueue a full pass;
+// the config source separately wakes the controller to reset its timer.
+func (c *Cache) UpdateBalanceConfig(config *api.BalanceConfig) bool {
 	if config == nil {
 		config = api.DefaultBalanceConfig()
 	}
 	copy := *config
-	c.config.Store(&copy)
-	c.changed(api.TriggerScope{NodeChanged: true})
+	if !copy.Valid() {
+		return false
+	}
+	for {
+		previous := c.config.Load()
+		if *previous == copy {
+			return false
+		}
+		if c.config.CompareAndSwap(previous, &copy) {
+			policy := copy
+			policy.TickerInterval = previous.TickerInterval
+			if policy != *previous {
+				c.changed(api.TriggerScope{NodeChanged: true})
+			}
+			return true
+		}
+	}
 }
 
 func (c *Cache) collection(id int64) *collectionSlot {

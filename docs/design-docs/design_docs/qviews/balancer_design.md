@@ -96,9 +96,52 @@ type TriggerScope struct {
 ```
 
 Existing explicit Trigger calls remain supported. `Trigger()` with no scope
-requests a full cache scan. The periodic interval remains unchanged (default
-10 seconds); it runs optimization and catches pending lifecycle work, without
+requests a full cache scan. The periodic interval defaults to 1 minute; it
+runs optimization and catches pending lifecycle work, without
 repulling upstream state or rebuilding row accounting.
+
+#### Dynamic configuration
+
+The controller subscribes to ParamTable when its loop starts and unregisters
+on shutdown. Registering before the initial read and serializing refreshes
+avoids missing startup changes or publishing stale callback values. Planning
+pins one immutable effective BalanceConfig for each batch; segment allocation
+does not read ParamTable directly.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `queryView.balancer.autoBalance` | `true` | Enables MayOptimize on both event-triggered and periodic reconciles; mandatory placement, recovery, replica isolation, and releases continue when false. |
+| `queryView.balancer.reconcileInterval` | `1m` | Positive duration between periodic reconciles. Lower values increase optimization/check frequency and CPU overhead; higher values reduce scans. Event-triggered work is independent. |
+| `queryView.balancer.stickinessWeight` | `1` | Higher values favor loaded/preparing resource reuse and reduce movement; lower values give load balance and fanout more influence. |
+| `queryView.balancer.nodeLoadWeight` | `1` | Higher values favor nodes with fewer projected rows, potentially increasing movement or fanout; lower values favor the other scores. |
+| `queryView.balancer.fanoutWeight` | `1` | Higher values discourage extra nodes beyond the free allowance, potentially accepting less even row loads; lower values permit wider spreading when other scores favor it. |
+| `queryView.balancer.stickyRowsScale` | `1000000` | Positive rows at which movement penalty saturates. Increasing reduces the penalty for a given segment; decreasing increases it up to saturation. |
+| `queryView.balancer.targetRowsPerShardNode` | `100000` | Positive rows used to derive free shard fanout. Increasing favors fewer nodes; decreasing increases the free allowance. Not a node capacity limit. |
+
+All settings are owned by `ComponentParam.QueryViewCfg`, defined in
+`pkg/util/paramtable/query_view_param.go`. The `queryView` namespace is included
+in shared component configuration queries. The QueryView autoBalance switch is
+independent of the legacy `queryCoord.autoBalance` switch. Earlier unreleased
+`queryCoord.queryView.*` keys, including the misspelled interval, have no aliases.
+
+The interval requires a duration unit (for example, `500ms`, `10s`, or `1m`)
+within time.Duration range. The current periodic pass visits all collections;
+the configuration name does not require that scope for future implementations.
+Weights must be finite and nonnegative, with a finite positive sum. Row scales must be
+positive int64 values. Invalid refreshes retain the complete last valid config;
+at startup the cache has valid defaults. Separately delivered key updates are
+not an atomic configuration transaction.
+
+Config publication copies the input and skips unchanged values. Policy changes
+request a full pass. Interval-only changes wake the controller and reset its
+timer without requesting extra optimization, including during retry backoff.
+An active reconcile is allowed to finish; configuration changes do not preempt
+planning or cancel previously submitted Preparing views. Recovery readiness
+still gates planning, while config updates can be published during that wait.
+
+Synchronous Reconcile callers may supply a valid cache configuration directly.
+Once Start runs, ParamTable owns the runtime configuration. Layout estimation
+budgets and retry backoff remain internal constants in this change.
 
 #### Main Loop
 

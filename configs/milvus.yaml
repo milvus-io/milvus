@@ -544,6 +544,39 @@ proxy:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on proxy can send, unit: byte
     clientMaxRecvSize: 67108864 # The maximum size of each RPC request that the clients on proxy can receive, unit: byte
 
+# QueryView subsystem configuration. All balancer settings below are dynamically refreshable.
+queryView:
+  balancer:
+    # Enable optional placement optimization. Disable to reduce background segment movement.
+    # Mandatory recovery, view updates, replica isolation, and releases continue when false.
+    # Applies to both event-triggered and periodic reconciles; does not disable reconciliation.
+    # Independent of the legacy queryCoord.autoBalance switch.
+    autoBalance: true
+    # Positive duration with a unit (e.g. 500ms, 10s, 1m). Smaller values run periodic
+    # optimization and lifecycle checks more often at higher coordinator CPU cost;
+    # larger values reduce scan overhead.
+    # Event-triggered reconciliation continues independently, even when autoBalance is false.
+    reconcileInterval: 1m
+    # The three weights are relative, finite, and nonnegative; at least one must be positive.
+    # Increasing all weights proportionally leaves their relative scoring influence unchanged.
+    # Higher stickiness favors loaded/preparing segment reuse and reduces movement/reloading;
+    # lower stickiness gives row-load balance and fanout more influence.
+    stickinessWeight: 1
+    # Higher values favor nodes with fewer projected rows, potentially increasing movement
+    # or fanout; lower values give resource reuse and fewer nodes per shard more influence.
+    nodeLoadWeight: 1
+    # Higher values discourage opening more nodes beyond the free fanout allowance, potentially
+    # accepting less even row loads; lower values allow wider spreading when other scores favor it.
+    fanoutWeight: 1
+    # Positive rows; movement penalty = min(segmentRows / stickyRowsScale, 1).
+    # Larger values reduce the penalty for moving a given segment; smaller values increase it
+    # until saturation. Only affects the stickiness score.
+    stickyRowsScale: 1000000
+    # Positive rows; free fanout = ceil(shardRows / targetRowsPerShardNode), capped by eligible
+    # nodes and segment count. Larger values favor fewer nodes per shard; smaller values allow
+    # more nodes before the fanout penalty applies. A soft scoring allowance, not a capacity limit.
+    targetRowsPerShardNode: 100000
+
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
   taskMergeCap: 1

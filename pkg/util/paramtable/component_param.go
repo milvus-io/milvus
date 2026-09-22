@@ -106,6 +106,7 @@ type ComponentParam struct {
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
 	QueryCoordCfg  queryCoordConfig
+	QueryViewCfg   queryViewConfig
 	QueryNodeCfg   queryNodeConfig
 	DataCoordCfg   dataCoordConfig
 	DataNodeCfg    dataNodeConfig
@@ -166,6 +167,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
+	p.QueryViewCfg.init(bt)
 	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
@@ -3540,7 +3542,6 @@ type queryCoordConfig struct {
 	UpdateTargetNeedSegmentDataReady ParamItem `refreshable:"true"`
 
 	AutoWarmupForNonPKIsolationCollection ParamItem `refreshable:"false"`
-	QueryViewFullReconsileInterval        ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -4265,21 +4266,6 @@ Set to 0 to disable the penalty period.`,
 		Export:       false,
 	}
 	p.AutoWarmupForNonPKIsolationCollection.Init(base.mgr)
-
-	p.QueryViewFullReconsileInterval = ParamItem{
-		Key:          "queryCoord.queryView.fullReconsileInterval",
-		Version:      "3.0.0",
-		DefaultValue: "10",
-		Doc:          "Interval in seconds for periodic QueryView full reconciliation.",
-		Export:       true,
-		Formatter: func(v string) string {
-			if getAsInt(v) < 1 {
-				return "1"
-			}
-			return v
-		},
-	}
-	p.QueryViewFullReconsileInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
