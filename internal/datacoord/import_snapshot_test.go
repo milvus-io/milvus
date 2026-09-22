@@ -62,6 +62,112 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestImportTaskConstructionDependencyErrors(t *testing.T) {
+	paramtable.Init()
+	type failureAllocator struct{ allocator.Allocator }
+	alloc := &failureAllocator{}
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, DataTs: 100}}
+	wantErr := merr.ErrServiceNotReady
+	for _, stage := range []string{"assign_segments", "sorted_ids"} {
+		t.Run(stage, func(t *testing.T) {
+			calls := 0
+			allocate := mockey.Mock((*failureAllocator).AllocN).To(func(_ *failureAllocator, _ int64) (int64, int64, error) {
+				calls++
+				if calls > 1 {
+					return 0, 0, wantErr
+				}
+				return 1, 2, nil
+			}).Build()
+			defer allocate.UnPatch()
+			var assignErr error
+			if stage == "assign_segments" {
+				assignErr = wantErr
+			}
+			assign := mockey.Mock(AssignSegments).Return([]int64{1}, assignErr).Build()
+			defer assign.UnPatch()
+			sorting := mockey.Mock(enableSortCompaction).Return(true).Build()
+			defer sorting.UnPatch()
+			tasks, err := NewImportTasks([][]*datapb.ImportFileStats{{{ImportFile: &internalpb.ImportFile{Id: 1}}}},
+				job, alloc, &meta{}, nil, 1024)
+			require.ErrorIs(t, err, wantErr)
+			require.Nil(t, tasks)
+		})
+	}
+	for _, stage := range []string{"missing_segment", "allocate_ids"} {
+		t.Run(stage, func(t *testing.T) {
+			task := &importTask{}
+			taskProto := &datapb.ImportTaskV2{JobID: 1, TaskID: 2}
+			if stage == "missing_segment" {
+				taskProto.SegmentIDs = []int64{10}
+			}
+			task.task.Store(taskProto)
+			get := mockey.Mock((*meta).GetSegment).Return((*SegmentInfo)(nil)).Build()
+			defer get.UnPatch()
+			allocate := mockey.Mock((*failureAllocator).AllocN).Return(int64(0), int64(0), wantErr).Build()
+			defer allocate.UnPatch()
+			req, err := AssembleImportRequest(task, job, &meta{}, alloc)
+			require.Nil(t, req)
+			if stage == "missing_segment" {
+				require.ErrorIs(t, err, merr.ErrSegmentNotFound)
+				require.Zero(t, allocate.Times())
+			} else {
+				require.ErrorIs(t, err, wantErr)
+			}
+		})
+	}
+}
+
+func TestImportCheckerPendingUpdateFailure(t *testing.T) {
+	paramtable.Init()
+	type pendingMeta struct{ ImportMeta }
+	type pendingAllocator struct{ allocator.Allocator }
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, State: internalpb.ImportJobState_Pending, Files: []*internalpb.ImportFile{{Id: 1, Paths: []string{"rows.json"}}},
+	}}
+	tm := &pendingMeta{}
+	checker := &importChecker{ctx: context.Background(), importMeta: tm, alloc: &pendingAllocator{}}
+	getTasks := mockey.Mock((*pendingMeta).GetTaskByJob).Return([]ImportTask(nil)).Build()
+	defer getTasks.UnPatch()
+	getJob := mockey.Mock((*pendingMeta).GetJob).Return(job).Build()
+	defer getJob.UnPatch()
+	allocation := mockey.Mock((*pendingAllocator).AllocN).Return(int64(1), int64(2), nil).Build()
+	defer allocation.UnPatch()
+	add := mockey.Mock((*pendingMeta).AddTask).Return(nil).Build()
+	defer add.UnPatch()
+	update := mockey.Mock((*pendingMeta).UpdateJob).Return(merr.ErrServiceNotReady).Build()
+	defer update.UnPatch()
+	checker.checkPendingJob(job)
+	require.Equal(t, 1, add.Times())
+	require.Equal(t, 1, update.Times())
+	require.Equal(t, internalpb.ImportJobState_Pending, job.GetState())
+}
+
+func TestImportCheckerDispatchesCommittingJob(t *testing.T) {
+	paramtable.Init()
+	old := Params.DataCoordCfg.ImportCheckIntervalHigh.SwapTempValue("0.01")
+	defer Params.DataCoordCfg.ImportCheckIntervalHigh.SwapTempValue(old)
+	type committingMeta struct{ ImportMeta }
+	job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: internalpb.ImportJobState_Committing}}
+	checker := &importChecker{ctx: context.Background(), importMeta: &committingMeta{}, closeChan: make(chan struct{})}
+	get := mockey.Mock((*committingMeta).GetJobBy).Return([]ImportJob{job}).Build()
+	defer get.UnPatch()
+	dispatch := mockey.Mock((*importChecker).checkCommittingJob).To(func(_ *importChecker, got ImportJob) {
+		require.Same(t, job, got)
+		close(checker.closeChan)
+	}).Build()
+	defer dispatch.UnPatch()
+	checker.runStateMachineLoop()
+	require.Equal(t, 1, dispatch.Times())
+}
+
+func TestValidateImportRequestInvalidSnapshotOptions(t *testing.T) {
+	s := &Server{}
+	err := s.validateImportRequest(context.Background(), nil, importutilv2.Options{{
+		Key: importutilv2.SourceType, Value: importutilv2.SourceTypeSnapshot,
+	}})
+	require.ErrorIs(t, err, merr.ErrImportFailed)
+}
+
 func TestPrepareSnapshotImportMetadataOnly(t *testing.T) {
 	paramtable.Init()
 	type sourceCM struct{ milvusstorage.ChunkManager }
@@ -1657,6 +1763,57 @@ func TestSnapshotImportMessageAdmission(t *testing.T) {
 				} else {
 					require.ErrorIs(t, err, merr.ErrImportFailed)
 				}
+			}
+		})
+	}
+}
+
+func TestCreateImportJobFromAckBackupListingError(t *testing.T) {
+	s := &Server{meta: &meta{}}
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	listing := mockey.Mock(ListBinlogImportRequestFiles).Return([]*internalpb.ImportFile(nil), merr.ErrIoKeyNotFound).Build()
+	defer listing.UnPatch()
+	resp, err := s.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
+		Files:   []*internalpb.ImportFile{{Paths: []string{"root/insert_log", "root/delta_log"}}},
+		Options: importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"}},
+	}, nil)
+	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrIoKeyNotFound)
+	require.Empty(t, resp.GetJobID(), "failed source listing must not allocate a job")
+}
+
+func TestSnapshotImportAckCollectionUnavailable(t *testing.T) {
+	type missingHandler struct{ Handler }
+	type ackAllocator struct{ allocator.Allocator }
+	allocation := mockey.Mock((*ackAllocator).AllocN).Return(int64(100), int64(110), nil).Build()
+	defer allocation.UnPatch()
+	server := &Server{handler: &missingHandler{}, allocator: &ackAllocator{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
+		SnapshotSources: []*internalpb.SnapshotImportSource{{Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1)}},
+	}).WithBody(&msgpb.ImportMsg{
+		CollectionID: 1, Files: []*msgpb.ImportFile{{}}, Options: funcutil.KeyValuePair2Map(snapshotImportTestOptions()),
+	}).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"dropped", merr.ErrCollectionNotFound},
+		{"missing_metadata", nil},
+		{"temporarily_unavailable", merr.ErrServiceNotReady},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			get := mockey.Mock((*missingHandler).GetCollection).Return((*collectionInfo)(nil), tc.err).Build()
+			defer get.UnPatch()
+			callback := &DDLCallbacks{Server: server}
+			err := callback.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+				Message: message.MustAsBroadcastImportMessageV1(wal), Results: map[string]*message.AppendResult{
+					"target_v1": {TimeTick: 100}, funcutil.GetControlChannel("target"): {TimeTick: 100},
+				},
+			})
+			if tc.err == merr.ErrServiceNotReady {
+				require.ErrorIs(t, err, tc.err, "temporary metadata errors must retry the ACK")
+			} else {
+				require.NoError(t, err, "a dropped collection must not retry the ACK forever")
 			}
 		})
 	}

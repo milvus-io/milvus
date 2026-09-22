@@ -65,8 +65,8 @@ type reader struct {
 	dr      storage.DeserializeReader[*storage.Value]
 
 	// Coordinator-expanded jobs with applicable L0, nonzero source commit
-	// timestamps, or external storage carry this context. Segment-local deletes
-	// need the same commit-time override as standalone L0 deletes.
+	// timestamps, external storage, or partition mapping carry this context.
+	// Segment-local deletes need the same commit-time override as standalone L0.
 	snapshotSource *internalpb.SnapshotImportSource
 	readErr        error
 	deleteBudget   int64
@@ -105,9 +105,10 @@ func NewReader(ctx context.Context,
 // metadata. Keeping this constructor distinct from legacy path-based backup
 // import prevents an object key from being interpreted through content-shaped
 // path heuristics and prevents fallback to ManifestLatest.
-// source is nil only when neither L0, commit-time overrides nor external storage
-// require context. Any descriptor activates bounded reads and preserves source
-// commit timestamps. L0 deletes are supplied only through task-prepared bitmaps.
+// source is nil only for snapshots without L0, commit-time overrides, external
+// storage or partition mapping. Any descriptor activates bounded reads and
+// preserves source commit timestamps. L0 deletes are supplied only through
+// task-prepared bitmaps.
 func NewStorageV3ManifestReader(ctx context.Context,
 	cm storage.ChunkManager,
 	schema *schemapb.CollectionSchema,
@@ -467,7 +468,13 @@ func (r *reader) collectStorageV3Files(manifestPath string) error {
 		}
 		files[snapshotstorage.NormalizeSnapshotObjectPath(fragment.FilePath)] = struct{}{}
 	}
-	if !typeutil.HasTextField(r.schema) {
+	textFields := typeutil.NewSet[int64]()
+	for _, field := range r.schema.GetFields() {
+		if field.GetDataType() == schemapb.DataType_Text {
+			textFields.Insert(field.GetFieldID())
+		}
+	}
+	if textFields.Len() == 0 {
 		r.storageV3Files = lo.Keys(files)
 		return nil
 	}
@@ -477,6 +484,12 @@ func (r *reader) collectStorageV3Files(manifestPath string) error {
 		return merr.Wrap(err, "failed to read StorageV3 LOB files from manifest")
 	}
 	for _, lobFile := range lobFiles {
+		// r.schema has already been projected by physical FieldID. Ignore LOBs
+		// of omitted fields before validation and size accounting: they are not
+		// read, even when another TEXT field still requires LOB resolution.
+		if !textFields.Contain(lobFile.FieldID) {
+			continue
+		}
 		if r.validatePath != nil {
 			if err := r.validatePath(lobFile.Path); err != nil {
 				return err

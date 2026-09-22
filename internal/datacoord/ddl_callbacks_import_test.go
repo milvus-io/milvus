@@ -218,6 +218,72 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 	require.Nil(t, received, "invalid source plans must fail before broadcast")
 }
 
+func TestBroadcastImportBoundaryFailures(t *testing.T) {
+	type boundaryBroker struct{ broker.Broker }
+	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "pk_ranges", "auto_id"} {
+		t.Run(stage, func(t *testing.T) {
+			cause := merr.ErrServiceNotReady
+			errFor := func(name string) error {
+				if stage == name {
+					return cause
+				}
+				return nil
+			}
+			opts := snapshotImportTestOptions()
+			files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1),
+			}}}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			}}
+			if stage == "pk_ranges" || stage == "auto_id" {
+				opts = nil
+				files = []*internalpb.ImportFile{{Paths: []string{"rows.json"}}}
+				schema.Fields[0].AutoID = true
+			}
+			validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+			defer validation.UnPatch()
+			expansion := mockey.Mock(prepareSnapshotImportFiles).Return(files, opts, errFor("prepare")).Build()
+			defer expansion.UnPatch()
+			replication := mockey.Mock((*Server).validateImportReplication).Return(errFor("replication")).Build()
+			defer replication.UnPatch()
+			partitions := mockey.Mock((*Server).validateSnapshotPartitionTargets).Return(errFor("partition_targets")).Build()
+			defer partitions.UnPatch()
+			size := mockey.Mock(validateSnapshotImportMessageSize).Return(errFor("message_size")).Build()
+			defer size.UnPatch()
+			pkRanges := mockey.Mock(assignPKRangesToFiles).Return(errFor("pk_ranges")).Build()
+			defer pkRanges.UnPatch()
+			api := newMockBroadcastAPIImpl()
+			start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+			defer start.UnPatch()
+			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+			defer describe.UnPatch()
+			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).Return(&types.BroadcastAppendResult{}, nil).Build()
+			defer transport.UnPatch()
+			if stage == "public_options" {
+				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
+			}
+			type boundaryAllocator struct{ allocator.Allocator }
+			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
+			_, _, err := s.broadcastImport(context.Background(), "target", 100, []int64{10}, files,
+				opts, schema, 1, []string{"v1"}, "")
+			if stage == "auto_id" {
+				require.NoError(t, err)
+				require.Equal(t, 1, pkRanges.Times())
+				require.Equal(t, 1, transport.Times())
+			} else {
+				if stage == "public_options" {
+					require.ErrorIs(t, err, merr.ErrImportFailed)
+				} else {
+					require.ErrorIs(t, err, cause)
+				}
+				require.Zero(t, transport.Times(), "rejected requests must not reach the WAL")
+			}
+		})
+	}
+}
+
 func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
 	patchSnapshotImportInstance(t)
 	ctx := context.Background()

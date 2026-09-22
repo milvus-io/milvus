@@ -76,7 +76,8 @@ func TestSnapshotBitmapTextAndLocalDeletes(t *testing.T) {
 		[]storagecommon.ColumnGroup{
 			{GroupID: 0, Columns: []int{0, 1, 2}, Fields: []int64{0, 1, 100}},
 			{GroupID: 1, Columns: []int{3}, Fields: []int64{101}},
-		}, cfg, []packed.TextColumnConfig{{FieldID: 101,
+		}, cfg, []packed.TextColumnConfig{{
+			FieldID:         101,
 			LobBasePath:     path.Join(storage.SegmentPartitionBasePath(root, 1, 2), "lobs", "101"),
 			InlineThreshold: 1, MaxLobFileBytes: 1 << 20, FlushThresholdBytes: 1,
 		}}, "parquet", []string{"parquet", "parquet"})
@@ -589,9 +590,9 @@ func TestSnapshotL0DeferredManifest(t *testing.T) {
 
 func TestSnapshotReaderDeferredPhysicalValidation(t *testing.T) {
 	paramtable.Init()
-	patchStorageV3TestFieldIDs(t, 100, 101)
+	patchStorageV3TestFieldIDs(t, 100, 101, 102)
 	type sourceCM struct{ storage.ChunkManager }
-	for _, mode := range []string{"manifest", "fragment", "delete", "lob_path", "lob_missing", "lob_error", "valid", "shared", "unprojected_lob"} {
+	for _, mode := range []string{"manifest", "fragment", "delete", "lob_path", "lob_missing", "lob_error", "valid", "shared", "unprojected_lob", "partially_projected_lob", "shared_partially_projected_lob"} {
 		t.Run(mode, func(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, IsPrimaryKey: true, DataType: schemapb.DataType_Int64}, {FieldID: 101, DataType: schemapb.DataType_Text},
@@ -601,7 +602,18 @@ func TestSnapshotReaderDeferredPhysicalValidation(t *testing.T) {
 			}
 			fragments := mockey.Mock(packed.ReadFragmentsFromManifest).Return([]packed.Fragment{{FilePath: "root/data"}}, nil).Build()
 			defer fragments.UnPatch()
-			lob := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{{Path: "s3://source/root/lob", FileSizeBytes: 123}}, nil).Build()
+			lobFiles := []packed.LobFileInfo{{FieldID: 101, Path: "s3://source/root/lob", FileSizeBytes: 123}}
+			partialProjection := strings.HasSuffix(mode, "partially_projected_lob")
+			if partialProjection {
+				// Source TEXT 102 is absent from the target. None of its LOB
+				// metadata or objects may be validated or counted for Import.
+				lobFiles = append(lobFiles,
+					packed.LobFileInfo{FieldID: 102, Path: "outside/dropped-lob", FileSizeBytes: -1},
+					packed.LobFileInfo{FieldID: 102, Path: "root/missing-lob", FileSizeBytes: 456},
+					packed.LobFileInfo{FieldID: 102},
+				)
+			}
+			lob := mockey.Mock(packed.GetManifestLobFiles).Return(lobFiles, nil).Build()
 			defer lob.UnPatch()
 			delta := mockey.Mock(packed.GetDeltaLogPathsFromManifest).Return([]string{"root/delete"}, nil).Build()
 			defer delta.UnPatch()
@@ -618,6 +630,9 @@ func TestSnapshotReaderDeferredPhysicalValidation(t *testing.T) {
 			deletes := mockey.Mock(storage.NewDeltalogReader).Return(&storageV3DeltaRecordReader{read: true}, nil).Build()
 			defer deletes.UnPatch()
 			validate := func(path string) error {
+				if path == "outside/dropped-lob" {
+					return merr.ErrParameterInvalid
+				}
 				if mode == "manifest" && path == "root/segment" || mode == "fragment" && path == "root/data" || mode == "delete" && path == "root/delete" || mode == "lob_path" && path == "s3://source/root/lob" {
 					return merr.ErrParameterInvalid
 				}
@@ -626,7 +641,7 @@ func TestSnapshotReaderDeferredPhysicalValidation(t *testing.T) {
 			manifest := packed.MarshalManifestPath("root/segment", 1)
 			var r *reader
 			var err error
-			if mode == "shared" {
+			if mode == "shared" || mode == "shared_partially_projected_lob" {
 				source := &internalpb.SnapshotImportSource{Version: 1, ManifestPath: manifest}
 				masks := &SnapshotL0Deletes{masks: map[snapshotMaskKey]*rowDeleteMask{maskKey(source): {rows: 0}}}
 				r, err = NewStorageV3ManifestReaderWithSharedL0(context.Background(), &sourceCM{}, schema, nil, manifest, 0, math.MaxUint64, 1024, SourceEncryption{},
@@ -634,8 +649,13 @@ func TestSnapshotReaderDeferredPhysicalValidation(t *testing.T) {
 			} else {
 				r, err = NewStorageV3ManifestReader(context.Background(), &sourceCM{}, schema, nil, manifest, 0, math.MaxUint64, 1024, SourceEncryption{}, nil, 0, validate)
 			}
-			if mode == "valid" || mode == "shared" || mode == "unprojected_lob" {
+			if mode == "valid" || mode == "shared" || mode == "unprojected_lob" || partialProjection {
 				require.NoError(t, err)
+				if partialProjection {
+					require.EqualValues(t, 1, exist.Times(), "only the retained TEXT field needs a LOB existence check")
+					require.EqualValues(t, 123, r.storageV3LobSize)
+					require.Equal(t, []string{"root/data"}, r.storageV3Files, "dropped LOBs must not reach Size lookups")
+				}
 				r.Close()
 				if mode == "unprojected_lob" {
 					require.Zero(t, lob.Times())
@@ -2240,15 +2260,15 @@ func TestStorageV3Reader_CollectsManifestReferencedFiles(t *testing.T) {
 	defer fragmentsPatch.UnPatch()
 
 	lobPatch := mockey.Mock(packed.GetManifestLobFiles).Return([]packed.LobFileInfo{
-		{Path: lobWithSizePath, FileSizeBytes: 64},
-		{Path: lobWithoutSizePath},
+		{FieldID: 101, Path: lobWithSizePath, FileSizeBytes: 64},
+		{FieldID: 101, Path: lobWithoutSizePath},
 	}, nil).Build()
 	defer lobPatch.UnPatch()
 
 	r := &reader{
 		ctx:            ctx,
 		cm:             cm,
-		schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{DataType: schemapb.DataType_Text}}},
+		schema:         &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Text}}},
 		storageVersion: storage.StorageV3,
 		fileSize:       atomic.NewInt64(0),
 	}
@@ -2293,13 +2313,13 @@ func TestStorageV3Reader_RejectsInvalidManifestSizeMetadata(t *testing.T) {
 		},
 		{
 			name:          "LOB file without path",
-			lobFiles:      []packed.LobFileInfo{{FileSizeBytes: 1}},
+			lobFiles:      []packed.LobFileInfo{{FieldID: 101, FileSizeBytes: 1}},
 			wantError:     "LOB file without a path",
 			dataIntegrity: true,
 		},
 		{
 			name:          "LOB file with negative size",
-			lobFiles:      []packed.LobFileInfo{{Path: "lobs/1", FileSizeBytes: -1}},
+			lobFiles:      []packed.LobFileInfo{{FieldID: 101, Path: "lobs/101", FileSizeBytes: -1}},
 			wantError:     "with negative size",
 			dataIntegrity: true,
 		},
@@ -2314,7 +2334,7 @@ func TestStorageV3Reader_RejectsInvalidManifestSizeMetadata(t *testing.T) {
 				Return(test.lobFiles, test.lobErr).Build()
 			defer lobPatch.UnPatch()
 
-			r := &reader{ctx: context.Background(), schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{DataType: schemapb.DataType_Text}}}}
+			r := &reader{ctx: context.Background(), schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, DataType: schemapb.DataType_Text}}}}
 			err := r.collectStorageV3Files(manifestPath)
 			assert.ErrorContains(t, err, test.wantError)
 			if test.dataIntegrity {
@@ -2684,6 +2704,96 @@ func TestStorageV3Reader_DeleteFilterRequiresPrimaryKey(t *testing.T) {
 	f, err := FilterWithDelete(&reader{schema: &schemapb.CollectionSchema{}})
 	require.Error(t, err)
 	require.Nil(t, f)
+}
+
+func TestBinlogReader_InitDependencyErrors(t *testing.T) {
+	paramtable.Init()
+	type chunkManager struct{ storage.ChunkManager }
+	for _, name := range []string{"list_insert", "ez_id", "plugin_context", "open_reader", "walk_delta", "read_delta", "delete_filter", "no_delta"} {
+		t.Run(name, func(t *testing.T) {
+			cause := errors.New("injected dependency failure")
+			r := &reader{
+				ctx: context.Background(), cm: &chunkManager{}, retryAttempts: 1,
+				storageVersion: storage.StorageV1,
+				schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+				}},
+			}
+			defer r.Close()
+			var listErr error
+			if name == "list_insert" {
+				listErr = cause
+			}
+			listPatch := mockey.Mock(listInsertLogs).Return(map[int64][]string{0: {"row_id"}, 1: {"timestamp"}, 100: {"pk"}}, listErr).Build()
+			defer listPatch.UnPatch()
+
+			if name == "ez_id" || name == "plugin_context" || name == "no_delta" {
+				r.importEz = "source-key"
+				var ezErr, pluginErr error
+				if name == "ez_id" {
+					ezErr = cause
+				}
+				if name == "plugin_context" {
+					pluginErr = cause
+				}
+				ezPatch := mockey.Mock(hookutil.GetEzIDByImportEzk).Return(int64(10), ezErr).Build()
+				defer ezPatch.UnPatch()
+				pluginPatch := mockey.Mock(hookutil.GetCPluginContextByEzID).Return(&indexcgopb.StoragePluginContext{}, pluginErr).Build()
+				defer pluginPatch.UnPatch()
+			}
+			if name == "open_reader" {
+				openPatch := mockey.Mock(storage.NewBinlogRecordReader).Return(nil, cause).Build()
+				defer openPatch.UnPatch()
+			}
+			if name == "walk_delta" || name == "read_delta" || name == "delete_filter" {
+				walkPatch := mockey.Mock((*chunkManager).WalkWithPrefix).To(
+					func(_ *chunkManager, _ context.Context, _ string, _ bool, walk storage.ChunkObjectWalkFunc) error {
+						if name == "walk_delta" {
+							return cause
+						}
+						walk(&storage.ChunkObjectInfo{FilePath: "delta/1"})
+						return nil
+					}).Build()
+				defer walkPatch.UnPatch()
+			}
+			if name == "read_delta" {
+				deletePatch := mockey.Mock(storage.NewDeltalogReader).Return(nil, cause).Build()
+				defer deletePatch.UnPatch()
+			}
+			if name == "delete_filter" {
+				readPatch := mockey.Mock((*reader).readDelete).Return(map[any]typeutil.Timestamp{}, nil).Build()
+				defer readPatch.UnPatch()
+				filterPatch := mockey.Mock(FilterWithDelete).Return(nil, cause).Build()
+				defer filterPatch.UnPatch()
+			}
+			paths := []string{"insert", "delta"}
+			if name == "no_delta" {
+				paths = paths[:1]
+			}
+			err := r.init(paths, 0, math.MaxUint64)
+			if name == "no_delta" {
+				require.NoError(t, err)
+				require.NotNil(t, r.dr)
+			} else if name == "walk_delta" {
+				// The shared walk helper classifies raw backend failures as IO.
+				require.ErrorIs(t, err, merr.ErrIoFailed)
+				require.ErrorContains(t, err, cause.Error())
+			} else {
+				require.ErrorIs(t, err, cause)
+			}
+		})
+	}
+}
+
+func TestBinlogReader_SizeError(t *testing.T) {
+	cause := errors.New("object size unavailable")
+	patch := mockey.Mock(storage.GetFilesSize).Return(int64(0), cause).Build()
+	defer patch.UnPatch()
+	r := &reader{ctx: context.Background(), fileSize: atomic.NewInt64(0)}
+	size, err := r.Size()
+	require.ErrorIs(t, err, cause)
+	require.Zero(t, size)
+	require.Zero(t, r.fileSize.Load(), "failed lookups must not populate the size cache")
 }
 
 func TestDeltaLogListing_RetryOnTransientError(t *testing.T) {
