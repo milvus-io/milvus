@@ -1257,7 +1257,7 @@ func (s *mixCoordImpl) broadcastAlterWALMessage(ctx context.Context, targetWALNa
 	logger.Info("broadcastAlterWALMessage preparing",
 		zap.Int("pChannelCount", len(broadcastPChannels)),
 		zap.Strings("pChannels", broadcastPChannels),
-		zap.Any("config", config))
+		zap.Int("configCount", len(config)))
 
 	// Create AlterWAL broadcast message
 	broadcastMsg, err := message.NewAlterWALMessageBuilderV2().
