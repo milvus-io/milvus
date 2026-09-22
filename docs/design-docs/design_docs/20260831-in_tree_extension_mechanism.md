@@ -37,7 +37,8 @@ package extension
 
 func SetHook(h hook.Hook)                     // hookutil prefers it over proxy.soPath
 func InstalledHook() hook.Hook
-func FormInstalled() bool                     // InstalledHook() != nil; read by the coordinators too
+func SetForm()                                // declares a form installed, in every role
+func FormInstalled() bool                     // reads SetForm's mark; independent of SetHook
 
 type QueryHook interface { ... }              // the queryNode.soPath plug-in's method set
 func SetQueryHook(h QueryHook)                // the QueryNode prefers it over queryNode.soPath
