@@ -79,6 +79,10 @@ SetExternalSparseConversionMemoryLimit(int64_t bytes);
 int64_t
 GetExternalSparseConversionMemoryLimit();
 
+// Materialize a bounded NULL/default array in the native field representation.
+std::shared_ptr<arrow::Array>
+CreateDefaultArrowArray(const FieldMeta& field_meta, int64_t num_rows);
+
 void
 ReadMediumType(BinlogReaderPtr reader);
 

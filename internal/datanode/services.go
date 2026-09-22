@@ -1107,11 +1107,12 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 			return wrapQueryTaskResult(resp, resProperties)
 		}
 		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			Status:          merr.Success(),
-			State:           info.State,
-			FailReason:      info.FailReason,
-			KeptSegments:    info.KeptSegments,
-			UpdatedSegments: info.UpdatedSegments,
+			Status:               merr.Success(),
+			State:                info.State,
+			FailReason:           info.FailReason,
+			KeptSegments:         info.KeptSegments,
+			UpdatedSegments:      info.UpdatedSegments,
+			AllFragmentsUnmapped: info.AllFragmentsUnmapped,
 		}
 		resProperties := taskcommon.NewProperties(nil)
 		resProperties.AppendTaskState(info.State)
@@ -1266,10 +1267,11 @@ func (node *DataNode) createRefreshExternalCollectionTask(ctx context.Context, r
 			mlog.Int("updatedSegments", len(task.GetUpdatedSegments())))
 
 		resp := &datapb.RefreshExternalCollectionTaskResponse{
-			Status:          merr.Success(),
-			State:           indexpb.JobState_JobStateFinished,
-			KeptSegments:    task.GetKeptSegmentIDs(),
-			UpdatedSegments: task.GetUpdatedSegments(),
+			Status:               merr.Success(),
+			State:                indexpb.JobState_JobStateFinished,
+			KeptSegments:         task.GetKeptSegmentIDs(),
+			UpdatedSegments:      task.GetUpdatedSegments(),
+			AllFragmentsUnmapped: task.AllFragmentsUnmapped(),
 		}
 
 		return resp, nil
