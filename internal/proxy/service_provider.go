@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -15,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -307,6 +310,10 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		}
 	}
 
+	if err := node.checkCollectionVisibility(ctx, c); err != nil {
+		return nil, err
+	}
+
 	// The base logger was built from the raw request, whose name is empty for
 	// id-only requests; surface the resolved name so downstream log lines stay
 	// traceable. The request itself is left untouched -- the access log and
@@ -349,6 +356,61 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		mlog.Int("schemaVersion", int(resp.GetSchema().GetVersion())),
 	)
 	return resp, nil
+}
+
+// checkCollectionVisibility keeps authorization out of the shared metadata
+// cache. DescribeCollection is granted to public, but the coordinator also
+// enforces object visibility. Check every response against that contract,
+// including hot cache hits and IDs resolved into another database.
+func (node *CachedProxyServiceProvider) checkCollectionVisibility(ctx context.Context, collection *collectionInfo) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	if err := checkDescribeCollectionUser(ctx); err != nil {
+		return err
+	}
+	if collection.DBName == "" {
+		// Older coordinators may not return the database for an ID-only lookup.
+		// The caller's database is not evidence of the resolved object's owner.
+		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
+	}
+
+	// Replace an existing outgoing identity rather than appending to it: the
+	// first authorization value is what RootCoord consumes. Only the incoming
+	// identity already authenticated at the public API may select the user.
+	visible, err := node.mixCoord.DescribeCollection(describeCollectionRPCContext(ctx), &milvuspb.DescribeCollectionRequest{
+		Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
+		DbName:         collection.DBName,
+		CollectionName: collection.Schema.GetName(),
+		CollectionID:   collection.CollID,
+	})
+	if err := merr.CheckRPCCall(visible, err); err != nil {
+		return err
+	}
+	if visible.GetCollectionID() == collection.CollID {
+		return nil
+	}
+	// A rename or drop/recreate can race the cached lookup. Deny the stale
+	// response without blaming the caller for inconsistent metadata.
+	return merr.WrapErrServiceUnavailable("collection changed during visibility check")
+}
+
+func describeCollectionRPCContext(ctx context.Context) context.Context {
+	md, _ := metadata.FromOutgoingContext(ctx)
+	md = md.Copy()
+	md.Delete(util.HeaderAuthorize)
+	return AppendUserInfoForRPC(metadata.NewOutgoingContext(ctx, md))
+}
+
+func checkDescribeCollectionUser(ctx context.Context) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	user, err := GetCurUserFromContext(ctx)
+	if err != nil || user == "" {
+		return merr.WrapErrPrivilegeNotPermitted("describe collection requires an authenticated user")
+	}
+	return nil
 }
 
 type RemoteProxyServiceProvider struct {
