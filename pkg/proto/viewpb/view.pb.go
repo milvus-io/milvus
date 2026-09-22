@@ -733,6 +733,7 @@ type SyncRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Request:
+	//
 	//	*SyncRequest_Views
 	//	*SyncRequest_Close
 	Request isSyncRequest_Request `protobuf_oneof:"request"`
@@ -900,6 +901,7 @@ type SyncResponse struct {
 	unknownFields protoimpl.UnknownFields
 
 	// Types that are assignable to Response:
+	//
 	//	*SyncResponse_Views
 	//	*SyncResponse_Close
 	Response isSyncResponse_Response `protobuf_oneof:"response"`
