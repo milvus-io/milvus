@@ -6980,7 +6980,6 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Export: true,
 	}
 	p.SegmentIndexManifestLoadConcurrency.Init(base.mgr)
-
 	p.HybridIndexLowCardinalityIndexType = ParamItem{
 		Key:          "dataCoord.index.hybridIndex.lowCardinalityIndexType",
 		Version:      "2.6.10",
