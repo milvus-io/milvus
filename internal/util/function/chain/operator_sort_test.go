@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 type SortOpTestSuite struct {
@@ -476,4 +477,14 @@ func (s *SortOpTestSuite) TestSortIgnoresNonComparableTieBreakAndStringHelpers()
 
 	emptyOp := &SortOp{}
 	s.Empty(emptyOp.Column())
+
+	// A user can select a Bool column (including a projected JSON path), but
+	// sorting it must fail as an input error, including after a wire round trip.
+	_, err = NewFuncChainWithAllocator(s.pool).
+		SetStage(types.StageL1Rerank).
+		Sort("bool_tie", false, types.IDFieldName).
+		Execute(df)
+	s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+	s.Equal(merr.InputError, merr.GetErrorType(merr.Error(merr.Status(err))))
+	s.False(merr.Status(err).GetRetriable())
 }

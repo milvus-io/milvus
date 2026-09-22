@@ -294,7 +294,7 @@ func (s *SearchPipelineSuite) TestRerankOp() {
 		offset:       offset,
 		roundDecimal: -1,
 		collSchema:   schema,
-		rerankMeta:   newRerankMeta(schema, funcScoreSchema),
+		rerankMeta:   mustNewRerankMeta(s.T(), schema, funcScoreSchema),
 	}
 
 	_, err = op.run(context.Background(), s.span, reduced[0], []string{"IP"})
@@ -423,7 +423,7 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 	reduced, err := reduceOp.run(context.Background(), s.span, []*internalpb.SearchResults{data})
 	s.Require().NoError(err)
 
-	repr, err := chain.ProtoChainToRepr(l2FunctionChain(
+	chainPB := l2FunctionChain(
 		mapOp(types.ScoreFieldName, "num_combine", columnArg(types.ScoreFieldName), columnArg("ts")),
 		&schemapb.FunctionChainOp{
 			Op: types.OpTypeLimit,
@@ -431,7 +431,8 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 				"limit": chainIntParam(limit),
 			},
 		},
-	))
+	)
+	meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, mustNewSchemaInfo(schema))
 	s.Require().NoError(err)
 
 	op := rerankOperator{
@@ -439,10 +440,7 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 		topK:         topk,
 		roundDecimal: -1,
 		collSchema:   schema,
-		rerankMeta: &functionChainRerankMeta{
-			repr:            repr,
-			inputFieldNames: []string{"ts"},
-		},
+		rerankMeta:   meta,
 	}
 
 	outputs, err := op.run(context.Background(), s.span, reduced[0], []string{"IP"})
@@ -454,6 +452,239 @@ func (s *SearchPipelineSuite) TestRerankOpWithFunctionChainMeta() {
 	s.Equal(limit, result.GetTopK())
 	s.Len(result.GetScores(), int(nq*limit))
 	s.Len(result.GetIds().GetIntId().GetData(), int(nq*limit))
+	s.Empty(result.GetFieldsData())
+}
+
+func (s *SearchPipelineSuite) TestRerankOpWithJSONPathInput() {
+	schema := &schemapb.CollectionSchema{
+		Name:               "test",
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "metadata", DataType: schemapb.DataType_JSON},
+			{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+	mapJSONPath := mapOp(
+		types.ScoreFieldName,
+		"num_combine",
+		columnArg(types.ScoreFieldName),
+		columnArg(`metadata["value"]`),
+		columnArg(`metadata["bonus"]`),
+		columnArg(`$meta["ctr"]`),
+	)
+	mapJSONPath.Params = map[string]*schemapb.FunctionParamValue{
+		types.InputDataTypesParam: chainDataTypesParam(
+			schemapb.DataType_None,
+			schemapb.DataType_Int64,
+			schemapb.DataType_Double,
+			schemapb.DataType_Int64,
+		),
+	}
+	chainPB := l2FunctionChain(
+		mapJSONPath,
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeLimit,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"limit": chainIntParam(2),
+			},
+		},
+	)
+	meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, mustNewSchemaInfo(schema))
+	s.Require().NoError(err)
+
+	reducedResults := []*milvuspb.SearchResults{{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			Scores:     []float32{0.1, 0.2, 0.3},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "metadata",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{
+						[]byte(`{"value":1,"bonus":0.5}`),
+						[]byte(`{"value":2,"bonus":1.5}`),
+						[]byte(`{"value":3,"bonus":2.5}`),
+					}}},
+				}},
+			}, {
+				Type:      schemapb.DataType_JSON,
+				FieldName: "$meta",
+				FieldId:   102,
+				IsDynamic: true,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{
+						[]byte(`{"ctr":10}`),
+						[]byte(`{"ctr":20}`),
+						[]byte(`{"ctr":30}`),
+					}}},
+				}},
+			}},
+		},
+	}}
+	op := rerankOperator{
+		nq:           1,
+		topK:         3,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta:   meta,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, reducedResults, []string{"IP"})
+	s.Require().NoError(err)
+	s.Require().Len(outputs, 1)
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{2}, result.GetTopks())
+	// num_combine defaults to multiply. The limit preserves the first two
+	// rows, with scores 0.1*1*0.5*10 and 0.2*2*1.5*20 respectively.
+	s.Equal([]int64{1, 2}, result.GetIds().GetIntId().GetData())
+	s.InDeltaSlice([]float32{0.5, 12.0}, result.GetScores(), 1e-6)
+	s.Empty(result.GetFieldsData())
+}
+
+func (s *SearchPipelineSuite) TestRerankOpSortsByJSONArrayPath() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "metadata", DataType: schemapb.DataType_JSON},
+		},
+	}
+	sortJSONPath := &schemapb.FunctionChainOp{
+		Op:     types.OpTypeSort,
+		Inputs: []string{`metadata["rankings"][0]`},
+		Params: map[string]*schemapb.FunctionParamValue{
+			"desc":                    {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+			types.InputDataTypesParam: chainDataTypesParam(schemapb.DataType_Int64),
+		},
+	}
+	chainPB := l2FunctionChain(
+		sortJSONPath,
+		&schemapb.FunctionChainOp{
+			Op: types.OpTypeLimit,
+			Params: map[string]*schemapb.FunctionParamValue{
+				"limit": chainIntParam(2),
+			},
+		},
+	)
+	meta, err := newFunctionChainRerankMeta([]*schemapb.FunctionChain{chainPB}, mustNewSchemaInfo(schema))
+	s.Require().NoError(err)
+
+	reducedResults := []*milvuspb.SearchResults{{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       3,
+			Topks:      []int64{3},
+			Ids:        testSearchResultIDs(1, 2, 3),
+			Scores:     []float32{0.1, 0.2, 0.3},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "metadata",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{
+						[]byte(`{"rankings":[2]}`),
+						[]byte(`{"rankings":[1]}`),
+						[]byte(`{"rankings":[3]}`),
+					}}},
+				}},
+			}},
+		},
+	}}
+	op := rerankOperator{
+		nq:           1,
+		topK:         3,
+		roundDecimal: -1,
+		collSchema:   schema,
+		rerankMeta:   meta,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, reducedResults, []string{"IP"})
+	s.Require().NoError(err)
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Equal([]int64{2}, result.GetTopks())
+	s.Equal([]int64{3, 1}, result.GetIds().GetIntId().GetData())
+	s.InDeltaSlice([]float32{0.3, 0.1}, result.GetScores(), 1e-6)
+	s.Empty(result.GetFieldsData())
+}
+
+func (s *SearchPipelineSuite) TestRerankOpPreservesJSONGroupByBesidePathInput() {
+	schema := &schemapb.CollectionSchema{
+		Name: "test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "metadata", DataType: schemapb.DataType_JSON},
+		},
+	}
+	mapJSONPath := mapOp(
+		types.ScoreFieldName,
+		"num_combine",
+		columnArg(types.ScoreFieldName),
+		columnArg(`metadata["price"]`),
+	)
+	mapJSONPath.Params = map[string]*schemapb.FunctionParamValue{
+		types.InputDataTypesParam: chainDataTypesParam(schemapb.DataType_None, schemapb.DataType_Int64),
+	}
+	meta, err := newFunctionChainRerankMeta(
+		[]*schemapb.FunctionChain{l2FunctionChain(mapJSONPath)},
+		mustNewSchemaInfo(schema),
+	)
+	s.Require().NoError(err)
+
+	reducedResults := []*milvuspb.SearchResults{{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: 1,
+			TopK:       2,
+			Topks:      []int64{2},
+			Ids:        testSearchResultIDs(1, 2),
+			Scores:     []float32{0.1, 0.2},
+			FieldsData: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_JSON,
+				FieldName: "metadata",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_JsonData{JsonData: &schemapb.JSONArray{Data: [][]byte{
+						[]byte(`{"price":10}`),
+						[]byte(`{"price":20}`),
+					}}},
+				}},
+			}},
+			GroupByFieldValues: []*schemapb.FieldData{{
+				Type:      schemapb.DataType_VarChar,
+				FieldName: "metadata",
+				FieldId:   101,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{
+						Data: []string{"a", "b"},
+					}},
+				}},
+			}},
+		},
+	}}
+	op := rerankOperator{
+		nq:               1,
+		topK:             2,
+		roundDecimal:     -1,
+		groupByFieldName: "metadata",
+		groupSize:        1,
+		collSchema:       schema,
+		rerankMeta:       meta,
+	}
+
+	outputs, err := op.run(context.Background(), s.span, reducedResults, []string{"IP"})
+	s.Require().NoError(err)
+	result := outputs[0].(*milvuspb.SearchResults).GetResults()
+	s.Require().Len(result.GetGroupByFieldValues(), 1)
+	groupBy := result.GetGroupByFieldValues()[0]
+	s.Equal(int64(101), groupBy.GetFieldId())
+	s.Equal([]string{"a", "b"}, groupBy.GetScalars().GetStringData().GetData())
 	s.Empty(result.GetFieldsData())
 }
 
@@ -501,7 +732,7 @@ func (s *SearchPipelineSuite) TestRerankOpPreservesGroupByFieldWithColumnPruning
 		groupByFieldName: "category",
 		groupSize:        1,
 		collSchema:       schema,
-		rerankMeta:       newRerankMeta(schema, funcScore),
+		rerankMeta:       mustNewRerankMeta(s.T(), schema, funcScore),
 	}
 
 	outputs, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{input}, []string{"IP"})
@@ -2908,7 +3139,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankPipe() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
-		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
+		rerankMeta:             mustNewRerankMeta(s.T(), schema, funcScoreSchema),
 	}
 
 	pipeline, err := newPipeline(searchWithRerankPipe, task)
@@ -2981,7 +3212,7 @@ func (s *SearchPipelineSuite) TestSearchWithRerankRequeryPipe() {
 		queryInfos:             []*planpb.QueryInfo{{}},
 		translatedOutputFields: []string{"intField"},
 		node:                   nil,
-		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
+		rerankMeta:             mustNewRerankMeta(s.T(), schema, funcScoreSchema),
 		request:                &milvuspb.SearchRequest{Namespace: nil},
 	}
 	f1 := testutils.GenerateScalarFieldData(schemapb.DataType_Int64, "intField", 20)
@@ -3364,6 +3595,10 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 		},
 	}
 	funcScoreSchema := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{functionSchema}}
+	rerankMeta, err := newRerankMeta(schema, funcScoreSchema)
+	if err != nil {
+		panic(err)
+	}
 	task := &searchTask{
 		ctx:            context.Background(),
 		collectionName: collName,
@@ -3407,7 +3642,7 @@ func getHybridSearchTask(collName string, data [][]string, outputFields []string
 			roundDecimal: 0,
 		},
 		queryInfos:             []*planpb.QueryInfo{{}, {}},
-		rerankMeta:             newRerankMeta(schema, funcScoreSchema),
+		rerankMeta:             rerankMeta,
 		translatedOutputFields: outputFields,
 	}
 	return task
@@ -7569,4 +7804,45 @@ func (s *SearchPipelineSuite) TestPickFieldDataWithNullableSparseVectorMissingVa
 	s.Equal([]int64{2, 1}, result[0].GetScalars().GetLongData().GetData())
 	s.Equal([]bool{false, false}, result[1].GetValidData())
 	s.Empty(result[1].GetVectors().GetSparseFloatVector().GetContents())
+}
+
+func (s *SearchPipelineSuite) TestFunctionScoreDuplicateInputs() {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		{FieldID: 101, Name: "price", DataType: schemapb.DataType_Int64},
+	}}
+	for _, ranker := range []string{"rrf", "weighted", "decay"} {
+		for _, rows := range []int64{0, 2} {
+			s.Run(fmt.Sprintf("%s/rows%d", ranker, rows), func() {
+				params := []*commonpb.KeyValuePair{{Key: "reranker", Value: ranker}}
+				if ranker == "weighted" {
+					params = append(params, &commonpb.KeyValuePair{Key: "weights", Value: "[1]"})
+				}
+				if ranker == "decay" {
+					params = append(params, &commonpb.KeyValuePair{Key: "function", Value: "gauss"}, &commonpb.KeyValuePair{Key: "origin", Value: "0"}, &commonpb.KeyValuePair{Key: "scale", Value: "10"})
+				}
+				score := &schemapb.FunctionScore{Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_Rerank, InputFieldNames: []string{"price", "price"}, Params: params}}}
+				meta := mustNewRerankMeta(s.T(), schema, score)
+				s.Require().Len(meta.GetInputPlan().Inputs, 1)
+				s.Equal([]string{"price", "price"}, score.Functions[0].InputFieldNames)
+				result := &schemapb.SearchResultData{NumQueries: 1, Topks: []int64{rows}, Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{}}}}
+				if rows > 0 {
+					result.Ids.GetIntId().Data = []int64{1, 2}
+					result.Scores = []float32{0.8, 0.2}
+					result.FieldsData = []*schemapb.FieldData{{FieldId: 101, FieldName: "price", Type: schemapb.DataType_Int64, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{10, 20}}}}}}}
+				}
+				op := rerankOperator{nq: 1, topK: 2, roundDecimal: -1, collSchema: schema, rerankMeta: meta}
+				outputs, err := op.run(context.Background(), s.span, []*milvuspb.SearchResults{{Results: result}}, []string{"IP"})
+				if ranker == "decay" {
+					s.ErrorIs(err, merr.ErrParameterInvalid)
+					s.ErrorContains(err, "requires exactly 1 input field")
+					s.Nil(outputs)
+				} else {
+					s.Require().NoError(err)
+					s.Require().Len(outputs, 1)
+					s.Equal([]int64{rows}, outputs[0].(*milvuspb.SearchResults).GetResults().GetTopks())
+				}
+			})
+		}
+	}
 }

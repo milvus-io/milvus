@@ -66,6 +66,8 @@ SimdjsonParseErrorToErrorCode(simdjson::error_code err) {
         case simdjson::UNINITIALIZED:
         case simdjson::INSUFFICIENT_PADDING:
         case simdjson::UNEXPECTED_ERROR:
+        case simdjson::PARSER_IN_USE:
+        case simdjson::OUT_OF_ORDER_ITERATION:
             return ErrorCode::UnexpectedError;  // milvus-side misuse / bug
         default:
             return ErrorCode::DataFormatBroken;  // 2024, malformed stored JSON
@@ -89,14 +91,14 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
     thread_local simdjson::ondemand::parser parser;
     auto doc = parser.iterate(padded);
     if (doc.error()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
                   "json parse failed: {}",
                   simdjson::error_message(doc.error()));
     }
 
     auto obj = doc.get_object();
     if (obj.error()) {
-        ThrowInfo(ErrorCode::UnexpectedError,
+        ThrowInfo(SimdjsonParseErrorToErrorCode(obj.error()),
                   "ExtractSubJson: input is not a JSON object: {}",
                   simdjson::error_message(obj.error()));
     }
@@ -110,7 +112,7 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
         // unescaped_key() resolves escape sequences for correct comparison
         auto uk = field.unescaped_key();
         if (uk.error()) {
-            ThrowInfo(ErrorCode::UnexpectedError,
+            ThrowInfo(SimdjsonParseErrorToErrorCode(uk.error()),
                       "ExtractSubJson: failed to decode key: {}",
                       simdjson::error_message(uk.error()));
         }
@@ -119,7 +121,7 @@ ExtractSubJson(std::string_view json, const std::vector<std::string>& keys) {
             // avoiding any re-serialization overhead
             auto raw = field.value().raw_json();
             if (raw.error()) {
-                ThrowInfo(ErrorCode::UnexpectedError,
+                ThrowInfo(SimdjsonParseErrorToErrorCode(raw.error()),
                           "ExtractSubJson: failed to extract value for "
                           "key '{}': {}",
                           uk.value(),
@@ -246,10 +248,12 @@ class Json {
         // as we have allocated the memory with this padding
         auto doc =
             parser.iterate(data_, data_.size() + simdjson::SIMDJSON_PADDING);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {}: {}",
-                   data_,
-                   simdjson::error_message(doc.error()));
+        if (doc.error() != simdjson::SUCCESS) {
+            ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
+                      "failed to parse the json {}: {}",
+                      data_,
+                      simdjson::error_message(doc.error()));
+        }
         return doc;
     }
 
@@ -263,10 +267,12 @@ class Json {
         // it's always safe to add the padding,
         // as we have allocated the memory with this padding
         auto doc = parser.parse(data_);
-        AssertInfo(doc.error() == simdjson::SUCCESS,
-                   "failed to parse the json {}: {}",
-                   data_,
-                   simdjson::error_message(doc.error()));
+        if (doc.error() != simdjson::SUCCESS) {
+            ThrowInfo(SimdjsonParseErrorToErrorCode(doc.error()),
+                      "failed to parse the json {}: {}",
+                      data_,
+                      simdjson::error_message(doc.error()));
+        }
         return doc;
     }
 

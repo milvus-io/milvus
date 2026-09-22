@@ -31,6 +31,34 @@ type rankParams struct {
 	groupByFieldNames []string
 	groupSize         int64
 	strictGroupSize   bool
+	// The JSON group-by attributes ride along for hybrid search: they are
+	// resolved by parseGroupByInfo like everything above, and dropping them
+	// here used to make a hybrid group-by on a dynamic field group by the
+	// whole $meta object instead of the named key.
+	jsonPath   string
+	jsonType   schemapb.DataType
+	strictCast bool
+}
+
+func (r *rankParams) GetJSONPath() string {
+	if r != nil {
+		return r.jsonPath
+	}
+	return ""
+}
+
+func (r *rankParams) GetJSONType() schemapb.DataType {
+	if r != nil {
+		return r.jsonType
+	}
+	return schemapb.DataType_None
+}
+
+func (r *rankParams) GetStrictCast() bool {
+	if r != nil {
+		return r.strictCast
+	}
+	return false
 }
 
 func (r *rankParams) GetLimit() int64 {
@@ -564,6 +592,7 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	var isIterativeFilter bool
 	if isAdvanced {
 		groupByFieldId, groupByFieldIds, groupSize, strictGroupSize = rankParams.GetGroupByFieldId(), rankParams.GetGroupByFieldIds(), rankParams.GetGroupSize(), rankParams.GetStrictGroupSize()
+		jsonPath, jsonType, strictCast = rankParams.GetJSONPath(), rankParams.GetJSONType(), rankParams.GetStrictCast()
 	} else {
 		groupByInfo, err := parseGroupByInfo(searchParamsPair, schema)
 		if err != nil {
@@ -1033,6 +1062,15 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 		return nil, err
 	}
 
+	// normalized here once, exactly as the single-search path normalizes it
+	jsonPath := groupByInfo.GetJSONPath()
+	if jsonPath != "" {
+		jsonPath, err = typeutil2.ParseAndVerifyNestedPath(jsonPath, schema, groupByInfo.GetGroupByFieldId())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &rankParams{
 		limit:             limit,
 		offset:            offset,
@@ -1041,6 +1079,9 @@ func parseRankParams(rankParamsPair []*commonpb.KeyValuePair, schema *schemapb.C
 		groupByFieldNames: groupByInfo.GetGroupByFieldNames(),
 		groupSize:         groupByInfo.GetGroupSize(),
 		strictGroupSize:   groupByInfo.GetStrictGroupSize(),
+		jsonPath:          jsonPath,
+		jsonType:          groupByInfo.GetJSONType(),
+		strictCast:        groupByInfo.GetStrictCast(),
 	}, nil
 }
 

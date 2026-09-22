@@ -35,7 +35,7 @@ import (
 
 const l1SourceIndexColumn = "$l1_source_index"
 
-var fillL1FieldsOrdered = segcore.FillFieldsOrderedAsArrowRecordBatch
+var fillL1FieldsOrdered = segcore.FillFieldsOrderedAsArrowRecordBatchWithInputPlan
 
 func validateL1FunctionChain(repr *chain.ChainRepr) error {
 	if repr == nil {
@@ -90,7 +90,14 @@ func (t *SearchTask) applyL1Rerank(reduced *mergeResult, results []*segments.Sea
 		return nil, err
 	}
 
-	input, err := buildL1InputDataFrame(t.ctx, defaultAllocator, reduced, results, plan, prepared.inputFieldIDs)
+	input, err := buildL1InputDataFrame(
+		t.ctx,
+		defaultAllocator,
+		reduced,
+		results,
+		plan,
+		prepared.inputPlan,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +171,7 @@ func buildL1InputDataFrame(
 	reduced *mergeResult,
 	results []*segments.SearchResult,
 	plan *segcore.SearchPlan,
-	inputFieldIDs []int64,
+	inputPlan *chain.DataFrameInputPlan,
 ) (*chain.DataFrame, error) {
 	builder := chain.NewDataFrameBuilder()
 	defer builder.Release()
@@ -177,13 +184,17 @@ func buildL1InputDataFrame(
 		}
 	}
 
-	if len(inputFieldIDs) > 0 {
+	if inputPlan != nil && len(inputPlan.Inputs) > 0 {
+		inputPlanBlob, err := segcore.MarshalFunctionChainInputPlan(inputPlan)
+		if err != nil {
+			return nil, merr.Wrap(err, "l1_rerank: encode input plan")
+		}
 		segIndices, segOffsets := flattenL1Sources(reduced.Sources)
 		record, err := fillL1FieldsOrdered(
 			ctx,
 			results,
 			plan,
-			inputFieldIDs,
+			inputPlanBlob,
 			segIndices,
 			segOffsets,
 		)
@@ -197,26 +208,19 @@ func buildL1InputDataFrame(
 			return nil, merr.Wrap(err, "l1_rerank: build input fields dataframe")
 		}
 		defer fields.Release()
-		if len(fields.ColumnNames()) != len(inputFieldIDs) {
-			return nil, merr.WrapErrServiceInternalMsg("l1_rerank: materialized %d input fields, expected %d", len(fields.ColumnNames()), len(inputFieldIDs))
+		if fields.NumColumns() != len(inputPlan.Inputs) {
+			return nil, merr.WrapErrServiceInternalMsg("l1_rerank: materialized %d input fields, expected %d", fields.NumColumns(), len(inputPlan.Inputs))
 		}
-		materializedFieldIDs := make(map[int64]struct{}, len(inputFieldIDs))
-		for _, name := range fields.ColumnNames() {
+		for _, input := range inputPlan.Inputs {
+			name := input.LogicalName
 			if reduced.DF.HasColumn(name) {
 				return nil, merr.WrapErrServiceInternalMsg("l1_rerank: materialized field %q conflicts with reduced dataframe column", name)
 			}
-			fieldID, ok := fields.FieldID(name)
-			if !ok {
-				return nil, merr.WrapErrServiceInternalMsg("l1_rerank: materialized field %q is missing field id metadata", name)
+			if err := chain.ValidateMaterializedInput(fields, input); err != nil {
+				return nil, merr.Wrap(err, "l1_rerank")
 			}
-			materializedFieldIDs[fieldID] = struct{}{}
 			if err := builder.AddColumnFrom(fields, name); err != nil {
 				return nil, err
-			}
-		}
-		for _, fieldID := range inputFieldIDs {
-			if _, ok := materializedFieldIDs[fieldID]; !ok {
-				return nil, merr.WrapErrServiceInternalMsg("l1_rerank: materialized input is missing field id %d", fieldID)
 			}
 		}
 	}

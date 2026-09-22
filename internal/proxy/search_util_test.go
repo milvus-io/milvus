@@ -23,9 +23,45 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
+
+func TestRankParamsCarryJSONGroupAttributes(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		EnableDynamicField: true,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 101, Name: "metadata", DataType: schemapb.DataType_JSON},
+			{FieldID: 102, Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+	for _, tc := range []struct {
+		field string
+		path  string
+		id    int64
+	}{
+		{`metadata["group"]`, "/group", 101},
+		{`$meta["profile"]["group"]`, "/profile/group", 102},
+	} {
+		t.Run(tc.field, func(t *testing.T) {
+			parsed, err := parseRankParams([]*commonpb.KeyValuePair{
+				{Key: LimitKey, Value: "10"},
+				{Key: GroupByFieldKey, Value: tc.field},
+				{Key: JSONType, Value: "VarChar"},
+				{Key: StrictCastKey, Value: "true"},
+			}, schema, false)
+			require.NoError(t, err)
+			assert.Equal(t, tc.path, parsed.GetJSONPath())
+			info, err := parseSearchInfo(getValidSearchParams(), schema, parsed, false)
+			require.NoError(t, err)
+			assert.Equal(t, tc.id, info.planInfo.GetGroupByFieldId())
+			assert.Equal(t, tc.path, info.planInfo.GetJsonPath())
+			assert.Equal(t, schemapb.DataType_VarChar, info.planInfo.GetJsonType())
+			assert.True(t, info.planInfo.GetStrictCast())
+		})
+	}
+}
 
 func TestConvertHybridSearchToSearchKeepsNamespace(t *testing.T) {
 	namespace := "tenant_a"
