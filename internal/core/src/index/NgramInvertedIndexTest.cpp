@@ -1519,6 +1519,84 @@ TEST(NgramPatternMatchConsistency, UTF8Patterns) {
     }
 }
 
+TEST(NgramPatternMatchConsistency, SingleMultiByteCharLiterals) {
+    // A literal that is a single multi-byte char (e.g. "）" = 1 char / 3
+    // bytes) has byte length >= min_gram(2) but char count < min_gram, so
+    // the ngram index cannot serve it and must return nullopt (fall back
+    // to brute-force matching) instead of tripping the tantivy-side assert.
+    boost::container::vector<std::string> test_data = {
+        "订单（已取消）",
+        "中文测试",
+        "café latte",
+        "emoji😀test",
+        "hello world",
+    };
+
+    // Patterns whose wildcard-free literal is a single multi-byte char:
+    // 1 char in every case, 2-4 bytes in UTF-8.
+    std::vector<std::pair<std::string, proto::plan::OpType>> test_cases = {
+        {"）", proto::plan::OpType::InnerMatch},
+        {"）", proto::plan::OpType::PrefixMatch},
+        {"）", proto::plan::OpType::PostfixMatch},
+        {"好", proto::plan::OpType::InnerMatch},  // 3-byte CJK char
+        {"é", proto::plan::OpType::InnerMatch},   // 2-byte char
+        {"😀", proto::plan::OpType::InnerMatch},   // 4-byte char
+        {"%）%", proto::plan::OpType::Match},
+        {"%abc%）%", proto::plan::OpType::Match},  // split part "）" is 1 char
+    };
+
+    for (const auto& [pattern, op_type] : test_cases) {
+        // Compute expected results with brute-force semantics
+        std::vector<bool> expected_results;
+
+        PatternMatchTranslator translator;
+        std::string like_pattern;
+        switch (op_type) {
+            case proto::plan::OpType::PrefixMatch:
+                like_pattern = pattern + "%";
+                break;
+            case proto::plan::OpType::PostfixMatch:
+                like_pattern = "%" + pattern;
+                break;
+            case proto::plan::OpType::InnerMatch:
+                like_pattern = "%" + pattern + "%";
+                break;
+            case proto::plan::OpType::Match:
+                like_pattern = pattern;
+                break;
+            default:
+                continue;
+        }
+
+        LikePatternMatcher like_matcher(like_pattern);
+        for (const auto& data : test_data) {
+            expected_results.push_back(like_matcher(data));
+        }
+
+        // Every literal here is 1 char < min_gram(2), so the ngram index
+        // must forward to brute-force matching.
+        test_ngram_with_data(test_data,
+                             pattern,
+                             op_type,
+                             expected_results,
+                             /*forward_to_br=*/true);
+    }
+
+    // Control: a multi-char CJK literal (2 chars / 6 bytes >= min_gram) is
+    // still served by the ngram index path.
+    {
+        std::vector<bool> expected_results;
+        LikePatternMatcher like_matcher("%中文%");
+        for (const auto& data : test_data) {
+            expected_results.push_back(like_matcher(data));
+        }
+        test_ngram_with_data(test_data,
+                             "中文",
+                             proto::plan::OpType::InnerMatch,
+                             expected_results);
+    }
+}
+
 TEST(NgramPatternMatchConsistency, EscapeSequences) {
     // Test data with special characters
     boost::container::vector<std::string> test_data = {

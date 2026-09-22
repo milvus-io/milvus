@@ -51,6 +51,23 @@
 
 namespace milvus::index {
 
+// Number of UTF-8 characters in `literal`. The rust binding checks min_gram
+// against `str::chars().count()`, so the gate on this side must count
+// characters too, not bytes: a single 3-byte character passes a byte-length
+// check against min_gram=2 and then trips the rust-side check. Invalid
+// UTF-8 needs no special handling here; the FFI shim rejects it before the
+// rust-side check runs.
+inline size_t
+Utf8LiteralLength(const std::string& literal) {
+    size_t count = 0;
+    for (unsigned char c : literal) {
+        if ((c & 0xC0) != 0x80) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 const std::string NGRAM_AVG_ROW_SIZE_FILE_NAME = "ngram_avg_row_size";
 
 const JsonCastType JSON_CAST_TYPE = JsonCastType::FromString("VARCHAR");
@@ -310,7 +327,7 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  exec::SegmentExpr* segment) {
     tracer::AutoSpan span(
         "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
-    if (literal.length() < min_gram_) {
+    if (Utf8LiteralLength(literal) < min_gram_) {
         return std::nullopt;
     }
 
@@ -518,7 +535,7 @@ NgramInvertedIndex::MatchQuery(const std::string& literal,
     TargetBitmap bitset(static_cast<size_t>(Count()), true);
     auto literals = split_by_wildcard(literal);
     for (const auto& l : literals) {
-        if (l.length() < min_gram_) {
+        if (Utf8LiteralLength(l) < min_gram_) {
             return std::nullopt;
         }
         TargetBitmap tmp_bitset(static_cast<size_t>(Count()), false);
