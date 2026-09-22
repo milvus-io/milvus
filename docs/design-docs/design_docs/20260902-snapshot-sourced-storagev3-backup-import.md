@@ -1,7 +1,7 @@
 # MEP: Snapshot-Sourced StorageV3 Backup Import
 
 - **Created:** 2026-09-02
-- **Updated:** 2026-09-21
+- **Updated:** 2026-09-22
 - **Status:** Proposed
 - **Feature DRI:** @weiliu1031
 - **Primary Approver:** TBD
@@ -620,11 +620,13 @@ unreadable target field. This follows backup Import rather than promising
 synchronous rejection of every schema mismatch.
 
 DataNode validates manifest fragments, own deletes and projected TEXT/LOB paths
-before constructing its row reader. LOB existence is checked even when the
-manifest supplies a positive size. Unprojected TEXT/LOB and unused stats/index
-files are not opened by Import. Missing channel identity or an unsupported
-applicable L0 representation fails preparation; unrelated partitions' L0
-inputs are not read.
+before constructing its row reader. LOB inventory entries are filtered by the
+projected TEXT FieldIDs before path checks, existence checks and size accounting,
+including when only some source TEXT fields are projected. LOB existence is
+checked even when the manifest supplies a positive size. Unprojected TEXT/LOB
+and unused stats/index files are not opened by Import. Missing channel identity
+or an unsupported applicable L0 representation fails preparation; unrelated
+partitions' L0 inputs are not read.
 
 Retries reuse the persisted input representation: exact manifests for baseline
 jobs, or descriptors plus the shared L0 inventory for activated jobs. Neither
@@ -1239,11 +1241,11 @@ Without `external_spec`, source reads use the configured target Milvus storage;
 the complete metadata URI must match that storage identity before reading.
 With it, source reads use the request-scoped foreign storage; target writes
 always use the target instance configuration. Ordinary file and legacy backup
-imports reject this option. External jobs use source descriptor version 2 and
-empty legacy paths, with version 4 required when partition mapping is also
-present, as defined in section 1.1. Unsupported workers fail closed rather than
-reading target objects with identical keys or losing the requested mapping.
-Provider/endpoint admission remains the existing snapshot policy; no
+imports reject this option. External jobs use empty legacy paths and select
+the source descriptor version according to the capability matrix in section 1.1,
+including partition mapping and shared L0. Unsupported workers fail closed
+rather than reading target objects with identical keys or losing the requested
+mapping. Provider/endpoint admission remains the existing snapshot policy; no
 destination-side copier is constructed for Import.
 
 Raw `external_spec` and `ezk` values must not appear in options logs. Credentials

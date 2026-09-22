@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -53,6 +54,10 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 		wantName     string
 		wantIDs      []int64
 		wantErr      string
+		l0           bool
+		loaded       bool
+		failAt       string
+		fileCount    int
 	}{
 		{name: "snapshot_default", snapshot: true, backup: true, wantName: "_default", wantIDs: []int64{10}},
 		{name: "snapshot_mapping", snapshot: true, backup: true, mapping: `{"A":"custom","B":"_default"}`, wantIDs: []int64{10, 20}},
@@ -69,8 +74,37 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 		{name: "legacy_backup_named", backup: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
 		{name: "ordinary_default", wantName: "_default", wantIDs: []int64{10}},
 		{name: "ordinary_partition_key", partitionKey: true, wantIDs: []int64{20, 10}},
+		{name: "legacy_backup_missing_partition", backup: true, partition: "missing", wantErr: "partition not found"},
+		{name: "l0_all_partitions", l0: true, wantIDs: []int64{-1}},
+		{name: "l0_named_partition", l0: true, partition: "custom", wantName: "custom", wantIDs: []int64{20}},
+		{name: "l0_missing_partition", l0: true, partition: "missing", wantErr: "partition not found"},
+		{name: "l0_load_state_error", l0: true, failAt: "load", wantErr: "dependency failed"},
+		{name: "l0_already_loaded", l0: true, loaded: true, wantErr: "collection cannot be loaded"},
+		{name: "partition_metadata_error", snapshot: true, backup: true, partitionKey: true, failAt: "partitions", wantErr: "dependency failed"},
+		{name: "text_storage_disabled", failAt: "text", wantErr: "dependency failed"},
+		{name: "partition_mapping_read_error", failAt: "mapping", wantErr: "dependency failed"},
+		{name: "multiple_snapshot_sources", snapshot: true, backup: true, fileCount: 2, wantErr: "exactly one snapshot metadata path"},
+		{name: "too_many_files", fileCount: 2, wantErr: "max number of import files"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			errFor := func(stage string) error {
+				if tc.failAt == stage {
+					return errors.New("dependency failed")
+				}
+				return nil
+			}
+			textValidation := mockey.Mock(validateTextStorageV3Enabled).Return(errFor("text")).Build()
+			defer textValidation.UnPatch()
+			loaded := mockey.Mock(isCollectionLoaded).Return(tc.loaded, errFor("load")).Build()
+			defer loaded.UnPatch()
+			if tc.failAt == "mapping" {
+				// Exercise propagation at the routing boundary independently of
+				// the earlier public-option validator, which has its own tests.
+				validation := mockey.Mock(importutilv2.ValidateSnapshotSourceRequest).Return(nil).Build()
+				defer validation.UnPatch()
+				mapping := mockey.Mock(importutilv2.GetPartitionMapping).Return(nil, errFor("mapping")).Build()
+				defer mapping.UnPatch()
+			}
 			schema := &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 				{FieldID: 101, Name: "part", DataType: schemapb.DataType_Int64, IsPartitionKey: tc.partitionKey},
@@ -96,7 +130,7 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			// receive the stable partition-key index order, not map or ID order.
 			partitionsPatch := mockey.Mock((*MetaCache).GetPartitions).Return(map[string]int64{
 				"_default_1": 10, "_default_0": 20,
-			}, nil).Build()
+			}, errFor("partitions")).Build()
 			defer partitionsPatch.UnPatch()
 			type testChannels struct{ channelmgr.ChannelsMgr }
 			channels := &testChannels{}
@@ -109,12 +143,20 @@ func TestImportTaskPreExecuteTargetPartitions(t *testing.T) {
 			if tc.backup {
 				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "backup", Value: "true"})
 			}
+			if tc.l0 {
+				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "l0_import", Value: "true"})
+			}
 			if tc.mapping != "" {
 				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "partition_mapping", Value: tc.mapping})
 			}
 			if tc.snapshot {
 				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "source_type", Value: "snapshot"})
 				req.Files[0].Paths = []string{"s3://source/root/snapshots/1/metadata/2.json"}
+			}
+			if tc.fileCount > 1 {
+				req.Files = append(req.Files, &internalpb.ImportFile{Paths: []string{"second.json"}})
+				old := Params.DataCoordCfg.MaxFilesPerImportReq.SwapTempValue("1")
+				defer Params.DataCoordCfg.MaxFilesPerImportReq.SwapTempValue(old)
 			}
 			task := &importTask{req: req, node: &Proxy{chMgr: channels}}
 			task.MetaCache = cache

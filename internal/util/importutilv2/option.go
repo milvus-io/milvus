@@ -225,7 +225,9 @@ func ValidateSnapshotSourceOptions(options Options) error {
 	hasSnapshotContractOption := false
 	for _, option := range options {
 		if option == nil {
-			continue
+			// Attribute lookups below dereference each entry. Reject malformed
+			// option lists before they reach those shared helpers.
+			return merr.WrapErrImportFailedMsg("import option must not be nil")
 		}
 		if option.GetKey() == SourceType || option.GetKey() == ExternalSpec || option.GetKey() == SnapshotSourceURI || option.GetKey() == SnapshotLayout || option.GetKey() == PartitionMapping {
 			hasSnapshotContractOption = true
@@ -365,14 +367,14 @@ func ValidateSnapshotSourceRequest(options Options) error {
 	// Do not silently broaden a request written for the earlier partition
 	// selector. Already-expanded tasks still use ValidateSnapshotSourceOptions
 	// and keep their immutable file inventory rather than re-expanding it.
-	if _, err := funcutil.GetAttrByKeyFromRepeatedKV("source_partition_name", options); err == nil {
-		return merr.WrapErrImportFailedMsg("source_partition_name is not supported; snapshot import reads all source partitions")
-	}
-	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options); err == nil {
-		return merr.WrapErrImportFailedMsg("%s is reserved for internal use", SnapshotSourceURI)
-	}
-	if _, err := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options); err == nil {
-		return merr.WrapErrImportFailedMsg("%s is reserved for internal use", SnapshotLayout)
+	for _, option := range options {
+		// GetKey tolerates nil entries; the common validator rejects them below.
+		switch option.GetKey() {
+		case "source_partition_name":
+			return merr.WrapErrImportFailedMsg("source_partition_name is not supported; snapshot import reads all source partitions")
+		case SnapshotSourceURI, SnapshotLayout:
+			return merr.WrapErrImportFailedMsg("%s is reserved for internal use", option.GetKey())
+		}
 	}
 	return ValidateSnapshotSourceOptions(options)
 }
