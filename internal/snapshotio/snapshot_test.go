@@ -17,6 +17,7 @@
 package snapshotio
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
@@ -69,14 +70,15 @@ func TestParseSnapshotMetadataWithVersionCheck(t *testing.T) {
 	assert.Equal(t, int32(3), metadata.GetFormatVersion())
 	assert.Equal(t, int64(10), metadata.GetSnapshotInfo().GetId())
 
-	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":5}`))
+	metadata, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, SnapshotFormatVersion)))
 	require.NoError(t, err)
 	assert.Equal(t, int32(SnapshotFormatVersion), metadata.GetFormatVersion())
 
-	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(`{"format_version":99}`))
+	futureVersion := SnapshotFormatVersion + 1
+	_, err = ParseSnapshotMetadataWithVersionCheck([]byte(fmt.Sprintf(`{"format_version":%d}`, futureVersion)))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "snapshot format version 99 is too new")
-	assert.Contains(t, err.Error(), "current supported version: 4")
+	assert.Contains(t, err.Error(), fmt.Sprintf("snapshot format version %d is too new", futureVersion))
+	assert.Contains(t, err.Error(), fmt.Sprintf("current supported version: %d", SnapshotFormatVersion))
 	assert.Contains(t, err.Error(), "please upgrade Milvus")
 	assert.ErrorIs(t, err, merr.ErrOperationNotSupported)
 	assert.Equal(t, int32(3000), merr.Status(err).GetCode())
