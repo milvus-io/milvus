@@ -409,12 +409,14 @@ TEST(StrictGroupPerGroupTest, OrdinarySearchSettingsDoNotMutatePhaseOne) {
     original.iterator_v2_info_ = SearchIteratorV2Info{};
     original.field_id_ = FieldId(100);
     original.metric_type_ = knowhere::metric::IP;
-    original.search_params_ = {{"ef", 123},
-                               {"nprobe", 128},
-                               {"search_list", 200},
-                               {"radius", 0.5},
-                               {"iterator_refine_ratio", 0.5},
-                               {knowhere::meta::TOPK, 50}};
+    original.search_params_ = {
+        {"ef", 123},
+        {"nprobe", 128},
+        {"search_list", 200},
+        {"radius", 0.5},
+        {"iterator_refine_ratio", 0.5},
+        {"backend_options", {{"mode", "custom"}, {"values", {1, 2, 3}}}},
+        {knowhere::meta::TOPK, 50}};
     const auto original_params = original.search_params_;
     for (int64_t remaining : {1, 2}) {
         auto ordinary = query::StrictGroupSearchInfo(original, remaining);
@@ -426,9 +428,11 @@ TEST(StrictGroupPerGroupTest, OrdinarySearchSettingsDoNotMutatePhaseOne) {
         EXPECT_EQ(ordinary.field_id_, original.field_id_);
         EXPECT_EQ(ordinary.metric_type_, original.metric_type_);
         EXPECT_EQ(ordinary.round_decimal_, -1);
-        EXPECT_EQ(ordinary.search_params_,
-                  (knowhere::Json{{knowhere::meta::TOPK, remaining},
-                                  {"skip_refine", false}}));
+        auto expected_params = original_params;
+        expected_params[knowhere::meta::TOPK] = remaining;
+        expected_params["skip_refine"] = false;
+        EXPECT_EQ(ordinary.search_params_, expected_params);
+        ordinary.search_params_["backend_options"]["mode"] = "changed";
     }
     EXPECT_TRUE(UseVectorIterator(original));
     EXPECT_EQ(original.topk_, 50);
@@ -446,16 +450,19 @@ TEST(StrictGroupPerGroupTest, IndependentSearchPreservesScoringContext) {
     original.group_size_ = 3;
     original.strict_group_skip_refine_ = true;
     original.search_params_ = {{knowhere::meta::BM25_AVGDL, 123.5},
+                               {knowhere::meta::BM25_K1, 1.5},
+                               {knowhere::meta::BM25_B, 0.7},
                                {"drop_ratio_search", 0.2},
+                               {"skip_refine", false},
                                {"ef", 2},
                                {"nprobe", 128}};
     const auto params = original.search_params_;
-    const auto ordinary = query::StrictGroupSearchInfo(original, 2);
+    const auto ordinary = query::StrictGroupSearchInfo(original, 4);
     EXPECT_EQ(ordinary.metric_type_, original.metric_type_);
-    EXPECT_EQ(ordinary.search_params_,
-              (knowhere::Json{{knowhere::meta::TOPK, 2},
-                              {"skip_refine", true},
-                              {knowhere::meta::BM25_AVGDL, 123.5}}));
+    auto expected_params = params;
+    expected_params[knowhere::meta::TOPK] = 4;
+    expected_params["skip_refine"] = true;
+    EXPECT_EQ(ordinary.search_params_, expected_params);
     EXPECT_EQ(original.search_params_, params);
 }
 
