@@ -10,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/dataview"
 	datacatalog "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/internal/metastore/kv/queryview"
+	"github.com/milvus-io/milvus/internal/views/coord/balancer/api"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -123,7 +124,7 @@ func TestDataViewReferenceSurvivesUntilDurableQueryViewRemoval(t *testing.T) {
 	require.Nil(t, ref, "durable removal must release the last reference")
 }
 
-func TestPlanningSnapshotCollectedBeforeAddPreparing(t *testing.T) {
+func TestPublishedDataViewCollectedBeforeAddPreparing(t *testing.T) {
 	m := newInterfaceDataViews(t)
 	registry := newInterfaceRegistry(t, m, nil, nil)
 	mgr := registry.Ensure(testShardID)
@@ -131,11 +132,18 @@ func TestPlanningSnapshotCollectedBeforeAddPreparing(t *testing.T) {
 	require.NoError(t, registry.flushScheduler.Flush(t.Context()))
 	current := mgr.preparingView
 	staleVersion := publishInterfaceDataView(t, m, 1002, 7)
-	snapshot := m.DataViewSnapshot(t.Context())
+	var published *api.CollectionDataView
+	unsubscribe := m.RegisterDataViewListener(func(id int64, view *api.CollectionDataView) {
+		if id == testCollectionID {
+			published = view
+		}
+	})
+	unsubscribe()
+	require.NotNil(t, published)
 	publishInterfaceDataView(t, m, 1003, 9)
 	require.NoError(t, m.GarbageCollect(t.Context(), testCollectionID, 1))
-	_, ok := snapshot.SegmentInfo(1002)
-	require.True(t, ok, "the detached planning snapshot outlives collection GC")
+	_, ok := published.Segment(1002)
+	require.True(t, ok, "the published planning object remains readable after DataVersion GC")
 
 	err := mgr.AddPreparing(t.Context(), testBuilder(staleVersion.StreamingVersion, staleVersion.CompactVersion, 1))
 	require.ErrorIs(t, err, merr.ErrServiceUnavailable)

@@ -259,16 +259,13 @@ before enabling DataView GC; that wiring is outside this PR.
 
 ### View consumer interfaces
 
-The current implementation exposes both consumer interfaces:
+The current implementation exposes two consumer contracts:
 
 - `qviews.DataViewRefProvider.Get` supplies exact-version references to
   `ShardViewRegistry`. Each state machine owns one acquired reference.
-- `balancer.DataViewProvider.DataViewSnapshot` and
-  `DataViewSnapshotForCollections` remain compatibility APIs supplying detached native snapshots. Nil collection selection means all collections; a non-nil empty
-  selection means none. Each collection's membership and row statistics are
-  copied from the same version under its collection lock. The global manager
-  lock is released before waiting for any collection lock, and the selected
-  collection is revalidated against concurrent drop.
+- `api.DataViewPublisher.RegisterDataViewListener` synchronously replays existing
+  immutable collection objects and publishes subsequent updates without a
+  missing-update window. Balancer reads these objects from its resident cache.
 
 The [Balancer Cache implementation](balancer_cache.md) replaces the Balancer's
 snapshot-pull path with `RegisterDataViewListener` synchronous publication hooks. At each committed publication, DataViewManager supplies a read-only
@@ -276,8 +273,8 @@ Collection object with immutable membership and matching RowNum. The native
 projection is materialized once and retained for the latest publication. Each
 desired shard also publishes `TotalRows` and `SegmentCount`, so reconciliation
 does not rescan segments for these aggregates. Indexes and summaries are built
-once per published version, not per reconcile. Existing snapshot APIs may
-remain compatibility interfaces for other callers.
+once per published version, not per reconcile. The obsolete global and scoped
+DataViewSnapshot pull APIs have been removed.
 
 The hook covers create/bootstrap, recompute publication, successful flush
 commit, recovery footprint initialization, and logical collection drop. Abort

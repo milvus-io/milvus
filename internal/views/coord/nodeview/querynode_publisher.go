@@ -26,7 +26,7 @@ type nodeFacts struct {
 
 // QueryNodePublisher joins node facts with RG assignments on publication.
 // A session label has precedence; overlapping RG bindings choose the smallest
-// name, matching the existing pull adapter. Cache subscribers only read results.
+// name. Cache subscribers only read results.
 type QueryNodePublisher struct {
 	mu           sync.Mutex
 	facts        map[int64]nodeFacts

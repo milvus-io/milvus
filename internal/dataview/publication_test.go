@@ -13,10 +13,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func newPublicationTestManager(t *testing.T) *dataViewManager {
+	t.Helper()
+	patch := mockey.Mock((*datacatalog.Catalog).SaveDataView).Return(nil).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	return newManager(t.Context(), datacatalog.NewCatalog(nil, "", ""), nil)
+}
+
 func TestDataViewPublicationReplayCommitAndDrop(t *testing.T) {
-	m := newSnapshotTestManager(t)
+	m := newPublicationTestManager(t)
 	ctx := t.Context()
-	_, err := m.OnBootstrapCollection(ctx, BootstrapCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v0"}, Segments: []LoadableSegment{segmentWithRows(10, "v0", 100, 42)}})
+	_, err := m.OnBootstrapCollection(ctx, BootstrapCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v0", "v1"}, Segments: []LoadableSegment{segmentWithRows(10, "v0", 100, 42)}})
 	require.NoError(t, err)
 	var published []*api.CollectionDataView
 	unsubscribe := m.RegisterDataViewListener(func(id int64, view *api.CollectionDataView) {
@@ -27,6 +34,12 @@ func TestDataViewPublicationReplayCommitAndDrop(t *testing.T) {
 	first := published[0]
 	require.Equal(t, int64(42), first.Shards[0].TotalRows)
 	require.Equal(t, 1, first.Shards[0].SegmentCount)
+	require.NotNil(t, first.Shard("v1"), "declared empty shards survive publication")
+	require.Empty(t, first.Shard("v1").Partitions)
+	segment, ok := first.Segment(10)
+	require.True(t, ok)
+	require.Equal(t, int64(100), segment.PartitionID)
+	require.Equal(t, int64(42), segment.RowNum)
 	_, err = m.RecomputeNow(ctx, 1, projectSegments(segmentWithRows(11, "v0", 100, 99)))
 	require.NoError(t, err)
 	require.Len(t, published, 2)
@@ -62,7 +75,7 @@ func TestDataViewFailedCommitDoesNotPublish(t *testing.T) {
 }
 
 func TestDataViewRegistrationSerializesConcurrentCommit(t *testing.T) {
-	m := newSnapshotTestManager(t)
+	m := newPublicationTestManager(t)
 	var wg sync.WaitGroup
 	for id := int64(1); id <= 20; id++ {
 		wg.Add(1)
@@ -85,7 +98,7 @@ func TestDataViewRegistrationSerializesConcurrentCommit(t *testing.T) {
 }
 
 func TestDataViewFlushPublishesOnlyCommit(t *testing.T) {
-	m := newSnapshotTestManager(t)
+	m := newPublicationTestManager(t)
 	ctx := t.Context()
 	_, err := m.OnCreateCollection(ctx, CreateCollectionDataViewEvent{CollectionID: 1, VChannels: []string{"v0"}})
 	require.NoError(t, err)

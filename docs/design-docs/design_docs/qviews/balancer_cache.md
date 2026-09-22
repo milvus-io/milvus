@@ -271,9 +271,8 @@ is insufficient: recovery can initialize previously unknown RowNum without
 advancing that version. Same-source synchronous ordering is the primary
 mechanism; no distributed sequencing protocol is introduced.
 
-The existing QueryNodeProvider only exposes a membership notification and
-full node/RG reads. It cannot satisfy this contract unchanged. Source owners
-must implement `QueryNodeStatePublisher` and `ResourceGroupStatePublisher`
+Membership notifications followed by full node/RG reads cannot satisfy this
+contract. Source owners must implement `QueryNodeStatePublisher` and `ResourceGroupStatePublisher`
 (or an equivalent synchronous `NodePublisher`) at their commit points;
 `nodeview.QueryNodePublisher` merges these keyed facts and replays them to cache
 subscribers.
@@ -370,9 +369,9 @@ Implement the cache and read contracts in an isolated package with source
 adapters. Keep shared read types in a dependency-leaf API package; upstream
 managers must not import the concrete Balancer policy. Then add source
 publication/seed interfaces and switch Policy to Reader + PlanningContext.
-Remove SnapshotBuilder from reconciliation; retain compatibility adapters only
-where other callers still require the old APIs. Do not add production wiring
-or change the score formulas, batch order, or plan emission rules.
+The old SnapshotBuilder, DataViewSnapshot APIs, and node snapshot pull adapter
+have been removed; reconciliation reads only published cache entries. Do not
+add production wiring or change the score formulas, batch order, or plan emission rules.
 
 The cache removes reconcile-time segment materialization and actual-load
 ledger rebuilds. It does not remove `O(S log S + S*N)` allocation work, upstream
@@ -442,8 +441,7 @@ Key implementation packages are `internal/views/coord/balancer/cache/`,
   and controller/apply. It consumes `cache.Reader` through public accessors;
   cache internals do not depend on the parent package.
 - `nodeview.QueryNodePublisher` publishes through the cache/API contracts
-  without depending on the concrete balancing policy. The legacy pull adapter
-  retains its compatibility API.
+  without depending on the concrete balancing policy.
 
 The parent package retains aliases for the existing public scalar types; the
 cache implementation, constructors, and read-entry types live in the subpackage.
