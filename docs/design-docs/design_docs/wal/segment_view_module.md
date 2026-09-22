@@ -81,6 +81,12 @@ Append the retained Insert to the segment's pending L1 buffer and update live
 row/byte accounting. SegmentView may batch subsequent Inserts for this segment
 when flushing.
 
+Before encoding a growing pack, fill any missing BM25/MinHash output fields
+using the pack's schema. Already materialized WAL fields remain unchanged.
+Fallback function runners belong to that pack and are closed after preparation;
+they must remain available even when Drop has released the WAL's managed runners.
+Transient materialization failures retain the pack's handles for retry.
+
 Before QueryView is enabled, each written growing pack is also registered with
 DataCoord through `SaveBinlogPaths(Flushed=false, WithFullBinlogs=true)`. The
 request uses the cumulative stable pack snapshot, including matching row counts
