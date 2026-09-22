@@ -1166,6 +1166,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			"",
 			[]int64{1, 2},
 			[]*datapb.SegmentInfo{updatedSegment},
+			false,
 		)
 		assert.NoError(t, err)
 		assert.NotNil(t, savedTask)
@@ -1205,6 +1206,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			"",
 			[]int64{1},
 			[]*datapb.SegmentInfo{{ID: 10, CollectionID: 100, NumOfRows: 7}},
+			false,
 		)
 		assert.Error(t, err)
 
@@ -1243,7 +1245,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			indexpb.JobState_JobStateFinished,
 			"",
 			[]int64{1, 2},
-			[]*datapb.SegmentInfo{updatedSegment},
+			[]*datapb.SegmentInfo{updatedSegment}, false,
 		)
 		assert.NoError(t, err)
 
@@ -1305,7 +1307,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			}).Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", []int64{1}, nil)
+		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", []int64{1}, nil, false)
 		assert.Error(t, err)
 		assert.Zero(t, saveCalls)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
@@ -1322,7 +1324,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		}}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil)
+		err := meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil, false)
 		assert.ErrorContains(t, err, "unconfigured result store")
 	})
 
@@ -1336,7 +1338,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 		}}
 		meta := createMetaTestRefreshMeta(t, nil, tasks)
 
-		err := meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil)
+		err := meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil, false)
 		assert.ErrorContains(t, err, "unsupported ownership plan version 99")
 	})
 
@@ -1364,7 +1366,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			}).Build()
 		defer mockWrite.UnPatch()
 
-		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil)
+		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", nil, nil, false)
 		assert.ErrorContains(t, err, "changed while persisting result")
 		assert.Equal(t, int64(2), meta.GetTask(1001).GetVersion())
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
@@ -1394,7 +1396,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			Build()
 		defer mockSave.UnPatch()
 
-		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", []int64{1}, nil)
+		err = meta.UpdateTaskResult(1001, indexpb.JobState_JobStateFinished, "", []int64{1}, nil, false)
 		assert.Error(t, err)
 		assert.Equal(t, indexpb.JobState_JobStateInProgress, meta.GetTask(1001).GetState())
 		assert.Empty(t, meta.GetTask(1001).GetResultPath())
@@ -1419,6 +1421,7 @@ func TestExternalCollectionRefreshMeta_UpdateTaskResult(t *testing.T) {
 			"",
 			[]int64{1},
 			[]*datapb.SegmentInfo{{ID: 10}},
+			false,
 		)
 		assert.Error(t, err)
 	})
@@ -1693,4 +1696,59 @@ func TestExternalCollectionRefreshMeta_AggregateJobStateFromTasks(t *testing.T) 
 			assert.Equal(t, tc.expectedProgress, progress)
 		})
 	}
+}
+
+func TestExternalCollectionRefreshMeta_UnmappedResultSurvivesReload(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	assert.NoError(t, meta.AddTask(&datapb.ExternalCollectionRefreshTask{TaskId: 1, JobId: 1, CollectionId: 100}))
+	var persisted *datapb.ExternalCollectionRefreshTask
+	save := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).To(func(_ context.Context, task *datapb.ExternalCollectionRefreshTask) error {
+		persisted = task
+		return nil
+	}).Build()
+	defer save.UnPatch()
+	wrapper := newRefreshExternalCollectionTask(meta.GetTask(1), meta, nil, nil)
+	finished := false
+	wrapper.processFinishedJob = func(int64) {
+		finished = true
+		assert.True(t, meta.GetTask(1).GetAllFragmentsUnmapped())
+		assert.True(t, meta.GetTask(1).GetResultReady())
+	}
+	assert.NoError(t, wrapper.UpdateResultWithMeta(indexpb.JobState_JobStateFinished, "", nil, nil, true))
+	assert.True(t, finished)
+	assert.True(t, wrapper.GetAllFragmentsUnmapped())
+	assert.True(t, persisted.GetAllFragmentsUnmapped())
+	assert.True(t, persisted.GetResultReady())
+	// Reload serialized metadata, as after a coordinator restart.
+	blob, err := proto.Marshal(persisted)
+	assert.NoError(t, err)
+	persisted = &datapb.ExternalCollectionRefreshTask{}
+	assert.NoError(t, proto.Unmarshal(blob, persisted))
+	list := mockey.Mock((*stubCatalog).ListExternalCollectionRefreshTasks).Return([]*datapb.ExternalCollectionRefreshTask{persisted}, nil).Build()
+	defer list.UnPatch()
+	reloaded, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	assert.True(t, reloaded.GetTask(1).GetAllFragmentsUnmapped())
+	assert.NoError(t, reloaded.ClearTaskResult(1))
+	assert.False(t, reloaded.GetTask(1).GetAllFragmentsUnmapped())
+	assert.False(t, persisted.GetAllFragmentsUnmapped())
+}
+
+func TestExternalCollectionRefreshMeta_UnmappedResultSaveFailure(t *testing.T) {
+	ctx := context.Background()
+	catalog := &stubCatalog{}
+	meta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+	assert.NoError(t, err)
+	assert.NoError(t, meta.AddTask(&datapb.ExternalCollectionRefreshTask{TaskId: 1, JobId: 1, State: indexpb.JobState_JobStateInProgress}))
+	wrapper := newRefreshExternalCollectionTask(meta.GetTask(1), meta, nil, nil)
+	wrapper.processFinishedJob = func(int64) { t.Error("must not publish an unpersisted result") }
+	save := mockey.Mock((*stubCatalog).SaveExternalCollectionRefreshTask).Return(errors.New("save failed")).Build()
+	defer save.UnPatch()
+	assert.ErrorContains(t, wrapper.UpdateResultWithMeta(indexpb.JobState_JobStateFinished, "", nil, nil, true), "save failed")
+	assert.False(t, wrapper.GetAllFragmentsUnmapped())
+	assert.False(t, meta.GetTask(1).GetAllFragmentsUnmapped())
+	assert.False(t, meta.GetTask(1).GetResultReady())
 }

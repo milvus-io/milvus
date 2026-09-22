@@ -90,6 +90,7 @@ func NormalizeFileInfos(fileInfos []FileInfo, format string) ([]FileInfo, int) {
 // a row total at this layer. Real row counts are only available after manifest
 // construction where Fragment.RowCount = endRow - startRow.
 type FileInfo struct {
+	Columns         []string
 	FilePath        string
 	NumRows         int64
 	SourceSegmentID int64
@@ -132,8 +133,13 @@ func GetFileInfo(
 	if err := HandleLoonFFIResult(result); err != nil {
 		return nil, merr.WrapErrStorage(err, "loon_exttable_get_file_info failed")
 	}
+	columns, err := GetExternalFileColumns(format, filePath, storageConfig, extfs)
+	if err != nil {
+		return nil, merr.Wrap(err, "read external file columns")
+	}
 
 	return &FileInfo{
+		Columns:  columns,
 		FilePath: filePath,
 		NumRows:  int64(numRows),
 	}, nil

@@ -39,23 +39,25 @@ type TaskKey struct {
 
 // TaskInfo stores the mutable state of an external collection task.
 type TaskInfo struct {
-	Cancel          context.CancelFunc
-	State           indexpb.JobState
-	FailReason      string
-	CollID          int64
-	KeptSegments    []int64
-	UpdatedSegments []*datapb.SegmentInfo
+	Cancel               context.CancelFunc
+	State                indexpb.JobState
+	FailReason           string
+	CollID               int64
+	KeptSegments         []int64
+	UpdatedSegments      []*datapb.SegmentInfo
+	AllFragmentsUnmapped bool
 }
 
 // Clone creates a deep copy so callers can freely mutate the result.
 func (t *TaskInfo) Clone() *TaskInfo {
 	return &TaskInfo{
-		Cancel:          t.Cancel,
-		State:           t.State,
-		FailReason:      t.FailReason,
-		CollID:          t.CollID,
-		KeptSegments:    cloneSegmentIDs(t.KeptSegments),
-		UpdatedSegments: cloneSegments(t.UpdatedSegments),
+		Cancel:               t.Cancel,
+		State:                t.State,
+		FailReason:           t.FailReason,
+		CollID:               t.CollID,
+		KeptSegments:         cloneSegmentIDs(t.KeptSegments),
+		UpdatedSegments:      cloneSegments(t.UpdatedSegments),
+		AllFragmentsUnmapped: t.AllFragmentsUnmapped,
 	}
 }
 
@@ -185,6 +187,7 @@ func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
 	failReason string,
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	allFragmentsUnmapped bool,
 ) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -194,6 +197,7 @@ func (m *ExternalCollectionManager) UpdateResult(clusterID string, taskID int64,
 		info.FailReason = failReason
 		info.KeptSegments = append([]int64(nil), keptSegments...)
 		info.UpdatedSegments = cloneSegments(updatedSegments)
+		info.AllFragmentsUnmapped = allFragmentsUnmapped
 	}
 }
 
@@ -258,7 +262,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 					mlog.Any("panic", r),
 					mlog.ByteString("stack", stack))
 				reason := fmt.Sprintf("task panicked: %v", r)
-				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil)
+				m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, reason, info.KeptSegments, nil, false)
 				// A recovered panic is a server-side failure, never caller input.
 				retErr = merr.WrapErrServiceInternalMsg("%s", reason)
 			}
@@ -270,7 +274,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		// Execute the task
 		resp, err := taskFunc(taskCtx)
 		if err != nil {
-			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil)
+			m.UpdateResult(clusterID, taskID, indexpb.JobState_JobStateFailed, err.Error(), info.KeptSegments, nil, false)
 			mlog.Warn(m.ctx, "external collection task failed",
 				mlog.FieldTaskID(taskID),
 				mlog.Err(err))
@@ -283,7 +287,7 @@ func (m *ExternalCollectionManager) SubmitTask(
 		}
 		failReason := resp.GetFailReason()
 		kept := resp.GetKeptSegments()
-		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments())
+		m.UpdateResult(clusterID, taskID, state, failReason, kept, resp.GetUpdatedSegments(), resp.GetAllFragmentsUnmapped())
 		mlog.Info(m.ctx, "external collection task completed",
 			mlog.FieldTaskID(taskID))
 		return nil, nil

@@ -518,6 +518,10 @@ class Schema {
     bool
     RequiresSourceInsertTimestamps() const;
 
+    // Only ordinary historical source fields may be synthesized.
+    bool
+    CanFillMissingExternalField(FieldId field_id) const;
+
     // Return the physical column name used by external readers. Milvus-table
     // source fields use field ID strings; mapped external fields use
     // external_field; function outputs and internal storage columns use field
