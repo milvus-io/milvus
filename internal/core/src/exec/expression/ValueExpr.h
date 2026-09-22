@@ -30,7 +30,7 @@ namespace exec {
 
 class PhyValueExpr : public Expr {
  public:
-    PhyValueExpr(const std::vector<std::shared_ptr<Expr>>& input,
+    PhyValueExpr(std::vector<std::shared_ptr<Expr>> input,
                  const std::shared_ptr<const milvus::expr::ValueExpr> expr,
                  const std::string& name,
                  milvus::OpContext* op_ctx,
@@ -41,9 +41,9 @@ class PhyValueExpr : public Expr {
           expr_(expr),
           active_count_(active_count),
           batch_size_(batch_size) {
-        AssertInfo(input.empty(),
+        AssertInfo(inputs_.empty(),
                    "PhyValueExpr should not have input, but got " +
-                       std::to_string(input.size()));
+                       std::to_string(inputs_.size()));
     }
 
     void

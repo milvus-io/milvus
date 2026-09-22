@@ -457,7 +457,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
         value_arg_.SetValue<ValueType>(expr_->val_);
         arg_inited_ = true;
     }
-    ValueType val = value_arg_.GetValue<ValueType>();
+    const ValueType& val = value_arg_.GetValue<ValueType>();
     auto op_type = expr_->op_type_;
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -473,7 +473,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ValueType val,
+            const ValueType& val,
             int index) {
         if (data == nullptr) {
             processed_cursor += size;
@@ -711,7 +711,11 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
     }
 
     // get all elements.
-    auto val = GetValueFromProto<proto::plan::Array>(expr_->val_);
+    if (!arg_inited_) {
+        value_arg_.SetValue<proto::plan::Array>(expr_->val_);
+        arg_inited_ = true;
+    }
+    const auto& val = value_arg_.GetValue<proto::plan::Array>();
     if (val.array_size() == 0) {
         // rollback to bruteforce. no candidates will be filtered out via index.
         return ExecRangeVisitorImplArray<proto::plan::Array>(context);
@@ -725,7 +729,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             for (auto const& element : val.array()) {
                 auto e = GetValueFromProto<IndexInnerType>(element);
                 if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
-                    elems.push_back(e);
+                    elems.push_back(std::move(e));
                 }
             }
 
@@ -746,12 +750,12 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             };
 
             // filtering by index, get candidates.
-            std::function<bool(milvus::proto::plan::Array& /*val*/,
+            std::function<bool(const milvus::proto::plan::Array& /*val*/,
                                int64_t /*offset*/)>
                 is_same;
 
             if (segment_->is_chunked()) {
-                is_same = [this, reverse](milvus::proto::plan::Array& val,
+                is_same = [this, reverse](const milvus::proto::plan::Array& val,
                                           int64_t offset) -> bool {
                     auto [chunk_idx, chunk_offset] =
                         GetChunkByOffset(field_id_, offset);
@@ -764,7 +768,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(EvalCtx& context,
             } else {
                 auto size_per_chunk = segment_->size_per_chunk();
                 is_same = [this, size_per_chunk, reverse](
-                              milvus::proto::plan::Array& val,
+                              const milvus::proto::plan::Array& val,
                               int64_t offset) -> bool {
                     auto chunk_idx = offset / size_per_chunk;
                     auto chunk_offset = offset % size_per_chunk;
@@ -873,7 +877,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     TargetBitmapView valid_res(res_vec->GetValidRawData(), real_batch_size);
 
-    ExprValueType val = value_arg_.GetValue<ExprValueType>();
+    const ExprValueType& val = value_arg_.GetValue<ExprValueType>();
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -922,7 +926,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson(EvalCtx& context) {
             const int size,
             TargetBitmapView res,
             TargetBitmapView valid_res,
-            ExprValueType val) {
+            const ExprValueType& val) {
         if (data == nullptr) {
             processed_cursor += size;
             return;
@@ -1629,7 +1633,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         return res;
     }
     auto op_type = expr_->op_type_;
-    auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
+    auto execute_sub_batch = [op_type](Index* index_ptr,
+                                       const IndexInnerType& val) {
         TargetBitmap res;
         switch (op_type) {
             case proto::plan::GreaterThan: {
@@ -1695,7 +1700,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
         }
         return res;
     };
-    IndexInnerType val = value_arg_.GetValue<IndexInnerType>();
+    const IndexInnerType& val = value_arg_.GetValue<IndexInnerType>();
     auto res = ProcessIndexChunks<T>(execute_sub_batch, val);
     AssertInfo(res->size() == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -2257,7 +2262,7 @@ PhyUnaryRangeFilterExpr::ExecTextMatch() {
         value_arg_.SetValue<std::string>(expr_->val_);
         arg_inited_ = true;
     }
-    auto query = value_arg_.GetValue<std::string>();
+    const auto& query = value_arg_.GetValue<std::string>();
 
     int64_t slop = 0;
     if (expr_->op_type_ == proto::plan::PhraseMatch) {
@@ -2390,7 +2395,7 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase1(TargetBitmap& candidates) {
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto index = pinned_ngram_index_.get();
     AssertInfo(index != nullptr,
                "ngram index should not be null, field_id: {}",
@@ -2408,7 +2413,7 @@ PhyUnaryRangeFilterExpr::ExecuteNgramPhase2(TargetBitmap& candidates,
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto index = pinned_ngram_index_.get();
     AssertInfo(index != nullptr,
                "ngram index should not be null, field_id: {}",
@@ -2453,7 +2458,7 @@ PhyUnaryRangeFilterExpr::ExecFMMatch(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return std::nullopt;
@@ -2557,7 +2562,7 @@ PhyUnaryRangeFilterExpr::ExecNgramMatch(EvalCtx& context) {
         arg_inited_ = true;
     }
 
-    auto literal = value_arg_.GetValue<std::string>();
+    const auto& literal = value_arg_.GetValue<std::string>();
     auto real_batch_size = GetNextBatchSize();
     if (real_batch_size == 0) {
         return std::nullopt;
