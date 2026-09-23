@@ -54,8 +54,9 @@ var _ delegator.ChildSpawner = (*QueryNode)(nil)
 // seeks from (loadSplitChildRecovery).
 //
 // It is idempotent: a re-consume of the fence finds the source's child already
-// registered and returns it. A registered delegator the source does not front
-// is never returned or replaced (see reuseSplitChild).
+// registered and returns it. A registered delegator is never replaced; one
+// fronted by nobody is attached, one fronted by another source refused (see
+// reuseSplitChild).
 func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.SpawnChildParams) (delegator.ShardDelegator, error) {
 	targetVChannel := params.TargetVChannel
 	log := mlog.With(
@@ -267,21 +268,45 @@ func (node *QueryNode) getSplitTargetSegmentInfos(ctx context.Context, segmentID
 // broker does.
 const splitTargetSegmentInfoBatch = 1000
 
-// reuseSplitChild returns a delegator already registered for a split target
-// only if the spawning source fronts it, i.e. it is that source's own child
-// (re-consume of the fence). Anything else, typically a delegator querycoord
-// watched for the target on its own, forwards no delete to the source, and
-// fronting it would serve rows deleted on the target. It is refused with
-// ErrChannelReduplicate, which the source does not retry.
+// reuseSplitChild returns a delegator already registered for a split target,
+// fronted by the spawning source:
+//
+//   - the source's own child (a re-consume of the fence, or a recovery respawn
+//     racing it) is returned as is;
+//   - a delegator fronted by nobody -- typically one querycoord watched for the
+//     target on its own after adoption, while this spawn was waiting -- is
+//     attached: marked adopted (it is a shard querycoord manages, and must stay
+//     visible to it), fronted by the source, and made to forward every delete
+//     it already holds (its L0 and its buffer) to the source, since until now it
+//     forwarded none. Refusing it instead would leave the target pending, and
+//     every read through the source refused, until the source is released;
+//   - a delegator fronted by another source is refused with
+//     ErrChannelReduplicate: fronting it from here too would return its rows
+//     twice. The source retries, so the refusal ends when that parent lets go.
 func reuseSplitChild(ctx context.Context, existing delegator.ShardDelegator, params delegator.SpawnChildParams) (delegator.ShardDelegator, error) {
 	targetVChannel := params.TargetVChannel
-	if params.Parent != nil && existing.FrontingParent() == params.Parent {
+	switch parent := existing.FrontingParent(); {
+	case params.Parent != nil && parent == params.Parent:
 		mlog.Info(ctx, "split child delegator already registered, reuse it",
 			mlog.String("sourceVChannel", params.SourceVChannel), mlog.String("targetVChannel", targetVChannel))
 		return existing, nil
+	case params.Parent != nil && parent == nil:
+		// adopted first, so setting the parent never makes it an un-adopted
+		// child that GetDataDistribution would hide from querycoord.
+		existing.MarkAdopted()
+		existing.SetFrontingParent(params.Parent)
+		if err := existing.ForwardKnownDeletesToParent(ctx); err != nil {
+			// detach again, so the retry re-attaches and forwards them all.
+			existing.SetFrontingParent(nil)
+			return nil, merr.Wrap(err, "failed to attach the delegator serving the split target to its source")
+		}
+		mlog.Info(ctx, "attached the delegator already serving a split target to its source",
+			mlog.String("sourceVChannel", params.SourceVChannel), mlog.String("targetVChannel", targetVChannel))
+		return existing, nil
+	default:
+		return nil, merr.WrapErrChannelReduplicate(targetVChannel,
+			fmt.Sprintf("a delegator fronted by another source already serves the split target, not %s", params.SourceVChannel))
 	}
-	return nil, merr.WrapErrChannelReduplicate(targetVChannel,
-		fmt.Sprintf("a delegator not fronted by source %s already serves the split target", params.SourceVChannel))
 }
 
 // respawnSplitChildrenOnRecovery re-creates the in-process split children for a
