@@ -416,6 +416,23 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 		}
 	}
 
+	segmentTasks := b.segmentTasksFromPlans(ctx, segmentPlans, config, isStoppingBalance)
+	channelTasks := make([]task.Task, 0)
+
+	// Create channel tasks with error handling
+	if len(channelPlans) > 0 {
+		tasks := balance.CreateChannelTasksFromPlans(ctx, b.ID(), config.channelTaskTimeout, channelPlans)
+		if len(tasks) > 0 {
+			task.SetReason("channel unbalanced", tasks...)
+			channelTasks = append(channelTasks, tasks...)
+		}
+	}
+
+	return segmentTasks, channelTasks
+}
+
+// segmentTasksFromPlans turns segment balance plans into tasks.
+func (b *BalanceChecker) segmentTasksFromPlans(ctx context.Context, segmentPlans []assign.SegmentAssignPlan, config balanceConfig, isStoppingBalance bool) []task.Task {
 	// Set LoadPriority based on balance type:
 	// - Stopping balance (node draining): HIGH priority to quickly move data off stopping nodes
 	// - Normal balance: LOW priority to avoid interfering with user operations
@@ -428,7 +445,6 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 	}
 
 	segmentTasks := make([]task.Task, 0)
-	channelTasks := make([]task.Task, 0)
 	// Create segment tasks with error handling
 	if len(segmentPlans) > 0 {
 		tasks := balance.CreateSegmentTasksFromPlans(ctx, b.ID(), config.segmentTaskTimeout, segmentPlans)
@@ -438,17 +454,28 @@ func (b *BalanceChecker) generateBalanceTasksFromReplicas(ctx context.Context, b
 			segmentTasks = append(segmentTasks, tasks...)
 		}
 	}
+	return segmentTasks
+}
 
-	// Create channel tasks with error handling
-	if len(channelPlans) > 0 {
-		tasks := balance.CreateChannelTasksFromPlans(ctx, b.ID(), config.channelTaskTimeout, channelPlans)
-		if len(tasks) > 0 {
-			task.SetReason("channel unbalanced", tasks...)
-			channelTasks = append(channelTasks, tasks...)
+// segmentOnlyBalancer plans segment moves alone (balance.StoppingBalancer).
+type segmentOnlyBalancer interface {
+	BalanceReplicaSegments(ctx context.Context, replica *meta.Replica) []assign.SegmentAssignPlan
+}
+
+// stoppingSegmentTasks plans the segments to move off the replicas' stopping
+// nodes while channels are left there, when the balancer can plan them alone.
+func (b *BalanceChecker) stoppingSegmentTasks(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig) []task.Task {
+	segmentBalancer, ok := balancer.(segmentOnlyBalancer)
+	if !ok {
+		return nil
+	}
+	segmentPlans := make([]assign.SegmentAssignPlan, 0)
+	for _, rid := range replicas {
+		if replica := b.meta.Get(ctx, rid); replica != nil {
+			segmentPlans = append(segmentPlans, segmentBalancer.BalanceReplicaSegments(ctx, replica)...)
 		}
 	}
-
-	return segmentTasks, channelTasks
+	return b.segmentTasksFromPlans(ctx, segmentPlans, config, true)
 }
 
 // processBalanceQueue processes balance queue with common logic for both normal and stopping balance.
@@ -514,7 +541,15 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
+		plannedChannels := len(newChannelTasks)
 		newSegmentTasks, newChannelTasks = b.dropShardSplitFrozen(ctx, item.collectionID, newSegmentTasks, newChannelTasks, isStoppingBalance)
+		if isStoppingBalance && plannedChannels > 0 && len(newChannelTasks) == 0 && len(newSegmentTasks) == 0 {
+			// every channel left on the stopping nodes is held by a shard split,
+			// and the balancer plans no segment while one is left: drain the
+			// segments past it.
+			newSegmentTasks = b.stoppingSegmentTasks(ctx, balancer, replicasToBalance, config)
+			newSegmentTasks, _ = b.dropShardSplitFrozen(ctx, item.collectionID, newSegmentTasks, nil, isStoppingBalance)
+		}
 		generatedSegmentTaskNum += len(newSegmentTasks)
 		generatedChannelTaskNum += len(newChannelTasks)
 		b.submitTasks(newSegmentTasks, newChannelTasks)
