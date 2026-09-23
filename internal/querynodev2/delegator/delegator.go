@@ -1295,16 +1295,29 @@ func (sd *shardDelegator) waitFamilyTSafe(ctx context.Context, ts uint64, childr
 		return typeutil.MaxTimestamp, nil
 	}
 
-	// shard-split fronting: after the fence the source vchannel takes no DML, but
-	// the source pipeline keeps consuming time ticks, so its own tsafe keeps
-	// advancing and says nothing about the split key range's writes, which land
-	// on the children. A read therefore waits on the children's tsafe instead,
-	// and the source serves at the min over them — it never answers at t before
-	// every child has consumed and forwarded all deletes <= t.
+	// shard-split fronting: after the fence the split key range's writes land on
+	// the children, so the source's own tsafe does not bound them, and a read
+	// also waits on every child's. It does not replace the source's own tsafe:
+	// the source's delete node can still be behind the filter node that consumed
+	// the fence, and a bulk delete replay stalls it, so deletes <= t may not be
+	// applied to what the source serves until its own tsafe passes t. The family
+	// is served at min(own tsafe, children's tsafe).
 	if len(children) > 0 {
-		return sd.waitChildrenTSafe(ctx, children, ts)
+		childrenTSafe, err := sd.waitChildrenTSafe(ctx, children, ts)
+		if err != nil {
+			return 0, err
+		}
+		ownTSafe, err := sd.waitOwnTSafe(ctx, ts)
+		if err != nil {
+			return 0, err
+		}
+		return min(ownTSafe, childrenTSafe), nil
 	}
+	return sd.waitOwnTSafe(ctx, ts)
+}
 
+// waitOwnTSafe returns when this delegator's own tsafe reaches ts.
+func (sd *shardDelegator) waitOwnTSafe(ctx context.Context, ts uint64) (uint64, error) {
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "Delegator-waitTSafe")
 	defer sp.End()
 	log := sd.getLogger(ctx)
@@ -1447,21 +1460,15 @@ func (sd *shardDelegator) UpdateTSafe(tsafe uint64) {
 }
 
 func (sd *shardDelegator) GetTSafe() uint64 {
-	// shard-split fronting: the source serves the merged shard at min(child
-	// tsafes). Its own view takes no DML after the fence, so it is complete at any
-	// later timestamp, and its own tsafe (which keeps advancing on time ticks)
-	// does not bound the split key range; the children's progress does.
-	if children := sd.frontingChildren(); len(children) > 0 {
-		var minTSafe uint64
-		for i, child := range children {
-			childTSafe := child.GetTSafe()
-			if i == 0 || childTSafe < minTSafe {
-				minTSafe = childTSafe
-			}
-		}
-		return minTSafe
+	// shard-split fronting: the source serves the merged shard at min(own tsafe,
+	// child tsafes), as waitFamilyTSafe does. Its own tsafe does not bound the
+	// split key range's writes, which land on the children, but it does bound
+	// the deletes it has applied to its own view.
+	minTSafe := sd.latestTsafe.Load()
+	for _, child := range sd.frontingChildren() {
+		minTSafe = min(minTSafe, child.GetTSafe())
 	}
-	return sd.latestTsafe.Load()
+	return minTSafe
 }
 
 // CatchingUpStreamingData returns true if delegator is still catching up with streaming data.
