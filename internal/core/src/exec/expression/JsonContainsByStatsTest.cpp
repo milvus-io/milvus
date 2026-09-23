@@ -1527,7 +1527,7 @@ TEST(JsonContainsByStatsTest, GroupByScalarReadersSurviveBuildUploadLoad) {
                                           field.get(),
                                           5266,
                                           1);
-    ShreddedOnlyGroupBySegment segment(schema, stats);
+    ShreddedOnlyGroupBySegment segment(schema, std::move(stats));
     auto strings = exec::GetDataGetter<std::string, Json>(
         nullptr, segment, field, "/s", DataType::VARCHAR);
     auto integers = exec::GetDataGetter<int64_t, Json>(
