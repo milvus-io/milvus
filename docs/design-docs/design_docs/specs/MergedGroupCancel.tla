@@ -8,19 +8,26 @@
 (* member must not end the others. Cancellation can land at any of four    *)
 (* moments: before the request is enqueued, while the group waits in the   *)
 (* queue, between the group leaving the queue and reaching the executor,   *)
-(* and while the group is executing. Tests can sample those moments; this  *)
-(* model enumerates every interleaving of them.                            *)
+(* and while the group is executing. A waiting group can also leave the    *)
+(* queue a third way, through the expiry sweep that runs when the queue is *)
+(* full. Tests can sample these moments; this model enumerates every       *)
+(* interleaving of them.                                                   *)
 (*                                                                         *)
 (* Modelled from internal/querynodev2/tasks/search_task.go (Merge,         *)
 (* PruneCanceled, useGroupContext, Done) and                              *)
 (* internal/util/searchutil/scheduler/concurrent_safe_scheduler.go         *)
-(* (setupExecListener, schedule, exec) on branch                           *)
+(* (setupExecListener, schedule, exec, cleanupExpiredTasks) and            *)
+(* internal/util/searchutil/scheduler/tasks.go (cleanupReady) on branch    *)
 (* cancel-5-merged-group-isolation.                                        *)
 (*                                                                         *)
 (* Deliberately left out, because none of it bears on the property:        *)
 (*  - which searches may merge (topk ratio, mvcc timestamp, expression     *)
 (*    plan, segment set): merging is simply allowed or not, at will;       *)
-(*  - time, deadlines and queue expiry;                                    *)
+(*  - time. A request whose deadline has passed, or is close enough that   *)
+(*    the expiry sweep treats it as passed, is modelled the same way as a  *)
+(*    canceled one: its context is done, and the environment may make it  *)
+(*    so at any moment. The sweep itself only runs when the queue is full; *)
+(*    here it may run at any time, which admits strictly more behaviours;  *)
 (*  - what a search computes. Its call either succeeds or fails.           *)
 (* Every request carries one unit of work, so a group's size is its member *)
 (* count and the scheduler's work counter counts requests.                 *)
@@ -35,13 +42,19 @@
 (* work a group is debited is the work it was credited with when it was    *)
 (* enqueued, not what is left of it after pruning. Setting it FALSE debits *)
 (* the pruned size instead, which is the obvious way to write it.          *)
+(*                                                                         *)
+(* IsolateExpiry covers the expiry sweep. Setting it FALSE lets the sweep  *)
+(* decide on the owner's context alone and end the whole group with the    *)
+(* owner's error, which is what the code still did after the two pruning   *)
+(* points were isolated and before the sweep was.                          *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS
     Tasks,
     Isolation,    \* TRUE models this branch; FALSE models the code it replaces
-    RememberNQ    \* TRUE debits the work the counters were credited with
+    RememberNQ,   \* TRUE debits the work the counters were credited with
+    IsolateExpiry \* TRUE lets the expiry sweep take a group only when all of it is done
 
 VARIABLES
     loc,        \* Tasks -> where the request is
@@ -222,11 +235,35 @@ Run(o, err) ==
                       ELSE result[t]]
     /\ UNCHANGED <<owner, canceled, heldNQ, wCount, wNQ>>
 
+(***************************************************************************)
+(* The expiry sweep. When the queue is full it takes out the waiting       *)
+(* groups that are done, so that a new request has room. Isolated, a group *)
+(* is done only when every one of its requests is, and each is told its    *)
+(* own reason. Otherwise the owner's context speaks for the whole group,   *)
+(* and every request in it is told the owner's error.                      *)
+(***************************************************************************)
+ExpireFromQueue(o) ==
+    LET M == Members(o) IN
+    /\ loc[o] = "queued"
+    /\ owner[o] = o
+    /\ IF IsolateExpiry THEN M \subseteq canceled ELSE o \in canceled
+    /\ loc'      = [t \in Tasks |-> IF t \in M THEN "done" ELSE loc[t]]
+    /\ notified' = [t \in Tasks |-> IF t \in M THEN notified[t] + 1 ELSE notified[t]]
+    \* Isolated, each request is told its own reason, and since every one of
+    \* them is done, that reason is its own cancellation. Otherwise all of
+    \* them are told the owner's.
+    /\ result'   = [t \in Tasks |-> IF t \in M THEN "canceled" ELSE result[t]]
+    \* The group never left the queue through the executor, so nothing was
+    \* remembered for it: the whole of what it was credited with is debited.
+    /\ wCount'   = wCount - 1
+    /\ wNQ'      = wNQ - Cardinality(M)
+    /\ UNCHANGED <<owner, canceled, heldNQ>>
+
 Arrive(t)  == SubmitRefused(t) \/ SubmitAlone(t) \/ (\E o \in Tasks : SubmitMerged(t, o))
 Advance(t) == Arrive(t) \/ Dequeue(t) \/ HandToExecutor(t) \/ PruneBeforeRun(t)
                         \/ (\E e \in {"ok", "grouperr"} : Run(t, e))
 
-Next == \E t \in Tasks : Cancel(t) \/ Advance(t)
+Next == \E t \in Tasks : Cancel(t) \/ Advance(t) \/ ExpireFromQueue(t)
 
 Spec == Init /\ [][Next]_vars /\ \A t \in Tasks : WF_vars(Advance(t))
 

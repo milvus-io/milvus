@@ -52,7 +52,7 @@ main `3e15e837` and cardinal `0b9f18bb`.
 | Proxy entry | `internal/proxy/impl.go:3016` (Search), `:3251` (HybridSearch), `:3886` (Query) | The task stores the gRPC request ctx as is. Nothing wraps it with `WithCancel`, so there is no cancel function to call. |
 | Proxy scheduler | `internal/proxy/scheduler/task_scheduler.go:567-611` | `processTask` derives its ctx from `t.TraceCtx()` for all three phases; canceling the task ctx cancels the whole execution. |
 | Proxy to QueryNode | `internal/proxy/task_search.go:1540`, `task_query.go:1125` | The task ctx is the ctx of the gRPC call; cancellation aborts the RPC. |
-| QueryNode scheduler | `internal/util/searchutil/scheduler/concurrent_safe_scheduler.go:99, 230, 352, 289` | The ctx is checked before enqueue, at dequeue and before execution. During execution the task body checks. |
+| QueryNode scheduler | `internal/util/searchutil/scheduler/concurrent_safe_scheduler.go:99, 230, 352, 289` | The ctx is checked before enqueue, at dequeue, before execution, and by the expiry sweep that runs when the queue is full. During execution the task body checks. |
 | Delegator | `internal/querynodev2/delegator/delegator.go:1049-1082` | Sub-requests to workers use an `errgroup` ctx derived from the caller's; gRPC propagates cancellation to remote QueryNodes. |
 | Segment level | `internal/querynodev2/segments/search.go:102, 154, 169` | The ctx is checked before each segment's cgo call. |
 | cgo future | `internal/util/cgo/manager_active.go:99-123`, `futures.go:169-184` | A `reflect.Select` over every future's `ctx.Done` calls `C.future_cancel`. Event driven, not polled. |
@@ -189,23 +189,27 @@ message CancelRequestsResponse {
 Section 2.7 asks that canceling one request in a merged QueryNode group not
 affect the others. A cancellation can land at four moments: before the request
 is enqueued, while the group waits in the queue, between the group leaving the
-queue and reaching the executor, and while the group is executing. Tests reach
-those moments one at a time and cannot show that no other ordering breaks the
-rule.
+queue and reaching the executor, and while the group is executing. A waiting
+group can also leave the queue through the expiry sweep, which runs when the
+queue is full. Tests reach these one at a time and cannot show that no other
+ordering breaks the rule.
 
 `specs/MergedGroupCancel.tla` is a TLA+ model of the group's journey, checked
 with TLC. It enumerates every interleaving of arrival, merging, cancellation,
-the two pruning points and the search itself, and checks that every caller is
-answered exactly once, that a canceled request is told it was canceled, that
-a request nobody canceled is never told it was, that the scheduler's waiting
-counters are conserved across pruning, and that every request is eventually
-answered. Four requests is 144,771 distinct states and five is 3,909,257, both
-with no violation.
+the two pruning points, the expiry sweep and the search itself, and checks that
+every caller is answered exactly once, that a canceled request is told it was
+canceled, that a request nobody canceled is never told it was, that the
+scheduler's waiting counters are conserved across pruning, and that every
+request is eventually answered. Four requests is 145,243 distinct states and
+five is 3,916,092, both with no violation.
 
-Two of the model's constants turn it back into the behaviour this design
+Three of the model's constants turn it back into behaviour this design
 replaces, so each property is shown to fail there rather than only to hold
-here. `specs/README.md` records what the model leaves out and what has to be
-revisited when the code changes.
+here. One of them is the expiry sweep deciding on the owner's context alone.
+An earlier version of the model left the sweep out as unrelated to the rule;
+review found the sweep broke the rule, and the model with the sweep added
+reports exactly that case. `specs/README.md` records what the model still
+leaves out and what has to be revisited when the code changes.
 
 ### When a proxy does not answer
 
@@ -377,12 +381,27 @@ request depends on one fact, whether the group has started executing:
 
 Implementation: at dequeue, filter members whose ctx is canceled and `Done`
 each with its own `ctx.Err()`; if the owner was canceled, rebuild the group
-from the remaining members via the existing `Merge`. Run the segcore call under
-a ctx that is canceled only when every member's ctx is canceled
+from the remaining members via the existing `Merge`. Do the same again right
+before execution, logging how many were dropped and why. Run the segcore call
+under a ctx that is canceled only when every member's ctx is canceled
 (`context.WithoutCancel(owner.ctx)` to keep trace values, plus
 `context.AfterFunc` on each member's ctx decrementing a counter). At `Done`, a
 member whose own ctx is canceled receives its `ctx.Err()`; the others receive
 the result. `MergeWith` refuses members whose ctx is already canceled.
+
+A waiting group leaves the queue a third way: the expiry sweep, which runs when
+the queue is full and takes out the tasks that are done. The queue holds only
+the owner's ctx, so the sweep must ask the group instead. A group is taken out
+only when every member is canceled or due, and each member is told its own
+reason, `ctx.Err()` or `DeadlineExceeded` when the sweep takes it a little
+ahead of its deadline. Members can carry deadlines up to the merge gap apart,
+so one member coming due says nothing about the rest. A group with a live
+member stays in the queue, and a new request is refused while the queue is
+still full.
+
+The group histograms (`QueryNodeSearchGroupSize`, `GroupNQ`, `GroupTopK`)
+describe the groups that reach the executor, once each, at the size they reach
+it with. A request that is pruned or expires before then is not counted.
 
 ### Index layer status codes (independent, not a prerequisite)
 
@@ -391,15 +410,22 @@ vector, but both report the cancellation as an engine inner error. The fixes
 below make logs and metrics accurate; they are not required for cancellation to
 take effect or for the proxy's decisions, which rely on ctx state.
 
-- knowhere: add `Status::canceled` and `StatusCategory::canceled`; map it to
-  `FollyCancel` in `ToSegcoreErrorCode`; catch `folly::FutureCancellation`
-  before `std::exception` in each search path; let `GuardedCall` catch it as a
-  last resort (zilliztech/knowhere#1831).
-- cardinal: add `CardinalStatus::canceled`, map it in `convertStatus`, and
+The names below are the ones in those repositories, which spell the status
+`cancelled`.
+
+- knowhere: `Status::cancelled` and `StatusCategory::cancelled`, mapped to
+  `FollyCancel` in `ToSegcoreErrorCode`. Each search path catches
+  `folly::FutureCancellation` before `std::exception`, the multi-vector
+  strategies and their shared rerank pass the status through instead of
+  rewriting it, and `GuardedCall` catches it as a last resort. Merged in
+  zilliztech/knowhere#1835 (issue zilliztech/knowhere#1831).
+- cardinal: add `CardinalStatus::cancelled`, map it in `convertStatus`, and
   throw `FutureCancellation` from `chunk_translator` instead of
   `CardinalException`. After knowhere.
-- milvus: map `canceled` to `FollyCancel` in `Utils.h` when the knowhere
-  version is bumped.
+- milvus: map `knowhere::Status::cancelled` to `FollyCancel` in `Utils.h`, with
+  the knowhere version bumped to include #1835. Measured on an HNSW index: the
+  QueryNode records the task as `cancel` rather than `fail`, and segcore reports
+  2038 (`FollyCancel`) rather than 2099 (`KnowhereError`).
 
 ### Observability
 
@@ -416,10 +442,11 @@ take effect or for the proxy's decisions, which rely on ctx state.
   API changes.
 - During a rolling upgrade, requests on older proxies cannot be listed or
   canceled; the response marks those nodes `unimplemented`.
-- Until the knowhere and cardinal status fixes land, a canceled request
-  returns `KnowhereError` (2099) from the QueryNode and logs an inner error.
-  Cancellation still takes effect and the proxy's blacklist decision is
-  unaffected, because it keys on ctx state.
+- Until milvus takes the knowhere build with #1835, and on the cardinal path
+  until the cardinal change lands, a canceled request returns `KnowhereError`
+  (2099) from the QueryNode and logs an inner error. Cancellation still takes
+  effect and the proxy's blacklist decision is unaffected, because it keys on
+  ctx state.
 - SDKs must treat 3002 as non-retriable.
 
 ## Known limits
@@ -475,7 +502,7 @@ Remaining limits:
 | 3 | milvus-proto | two RPCs, messages, two privilege enums | none |
 | 4 | milvus | internal rpcs in `root_coord.proto` and `proxy.proto`; `ProxyClientManager` methods; RootCoord implementation and MixCoord forwarding; proxy handlers with merge and dedup; privilege tables; REST v2; regenerated mocks | 2, 3 |
 | 5 | milvus | QueryNode merged-group cancellation isolation (#53508) | none, independent bug fix |
-| 6 | knowhere, cardinal, milvus | `canceled` status, released in that order | none |
+| 6 | knowhere, cardinal, milvus | `cancelled` status in the index layers, released in that order; knowhere merged | none |
 | 7 | pymilvus / Go SDK | two interfaces; 3002 not retried | 3 |
 
 PRs 1, 2 and 5 do not touch proto and can be backported to 2.6 and 3.0.
