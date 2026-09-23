@@ -81,7 +81,7 @@ func channelDiff(t *testing.T, states *milvuspb.DescribeCollectionResponse,
 	nextTarget, currentTarget map[string]*meta.DmChannel, inDist ...string,
 ) (loaded, released []string) {
 	return channelDiffWith(t, func(broker *meta.MockBroker) {
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(states, nil).Maybe()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(states, nil).Maybe()
 	}, nil, nextTarget, currentTarget, inDist...)
 }
 
@@ -219,7 +219,7 @@ func TestAFenceRaceWithAStaleCacheDoesNotWatchTheTargets(t *testing.T) {
 	}
 	current := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1)}
 	preFence := func(broker *meta.MockBroker) {
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"v0"},
 			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
 		}, nil).Maybe()
@@ -242,7 +242,7 @@ func TestAnAdoptedTargetIsNotWatchedFromTheWindowSnapshot(t *testing.T) {
 	}
 	current := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1)}
 	adopted := func(broker *meta.MockBroker) {
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(delistedSplitResp(), nil).Maybe()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(delistedSplitResp(), nil).Maybe()
 	}
 	loaded, _ := channelDiffWith(t, adopted, typeutil.NewSet("v1", "v2"), window, current, "v0")
 	assert.Empty(t, loaded, "a window target is watched only from a pull that no longer marks it")
@@ -262,7 +262,7 @@ func TestNothingIsWatchedWhileTheShardStatesAreUnknown(t *testing.T) {
 		"v1": servingChannel("v1", 1),
 	}
 	describeFails := func(broker *meta.MockBroker) {
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).
 			Return(nil, merr.WrapErrServiceUnavailable("rootcoord not ready")).Maybe()
 	}
 	loaded, released := channelDiffWith(t, describeFails, nil, next, nil)
@@ -311,7 +311,7 @@ func affinityLoads(t *testing.T, sourceReadOnly bool) map[string]int64 {
 	}).Maybe()
 	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), meta.NextTarget).Return(nil).Maybe()
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(delistedSplitResp(), nil).Maybe()
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(delistedSplitResp(), nil).Maybe()
 
 	scheduler := task.NewMockScheduler(t)
 	scheduler.EXPECT().GetChannelTaskDelta(mock.Anything, mock.Anything).Return(0).Maybe()
@@ -381,7 +381,7 @@ func TestSplitSourceAffinityPinsOnlyWhatItCanJustify(t *testing.T) {
 	}
 	listing := func(names ...string) func(*meta.MockBroker) {
 		return func(broker *meta.MockBroker) {
-			broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+			broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
 				VirtualChannelNames: names,
 			}, nil).Maybe()
 		}
@@ -413,7 +413,7 @@ func TestSplitSourceAffinityPinsOnlyWhatItCanJustify(t *testing.T) {
 	})
 	t.Run("shard states unknown", func(t *testing.T) {
 		checker, replica := build(t, func(broker *meta.MockBroker) {
-			broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(nil, merr.WrapErrServiceUnavailable("down")).Maybe()
+			broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(nil, merr.WrapErrServiceUnavailable("down")).Maybe()
 		}, map[string]int64{"v0": 2})
 		_, ok := checker.splitSourceAffinity(ctx, replica)("v1", rw)
 		assert.False(t, ok)
