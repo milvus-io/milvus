@@ -367,7 +367,11 @@ message VchannelInfo {
   repeated int64 level_zero_segment_ids = 12;
   map<int64, int64> partition_stats_versions = 13;
   // delete record which ts is smaller than delete_checkpoint already be dispatch to sealed segments.
-  msg.MsgPosition delete_checkpoint = 14; 
+  msg.MsgPosition delete_checkpoint = 14;
+  // Set by DataCoord on a shard split source's recovery info while the split has not finished on
+  // this cluster: the split's target vchannels. Empty for every channel that is not an unfinished
+  // split source; a QueryNode recovers split children only when it is non-empty.
+  repeated string split_target_channels = 15;
 }
 
 message WatchDmChannelsRequest {
