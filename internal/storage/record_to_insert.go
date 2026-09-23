@@ -22,6 +22,60 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// GenerateMissingFieldArrays materializes fields known to be physically absent.
+// Callers must derive fields from storage metadata, not from NULL values in a
+// batch. The caller owns the returned arrays; failures release partial results.
+func GenerateMissingFieldArrays(fields []*schemapb.FieldSchema, numRows int) (map[FieldID]arrow.Array, error) {
+	columns := make(map[FieldID]arrow.Array, len(fields))
+	for _, field := range fields {
+		column, err := GenerateEmptyArrayFromSchema(field, numRows)
+		if err != nil {
+			for _, allocated := range columns {
+				allocated.Release()
+			}
+			return nil, err
+		}
+		if previous := columns[field.GetFieldID()]; previous != nil {
+			previous.Release()
+		}
+		columns[field.GetFieldID()] = column
+	}
+	return columns, nil
+}
+
+// RecordToInsertDataWithDefaults applies physically missing field defaults
+// before conversion, preserving NULLs in every physically present field.
+// It borrows rec and never changes or releases the caller's record.
+func RecordToInsertDataWithDefaults(rec Record, schema *schemapb.CollectionSchema, requiredFields typeutil.Set[int64], missingFields []*schemapb.FieldSchema) (*InsertData, error) {
+	if rec == nil || rec.Len() == 0 || len(missingFields) == 0 {
+		return RecordToInsertData(rec, schema, requiredFields)
+	}
+	columns, err := GenerateMissingFieldArrays(missingFields, rec.Len())
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		for _, column := range columns {
+			column.Release()
+		}
+	}()
+	return RecordToInsertData(&defaultValueRecord{Record: rec, columns: columns}, schema, requiredFields)
+}
+
+// defaultValueRecord is a borrowed view used only during InsertData conversion.
+type defaultValueRecord struct {
+	Record
+	columns map[FieldID]arrow.Array
+}
+
+func (r *defaultValueRecord) Column(fieldID FieldID) arrow.Array {
+	if column, ok := r.columns[fieldID]; ok {
+		return column
+	}
+	column, _ := recordColumn(r.Record, fieldID)
+	return column
+}
+
 // RecordToInsertData converts a Record batch into *InsertData using the provided
 // collection schema. Columns are matched by Milvus field id through the Record
 // abstraction.

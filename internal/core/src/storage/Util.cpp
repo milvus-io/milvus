@@ -662,6 +662,60 @@ CreateArrowBuilder(DataType data_type,
     }
 }
 
+std::shared_ptr<arrow::Array>
+CreateDefaultArrowArray(const FieldMeta& field_meta, int64_t num_rows) {
+    auto data_type = field_meta.get_data_type();
+    std::shared_ptr<arrow::ArrayBuilder> builder;
+
+    if (data_type == milvus::DataType::VECTOR_ARRAY) {
+        AssertInfo(field_meta.is_nullable(),
+                   "only nullable vector array fields can be "
+                   "dynamically added");
+        builder =
+            milvus::storage::CreateArrowBuilder(data_type,
+                                                field_meta.get_element_type(),
+                                                field_meta.get_dim(),
+                                                true);
+    } else if (IsVectorDataType(data_type)) {
+        AssertInfo(field_meta.is_nullable(),
+                   "only nullable vector fields can be dynamically added");
+        builder = std::make_shared<arrow::BinaryBuilder>();
+    } else {
+        builder = milvus::storage::CreateArrowBuilder(data_type);
+    }
+
+    arrow::Status ast;
+    if (field_meta.default_value().has_value()) {
+        ast = builder->Reserve(num_rows);
+        if (!ast.ok()) {
+            ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                      "reserve arrow builder failed: {}",
+                      ast.ToString());
+        }
+        auto default_scalar =
+            storage::CreateArrowScalarFromDefaultValue(field_meta);
+        ast = builder->AppendScalar(*default_scalar, num_rows);
+    } else {
+        ast = builder->AppendNulls(num_rows);
+    }
+    if (!ast.ok()) {
+        ThrowInfo(milvus::storage::ArrowStatusToErrorCode(ast),
+                  "append null/default values to arrow builder failed: {}",
+                  ast.ToString());
+    }
+
+    auto finish_result = builder->Finish();
+    if (!finish_result.ok()) {
+        // ValueOrDie would abort the process; a Finish failure (allocation)
+        // must surface as a classified, retriable error instead.
+        ThrowInfo(
+            milvus::storage::ArrowStatusToErrorCode(finish_result.status()),
+            "finish arrow builder for default values failed: {}",
+            finish_result.status().ToString());
+    }
+    return finish_result.ValueUnsafe();
+}
+
 std::shared_ptr<arrow::Scalar>
 CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta) {
     const auto& default_var = field_meta.default_value();

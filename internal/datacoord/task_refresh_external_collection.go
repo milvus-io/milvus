@@ -185,8 +185,9 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	failReason string,
 	keptSegments []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	allFragmentsUnmapped bool,
 ) error {
-	if err := t.refreshMeta.UpdateTaskResult(t.GetTaskId(), state, failReason, keptSegments, updatedSegments); err != nil {
+	if err := t.refreshMeta.UpdateTaskResult(t.GetTaskId(), state, failReason, keptSegments, updatedSegments, allFragmentsUnmapped); err != nil {
 		mlog.Warn(context.TODO(), "update refresh task result failed",
 			mlog.Int64("taskID", t.GetTaskId()),
 			mlog.String("state", state.String()),
@@ -197,6 +198,7 @@ func (t *refreshExternalCollectionTask) UpdateResultWithMeta(
 	t.SetState(state, failReason)
 	t.KeptSegments = append([]int64(nil), keptSegments...)
 	t.UpdatedSegments = cloneProtoSegments(updatedSegments)
+	t.AllFragmentsUnmapped = allFragmentsUnmapped
 
 	if state == indexpb.JobState_JobStateFinished || state == indexpb.JobState_JobStateFailed {
 		if t.processFinishedJob != nil {
@@ -218,6 +220,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 	baselineSegmentIDs []int64,
 	keptSegmentIDs []int64,
 	updatedSegments []*datapb.SegmentInfo,
+	allFragmentsUnmapped bool,
 	logFields ...mlog.Field,
 ) error {
 	if mt == nil {
@@ -229,6 +232,10 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			mlog.Int("keptSegments", len(keptSegmentIDs)),
 			mlog.Int("updatedSegments", len(updatedSegments)),
 		)...)
+
+	if allFragmentsUnmapped && (len(keptSegmentIDs) > 0 || len(updatedSegments) > 0) {
+		return merr.WrapErrServiceInternalMsg("unmapped refresh result must not contain segments")
+	}
 
 	keptSegmentMap := make(map[int64]bool)
 	for _, segID := range keptSegmentIDs {
@@ -295,9 +302,9 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 		mlog.Int("upsertSegments", len(upsertSegmentMap)),
 		mlog.Int("finalSegmentCount", finalSegmentCount))
 
-	// Safety check: reject if dropping all segments without adding new ones
-	// This prevents accidental data loss from malformed worker responses
-	if baselineSegmentCount > 0 && finalSegmentCount == 0 {
+	// Reject unexplained empty results; only fully inspected unmapped
+	// source ranges may intentionally remove all baseline segments.
+	if baselineSegmentCount > 0 && finalSegmentCount == 0 && !allFragmentsUnmapped {
 		mlog.Error(ctx, "safety check failed: refusing to drop all segments without replacement",
 			mlog.Int("baselineSegmentCount", baselineSegmentCount),
 			mlog.Int("keptSegments", len(keptSegmentMap)),
@@ -641,6 +648,10 @@ func validateExternalRefreshBinlogRowCount(segment *datapb.SegmentInfo, expected
 }
 
 func applyExternalRefreshPatch(oldSeg *SegmentInfo, incoming *datapb.SegmentInfo) *SegmentInfo {
+	// TODO: Unify index invalidation with internal backfill when a manifest patch
+	// changes field values (for example, defaults becoming source values). Keeping
+	// the segment ID also keeps its index records; this patch does not invalidate
+	// or rebuild them. Resolve publication and index replacement together.
 	cloned := oldSeg.Clone()
 	cloned.ManifestPath = incoming.GetManifestPath()
 	cloned.SchemaVersion = incoming.GetSchemaVersion()
@@ -890,6 +901,7 @@ func (t *refreshExternalCollectionTask) QueryTaskOnWorker(cluster session.Cluste
 			"",
 			resp.GetKeptSegments(),
 			resp.GetUpdatedSegments(),
+			resp.GetAllFragmentsUnmapped(),
 		); err != nil {
 			mlog.Warn(context.TODO(), "failed to update task state to Finished", mlog.Err(err))
 			return

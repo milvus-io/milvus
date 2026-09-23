@@ -157,6 +157,7 @@ CreateExternalSegment(SegmentSealedUPtr& holder,
 class MockTakeReader : public milvus_storage::api::Reader {
  public:
     std::shared_ptr<arrow::Table> table_;
+    int take_calls = 0;
 
     explicit MockTakeReader(std::shared_ptr<arrow::Table> table)
         : table_(std::move(table)) {
@@ -183,6 +184,7 @@ class MockTakeReader : public milvus_storage::api::Reader {
          size_t,
          const std::shared_ptr<std::vector<std::string>>& needed_columns)
         override {
+        ++take_calls;
         if (!table_) {
             return arrow::Status::Invalid("no table");
         }
@@ -3902,4 +3904,93 @@ TEST(NormalizeExternalArrow, NonMatchingTypePassthrough) {
 
     EXPECT_EQ(result->type_id(), arrow::Type::INT64);
     EXPECT_EQ(result.get(), arr.get());
+}
+
+TEST(ExternalTakeTest, DefaultOutputsBypassTakeBeforeIO) {
+    auto [schema,
+          bool_id,
+          int8_id,
+          int16_id,
+          int32_id,
+          int64_id,
+          float_id,
+          double_id,
+          varchar_id,
+          vec_id] = BuildExternalSchema();
+    SegmentSealedUPtr holder;
+    auto* segment = CreateExternalSegment(holder, schema);
+    // The reader could return a value, but the published default marker is
+    // authoritative. Neither search nor retrieve may issue this take.
+    auto reader = std::make_unique<MockTakeReader>(BuildTestArrowTable());
+    auto* counter = reader.get();
+    segment->SetReaderForTesting(std::move(reader));
+    segment->SetUseTakeForOutputForTesting(true);
+    segment->SetDefaultFieldsForTesting({int64_id});
+    segment->SetUseTakeForOutputForTesting(true);
+    int64_t offsets[] = {0, 1};
+    auto plan = std::make_unique<query::RetrievePlan>(schema);
+    plan->field_ids_ = {varchar_id, int64_id};
+    auto output = std::make_unique<proto::segcore::RetrieveResults>();
+    EXPECT_FALSE(segment->TryTakeForRetrieve(
+        plan.get(), output, offsets, 2, false, false));
+    EXPECT_EQ(output->fields_data_size(), 0);
+    auto search = std::make_unique<query::Plan>(schema);
+    search->target_entries_ = {varchar_id, int64_id};
+    SearchResult results;
+    EXPECT_FALSE(
+        segment->TestTryTakeForSearch(search.get(), offsets, 2, results));
+    EXPECT_TRUE(results.output_fields_data_.empty());
+    EXPECT_EQ(counter->take_calls, 0);
+    // A default used elsewhere in the query does not disable physical output.
+    plan->field_ids_ = {varchar_id};
+    EXPECT_TRUE(segment->TryTakeForRetrieve(
+        plan.get(), output, offsets, 2, false, false));
+    EXPECT_EQ(counter->take_calls, 1);
+}
+
+TEST(ExternalTakeTest, MissingPhysicalOutputsBypassTakeWithoutDefaultMarker) {
+    for (bool external : {false, true}) {
+        SCOPED_TRACE(external);
+        auto [schema,
+              bool_id,
+              int8_id,
+              int16_id,
+              int32_id,
+              int64_id,
+              float_id,
+              double_id,
+              varchar_id,
+              vec_id] = BuildExternalSchema();
+        if (!external) {
+            schema->set_external_source("");
+        }
+        SegmentSealedUPtr holder;
+        auto* segment = CreateExternalSegment(holder, schema);
+        proto::segcore::SegmentLoadInfo info;
+        info.set_segmentid(1);
+        info.set_num_of_rows(kTestRows);
+        info.set_manifest_path("/manifest/without_output_column");
+        segment->SetLoadInfo(info);
+        auto reader = std::make_unique<MockTakeReader>(BuildTestArrowTable());
+        auto* counter = reader.get();
+        segment->SetReaderForTesting(std::move(reader));
+        segment->SetUseTakeForOutputForTesting(true);
+        auto load_info_snapshot = segment->TestGetLoadInfoSnapshot();
+        ASSERT_NE(load_info_snapshot, nullptr);
+        ASSERT_FALSE(load_info_snapshot->IsFieldFilledWithDefault(int64_id));
+        int64_t offsets[] = {0, 1};
+        auto plan = std::make_unique<query::RetrievePlan>(schema);
+        plan->field_ids_ = {int64_id};
+        auto output = std::make_unique<proto::segcore::RetrieveResults>();
+        EXPECT_FALSE(segment->TryTakeForRetrieve(
+            plan.get(), output, offsets, 2, false, false));
+        EXPECT_EQ(output->fields_data_size(), 0);
+        auto search = std::make_unique<query::Plan>(schema);
+        search->target_entries_ = {int64_id};
+        SearchResult results;
+        EXPECT_FALSE(
+            segment->TestTryTakeForSearch(search.get(), offsets, 2, results));
+        EXPECT_TRUE(results.output_fields_data_.empty());
+        EXPECT_EQ(counter->take_calls, 0);
+    }
 }

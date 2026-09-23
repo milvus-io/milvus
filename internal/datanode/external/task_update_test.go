@@ -316,10 +316,11 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Zero
 		TaskID:       s.taskID,
 	}
 	task := s.newTask(ctx, req)
+	task.columns = []string{"id", "revision"}
 
 	fragments := []packed.Fragment{
-		{FragmentID: 1, RowCount: 0, FilePath: "s3://bucket/zero.parquet"},
-		{FragmentID: 2, RowCount: 0, FilePath: "s3://bucket/zero2.parquet"},
+		{FragmentID: 1, RowCount: 0, FilePath: "s3://bucket/zero.parquet", Columns: []string{"id"}},
+		{FragmentID: 2, RowCount: 0, FilePath: "s3://bucket/zero2.parquet", Columns: []string{"id", "revision"}},
 	}
 	s.NotPanics(func() {
 		result, err := task.balanceFragmentsToSegments(context.Background(), fragments)
@@ -327,6 +328,66 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Zero
 		s.Nil(result)
 		s.Contains(err.Error(), "zero total rows")
 	})
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_ZeroRowProfile() {
+	paramtable.Init()
+	// Parquet represents the shared balancing path; format-specific I/O is mocked.
+	for _, emptyFirst := range []bool{true, false} {
+		s.Run(fmt.Sprintf("empty_first_%t", emptyFirst), func() {
+			ctx := context.Background()
+			req := &datapb.RefreshExternalCollectionTaskRequest{
+				CollectionID:           s.collectionID,
+				TaskID:                 s.taskID,
+				PreAllocatedSegmentIds: &datapb.IDRange{Begin: 100, End: 102},
+				StorageConfig:          &indexpb.StorageConfig{StorageType: "local"},
+				ExternalSource:         "/external/data/",
+				ExternalSpec:           `{"format":"parquet"}`,
+				Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+					{FieldID: 100, Name: "id", ExternalField: "id", DataType: schemapb.DataType_Int64},
+					{FieldID: 101, Name: "revision", ExternalField: "revision", DataType: schemapb.DataType_Int64, Nullable: true},
+				}},
+			}
+			task := s.newTask(ctx, req)
+			s.Require().NoError(task.PreExecute(ctx))
+			task.preallocatedIDRange = req.GetPreAllocatedSegmentIds()
+			task.nextAllocID = task.preallocatedIDRange.Begin
+
+			generateID := packed.NewFragmentIDGenerator(0)
+			empty := packed.SplitFileToFragments("empty", 0, 100, nil, generateID)[0]
+			empty.Columns = []string{"id", "revision"}
+			data := packed.SplitFileToFragments("data", 1, 100, nil, generateID)[0]
+			data.Columns = []string{"id"}
+			fragments := []packed.Fragment{empty, data}
+			if !emptyFirst {
+				fragments = []packed.Fragment{data, empty}
+			}
+			admitted, err := task.filterMappedFragments(ctx, fragments)
+			s.Require().NoError(err)
+			s.Len(admitted, 2, "physical column admission must not depend on row count")
+			s.False(task.AllFragmentsUnmapped())
+
+			created := make(chan []packed.Fragment, len(fragments))
+			manifest := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).
+				To(func(_ context.Context, basePath, _ string, _ []string, fragments []packed.Fragment, _ *indexpb.StorageConfig, _ packed.ExternalSpecContext) (string, error) {
+					created <- fragments
+					return basePath + "/manifest", nil
+				}).Build()
+			defer manifest.UnPatch()
+			sample := mockey.Mock(packed.SampleExternalFieldSizes).
+				Return(map[string]int64{"id": 8, "revision": 8}, nil).Build()
+			defer sample.UnPatch()
+
+			segments, err := task.balanceFragmentsToSegments(ctx, admitted)
+			s.Require().NoError(err)
+			s.Require().Len(segments, 1)
+			s.Equal(int64(1), segments[0].GetNumOfRows())
+			s.Equal(int64(100), segments[0].GetID())
+			s.Equal(int64(102), task.nextAllocID, "empty profiles must not consume IDs")
+			s.Require().Len(created, 1)
+			s.Equal([]packed.Fragment{data}, <-created, "only nonempty profiles reach manifest creation")
+		})
+	}
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_SingleFragment() {
@@ -386,6 +447,77 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_Sing
 	// avgBytesPerRow = 64 + 512 = 576, memorySize = 576 * 500 = 288000
 	s.Equal(int64(288000), binlog.GetMemorySize())
 	s.Equal(int64(288000), binlog.GetLogSize())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_MilvusTablePrepareFailure() {
+	paramtable.Init()
+	for _, remainingIDs := range []int64{1, 2} {
+		s.Run(fmt.Sprintf("remaining_ids_%d", remainingIDs), func() {
+			task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{})
+			task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+			task.preallocatedIDRange = &datapb.IDRange{Begin: 100, End: 100 + remainingIDs}
+			task.nextAllocID = 100
+			metadata := mockey.Mock((*RefreshExternalCollectionTask).getMilvusTableSourceManifestDeltalogs).
+				Return(nil, context.DeadlineExceeded).Build()
+			defer metadata.UnPatch()
+			manifest := mockey.Mock((*RefreshExternalCollectionTask).createManifestForSegment).
+				Return("manifest", nil).Build()
+			defer manifest.UnPatch()
+
+			segments, err := task.balanceFragmentsToSegments(context.Background(), []packed.Fragment{{FilePath: "source", RowCount: 1}})
+			s.Require().Error(err)
+			s.Nil(segments)
+			s.Zero(manifest.Times(), "prepare failures must precede all manifest writes")
+			if remainingIDs == 1 {
+				s.Contains(err.Error(), "insufficient pre-allocated IDs")
+				s.Zero(metadata.Times())
+				s.Equal(int64(100), task.nextAllocID)
+			} else {
+				s.ErrorIs(err, context.DeadlineExceeded)
+				s.Equal(1, metadata.Times())
+			}
+		})
+	}
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_MilvusTableVirtualPKMultipleFragments() {
+	paramtable.Init()
+	task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID:   s.collectionID,
+		StorageConfig:  &indexpb.StorageConfig{StorageType: "local"},
+		ExternalSource: "/external/snapshot/",
+		Schema: &schemapb.CollectionSchema{
+			ExternalSpec: `{"format":"milvus-table"}`,
+			Fields:       []*schemapb.FieldSchema{{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64}},
+		},
+	})
+	task.parsedSpec = &externalspec.ExternalSpec{Format: externalspec.FormatMilvusTable}
+	task.preallocatedIDRange = &datapb.IDRange{Begin: 100, End: 110}
+	task.nextAllocID = 100
+	metadata := mockey.Mock((*RefreshExternalCollectionTask).getMilvusTableSourceManifestDeltalogs).
+		Return(nil, nil).Build()
+	defer metadata.UnPatch()
+	manifest := mockey.Mock((*RefreshExternalCollectionTask).createManifestForSegment).
+		Return("manifest", nil).Build()
+	defer manifest.UnPatch()
+	sample := mockey.Mock(packed.SampleExternalFieldSizes).
+		Return(map[string]int64{"100": 8}, nil).Build()
+	defer sample.UnPatch()
+
+	// More fragments than the virtual-PK worker limit must still map 1:1.
+	fragments := make([]packed.Fragment, 5)
+	for i := range fragments {
+		fragments[i] = packed.Fragment{FilePath: fmt.Sprintf("source-%d", i), RowCount: int64(i + 1)}
+	}
+	segments, err := task.balanceFragmentsToSegments(context.Background(), fragments)
+	s.Require().NoError(err)
+	s.Require().Len(segments, len(fragments))
+	s.Equal(len(fragments), manifest.Times())
+	s.Equal(int64(110), task.nextAllocID)
+	for i, segment := range segments {
+		s.Equal(int64(100+i*2), segment.GetID())
+		s.Equal(fragments[i].RowCount, segment.GetNumOfRows())
+	}
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_MultipleFragments() {
@@ -2000,6 +2132,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesProcessingErrors()
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSuccess() {
+	physical := mockey.Mock(packed.ManifestHasColumns).Return(true, nil).Build()
+	defer physical.UnPatch()
 	ctx := context.Background()
 	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
 	schema := &schemapb.CollectionSchema{
@@ -2079,7 +2213,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 	manifestPath, err := ExecuteFunctionsForSegment(
 		ctx,
 		schema,
-		[]packed.Fragment{{FragmentID: 1}},
+		[]packed.Fragment{{FragmentID: 1, RowCount: 7}},
 		"parquet",
 		storageConfig,
 		s.collectionID,
@@ -2096,6 +2230,8 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentSucce
 }
 
 func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentErrorPaths() {
+	physical := mockey.Mock(packed.ManifestHasColumns).Return(true, nil).Build()
+	defer physical.UnPatch()
 	ctx := context.Background()
 	storageConfig := &indexpb.StorageConfig{RootPath: "files", StorageType: "local"}
 	basePath := "files/insert_log/1000/2000/3000"
@@ -2149,6 +2285,49 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		s.Contains(err.Error(), "has no external_field")
 	})
 
+	s.T().Run("physical input metadata", func(t *testing.T) {
+		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+		defer mockCreate.UnPatch()
+		physical.UnPatch()
+		defer physical.Patch()
+		inventory := mockey.Mock(packed.ManifestHasColumns).Return(false, fmt.Errorf("inventory failed")).Build()
+		defer inventory.UnPatch()
+		manifest, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+		s.ErrorContains(err, "inventory failed")
+		s.Empty(manifest)
+	})
+
+	for _, stage := range []string{"row count", "commit"} {
+		s.T().Run(stage, func(t *testing.T) {
+			reader := &fakeRecordReader{}
+			writer := &packed.FFIPackedWriter{}
+			create := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
+			defer create.UnPatch()
+			open := mockey.Mock(openInputReader).Return(reader, nil).Build()
+			defer open.UnPatch()
+			newWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(writer, nil).Build()
+			defer newWriter.UnPatch()
+			rows := int64(0)
+			if stage == "row count" {
+				rows = 1
+			}
+			stream := mockey.Mock(streamBatches).Return(rows, nil).Build()
+			defer stream.UnPatch()
+			close := mockey.Mock((*packed.FFIPackedWriter).Close).Return(nil, nil).Build()
+			defer close.UnPatch()
+			appendStats := mockey.Mock(appendBM25Stats).Return(nil).Build()
+			defer appendStats.UnPatch()
+			commit := mockey.Mock(packed.CommitManifestUpdates).Return("", fmt.Errorf("commit failed")).Build()
+			defer commit.UnPatch()
+			manifest, err := ExecuteFunctionsForSegment(ctx, schema, nil, "parquet", storageConfig, s.collectionID, 3000, basePath, "cluster")
+			s.ErrorContains(err, stage)
+			s.Empty(manifest)
+			if stage == "row count" {
+				s.Zero(commit.Times())
+			}
+		})
+	}
+
 	s.T().Run("open reader", func(t *testing.T) {
 		mockCreate := mockey.Mock(packed.CreateSegmentManifestWithBasePathAndExtfs).Return(packed.MarshalManifestPath(basePath, 42), nil).Build()
 		defer mockCreate.UnPatch()
@@ -2197,7 +2376,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockOpen.UnPatch()
 		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(writer, nil).Build()
 		defer mockWriter.UnPatch()
-		mockStream := mockey.Mock(streamBatches).Return(int64(1), nil).Build()
+		mockStream := mockey.Mock(streamBatches).Return(int64(0), nil).Build()
 		defer mockStream.UnPatch()
 		mockClose := mockey.Mock(mockey.GetMethod(writer, "Close")).Return(nil, fmt.Errorf("close failed")).Build()
 		defer mockClose.UnPatch()
@@ -2215,7 +2394,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteFunctionsForSegmentError
 		defer mockOpen.UnPatch()
 		mockWriter := mockey.Mock(packed.NewFFIPackedWriter).Return(writer, nil).Build()
 		defer mockWriter.UnPatch()
-		mockStream := mockey.Mock(streamBatches).Return(int64(1), nil).Build()
+		mockStream := mockey.Mock(streamBatches).Return(int64(0), nil).Build()
 		defer mockStream.UnPatch()
 		mockClose := mockey.Mock(mockey.GetMethod(writer, "Close")).Return(new(packed.ColumnGroups), nil).Build()
 		defer mockClose.UnPatch()
@@ -2273,7 +2452,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteWithMockedSteps() {
 		CurrentSegments:        []*datapb.SegmentInfo{{ID: 1}},
 		ExploreManifestPath:    "manifest",
 		StorageConfig:          &indexpb.StorageConfig{RootPath: "files", StorageType: "local"},
-		Schema:                 &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar}}},
+		Schema:                 &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "text", ExternalField: "text", DataType: schemapb.DataType_VarChar}}},
 		ExternalSource:         "s3://bucket/path",
 		ExternalSpec:           `{"format":"parquet"}`,
 		NumSegmentsExpected:    1,
@@ -2283,7 +2462,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteWithMockedSteps() {
 	task := s.newTask(ctx, req)
 	task.parsedSpec = &externalspec.ExternalSpec{Format: "parquet"}
 	task.columns = []string{"text"}
-	fragments := []packed.Fragment{{FragmentID: 1, FilePath: "file", StartRow: 0, EndRow: 10, RowCount: 10}}
+	fragments := []packed.Fragment{{FragmentID: 1, FilePath: "file", StartRow: 0, EndRow: 10, RowCount: 10, Columns: []string{"text"}}}
 	segmentFragments := packed.SegmentFragments{1: fragments}
 	updated := []*datapb.SegmentInfo{{ID: 1}}
 
@@ -2327,7 +2506,7 @@ func (s *RefreshExternalCollectionTaskSuite) TestExecuteErrorPathsWithMockedStep
 	mockFetch.UnPatch()
 
 	task = newTask()
-	fragments := []packed.Fragment{{FragmentID: 1}}
+	fragments := []packed.Fragment{{FragmentID: 1, Columns: []string{}}}
 	mockFetch = mockey.Mock(mockey.GetMethod(task, "fetchFragmentsFromExternalSource")).Return(fragments, nil).Build()
 	mockBuild := mockey.Mock(mockey.GetMethod(task, "buildCurrentSegmentFragments")).Return(nil, fmt.Errorf("build failed")).Build()
 	err = task.Execute(ctx)
@@ -4052,4 +4231,229 @@ func (s *RefreshExternalCollectionTaskSuite) TestBalanceFragmentsToSegments_NilS
 
 func TestRefreshExternalCollectionTaskSuite(t *testing.T) {
 	suite.Run(t, new(RefreshExternalCollectionTaskSuite))
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestGroupFragmentsByColumns() {
+	fragments := []packed.Fragment{
+		{FilePath: "old", RowCount: 3, Columns: []string{"id", "extra"}},
+		{FilePath: "new", RowCount: 2, Columns: []string{"id", "revision"}},
+		{FilePath: "old2", RowCount: 1, Columns: []string{"id"}},
+	}
+	groups := groupFragmentsByColumns([]string{"id", "revision"}, fragments)
+	s.Len(groups, 2)
+	s.Equal([]packed.Fragment{fragments[0], fragments[2]}, groups[0])
+	s.Equal([]packed.Fragment{fragments[1]}, groups[1])
+	s.Empty(groupFragmentsByColumns([]string{"id"}, nil))
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestFilterMappedFragments() {
+	for _, format := range []string{"parquet", "milvus-table"} {
+		s.Run(format, func() {
+			schema := &schemapb.CollectionSchema{ExternalSource: "source", ExternalSpec: fmt.Sprintf(`{"format":%q}`, format), Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: common.VirtualPKFieldName, IsPrimaryKey: true},
+				{FieldID: 101, Name: "value", ExternalField: "value_col"},
+				{FieldID: 102, Name: "generated", ExternalField: "generated_col", IsFunctionOutput: true},
+				{FieldID: 1, Name: common.TimeStampFieldName},
+			}}
+			task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{Schema: schema})
+			physical := "value_col"
+			if format == "milvus-table" {
+				physical = "101"
+			}
+			input := []packed.Fragment{
+				{FilePath: "missing", RowCount: 5, Columns: []string{"other", "1", "100", "102", "generated_col"}},
+				{FilePath: "present", RowCount: 3, Columns: []string{physical}},
+				{FilePath: "empty", RowCount: 2, Columns: []string{}},
+			}
+			got, err := task.filterMappedFragments(context.Background(), input)
+			s.NoError(err)
+			s.Equal(input[1:2], got)
+			s.False(task.AllFragmentsUnmapped())
+			got, err = task.filterMappedFragments(context.Background(), input[:1])
+			s.NoError(err)
+			s.Empty(got)
+			s.True(task.AllFragmentsUnmapped())
+			got, err = task.filterMappedFragments(context.Background(), []packed.Fragment{{FilePath: "unknown"}})
+			s.ErrorContains(err, "inventory missing")
+			s.Nil(got)
+			s.False(task.AllFragmentsUnmapped())
+			got, err = task.filterMappedFragments(context.Background(), nil)
+			s.NoError(err)
+			s.Empty(got)
+			s.False(task.AllFragmentsUnmapped())
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			_, err = task.filterMappedFragments(ctx, input)
+			s.ErrorIs(err, context.Canceled)
+			// A real primary key must not make the internal timestamp a business column.
+			schema.Fields[0] = &schemapb.FieldSchema{FieldID: 100, Name: "pk", ExternalField: "pk_col", IsPrimaryKey: true}
+			_, err = task.filterMappedFragments(context.Background(), []packed.Fragment{{Columns: []string{"1"}}})
+			s.NoError(err)
+			s.True(task.AllFragmentsUnmapped())
+		})
+	}
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestExecuteFiltersBeforeSegmentReuse() {
+	paramtable.Init()
+	ctx := context.Background()
+	req := &datapb.RefreshExternalCollectionTaskRequest{
+		CollectionID: 1, TaskID: 1, PreAllocatedSegmentIds: &datapb.IDRange{Begin: 10, End: 100},
+		Schema:          &schemapb.CollectionSchema{ExternalSource: "source", Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "value", ExternalField: "value_col"}}},
+		CurrentSegments: []*datapb.SegmentInfo{{ID: 1}},
+	}
+	task := NewRefreshExternalCollectionTask(ctx, req)
+	task.columns = []string{"value_col"}
+	bad := packed.Fragment{FilePath: "bad", EndRow: 5, RowCount: 5, Columns: []string{"unrelated"}}
+	good := packed.Fragment{FilePath: "good", EndRow: 3, RowCount: 3, Columns: []string{"value_col"}}
+	next := []packed.Fragment{bad, good}
+	fetch := mockey.Mock(mockey.GetMethod(task, "fetchFragmentsFromExternalSource")).To(func(context.Context) ([]packed.Fragment, error) { return next, nil }).Build()
+	defer fetch.UnPatch()
+	current := mockey.Mock(mockey.GetMethod(task, "buildCurrentSegmentFragments")).Return(packed.SegmentFragments{1: {bad, good}}, nil).Build()
+	defer current.UnPatch()
+	var admitted []packed.Fragment
+	balance := mockey.Mock(mockey.GetMethod(task, "balanceFragmentsToSegments")).To(func(_ context.Context, fragments []packed.Fragment) ([]*datapb.SegmentInfo, error) {
+		admitted = fragments
+		if len(fragments) == 0 {
+			return nil, nil
+		}
+		return []*datapb.SegmentInfo{{ID: 10, NumOfRows: fragments[0].RowCount}}, nil
+	}).Build()
+	defer balance.UnPatch()
+	s.NoError(task.Execute(ctx))
+	s.Equal([]packed.Fragment{good}, admitted)
+	s.Empty(task.GetKeptSegmentIDs())
+	s.Len(task.GetUpdatedSegments(), 1)
+	s.False(task.AllFragmentsUnmapped())
+	next = []packed.Fragment{bad}
+	for i := 0; i < 2; i++ {
+		s.NoError(task.Execute(ctx))
+		s.Empty(admitted)
+		s.Empty(task.GetKeptSegmentIDs())
+		s.Empty(task.GetUpdatedSegments())
+		s.True(task.AllFragmentsUnmapped())
+	}
+	// The same file range becomes eligible again when a mapped column appears.
+	bad.Columns = []string{"value_col"}
+	next = []packed.Fragment{bad}
+	s.NoError(task.Execute(ctx))
+	s.Equal(next, admitted)
+	s.Len(task.GetUpdatedSegments(), 1)
+	s.False(task.AllFragmentsUnmapped())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestExecuteRejectsUnknownColumnInventory() {
+	task := NewRefreshExternalCollectionTask(context.Background(), &datapb.RefreshExternalCollectionTaskRequest{PreAllocatedSegmentIds: &datapb.IDRange{Begin: 10, End: 100}})
+	// An early retry failure must not reuse a previous all-unmapped result.
+	task.allFragmentsUnmapped = true
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.ErrorIs(task.Execute(ctx), context.Canceled)
+	s.False(task.AllFragmentsUnmapped())
+	fetch := mockey.Mock(mockey.GetMethod(task, "fetchFragmentsFromExternalSource")).Return([]packed.Fragment{{FilePath: "unknown"}}, nil).Build()
+	defer fetch.UnPatch()
+	s.ErrorContains(task.Execute(context.Background()), "inventory missing")
+	s.False(task.AllFragmentsUnmapped())
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestResolveFunctionInputSchema() {
+	for _, mode := range []string{"present", "default", "nullable", "required", "no_anchor", "metadata_error", "anchor_error", "milvus_table"} {
+		s.Run(mode, func() {
+			input := &schemapb.FieldSchema{FieldID: 100, Name: "text", ExternalField: "source_text", DataType: schemapb.DataType_VarChar, Nullable: true}
+			anchor := &schemapb.FieldSchema{FieldID: 101, Name: "id", ExternalField: "source_id", DataType: schemapb.DataType_Int64}
+			schema := &schemapb.CollectionSchema{ExternalSource: "s3://bucket/path", Fields: []*schemapb.FieldSchema{
+				{FieldID: 102, Name: "output", IsFunctionOutput: true}, input, anchor}}
+			if mode == "required" {
+				input.Nullable = false
+			}
+			if mode == "default" {
+				input.Nullable = false
+				input.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}}
+			}
+			if mode == "milvus_table" {
+				schema.ExternalSpec = `{"format":"milvus-table"}`
+			}
+			calls := 0
+			mock := mockey.Mock(packed.ManifestHasColumns).To(func(_ string, _ *indexpb.StorageConfig, columns []string) (bool, error) {
+				calls++
+				if mode == "metadata_error" || (mode == "anchor_error" && calls > 1) {
+					return false, fmt.Errorf("inventory failed")
+				}
+				if mode == "milvus_table" {
+					s.Contains([]string{"100", "101"}, columns[0])
+				}
+				return mode == "present" || (mode != "no_anchor" && (columns[0] == "source_id" || columns[0] == "101")), nil
+			}).Build()
+			defer mock.UnPatch()
+			inputs := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{input}}
+			read, missing, err := resolveFunctionInputSchema(schema, inputs, "manifest", nil)
+			if mode == "required" || mode == "no_anchor" || mode == "metadata_error" || mode == "anchor_error" {
+				s.Error(err)
+				s.Nil(read)
+				return
+			}
+			s.Require().NoError(err)
+			s.Require().Len(read.Fields, 1)
+			if mode == "present" {
+				s.Empty(missing)
+				s.Equal(int64(100), read.Fields[0].GetFieldID())
+			} else {
+				s.Equal([]*schemapb.FieldSchema{input}, missing)
+				s.Equal(int64(101), read.Fields[0].GetFieldID())
+			}
+			s.Equal([]*schemapb.FieldSchema{input}, inputs.Fields)
+		})
+	}
+}
+
+func (s *RefreshExternalCollectionTaskSuite) TestStreamBatchesDefaultsAndOutputRows() {
+	input := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_VarChar,
+		DefaultValue: &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}}}
+	output := &schemapb.FieldSchema{FieldID: 101, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector, IsFunctionOutput: true}
+	execution := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{input, output}}
+	outputs := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{output}}
+	for _, mode := range []string{"success", "short_output", "missing_output", "function_error", "required"} {
+		s.Run(mode, func() {
+			reader := &fakeRecordReader{records: []storage.Record{s.makeStringStorageRecord(999, "anchor", []string{"a", "b"})}}
+			mock := mockey.Mock(embedding.RunAll).To(func(_ context.Context, _ *schemapb.CollectionSchema, data *storage.InsertData, _ embedding.RunOptions) error {
+				s.Equal([]string{"fallback", "fallback"}, data.Data[100].(*storage.StringFieldData).Data)
+				if mode == "function_error" {
+					return fmt.Errorf("provider failed")
+				}
+				rows := 2
+				if mode == "short_output" {
+					rows = 1
+				}
+				if mode == "missing_output" {
+					delete(data.Data, 101)
+				} else {
+					data.Data[101] = &storage.SparseFloatVectorFieldData{SparseFloatArray: schemapb.SparseFloatArray{Contents: make([][]byte, rows)}}
+				}
+				return nil
+			}).Build()
+			defer mock.UnPatch()
+			written := 0
+			write := mockey.Mock(writeOutputBatch).To(func(_ *storage.InsertData, _ *schemapb.CollectionSchema, _ *arrow.Schema, _ *packed.FFIPackedWriter) error {
+				written++
+				return nil
+			}).Build()
+			defer write.UnPatch()
+			if mode == "required" {
+				input.DefaultValue = nil
+				defer func() {
+					input.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}}
+				}()
+			}
+			rows, err := streamBatches(context.Background(), execution, execution, outputs, nil, typeutil.NewSet[int64](100), reader, nil, nil, "", input)
+			if mode == "success" {
+				s.NoError(err)
+				s.EqualValues(2, rows)
+				s.Equal(1, written)
+			} else {
+				s.Error(err)
+				s.Zero(rows)
+				s.Zero(written)
+			}
+		})
+	}
 }

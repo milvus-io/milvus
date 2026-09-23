@@ -97,7 +97,8 @@ ManifestGroupTranslator::ManifestGroupTranslator(
     std::string shard,
     std::optional<ColumnSizeEstimateResult> column_size_estimate,
     const MmapChunkWritebackMode writeback_mode,
-    const bool enable_async_load)
+    const bool enable_async_load,
+    std::unordered_map<std::string, FieldId> column_field_ids)
     : segment_id_(segment_id),
       group_chunk_type_(group_chunk_type),
       column_group_index_(column_group_index),
@@ -109,6 +110,7 @@ ManifestGroupTranslator::ManifestGroupTranslator(
                              column_group_index,
                              cache_key_suffix)),
       field_metas_(field_metas),
+      column_field_ids_(std::move(column_field_ids)),
       mmap_dir_path_(mmap_dir_path),
       meta_(num_fields,
             use_mmap ? milvus::cachinglayer::StorageType::DISK
@@ -714,8 +716,14 @@ ManifestGroupTranslator::load_group_chunk(
     for (int i = 0; i < schema->num_fields(); ++i) {
         const auto column_name = schema->field(i)->name();
         int64_t field_id = -1;
-        if (auto parsed_fid = ParseFieldIdColumnName(column_name);
-            parsed_fid.has_value()) {
+        if (!column_field_ids_.empty()) {
+            auto it = column_field_ids_.find(column_name);
+            AssertInfo(it != column_field_ids_.end(),
+                       "column {} not in manifest projection",
+                       column_name);
+            field_id = it->second.get();
+        } else if (auto parsed_fid = ParseFieldIdColumnName(column_name);
+                   parsed_fid.has_value()) {
             field_id = parsed_fid->get();
         } else {
             // External collection fallback: column_name is non-numeric, so it

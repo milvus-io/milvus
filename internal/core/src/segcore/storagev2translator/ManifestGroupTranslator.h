@@ -112,7 +112,8 @@ class ManifestGroupTranslator
             std::nullopt,
         MmapChunkWritebackMode writeback_mode =
             MmapChunkWritebackMode::Disabled,
-        bool enable_async_load = false);
+        bool enable_async_load = false,
+        std::unordered_map<std::string, FieldId> column_field_ids = {});
     ~ManifestGroupTranslator() = default;
 
     /**
@@ -242,6 +243,7 @@ class ManifestGroupTranslator
     int64_t column_group_index_;
     std::string key_;
     std::unordered_map<FieldId, FieldMeta> field_metas_;
+    std::unordered_map<std::string, FieldId> column_field_ids_;
     std::shared_ptr<milvus_storage::api::ChunkReader> chunk_reader_;
 
     GroupCTMeta meta_;

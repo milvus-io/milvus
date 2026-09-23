@@ -128,6 +128,7 @@ func addManagerOwnershipTask(
 			failReason,
 			keptSegments,
 			updatedSegments,
+			task.GetAllFragmentsUnmapped(),
 		))
 	}
 }
@@ -2699,4 +2700,40 @@ func TestCleanup_DoubleHandleJobFailedDoesNotDouble(t *testing.T) {
 		t.Fatalf("expected exactly 1 prefix cleanup for Failed+GC flow, got %d: %v", len(prefixes), prefixes)
 	}
 	assert.Equal(t, fmt.Sprintf("__explore_temp__/coord_%d/", 111), prefixes[0])
+}
+
+func TestExternalCollectionRefreshManager_EmptyResultRequiresEveryTaskUnmapped(t *testing.T) {
+	for _, allUnmapped := range []bool{false, true} {
+		t.Run(fmt.Sprint(allUnmapped), func(t *testing.T) {
+			ctx := context.Background()
+			catalog := &stubCatalog{}
+			refreshMeta, err := newExternalCollectionRefreshMeta(ctx, catalog)
+			assert.NoError(t, err)
+			for id, flag := range []bool{true, allUnmapped} {
+				task := &datapb.ExternalCollectionRefreshTask{
+					TaskId: int64(id + 1), JobId: 1, CollectionId: 100, State: indexpb.JobState_JobStateFinished,
+					ResultReady: true, AllFragmentsUnmapped: flag,
+				}
+				if id == 0 {
+					task.OwnedSegmentIds = []int64{10}
+				}
+				addManagerOwnershipTask(t, refreshMeta, task, task.GetOwnedSegmentIds()...)
+			}
+			publishManagerTestTasks(t, refreshMeta, 1, 100, 1, 2)
+			segments := NewSegmentsInfo()
+			segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 10, CollectionID: 100, State: commonpb.SegmentState_Flushed, NumOfRows: 5}})
+			mt := &meta{catalog: catalog, segments: segments, collections: newTestCollections(100)}
+			mgr := &externalCollectionRefreshManager{mt: mt, refreshMeta: refreshMeta}
+			err = mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100})
+			if allUnmapped {
+				assert.NoError(t, err)
+				assert.Equal(t, commonpb.SegmentState_Dropped, mt.segments.GetSegment(10).GetState())
+				// Applying the same persisted result again is safe.
+				assert.NoError(t, mgr.applyFinishedJobSegments(ctx, &datapb.ExternalCollectionRefreshJob{JobId: 1, CollectionId: 100}))
+			} else {
+				assert.ErrorContains(t, err, "safety check failed")
+				assert.Equal(t, commonpb.SegmentState_Flushed, mt.segments.GetSegment(10).GetState())
+			}
+		})
+	}
 }

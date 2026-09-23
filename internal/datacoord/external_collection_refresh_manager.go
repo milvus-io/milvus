@@ -399,6 +399,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 	}
 	// Validate that every baseline classification came from its owner task while
 	// allowing newly allocated segment IDs that are outside the baseline.
+	allFragmentsUnmapped := true
 	keptSet := make(map[int64]struct{})
 	updatedSet := make(map[int64]struct{})
 	classifiedBaselineCount := 0
@@ -415,6 +416,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 			return merr.WrapErrServiceInternalMsg("job %d has finished task %d without persisted refresh result; please retry refresh",
 				job.GetJobId(), task.GetTaskId())
 		}
+		allFragmentsUnmapped = allFragmentsUnmapped && task.GetAllFragmentsUnmapped()
 		for _, segmentID := range task.GetKeptSegments() {
 			ownerTaskID, ok := ownerBySegment[segmentID]
 			if !ok || ownerTaskID != task.GetTaskId() {
@@ -515,6 +517,7 @@ func (m *externalCollectionRefreshManager) applyFinishedJobSegments(ctx context.
 		baselineSegmentIDs,
 		keptSegments,
 		updatedSegments,
+		allFragmentsUnmapped,
 		mlog.FieldJobID(job.GetJobId()),
 	)
 }

@@ -511,8 +511,12 @@ func TestBM25FunctionMaterializerRejectsTextInputWithoutLOBDecoding(t *testing.T
 		}},
 	}
 	materializer, err := newBM25FunctionMaterializer(schema, runner, []int{0}, false)
-	require.Nil(t, materializer)
-	require.ErrorContains(t, err, "text input requires LOB decoding")
+	require.NoError(t, err)
+	defer materializer.Close()
+	input := newBinaryArray(t, [][]byte{[]byte("encoded-lob-ref")})
+	defer input.Release()
+	_, err = materializer.Materialize(&materializerTestRecord{len: 1, columns: map[storage.FieldID]arrow.Array{100: input}})
+	require.ErrorContains(t, err, "cannot materialize bm25 from text binary values without lob decoding")
 	require.Nil(t, runner.inputs)
 }
 
@@ -984,4 +988,46 @@ func newInt64Array(t *testing.T, values []int64) *array.Int64 {
 	t.Cleanup(builder.Release)
 	builder.AppendValues(values, nil)
 	return builder.NewInt64Array()
+}
+
+// The reader has already filled missing fields; physical NULLs must reach
+// function runners unchanged, including after row selection.
+func TestRecordMaterializerPreservesNullFunctionInputs(t *testing.T) {
+	for _, mode := range []string{"physical_null", "selected_null", "text_null"} {
+		t.Run(mode, func(t *testing.T) {
+			schema, fn, input, output := materializerBM25Schema()
+			input.Nullable = true
+			input.DefaultValue = &schemapb.ValueField{Data: &schemapb.ValueField_StringData{StringData: "fallback"}}
+			var col arrow.Array
+			if mode == "text_null" {
+				input.DataType = schemapb.DataType_Text
+				input.DefaultValue = nil
+				builder := array.NewBinaryBuilder(memory.DefaultAllocator, arrow.BinaryTypes.Binary)
+				builder.AppendNulls(2)
+				col = builder.NewArray()
+				builder.Release()
+			} else {
+				col = newNullableStringArray(t, []string{"", ""}, []bool{false, false})
+			}
+			defer col.Release()
+			runner := &materializerTestFunctionRunner{schema: fn, inputFields: []*schemapb.FieldSchema{input}, outputFields: []*schemapb.FieldSchema{output},
+				outputs: []any{&schemapb.SparseFloatArray{Contents: [][]byte{nil, nil}}}}
+			fm, err := newFunctionMaterializer(schema, runner, []int{0}, false)
+			require.NoError(t, err)
+			m := &RecordMaterializer{schema: schema, materializers: []FunctionMaterializer{fm}, pendingOutputs: map[int64]struct{}{output.GetFieldID(): {}}}
+			defer m.Close()
+			rec := &materializerTestRecord{len: 2, columns: map[int64]arrow.Array{input.GetFieldID(): col}}
+			var selection *recordSelection
+			if mode == "selected_null" {
+				selection = &recordSelection{ranges: []rowRange{{start: 0, end: 2}}, length: 2}
+			}
+			wrapped, err := m.WrapWithSelection(rec, selection)
+			require.NoError(t, err)
+			defer cleanupMaterializedRecord(wrapped)
+			require.Equal(t, []string{"", ""}, runner.inputs[0])
+			require.Equal(t, 2, wrapped.Column(output.GetFieldID()).Len())
+			require.Equal(t, 2, wrapped.Column(input.GetFieldID()).NullN())
+			require.Zero(t, rec.releaseCount)
+		})
+	}
 }

@@ -336,13 +336,10 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 	}
 }
 
-// GenerateEmptyArrayFromSchema generate empty array from schema
-// If schema has default value, the array will bef filled with it.
-// Otherwise, null will be used instead.
-// If input schema is not nullable, an error will be returned.
+// GenerateEmptyArrayFromSchema fills a physically missing field with its default,
+// or with NULL when nullable. A required field without a default is an error.
 func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (arrow.Array, error) {
-	// if not nullable, return error
-	if !schema.GetNullable() {
+	if !schema.GetNullable() && schema.GetDefaultValue() == nil {
 		return nil, merr.WrapErrServiceInternalMsg("missing field data %s", schema.Name)
 	}
 	dim, _ := typeutil.GetDim(schema)
@@ -358,6 +355,7 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 		arrowType = arrow.BinaryTypes.Binary
 	}
 	builder := array.NewBuilder(memory.DefaultAllocator, arrowType)
+	defer builder.Release()
 	if schema.GetDefaultValue() != nil {
 		switch schema.GetDataType() {
 		case schemapb.DataType_Bool:

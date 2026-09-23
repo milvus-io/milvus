@@ -1676,6 +1676,9 @@ message RefreshExternalCollectionTaskResponse {
   repeated SegmentInfo updatedSegments = 3;
   index.JobState state = 4;
   string fail_reason = 5;
+  // True only when a non-empty source range was fully inspected and no fragment
+  // contains a mapped business column. Allows an intentional empty refresh.
+  bool all_fragments_unmapped = 6;
 }
 
 // External Table Refresh Messages
@@ -1771,6 +1774,7 @@ message ExternalCollectionRefreshTask {
   string result_path = 22;
   // SHA-256 checksum of the serialized task result payload.
   bytes result_checksum = 23;
+  bool all_fragments_unmapped = 24;  // Persisted worker proof of an intentional empty result
 }
 
 message GetRefreshExternalCollectionProgressResponse {
