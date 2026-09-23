@@ -549,6 +549,12 @@ func (node *QueryNode) releaseSplitChildren(ctx context.Context, source delegato
 	}
 }
 
+// Done is closed when the querynode stops, ending every split child spawn still
+// retrying.
+func (node *QueryNode) Done() <-chan struct{} {
+	return node.ctx.Done()
+}
+
 // AbortSplitChild tears down a child the spawner created but could not publish
 // because the source was released or had stopped mid-spawn. It mirrors the
 // un-adopted teardown in releaseSplitChildren: the child was never fronted, so
