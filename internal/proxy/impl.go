@@ -4318,6 +4318,11 @@ func (node *Proxy) GetPersistentSegmentInfo(ctx context.Context, req *milvuspb.G
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
+	err = merr.Error(getSegmentsByStatesResponse.GetStatus())
+	if err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
 
 	// get Segment info
 	infoResp, err := node.mixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
