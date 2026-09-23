@@ -136,6 +136,7 @@
 #include "segcore/storagev1translator/TextMatchIndexTranslator.h"
 #include "segcore/storagev2translator/AsyncChunkReader.h"
 #include "segcore/storagev2translator/GroupChunkTranslator.h"
+#include "segcore/storagev2translator/JsonStatsTranslator.h"
 #include "segcore/storagev2translator/ManifestGroupTranslator.h"
 #include "segcore/storagev2translator/StorageV2Config.h"
 #include "segcore/TextColumnCache.h"
@@ -2076,10 +2077,29 @@ ChunkedSegmentSealedImpl::GetJsonStats(milvus::OpContext* op_ctx,
         return nullptr;
     }
     auto iter = runtime->json_stats.find(field_id);
-    if (iter == runtime->json_stats.end()) {
+    if (iter == runtime->json_stats.end() || iter->second == nullptr) {
         return nullptr;
     }
-    return iter->second;
+    auto slot = iter->second;
+    runtime.reset();
+
+    auto accessor = SemiInlineGet(slot->PinCells(op_ctx, {0}));
+    auto* stats = accessor->get_cell_of(0);
+    AssertInfo(stats != nullptr,
+               "JSON stats cache returned an empty cell, segment {}, field {}",
+               id_,
+               field_id.get());
+    return std::shared_ptr<index::JsonKeyStats>(std::move(accessor), stats);
+}
+
+bool
+ChunkedSegmentSealedImpl::HasJsonStats(FieldId field_id) const {
+    auto runtime = CaptureRuntimeResourceState();
+    if (runtime == nullptr) {
+        return false;
+    }
+    auto iter = runtime->json_stats.find(field_id);
+    return iter != runtime->json_stats.end() && iter->second != nullptr;
 }
 
 void
@@ -5930,11 +5950,12 @@ ChunkedSegmentSealedImpl::BuildTextIndexFromFiles(
     return cache_slot;
 }
 
-std::shared_ptr<index::JsonKeyStats>
+std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>>
 ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
     milvus::OpContext* op_ctx,
     const std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>&
-        info_proto) {
+        info_proto,
+    const std::string& shard) {
     auto field_id = milvus::FieldId(info_proto->fieldid());
     CheckCancellation(op_ctx,
                       id_,
@@ -5953,7 +5974,7 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
     }
 
     LOG_INFO(
-        "start load json key stats, segment:{}, field:{}, build:{}, "
+        "start register json key stats, segment:{}, field:{}, build:{}, "
         "version:{}, "
         "file_count:{}, base_path:{}, enable_mmap:{}, stats_size:{}",
         id_,
@@ -5965,76 +5986,29 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
         info_proto->enable_mmap(),
         info_proto->stats_size());
 
-    milvus::storage::FieldDataMeta field_data_meta{info_proto->collectionid(),
-                                                   info_proto->partitionid(),
-                                                   this->get_segment_id(),
-                                                   info_proto->fieldid(),
-                                                   info_proto->schema()};
-    milvus::storage::IndexMeta index_meta{this->get_segment_id(),
-                                          info_proto->fieldid(),
-                                          info_proto->buildid(),
-                                          info_proto->version()};
     auto remote_chunk_manager =
         milvus::storage::RemoteChunkManagerSingleton::GetInstance()
             .GetRemoteChunkManager();
     auto fs = milvus::segcore::GetDefaultArrowFileSystem();
     AssertInfo(fs != nullptr, "arrow file system is null");
 
-    milvus::Config config;
-    std::vector<std::string> files;
-    files.reserve(info_proto->files_size());
-    for (const auto& f : info_proto->files()) {
-        files.push_back(f);
-    }
-    config[milvus::index::INDEX_FILES] = files;
-    config[milvus::LOAD_PRIORITY] = info_proto->load_priority();
-    config[milvus::index::ENABLE_MMAP] = info_proto->enable_mmap();
-    if (info_proto->enable_mmap()) {
-        config[milvus::index::MMAP_FILE_PATH] = info_proto->mmap_dir_path();
-    }
-    if (!info_proto->warmup_policy().empty()) {
-        config[milvus::index::WARMUP] = info_proto->warmup_policy();
-    }
-    config[milvus::index::INDEX_SIZE] = info_proto->stats_size();
-    if (!info_proto->base_path().empty()) {
-        config[STATS_BASE_PATH_KEY] = info_proto->base_path();
-    }
-    auto load_info_snapshot = CaptureLoadInfoSnapshot();
-    config[JSON_STATS_CACHE_SHARD_KEY] = load_info_snapshot->GetInsertChannel();
+    milvus::segcore::storagev2translator::JsonStatsLoadInfo load_info{
+        segment_instance_uid(), id_, shard};
+    std::unique_ptr<
+        milvus::cachinglayer::Translator<milvus::index::JsonKeyStats>>
+        translator = std::make_unique<
+            milvus::segcore::storagev2translator::JsonStatsTranslator>(
+            std::move(load_info),
+            info_proto,
+            std::move(remote_chunk_manager),
+            std::move(fs));
+    auto cache_slot =
+        milvus::cachinglayer::Manager::GetInstance().CreateCacheSlot(
+            std::move(translator), op_ctx);
 
-    milvus::storage::FileManagerContext file_ctx(
-        field_data_meta, index_meta, remote_chunk_manager, fs);
-    auto index = std::make_shared<milvus::index::JsonKeyStats>(file_ctx, true);
-    milvus::tracer::TraceContext trace_ctx;
-    try {
-        milvus::ScopedTimer timer(
-            "json_stats_load",
-            [](double us) {
-                milvus::monitor::internal_json_stats_latency_load.Observe(
-                    us / 1000.0);
-            },
-            milvus::ScopedTimer::LogLevel::Info);
-        index->Load(trace_ctx, config);
-    } catch (std::exception& e) {
-        LOG_WARN(
-            "failed load json key stats, segment:{}, field:{}, build:{}, "
-            "version:{}, error:{}",
-            id_,
-            info_proto->fieldid(),
-            info_proto->buildid(),
-            info_proto->version(),
-            e.what());
-        throw;
-    }
-
-    LOG_INFO(
-        "load json key stats success, segment:{}, field:{}, build:{}, "
-        "version:{}",
-        id_,
-        info_proto->fieldid(),
-        info_proto->buildid(),
-        info_proto->version());
-    return index;
+    CheckCancellation(
+        op_ctx, id_, "ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex()");
+    return cache_slot;
 }
 
 void
@@ -6043,22 +6017,40 @@ ChunkedSegmentSealedImpl::LoadBatchJsonKeyIndexes(
     const std::unordered_map<
         FieldId,
         std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>& infos,
+    const SegmentLoadInfo& segment_load_info,
     const SchemaPtr& schema_snapshot,
     StagedStateCommitter& committer) {
+    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
+    std::vector<std::future<void>> load_index_futures;
+    load_index_futures.reserve(infos.size());
+    auto futures_guard = folly::makeGuard(
+        [&load_index_futures]() { storage::DrainFutures(load_index_futures); });
+
     for (const auto& [field_id, info_proto] : infos) {
         AssertInfo(field_exists_in_schema(schema_snapshot, field_id),
                    "field {} not found in schema when loading json stats",
                    field_id.get());
-        auto index = BuildJsonKeyStatsIndex(op_ctx, info_proto);
-        if (index == nullptr) {
-            continue;
-        }
-        committer.Commit(
-            [field_id = field_id, index = std::move(index)](
-                RuntimeResourceState& runtime, PublishedSegmentState&) mutable {
-                runtime.json_stats[field_id] = std::move(index);
+        auto future = pool.Submit([this,
+                                   op_ctx,
+                                   field_id = field_id,
+                                   info = info_proto,
+                                   &segment_load_info,
+                                   &committer]() {
+            auto slot = BuildJsonKeyStatsIndex(
+                op_ctx, info, segment_load_info.GetInsertChannel());
+            if (slot == nullptr) {
+                return;
+            }
+            committer.Commit([field_id, slot = std::move(slot)](
+                                 RuntimeResourceState& runtime,
+                                 PublishedSegmentState&) mutable {
+                runtime.json_stats[field_id] = std::move(slot);
             });
+        });
+        load_index_futures.emplace_back(std::move(future));
     }
+
+    storage::WaitAllFutures(load_index_futures);
 }
 
 void
@@ -7683,12 +7675,18 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.json_stats_to_load.empty()) {
-        LoadBatchJsonKeyIndexes(
-            op_ctx, diff.json_stats_to_load, schema_snapshot, committer);
+        LoadBatchJsonKeyIndexes(op_ctx,
+                                diff.json_stats_to_load,
+                                segment_load_info,
+                                schema_snapshot,
+                                committer);
     }
     if (!diff.json_stats_to_replace.empty()) {
-        LoadBatchJsonKeyIndexes(
-            op_ctx, diff.json_stats_to_replace, schema_snapshot, committer);
+        LoadBatchJsonKeyIndexes(op_ctx,
+                                diff.json_stats_to_replace,
+                                segment_load_info,
+                                schema_snapshot,
+                                committer);
     }
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");

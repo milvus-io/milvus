@@ -228,8 +228,15 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 	params := []*commonpb.KeyValuePair{
-		{Key: "ticket", Value: req.URL.Query().Get("ticket")},
-		{Key: "collection_id", Value: collectionID},
+		{Key: "ticket", Value: ticket},
+	}
+	// only forward collection_id when the ticket carries one, an empty value
+	// fails to parse on the coordinator side and rejects the whole request
+	if collectionID != "" {
+		params = append(params, &commonpb.KeyValuePair{
+			Key:   "collection_id",
+			Value: collectionID,
+		})
 	}
 
 	resp, err := node.mixCoord.GcControl(req.Context(), &datapb.GcControlRequest{

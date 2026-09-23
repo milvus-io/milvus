@@ -47,12 +47,18 @@ type NodeInfo struct {
 	// it. It must not be read as "no resource group", and an unknown entry
 	// never matches a named group in FilterByResourceGroup.
 	//
-	// The one reader is FilterByResourceGroup, applied by LBPolicyImpl.selectNode
-	// when ChannelWorkload.ResourceGroup names a group. Nothing on the proxy's
-	// request path sets that field yet, so deployed traffic still builds its
-	// candidate sets purely from Serviceable; the filter ships with the tag so
-	// that the constraints on consuming it (see FilterByResourceGroup) live in
-	// one place rather than with each future caller.
+	// Written by the coordinator's shard-leader answer and matched against the
+	// group a workload names. That group is stamped from the request context
+	// at the three workload entry points - scopedCollectionWorkload and
+	// scopedChannelWorkload (resource_group_scope.go), called by
+	// LBPolicyImpl.Execute, ExecuteOneChannel and ExecuteWithRetry - and is
+	// read through FilterByResourceGroup in LBPolicyImpl.selectNode (the
+	// candidate set), in ExecuteWithRetry (whether every leader of the scope
+	// has been excluded, which decides the refresh-and-retry) and in
+	// ExecuteOneChannel (the pre-filter that picks a channel the group can
+	// serve). A request that names no group keeps building its candidate sets
+	// from Serviceable alone. The constraints on consuming the field live with
+	// FilterByResourceGroup rather than with each of those callers.
 	ResourceGroup string
 }
 

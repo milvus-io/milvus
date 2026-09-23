@@ -121,8 +121,8 @@ func serveMuxPatternPath(pattern string) string {
 // for the operator surface, where the next route added would otherwise ship
 // anonymous with nothing to say so.
 //
-// It covers what goes through Register only; the proxy's /api/v1 tree is
-// classified by its /_ prefix and covered by a route-enumerating test.
+// It covers what goes through Register only; the proxy's /api/v1/_* tree has
+// authentication on its parent Gin group and a route-enumerating test.
 func mustBeGated(pattern string) bool {
 	path := serveMuxPatternPath(pattern)
 	if _, ok := openOperatorPaths[path]; ok {

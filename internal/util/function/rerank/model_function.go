@@ -53,6 +53,38 @@ func parseMaxBatch(maxBatch string) (int, error) {
 	}
 }
 
+// rerankScoresByIndex maps the results a rerank service returned onto a
+// per-document score slice.
+//
+// A rerank response is a list of (index, score) pairs where index is the position
+// of the document in the request. The service may answer in any order — that is
+// why every client in models/ sorts the results by that index — and, with
+// parameters such as top_n, it may answer for only some of the documents. Storing
+// the scores by their position in the response therefore attaches a score to the
+// wrong document as soon as the response is incomplete, and leaves 0 for the
+// documents that were not answered for, which is a legal score and so is
+// invisible to the caller.
+//
+// Each score is placed at its own index, and a response that does not cover every
+// document exactly once is an error — the same contract the embedding providers
+// and the huggingface rerank provider already enforce.
+func rerankScoresByIndex(docCount int, resultCount int, at func(i int) (int, float32)) ([]float32, error) {
+	if resultCount != docCount {
+		return nil, merr.WrapErrFunctionFailedMsg("get rerank scores failed, the number of docs and scores does not match docs:[%d], scores:[%d]", docCount, resultCount)
+	}
+	scores := make([]float32, docCount)
+	filled := make([]bool, docCount)
+	for i := 0; i < resultCount; i++ {
+		idx, score := at(i)
+		if idx < 0 || idx >= docCount || filled[idx] {
+			return nil, merr.WrapErrFunctionFailedMsg("get rerank scores failed, the rerank service returned an invalid or duplicated result index [%d] for [%d] docs", idx, docCount)
+		}
+		filled[idx] = true
+		scores[idx] = score
+	}
+	return scores, nil
+}
+
 // ModelProvider is the interface for external rerank model services.
 type ModelProvider interface {
 	Rerank(context.Context, string, []string) ([]float32, error)

@@ -1,0 +1,106 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+// Package extension is what a distribution that compiles its own behavior into
+// the milvus binary installs at boot: a request hook, a query hook, a cipher,
+// and an engine the coordinator runs while it is active. Everything else such
+// a distribution needs is either the hook's own reach (every proxy RPC passes
+// Mock, Before and After), a coordinator RPC, or a configuration item.
+//
+// A stock binary installs nothing: InstalledHook, InstalledQueryHook,
+// InstalledCipher and InstalledCoordinatorEngine answer nil, and milvus
+// behaves as it always did. The one context mark this package defines,
+// WithQueryResourceGroup, pins a query to a resource group for routing;
+// nothing in a stock binary sets it.
+package extension
+
+import (
+	"sync/atomic"
+
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
+)
+
+var (
+	installedHook      atomic.Pointer[hookBox]
+	installedEngine    atomic.Pointer[engineBox]
+	installedQueryHook atomic.Pointer[queryHookBox]
+	installedCipher    atomic.Pointer[cipherBox]
+	formInstalled      atomic.Bool
+)
+
+type (
+	hookBox      struct{ hook hook.Hook }
+	engineBox    struct{ engine CoordinatorEngine }
+	queryHookBox struct{ hook QueryHook }
+	cipherBox    struct{ cipher hook.Cipher }
+)
+
+// SetHook installs a compiled-in request hook. hookutil prefers it over
+// proxy.soPath and refuses a deployment that configures both. Call it before
+// milvus starts; a nil hook leaves the stock behavior in place.
+//
+// Init is called again whenever the hook's configuration is refreshed. A
+// compiled-in hook whose Init returns an error then must leave the
+// configuration it was running with in effect: hookutil logs the refusal and
+// keeps the process up, where a plug-in's failed refresh stops it, and it has
+// no way to inspect or roll back what the hook did with the new values.
+func SetHook(h hook.Hook) {
+	installedHook.Store(&hookBox{hook: h})
+}
+
+// InstalledHook returns the installed request hook, or nil.
+func InstalledHook() hook.Hook {
+	if b := installedHook.Load(); b != nil {
+		return b.hook
+	}
+	return nil
+}
+
+// SetForm marks this binary as running the deployment form the coordinators'
+// form-gated behaviors are written for: one streaming node, several resource
+// groups loading the same collection, every role from one image. It switches
+// on, in the query coordinator and the data coordinator: shard delegators on
+// the regular query nodes of the resource groups, with the streaming node kept
+// for DDL and the write ahead log, a load that names the resource groups it
+// speaks for, an index engine version answered before any QueryNode registers.
+// Call it in EVERY role, before milvus starts - a role whose main forgets the
+// call runs as stock with no signal at all. It is independent of SetHook: a
+// distribution may install a request hook without switching any coordinator
+// behavior on.
+func SetForm() {
+	formInstalled.Store(true)
+}
+
+// FormInstalled reports whether SetForm was called. A stock binary answers
+// false everywhere and keeps the behavior it always had.
+func FormInstalled() bool {
+	return formInstalled.Load()
+}
+
+// SetCoordinatorEngine installs the engine the coordinator starts when it
+// becomes active and stops on shutdown. Call it before milvus starts; nil
+// installs nothing.
+func SetCoordinatorEngine(e CoordinatorEngine) {
+	installedEngine.Store(&engineBox{engine: e})
+}
+
+// InstalledCoordinatorEngine returns the installed engine, or nil.
+func InstalledCoordinatorEngine() CoordinatorEngine {
+	if b := installedEngine.Load(); b != nil {
+		return b.engine
+	}
+	return nil
+}

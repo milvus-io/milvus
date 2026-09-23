@@ -129,7 +129,7 @@ func ValidateFormatVersion(version int) error {
 		return nil
 	}
 	if version > SnapshotFormatVersion {
-		return merr.WrapErrServiceInternalMsg("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
+		return merr.WrapErrOperationNotSupportedMsg("snapshot format version %d is too new, current supported version: %d (please upgrade Milvus)",
 			version, SnapshotFormatVersion)
 	}
 	return nil
@@ -142,7 +142,7 @@ func ParseSnapshotMetadata(data []byte) (*datapb.SnapshotMetadata, error) {
 		DiscardUnknown: true,
 	}
 	if err := opts.Unmarshal(data, metadata); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "failed to parse metadata JSON")
+		return nil, merr.WrapErrDataIntegrity(err, "failed to parse metadata JSON")
 	}
 	return metadata, nil
 }
@@ -154,7 +154,7 @@ func ParseSnapshotMetadataWithVersionCheck(data []byte) (*datapb.SnapshotMetadat
 		return nil, err
 	}
 	if err := ValidateFormatVersion(int(metadata.GetFormatVersion())); err != nil {
-		return nil, merr.WrapErrServiceInternalErr(err, "incompatible snapshot format")
+		return nil, err
 	}
 	return metadata, nil
 }

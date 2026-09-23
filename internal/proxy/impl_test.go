@@ -2597,7 +2597,7 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 
 		var capturedNamespace *string
 		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-			capturedNamespace = qt.request.Namespace
+			capturedNamespace = qt.Request().Namespace
 			return &milvuspb.QueryResults{
 				Status: merr.Success(),
 				FieldsData: []*schemapb.FieldData{
