@@ -266,3 +266,16 @@ func TestSetMixCoordClient(t *testing.T) {
 	node.SetMixCoordClient(future)
 	assert.Same(t, future, node.mixCoord)
 }
+
+// The node's Done ends the split child spawns still retrying when it stops.
+func TestQueryNodeDoneEndsWithTheNode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	node := &QueryNode{ctx: ctx}
+	select {
+	case <-node.Done():
+		t.Fatal("done before the node stopped")
+	default:
+	}
+	cancel()
+	<-node.Done()
+}
