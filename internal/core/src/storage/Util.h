@@ -557,9 +557,11 @@ GetFieldIDList(FieldId column_group_id,
 // Convert a single row of an Arrow ListArray to a protobuf ScalarField.
 // The element type is inferred from the ListArray's value type.
 // Supported value types: BOOL, INT8, INT16, INT32, INT64, FLOAT, DOUBLE, STRING.
+// Element-nullable arrays retain one validity entry per logical child value.
 proto::schema::ScalarField
 ArrowListToScalarFieldProto(const std::shared_ptr<arrow::ListArray>& list_array,
-                            int64_t row_index);
+                            int64_t row_index,
+                            bool element_nullable);
 
 // Convert a timestamp value to microseconds based on its Arrow TimeUnit.
 inline int64_t
@@ -616,9 +618,17 @@ ConvertTimestampToInt64(const arrow::ArrayVector& arrays);
 //   Vectors: various -> FixedSizeBinary
 //   VectorArray: List<List<scalar>> -> List<FixedSizeBinary>
 //
+// preserve_array_element_validity is for consumers whose ARRAY result model
+// carries element validity; legacy Chunk materialization leaves it disabled.
 std::shared_ptr<arrow::Array>
 NormalizeExternalArrow(const std::shared_ptr<arrow::Array>& array,
-                       const FieldMeta& field_meta);
+                       const FieldMeta& field_meta,
+                       bool preserve_array_element_validity = false);
+
+bool
+IsCompatibleArrayElementArrowType(
+    const std::shared_ptr<arrow::DataType>& actual_type,
+    DataType expected_type);
 
 // Load path: batch wrapper around NormalizeExternalArrow.
 arrow::ArrayVector

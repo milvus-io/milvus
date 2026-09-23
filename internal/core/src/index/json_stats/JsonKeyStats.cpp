@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <initializer_list>
 #include <iosfwd>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include "segcore/default_fs.h"
@@ -84,6 +85,20 @@ namespace {
 
 // Reader::create() exposes this synthetic JSON-stats group at index zero.
 constexpr int64_t kJsonStatsReaderColumnGroupIndex = 0;
+
+std::unordered_map<std::string, std::vector<FieldId>>
+BuildJsonStatsColumnFieldIds(const std::vector<std::string>& column_names,
+                             const std::vector<FieldId>& field_ids) {
+    AssertInfo(column_names.size() == field_ids.size(),
+               "json stats column count {} does not match field count {}",
+               column_names.size(),
+               field_ids.size());
+    std::unordered_map<std::string, std::vector<FieldId>> result;
+    for (size_t i = 0; i < column_names.size(); ++i) {
+        result[column_names[i]].emplace_back(field_ids[i]);
+    }
+    return result;
+}
 
 struct JsonStatsParquetMetadata {
     std::shared_ptr<arrow::Schema> schema;
@@ -1274,6 +1289,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             column_group_id,
             std::move(chunk_reader),
             field_meta_map,
+            BuildJsonStatsColumnFieldIds(column_names, milvus_field_ids),
             column_names,
             column_names,
             enable_mmap,
@@ -1392,6 +1408,7 @@ JsonKeyStats::LoadColumnGroup(int64_t column_group_id,
             column_group_id,
             std::move(chunk_reader),
             projected_field_meta_map,
+            BuildJsonStatsColumnFieldIds({column_name}, {inner_field_id}),
             column_names,
             *needed_columns,
             enable_mmap,

@@ -957,8 +957,8 @@ class PhyCompareFilterExpr : public Expr {
     int64_t right_current_chunk_pos_{0};
     int64_t current_chunk_id_{0};
     int64_t current_chunk_pos_{0};
-    segcore::StringScanState left_string_scan_state_;
-    segcore::StringScanState right_string_scan_state_;
+    segcore::ColumnScanState left_column_scan_state_;
+    segcore::ColumnScanState right_column_scan_state_;
     // Chunk cursors remain for the legacy fallback. Scan position is always a
     // segment offset so it does not depend on a later published chunk layout.
     int64_t current_data_global_pos_{0};
