@@ -694,6 +694,10 @@ func (scheduler *taskScheduler) Add(task Task) error {
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
 		scheduler.segmentTasks.Insert(index, task)
+
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
+		scheduler.segmentTasks.Insert(index, task)
 	}
 
 	scheduler.taskStats.Add(task.ID(), task)
@@ -1321,7 +1325,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
-		scheduler.segmentTasks.Remove(index)
+		scheduler.segmentTasks.CompareAndDelete(index, task)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
 		if task.Status() == TaskStatusFailed &&
 			task.Err() != nil &&
@@ -1331,13 +1335,17 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	case *ChannelTask:
 		index := replicaChannelIndex{task.ReplicaID(), task.Channel()}
-		scheduler.channelTasks.Remove(index)
+		scheduler.channelTasks.CompareAndDelete(index, task)
 		log = log.With(zap.String("channel", task.Channel()))
 
 	case *LeaderTask:
 		index := NewReplicaLeaderIndex(task)
-		scheduler.segmentTasks.Remove(index)
+		scheduler.segmentTasks.CompareAndDelete(index, task)
 		log = log.With(zap.Int64("segmentID", task.SegmentID()))
+
+	case *DropIndexTask:
+		index := NewReplicaDropIndex(task)
+		scheduler.segmentTasks.CompareAndDelete(index, task)
 	}
 
 	log.Info("task removed")

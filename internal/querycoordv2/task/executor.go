@@ -599,7 +599,10 @@ func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
 func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 	action := task.Actions()[step].(*DropIndexAction)
 	defer action.rpcReturned.Store(true)
-	ctx := task.Context()
+	// A stalled response must not retain the segment's scheduler key forever.
+	// The deadline bounds the RPC; it does not drain native work on the node.
+	ctx, cancel := context.WithTimeout(task.Context(), Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
 	log := log.Ctx(ctx).With(
 		zap.Int64("taskID", task.ID()),
 		zap.Int64("collectionID", task.CollectionID()),
@@ -618,19 +621,6 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 		ex.removeTask(task, step)
 	}()
 
-	replica := ex.meta.Get(ctx, task.ReplicaID())
-	if replica == nil {
-		err = merr.WrapErrNodeNotAvailable(action.Node())
-		log.Warn("node doesn't belong to any replica", zap.Error(err))
-		return
-	}
-	view := ex.dist.ChannelDistManager.GetShardLeader(task.Shard(), replica)
-	if view == nil {
-		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
-		log.Warn("failed to get shard leader", zap.Error(err))
-		return
-	}
-
 	req := &querypb.DropIndexRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_DropIndex),
@@ -639,12 +629,15 @@ func (ex *Executor) executeDropIndexAction(task *DropIndexTask, step int) {
 		SegmentID:    task.SegmentID(),
 		IndexIDs:     action.indexIDs,
 		Channel:      task.Shard(),
-		NeedTransfer: true,
+		NeedTransfer: false,
 	}
 
 	startTs := time.Now()
 	log.Info("drop index...")
-	status, err := ex.cluster.DropIndex(task.Context(), view.Node, req)
+	// The checker selected the node reporting this segment's redundant indexes.
+	// Dropping a local index does not change the delegator's segment routing;
+	// forwarding through it would unnecessarily involve unrelated cached workers.
+	status, err := ex.cluster.DropIndex(ctx, action.Node(), req)
 	if err != nil {
 		log.Warn("failed to drop index", zap.Error(err))
 		return
