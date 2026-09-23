@@ -61,6 +61,16 @@ func (suite *ServiceSuite) splitWatchRequest(vchannel string) *querypb.WatchDmCh
 	}
 }
 
+// splitTargetRecovery is a split target's recovery view with nothing to load:
+// the target was created at the fence and has flushed nothing yet.
+func (suite *ServiceSuite) splitTargetRecovery(vchannel string) *datapb.VchannelInfo {
+	return &datapb.VchannelInfo{
+		CollectionID: suite.collectionID,
+		ChannelName:  vchannel,
+		SeekPosition: &msgpb.MsgPosition{ChannelName: vchannel, MsgID: suite.position.GetMsgID()},
+	}
+}
+
 // awaitSplitChild waits until parent fronts a child on vchannel and returns the
 // child the node registered for it.
 func (suite *ServiceSuite) awaitSplitChild(parent delegator.ShardDelegator, vchannel string) delegator.ShardDelegator {
@@ -88,8 +98,8 @@ func (suite *ServiceSuite) TestSplitChildFrontsItsOwnSplit() {
 	)
 
 	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
-		func(_ *QueryNode, _ int64, vchannel string) (*msgpb.MsgPosition, error) {
-			return &msgpb.MsgPosition{ChannelName: vchannel, MsgID: suite.position.GetMsgID()}, nil
+		func(_ *QueryNode, _ int64, vchannel string) (*datapb.VchannelInfo, error) {
+			return suite.splitTargetRecovery(vchannel), nil
 		}).Build()
 	defer recovery.UnPatch()
 
@@ -133,10 +143,10 @@ func (suite *ServiceSuite) TestSpawnSplitChildNeverOverwritesADelegatorWatchedDu
 	watched := delegator.NewMockShardDelegator(suite.T())
 	watched.EXPECT().FrontingParent().Return(nil).Maybe()
 	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
-		func(node *QueryNode, _ int64, vchannel string) (*msgpb.MsgPosition, error) {
+		func(node *QueryNode, _ int64, vchannel string) (*datapb.VchannelInfo, error) {
 			// querycoord's watch of the target lands while the spawn waits.
 			node.delegators.Insert(vchannel, watched)
-			return &msgpb.MsgPosition{ChannelName: vchannel, MsgID: suite.position.GetMsgID()}, nil
+			return suite.splitTargetRecovery(vchannel), nil
 		}).Build()
 	defer recovery.UnPatch()
 	defer suite.node.delegators.GetAndRemove(target)
@@ -167,8 +177,8 @@ func (suite *ServiceSuite) TestSpawnSplitChildYieldsToAWatchInProgress() {
 	suite.Require().True(ok)
 
 	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
-		func(_ *QueryNode, _ int64, vchannel string) (*msgpb.MsgPosition, error) {
-			return &msgpb.MsgPosition{ChannelName: vchannel, MsgID: suite.position.GetMsgID()}, nil
+		func(_ *QueryNode, _ int64, vchannel string) (*datapb.VchannelInfo, error) {
+			return suite.splitTargetRecovery(vchannel), nil
 		}).Build()
 	defer recovery.UnPatch()
 	suite.Require().True(suite.node.subscribingChannels.Insert(target))
