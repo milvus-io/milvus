@@ -253,6 +253,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     std::shared_ptr<index::JsonKeyStats>
     GetJsonStats(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
+    bool
+    HasJsonStats(FieldId field_id) const override;
+
     PinWrapper<index::NgramInvertedIndex*>
     GetNgramIndex(milvus::OpContext* op_ctx, FieldId field_id) const override;
 
@@ -342,7 +345,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
         std::unordered_map<FieldId, std::string> text_lob_paths;
         std::unordered_map<FieldId, TextIndexVariant> text_indexes;
         std::vector<JsonIndex> json_indices;
-        std::unordered_map<FieldId, std::shared_ptr<index::JsonKeyStats>>
+        std::unordered_map<
+            FieldId,
+            std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>>>
             json_stats;
         std::shared_ptr<milvus_storage::api::Reader> reader;
         std::shared_ptr<TimestampData> timestamps;
@@ -1650,11 +1655,12 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
                        milvus::OpContext* op_ctx = nullptr,
                        PublishMode publish_mode = PublishMode::Drain);
 
-    std::shared_ptr<index::JsonKeyStats>
+    std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>>
     BuildJsonKeyStatsIndex(
         milvus::OpContext* op_ctx,
         const std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>&
-            info_proto);
+            info_proto,
+        const std::string& shard);
 
     void
     LoadBatchJsonKeyIndexes(
@@ -1663,6 +1669,7 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
             FieldId,
             std::shared_ptr<milvus::proto::indexcgo::LoadJsonKeyIndexInfo>>&
             infos,
+        const SegmentLoadInfo& segment_load_info,
         const SchemaPtr& schema_snapshot,
         StagedStateCommitter& committer);
 
@@ -2601,8 +2608,9 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    SetJsonStatsForTesting(FieldId field_id,
-                           std::shared_ptr<index::JsonKeyStats> stats) {
+    SetJsonStatsForTesting(
+        FieldId field_id,
+        std::shared_ptr<cachinglayer::CacheSlot<index::JsonKeyStats>> stats) {
         std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
         auto current = CapturePublishedState();
         auto next = ClonePublishedState(current);
