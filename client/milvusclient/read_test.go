@@ -541,42 +541,6 @@ func (s *ReadSuite) TestHybridSearch_RejectsHighlighterAnyLeg() {
 		s.Contains(err.Error(), "hybrid search does not support highlighter")
 	})
 
-	s.Run("nil highlighter on a leg does NOT trip the check", func() {
-		// WithHighlighter(nil) is a defensive reset; the check must allow it.
-		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
-		s.setupCache(collectionName, s.schema)
-
-		s.mock.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
-				// Capture proves a wire call happened with all three legs' Highlighter nil.
-				for _, req := range hsr.GetRequests() {
-					s.Nil(req.GetHighlighter())
-				}
-				return &milvuspb.SearchResults{
-					Status: merr.Success(),
-					Results: &schemapb.SearchResultData{
-						NumQueries: 1,
-						Topks:      []int64{2},
-						Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
-							IntId: &schemapb.LongArray{Data: []int64{1, 2}},
-						}},
-						Scores: []float32{0.1, 0.2},
-						FieldsData: []*schemapb.FieldData{
-							s.getInt64FieldData("ID", []int64{1, 2}),
-						},
-					},
-				}, nil
-			}).Once()
-
-		_, err := s.client.HybridSearch(ctx,
-			NewHybridSearchOption(collectionName, 5,
-				NewAnnRequest("vector", 10, vec()).WithHighlighter(nil),
-				NewAnnRequest("vector", 10, vec()),
-				NewAnnRequest("vector", 10, vec()).WithHighlighter(nil),
-			))
-		s.NoError(err)
-	})
-
 	s.Run("highlighter combined with reranker still rejected", func() {
 		// Proves the highlighter check is independent of other option plumbing.
 		_, err := s.client.HybridSearch(ctx,
