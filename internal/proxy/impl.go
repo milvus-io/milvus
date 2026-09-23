@@ -5160,6 +5160,9 @@ func (node *Proxy) InvalidateCredentialCache(ctx context.Context, request *proxy
 	if priCache != nil {
 		priCache.RemoveCredential(username) // no need to return error, though credential may be not cached
 	}
+	if username == util.UserRoot && node.managementRootVerifier != nil {
+		node.managementRootVerifier.Forget()
+	}
 	mlog.Debug(ctx, "complete to invalidate credential cache")
 
 	return merr.Success(), nil
@@ -5183,7 +5186,12 @@ func (node *Proxy) UpdateCredentialCache(ctx context.Context, request *proxypb.U
 	if priCache != nil {
 		priCache.UpdateCredential(credInfo) // no need to return error, though credential may be not cached
 	}
-	mlog.Debug(context.TODO(), "complete to update credential cache")
+	if request.Username == util.UserRoot && node.managementRootVerifier != nil {
+		// The notification carries SHA256, not the bcrypt hash this verifier
+		// needs. Revoke the old credential and fetch the current hash on demand.
+		node.managementRootVerifier.Forget()
+	}
+	mlog.Debug(ctx, "complete to update credential cache")
 
 	return merr.Success(), nil
 }
@@ -6629,12 +6637,12 @@ func DeregisterSubLabel(subLabel string) {
 func (node *Proxy) RegisterRestRouter(router gin.IRouter) {
 	// Cluster request that executed by proxy
 	router.GET(http.ClusterInfoPath, getClusterInfo(node))
-	router.GET(http.ClusterConfigsPath, getConfigs(paramtable.Get().GetConfigsView()))
+	router.GET(http.ClusterConfigsPath, getProjectedConfigs(paramtable.Get().GetConfigsView))
 	router.GET(http.ClusterClientsPath, getConnectedClients)
 	router.GET(http.ClusterDependenciesPath, getDependencies)
 
 	// Hook request that executed by proxy
-	router.GET(http.HookConfigsPath, getConfigs(paramtable.GetHookParams().GetAll()))
+	router.GET(http.HookConfigsPath, getProjectedConfigs(paramtable.GetHookParams().GetAll))
 
 	// Slow query request that executed by proxy
 	router.GET(http.SlowQueryPath, getSlowQuery(node))

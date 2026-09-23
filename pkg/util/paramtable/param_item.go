@@ -101,6 +101,19 @@ func (sw *VersionGateSwitcher) Validate() {
 	}
 }
 
+// Sensitivity controls configuration presentation and log redaction only.
+// Mutation restrictions are independent of this policy.
+type Sensitivity int
+
+const (
+	// Auto inherits the manager's prefix and key-name inference rules.
+	Auto Sensitivity = iota
+	// Sensitive explicitly redacts the value regardless of its key name.
+	Sensitive
+	// NonSensitive explicitly exposes a reviewed value regardless of inference.
+	NonSensitive
+)
+
 type ParamItem struct {
 	Key          string // which should be named as "A.B.C"
 	Version      string
@@ -113,6 +126,9 @@ type ParamItem struct {
 	Formatter func(originValue string) string
 	Forbidden bool
 	Immutable bool
+	// Sensitivity defaults to Auto. Scalar GetValue calls remain raw for
+	// internal consumers in every state.
+	Sensitivity Sensitivity
 
 	// VersionGateSwitcher attaches version-gated auto-switch semantics to this
 	// item; nil means no version gating (backward compatible).
@@ -139,6 +155,25 @@ func (pi *ParamItem) Init(manager *config.Manager) {
 	}
 	if pi.Immutable {
 		pi.manager.ImmutableUpdate(pi.Key)
+	}
+	switch pi.Sensitivity {
+	case Sensitive:
+		pi.manager.RegisterSensitiveKey(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.RegisterSensitiveKey(key)
+		}
+	case NonSensitive:
+		pi.manager.RegisterNonSensitiveKey(pi.Key)
+		for _, key := range pi.FallbackKeys {
+			pi.manager.RegisterNonSensitiveKey(key)
+		}
+	}
+	// Sources already refresh while ParamItems initialize. Publish policy for
+	// every spelling before declaring any key visible to logs or projections.
+	// Until declaration, those boundaries omit or redact the value.
+	pi.manager.RegisterConfigKey(pi.Key)
+	for _, key := range pi.FallbackKeys {
+		pi.manager.RegisterConfigKey(key)
 	}
 
 	currentValue := pi.GetValue()
@@ -178,20 +213,40 @@ func (pi *ParamItem) handleConfigChange(event *config.Event) {
 		return
 	}
 
+	// Etcd updates may contain management-request payload even for a public
+	// scalar. Callback errors may embed the same payload in their message or
+	// verbose chain, so protect them along with the old and new values.
+	redactPayload := event.EventSource == "EtcdSource" || pi.manager == nil || pi.manager.IsSensitive(pi.Key)
+	logOldValue, logNewValue := config.RedactedValue, config.RedactedValue
+	if !redactPayload {
+		logOldValue = pi.configValueForLog(oldValue)
+		logNewValue = pi.configValueForLog(newValue)
+	}
+
 	if err := pi.callback(context.Background(), pi.Key, oldValue, newValue); err != nil {
+		// A callback may read other sensitive settings, even when this key is
+		// public (for example, cipher rotation reloads all KMS credentials).
 		mlog.Error(context.TODO(), "param change callback failed",
 			mlog.String("key", pi.Key),
-			mlog.String("oldValue", oldValue),
-			mlog.String("newValue", newValue),
-			mlog.Err(err))
+			mlog.String("oldValue", logOldValue),
+			mlog.String("newValue", logNewValue),
+			mlog.String("error", config.RedactedValue))
 	} else {
 		mlog.Info(context.TODO(), "param value changed",
 			mlog.String("key", pi.Key),
-			mlog.String("oldValue", oldValue),
-			mlog.String("newValue", newValue))
+			mlog.String("oldValue", logOldValue),
+			mlog.String("newValue", logNewValue))
 	}
 
 	pi.lastValue.Store(&newValue)
+}
+
+func (pi *ParamItem) configValueForLog(value string) string {
+	if pi.manager == nil {
+		// Only reachable before Init; assume the worst.
+		return config.RedactedValue
+	}
+	return pi.manager.RedactValue(pi.Key, value)
 }
 
 // Get original value with error
@@ -496,6 +551,15 @@ type ParamGroup struct {
 	Version   string
 	Doc       string
 	Export    bool
+	// Sensitive marks every value below KeyPrefix as sensitive. Use it when the
+	// members are provider- or plugin-defined, so the core cannot enumerate
+	// which of them carry credentials or protected topology.
+	Sensitive bool
+	// NonSensitiveSuffixes lists leaf names below KeyPrefix that the group itself
+	// defines and that are known to carry neither credentials nor infrastructure
+	// topology, for example a pure enable flag. Only meaningful together with
+	// Sensitive; every other leaf below the prefix still fails closed.
+	NonSensitiveSuffixes []string
 
 	GetFunc func() map[string]string
 	DocFunc func(string) string
@@ -504,14 +568,26 @@ type ParamGroup struct {
 }
 
 func (pg *ParamGroup) Init(manager *config.Manager) {
+	if !pg.Sensitive && len(pg.NonSensitiveSuffixes) > 0 {
+		panic(fmt.Sprintf("%s declares NonSensitiveSuffixes without Sensitive", pg.KeyPrefix))
+	}
 	pg.manager = manager
+	if pg.Sensitive {
+		pg.manager.RegisterSensitivePrefix(pg.KeyPrefix)
+		for _, suffix := range pg.NonSensitiveSuffixes {
+			pg.manager.RegisterNonSensitiveSuffix(pg.KeyPrefix, suffix)
+		}
+	}
+	// Keep the namespace hidden until its default and reviewed exemptions are
+	// installed, including the empty-prefix hook configuration namespace.
+	pg.manager.RegisterConfigPrefix(pg.KeyPrefix)
 }
 
 func (pg *ParamGroup) GetValue() map[string]string {
 	if pg.GetFunc != nil {
 		return pg.GetFunc()
 	}
-	values := pg.manager.GetBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
+	values := pg.manager.GetEffectiveBy(config.WithPrefix(pg.KeyPrefix), config.RemovePrefix(pg.KeyPrefix))
 	return values
 }
 
