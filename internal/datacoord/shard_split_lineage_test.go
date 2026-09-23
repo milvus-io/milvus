@@ -677,3 +677,52 @@ func TestAnUnsortedRewriteOutputIsSortedAndIndexedInTheWindow(t *testing.T) {
 	pending := map[string]typeutil.Set[int64]{src: typeutil.NewSet(input)}
 	assert.Equal(t, 1, forgetNonInputSegments(pending, func(id int64) *SegmentInfo { return f.svr.meta.GetSegment(ctx, id) }))
 }
+
+// A split source's recovery info names the split's target vchannels while the
+// split has not finished on this cluster: the QueryNode recovers the split's
+// children only when the field is set. Every other channel, and the source once
+// the split is Done or Aborted, carries none.
+func TestSplitSourceRecoveryInfoNamesItsTargets(t *testing.T) {
+	const src, t1, t2 = hashSrcVChannel, hashTgtA, hashTgtB
+
+	for _, state := range []datapb.SplitShardTaskState{
+		datapb.SplitShardTaskState_SplitShardTaskPreparing,
+		datapb.SplitShardTaskState_SplitShardTaskFencing,
+		datapb.SplitShardTaskState_SplitShardTaskRedistributing,
+		datapb.SplitShardTaskState_SplitShardTaskAdopting,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			f := newLineageFixture(t)
+			f.setState(t, state)
+			assert.Equal(t, []string{t1, t2}, f.view(src).GetSplitTargetChannels())
+			assert.Empty(t, f.view(t1).GetSplitTargetChannels(), "a target is no split source")
+
+			f.describing(t, src, t1, t2)
+			_, channels := f.recovery(t)
+			assert.Equal(t, []string{t1, t2}, channels[src].GetSplitTargetChannels())
+			assert.Empty(t, channels[t1].GetSplitTargetChannels())
+			assert.Empty(t, channels[t2].GetSplitTargetChannels())
+		})
+	}
+
+	for _, state := range []datapb.SplitShardTaskState{
+		datapb.SplitShardTaskState_SplitShardTaskDone,
+		datapb.SplitShardTaskState_SplitShardTaskAborted,
+	} {
+		t.Run(state.String(), func(t *testing.T) {
+			f := newLineageFixture(t)
+			f.setState(t, state)
+			assert.Empty(t, f.view(src).GetSplitTargetChannels())
+			f.describing(t, src, t1, t2)
+			_, channels := f.recovery(t)
+			assert.Empty(t, channels[src].GetSplitTargetChannels())
+		})
+	}
+
+	t.Run("the field is the view's own copy", func(t *testing.T) {
+		f := newLineageFixture(t)
+		view := f.view(src)
+		view.SplitTargetChannels[0] = "mutated"
+		assert.Equal(t, []string{t1, t2}, f.mgr.SplitTargetsOfSource(src))
+	})
+}

@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -294,6 +295,12 @@ func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, s
 		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
 		PartitionStatsVersions: partStatsVersionsMap,
 		DeleteCheckpoint:       deleteCheckPoint,
+		// The split's targets while it has not finished on this cluster, in
+		// the same info as the seek position they qualify: a QueryNode
+		// recovers the split's children from a source only when it is set.
+		// splitTargets is the family the view was built over, so the field
+		// and the merged segments come from one task-state read.
+		SplitTargetChannels: slices.Clone(splitTargets),
 	}
 }
 
