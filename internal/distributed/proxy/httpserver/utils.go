@@ -17,16 +17,21 @@
 package httpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	gojson "encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/spf13/cast"
@@ -44,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
+	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -471,9 +477,313 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 // --------------------- insert param --------------------- //
 
-func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool) ([]map[string]interface{}, map[string][]bool, error) {
+// maxJSONDepth is where simdjson's DOM parser gives up with DEPTH_ERROR. The
+// on-demand parser used by ordinary filters copes with far more, but the JSON
+// index and JSON_CONTAINS build a DOM, so a deeper document is readable by some
+// queries and not others. The request binder allows 9997 levels, so the gap is
+// reachable.
+const maxJSONDepth = fieldvalidator.MaxJSONDepth
+
+// checkPathReplaceJSONCompatible reports the first reason the storage engine would not be
+// able to read a document back, in one pass over it.
+//
+// Keeping the caller's bytes is only safe for values the engine can actually
+// read. The request binder guarantees the body is syntactically valid JSON, but
+// that is a weaker guarantee than it looks:
+//
+//   - it accepts an integer beyond 64 bits, which simdjson reports as
+//     BIGINT_ERROR
+//   - it accepts invalid UTF-8, replacing it with U+FFFD when it decodes, while
+//     the raw bytes keep the offending byte and simdjson reports UTF8_ERROR
+//   - it accepts nesting up to 9997 levels, past the DOM limit above
+//   - it accepts an object that declares the same key twice, where the readers
+//     disagree about which value wins: encoding/json, Python and PostgreSQL's
+//     jsonb keep the last, gjson and simdjson keep the first
+//
+// The duplicate-key scan needs a full walk anyway, so the rest costs nothing on
+// top of it.
+func checkPathReplaceJSONCompatible(field string, document string) error {
+	if !utf8.ValidString(document) {
+		return merr.WrapErrParameterInvalidMsg(
+			"field %s contains invalid UTF-8, which the JSON engine cannot read", field)
+	}
+
+	// One pass of the standard library's tokenizer, chosen over a recursive
+	// gjson walk on purpose. gjson's ForEach re-scans each child's whole
+	// subtree to find its extent, so a deep document with a wide leaf cost
+	// O(depth * bytes) -- benchmarked at 37x on 500 levels around a 2KB leaf
+	// -- and the only ways to keep that walk were a depth line the engine
+	// does not have or a work budget with a tunable, both of them complexity
+	// wearing a smaller number. The tokenizer reads every byte once; its
+	// price is an allocation per token, about two extra microseconds on an
+	// ordinary value, paid for never having to think about document shape
+	// again. Sonic is not an option because its Decoder has no Token. With
+	// UseNumber the tokenizer hands back each number's exact literal, which
+	// is what the number check needs.
+	//
+	// The depth rule is simdjson's: it counts containers, not values, so 1023
+	// arrays holding a scalar and 1024 empty arrays both parse while 1024
+	// arrays holding a scalar do not -- the limit is on a node sitting past
+	// maxJSONDepth, not on reaching it. Anything after the first complete
+	// value is ignored, as the previous walk ignored it: every caller hands
+	// over exactly one token.
+	decoder := gojson.NewDecoder(strings.NewReader(document))
+	decoder.UseNumber()
+
+	type frame struct {
+		isObject  bool
+		expectKey bool
+		seen      map[string]struct{}
+	}
+	var stack []frame
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF && len(stack) == 0 {
+				return nil
+			}
+			return merr.WrapErrParameterInvalidMsg(
+				"field %s is not a readable JSON document: %s", field, err.Error())
+		}
+
+		if delim, ok := token.(gojson.Delim); ok && (delim == ']' || delim == '}') {
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				return nil // first value complete
+			}
+			top := &stack[len(stack)-1]
+			if top.isObject {
+				top.expectKey = true
+			}
+			continue
+		}
+
+		// a key, or a value node at depth len(stack)+1
+		if len(stack) > 0 {
+			top := &stack[len(stack)-1]
+			if top.isObject && top.expectKey {
+				name := token.(string)
+				if _, dup := top.seen[name]; dup {
+					return merr.WrapErrParameterInvalidMsg(
+						"field %s declares the key %s twice; JSON object names must be unique",
+						field, name)
+				}
+				top.seen[name] = struct{}{}
+				top.expectKey = false
+				continue
+			}
+			if top.isObject {
+				top.expectKey = true
+			}
+		}
+
+		switch value := token.(type) {
+		case gojson.Delim: // '[' or '{'
+			if len(stack)+1 > maxJSONDepth {
+				return merr.WrapErrParameterInvalidMsg(
+					"field %s nests deeper than %d levels, which the JSON engine cannot read",
+					field, maxJSONDepth)
+			}
+			next := frame{isObject: value == '{', expectKey: value == '{'}
+			if next.isObject {
+				next.seen = make(map[string]struct{})
+			}
+			stack = append(stack, next)
+		case gojson.Number:
+			if len(stack)+1 > maxJSONDepth {
+				return merr.WrapErrParameterInvalidMsg(
+					"field %s nests deeper than %d levels, which the JSON engine cannot read",
+					field, maxJSONDepth)
+			}
+			if _, err := pathReplaceJSONNumberLiteral(field, value.String()); err != nil {
+				return err
+			}
+		default: // string, bool, nil
+			if len(stack)+1 > maxJSONDepth {
+				return merr.WrapErrParameterInvalidMsg(
+					"field %s nests deeper than %d levels, which the JSON engine cannot read",
+					field, maxJSONDepth)
+			}
+		}
+		if len(stack) == 0 {
+			return nil // scalar document, complete
+		}
+	}
+}
+
+// pathReplaceJSONDocument returns the bytes to store for a JSON document,
+// rejecting what the engine cannot read.
+// It is used only for PATH_REPLACE operands in 3.0. Ordinary REST writes keep
+// their existing conversion rules; this backport does not change them.
+//
+// A lone surrogate is the one case that falls back rather than being rejected.
+// The binder accepts it and replaces it with U+FFFD when it decodes, so the
+// value was readable before the token was kept; decoding and re-encoding
+// reproduces exactly what used to be stored.
+func pathReplaceJSONDocument(field string, document string) ([]byte, error) {
+	// Check the document the caller actually sent. Checking the normalized form
+	// instead is too late: decoding resolves a duplicate key to one value and
+	// turns an oversized integer into a float, so both would pass.
+	if err := checkPathReplaceJSONCompatible(field, document); err != nil {
+		return nil, err
+	}
+
+	if pathReplaceJSONHasLoneSurrogate(document) {
+		// Decode with UseNumber so every number keeps its literal. Going through
+		// float64 would rewrite the ones that need more than 53 bits, and an
+		// earlier version tried to predict which those were: it asked whether the
+		// literal fit an int64, so 2^63 was judged safe and came back as
+		// 9223372036854776000, while 9007199254740994 was refused even though it
+		// round-trips exactly. Not converting at all removes the question.
+		decoder := json.NewDecoder(bytes.NewReader([]byte(document)))
+		decoder.UseNumber()
+		var decoded interface{}
+		if err := decoder.Decode(&decoded); err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"field %s is not a readable JSON document: %s", field, err.Error())
+		}
+		normalized, err := json.Marshal(decoded)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"field %s is not a readable JSON document: %s", field, err.Error())
+		}
+		if err := checkPathReplaceJSONCompatible(field, string(normalized)); err != nil {
+			return nil, err
+		}
+		return normalized, nil
+	}
+
+	return []byte(document), nil
+}
+
+// pathReplaceJSONHasLoneSurrogate reports whether raw contains a \uXXXX escape that is half of
+// a surrogate pair without its partner.
+//
+// Such an escape is accepted by the request binder, which silently replaces it
+// with U+FFFD, but simdjson refuses to decode the string it belongs to and
+// reports STRING_ERROR. Storing the document verbatim would therefore make that
+// value unreadable, so the callers fall back to the decoded form, which is what
+// was stored before the token was kept.
+//
+// The scan is skipped entirely for a document with no \u escape at all, which is
+// the overwhelmingly common case.
+func pathReplaceJSONHasLoneSurrogate(raw string) bool {
+	if !strings.Contains(raw, `\u`) {
+		return false
+	}
+	for i := 0; i+5 < len(raw); i++ {
+		if raw[i] != '\\' || raw[i+1] != 'u' {
+			continue
+		}
+		// A backslash that is itself escaped does not start an escape.
+		backslashes := 0
+		for j := i - 1; j >= 0 && raw[j] == '\\'; j-- {
+			backslashes++
+		}
+		if backslashes%2 == 1 {
+			continue
+		}
+		code, err := strconv.ParseUint(raw[i+2:i+6], 16, 32)
+		if err != nil {
+			continue
+		}
+		if code < 0xD800 || code > 0xDFFF {
+			continue
+		}
+		if code >= 0xDC00 {
+			// a low surrogate can never come first
+			return true
+		}
+		// a high surrogate must be followed by a low one
+		if i+11 >= len(raw) || raw[i+6] != '\\' || raw[i+7] != 'u' {
+			return true
+		}
+		low, err := strconv.ParseUint(raw[i+8:i+12], 16, 32)
+		if err != nil || low < 0xDC00 || low > 0xDFFF {
+			return true
+		}
+		i += 11
+	}
+	return false
+}
+
+// pathReplaceJSONNumberLiteral keeps the original JSON number literal instead of decoding
+// it into int64/float64 and re-encoding it. Both the JSON field and the dynamic
+// field are stored as JSON text, so that round trip can only lose information:
+// gjson's String() renders numbers through float64, and cast.ToInt64 discards
+// its error and yields 0, so 1e300, 1e19 and integers beyond int64 were all
+// silently stored as 0.
+//
+// Values the JSON engine cannot represent are rejected here rather than stored,
+// so they surface at insert time instead of failing every query that touches the
+// path. Integers are limited to 64 bits because simdjson reports BIGINT_ERROR
+// beyond that; a caller that only needs the magnitude can send a floating-point
+// literal, and one that needs the exact digits can send a string.
+func pathReplaceJSONNumberLiteral(field string, raw string) (json.Number, error) {
+	if !strings.ContainsAny(raw, ".eE") {
+		if _, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			return json.Number(raw), nil
+		}
+		if _, err := strconv.ParseUint(raw, 10, 64); err == nil {
+			return json.Number(raw), nil
+		}
+		return "", merr.WrapErrParameterInvalidMsg(
+			"field %s integer %s exceeds the 64-bit range supported by the JSON engine, "+
+				"write it as a floating-point literal or as a string", field, raw)
+	}
+	// The request binder already rejects numbers outside the float64 range, so
+	// this only guards against that gate changing.
+	if value, err := strconv.ParseFloat(raw, 64); err != nil || math.IsInf(value, 0) {
+		return "", merr.WrapErrParameterInvalidMsg(
+			"field %s number %s is outside the range representable as a double", field, raw)
+	}
+	return json.Number(raw), nil
+}
+
+// nullElementIn returns the position of the first null element in an array
+// value. An array has no element-level validity in Milvus, so a null can only
+// be stored as the element type's zero value and is never recoverable.
+func nullElementIn(value gjson.Result) (int, bool) {
+	// A null element can only exist where the letters "null" appear in the
+	// text, and a vector's text is digits, brackets and commas. The substring
+	// scan is vectorized and the walk below is not, so the walk runs only for
+	// the rare value that could contain one; benchmarked, this is the
+	// difference between the null rule being free and it doubling the parse.
+	if !strings.Contains(value.Raw, "null") {
+		return 0, false
+	}
+	// Only an array has elements to look at. gjson dispatches on the first
+	// character, so text that is not JSON at all can still come back as a
+	// literal: a base64 binary vector starting with "nu" is read as a partial
+	// null, and that result hands itself to ForEach as a single element, which
+	// looked like a null at index 0.
+	if !value.IsArray() {
+		return 0, false
+	}
+
+	idx, found := 0, false
+	position := 0
+	value.ForEach(func(_, element gjson.Result) bool {
+		if element.Type == gjson.Null {
+			idx, found = position, true
+			return false
+		}
+		position++
+		return true
+	})
+	return idx, found
+}
+
+func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partialUpdate bool, fieldOps ...*schemapb.FieldPartialUpdateOp) ([]map[string]interface{}, map[string][]bool, error) {
 	var reallyDataArray []map[string]interface{}
 	validDataMap := make(map[string][]bool)
+	jsonPathFields := make(map[string]bool)
+	for _, op := range fieldOps {
+		if op.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			jsonPathFields[op.GetFieldName()] = true
+		}
+	}
 	dataResult := gjson.GetBytes(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
@@ -519,6 +829,24 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 				fieldType := field.DataType
 				fieldName := field.Name
 				fieldValue := data.Get(fieldName)
+
+				// Replacement operands are JSON values, not SQL NULL or an encoded
+				// document string. Preserve their type rather than applying the
+				// legacy whole-field JSON conversion below.
+				if fieldType == schemapb.DataType_JSON && jsonPathFields[fieldName] {
+					if !fieldValue.Exists() {
+						return reallyDataArray, validDataMap, merr.WrapErrParameterMissingMsg("JSON PATH_REPLACE field %s is required in every row", fieldName)
+					}
+					stored, err := pathReplaceJSONDocument(fieldName, fieldValue.Raw)
+					if err != nil {
+						return reallyDataArray, validDataMap, err
+					}
+					reallyData[fieldName] = stored
+					if field.Nullable || field.DefaultValue != nil {
+						validDataMap[fieldName] = append(validDataMap[fieldName], true)
+					}
+					continue
+				}
 
 				// For partial update, missing fields mean "do not update this field".
 				// Explicit JSON null is handled below as an update to null for nullable fields.
@@ -839,6 +1167,109 @@ func checkAndSetData(body []byte, collSchema *schemapb.CollectionSchema, partial
 		}
 	}
 	return reallyDataArray, validDataMap, nil
+}
+
+// schemaForPathReplaceOperands validates information that would be lost during
+// REST row conversion and returns a request-local schema view. A PATH_REPLACE
+// StructArray operand must contain all children for an element path or exactly
+// the selected child for a child path. The collection schema remains complete.
+func schemaForPathReplaceOperands(body []byte, collSchema *schemapb.CollectionSchema, fieldOps []*schemapb.FieldPartialUpdateOp) (*schemapb.CollectionSchema, error) {
+	targets := make(map[string]string)
+	for _, fieldOp := range fieldOps {
+		if fieldOp.GetOp() == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+			targets[fieldOp.GetFieldName()] = fieldOp.GetPath()
+		}
+	}
+	if len(targets) == 0 {
+		return collSchema, nil
+	}
+
+	rows := gjson.GetBytes(body, HTTPRequestData).Array()
+	if len(rows) == 0 {
+		return collSchema, nil
+	}
+	for _, field := range collSchema.GetFields() {
+		if field.GetDataType() != schemapb.DataType_Array {
+			continue
+		}
+		if _, targeted := targets[field.GetName()]; !targeted {
+			continue
+		}
+		for rowIndex, row := range rows {
+			rawValue := gjson.Get(row.Raw, field.GetName())
+			if !rawValue.Exists() || rawValue.Type == gjson.Null {
+				continue
+			}
+			// A scalar Array has no element-level validity. Inspect the raw
+			// operand before legacy decoding can turn a null bool
+			// or float into its zero value. String() also unwraps the legacy
+			// quoted-array spelling accepted by REST row conversion.
+			if index, found := nullElementIn(gjson.Parse(rawValue.String())); found {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"row %d PATH_REPLACE array field %q has a null operand element at index %d",
+					rowIndex, field.GetName(), index)
+			}
+		}
+	}
+	requestSchema := proto.Clone(collSchema).(*schemapb.CollectionSchema)
+	for _, structSchema := range requestSchema.GetStructArrayFields() {
+		if _, targeted := targets[structSchema.GetName()]; !targeted {
+			continue
+		}
+		var expectedMask []string
+		for rowIndex, row := range rows {
+			rawValue := gjson.Get(row.Raw, structSchema.GetName())
+			if !rawValue.Exists() || rawValue.Type == gjson.Null {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must not be missing or null", rowIndex, structSchema.GetName())
+			}
+			elements := rawValue.Array()
+			if !rawValue.IsArray() || len(elements) != 1 || !elements[0].IsObject() {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q must contain exactly one object", rowIndex, structSchema.GetName())
+			}
+			mask := make([]string, 0)
+			elements[0].ForEach(func(key, _ gjson.Result) bool {
+				mask = append(mask, key.String())
+				return true
+			})
+			sort.Strings(mask)
+			if len(mask) == 0 {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask must not be empty", rowIndex, structSchema.GetName())
+			}
+			if rowIndex == 0 {
+				expectedMask = mask
+			} else if !slices.Equal(expectedMask, mask) {
+				return nil, merr.WrapErrParameterInvalidMsg("row %d PATH_REPLACE struct field %q child mask %v does not match request mask %v", rowIndex, structSchema.GetName(), mask, expectedMask)
+			}
+		}
+
+		path := targets[structSchema.GetName()]
+		if strings.Count(path, "[") == 1 {
+			if len(expectedMask) != len(structSchema.GetFields()) {
+				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q whole element requires all struct children", structSchema.GetName())
+			}
+		} else if len(expectedMask) != 1 || !strings.HasSuffix(path, "["+expectedMask[0]+"]") {
+			return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE field %q path requires exactly the selected child", structSchema.GetName())
+		}
+		selected := make(map[string]struct{}, len(expectedMask))
+		for _, name := range expectedMask {
+			selected[name] = struct{}{}
+		}
+		children := make([]*schemapb.FieldSchema, 0, len(selected))
+		for _, child := range structSchema.GetFields() {
+			name := subShortName(child)
+			if _, ok := selected[name]; ok {
+				children = append(children, child)
+				delete(selected, name)
+			}
+		}
+		if len(selected) > 0 {
+			for name := range selected {
+				return nil, merr.WrapErrParameterInvalidMsg("PATH_REPLACE struct field %q has no child %q", structSchema.GetName(), name)
+			}
+		}
+		structSchema.Fields = children
+	}
+	return requestSchema, nil
 }
 
 func containsString(arr []string, s string) bool {

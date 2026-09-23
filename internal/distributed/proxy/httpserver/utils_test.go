@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -3979,6 +3981,306 @@ func buildStructArrayTestSchema() *schemapb.CollectionSchema {
 		Fields:            []*schemapb.FieldSchema{pk, vec},
 		StructArrayFields: []*schemapb.StructArrayFieldSchema{structField},
 	}
+}
+
+func TestPathReplaceJSONDocument(t *testing.T) {
+	for _, tc := range []struct {
+		name, input, output, wantError string
+	}{
+		{"null", `null`, `null`, ""},
+		{"empty input", ``, ``, ""}, // Callers supply a token; the scanner also tolerates EOF.
+		{"nested object", `{"x":{},"y":[]}`, `{"x":{},"y":[]}`, ""},
+		{"raw object", `{"n":9007199254740993,"s":"<&>"}`, `{"n":9007199254740993,"s":"<&>"}`, ""},
+		{"uint64", `18446744073709551615`, `18446744073709551615`, ""},
+		{"float literal", `1.50e2`, `1.50e2`, ""},
+		{"duplicate key", `{"x":1,"x":2}`, "", "must be unique"},
+		{"escaped duplicate key", `{"x":1,"\u0078":2}`, "", "must be unique"},
+		{"oversized integer", `18446744073709551616`, "", "64-bit range"},
+		{"oversized float", `1e400`, "", "double"},
+		{"invalid utf8", "\"\xff\"", "", "invalid UTF-8"},
+		{"invalid syntax", `{"x":`, "", "not a readable JSON document"},
+		{"depth limit", strings.Repeat("[", maxJSONDepth) + strings.Repeat("]", maxJSONDepth), strings.Repeat("[", maxJSONDepth) + strings.Repeat("]", maxJSONDepth), ""},
+		{"too deep", strings.Repeat("[", maxJSONDepth) + "0" + strings.Repeat("]", maxJSONDepth), "", "nests deeper"},
+		{"too many containers", strings.Repeat("[", maxJSONDepth+1) + strings.Repeat("]", maxJSONDepth+1), "", "nests deeper"},
+		{"string too deep", strings.Repeat("[", maxJSONDepth) + `"x"` + strings.Repeat("]", maxJSONDepth), "", "nests deeper"},
+		{"escaped normal character", `"\u0041"`, `"\u0041"`, ""},
+		{"valid surrogate pair", `"\ud83d\ude00"`, `"\ud83d\ude00"`, ""},
+		{"escaped backslash", `"\\ud800"`, `"\\ud800"`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := pathReplaceJSONDocument("metadata", tc.input)
+			if tc.wantError != "" {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.output, string(got))
+		})
+	}
+	for _, surrogate := range []string{`\ud800`, `\udc00`, `\ud800\u0041`} {
+		input := `{"s":"` + surrogate + `","n":9007199254740993}`
+		got, err := pathReplaceJSONDocument("metadata", input)
+		require.NoError(t, err)
+		assert.False(t, pathReplaceJSONHasLoneSurrogate(string(got)))
+		assert.Contains(t, string(got), "9007199254740993")
+		assert.Contains(t, gjson.GetBytes(got, "s").String(), "\ufffd")
+	}
+	assert.False(t, pathReplaceJSONHasLoneSurrogate(`"\uZZZZ"`), "syntax errors belong to the JSON parser")
+	for _, tc := range []struct {
+		value string
+		index int
+		found bool
+	}{
+		{`"null"`, 0, false},
+		{`["null",1]`, 0, false},
+		{`[false,null]`, 1, true},
+	} {
+		index, found := nullElementIn(gjson.Parse(tc.value))
+		assert.Equal(t, tc.index, index)
+		assert.Equal(t, tc.found, found)
+	}
+}
+
+func TestPathReplaceJSONDocumentCodecFailures(t *testing.T) {
+	// The real operand converter must propagate codec failures and revalidate
+	// normalized bytes. Only its codec dependencies are patched here.
+	const input = `{"s":"\ud800"}`
+	t.Run("decode failure", func(t *testing.T) {
+		decoder := json.NewDecoder(strings.NewReader(input))
+		patch := mockey.Mock(mockey.GetMethod(decoder, "Decode")).Return(errors.New("decode failed")).Build()
+		defer patch.UnPatch()
+		_, err := pathReplaceJSONDocument("metadata", input)
+		require.ErrorContains(t, err, "decode failed")
+	})
+	t.Run("encode failure", func(t *testing.T) {
+		patch := mockey.Mock(json.Marshal).Return(nil, errors.New("encode failed")).Build()
+		defer patch.UnPatch()
+		_, err := pathReplaceJSONDocument("metadata", input)
+		require.ErrorContains(t, err, "encode failed")
+	})
+	t.Run("unreadable normalized output", func(t *testing.T) {
+		patch := mockey.Mock(json.Marshal).Return([]byte(`{"x":1,"x":2}`), nil).Build()
+		defer patch.UnPatch()
+		_, err := pathReplaceJSONDocument("metadata", input)
+		require.ErrorContains(t, err, "must be unique")
+	})
+}
+
+func TestJSONPathReplaceRESTOperands(t *testing.T) {
+	paramtable.Init()
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{Name: "metadata", DataType: schemapb.DataType_JSON, Nullable: true},
+	}}
+	op := &schemapb.FieldPartialUpdateOp{FieldName: "metadata", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: `["age"]`}
+	t.Run("preserves operand types", func(t *testing.T) {
+		for _, value := range []string{`null`, `18`, `true`, `"123"`, `"{\"x\":1}"`, `{"age":18}`, `[1,2]`} {
+			body := []byte(`{"data":[{"metadata":` + value + `}]}`)
+			rows, valid, err := checkAndSetData(body, schema, true, op)
+			require.NoError(t, err)
+			require.Equal(t, []bool{true}, valid["metadata"])
+			fields, err := anyToColumns(rows, valid, schema, false, true)
+			require.NoError(t, err)
+			require.Len(t, fields, 1)
+			assert.JSONEq(t, value, string(fields[0].GetScalars().GetJsonData().GetData()[0]))
+		}
+		_, _, err := checkAndSetData([]byte(`{"data":[{}]}`), schema, true, op)
+		require.ErrorContains(t, err, "required in every row")
+		_, valid, err := checkAndSetData([]byte(`{"data":[{"metadata":null}]}`), schema, true)
+		require.NoError(t, err)
+		require.Equal(t, []bool{false}, valid["metadata"], "ordinary upsert keeps field NULL semantics")
+	})
+}
+
+func TestSchemaForPathReplaceOperands(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	body := []byte(`{"data":[
+		{"id":1,"my_struct":[{"sub_int":18}]},
+		{"id":2,"my_struct":[{"sub_int":21}]}
+	]}`)
+	ops := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "my_struct",
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      "[1][sub_int]",
+	}}
+
+	requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+	require.NoError(t, err)
+	require.Len(t, requestSchema.GetStructArrayFields()[0].GetFields(), 1)
+	assert.Equal(t, "sub_int", subShortName(requestSchema.GetStructArrayFields()[0].GetFields()[0]))
+	assert.Len(t, schema.GetStructArrayFields()[0].GetFields(), 2, "collection schema must not be mutated")
+
+	rows, validData, err := checkAndSetData(body, requestSchema, true)
+	require.NoError(t, err)
+	fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+	require.NoError(t, err)
+	var structData *schemapb.FieldData
+	for _, field := range fieldsData {
+		if field.GetFieldName() == "my_struct" {
+			structData = field
+			break
+		}
+	}
+	require.NotNil(t, structData)
+	require.Len(t, structData.GetStructArrays().GetFields(), 1)
+	assert.Equal(t, "sub_int", subShortName(requestSchema.GetStructArrayFields()[0].GetFields()[0]))
+}
+
+func TestSchemaForPathReplaceOperandsMatchesPathScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, operand, wantErr string
+		children                     int
+	}{
+		{"whole_missing_child", "[1]", `{"sub_int":18}`, "requires all struct children", 0},
+		{"whole_complete", "[1]", `{"sub_int":18,"sub_vec":[0.1,0.2,0.3,0.4]}`, "", 2},
+		{"child_exact", "[1][sub_int]", `{"sub_int":18}`, "", 1},
+		{"child_extra", "[1][sub_int]", `{"sub_int":18,"sub_vec":[0.1,0.2,0.3,0.4]}`, "exactly the selected child", 0},
+		{"child_wrong", "[1][sub_vec]", `{"sub_int":18}`, "exactly the selected child", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := buildStructArrayTestSchema()
+			body := []byte(fmt.Sprintf(`{"data":[{"id":1,"my_struct":[%s]}]}`, tc.operand))
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			got, err := schemaForPathReplaceOperands(body, schema, ops)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+				require.Len(t, got.GetStructArrayFields()[0].GetFields(), tc.children)
+			}
+			require.Len(t, schema.GetStructArrayFields()[0].GetFields(), 2)
+		})
+	}
+}
+
+func TestSchemaForPathReplaceOperandsRejectsDifferentMasks(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	body := []byte(`{"data":[
+		{"id":1,"my_struct":[{"sub_int":18}]},
+		{"id":2,"my_struct":[{"sub_vec":[0.1,0.2,0.3,0.4]}]}
+	]}`)
+	ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[1]"}}
+
+	_, err := schemaForPathReplaceOperands(body, schema, ops)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not match request mask")
+}
+
+func TestSchemaForPathReplaceOperandsRejectsInvalidStructRows(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, path, want string
+	}{
+		{"missing", `{"data":[{"id":1}]}`, "[0]", "missing or null"},
+		{"null", `{"data":[{"my_struct":null}]}`, "[0]", "missing or null"},
+		{"not array", `{"data":[{"my_struct":{}}]}`, "[0]", "exactly one object"},
+		{"empty array", `{"data":[{"my_struct":[]}]}`, "[0]", "exactly one object"},
+		{"not object", `{"data":[{"my_struct":[null]}]}`, "[0]", "exactly one object"},
+		{"empty mask", `{"data":[{"my_struct":[{}]}]}`, "[0]", "child mask must not be empty"},
+		{"unknown child", `{"data":[{"my_struct":[{"unknown":1}]}]}`, "[0][unknown]", "has no child"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := buildStructArrayTestSchema()
+			before := proto.Clone(schema)
+			ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: tc.path}}
+			got, err := schemaForPathReplaceOperands([]byte(tc.body), schema, ops)
+			require.Nil(t, got)
+			require.ErrorContains(t, err, tc.want)
+			require.True(t, proto.Equal(before, schema), "rejected operand must not narrow collection schema")
+		})
+	}
+}
+
+func TestSchemaForPathReplaceOperandsPreservesUntargetedFields(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+		Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64,
+	})
+	for _, tc := range []struct {
+		body, target string
+	}{
+		{`{"data":[]}`, "scores"},
+		{`{"data":[{}]}`, "scores"},
+		{`{"data":[{"scores":null}]}`, "scores"},
+		{`{"data":[{"scores":[null]}]}`, "other"},
+	} {
+		ops := []*schemapb.FieldPartialUpdateOp{{FieldName: tc.target, Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[0]"}}
+		got, err := schemaForPathReplaceOperands([]byte(tc.body), schema, ops)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(schema, got))
+	}
+}
+
+func TestSchemaForPathReplaceOperandsKeepsBracketedDynamicKeyLiteral(t *testing.T) {
+	schema := buildStructArrayTestSchema()
+	schema.EnableDynamicField = true
+	body := []byte(`{"data":[{
+		"id":1,
+		"my_struct":[{"sub_int":18}],
+		"my_struct[1][sub_int]":"literal"
+	}]}`)
+	ops := []*schemapb.FieldPartialUpdateOp{{FieldName: "my_struct", Op: schemapb.FieldPartialUpdateOp_PATH_REPLACE, Path: "[1][sub_int]"}}
+
+	requestSchema, err := schemaForPathReplaceOperands(body, schema, ops)
+	require.NoError(t, err)
+	rows, validData, err := checkAndSetData(body, requestSchema, true)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "literal", rows[0]["my_struct[1][sub_int]"])
+
+	fieldsData, err := anyToColumns(rows, validData, requestSchema, false, true)
+	require.NoError(t, err)
+	var dynamicData *schemapb.FieldData
+	for _, field := range fieldsData {
+		if field.GetIsDynamic() {
+			dynamicData = field
+			break
+		}
+	}
+	require.NotNil(t, dynamicData)
+	require.Len(t, dynamicData.GetScalars().GetJsonData().GetData(), 1)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(dynamicData.GetScalars().GetJsonData().GetData()[0], &decoded))
+	assert.Equal(t, "literal", decoded["my_struct[1][sub_int]"])
+}
+
+func TestSchemaForPathReplaceOperandsRejectsScalarArrayNull(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "c_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Bool},
+		},
+	}
+	pathReplaceOps := []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores",
+		Op:        schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+		Path:      "[1]",
+	}}
+	paramtable.Init()
+
+	for _, operand := range []string{`[null]`, `"[null]"`} {
+		body := []byte(fmt.Sprintf(`{"data":[{"id":1,"scores":%s}]}`, operand))
+		_, err := schemaForPathReplaceOperands(body, schema, pathReplaceOps)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Contains(t, err.Error(), "null operand element at index 0")
+	}
+
+	// The strict raw-token check belongs only to the new PATH_REPLACE
+	// operation. It must not change legacy null handling for an
+	// ordinary whole-field replacement.
+	body := []byte(`{"data":[{"id":1,"scores":[null]}]}`)
+	requestSchema, err := schemaForPathReplaceOperands(body, schema, []*schemapb.FieldPartialUpdateOp{{
+		FieldName: "scores",
+		Op:        schemapb.FieldPartialUpdateOp_REPLACE,
+	}})
+	require.NoError(t, err)
+	rows, _, err := checkAndSetData(body, requestSchema, false)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	array, ok := rows[0]["scores"].(*schemapb.ScalarField)
+	require.True(t, ok)
+	assert.Equal(t, []bool{false}, array.GetBoolData().GetData())
 }
 
 func TestStructArrayFieldSchemaGetProto(t *testing.T) {

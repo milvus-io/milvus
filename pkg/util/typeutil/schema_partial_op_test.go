@@ -22,8 +22,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // boolRow/intRow/... helpers build a ScalarField carrying a single row's
@@ -66,6 +68,81 @@ func TestApplyArrayRowOp_UnsupportedOp(t *testing.T) {
 	got, err := ApplyArrayRowOp(longRow(1), longRow(2), schemapb.FieldPartialUpdateOp_OpType(999), schemapb.DataType_Int64, -1)
 	assert.Error(t, err)
 	assert.Nil(t, got)
+}
+
+func TestApplyArrayRowOp_PathReplace(t *testing.T) {
+	for _, test := range []struct {
+		elementType        schemapb.DataType
+		base, update, want *schemapb.ScalarField
+	}{
+		{schemapb.DataType_Bool, boolRow(false, false), boolRow(true), boolRow(false, true)},
+		{schemapb.DataType_Int8, intRow(1, 2), intRow(9), intRow(1, 9)},
+		{schemapb.DataType_Int16, intRow(1, 2), intRow(9), intRow(1, 9)},
+		{schemapb.DataType_Int32, intRow(1, 2), intRow(9), intRow(1, 9)},
+		{schemapb.DataType_Int64, longRow(1, 2), longRow(9), longRow(1, 9)},
+		{schemapb.DataType_Float, floatRow(1, 2), floatRow(9), floatRow(1, 9)},
+		{schemapb.DataType_Double, doubleRow(1, 2), doubleRow(9), doubleRow(1, 9)},
+		{schemapb.DataType_VarChar, stringRow("a", "b"), stringRow("z"), stringRow("a", "z")},
+		{schemapb.DataType_String, stringRow("a", "b"), stringRow("z"), stringRow("a", "z")},
+	} {
+		t.Run(test.elementType.String(), func(t *testing.T) {
+			originalBase, originalUpdate := proto.Clone(test.base), proto.Clone(test.update)
+			// Capacity only governs APPEND. A positional replacement preserves
+			// length even if a smaller capacity is passed to this primitive.
+			got, err := ApplyArrayRowOp(test.base, test.update, schemapb.FieldPartialUpdateOp_PATH_REPLACE, test.elementType, 1, 1)
+			require.NoError(t, err)
+			assert.True(t, proto.Equal(test.want, got))
+			assert.True(t, proto.Equal(originalBase, test.base))
+			assert.True(t, proto.Equal(originalUpdate, test.update))
+			assert.NotSame(t, test.base, got)
+
+			for _, rows := range [][2]*schemapb.ScalarField{{{}, test.update}, {test.base, {}}} {
+				_, err = ApplyArrayRowOp(rows[0], rows[1], schemapb.FieldPartialUpdateOp_PATH_REPLACE, test.elementType, -1, 0)
+				require.ErrorContains(t, err, "payload does not match element type")
+			}
+		})
+	}
+
+	t.Run("preserves unknown protobuf fields", func(t *testing.T) {
+		base := longRow(1, 2)
+		base.ProtoReflect().SetUnknown([]byte{0x98, 0x06, 0x01})
+		got, err := ApplyArrayRowOp(base, longRow(9), schemapb.FieldPartialUpdateOp_PATH_REPLACE, schemapb.DataType_Int64, -1, 0)
+		require.NoError(t, err)
+		assert.Equal(t, base.ProtoReflect().GetUnknown(), got.ProtoReflect().GetUnknown())
+		assert.Equal(t, []int64{1, 2}, base.GetLongData().GetData())
+	})
+}
+
+func TestApplyArrayRowOp_PathReplaceRejectsInvalidOperand(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		base, update *schemapb.ScalarField
+		elementType  schemapb.DataType
+		indices      []int
+		wantError    string
+	}{
+		{"nil base", nil, longRow(9), schemapb.DataType_Int64, []int{0}, "non-nil"},
+		{"nil operand", longRow(1), nil, schemapb.DataType_Int64, []int{0}, "non-nil"},
+		{"empty base", longRow(), longRow(9), schemapb.DataType_Int64, []int{0}, "out of range"},
+		{"empty operand", longRow(1), longRow(), schemapb.DataType_Int64, []int{0}, "exactly one Array element"},
+		{"multiple elements", longRow(1), longRow(8, 9), schemapb.DataType_Int64, []int{0}, "exactly one Array element"},
+		{"negative index", longRow(1), longRow(9), schemapb.DataType_Int64, []int{-1}, "out of range"},
+		{"past end", longRow(1), longRow(9), schemapb.DataType_Int64, []int{1}, "out of range"},
+		{"missing index", longRow(1), longRow(9), schemapb.DataType_Int64, nil, "exactly one array index"},
+		{"multiple indices", longRow(1), longRow(9), schemapb.DataType_Int64, []int{0, 1}, "exactly one array index"},
+		{"unsupported type", longRow(1), longRow(9), schemapb.DataType_JSON, []int{0}, "does not support"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			baseBefore, updateBefore := proto.Clone(test.base), proto.Clone(test.update)
+			got, err := ApplyArrayRowOp(test.base, test.update, schemapb.FieldPartialUpdateOp_PATH_REPLACE, test.elementType, -1, test.indices...)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.Equal(t, merr.InputError, merr.GetErrorType(err))
+			assert.ErrorContains(t, err, test.wantError)
+			assert.Nil(t, got)
+			assert.True(t, proto.Equal(baseBefore, test.base))
+			assert.True(t, proto.Equal(updateBefore, test.update))
+		})
+	}
 }
 
 func TestApplyArrayRowOp_AppendBool(t *testing.T) {
@@ -325,6 +402,141 @@ func arrayField(rows []*schemapb.ScalarField, et schemapb.DataType) *schemapb.Fi
 	}
 }
 
+func TestUpdateArrayFieldByColumnWithOp_PathReplace(t *testing.T) {
+	base := arrayField([]*schemapb.ScalarField{longRow(1, 2, 3), longRow(4, 5, 6)}, schemapb.DataType_Int64)
+	update := arrayField([]*schemapb.ScalarField{longRow(10), longRow(20)}, schemapb.DataType_Int64)
+	// PATH_REPLACE must not rewrite validity metadata, including legacy input.
+	base.ValidData = []bool{true, true}
+	updateBefore := proto.Clone(update)
+	originalRows := append([]*schemapb.ScalarField(nil), base.GetScalars().GetArrayData().Data...)
+	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{1, 0}, []int64{0, 1},
+		schemapb.FieldPartialUpdateOp_PATH_REPLACE, -1, 1)
+	require.NoError(t, err)
+	rows := base.GetScalars().GetArrayData().GetData()
+	assert.Equal(t, []int64{1, 20, 3}, rows[0].GetLongData().GetData())
+	assert.Equal(t, []int64{4, 10, 6}, rows[1].GetLongData().GetData())
+	assert.Equal(t, []bool{true, true}, base.GetValidData())
+	assert.Equal(t, []bool{true, true}, base.ValidData)
+	assert.True(t, proto.Equal(updateBefore, update))
+	assert.Equal(t, []int64{1, 2, 3}, originalRows[0].GetLongData().GetData())
+	assert.Equal(t, []int64{4, 5, 6}, originalRows[1].GetLongData().GetData())
+}
+
+func TestUpdateArrayFieldByColumnWithOp_PathReplaceElementType(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		elementType schemapb.DataType
+		row         *schemapb.ScalarField
+		wantError   string
+	}{
+		{"omitted", schemapb.DataType_None, longRow(9), ""},
+		{"matching", schemapb.DataType_Int64, longRow(9), ""},
+		{"mismatched", schemapb.DataType_Int32, longRow(9), "element type mismatch"},
+		{"omitted with wrong payload", schemapb.DataType_None, boolRow(true), "does not match element type"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := arrayField([]*schemapb.ScalarField{longRow(1, 2, 3)}, schemapb.DataType_Int64)
+			update := arrayField([]*schemapb.ScalarField{test.row}, test.elementType)
+			original := proto.Clone(update)
+			err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0}, []int64{0}, schemapb.FieldPartialUpdateOp_PATH_REPLACE, -1, 1)
+			if test.wantError != "" {
+				require.ErrorContains(t, err, test.wantError)
+				assert.Equal(t, []int64{1, 2, 3}, base.GetScalars().GetArrayData().Data[0].GetLongData().GetData())
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, []int64{1, 9, 3}, base.GetScalars().GetArrayData().Data[0].GetLongData().GetData())
+				assert.Equal(t, schemapb.DataType_Int64, base.GetScalars().GetArrayData().GetElementType())
+			}
+			assert.True(t, proto.Equal(original, update))
+		})
+	}
+}
+
+func TestUpdateArrayFieldByColumnWithOp_NullSemantics(t *testing.T) {
+	for _, op := range []schemapb.FieldPartialUpdateOp_OpType{
+		schemapb.FieldPartialUpdateOp_REPLACE, schemapb.FieldPartialUpdateOp_ARRAY_APPEND,
+		schemapb.FieldPartialUpdateOp_ARRAY_REMOVE, schemapb.FieldPartialUpdateOp_PATH_REPLACE,
+	} {
+		t.Run(op.String(), func(t *testing.T) {
+			var index []int
+			if op == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+				index = []int{0}
+			}
+			t.Run("null operand", func(t *testing.T) {
+				base := arrayField([]*schemapb.ScalarField{longRow(1, 2)}, schemapb.DataType_Int64)
+				update := arrayField([]*schemapb.ScalarField{longRow(9)}, schemapb.DataType_Int64)
+				base.ValidData = []bool{true}
+				update.ValidData = []bool{false}
+				original := proto.Clone(base)
+				err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0}, []int64{0}, op, -1, index...)
+				if op == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+					require.ErrorContains(t, err, "operand Array row must not be null")
+					assert.True(t, proto.Equal(original, base))
+				} else {
+					require.NoError(t, err)
+					if op == schemapb.FieldPartialUpdateOp_REPLACE {
+						assert.Equal(t, []bool{false}, base.GetValidData())
+					} else {
+						assert.True(t, proto.Equal(original, base))
+					}
+				}
+			})
+			t.Run("null parent", func(t *testing.T) {
+				base := arrayField([]*schemapb.ScalarField{longRow()}, schemapb.DataType_Int64)
+				update := arrayField([]*schemapb.ScalarField{longRow(9)}, schemapb.DataType_Int64)
+				base.ValidData = []bool{false}
+				update.ValidData = []bool{true}
+				original := proto.Clone(base)
+				err := UpdateArrayFieldByColumnWithOp(base, update, []int64{0}, []int64{0}, op, -1, index...)
+				if op == schemapb.FieldPartialUpdateOp_PATH_REPLACE {
+					require.ErrorContains(t, err, "null parent Array row")
+					assert.True(t, proto.Equal(original, base))
+				} else {
+					require.NoError(t, err)
+					assert.Equal(t, []bool{true}, base.GetValidData())
+					row := base.GetScalars().GetArrayData().Data[0].GetLongData().GetData()
+					if op == schemapb.FieldPartialUpdateOp_ARRAY_REMOVE {
+						assert.Empty(t, row)
+					} else {
+						assert.Equal(t, []int64{9}, row)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestUpdateArrayFieldByColumnWithOp_PathReplaceRejectsInvalidRows(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		baseIndex   int64
+		updateIndex int64
+		alter       func(base, update *schemapb.FieldData)
+		wantError   string
+	}{
+		{"negative base index", -1, 0, nil, "row index is out of range"},
+		{"past base end", 2, 0, nil, "row index is out of range"},
+		{"negative update index", 0, -1, nil, "row index is out of range"},
+		{"past update end", 0, 2, nil, "row index is out of range"},
+		{"short base validity", 1, 0, func(base, _ *schemapb.FieldData) { base.ValidData = []bool{true} }, "base valid_data is shorter"},
+		{"short update validity", 0, 1, func(_, update *schemapb.FieldData) { update.ValidData = []bool{true} }, "operand valid_data is shorter"},
+		{"wrong update type", 0, 0, func(_, update *schemapb.FieldData) { update.Type = schemapb.DataType_Int64 }, "requires Array field data"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			base := arrayField([]*schemapb.ScalarField{longRow(1, 2), longRow(3, 4)}, schemapb.DataType_Int64)
+			update := arrayField([]*schemapb.ScalarField{longRow(9), longRow(8)}, schemapb.DataType_Int64)
+			if test.alter != nil {
+				test.alter(base, update)
+			}
+			original := proto.Clone(base)
+			err := UpdateArrayFieldByColumnWithOp(base, update, []int64{test.baseIndex}, []int64{test.updateIndex}, schemapb.FieldPartialUpdateOp_PATH_REPLACE, -1, 0)
+			require.ErrorIs(t, err, merr.ErrParameterInvalid)
+			assert.ErrorContains(t, err, test.wantError)
+			assert.True(t, proto.Equal(original, base))
+		})
+	}
+}
+
 func TestUpdateArrayFieldByColumnWithOp_Append(t *testing.T) {
 	base := arrayField([]*schemapb.ScalarField{longRow(1), longRow(10, 20)}, schemapb.DataType_Int64)
 	update := arrayField([]*schemapb.ScalarField{longRow(2, 3), longRow(30)}, schemapb.DataType_Int64)
@@ -359,6 +571,23 @@ func TestUpdateArrayFieldByColumnWithOp_ReplaceFallback(t *testing.T) {
 		schemapb.FieldPartialUpdateOp_REPLACE, -1)
 	require.NoError(t, err)
 	assert.Equal(t, []int64{9}, base.GetScalars().GetArrayData().GetData()[0].GetLongData().GetData())
+}
+
+func TestUpdateArrayFieldByColumnWithOp_ReplaceNonArray(t *testing.T) {
+	// The unified Proxy entry also receives ordinary scalar REPLACE operations;
+	// delegate before applying any Array-only validation or capacity checks.
+	base := &schemapb.FieldData{
+		Type:  schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: longRow(1, 2)},
+	}
+	update := &schemapb.FieldData{
+		Type:  schemapb.DataType_Int64,
+		Field: &schemapb.FieldData_Scalars{Scalars: longRow(9, 8)},
+	}
+	err := UpdateArrayFieldByColumnWithOp(base, update, []int64{1, 0}, []int64{0, 1},
+		schemapb.FieldPartialUpdateOp_REPLACE, 0)
+	require.NoError(t, err)
+	assert.Equal(t, []int64{8, 9}, base.GetScalars().GetLongData().GetData())
 }
 
 func TestUpdateArrayFieldByColumnWithOp_RejectsNonArray(t *testing.T) {
