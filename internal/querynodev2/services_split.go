@@ -66,7 +66,13 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	)
 
 	if existing, ok := node.delegators.Get(targetVChannel); ok {
-		return reuseSplitChild(ctx, existing, params)
+		// This source's own child is complete once registered: reuse it. Any
+		// other delegator is looked at only under the channel claim, which a
+		// WatchDmChannels still building it holds (see reuseRegisteredUnderClaim).
+		if params.Parent != nil && existing.FrontingParent() == params.Parent {
+			return reuseSplitChild(ctx, existing, params)
+		}
+		return node.reuseRegisteredUnderClaim(ctx, params)
 	}
 
 	collection := node.manager.Collection.Get(params.CollectionID)
@@ -97,9 +103,8 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	// retry finds the spawned child already registered and adopts it instead of
 	// building it fresh. Reads stay correct throughout that whole window
 	// because the source delegator fronts the child until it is adopted.
-	if !node.subscribingChannels.Insert(targetVChannel) {
-		return nil, merr.WrapErrServiceUnavailable("split target is being watched",
-			fmt.Sprintf("target %s, source %s", targetVChannel, params.SourceVChannel))
+	if !node.claimSplitTarget(params) {
+		return nil, errSplitTargetBeingWatched(params)
 	}
 	defer node.subscribingChannels.Remove(targetVChannel)
 	if existing, ok := node.delegators.Get(targetVChannel); ok {
@@ -267,6 +272,40 @@ func (node *QueryNode) getSplitTargetSegmentInfos(ctx context.Context, segmentID
 // splitTargetSegmentInfoBatch bounds one GetSegmentInfo call, as QueryCoord's
 // broker does.
 const splitTargetSegmentInfoBatch = 1000
+
+// claimSplitTarget takes the target's channel claim, the one WatchDmChannels
+// holds from before it registers a delegator until that delegator is started
+// or, on failure, removed and closed.
+func (node *QueryNode) claimSplitTarget(params delegator.SpawnChildParams) bool {
+	return node.subscribingChannels.Insert(params.TargetVChannel)
+}
+
+func errSplitTargetBeingWatched(params delegator.SpawnChildParams) error {
+	return merr.WrapErrServiceUnavailable("split target is being watched",
+		fmt.Sprintf("target %s, source %s", params.TargetVChannel, params.SourceVChannel))
+}
+
+// reuseRegisteredUnderClaim decides about a delegator registered for the target
+// that this source does not front, holding the target's channel claim.
+// WatchDmChannels registers its delegator before it loads the target's L0 and
+// growing segments and keeps the claim until it is done, so a delegator seen
+// under the claim is complete: attaching one mid-watch would forward none of the
+// L0 deletes it registers later, and a watch that then failed would close a
+// delegator the source fronts. While the claim is held elsewhere the spawn
+// yields with a retriable error.
+func (node *QueryNode) reuseRegisteredUnderClaim(ctx context.Context, params delegator.SpawnChildParams) (delegator.ShardDelegator, error) {
+	if !node.claimSplitTarget(params) {
+		return nil, errSplitTargetBeingWatched(params)
+	}
+	defer node.subscribingChannels.Remove(params.TargetVChannel)
+	existing, ok := node.delegators.Get(params.TargetVChannel)
+	if !ok {
+		// removed meanwhile (a failed watch, a release): the retry spawns anew.
+		return nil, merr.WrapErrServiceUnavailable("split target delegator went away",
+			fmt.Sprintf("target %s, source %s", params.TargetVChannel, params.SourceVChannel))
+	}
+	return reuseSplitChild(ctx, existing, params)
+}
 
 // reuseSplitChild returns a delegator already registered for a split target,
 // fronted by the spawning source:

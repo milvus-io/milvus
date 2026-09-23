@@ -43,8 +43,9 @@ import (
 
 func TestSpawnSplitChildIdempotent(t *testing.T) {
 	node := &QueryNode{
-		ctx:        context.Background(),
-		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		ctx:                 context.Background(),
+		delegators:          typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		subscribingChannels: typeutil.NewConcurrentSet[string](),
 	}
 	parent := delegator.NewMockShardDelegator(t)
 	existing := delegator.NewMockShardDelegator(t)
@@ -71,13 +72,14 @@ func TestSpawnSplitChildIdempotent(t *testing.T) {
 // made to forward every delete it already holds.
 func TestSpawnSplitChildAttachesADelegatorWatchedOnItsOwn(t *testing.T) {
 	node := &QueryNode{
-		ctx:        context.Background(),
-		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		ctx:                 context.Background(),
+		delegators:          typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		subscribingChannels: typeutil.NewConcurrentSet[string](),
 	}
 	parent := delegator.NewMockShardDelegator(t)
 	watched := delegator.NewMockShardDelegator(t)
 	var steps []string
-	watched.EXPECT().FrontingParent().Return(nil).Once()
+	watched.EXPECT().FrontingParent().Return(nil)
 	watched.EXPECT().MarkAdopted().Run(func() { steps = append(steps, "adopt") }).Once()
 	watched.EXPECT().SetFrontingParent(parent).Run(func(delegator.ShardDelegator) { steps = append(steps, "front") }).Once()
 	watched.EXPECT().ForwardKnownDeletesToParent(mock.Anything).RunAndReturn(func(context.Context) error {
@@ -99,16 +101,75 @@ func TestSpawnSplitChildAttachesADelegatorWatchedOnItsOwn(t *testing.T) {
 	assert.Same(t, watched, current)
 }
 
+// WatchDmChannels registers its delegator before it loads the target's L0 and
+// growing segments, and holds the channel claim until it is done (and until it
+// has removed and closed the delegator, should it fail). A spawn must not attach
+// such a half-built delegator: the L0s it registers later would never be
+// forwarded, and a failed watch would close a delegator the source fronts. It
+// yields while the claim is held, and attaches once the watch completed.
+func TestSpawnSplitChildNeverAttachesADelegatorWhoseWatchIsInFlight(t *testing.T) {
+	node := &QueryNode{
+		ctx:                 context.Background(),
+		delegators:          typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		subscribingChannels: typeutil.NewConcurrentSet[string](),
+	}
+	parent := delegator.NewMockShardDelegator(t)
+	watched := delegator.NewMockShardDelegator(t)
+	watched.EXPECT().FrontingParent().Return(nil)
+	node.delegators.Insert("v1", watched)
+	// the watch of v1 is in flight: it holds the claim.
+	require.True(t, node.subscribingChannels.Insert("v1"))
+
+	params := delegator.SpawnChildParams{CollectionID: 1, TargetVChannel: "v1", Parent: parent}
+	got, err := node.SpawnSplitChild(context.Background(), params)
+	assert.Error(t, err)
+	assert.True(t, merr.IsRetryableErr(err), "a watch in flight is transient: the spawn must retry")
+	assert.Nil(t, got)
+
+	// the watch completes and releases the claim: the retry attaches.
+	node.subscribingChannels.Remove("v1")
+	watched.EXPECT().MarkAdopted().Return().Once()
+	watched.EXPECT().SetFrontingParent(parent).Return().Once()
+	watched.EXPECT().ForwardKnownDeletesToParent(mock.Anything).Return(nil).Once()
+	got, err = node.SpawnSplitChild(context.Background(), params)
+	assert.NoError(t, err)
+	assert.Same(t, watched, got)
+	assert.False(t, node.subscribingChannels.Contain("v1"), "the spawn must release the claim it took")
+}
+
+// A delegator removed between the first look and the claim (a failed watch
+// cleaning up) is not attached: the spawn retries and builds its own child.
+func TestSpawnSplitChildRetriesWhenTheRegisteredDelegatorGoesAway(t *testing.T) {
+	node := &QueryNode{
+		ctx:                 context.Background(),
+		delegators:          typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		subscribingChannels: typeutil.NewConcurrentSet[string](),
+	}
+	parent := delegator.NewMockShardDelegator(t)
+	watched := delegator.NewMockShardDelegator(t)
+	watched.EXPECT().FrontingParent().RunAndReturn(func() delegator.ShardDelegator {
+		node.delegators.GetAndRemove("v1")
+		return nil
+	}).Once()
+	node.delegators.Insert("v1", watched)
+
+	got, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{CollectionID: 1, TargetVChannel: "v1", Parent: parent})
+	assert.True(t, merr.IsRetryableErr(err))
+	assert.Nil(t, got)
+	assert.False(t, node.subscribingChannels.Contain("v1"))
+}
+
 // An attach whose forward fails detaches again, so the source's retry attaches
 // and forwards everything once more instead of reusing a half-attached child.
 func TestSpawnSplitChildDetachesAFailedAttach(t *testing.T) {
 	node := &QueryNode{
-		ctx:        context.Background(),
-		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		ctx:                 context.Background(),
+		delegators:          typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		subscribingChannels: typeutil.NewConcurrentSet[string](),
 	}
 	parent := delegator.NewMockShardDelegator(t)
 	watched := delegator.NewMockShardDelegator(t)
-	watched.EXPECT().FrontingParent().Return(nil).Once()
+	watched.EXPECT().FrontingParent().Return(nil)
 	watched.EXPECT().MarkAdopted().Return().Once()
 	watched.EXPECT().SetFrontingParent(parent).Return().Once()
 	watched.EXPECT().ForwardKnownDeletesToParent(mock.Anything).Return(errors.New("load failed")).Once()
@@ -128,8 +189,9 @@ func TestSpawnSplitChildDetachesAFailedAttach(t *testing.T) {
 // sources returns its rows twice.
 func TestSpawnSplitChildRefusesADelegatorAnotherSourceFronts(t *testing.T) {
 	node := &QueryNode{
-		ctx:        context.Background(),
-		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		ctx:                 context.Background(),
+		delegators:          typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+		subscribingChannels: typeutil.NewConcurrentSet[string](),
 	}
 	parent := delegator.NewMockShardDelegator(t)
 	other := delegator.NewMockShardDelegator(t)
