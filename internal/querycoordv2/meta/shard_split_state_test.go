@@ -18,6 +18,8 @@ package meta
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -427,4 +429,105 @@ func TestShardSplitFreezeByChannel(t *testing.T) {
 		assert.NoError(t, f.CheckCollection())
 		assert.NoError(t, f.CheckChannel("v0"))
 	})
+}
+
+// AV-L6-M-H: the balance checker, the channel checker and the target observer
+// all read the same collection's shard states. Readers that miss the TTL
+// together share one DescribeCollection instead of issuing one each.
+func TestShardSplitStateCacheSharesAnInFlightRead(t *testing.T) {
+	release := make(chan struct{})
+	calls := atomic.Int32{}
+	broker := NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).RunAndReturn(
+		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+			calls.Add(1)
+			<-release
+			return splittingCollectionResp(), nil
+		})
+	cache := NewShardSplitStateCache(broker, time.Minute)
+
+	const readers = 8
+	var wg sync.WaitGroup
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			states, ok := cache.ChannelStates(context.Background(), 1)
+			assert.True(t, ok)
+			assert.True(t, states.Splitting())
+		}()
+	}
+	assert.Eventually(t, func() bool { return calls.Load() >= 1 }, time.Second, time.Millisecond)
+	time.Sleep(50 * time.Millisecond) // let every reader reach the cache
+	close(release)
+	wg.Wait()
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// AV-L6-M-H: a read that was issued before another one, but returns after it,
+// must not replace the newer read in the cache.
+func TestShardSplitStateCacheKeepsTheNewerRead(t *testing.T) {
+	oldReturns := make(chan struct{})
+	oldIssued := make(chan struct{})
+	var calls atomic.Int32
+	broker := NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).RunAndReturn(
+		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+			if calls.Add(1) == 1 {
+				close(oldIssued)
+				<-oldReturns
+				// the read issued first still shows the split window.
+				return splittingCollectionResp(), nil
+			}
+			// the read issued second already sees the adoption.
+			return &milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v1", "v2"}}, nil
+		})
+	cache := NewShardSplitStateCache(broker, time.Hour)
+	ctx := context.Background()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := cache.ReadShardStates(ctx, 1)
+		assert.NoError(t, err)
+	}()
+	<-oldIssued
+	_, err := cache.ReadShardStates(ctx, 1)
+	assert.NoError(t, err)
+	close(oldReturns)
+	<-done
+
+	states, ok := cache.ChannelStates(ctx, 1)
+	assert.True(t, ok)
+	assert.False(t, states.Splitting(), "the older read must not overwrite the newer one")
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+// Invalidate forces the next read to go to the coordinator, but keeps the last
+// read as the fallback for a failed refresh: forgetting it would turn a
+// transient coordinator error into "states unknown", which freezes everything
+// and stops every watch of the collection.
+func TestShardSplitStateCacheInvalidateKeepsTheFallback(t *testing.T) {
+	var fail atomic.Bool
+	var calls atomic.Int32
+	broker := NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).RunAndReturn(
+		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+			calls.Add(1)
+			if fail.Load() {
+				return nil, errors.New("rootcoord busy")
+			}
+			return splittingCollectionResp(), nil
+		})
+	cache := NewShardSplitStateCache(broker, time.Hour)
+	ctx := context.Background()
+
+	_, ok := cache.ChannelStates(ctx, 1)
+	assert.True(t, ok)
+	cache.Invalidate(1)
+	fail.Store(true)
+	states, ok := cache.ChannelStates(ctx, 1)
+	assert.Equal(t, int32(2), calls.Load(), "an invalidated entry is refreshed")
+	assert.True(t, ok, "a failed refresh falls back to the last read")
+	assert.True(t, states.Splitting())
 }
