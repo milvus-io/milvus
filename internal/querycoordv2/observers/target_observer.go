@@ -567,6 +567,10 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	log.RatedInfo(ctx, rate.Limit(10), "observer trigger update next target")
+	var windowBefore typeutil.Set[string]
+	if ob.splitState != nil {
+		windowBefore = ob.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	}
 	err := ob.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	if err != nil {
 		log.Warn(ctx, "failed to update next target for collection",
@@ -574,7 +578,29 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
+	ob.refreshShardStatesOnWindowChange(ctx, collectionID, windowBefore)
 	return nil
+}
+
+// refreshShardStatesOnWindowChange makes the checkers re-read the collection's
+// shard states when a pull changed its split window marks: the marks opening
+// give a fence away, and the marks going away an adoption. Either way the
+// cached states the freeze and the watch rules read may predate it -- the
+// pull's own state read can have failed and fallen back to that cached read --
+// and they should not be trusted for the rest of their TTL.
+func (ob *TargetObserver) refreshShardStatesOnWindowChange(ctx context.Context, collectionID int64, windowBefore typeutil.Set[string]) {
+	if ob.splitState == nil {
+		return
+	}
+	windowAfter := ob.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	if len(windowBefore) == len(windowAfter) && windowBefore.Contain(windowAfter.Collect()...) {
+		return
+	}
+	mlog.Info(ctx, "split window marks changed, refresh the cached shard states",
+		mlog.FieldCollectionID(collectionID),
+		mlog.Strings("before", windowBefore.Collect()),
+		mlog.Strings("after", windowAfter.Collect()))
+	ob.splitState.Invalidate(collectionID)
 }
 
 func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {

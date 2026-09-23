@@ -206,6 +206,25 @@ func (b *BalanceChecker) frozenForShardSplit(ctx context.Context, collectionID i
 	return false
 }
 
+// dropShardSplitFrozen drops the collection's balance tasks a shard split
+// forbids, right before they are submitted (meta.ShardSplitFreeze).
+//
+// The queue a collection is popped from may have been built rounds before, and
+// a split may have fenced one of its shards since; the split state is
+// re-evaluated here, once tasks exist, rather than trusted from the queue.
+func (b *BalanceChecker) dropShardSplitFrozen(ctx context.Context, collectionID int64, segmentTasks, channelTasks []task.Task) ([]task.Task, []task.Task) {
+	if b.splitState == nil || len(segmentTasks)+len(channelTasks) == 0 {
+		return segmentTasks, channelTasks
+	}
+	if err := meta.CheckShardSplitMovable(ctx, b.splitState, b.targetMgr, collectionID); err != nil {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "drop balance tasks of a collection a shard split freezes",
+			mlog.FieldCollectionID(collectionID), mlog.Int("segmentTasks", len(segmentTasks)),
+			mlog.Int("channelTasks", len(channelTasks)), mlog.Err(err))
+		return nil, nil
+	}
+	return segmentTasks, channelTasks
+}
+
 type ReadyForBalanceFilter func(ctx context.Context, collectionID int64) bool
 
 // filterCollectionForBalance filters all collections using the provided filter functions.
@@ -484,6 +503,7 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
+		newSegmentTasks, newChannelTasks = b.dropShardSplitFrozen(ctx, item.collectionID, newSegmentTasks, newChannelTasks)
 		generatedSegmentTaskNum += len(newSegmentTasks)
 		generatedChannelTaskNum += len(newChannelTasks)
 		b.submitTasks(newSegmentTasks, newChannelTasks)
