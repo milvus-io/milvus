@@ -2474,6 +2474,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
+    milvus::monitor::QueryStageTimer batch_timer(
+        milvus::monitor::QueryStage::LoadColumnGroupsBatch);
     const auto load_cg_start = std::chrono::high_resolution_clock::now();
     CheckCancellation(
         op_ctx, id_, "ChunkedSegmentSealedImpl::LoadColumnGroups()");
@@ -2614,8 +2616,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::vector<std::future<void>> load_group_futures;
     load_group_futures.reserve(tasks.size());
     for (auto& task : tasks) {
+        const auto submitted = milvus::monitor::QueryStageClock::now();
         auto future = pool.Submit(
             [this,
+             submitted,
              column_groups,
              properties,
              cg_index = task.column_group_index,
@@ -2630,6 +2634,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
              op_ctx,
              is_replace,
              &committer]() mutable {
+                milvus::monitor::QueryStageTaskTimer task_timer(
+                    milvus::monitor::QueryStage::LoadColumnGroupQueue,
+                    milvus::monitor::QueryStage::LoadColumnGroupRun,
+                    submitted);
                 CheckCancellation(
                     op_ctx,
                     id_,
@@ -2652,7 +2660,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             });
         load_group_futures.emplace_back(std::move(future));
     }
+    milvus::monitor::QueryStageTimer wait_timer(
+        milvus::monitor::QueryStage::LoadColumnGroupsWait);
     storage::WaitAllFutures(load_group_futures);
+    wait_timer.End();
     if (schema_snapshot->is_external_collection()) {
         committer.Commit(
             [&](RuntimeResourceState& runtime, PublishedSegmentState&) {
@@ -8818,6 +8829,8 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
+    milvus::monitor::QueryStageTimer batch_timer(
+        milvus::monitor::QueryStage::LoadColumnGroupsBatch);
     const auto reader = committer.runtime()->reader;
     std::vector<ManifestLoadTask> tasks;
     tasks.reserve(cg_field_ids.size());
@@ -8837,8 +8850,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
     std::vector<std::future<void>> load_group_futures;
     load_group_futures.reserve(tasks.size());
     for (auto& task : tasks) {
+        const auto submitted = milvus::monitor::QueryStageClock::now();
         auto future = pool.Submit(
             [this,
+             submitted,
              column_groups,
              properties,
              cg_index = task.column_group_index,
@@ -8853,6 +8868,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
              op_ctx,
              is_replace,
              &committer]() mutable {
+                milvus::monitor::QueryStageTaskTimer task_timer(
+                    milvus::monitor::QueryStage::LoadColumnGroupQueue,
+                    milvus::monitor::QueryStage::LoadColumnGroupRun,
+                    submitted);
                 CheckCancellation(
                     op_ctx,
                     id_,
@@ -8875,7 +8894,10 @@ ChunkedSegmentSealedImpl::LoadColumnGroups(
             });
         load_group_futures.emplace_back(std::move(future));
     }
+    milvus::monitor::QueryStageTimer wait_timer(
+        milvus::monitor::QueryStage::LoadColumnGroupsWait);
     storage::WaitAllFutures(load_group_futures);
+    wait_timer.End();
 }
 
 void
@@ -9158,6 +9180,8 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
     milvus::OpContext* op_ctx,
     bool is_replace,
     StagedStateCommitter& committer) {
+    milvus::monitor::QueryStageTimer batch_timer(
+        milvus::monitor::QueryStage::LoadIndexesBatch);
     auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
     std::vector<std::future<void>> load_index_futures;
     load_index_futures.reserve(field_id_to_index_info.size());
@@ -9170,7 +9194,9 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         auto& index_infos = pair.second;
         for (auto& load_index_info : index_infos) {
             auto* load_index_info_ptr = &load_index_info;
+            const auto submitted = milvus::monitor::QueryStageClock::now();
             auto future = pool.Submit([this,
+                                       submitted,
                                        trace_ctx,
                                        field_id,
                                        load_index_info_ptr,
@@ -9178,6 +9204,10 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
                                        op_ctx,
                                        is_replace,
                                        &committer]() mutable -> void {
+                milvus::monitor::QueryStageTaskTimer task_timer(
+                    milvus::monitor::QueryStage::LoadIndexQueue,
+                    milvus::monitor::QueryStage::LoadIndexRun,
+                    submitted);
                 // Early exit if cancelled while queued
                 CheckCancellation(op_ctx, id_, field_id.get(), "LoadIndex");
 
@@ -9207,6 +9237,8 @@ ChunkedSegmentSealedImpl::LoadBatchIndexes(
         }
     }
 
+    milvus::monitor::QueryStageTimer wait_timer(
+        milvus::monitor::QueryStage::LoadIndexesWait);
     storage::WaitAllFutures(load_index_futures);
 }
 

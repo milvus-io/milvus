@@ -38,6 +38,14 @@ enum class QueryStage {
     SearchPrepare,
     SearchExecute,
     FillPrimaryKeys,
+    LoadIndexesBatch,
+    LoadIndexesWait,
+    LoadIndexQueue,
+    LoadIndexRun,
+    LoadColumnGroupsBatch,
+    LoadColumnGroupsWait,
+    LoadColumnGroupQueue,
+    LoadColumnGroupRun,
     Count,
 };
 
@@ -67,6 +75,25 @@ class QueryStageTimer {
     QueryStageClock::time_point start_;
     int uncaught_exceptions_;
     bool active_ = true;
+};
+
+// Queue and run are observed together with the worker's final outcome.
+// A batch can contain parallel tasks: their durations do not sum to batch wall time.
+class QueryStageTaskTimer {
+ public:
+    QueryStageTaskTimer(QueryStage queue,
+                        QueryStage run,
+                        QueryStageClock::time_point submitted);
+    ~QueryStageTaskTimer();
+    QueryStageTaskTimer(const QueryStageTaskTimer&) = delete;
+    QueryStageTaskTimer&
+    operator=(const QueryStageTaskTimer&) = delete;
+
+ private:
+    QueryStage queue_;
+    QueryStageClock::duration queued_;
+    int uncaught_exceptions_;
+    QueryStageTimer run_;
 };
 
 }  // namespace milvus::monitor

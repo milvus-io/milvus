@@ -51,6 +51,10 @@ load admission cancellation and a failed synchronous chunk-reader result.
 | `load_batch_queue` | Legacy admitted batch submission to worker entry |
 | `manifest_read_batch` | Synchronous `MakeChunkReaderFactory` call to `get_chunks` |
 | `fill_primary_keys` | `FillPrimaryKeys`, starting before its shared lock |
+| `load_indexes_batch`, `load_column_groups_batch` | Complete index/column-group batch preparation, worker submission and waits, including Reopen callers |
+| `load_indexes_wait`, `load_column_groups_wait` | The contained `WaitAllFutures` call |
+| `load_index_queue`, `load_column_group_queue` | Worker submission to entry, emitted at completion with that worker's final outcome |
+| `load_index_run`, `load_column_group_run` | Complete worker body, including entry cancellation checks and staged commits |
 
 The new async load pipeline has its own admission/read scheduling. Its inner
 queue and read calls are not covered by the three legacy batch stages above.
@@ -58,11 +62,16 @@ The enclosing `manifest_load_cells` and chunk-build stages cover both paths.
 Reader/translator/cache-slot stages cover deferred materialization; they are
 not totals for all eager segment loads.
 
-Queue observations mean that a worker started, not that its work succeeded.
+Prefetch and legacy batch queue observations mean that a worker started, not that its work succeeded.
 For example, a vector prefetch cancelled before its worker body records queue
 time but no run timer. Tasks rejected before worker entry have no queue sample.
 The lazy-group mutex wait is not cancellable in the current implementation;
 `manifest_group_wait` does not imply cancellation-aware waiting.
+
+Index and column-group queue/run pairs are emitted together at worker completion
+with the same outcome. Cancellation at entry records an error for both. Tasks
+rejected before entry have neither sample. Worker durations can overlap and
+must not be summed as the batch's wall time.
 
 ## Reading the measurements
 
@@ -101,6 +110,6 @@ its inflight gauge instead.
 ## Validation
 
 `QueryMetricsTest.cpp` checks exported finite buckets and seconds, idempotent
-completion, thrown and returned failures, and concurrent count/gauge balance.
+completion, thrown and returned failures, concurrent count/gauge balance, and paired queue/run cancellation outcomes.
 Full search/storage integration still needs the corresponding native suite;
 these timer tests do not establish request-level coverage or performance gains.

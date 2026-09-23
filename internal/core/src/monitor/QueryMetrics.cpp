@@ -20,13 +20,20 @@ namespace milvus::monitor {
 namespace {
 
 constexpr std::array stage_names = {
-    "manifest_reader_open",   "manifest_translator",    "manifest_cache_slot",
-    "manifest_group_wait",    "field_prefetch_prepare", "field_prefetch_load",
-    "vector_prefetch_queue",  "vector_prefetch_run",    "vector_prefetch_wait",
-    "mvcc_prefetch_queue",    "mvcc_prefetch_run",      "mvcc_prefetch_wait",
-    "manifest_load_cells",    "manifest_read_batch",    "manifest_build_chunk",
-    "load_batch_budget_wait", "load_batch_queue",       "search_prepare",
-    "search_execute",         "fill_primary_keys",
+    "manifest_reader_open",     "manifest_translator",
+    "manifest_cache_slot",      "manifest_group_wait",
+    "field_prefetch_prepare",   "field_prefetch_load",
+    "vector_prefetch_queue",    "vector_prefetch_run",
+    "vector_prefetch_wait",     "mvcc_prefetch_queue",
+    "mvcc_prefetch_run",        "mvcc_prefetch_wait",
+    "manifest_load_cells",      "manifest_read_batch",
+    "manifest_build_chunk",     "load_batch_budget_wait",
+    "load_batch_queue",         "search_prepare",
+    "search_execute",           "fill_primary_keys",
+    "load_indexes_batch",       "load_indexes_wait",
+    "load_index_queue",         "load_index_run",
+    "load_column_groups_batch", "load_column_groups_wait",
+    "load_column_group_queue",  "load_column_group_run",
 };
 static_assert(stage_names.size() ==
               static_cast<std::size_t>(QueryStage::Count));
@@ -105,6 +112,20 @@ QueryStageTimer::End(bool failed) {
     ObserveQueryStage(stage_, QueryStageClock::now() - start_, failed);
     MetricsFor(stage_).inflight->Decrement();
     active_ = false;
+}
+
+QueryStageTaskTimer::QueryStageTaskTimer(QueryStage queue,
+                                         QueryStage run,
+                                         QueryStageClock::time_point submitted)
+    : queue_(queue),
+      queued_(QueryStageClock::now() - submitted),
+      uncaught_exceptions_(std::uncaught_exceptions()),
+      run_(run) {
+}
+
+QueryStageTaskTimer::~QueryStageTaskTimer() {
+    ObserveQueryStage(
+        queue_, queued_, std::uncaught_exceptions() > uncaught_exceptions_);
 }
 
 }  // namespace milvus::monitor

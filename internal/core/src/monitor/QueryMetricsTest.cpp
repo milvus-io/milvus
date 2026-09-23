@@ -140,5 +140,29 @@ TEST(QueryMetrics, ConcurrentTimersDoNotLoseSamplesOrLeakInflight) {
         Snapshot(inflight_family, "manifest_group_wait").gauge.value, 0);
 }
 
+TEST(QueryMetrics, QueuedCanceledTaskRecordsQueueAndRunWithSameOutcome) {
+    const auto queue = Snapshot(duration_family, "load_index_queue", "error");
+    const auto run = Snapshot(duration_family, "load_index_run", "error");
+    EXPECT_THROW(
+        {
+            QueryStageTaskTimer timing(
+                QueryStage::LoadIndexQueue,
+                QueryStage::LoadIndexRun,
+                QueryStageClock::now() - std::chrono::milliseconds(5));
+            throw std::runtime_error("canceled before loading");
+        },
+        std::runtime_error);
+    const auto after_queue =
+        Snapshot(duration_family, "load_index_queue", "error");
+    const auto after_run = Snapshot(duration_family, "load_index_run", "error");
+    EXPECT_EQ(after_queue.histogram.sample_count,
+              queue.histogram.sample_count + 1);
+    EXPECT_EQ(after_run.histogram.sample_count, run.histogram.sample_count + 1);
+    EXPECT_GE(after_queue.histogram.sample_sum - queue.histogram.sample_sum,
+              0.005);
+    EXPECT_DOUBLE_EQ(Snapshot(inflight_family, "load_index_run").gauge.value,
+                     0);
+}
+
 }  // namespace
 }  // namespace milvus::monitor
