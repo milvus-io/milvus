@@ -321,7 +321,8 @@ func affinityLoads(t *testing.T, sourceReadOnly bool) map[string]int64 {
 		meta.NewShardSplitStateCache(broker, time.Minute))
 
 	placed := make(map[string]int64)
-	for _, tk := range checker.checkReplica(ctx, m.Get(ctx, 1)) {
+	tasks, _ := checker.checkReplica(ctx, m.Get(ctx, 1))
+	for _, tk := range tasks {
 		for _, action := range tk.Actions() {
 			if ca, ok := action.(*task.ChannelAction); ok && action.Type() == task.ActionTypeGrow {
 				placed[ca.ChannelName()] = action.Node()
