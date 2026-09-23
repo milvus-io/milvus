@@ -424,6 +424,11 @@ func (c *ChannelChecker) keepOlderSplitDelegators(ctx context.Context, replica *
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
+	if len(channels) == 0 {
+		// nothing to place: in particular, no shard-state read for the
+		// adopted-target affinity.
+		return []task.Task{}
+	}
 	// Group channels by their candidate node set and hand each group to the
 	// assign policy in one call. Assigning channel by channel lets every call
 	// observe the same node scores (the tasks of this round are not in the

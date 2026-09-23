@@ -502,3 +502,19 @@ func duplicatedDelegatorsReleased(t *testing.T, describeErr error) map[string]in
 	}
 	return released
 }
+
+// RR-L6-N2: with no channel to watch, building the load tasks reads no shard
+// states (the adopted-target affinity is the only reader there).
+func TestChannelLoadTasksReadNoShardStatesWithNothingToWatch(t *testing.T) {
+	nodeMgr := session.NewNodeManager()
+	dist := meta.NewDistributionManager(nodeMgr)
+	targetMgr := meta.NewMockTargetManager(t)
+	scheduler := task.NewMockScheduler(t)
+	assign.InitGlobalAssignPolicyFactory(scheduler, nodeMgr, dist, nil, targetMgr)
+	t.Cleanup(assign.ResetGlobalAssignPolicyFactoryForTest)
+	// no expectation on the broker or the target manager: any call fails the test.
+	checker := NewChannelChecker(nil, dist, targetMgr, nodeMgr, scheduler,
+		meta.NewShardSplitStateCache(meta.NewMockBroker(t), time.Minute))
+
+	assert.Empty(t, checker.createChannelLoadTask(context.Background(), nil, utils.CreateTestReplica(1, 1, []int64{1})))
+}
