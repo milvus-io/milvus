@@ -492,15 +492,12 @@ func (s *scheduler) recordReadTaskQueueDuration(task *queuedTask, now time.Time,
 	}
 }
 
-func taskClassLabel(class taskClass) string {
-	if class == taskClassPriorityLane {
-		return metrics.ReQueryLabel
-	}
-	return metrics.RegularLabel
-}
-
 func recordReadTaskReject(class taskClass) {
-	metrics.QueryNodeReadTaskRejectCnt.WithLabelValues(paramtable.GetStringNodeID(), taskClassLabel(class)).Inc()
+	label := metrics.RegularLabel
+	if class == taskClassPriorityLane {
+		label = metrics.ReQueryLabel
+	}
+	metrics.QueryNodeReadTaskRejectCnt.WithLabelValues(paramtable.GetStringNodeID(), label).Inc()
 }
 
 // scheduler counter implement, concurrent safe.
