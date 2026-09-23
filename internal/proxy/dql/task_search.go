@@ -1656,7 +1656,11 @@ func (t *SearchTask) searchShard(ctx context.Context, nodeID int64, qn types.Que
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn(ctx, "QueryNode search result error",
 			mlog.String("reason", result.GetStatus().GetReason()))
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to search on QueryNode %d", nodeID)
+		statusErr := merr.Error(result.GetStatus())
+		if errors.Is(statusErr, merr.ErrCollectionNotLoaded) {
+			t.shardClientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
+		return errors.Wrapf(statusErr, "fail to search on QueryNode %d", nodeID)
 	}
 	if t.resultBuf != nil {
 		t.resultBuf.Insert(result)
