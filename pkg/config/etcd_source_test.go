@@ -24,7 +24,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 
@@ -182,6 +185,36 @@ func (s *EtcdSourceSuite) TestStaleSnapshotDoesNotRollBackNewerRefresh() {
 	value, err := source.GetConfigurationByKey(key)
 	s.Require().NoError(err)
 	s.Equal("service", value)
+}
+
+// headerlessKV is the shape a hand-written clientv3.KV fake naturally takes: it fills in the
+// key-values it wants to serve and leaves the rest of GetResponse zero, so Header is nil.
+type headerlessKV struct {
+	clientv3.KV
+	kvs []*mvccpb.KeyValue
+}
+
+func (kv *headerlessKV) Get(context.Context, string, ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	return &clientv3.GetResponse{Kvs: kv.kvs}, nil
+}
+
+// TestSnapshotWithoutResponseHeaderIsPublished pins that a response carrying no revision is
+// still published. Revision tracking must not assume every clientv3.KV fills in Header, and a
+// snapshot that cannot be ordered has to be published rather than dropped.
+func TestSnapshotWithoutResponseHeaderIsPublished(t *testing.T) {
+	client := clientv3.NewCtxClient(context.Background())
+	client.KV = &headerlessKV{kvs: []*mvccpb.KeyValue{{
+		Key:   []byte("no-header/config/woodpeckerstoragetype"),
+		Value: []byte("service"),
+	}}}
+
+	source, err := NewEtcdSource(client, &EtcdInfo{KeyPrefix: "no-header"})
+	require.NoError(t, err)
+	defer source.Close()
+
+	configs, err := source.GetConfigurations()
+	require.NoError(t, err)
+	assert.Equal(t, "service", configs["woodpeckerstoragetype"])
 }
 
 func TestEtcdSource(t *testing.T) {
