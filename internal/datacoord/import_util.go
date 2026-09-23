@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -48,17 +49,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
-
-// ErrPKRangeTooSmall marks the one AssembleImportRequest failure a retry can never
-// fix: the PK range was reserved at broadcast from an upper bound, and preimport
-// has since produced a larger exact row count. Neither number changes by
-// rescheduling, so the task must fail now and keep the precise reason.
-//
-// The scheduler cannot key this off merr classification. ErrImportSysFailed also
-// carries genuinely transient cases ("job %d not found, waiting for import job
-// creation"), and merr.IsNonRetryableErr is a deny-list over ErrIo* sentinels that
-// AssembleImportRequest never returns.
-var ErrPKRangeTooSmall = errors.New("reserved PK range too small")
 
 func WrapTaskLog(task ImportTask, fields ...mlog.Field) []mlog.Field {
 	res := []mlog.Field{
@@ -348,48 +338,27 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		return stat.GetTotalRows()
 	})
 
-	// Pre-allocate IDs for autoIDs and logIDs.
-	fieldsNum := len(job.GetSchema().GetFields()) + 2 // userFields + tsField + rowIDField
-	binlogNum := fieldsNum + 2                        // binlogs + statslog + BM25Statslog
-	expansionFactor := paramtable.Get().DataCoordCfg.ImportPreAllocIDExpansionFactor.GetAsInt64()
-	preAllocIDNum := (totalRows + 1) * int64(binlogNum) * expansionFactor
-
-	idBegin, idEnd, err := common.AllocAutoID(func(n uint32) (int64, int64, error) {
-		ids, ide, e := alloc.AllocN(int64(n))
-		return ids, ide, e
-	}, uint32(preAllocIDNum), Params.CommonCfg.ClusterID.GetAsUint64())
+	// Reserve the task-level log id range. AutoID jobs whose files carry per-file row id
+	// ranges consume it only for binlog logIDs; backup/L0 and legacy no-range jobs may also
+	// consume it per row for PK/RowID. ReserveLogIDs also checks every file's ID range
+	// against the exact preimport count and fails terminally with ErrIDRangeTooSmall when
+	// a range cannot hold its rows.
+	idRange, err := importid.ReserveLogIDs(job.GetSchema(), task.GetFileStats(),
+		alloc.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}
 
 	mlog.Info(context.TODO(), "pre-allocate ids and ts for import task", WrapTaskLog(task,
 		mlog.Int64("totalRows", totalRows),
-		mlog.Int("fieldsNum", fieldsNum),
-		mlog.Int64("idBegin", idBegin),
-		mlog.Int64("idEnd", idEnd),
+		mlog.Int64("idBegin", idRange.GetBegin()),
+		mlog.Int64("idEnd", idRange.GetEnd()),
 		mlog.Uint64("ts", ts))...,
 	)
 
 	importFiles := lo.Map(task.GetFileStats(), func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 		return fileStat.GetImportFile()
 	})
-
-	// The PK reservation was sized at broadcast from an upper bound; pre-import has
-	// since produced the exact row count. Compare them here, before any segment is
-	// written, instead of letting pkCursor.take trip mid-import on the datanode.
-	for _, fileStat := range task.GetFileStats() {
-		f := fileStat.GetImportFile()
-		r := f.GetPreAllocatedAutoIds()
-		reserved := r.GetEnd() - r.GetBegin()
-		if reserved > 0 && fileStat.GetTotalRows() > reserved {
-			// Marked so the scheduler can tell this apart from the retriable
-			// failures AssembleImportRequest also returns. The merr code stays
-			// ErrImportSysFailed; markers.Mark only adds the sentinel to the chain.
-			return nil, merr.Mark(merr.WrapErrImportSysFailedMsg(
-				"reserved PK range too small for file %v: %d rows, %d ids reserved",
-				f.GetPaths(), fileStat.GetTotalRows(), reserved), ErrPKRangeTooSmall)
-		}
-	}
 
 	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	storageVersion := importStorageVersion(isL0Import)
@@ -406,7 +375,7 @@ func AssembleImportRequest(task ImportTask, job ImportJob, meta *meta, alloc all
 		Files:           importFiles,
 		Options:         job.GetOptions(),
 		Ts:              ts,
-		IDRange:         &datapb.IDRange{Begin: idBegin, End: idEnd},
+		IDRange:         idRange,
 		RequestSegments: requestSegments,
 		StorageConfig:   createStorageConfig(),
 		TaskSlot:        task.GetTaskSlot(),
@@ -600,7 +569,7 @@ func getIndexBuildingProgress(ctx context.Context, jobID int64, importMeta Impor
 // GetJobProgress calculates the importing job progress.
 // The weight of each status is as follows:
 // 10%: Pending
-// 30%: PreImporting
+// 30%: PreImporting/AssigningIDRange
 // 30%: Importing
 // 10%: Stats
 // 10%: IndexBuilding
@@ -619,7 +588,7 @@ func GetJobProgress(ctx context.Context, jobID int64,
 		progress := getPendingProgress(ctx, jobID, importMeta)
 		return int64(progress * 10), internalpb.ImportJobState_Pending, 0, 0, ""
 
-	case internalpb.ImportJobState_PreImporting:
+	case internalpb.ImportJobState_PreImporting, internalpb.ImportJobState_AssigningIDRange:
 		progress := getPreImportingProgress(ctx, jobID, importMeta)
 		return 10 + int64(progress*30), internalpb.ImportJobState_Importing, 0, 0, ""
 

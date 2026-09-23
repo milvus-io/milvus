@@ -318,6 +318,13 @@ func (impl *WALFlusherImpl) dispatch(msg message.ImmutableMessage) (err error) {
 		impl.logger.Info(ctx, "RollbackImportMessage consumed (no-op in flusher)",
 			mlog.FieldVChannel(msg.VChannel()))
 		return nil // don't forward to flusherComponents
+	case message.MessageTypeImportIDRange:
+		// No-op: DataCoord ack callback handles all state changes. The message only
+		// carries the per-file ID ranges; the flusher has no local state to
+		// advance, so it is consumed here and never forwarded to flusherComponents.
+		impl.logger.Info(ctx, "ImportIDRangeMessage consumed (no-op in flusher)",
+			mlog.FieldVChannel(msg.VChannel()))
+		return nil // don't forward to flusherComponents
 	}
 	return impl.flusherComponents.HandleMessage(ctx, msg)
 }
