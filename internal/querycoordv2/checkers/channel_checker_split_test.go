@@ -423,3 +423,15 @@ func TestSplitSourceAffinityPinsOnlyWhatItCanJustify(t *testing.T) {
 		assert.False(t, ok)
 	})
 }
+
+// AV-L6-M-H: the shard states are read only when the diff has a channel to
+// watch. A collection whose next-target channels are all served costs no
+// DescribeCollection in the checker loop.
+func TestChannelDiffReadsShardStatesOnlyWithAChannelToWatch(t *testing.T) {
+	next := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1), "v9": servingChannel("v9", 1)}
+	loaded, released := channelDiffWith(t, func(*meta.MockBroker) {
+		// no DescribeCollection expectation: a call fails the test.
+	}, nil, next, next, "v0", "v9")
+	assert.Empty(t, loaded)
+	assert.Empty(t, released)
+}
