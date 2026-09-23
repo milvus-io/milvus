@@ -291,7 +291,12 @@ func (suite *ServiceSuite) TestWatchRefusesReadsUntilItsSplitRecoveryDescribes()
 	future.Set(mc)
 	suite.node.mixCoord = future
 
-	status, err := suite.node.WatchDmChannels(ctx, suite.splitWatchRequest(suite.vchannel))
+	// the targets are pending spawns once the recovery ran; keep them failing.
+	spawn := mockey.Mock((*QueryNode).SpawnSplitChild).Return(nil, errors.New("not now")).Build()
+	defer spawn.UnPatch()
+	req := suite.splitWatchRequest(suite.vchannel)
+	req.GetInfos()[0].SplitTargetChannels = []string{"by-dev-rootcoord-dml_2_111v3"}
+	status, err := suite.node.WatchDmChannels(ctx, req)
 	suite.Require().NoError(merr.CheckRPCCall(status, err))
 	source, ok := suite.node.delegators.Get(suite.vchannel)
 	suite.Require().True(ok)
@@ -331,11 +336,12 @@ func TestConcurrentSplitRecoveriesOfOneCollectionShareOneDescribe(t *testing.T) 
 	var wg sync.WaitGroup
 	for i := 0; i < watches; i++ {
 		source := delegator.NewMockShardDelegator(t)
+		source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t"}).Return(nil).Once()
 		source.EXPECT().FinishSplitRecovery().Return().Once()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, fmt.Sprintf("v%d", i))
+			node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, fmt.Sprintf("v%d", i), []string{"t"})
 		}()
 	}
 	require.Eventually(t, func() bool { return calls.Load() >= 1 }, 5*time.Second, time.Millisecond)
@@ -344,4 +350,63 @@ func TestConcurrentSplitRecoveriesOfOneCollectionShareOneDescribe(t *testing.T) 
 	close(release)
 	wg.Wait()
 	assert.EqualValues(t, 1, calls.Load(), "each recovery described the collection on its own")
+}
+
+// Only a watched split source needs the recovery. A channel whose recovery info
+// names no split target -- every channel of every collection that is not
+// mid-split -- neither describes the collection nor refuses a read, even with
+// the coordinator down.
+func (suite *ServiceSuite) TestWatchOfANonSplitChannelNeitherDescribesNorRefuses() {
+	ctx := context.Background()
+	mc := mocks.NewMockMixCoordClient(suite.T())
+	// no DescribeCollection expectation: the mock fails the test if it is called.
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(mc)
+	suite.node.mixCoord = future
+
+	status, err := suite.node.WatchDmChannels(ctx, suite.splitWatchRequest(suite.vchannel))
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	source, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+	suite.Never(func() bool {
+		_, err := source.Search(ctx, &querypb.SearchRequest{Req: &internalpb.SearchRequest{}, DmlChannels: []string{suite.vchannel}})
+		return errors.Is(err, merr.ErrServiceUnavailable)
+	}, 300*time.Millisecond, 20*time.Millisecond, "a read through a non-split channel was refused")
+}
+
+// A watched split source recovers from its recovery info's target list: the
+// named targets become pending spawns, and reads through it are refused until
+// their children publish.
+func (suite *ServiceSuite) TestWatchOfASplitSourceRecoversItsNamedTargets() {
+	ctx := context.Background()
+	const target = "by-dev-rootcoord-dml_2_111v3"
+	mc := mocks.NewMockMixCoordClient(suite.T())
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		VirtualChannelNames: []string{suite.vchannel, target},
+	}, nil).Once()
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(mc)
+	suite.node.mixCoord = future
+
+	var spawned atomic.Value
+	spawn := mockey.Mock((*QueryNode).SpawnSplitChild).To(func(_ *QueryNode, _ context.Context, params delegator.SpawnChildParams) (delegator.ShardDelegator, error) {
+		spawned.Store(params.TargetVChannel)
+		return nil, errors.New("not now")
+	}).Build()
+	defer spawn.UnPatch()
+
+	req := suite.splitWatchRequest(suite.vchannel)
+	req.GetInfos()[0].SplitTargetChannels = []string{target}
+	status, err := suite.node.WatchDmChannels(ctx, req)
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	source, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+
+	suite.Eventually(func() bool { return spawned.Load() == target }, 5*time.Second, 10*time.Millisecond)
+	suite.Eventually(func() bool {
+		_, err := source.Search(ctx, &querypb.SearchRequest{Req: &internalpb.SearchRequest{}, DmlChannels: []string{suite.vchannel}})
+		return errors.Is(err, merr.ErrServiceUnavailable) && strings.Contains(err.Error(), "still being spawned")
+	}, 5*time.Second, 10*time.Millisecond)
+	suite.Empty(source.SplitChildVChannels())
 }
