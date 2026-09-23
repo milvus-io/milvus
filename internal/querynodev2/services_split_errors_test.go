@@ -19,6 +19,7 @@ package querynodev2
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -119,8 +120,10 @@ func TestWaitSplitTargetRecoveryGivesUp(t *testing.T) {
 	})
 }
 
-// The recovery respawn is best effort: every failure leaves the source as it
-// is, and a source with no Creating target spawns nothing.
+// The recovery respawn stops without spawning when there is nothing to recover
+// or no way to: the node is shutting down, the source was released, no target
+// is Creating any more, or the source refuses the spawn. In every case it lifts
+// the source's recovery refusal.
 func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 	describe := func(states ...schemapb.ShardState) *milvuspb.DescribeCollectionResponse {
 		resp := &milvuspb.DescribeCollectionResponse{Status: merr.Success()}
@@ -137,14 +140,19 @@ func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 		cancel()
 		node := &QueryNode{mixCoord: syncutil.NewFuture[types.MixCoordClient]()}
 		source := delegator.NewMockShardDelegator(t)
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		node.respawnSplitChildrenOnRecovery(ctx, source, 1, "src")
 	})
 
-	t.Run("describe collection fails", func(t *testing.T) {
+	t.Run("a released source stops retrying a failing describe", func(t *testing.T) {
+		backoff := mockey.Mock(splitRecoveryRetryBackoff).Return(time.Millisecond).Build()
+		defer backoff.UnPatch()
 		mc := mocks.NewMockMixCoordClient(t)
 		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("coordinator down"))
 		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
 		source := delegator.NewMockShardDelegator(t)
+		source.EXPECT().Serviceable().Return(false)
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
 
@@ -154,6 +162,7 @@ func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 			describe(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
 		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
 		source := delegator.NewMockShardDelegator(t)
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
 
@@ -164,8 +173,47 @@ func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
 		source := delegator.NewMockShardDelegator(t)
 		source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).Return(errors.New("no spawner")).Once()
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
+}
+
+// rootcoord not answering at a restart is a case the design anticipates. The
+// fence sits behind the source's checkpoint and is not replayed, so giving up
+// leaves the source answering from its own view alone -- every target's rows
+// and deletes missing, with no error. The recovery keeps describing until it
+// answers, and only then lets reads through (the source refuses them while its
+// recovery is pending), by which time the respawned targets are pending spawns.
+func TestRespawnSplitChildrenOnRecoveryRetriesAFailingDescribe(t *testing.T) {
+	backoff := mockey.Mock(splitRecoveryRetryBackoff).Return(time.Millisecond).Build()
+	defer backoff.UnPatch()
+
+	mc := mocks.NewMockMixCoordClient(t)
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(nil, errors.New("coordinator down")).Times(2)
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		VirtualChannelNames: []string{"src", "t1", "t2"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardSplitting},
+			{State: schemapb.ShardState_ShardCreating},
+			{State: schemapb.ShardState_ShardCreating},
+		},
+	}, nil).Once()
+	node := &QueryNode{mixCoord: mixCoordFuture(mc)}
+
+	var steps []string
+	source := delegator.NewMockShardDelegator(t)
+	source.EXPECT().Serviceable().Return(true).Maybe()
+	source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).RunAndReturn(func(context.Context, []string) error {
+		steps = append(steps, "spawn")
+		return nil
+	}).Once()
+	source.EXPECT().FinishSplitRecovery().Run(func() { steps = append(steps, "finish") }).Once()
+
+	node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+	// the targets are pending spawns (reads refused) before the recovery's own
+	// refusal is lifted, so no read is ever served without them.
+	assert.Equal(t, []string{"spawn", "finish"}, steps)
 }
 
 // Releasing a source only detaches a child QueryCoord has adopted: it keeps
