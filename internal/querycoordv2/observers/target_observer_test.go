@@ -1801,3 +1801,37 @@ func TestCurrentTargetChannelSetChangeInvalidatesShardLeaders(t *testing.T) {
 	assert.Empty(t, run(t, channels("v0", "v1"), channels("v1", "v0"), true), "same channel set")
 	assert.Empty(t, run(t, channels("v0"), channels("v1"), false), "nothing promoted")
 }
+
+// AV-L6-H1: when the observer sees a next target's split window marks change,
+// the shard states the checkers freeze by are refreshed on their next read
+// rather than served from a cached read the marks show is out of date. Here
+// the pull's own fresh state read failed, so the pull marked its window from a
+// pre-fence read the cache still holds within its TTL.
+func TestSplitWindowMarkChangeRefreshesTheCachedShardStates(t *testing.T) {
+	f := newSplitHandoffFixture(t)
+	ctx, collectionID := f.ctx, f.collectionID
+	// a long TTL: only an invalidation makes the next read go to the coordinator.
+	splitState := meta.NewShardSplitStateCache(f.observer.broker, time.Hour)
+	f.targetMgr = meta.NewTargetManagerWithSplitState(f.observer.broker, f.meta, splitState)
+	f.observer = NewTargetObserverWithSplitState(f.meta, f.targetMgr, f.distMgr, f.observer.broker, f.observer.cluster, f.observer.nodeMgr, splitState)
+
+	f.setShards([]string{"src"}, schemapb.ShardState_ShardNormal)
+	f.setRecovery([]string{"src"}, nil)
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	states, ok := splitState.ChannelStates(ctx, collectionID)
+	assert.True(t, ok)
+	assert.False(t, states.Splitting())
+
+	// the fence: the pull's state read fails and falls back to the pre-fence read.
+	f.setShards([]string{"src", "t1", "t2"},
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.describeErr = errors.New("rootcoord busy")
+	f.setRecovery([]string{"src", "t1", "t2"}, nil)
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	assert.ElementsMatch(t, []string{"t1", "t2"}, f.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget).Collect())
+
+	f.describeErr = nil
+	states, ok = splitState.ChannelStates(ctx, collectionID)
+	assert.True(t, ok)
+	assert.True(t, states.Splitting(), "the checkers must see the fence the marks gave away, not the cached pre-fence read")
+}

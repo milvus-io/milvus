@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // ShardSplitStateCache answers whether a collection is mid shard-split and which
@@ -340,48 +341,110 @@ func (s ShardStates) CheckWatchable(vchannel string) error {
 	return nil
 }
 
-// CheckShardSplitMovable reports whether a shard split forbids moving the
-// collection's channels or segments between nodes right now: nil when it does
-// not, else a retriable System error naming why. It is the one rule behind
-// both the balance freeze (normal and stopping) and the refusal of manual
-// moves (LoadBalance, TransferSegment, TransferChannel).
+// CheckShardSplitMovable reports whether a shard split forbids moving any of
+// the collection's channels or segments between nodes right now: nil when it
+// does not, else a retriable System error naming why. It is
+// EvalShardSplitFreeze(...).CheckCollection(); the rules are on
+// ShardSplitFreeze. A nil cache disables the rule.
+func CheckShardSplitMovable(ctx context.Context, cache *ShardSplitStateCache, targetMgr TargetManagerInterface, collectionID int64) error {
+	return EvalShardSplitFreeze(ctx, cache, targetMgr, collectionID).CheckCollection()
+}
+
+// ShardSplitFreeze is one evaluation of what shard splits forbid moving in a
+// collection. It is the one rule behind every refusal to move a channel or a
+// segment during a split: the balance freeze (normal and stopping), the
+// executor's last-word check on a channel move, and the refusal of manual moves
+// (LoadBalance, TransferSegment, TransferChannel).
 //
 // Moving a split source rebuilds its delegator on another node without the
 // in-process children it fronts, which is wrong for as long as reads can route
-// to it. So a move is refused:
+// to it; moving a split target before the flip either builds a delegator the
+// source still fronts, or tears down the one the adoption converted in place.
+// So the split's family -- its sources and its targets -- stays where it is:
 //
-//   - while the next target marks split window targets. The mark is taken from
-//     a fresh state read before the pull, so it gives a fence away even while
-//     the cached states below still show a read from before it;
-//   - while the shard states are unknown, since none of the rules below can be
-//     ruled out. The cache keeps its last read on a failed refresh, so this is
-//     only before the first read of a collection succeeds;
-//   - while a shard is a fenced source (ShardSplitting): the split window;
-//   - while the current target lists a vchannel the collection no longer
-//     lists: a source retired by an adoption that reads still route to until
-//     the current target flips past it.
+//   - a channel the next target marks as a split window target. The mark is
+//     taken from a fresh state read before the pull, so it gives a fence away
+//     even while the states below still show a read from before it;
+//   - a fenced source (ShardSplitting) and a not-yet-adopted target
+//     (ShardCreating): the split window;
+//   - a vchannel the current target lists but the collection no longer does: a
+//     source retired by an adoption, which reads still route to until the
+//     current target flips past it; and, while there is one, every channel of
+//     the next target the current target does not list yet -- the adopted
+//     targets waiting for that flip.
 //
-// A nil cache disables the rule.
-func CheckShardSplitMovable(ctx context.Context, cache *ShardSplitStateCache, targetMgr TargetManagerInterface, collectionID int64) error {
+// Without a read of the shard states none of this can be ruled out, and
+// nothing of the collection moves. Every other channel, and every segment
+// attributed to one, may move.
+type ShardSplitFreeze struct {
+	collectionID int64
+	// unknown is set when the shard states could not be read.
+	unknown error
+	// family are the channels of the collection's splits: sources and targets.
+	family typeutil.Set[string]
+}
+
+// EvalShardSplitFreeze evaluates the freeze of a collection from the cached
+// shard states. A nil cache disables the rule: nothing is frozen.
+func EvalShardSplitFreeze(ctx context.Context, cache *ShardSplitStateCache, targetMgr TargetManagerInterface, collectionID int64) *ShardSplitFreeze {
 	if cache == nil {
-		return nil
-	}
-	if window := targetMgr.GetSplitWindowTargets(ctx, collectionID, NextTarget); len(window) > 0 {
-		return merr.WrapErrServiceUnavailable("shard split window open",
-			fmt.Sprintf("collection %d: the next target marks split window targets %v", collectionID, window.Collect()))
+		return &ShardSplitFreeze{collectionID: collectionID}
 	}
 	states, ok := cache.ChannelStates(ctx, collectionID)
 	if !ok {
-		return merr.WrapErrServiceUnavailable("shard split state unknown",
-			fmt.Sprintf("collection %d: its shard states could not be read", collectionID))
+		return &ShardSplitFreeze{
+			collectionID: collectionID,
+			unknown: merr.WrapErrServiceUnavailable("shard split state unknown",
+				fmt.Sprintf("collection %d: its shard states could not be read", collectionID)),
+		}
 	}
-	if states.Splitting() {
-		return merr.WrapErrServiceUnavailable("shard split window open",
-			fmt.Sprintf("collection %d has a fenced split source", collectionID))
+	return NewShardSplitFreeze(ctx, targetMgr, collectionID, states)
+}
+
+// NewShardSplitFreeze evaluates the freeze of a collection from the given shard
+// states, for a caller that has just read them fresh.
+func NewShardSplitFreeze(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, states ShardStates) *ShardSplitFreeze {
+	family := typeutil.NewSet[string]()
+	family.Insert(targetMgr.GetSplitWindowTargets(ctx, collectionID, NextTarget).Collect()...)
+	for channel, state := range states {
+		if state == schemapb.ShardState_ShardSplitting || state == schemapb.ShardState_ShardCreating {
+			family.Insert(channel)
+		}
 	}
-	if retired := states.Delisted(targetMgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)); len(retired) > 0 {
-		return merr.WrapErrServiceUnavailable("retired shard split source still current",
-			fmt.Sprintf("collection %d: the current target still routes reads to %v", collectionID, retired))
+	current := targetMgr.GetDmChannelsByCollection(ctx, collectionID, CurrentTarget)
+	if retired := states.Delisted(current); len(retired) > 0 {
+		family.Insert(retired...)
+		for channel := range targetMgr.GetDmChannelsByCollection(ctx, collectionID, NextTarget) {
+			if _, flipped := current[channel]; !flipped {
+				family.Insert(channel)
+			}
+		}
+	}
+	return &ShardSplitFreeze{collectionID: collectionID, family: family}
+}
+
+// CheckCollection returns nil when no shard split freezes anything of the
+// collection, else a retriable System error naming why.
+func (f *ShardSplitFreeze) CheckCollection() error {
+	if f.unknown != nil {
+		return f.unknown
+	}
+	if len(f.family) > 0 {
+		return merr.WrapErrServiceUnavailable("shard split in progress",
+			fmt.Sprintf("collection %d: split sources and targets %v must stay where they are", f.collectionID, f.family.Collect()))
+	}
+	return nil
+}
+
+// CheckChannel returns nil when the channel -- its delegator, or a segment
+// attributed to it -- may move, else a retriable System error naming why.
+func (f *ShardSplitFreeze) CheckChannel(channel string) error {
+	if f.unknown != nil {
+		return f.unknown
+	}
+	if f.family.Contain(channel) {
+		return merr.WrapErrServiceUnavailable("shard split in progress",
+			fmt.Sprintf("collection %d: channel %s is a split source or target and must stay where it is", f.collectionID, channel))
 	}
 	return nil
 }
