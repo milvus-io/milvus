@@ -129,6 +129,11 @@ VecIndexConfig::GetBuildBaseParams(DataType data_type) const {
     }
 }
 
+const knowhere::Json&
+VecIndexConfig::GetSearchBaseParams() const noexcept {
+    return search_params_;
+}
+
 SearchInfo
 VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) const {
     SearchInfo searchParam(searchInfo);
