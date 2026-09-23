@@ -121,9 +121,6 @@ class KmeansClustering {
         const milvus::proto::clustering::AnalyzeInfo& config,
         const milvus::proto::clustering::ClusteringCentroidsStats&
             centroid_stats,
-        const std::vector<
-            milvus::proto::clustering::ClusteringCentroidIdMappingStats>&
-            id_mapping_stats,
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& insert_files,
         const std::map<int64_t, int64_t>& num_rows,
@@ -131,7 +128,7 @@ class KmeansClustering {
         const Config& base_config,
         const knowhere::Json& cluster_config,
         const int64_t dim,
-        const int64_t trained_segments_num,
+        const T* full_training_data,
         const int64_t num_clusters);
 
     template <typename T>

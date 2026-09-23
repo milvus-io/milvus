@@ -506,6 +506,13 @@ TEST_P(KmeansManifestTest, ReadFromManifestStorageV3) {
         schema, n_batch, per_batch, dim, root_path, base_path);
     ASSERT_EQ(v3.TotalRows(), num_rows);
     ASSERT_EQ(v3.NumColumnGroups(), 1);
+    // A different segment length and batch boundary catch borrowing the wrong
+    // slice of the full training buffer (including byte/element offset mixups).
+    const int64_t segment_id2 = 202;
+    const int64_t per_batch2 = per_batch + 1;
+    const std::string base_path2 = base_path + "_second";
+    milvus::test::V3SegmentTestData v3_second(
+        schema, n_batch, per_batch2, dim, root_path, base_path2);
 
     // The fixture wrote to the local filesystem and ManifestPathJson() returns
     // an absolute base_path. MakeInternalPropertiesFromStorageConfig uses "/"
@@ -527,14 +534,17 @@ TEST_P(KmeansManifestTest, ReadFromManifestStorageV3) {
     info.set_num_clusters(num_clusters);
     // Exercise both full-training assignment reuse and sampled training
     // followed by a separate full-segment assignment.
-    info.set_train_size(num_rows * dim * int64_t(sizeof(float)) /
-                        train_divisor);
+    info.set_train_size((num_rows + v3_second.TotalRows()) * dim *
+                        int64_t(sizeof(float)) / train_divisor);
     info.set_min_cluster_ratio(0.01);
     info.set_max_cluster_ratio(10.0);
     info.set_max_cluster_size(int64_t(1) << 30);
     (*info.mutable_num_rows())[segment_id] = num_rows;
+    (*info.mutable_num_rows())[segment_id2] = v3_second.TotalRows();
     // StorageV3 marker: manifest present, and deliberately no insert_files.
     (*info.mutable_manifest_paths())[segment_id] = v3.ManifestPathJson();
+    (*info.mutable_manifest_paths())[segment_id2] =
+        v3_second.ManifestPathJson();
     ASSERT_TRUE(info.insert_files().empty());
     auto* field_schema = info.mutable_field_schema();
     field_schema->set_fieldid(vec_fid.get());
@@ -560,7 +570,7 @@ TEST_P(KmeansManifestTest, ReadFromManifestStorageV3) {
     auto meta = job->GetClusteringResultMeta();
     ASSERT_FALSE(meta.centroid_path.empty());
     ASSERT_GT(meta.centroid_file_size, 0);
-    ASSERT_EQ(meta.id_mappings.size(), size_t(1));
+    ASSERT_EQ(meta.id_mappings.size(), size_t(2));
 
     // Centroids must describe real data pulled through the manifest.
     std::string centroid_path = meta.centroid_path;
@@ -579,57 +589,66 @@ TEST_P(KmeansManifestTest, ReadFromManifestStorageV3) {
     }
     ASSERT_TRUE(any_non_zero);
 
-    // Every row of the manifest-backed segment must have been read and
-    // assigned; this is what fails if the manifest read returns nothing.
-    std::string id_mapping_path =
-        job->GetRemoteCentroidIdMappingObjectPrefix(segment_id) + "/" +
-        std::string(OFFSET_MAPPING_NAME);
-    milvus::proto::clustering::ClusteringCentroidIdMappingStats mapping_stats;
-    ReadPBFile(id_mapping_path, mapping_stats);
-    ASSERT_EQ(mapping_stats.centroid_id_mapping_size(), num_rows);
-    ASSERT_EQ(mapping_stats.distance_to_centroid_size(), num_rows);
-    // Compare with the original rows, not data read through the same reader:
-    // equal row counts alone cannot detect reordered assignment sidecars.
-    for (int64_t batch_index = 0; batch_index < n_batch; ++batch_index) {
-        auto source =
-            milvus::segcore::DataGen(schema, per_batch, 42 + batch_index);
-        const auto vectors = source.get_col<float>(vec_fid);
-        for (int64_t row = 0; row < per_batch; ++row) {
-            const auto mapping_row = batch_index * per_batch + row;
-            const auto id = mapping_stats.centroid_id_mapping(mapping_row);
-            ASSERT_LT(id, num_clusters);
-            const auto& centroid = centroid_stats.centroids(id).float_vector();
-            float expected_distance = 0.0f;
-            for (int64_t d = 0; d < dim; ++d) {
-                const auto diff = vectors[row * dim + d] - centroid.data(d);
-                expected_distance += diff * diff;
+    for (const auto [source_segment_id, source_per_batch] :
+         {std::make_pair(segment_id, per_batch),
+          std::make_pair(segment_id2, per_batch2)}) {
+        const auto source_num_rows = n_batch * source_per_batch;
+        // Every row of the manifest-backed segment must have been read and
+        // assigned; this is what fails if the manifest read returns nothing.
+        std::string id_mapping_path =
+            job->GetRemoteCentroidIdMappingObjectPrefix(source_segment_id) +
+            "/" + std::string(OFFSET_MAPPING_NAME);
+        milvus::proto::clustering::ClusteringCentroidIdMappingStats
+            mapping_stats;
+        ReadPBFile(id_mapping_path, mapping_stats);
+        ASSERT_EQ(mapping_stats.centroid_id_mapping_size(), source_num_rows);
+        ASSERT_EQ(mapping_stats.distance_to_centroid_size(), source_num_rows);
+        // Compare with the original rows, not data read through the same reader:
+        // equal row counts alone cannot detect reordered assignment sidecars.
+        for (int64_t batch_index = 0; batch_index < n_batch; ++batch_index) {
+            auto source = milvus::segcore::DataGen(
+                schema, source_per_batch, 42 + batch_index);
+            const auto vectors = source.get_col<float>(vec_fid);
+            for (int64_t row = 0; row < source_per_batch; ++row) {
+                const auto mapping_row = batch_index * source_per_batch + row;
+                const auto id = mapping_stats.centroid_id_mapping(mapping_row);
+                ASSERT_LT(id, num_clusters);
+                const auto& centroid =
+                    centroid_stats.centroids(id).float_vector();
+                float expected_distance = 0.0f;
+                for (int64_t d = 0; d < dim; ++d) {
+                    const auto diff = vectors[row * dim + d] - centroid.data(d);
+                    expected_distance += diff * diff;
+                }
+                ASSERT_NEAR(mapping_stats.distance_to_centroid(mapping_row),
+                            expected_distance,
+                            std::max(1e-4f, expected_distance * 1e-5f));
             }
-            ASSERT_NEAR(mapping_stats.distance_to_centroid(mapping_row),
-                        expected_distance,
-                        std::max(1e-4f, expected_distance * 1e-5f));
         }
-    }
-    for (const auto id : mapping_stats.centroid_id_mapping()) {
-        ASSERT_LT(id, num_clusters);
-    }
-    bool has_positive_distance = false;
-    for (const auto distance : mapping_stats.distance_to_centroid()) {
-        ASSERT_TRUE(std::isfinite(distance));
-        ASSERT_GE(distance, 0.0f);
-        has_positive_distance = has_positive_distance || distance > 0.0f;
-    }
-    ASSERT_TRUE(has_positive_distance);
-    ASSERT_EQ(mapping_stats.num_in_centroid_size(), num_clusters);
-    int64_t assigned = 0;
-    for (const auto num : mapping_stats.num_in_centroid()) {
-        assigned += num;
-    }
-    ASSERT_EQ(assigned, num_rows);
+        for (const auto id : mapping_stats.centroid_id_mapping()) {
+            ASSERT_LT(id, num_clusters);
+        }
+        bool has_positive_distance = false;
+        for (const auto distance : mapping_stats.distance_to_centroid()) {
+            ASSERT_TRUE(std::isfinite(distance));
+            ASSERT_GE(distance, 0.0f);
+            has_positive_distance = has_positive_distance || distance > 0.0f;
+        }
+        ASSERT_TRUE(has_positive_distance);
+        ASSERT_EQ(mapping_stats.num_in_centroid_size(), num_clusters);
+        int64_t assigned = 0;
+        for (const auto num : mapping_stats.num_in_centroid()) {
+            assigned += num;
+        }
+        ASSERT_EQ(assigned, source_num_rows);
 
+        cm->Remove(id_mapping_path);
+    }
     cm->Remove(centroid_path);
-    cm->Remove(id_mapping_path);
     std::filesystem::remove_all(std::filesystem::path(root_path) /
                                 std::filesystem::path(base_path));
+    std::filesystem::remove_all(std::filesystem::path(root_path) /
+                                std::filesystem::path(base_path2));
 }
 
 INSTANTIATE_TEST_SUITE_P(
