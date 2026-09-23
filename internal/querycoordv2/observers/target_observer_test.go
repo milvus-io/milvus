@@ -1837,3 +1837,25 @@ func TestSplitWindowMarkChangeRefreshesTheCachedShardStates(t *testing.T) {
 	assert.True(t, ok)
 	assert.True(t, states.Splitting(), "the checkers must see the fence the marks gave away, not the cached pre-fence read")
 }
+
+// AV-L6-M4: the load-progress count and the promotion's segment readiness are
+// two halves of one guard, and must narrow the window snapshot the same way.
+// A sealed segment attributed to a split window target -- which has no
+// delegator to load it until adoption -- must not keep the source-only current
+// target from being promoted, just as it does not keep the collection from
+// counting as loaded.
+func TestSplitWindowPromotionIgnoresSegmentsOfExcludedTargets(t *testing.T) {
+	f := newSplitHandoffFixture(t)
+	ctx, collectionID := f.ctx, f.collectionID
+	const segS, segT = int64(1), int64(2)
+
+	f.setShards([]string{"src", "t1", "t2"},
+		schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating)
+	f.setRecovery([]string{"src", "t1", "t2"}, map[int64]string{segS: "src", segT: "t1"})
+	assert.NoError(t, f.observer.updateNextTarget(ctx, collectionID))
+	f.setDist(map[string][]int64{"src": {segS}})
+
+	assert.True(t, f.observer.shouldUpdateCurrentTarget(ctx, collectionID))
+	f.observer.updateCurrentTarget(ctx, collectionID)
+	assert.Equal(t, []string{"src"}, f.currentChannels())
+}
