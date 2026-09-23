@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -62,19 +63,79 @@ func TestSpawnSplitChildIdempotent(t *testing.T) {
 	assert.Equal(t, existing, got)
 }
 
-// A delegator already registered for the target but not fronted by the
-// spawning source -- one querycoord watched on its own -- forwards no delete to
-// that source. Handing it back as the source's child would let the source front
-// it and serve rows deleted on the target, so the spawn is refused instead.
-func TestSpawnSplitChildRefusesADelegatorItDoesNotFront(t *testing.T) {
+// A delegator already registered for the target and fronted by nobody --
+// querycoord watched it on its own after adoption, while the spawn waited --
+// forwarded no delete to the source. Refusing it left the target pending and
+// every read through the source refused until release. It is attached instead:
+// adopted first (so it stays visible to querycoord), fronted by the source, and
+// made to forward every delete it already holds.
+func TestSpawnSplitChildAttachesADelegatorWatchedOnItsOwn(t *testing.T) {
 	node := &QueryNode{
 		ctx:        context.Background(),
 		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
 	}
 	parent := delegator.NewMockShardDelegator(t)
 	watched := delegator.NewMockShardDelegator(t)
-	watched.EXPECT().FrontingParent().Return(nil)
+	var steps []string
+	watched.EXPECT().FrontingParent().Return(nil).Once()
+	watched.EXPECT().MarkAdopted().Run(func() { steps = append(steps, "adopt") }).Once()
+	watched.EXPECT().SetFrontingParent(parent).Run(func(delegator.ShardDelegator) { steps = append(steps, "front") }).Once()
+	watched.EXPECT().ForwardKnownDeletesToParent(mock.Anything).RunAndReturn(func(context.Context) error {
+		steps = append(steps, "forward")
+		return nil
+	}).Once()
 	node.delegators.Insert("v1", watched)
+
+	got, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{
+		CollectionID:   1,
+		TargetVChannel: "v1",
+		Parent:         parent,
+	})
+	assert.NoError(t, err)
+	assert.Same(t, watched, got)
+	assert.Equal(t, []string{"adopt", "front", "forward"}, steps)
+	current, ok := node.delegators.Get("v1")
+	assert.True(t, ok)
+	assert.Same(t, watched, current)
+}
+
+// An attach whose forward fails detaches again, so the source's retry attaches
+// and forwards everything once more instead of reusing a half-attached child.
+func TestSpawnSplitChildDetachesAFailedAttach(t *testing.T) {
+	node := &QueryNode{
+		ctx:        context.Background(),
+		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+	}
+	parent := delegator.NewMockShardDelegator(t)
+	watched := delegator.NewMockShardDelegator(t)
+	watched.EXPECT().FrontingParent().Return(nil).Once()
+	watched.EXPECT().MarkAdopted().Return().Once()
+	watched.EXPECT().SetFrontingParent(parent).Return().Once()
+	watched.EXPECT().ForwardKnownDeletesToParent(mock.Anything).Return(errors.New("load failed")).Once()
+	watched.EXPECT().SetFrontingParent(nil).Return().Once()
+	node.delegators.Insert("v1", watched)
+
+	got, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{
+		CollectionID:   1,
+		TargetVChannel: "v1",
+		Parent:         parent,
+	})
+	assert.Error(t, err)
+	assert.Nil(t, got)
+}
+
+// A delegator fronted by ANOTHER source is refused: fronting it from two
+// sources returns its rows twice.
+func TestSpawnSplitChildRefusesADelegatorAnotherSourceFronts(t *testing.T) {
+	node := &QueryNode{
+		ctx:        context.Background(),
+		delegators: typeutil.NewConcurrentMap[string, delegator.ShardDelegator](),
+	}
+	parent := delegator.NewMockShardDelegator(t)
+	other := delegator.NewMockShardDelegator(t)
+	fronted := delegator.NewMockShardDelegator(t)
+	fronted.EXPECT().FrontingParent().Return(other)
+	node.delegators.Insert("v1", fronted)
 
 	got, err := node.SpawnSplitChild(context.Background(), delegator.SpawnChildParams{
 		CollectionID:   1,
@@ -83,9 +144,6 @@ func TestSpawnSplitChildRefusesADelegatorItDoesNotFront(t *testing.T) {
 	})
 	assert.ErrorIs(t, err, merr.ErrChannelReduplicate)
 	assert.Nil(t, got)
-	current, ok := node.delegators.Get("v1")
-	assert.True(t, ok)
-	assert.Same(t, watched, current)
 }
 
 func TestWaitSplitTargetRecovery(t *testing.T) {
