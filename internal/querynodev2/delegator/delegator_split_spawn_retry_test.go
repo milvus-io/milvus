@@ -65,3 +65,24 @@ func TestFailedSpawnGivesUpDuringItsBackoff(t *testing.T) {
 		})
 	}
 }
+
+// SetChildSpawner writes the spawner under childMut; a spawn in flight must not
+// read it without that lock (run with -race). The spawn uses the spawner that
+// was configured when the fence was consumed.
+func TestSpawnDoesNotRaceWithSetChildSpawner(t *testing.T) {
+	backoff := mockey.Mock(splitChildSpawnBackoff).Return(time.Millisecond).Build()
+	defer backoff.UnPatch()
+	first := &fakeChildSpawner{failures: 3}
+	sd := &shardDelegator{
+		vchannelName: "v0",
+		children:     make(map[string]ShardDelegator),
+		childSpawner: first,
+		lifetime:     lifetime.NewLifetime(lifetime.Working),
+	}
+	require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+	for i := 0; i < 50; i++ {
+		sd.SetChildSpawner(&fakeChildSpawner{})
+	}
+	require.Eventually(t, func() bool { return len(childVChannels(sd)) == 1 }, 3*time.Second, time.Millisecond)
+	assert.Equal(t, 4, first.attempts(), "the spawn switched spawners mid-flight")
+}
