@@ -42,10 +42,10 @@ type ResultSet struct {
 	// Highlights maps field name to one Highlight per row in this ResultSet.
 	// Nil when the search request did not include a Highlighter, or when the
 	// server returned no highlight data for the matched rows.
-	Highlights  map[string][]Highlight
-	Scores      []float32 // distance to the target vector
-	Recall      float32   // recall of the query vector's search result (estimated by zilliz cloud)
-	Err         error     // search error if any
+	Highlights map[string][]Highlight
+	Scores     []float32 // distance to the target vector
+	Recall     float32   // recall of the query vector's search result (estimated by zilliz cloud)
+	Err        error     // search error if any
 }
 
 // GetColumn returns column with provided field name.

@@ -409,10 +409,13 @@ func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
 }
 
 // WithHighlighter attaches a Highlighter (e.g. NewLexicalHighlighter) to the
-// per-sub-request level. Used by hybrid search to carry a highlighter on
-// each AnnRequest; the server currently rejects hybrid + highlighter
-// (internal/proxy/task_search.go:415), so this is mostly reserved for
-// future support and parity with the proto's per-request field.
+// per-sub-request level. Supported on regular Search (via
+// (*searchOption).WithHighlighter) but rejected when the AnnRequest is fed
+// into a hybrid search — HybridRequest() errors before the wire call because
+// the server cannot carry a per-leg highlighter today.
+//
+// Remove WithHighlighter from the leg if you need both hybrid + highlight;
+// hybrid+highlight support is pending in the server.
 func (r *AnnRequest) WithHighlighter(h Highlighter) *AnnRequest {
 	r.highlighter = h
 	return r
@@ -737,6 +740,18 @@ func (opt *hybridSearchOption) WithOffset(offset int) *hybridSearchOption {
 }
 
 func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
+	// Hybrid search does not support highlighter: convertHybridSearchToSearch
+	// (internal/proxy/search_util.go:1158) drops each sub-SearchRequest's
+	// Highlighter into SubSearchRequest, which has no such field. Until the
+	// server carries the per-leg highlighter through (e.g., via a proto
+	// change to SubSearchRequest), reject client-side so the user gets a
+	// clear error rather than a silent no-op.
+	for _, r := range opt.reqs {
+		if r != nil && r.highlighter != nil {
+			return nil, errors.New("hybrid search does not support highlighter")
+		}
+	}
+
 	requests := make([]*milvuspb.SearchRequest, 0, len(opt.reqs))
 	for _, annRequest := range opt.reqs {
 		req, err := annRequest.searchRequest()

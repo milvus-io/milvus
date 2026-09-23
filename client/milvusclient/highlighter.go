@@ -156,8 +156,8 @@ func (l *LexicalHighlighter) Validate() error {
 }
 
 func (l *LexicalHighlighter) protoMessage() (*commonpb.Highlighter, error) {
-	if l.fragmentSizeSet && l.fragmentSize < 0 {
-		return nil, errors.New("fragment_size must be non-negative")
+	if l.fragmentSizeSet && l.fragmentSize <= 0 {
+		return nil, errors.New("fragment_size must be positive")
 	}
 	if l.fragmentOffsetSet && l.fragmentOffset < 0 {
 		return nil, errors.New("fragment_offset must be non-negative")

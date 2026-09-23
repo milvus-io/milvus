@@ -69,24 +69,6 @@ func TestLexicalHighlighterProtoDefaults(t *testing.T) {
 	require.Empty(t, pb.GetParams())
 }
 
-func TestLexicalHighlighterProtoOmitsUnsetValues(t *testing.T) {
-	// WithFragmentSize(0) still pushes 0 if explicitly set (user intent).
-	hl := NewLexicalHighlighter().WithFragmentSize(0)
-	pb, err := hl.protoMessage()
-	require.NoError(t, err)
-	params := entity.KvPairsMap(pb.GetParams())
-	require.Contains(t, params, fragmentSizeKey)
-	require.Equal(t, "0", params[fragmentSizeKey])
-	require.NotContains(t, params, fragmentOffsetKey)
-	require.NotContains(t, params, fragmentNumKey)
-
-	// WithHighlightSearchText(false) still pushes "false" (user intent).
-	hl2 := NewLexicalHighlighter().WithHighlightSearchText(false)
-	pb2, err := hl2.protoMessage()
-	require.NoError(t, err)
-	require.Equal(t, "false", entity.KvPairsMap(pb2.GetParams())[highlightSearchTextKey])
-}
-
 func TestLexicalHighlighterTypeMethod(t *testing.T) {
 	require.Equal(t, HighlightTypeLexical, NewLexicalHighlighter().Type())
 }
@@ -195,6 +177,10 @@ func TestLexicalHighlighterValidate(t *testing.T) {
 			hl:   NewLexicalHighlighter().WithFragmentSize(-1),
 		},
 		{
+			name: "zero fragment size",
+			hl:   NewLexicalHighlighter().WithFragmentSize(0),
+		},
+		{
 			name: "negative fragment offset",
 			hl:   NewLexicalHighlighter().WithFragmentOffset(-1),
 		},
@@ -232,10 +218,6 @@ func TestLexicalHighlighterValidCases(t *testing.T) {
 		{
 			name: "only query",
 			hl:   NewLexicalHighlighter().WithQuery("text", "hello", "TextMatch"),
-		},
-		{
-			name: "zero fragment size explicit",
-			hl:   NewLexicalHighlighter().WithFragmentSize(0),
 		},
 		{
 			name: "highlight search text disabled",
