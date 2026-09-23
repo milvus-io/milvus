@@ -462,6 +462,11 @@ type segmentOnlyBalancer interface {
 	BalanceReplicaSegments(ctx context.Context, replica *meta.Replica) []assign.SegmentAssignPlan
 }
 
+// The stopping segment drain finds this method by a type assertion; if its
+// signature drifted, the drain would silently stop and a held split source
+// would block every segment on a stopping node again.
+var _ segmentOnlyBalancer = (*balance.StoppingBalancer)(nil)
+
 // stoppingSegmentTasks plans the segments to move off the replicas' stopping
 // nodes while channels are left there, when the balancer can plan them alone.
 func (b *BalanceChecker) stoppingSegmentTasks(ctx context.Context, balancer balance.Balance, replicas []int64, config balanceConfig) []task.Task {
