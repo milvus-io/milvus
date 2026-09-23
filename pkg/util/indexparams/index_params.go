@@ -40,6 +40,7 @@ const (
 	NumLoadThreadRatioKey     = "num_load_thread_ratio"
 	BeamWidthRatioKey         = "beamwidth_ratio"
 	DiskPQCodeBudgetRatioKey  = "disk_pq_code_budget_gb_ratio"
+	KnowhereBeamWidthRatioKey = "beam_width_ratio"
 
 	MaxDegreeKey           = "max_degree"
 	SearchListSizeKey      = "search_list_size"
@@ -270,19 +271,19 @@ func FillDiskIndexParams(params *paramtable.ComponentParam, indexParams map[stri
 		}
 		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
-			maxDegree = params.CommonCfg.MaxDegree.GetValue()
+			maxDegree = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, MaxDegreeKey)
 		}
 		searchListSize, ok = indexParams[SearchListSizeKey]
 		if !ok {
-			searchListSize = params.CommonCfg.SearchListSize.GetValue()
+			searchListSize = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, SearchListSizeKey)
 		}
 		pqCodeBudgetGBRatio, ok = indexParams[PQCodeBudgetRatioKey]
 		if !ok {
-			pqCodeBudgetGBRatio = params.CommonCfg.PQCodeBudgetGBRatio.GetValue()
+			pqCodeBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, PQCodeBudgetRatioKey)
 		}
 		searchCacheBudgetGBRatio, ok = indexParams[SearchCacheBudgetRatioKey]
 		if !ok {
-			searchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+			searchCacheBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey)
 		} else {
 			// User explicitly provided the ratio in CreateIndex request — persist it.
 			hasSearchCacheBudgetGBRatio = true
@@ -365,7 +366,7 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		}
 		pqCacheSize, ok = indexParams[PQCacheSizeKey]
 		if !ok {
-			pqCacheSize = params.CommonCfg.AiSAQCfg.PQCacheSize.GetValue()
+			pqCacheSize = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, PQCacheSizeKey)
 		}
 		// Read optional AISAQ-specific params from AutoIndex config if present.
 		aisVectorsBeamWidth = indexParams[VectorsBeamWidthKey]
@@ -377,23 +378,23 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		var ok bool
 		diskPQCodeBudgetGBRatio, ok = indexParams[DiskPQCodeBudgetRatioKey]
 		if !ok {
-			diskPQCodeBudgetGBRatio = params.CommonCfg.AiSAQCfg.DiskPQCodeBudgetGBRatio.GetValue()
+			diskPQCodeBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, DiskPQCodeBudgetRatioKey)
 		}
 		maxDegree, ok = indexParams[MaxDegreeKey]
 		if !ok {
-			maxDegree = params.CommonCfg.AiSAQCfg.MaxDegree.GetValue()
+			maxDegree = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, MaxDegreeKey)
 		}
 		searchListSize, ok = indexParams[SearchListSizeKey]
 		if !ok {
-			searchListSize = params.CommonCfg.AiSAQCfg.SearchListSize.GetValue()
+			searchListSize = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, SearchListSizeKey)
 		}
 		pqCodeBudgetGBRatio, ok = indexParams[PQCodeBudgetRatioKey]
 		if !ok {
-			pqCodeBudgetGBRatio = params.CommonCfg.AiSAQCfg.PQCodeBudgetGBRatio.GetValue()
+			pqCodeBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, PQCodeBudgetRatioKey)
 		}
 		searchCacheBudgetGBRatio, ok = indexParams[SearchCacheBudgetRatioKey]
 		if !ok {
-			searchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
+			searchCacheBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, SearchCacheBudgetRatioKey)
 		} else {
 			// User explicitly provided the ratio in CreateIndex request — persist it.
 			hasSearchCacheBudgetGBRatio = true
@@ -408,23 +409,23 @@ func FillAiSAQIndexParams(params *paramtable.ComponentParam, indexParams map[str
 		}
 		inlinePQ, ok = indexParams[InlinePQKey]
 		if !ok {
-			inlinePQ = params.CommonCfg.AiSAQCfg.InlinePQ.GetValue()
+			inlinePQ = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, InlinePQKey)
 		}
 		rearrange, ok = indexParams[RearrangeKey]
 		if !ok {
-			rearrange = params.CommonCfg.AiSAQCfg.Rearrange.GetValue()
+			rearrange = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, RearrangeKey)
 		}
 		numEntryPoints, ok = indexParams[NumEntryPointsKey]
 		if !ok {
-			numEntryPoints = params.CommonCfg.AiSAQCfg.NumEntryPoints.GetValue()
+			numEntryPoints = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, NumEntryPointsKey)
 		}
 		pqCacheSize, ok = indexParams[PQCacheSizeKey]
 		if !ok {
-			pqCacheSize = params.CommonCfg.AiSAQCfg.PQCacheSize.GetValue()
+			pqCacheSize = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, PQCacheSizeKey)
 		}
 		pqReadPageCacheSize, ok = indexParams[PQReadPageCacheSizeKey]
 		if !ok {
-			pqReadPageCacheSize = params.CommonCfg.AiSAQCfg.PQReadPageCacheSize.GetValue()
+			pqReadPageCacheSize = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.SearchStage, PQReadPageCacheSizeKey)
 		}
 	}
 
@@ -495,10 +496,10 @@ func UpdateDiskIndexBuildParams(params *paramtable.ComponentParam, indexParams [
 		searchCacheBudgetGBRatio = fmt.Sprintf("%f", extraParams.SearchCacheBudgetGBRatio)
 	} else if len(existedVal) == 0 {
 		if vecindex.IsDiskANN(indexType) {
-			configuredSearchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+			configuredSearchCacheBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey)
 		}
 		if vecindex.IsAISAQ(indexType) {
-			configuredSearchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
+			configuredSearchCacheBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, SearchCacheBudgetRatioKey)
 		}
 		paramVal, err := strconv.ParseFloat(configuredSearchCacheBudgetGBRatio, 64)
 		if err != nil {
@@ -659,10 +660,10 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	} else {
 		var configuredSearchCacheBudgetGBRatio string
 		if vecindex.IsDiskANN(indexType) {
-			configuredSearchCacheBudgetGBRatio = params.CommonCfg.SearchCacheBudgetGBRatio.GetValue()
+			configuredSearchCacheBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey)
 		}
 		if vecindex.IsAISAQ(indexType) {
-			configuredSearchCacheBudgetGBRatio = params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.GetValue()
+			configuredSearchCacheBudgetGBRatio = params.KnowhereConfig.GetIndexParamValue(vecindex.IndexAISAQ, paramtable.BuildStage, SearchCacheBudgetRatioKey)
 		}
 		searchCacheBudgetGBRatio, err = strconv.ParseFloat(configuredSearchCacheBudgetGBRatio, 64)
 		if err != nil {
@@ -700,7 +701,7 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 		}
 		beamWidthRatio = extraParams.BeamWidthRatio
 	} else {
-		beamWidthRatio, err = strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
+		beamWidthRatio, err = strconv.ParseFloat(params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.SearchStage, KnowhereBeamWidthRatioKey), 64)
 		if err != nil {
 			return err
 		}
