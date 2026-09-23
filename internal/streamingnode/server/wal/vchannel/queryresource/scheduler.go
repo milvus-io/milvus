@@ -109,3 +109,20 @@ func (t resourceReadyTask) Execute(ctx context.Context) error {
 }
 
 var _ nodescheduler.Task = resourceReadyTask{}
+
+// Retaining the callback retains the old DataView's files until subtraction finishes.
+type resourceReleaseTask struct {
+	runtime   *QueryRuntime
+	version   qviews.DataVersion
+	onDropped func()
+}
+
+func (t resourceReleaseTask) Execute(ctx context.Context) error {
+	if err := t.runtime.BeforeRelease(ctx, t.version); err != nil {
+		return errors.Mark(err, nodescheduler.ErrDelay)
+	}
+	if t.onDropped != nil {
+		t.onDropped()
+	}
+	return nil
+}

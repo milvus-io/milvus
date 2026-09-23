@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 const defaultLiveEventBufferSize = 1024
@@ -26,6 +27,9 @@ type QueryRuntime struct {
 
 	latestAdvance qviews.DataVersion
 	hasAdvance    bool
+
+	prepareView func(context.Context) error
+	closed      chan struct{}
 }
 
 type queryRuntimeState int
@@ -58,6 +62,7 @@ func newQueryRuntime(dispatcher *Dispatcher, modules ...QueryRuntimeModule) *Que
 	runtime := &QueryRuntime{
 		dispatcher:   dispatcher,
 		state:        queryRuntimePreparing,
+		closed:       make(chan struct{}),
 		pendingLimit: defaultLiveEventBufferSize,
 		modules:      append([]QueryRuntimeModule(nil), modules...),
 	}
@@ -69,6 +74,14 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	if r == nil {
 		return nil
 	}
+	view.ResourceEventBarrier = func(ctx context.Context) error {
+		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, nil)
+	}
+	r.mu.Lock()
+	r.prepareView = func(ctx context.Context) error {
+		return r.resourceEventBarrier(ctx, view.WithResourceEventLock, view.PrepareQueryView)
+	}
+	r.mu.Unlock()
 	for _, module := range r.modules {
 		if module == nil {
 			continue
@@ -79,15 +92,18 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	}
 	initial := r.takeInitialBatch()
 	r.applyBatch(ctx, initial)
-	advance, hasAdvance := r.recordedAdvance()
+	// Serialize the initial watermark with Advance and module event application.
+	r.applyMu.Lock()
 	r.mu.Lock()
 	if r.state == queryRuntimeClosed {
 		r.mu.Unlock()
+		r.applyMu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return context.Canceled
 	}
+	advance, hasAdvance := r.latestAdvance, r.hasAdvance
 	r.state = queryRuntimeReady
 	drain := r.markDrainScheduledLocked()
 	r.cond.Broadcast()
@@ -95,6 +111,7 @@ func (r *QueryRuntime) Initialize(ctx context.Context, view walview.VChannelWALV
 	if hasAdvance {
 		r.advanceModules(advance)
 	}
+	r.applyMu.Unlock()
 	if drain {
 		r.submitDrain()
 	}
@@ -136,7 +153,13 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 	if r == nil {
 		return
 	}
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
 	r.mu.Lock()
+	if r.state == queryRuntimeClosed {
+		r.mu.Unlock()
+		return
+	}
 	if r.hasAdvance && r.latestAdvance.GT(oldestDataVersion) {
 		r.mu.Unlock()
 		panic("non-monotonic query runtime advance")
@@ -150,7 +173,8 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
-func (r *QueryRuntime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
+// PrepareQueryView fences sealed handoffs before requesting an asynchronous BM25 refresh.
+func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.DataVersion) error {
 	if r == nil {
 		return nil
 	}
@@ -160,37 +184,64 @@ func (r *QueryRuntime) PrepareDataVersion(ctx context.Context, dataVersion qview
 		return context.Canceled
 	}
 	modules := append([]QueryRuntimeModule(nil), r.modules...)
+	prepare := r.prepareView
 	r.mu.Unlock()
+	if err := prepare(ctx); err != nil {
+		return err
+	}
 	for _, module := range modules {
-		versioned, ok := module.(QueryRuntimeVersionedModule)
+		versioned, ok := module.(QueryRuntimeRefreshModule)
 		if !ok {
 			continue
 		}
-		if err := versioned.PrepareDataVersion(ctx, dataVersion); err != nil {
+		if err := versioned.RequestRefresh(ctx, dataVersion); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *QueryRuntime) ReleaseDataVersion(dataVersion qviews.DataVersion) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	modules := append([]QueryRuntimeModule(nil), r.modules...)
-	r.mu.Unlock()
-	for _, module := range modules {
-		if versioned, ok := module.(QueryRuntimeVersionedModule); ok {
-			versioned.ReleaseDataVersion(dataVersion)
+func (r *QueryRuntime) BeforeRelease(ctx context.Context, version qviews.DataVersion) error {
+	var result error
+	r.RangeModules(func(module QueryRuntimeModule) bool {
+		if module, ok := module.(QueryRuntimeReleaseModule); ok {
+			result = module.BeforeRelease(ctx, version)
 		}
-	}
+		return result == nil
+	})
+	return result
 }
 
-func (r *QueryRuntime) recordedAdvance() (qviews.DataVersion, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.latestAdvance, r.hasAdvance
+// resourceEventBarrier orders the optional owner check and preceding sealed/WAL
+// events before readiness. Close also wakes waiters whose barrier was discarded.
+func (r *QueryRuntime) resourceEventBarrier(ctx context.Context, withOwnerLock func(func()), prepare func() bool) error {
+	done := make(chan struct{})
+	var err error
+	enqueue := func() {
+		if prepare != nil && !prepare() {
+			err = merr.WrapErrServiceNotReadyMsg("segment final commits are pending")
+			return
+		}
+		if !r.ObserveEvent(ctx, walview.VChannelResourceEvent{Barrier: func() { close(done) }}) {
+			err = context.Canceled
+		}
+	}
+	if withOwnerLock != nil {
+		withOwnerLock(enqueue)
+	} else {
+		enqueue()
+	}
+	if err != nil {
+		return err
+	}
+	select {
+	case <-done:
+		return nil
+	case <-r.closed:
+		return context.Canceled
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (r *QueryRuntime) advanceModules(oldestDataVersion qviews.DataVersion) {
@@ -214,6 +265,7 @@ func (r *QueryRuntime) Close() {
 		return
 	}
 	r.state = queryRuntimeClosed
+	close(r.closed)
 	r.pending = nil
 	r.drainScheduled = false
 	r.cond.Broadcast()
@@ -288,6 +340,10 @@ func (r *QueryRuntime) applyBatch(ctx context.Context, batch []walview.VChannelR
 	modules := append([]QueryRuntimeModule(nil), r.modules...)
 	r.mu.Unlock()
 	for _, event := range batch {
+		if event.Barrier != nil {
+			event.Barrier()
+			continue
+		}
 		for _, module := range modules {
 			if module != nil {
 				module.ApplyLiveEvent(ctx, event)

@@ -38,6 +38,6 @@ metadata still governs Summary GC and tombstone retirement.
 - `internal/streamingnode/server/wal/vchannel/l0materializer/` — window tracking and bounded Summary-to-L0 materialization
 - `internal/streamingnode/server/wal/walsummary/` — summary persistence, recovery and retention
 
-Future [TransformLog](../../../design-docs/design_docs/wal/transform_log.md) is a read-only subscription adaptor over Summary, outside this PR. It owns neither WAL observation nor L0 materialization.
+[TransformLog](../../../design-docs/design_docs/wal/transform_log.md) is a read-only subscription adaptor over Summary. Local SN bounded Delete replay is wired into QueryRuntime preparation via `walsummary.Stream`; subsequent live events arrive through VChannel observation. Remote/QN subscription integration remains planned. The adaptor owns neither WAL observation nor L0 materialization.
 
 The former `flusher/flusherimpl` path has been removed. A compatibility VChannel checkpoint updater still reports flush progress to DataCoord; it is not another recovery or truncation cursor.

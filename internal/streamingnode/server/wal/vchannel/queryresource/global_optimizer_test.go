@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -32,7 +33,7 @@ func TestGlobalOptimizerBuildsBM25IDF(t *testing.T) {
 	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9})
-	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1}, functionKey)
+	optimizer := NewGlobalOptimizer(runtime, functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
@@ -47,7 +48,7 @@ func TestGlobalOptimizerBuildsBM25IDF(t *testing.T) {
 	require.Equal(t, float64(9), plan.GetVectorAnns().GetQueryInfo().GetBm25Avgdl())
 }
 
-func TestGlobalOptimizerSkipsPreparedEmptyBM25Corpus(t *testing.T) {
+func TestGlobalOptimizerDoesNotSkipEmptyLatestBM25Corpus(t *testing.T) {
 	const (
 		collectionID  = int64(200)
 		inputFieldID  = int64(201)
@@ -59,11 +60,11 @@ func TestGlobalOptimizerSkipsPreparedEmptyBM25Corpus(t *testing.T) {
 
 	req := testBM25SearchRequest(t, collectionID, inputFieldID, outputFieldID)
 	runtime := NewQueryRuntime(fakeIDFModule{})
-	optimizer := NewGlobalOptimizer(runtime, qviews.DataVersion{StreamingVersion: 1}, functionKey)
+	optimizer := NewGlobalOptimizer(runtime, functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
-	require.True(t, result.Skip)
+	require.False(t, result.Skip)
 }
 
 func TestGlobalOptimizerOptimizesAdvancedBM25SubSearch(t *testing.T) {
@@ -90,7 +91,7 @@ func TestGlobalOptimizerOptimizesAdvancedBM25SubSearch(t *testing.T) {
 		},
 	}
 	idf := typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 3})
-	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9}), qviews.DataVersion{StreamingVersion: 1}, functionKey)
+	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{vectors: [][]byte{idf}, avgdl: 9}), functionKey)
 
 	result, err := optimizer.OptimizeSearch(context.Background(), req)
 	require.NoError(t, err)
@@ -105,7 +106,7 @@ func TestGlobalOptimizerOptimizesAdvancedBM25SubSearch(t *testing.T) {
 	require.Equal(t, float64(9), plan.GetVectorAnns().GetQueryInfo().GetBm25Avgdl())
 }
 
-func TestGlobalOptimizerUsesSubSearchSkipWithoutSkippingDenseSearch(t *testing.T) {
+func TestGlobalOptimizerDoesNotSkipOldViewSubSearches(t *testing.T) {
 	const (
 		collectionID  = int64(400)
 		inputFieldID  = int64(401)
@@ -124,7 +125,7 @@ func TestGlobalOptimizerUsesSubSearchSkipWithoutSkippingDenseSearch(t *testing.T
 			SerializedExprPlan: bm25Req.GetSerializedExprPlan(),
 		}
 	}
-	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), qviews.DataVersion{StreamingVersion: 1}, functionKey)
+	optimizer := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), functionKey)
 
 	mixedReq := &internalpb.SearchRequest{
 		CollectionID: collectionID,
@@ -138,7 +139,7 @@ func TestGlobalOptimizerUsesSubSearchSkipWithoutSkippingDenseSearch(t *testing.T
 	require.NoError(t, err)
 	require.False(t, result.Skip)
 	require.False(t, mixedReq.GetSubReqs()[0].GetSkip())
-	require.True(t, mixedReq.GetSubReqs()[1].GetSkip())
+	require.False(t, mixedReq.GetSubReqs()[1].GetSkip())
 
 	allBM25Req := &internalpb.SearchRequest{
 		CollectionID: collectionID,
@@ -147,9 +148,9 @@ func TestGlobalOptimizerUsesSubSearchSkipWithoutSkippingDenseSearch(t *testing.T
 	}
 	result, err = optimizer.OptimizeSearch(context.Background(), allBM25Req)
 	require.NoError(t, err)
-	require.True(t, result.Skip)
-	require.True(t, allBM25Req.GetSubReqs()[0].GetSkip())
-	require.True(t, allBM25Req.GetSubReqs()[1].GetSkip())
+	require.False(t, result.Skip)
+	require.False(t, allBM25Req.GetSubReqs()[0].GetSkip())
+	require.False(t, allBM25Req.GetSubReqs()[1].GetSkip())
 }
 
 func testBM25SearchRequest(t *testing.T, collectionID int64, inputFieldID int64, outputFieldID int64) *internalpb.SearchRequest {
@@ -212,6 +213,72 @@ func (m fakeIDFModule) ApplyLiveEvent(context.Context, walview.VChannelResourceE
 }
 func (m fakeIDFModule) Advance(qviews.DataVersion) {}
 func (m fakeIDFModule) Close()                     {}
-func (m fakeIDFModule) BuildIDF(qviews.DataVersion, int64, *schemapb.SparseFloatArray) ([][]byte, float64, error) {
-	return m.vectors, m.avgdl, nil
+func (m fakeIDFModule) BuildIDFBatch(requests []IDFRequest) ([]IDFResult, error) {
+	results := make([]IDFResult, len(requests))
+	for i := range results {
+		results[i] = IDFResult{Vectors: m.vectors, Avgdl: m.avgdl}
+	}
+	return results, nil
+}
+
+func TestGlobalOptimizerBatchesHybridIDFRead(t *testing.T) {
+	const key = "hybrid-atomic-idf"
+	const collection = int64(500)
+	require.NoError(t, function.GetManager().Alloc(collection, key, testBM25Schema(101, 102)))
+	defer function.GetManager().Release(collection, key)
+	req := testBM25SearchRequest(t, collection, 101, 102)
+	sub := &internalpb.SubSearchRequest{FieldId: 102, MetricType: metric.BM25, PlaceholderGroup: req.PlaceholderGroup, SerializedExprPlan: req.SerializedExprPlan}
+	hybrid := &internalpb.SearchRequest{CollectionID: collection, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{sub, proto.Clone(sub).(*internalpb.SubSearchRequest)}}
+	calls := 0
+	patch := mockey.Mock(fakeIDFModule.BuildIDFBatch).To(func(_ fakeIDFModule, requests []IDFRequest) ([]IDFResult, error) {
+		calls++
+		require.Len(t, requests, 2, "all hybrid tokenization must precede the single aggregate read")
+		for _, request := range requests {
+			require.NotEmpty(t, request.TFs.GetContents())
+		}
+		return []IDFResult{{Avgdl: 3}, {Avgdl: 3}}, nil
+	}).Build()
+	defer patch.UnPatch()
+	opt := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
+	_, err := opt.OptimizeSearch(context.Background(), hybrid)
+	require.NoError(t, err)
+	require.Equal(t, 1, calls)
+}
+
+func TestGlobalOptimizerBM25InvalidRequests(t *testing.T) {
+	const key = "invalid-bm25-idf"
+	const collection = int64(501)
+	require.NoError(t, function.GetManager().Alloc(collection, key, testBM25Schema(101, 102)))
+	defer function.GetManager().Release(collection, key)
+	opt := NewGlobalOptimizer(NewQueryRuntime(fakeIDFModule{}), key)
+	_, err := opt.OptimizeSearch(context.Background(), nil)
+	require.Error(t, err)
+	_, err = opt.OptimizeSearch(context.Background(), &internalpb.SearchRequest{IsAdvanced: true})
+	require.Error(t, err)
+	require.NoError(t, opt.OptimizeRetrieve(context.Background(), nil))
+	for _, tc := range []struct {
+		name   string
+		mutate func(*internalpb.SearchRequest)
+	}{
+		{"metric", func(r *internalpb.SearchRequest) { r.MetricType = metric.L2 }},
+		{"unknown function output", func(r *internalpb.SearchRequest) { r.FieldId = 101 }},
+		{"malformed placeholder", func(r *internalpb.SearchRequest) { r.PlaceholderGroup = []byte{0xff} }},
+		{"missing placeholder", func(r *internalpb.SearchRequest) { r.PlaceholderGroup = nil }},
+		{"missing plan", func(r *internalpb.SearchRequest) { r.SerializedExprPlan = nil }},
+		{"malformed plan", func(r *internalpb.SearchRequest) { r.SerializedExprPlan = []byte{0xff} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := testBM25SearchRequest(t, collection, 101, 102)
+			tc.mutate(req)
+			_, err := opt.OptimizeSearch(context.Background(), req)
+			require.Error(t, err)
+		})
+	}
+	req := testBM25SearchRequest(t, collection, 101, 102)
+	_, err = NewGlobalOptimizer(nil, key).OptimizeSearch(context.Background(), req)
+	require.Error(t, err)
+	patch := mockey.Mock(fakeIDFModule.BuildIDFBatch).Return(nil, context.Canceled).Build()
+	defer patch.UnPatch()
+	_, err = opt.OptimizeSearch(context.Background(), req)
+	require.ErrorIs(t, err, context.Canceled)
 }

@@ -11,6 +11,8 @@ import (
 
 // QueryRuntimeModule is a concrete vchannel resource module managed by
 // QueryRuntime. Modules do not observe WAL directly.
+// After preparation, live events, monotonic Advance calls and Close share one
+// serialized application path. Advance must not wait for owner callbacks or I/O.
 type QueryRuntimeModule interface {
 	Prepare(context.Context, walview.VChannelWALView) error
 	ApplyLiveEvent(context.Context, walview.VChannelResourceEvent)
@@ -18,11 +20,10 @@ type QueryRuntimeModule interface {
 	Close()
 }
 
-// QueryRuntimeVersionedModule owns resources that must be prepared for the
-// exact DataVersion of each QueryView before that view can become ready.
-type QueryRuntimeVersionedModule interface {
-	PrepareDataVersion(context.Context, qviews.DataVersion) error
-	ReleaseDataVersion(qviews.DataVersion)
+// QueryRuntimeRefreshModule requests a shared resource refresh when a new
+// QueryView becomes ready. It does not prepare a separate versioned resource.
+type QueryRuntimeRefreshModule interface {
+	RequestRefresh(context.Context, qviews.DataVersion) error
 }
 
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.
@@ -38,4 +39,9 @@ type QueryViewLoadInfo struct {
 	PartitionIDs []int64
 	LoadFields   []*messagespb.LoadFieldConfig
 	IndexInfos   []*indexpb.IndexInfo
+}
+
+// QueryRuntimeReleaseModule completes resource transitions before a DataView may Drop.
+type QueryRuntimeReleaseModule interface {
+	BeforeRelease(context.Context, qviews.DataVersion) error
 }
