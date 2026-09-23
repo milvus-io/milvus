@@ -5360,7 +5360,7 @@ However, this optimization may come at the cost of a slight decrease in query la
 		},
 		Doc: `maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
 Max read concurrency would be the value of ` + "hardware.GetCPUNum * maxReadConcurrentRatio" + `.
-It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
+It defaults to 1.0, which means max read concurrency would be the value of hardware.GetCPUNum * 1.
 Max read concurrency must greater than or equal to 1, and less than or equal to hardware.GetCPUNum * 100.
 (0, 100]`,
 		Export: true,
