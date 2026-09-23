@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -35,12 +36,22 @@ import (
 // cached with a short TTL so the checkers can consult it every cycle without an
 // RPC per check; splits are rare and the source set only changes at the start
 // and end of a split window.
+//
+// Readers that miss the TTL together share one read (single flight), and a read
+// only ever replaces an older one: the read issued last wins, whenever it
+// returns.
 type ShardSplitStateCache struct {
 	broker Broker
 	ttl    time.Duration
 
+	flight conc.Singleflight[*shardSplitEntry]
+
 	mu     sync.Mutex
 	states map[int64]*shardSplitEntry
+	// invalidatedAt is when a collection was last invalidated: an entry read
+	// before it is stale whatever its age, but still serves as the fallback of
+	// a failed refresh.
+	invalidatedAt map[int64]time.Time
 }
 
 type shardSplitEntry struct {
@@ -50,7 +61,10 @@ type shardSplitEntry struct {
 	// sources a target was carved from is provenance with the split task's
 	// lifetime, and lives there rather than on the collection.
 	channelStates ShardStates
-	fetchedAt     time.Time
+	// fetchedAt is when the read was ISSUED, so an entry speaks to the state at
+	// or after it (CreatingTargetChannelsAsOf) and orders reads by when they
+	// were taken, not by when they happened to return.
+	fetchedAt time.Time
 }
 
 func (e *shardSplitEntry) channelsInState(state schemapb.ShardState) []string {
@@ -66,9 +80,10 @@ func (e *shardSplitEntry) channelsInState(state schemapb.ShardState) []string {
 // NewShardSplitStateCache builds a cache backed by broker.DescribeCollection.
 func NewShardSplitStateCache(broker Broker, ttl time.Duration) *ShardSplitStateCache {
 	return &ShardSplitStateCache{
-		broker: broker,
-		ttl:    ttl,
-		states: make(map[int64]*shardSplitEntry),
+		broker:        broker,
+		ttl:           ttl,
+		states:        make(map[int64]*shardSplitEntry),
+		invalidatedAt: make(map[int64]time.Time),
 	}
 }
 
@@ -142,27 +157,42 @@ func (c *ShardSplitStateCache) channelsInState(ctx context.Context, collectionID
 }
 
 // entryFor returns the cached split-state entry for a collection, refreshing it
-// when older than the TTL; on a refresh error it falls back to the last known
-// entry so a transient coordinator error does not flap the freeze.
+// when older than the TTL or invalidated since it was read; on a refresh error
+// it falls back to the last known entry so a transient coordinator error does
+// not flap the freeze. Concurrent refreshes of one collection share one read;
+// one that starts after an Invalidate does not join a read issued before it.
 func (c *ShardSplitStateCache) entryFor(ctx context.Context, collectionID int64) *shardSplitEntry {
 	c.mu.Lock()
 	entry, ok := c.states[collectionID]
-	fresh := ok && time.Since(entry.fetchedAt) < c.ttl
+	invalidatedAt := c.invalidatedAt[collectionID]
+	fresh := ok && !entry.fetchedAt.Before(invalidatedAt) && time.Since(entry.fetchedAt) < c.ttl
 	c.mu.Unlock()
 	if fresh {
 		return entry
 	}
 
-	fetched, err := c.fetch(ctx, collectionID)
+	key := fmt.Sprintf("%d@%d", collectionID, invalidatedAt.UnixNano())
+	fetched, err, _ := c.flight.Do(key, func() (*shardSplitEntry, error) {
+		return c.fetch(ctx, collectionID)
+	})
 	if err != nil {
 		if ok {
 			return entry
 		}
 		return nil
 	}
+	return c.store(collectionID, fetched)
+}
+
+// store keeps the newer of the cached entry and fetched, by when each read was
+// issued, and returns the one kept.
+func (c *ShardSplitStateCache) store(collectionID int64, fetched *shardSplitEntry) *shardSplitEntry {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cached, ok := c.states[collectionID]; ok && !fetched.fetchedAt.After(cached.fetchedAt) {
+		return cached
+	}
 	c.states[collectionID] = fetched
-	c.mu.Unlock()
 	return fetched
 }
 
@@ -228,27 +258,29 @@ func (c *ShardSplitStateCache) ReadShardStates(ctx context.Context, collectionID
 			mlog.Err(err))
 		return &ShardStateSnapshot{entry: cached}, nil
 	}
-	c.mu.Lock()
-	c.states[collectionID] = fetched
-	c.mu.Unlock()
-	return &ShardStateSnapshot{entry: fetched}, nil
+	// a read issued after this one may have returned first; it is at least as
+	// fresh, and just as much a read taken before the pull.
+	return &ShardStateSnapshot{entry: c.store(collectionID, fetched)}, nil
 }
 
-// Invalidate drops the cached state for a collection so the next query refetches
-// immediately — used to lift the freeze the moment a split completes rather than
-// waiting out the TTL.
+// Invalidate makes the next query of a collection read its shard states afresh
+// instead of waiting out the TTL -- used when something shows the cached read
+// is out of date. The cached read stays the fallback of a failed refresh:
+// forgetting it would turn a transient coordinator error into "states
+// unknown", which freezes everything and stops every watch of the collection.
 func (c *ShardSplitStateCache) Invalidate(collectionID int64) {
 	c.mu.Lock()
-	delete(c.states, collectionID)
+	c.invalidatedAt[collectionID] = time.Now()
 	c.mu.Unlock()
 }
 
 func (c *ShardSplitStateCache) fetch(ctx context.Context, collectionID int64) (*shardSplitEntry, error) {
+	issuedAt := time.Now()
 	resp, err := c.broker.DescribeCollection(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
-	return &shardSplitEntry{channelStates: ShardStatesOf(resp), fetchedAt: time.Now()}, nil
+	return &shardSplitEntry{channelStates: ShardStatesOf(resp), fetchedAt: issuedAt}, nil
 }
 
 // ShardStates maps each vchannel a collection lists to its shard state, as one

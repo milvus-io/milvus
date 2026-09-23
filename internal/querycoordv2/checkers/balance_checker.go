@@ -141,7 +141,8 @@ type BalanceChecker struct {
 
 	// splitState freezes balance for a collection while one of its shards is
 	// being split: a rebalance would tear down the source delegator together with
-	// the in-process split children it fronts. May be nil (no freeze).
+	// the in-process split children it fronts. Consulted only for a collection
+	// that has tasks to submit. May be nil (no freeze).
 	splitState *meta.ShardSplitStateCache
 
 	// autoBalanceTs records the timestamp of the last auto balance operation
@@ -183,27 +184,16 @@ func (b *BalanceChecker) Description() string {
 //  2. It has either a current target or next target defined
 //
 // Returns true if the collection is ready for balance operations.
+//
+// A shard split's freeze is deliberately not a queue filter: it needs the
+// collection's shard states, a coordinator read, and the queue is built over
+// every loaded collection. It is evaluated once a collection has tasks to
+// submit (dropShardSplitFrozen), which is also the only point at which it is
+// not already stale.
 func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) bool {
 	metaExist := (b.meta.GetCollection(ctx, collectionID) != nil)
 	targetExist := b.targetMgr.IsNextTargetExist(ctx, collectionID) || b.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
-
-	if b.frozenForShardSplit(ctx, collectionID) {
-		return false
-	}
-
 	return metaExist && targetExist
-}
-
-// frozenForShardSplit reports whether balance of the collection is frozen for a
-// shard split (meta.CheckShardSplitMovable). Both the normal and the stopping
-// balance queue are built through readyToCheck, so the freeze holds for both.
-func (b *BalanceChecker) frozenForShardSplit(ctx context.Context, collectionID int64) bool {
-	if err := meta.CheckShardSplitMovable(ctx, b.splitState, b.targetMgr, collectionID); err != nil {
-		mlog.RatedInfo(ctx, rate.Limit(0.1), "freeze balance for a shard split",
-			mlog.FieldCollectionID(collectionID), mlog.Err(err))
-		return true
-	}
-	return false
 }
 
 // dropShardSplitFrozen drops the collection's balance tasks a shard split
