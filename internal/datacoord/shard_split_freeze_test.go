@@ -18,9 +18,11 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -29,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -384,4 +387,32 @@ func TestIsVChannelSplittingIsAnIndexLookup(t *testing.T) {
 	require.NoError(t, store.load(ctx, manager.catalog))
 	source, target = store.activeSplitRoles(splitMgrV0)
 	assert.False(t, source || target)
+}
+
+// A compaction taken off the queue by the freeze -- dropped at dequeue or
+// preempted while queued -- is taken off the Pending gauge under the label it
+// was counted under when queued (NullNodeID), whatever node the task names.
+func TestFrozenQueuedCompactionsLeaveThePendingGaugeBalanced(t *testing.T) {
+	pending := func() float64 {
+		return testutil.ToFloat64(metrics.DataCoordCompactionTaskNum.WithLabelValues(
+			fmt.Sprintf("%d", NullNodeID), datapb.CompactionType_MixCompaction.String(), metrics.Pending))
+	}
+	for _, preempted := range []bool{false, true} {
+		before := pending()
+		inspector, mockMeta, scheduler, frozen := newFrozenScheduleCase(t)
+		scheduler.EXPECT().AbortAndRemoveTask(mock.Anything).Return().Maybe()
+		require.NoError(t, inspector.enqueueCompaction(&datapb.CompactionTask{
+			TriggerID: 1, PlanID: 2, Channel: splitMgrV0, NodeID: 7, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{200},
+		}))
+		require.Equal(t, before+2, pending())
+		mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, mock.Anything, false).Return().Times(2)
+
+		frozen.Store(true)
+		if preempted {
+			inspector.preemptTasksByChannel(splitMgrV0)
+		} else {
+			inspector.schedule()
+		}
+		assert.Equal(t, before, pending(), "preempted=%v", preempted)
+	}
 }

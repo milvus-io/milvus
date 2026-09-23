@@ -111,7 +111,7 @@ func (c *compactionInspector) preemptTasksByChannel(channel string) {
 			return false
 		}
 		preempted = append(preempted, task)
-		metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+		decPendingCompaction(task)
 		return true
 	})
 
@@ -131,11 +131,18 @@ func (c *compactionInspector) preemptTasksByChannel(channel string) {
 	}
 }
 
+// decPendingCompaction takes a task that leaves the queue off the Pending
+// gauge, under the label submitTask counted it under: NullNodeID, whatever
+// node the task names.
+func decPendingCompaction(task CompactionTask) {
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", NullNodeID), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+}
+
 // dropFrozenQueuedTask drops a task the schedule loop dequeued on a channel a
 // split freezes. It was never handed to the global scheduler, so there is
 // nothing to abort on a worker; it is cleaned like a preempted one.
 func (c *compactionInspector) dropFrozenQueuedTask(task CompactionTask) {
-	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+	decPendingCompaction(task)
 	c.cleanPreemptedTask(context.TODO(), task, "queued compaction task dropped, a shard split froze its channel")
 }
 
