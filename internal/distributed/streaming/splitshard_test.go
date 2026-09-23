@@ -1,6 +1,7 @@
 package streaming_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -143,7 +144,7 @@ func TestNewSplitShardBroadcastMessage(t *testing.T) {
 		assert.Equal(t, param.TargetVChannels, header.GetTargetVchannels())
 		assert.Equal(t, param.PartitionIDs, header.GetPartitionIds())
 
-		body, err := specialized.Body()
+		body, err := specialized.Body(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, "col", body.GetGenesis().GetCollectionSchema().GetName())
 		assert.Equal(t, param.Routing.GetVirtualChannelNames(), body.GetRouting().GetVirtualChannelNames())
