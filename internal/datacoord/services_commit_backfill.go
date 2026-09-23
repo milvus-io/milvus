@@ -190,6 +190,7 @@ func (s *Server) broadcastBackfillBatch(
 			Items: items,
 		}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	)
 	return err

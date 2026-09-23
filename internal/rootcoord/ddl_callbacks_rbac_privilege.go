@@ -70,6 +70,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 				Entity: in.Entity,
 			}).
 			WithBody(&message.AlterPrivilegeMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	case milvuspb.OperatePrivilegeType_Revoke:
 		msg = message.NewDropPrivilegeMessageBuilderV2().
@@ -77,6 +78,7 @@ func (c *Core) broadcastOperatePrivilege(ctx context.Context, in *milvuspb.Opera
 				Entity: in.Entity,
 			}).
 			WithBody(&message.DropPrivilegeMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate privilege type")
@@ -124,6 +126,7 @@ func (c *Core) broadcastCreatePrivilegeGroup(ctx context.Context, in *milvuspb.C
 			},
 		}).
 		WithBody(&message.AlterPrivilegeGroupMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -151,6 +154,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 				},
 			}).
 			WithBody(&message.AlterPrivilegeGroupMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	case milvuspb.OperatePrivilegeGroupType_RemovePrivilegesFromGroup:
 		msg = message.NewDropPrivilegeGroupMessageBuilderV2().
@@ -161,6 +165,7 @@ func (c *Core) broadcastOperatePrivilegeGroup(ctx context.Context, in *milvuspb.
 				},
 			}).
 			WithBody(&message.DropPrivilegeGroupMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate privilege group type")
@@ -194,6 +199,7 @@ func (c *Core) broadcastDropPrivilegeGroup(ctx context.Context, in *milvuspb.Dro
 			},
 		}).
 		WithBody(&message.DropPrivilegeGroupMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

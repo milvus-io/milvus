@@ -981,6 +981,7 @@ func (sm *snapshotManager) finishRestoreSnapshot(
 		WithHeader(header).
 		WithBody(&message.RestoreSnapshotMessageBody{}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 
 	if _, bcErr := restoreBroadcaster.Broadcast(ctx, msg); bcErr != nil {
@@ -1231,6 +1232,7 @@ func (sm *snapshotManager) RestoreIndexes(
 			WithBody(&message.CreateIndexMessageBody{
 				FieldIndex: model.MarshalIndexModel(index),
 			}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast(),
 		)
 		b.Close()

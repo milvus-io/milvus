@@ -52,6 +52,7 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return false, err
@@ -80,6 +81,7 @@ func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -107,6 +109,7 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

@@ -73,6 +73,7 @@ func (c *Core) broadcastCreateDatabase(ctx context.Context, req *milvuspb.Create
 		WithBody(&message.CreateDatabaseMessageBody{
 			Properties: properties,
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

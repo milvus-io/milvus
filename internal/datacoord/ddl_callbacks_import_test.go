@@ -1227,14 +1227,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
-	// Import messages now target the job's data vchannels plus the control channel: the
-	// data copies drive the per-vchannel work (flush/commit), the control-channel copy is
-	// the ack-callback ordering anchor.
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
-	streaming.SetWALForTest(wal)
-
+	// Import messages target the job's data vchannels; the broadcaster adds the
+	// control-channel copy that anchors the ack-callback order.
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
@@ -1261,8 +1255,8 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	err := broadcastFn(server, ctx, job)
 	assert.NoError(t, err)
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, append(wantVchannels, controlChannel), capture.captured.BroadcastHeader().VChannels,
-		"broadcast must target the job's data vchannels plus the control channel ordering anchor")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 }
 
 // TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
@@ -1612,10 +1606,6 @@ func TestImportIDRangeAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T)
 func TestAssignAndBroadcastImportIDRange_MessageShape(t *testing.T) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
-	controlChannel := funcutil.GetControlChannel("by-dev-rootcoord-dml_0")
-	wal := mock_streaming.NewMockWALAccesser(t)
-	wal.EXPECT().ControlChannel().Return(controlChannel).Maybe()
-	streaming.SetWALForTest(wal)
 
 	mockBroker := broker.NewMockBroker(t)
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(7)).Return(&milvuspb.DescribeCollectionResponse{
@@ -1654,8 +1644,8 @@ func TestAssignAndBroadcastImportIDRange_MessageShape(t *testing.T) {
 	require.NoError(t, server.broadcastImportIDRangeMessage(ctx, job, []int64{10, 0, 5}))
 
 	require.NotNil(t, capture.captured, "Broadcast must have been called")
-	assert.ElementsMatch(t, append(wantVchannels, controlChannel), capture.captured.BroadcastHeader().VChannels,
-		"ImportIDRange must target the job's data vchannels plus the control channel, like ImportMsg")
+	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
+		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 
 	msg, err := message.AsBroadcastImportIDRangeMessageV2(capture.captured)
 	require.NoError(t, err)
@@ -1767,7 +1757,8 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		WithBody(&msgpb.ImportMsg{CollectionID: 100, JobID: 1}).
 		WithBroadcast([]string{"vchannel1"}).
 		MustBuildBroadcast().
-		OverwriteBroadcastHeader(1, cchannel)
+		OverwriteBroadcastHeader(1)
+	broadcastMsg = message.WithBroadcastControlChannel(broadcastMsg, cchannel)
 	result := message.BroadcastResultImportMessageV1{
 		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
 		Results: map[string]*message.AppendResult{

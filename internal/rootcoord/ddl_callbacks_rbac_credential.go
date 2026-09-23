@@ -48,6 +48,7 @@ func (c *Core) broadcastAlterUserForCreateCredential(ctx context.Context, credIn
 		WithBody(&message.AlterUserMessageBody{
 			CredentialInfo: credInfo,
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -73,6 +74,7 @@ func (c *Core) broadcastAlterUserForUpdateCredential(ctx context.Context, credIn
 		WithBody(&message.AlterUserMessageBody{
 			CredentialInfo: credInfo,
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -111,6 +113,7 @@ func (c *Core) broadcastDropUserForDeleteCredential(ctx context.Context, in *mil
 			UserName: in.Username,
 		}).
 		WithBody(&message.DropUserMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

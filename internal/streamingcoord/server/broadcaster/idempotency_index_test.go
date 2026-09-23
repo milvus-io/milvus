@@ -108,7 +108,7 @@ func createImportBroadcastTaskProto(
 	if len(rks) == 0 {
 		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
 	}
-	msg := newImportMsgWithKey(key).OverwriteBroadcastHeader(broadcastID, "", rks...)
+	msg := newImportMsgWithKey(key).OverwriteBroadcastHeader(broadcastID, rks...)
 	return createNewWaitAckBroadcastTaskFromMessage(msg, state, bitmap)
 }
 
@@ -384,10 +384,10 @@ func TestIdempotencyScopeIgnoresResourceKeys(t *testing.T) {
 	bare := idempotencyScopeOfMessage(msg)
 	require.NotEmpty(t, bare)
 
-	beforeRename := msg.OverwriteBroadcastHeader(100, "",
+	beforeRename := msg.OverwriteBroadcastHeader(100,
 		message.NewSharedDBNameResourceKey("db1"),
 		message.NewExclusiveCollectionNameResourceKey("db1", "coll1"))
-	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(101, "",
+	afterRename := newImportMsgWithKey("k").OverwriteBroadcastHeader(101,
 		message.NewSharedDBNameResourceKey("db1"),
 		message.NewExclusiveCollectionNameResourceKey("db1", "coll1-renamed"))
 
@@ -639,7 +639,7 @@ func createBroadcastTaskProtoFromMessage(
 	if len(rks) == 0 {
 		rks = []message.ResourceKey{message.NewSharedClusterResourceKey()}
 	}
-	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(broadcastID, "", rks...), state, bitmap)
+	return createNewWaitAckBroadcastTaskFromMessage(msg.OverwriteBroadcastHeader(broadcastID, rks...), state, bitmap)
 }
 
 // TestNonImportBroadcastIsDeduplicated is the acceptance test for this mechanism

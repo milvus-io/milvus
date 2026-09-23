@@ -74,6 +74,7 @@ func (c *Core) broadcastCreateAlias(ctx context.Context, req *milvuspb.CreateAli
 			OldCollectionId: aliasNoOldTarget,
 		}).
 		WithBody(&message.AlterAliasMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -142,6 +143,7 @@ func (c *Core) broadcastAlterAlias(ctx context.Context, req *milvuspb.AlterAlias
 			OldCollectionId: oldCollectionID,
 		}).
 		WithBody(&message.AlterAliasMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

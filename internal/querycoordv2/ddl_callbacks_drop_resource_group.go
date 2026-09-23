@@ -50,6 +50,7 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 		}).
 		WithBody(&message.DropResourceGroupMessageBody{}).
 		WithUnreplicable().
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return false, err

@@ -86,6 +86,7 @@ func broadcastAlterRLSPolicy(ctx context.Context, broadcaster broadcaster.Broadc
 				Policy: marshalRLSPolicyMessage(policy),
 			},
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err := broadcaster.Broadcast(ctx, msg)
 	return err
@@ -113,6 +114,7 @@ func (c *Core) broadcastDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowP
 				PolicyName: policy.PolicyName,
 			},
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -150,6 +152,7 @@ func broadcastAlterRLSPrincipal(ctx context.Context, broadcaster broadcaster.Bro
 				Principal: principalMessage,
 			},
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -181,6 +184,7 @@ func (c *Core) broadcastDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil
 				PrincipalName: principal.PrincipalName,
 			},
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

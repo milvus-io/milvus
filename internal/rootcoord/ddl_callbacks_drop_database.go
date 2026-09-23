@@ -57,6 +57,7 @@ func (c *Core) broadcastDropDatabase(ctx context.Context, req *milvuspb.DropData
 			DbId:   db.ID,
 		}).
 		WithBody(&message.DropDatabaseMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

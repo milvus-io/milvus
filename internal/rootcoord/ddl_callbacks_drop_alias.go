@@ -51,6 +51,7 @@ func (c *Core) broadcastDropAlias(ctx context.Context, req *milvuspb.DropAliasRe
 			Alias:  req.GetAlias(),
 		}).
 		WithBody(&message.DropAliasMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

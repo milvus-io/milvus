@@ -231,7 +231,7 @@ func createNewBroadcastMsg(vchannels []string, rks ...message.ResourceKey) messa
 	if err != nil {
 		panic(err)
 	}
-	return msg.OverwriteBroadcastHeader(0, "", rks...)
+	return msg.OverwriteBroadcastHeader(0, rks...)
 }
 
 func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
@@ -260,7 +260,7 @@ func TestBroadcastTaskNotCreatedOnStoppedBroadcaster(t *testing.T) {
 }
 
 func createNewBroadcastTask(broadcastID uint64, vchannels []string, rks ...message.ResourceKey) *streamingpb.BroadcastTask {
-	msg := createNewBroadcastMsg(vchannels).OverwriteBroadcastHeader(broadcastID, "", rks...)
+	msg := createNewBroadcastMsg(vchannels).OverwriteBroadcastHeader(broadcastID, rks...)
 	pb := msg.IntoMessageProto()
 	return &streamingpb.BroadcastTask{
 		Message: &messagespb.Message{

@@ -350,6 +350,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		WithBody(&message.CreateIndexMessageBody{
 			FieldIndex: model.MarshalIndexModel(index),
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(ctx, "CreateIndex fail", mlog.Err(err))
@@ -509,6 +510,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 				return model.MarshalIndexModel(index)
 			}),
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		mlog.Warn(context.TODO(), "failed to broadcast alter index message", mlog.Err(err))
@@ -1037,6 +1039,7 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 			IndexIds:     indexIDs,
 		}).
 		WithBody(&message.DropIndexMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {

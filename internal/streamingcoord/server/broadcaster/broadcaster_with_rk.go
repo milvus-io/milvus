@@ -42,7 +42,8 @@ func (b *broadcasterWithRK) Broadcast(ctx context.Context, msg message.Broadcast
 	// ack callback scheduler, and its time tick orders the ack callbacks.
 	// Keep a trace context in the broadcast message so that the DDL ack callback
 	// can still extract it after the original caller span is long gone.
-	msg = msg.OverwriteBroadcastHeader(b.broadcastID, b.controlChannel, guards.ResourceKeys()...)
+	msg = msg.OverwriteBroadcastHeader(b.broadcastID, guards.ResourceKeys()...)
+	msg = message.WithBroadcastControlChannel(msg, b.controlChannel)
 	ctx, span := message.StartSpanForMessage(ctx, msg, message.SpanNameWALBroadcast)
 	defer span.End()
 	message.InjectTraceContext(ctx, msg)

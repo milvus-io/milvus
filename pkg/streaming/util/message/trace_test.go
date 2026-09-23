@@ -166,7 +166,7 @@ func TestStartSpanForMessage_AddsBroadcastAttributes(t *testing.T) {
 		WithBody(&msgpb.DropCollectionRequest{}).
 		WithBroadcast([]string{"v1", "v2"}).
 		MustBuildBroadcast().
-		OverwriteBroadcastHeader(11, "")
+		OverwriteBroadcastHeader(11)
 	_, span := StartSpanForMessage(context.Background(), msg, SpanNameWALBroadcast)
 	span.End()
 

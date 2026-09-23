@@ -43,6 +43,7 @@ func (c *Core) broadcastRestoreRBACV2(ctx context.Context, req *milvuspb.Restore
 		WithBody(&message.RestoreRBACMessageBody{
 			RbacMeta: req.GetRBACMeta(),
 		}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err

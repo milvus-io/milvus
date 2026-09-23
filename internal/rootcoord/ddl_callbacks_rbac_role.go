@@ -46,6 +46,7 @@ func (c *Core) broadcastCreateRole(ctx context.Context, in *milvuspb.CreateRoleR
 			RoleEntity: in.GetEntity(),
 		}).
 		WithBody(&message.AlterRoleMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -70,6 +71,7 @@ func (c *Core) broadcastAlterRole(ctx context.Context, in *milvuspb.AlterRoleReq
 			},
 		}).
 		WithBody(&message.AlterRoleMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -103,6 +105,7 @@ func (c *Core) broadcastDropRole(ctx context.Context, in *milvuspb.DropRoleReque
 			RoleName: in.RoleName,
 		}).
 		WithBody(&message.DropRoleMessageBody{}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -150,6 +153,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 				},
 			}).
 			WithBody(&message.AlterUserRoleMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	case milvuspb.OperateUserRoleType_RemoveUserFromRole:
 		msg = message.NewDropUserRoleMessageBuilderV2().
@@ -160,6 +164,7 @@ func (c *Core) broadcastOperateUserRole(ctx context.Context, in *milvuspb.Operat
 				},
 			}).
 			WithBody(&message.DropUserRoleMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast()
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid operate user role type")

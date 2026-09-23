@@ -158,6 +158,8 @@ func TestBroadcasterWithRK_AddsControlChannel(t *testing.T) {
 			WithBody(&msgpb.DropCollectionRequest{})
 		if len(vchannels) > 0 {
 			b.WithBroadcast(vchannels)
+		} else {
+			b.WithControlChannelBroadcast()
 		}
 		return b.MustBuildBroadcast()
 	}
@@ -189,7 +191,7 @@ func buildTestBroadcastMessageForTrace(t *testing.T) message.BroadcastMutableMes
 	if err != nil {
 		t.Fatalf("failed to build broadcast message: %v", err)
 	}
-	return msg.OverwriteBroadcastHeader(0, "")
+	return msg.OverwriteBroadcastHeader(0)
 }
 
 func buildTestLockGuards(keys ...message.ResourceKey) *lockGuards {

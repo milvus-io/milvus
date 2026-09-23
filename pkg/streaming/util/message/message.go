@@ -151,9 +151,7 @@ type BroadcastMutableMessage interface {
 	WithBroadcastID(broadcastID uint64) BroadcastMutableMessage
 
 	// OverwriteBroadcastHeader overwrites the broadcast header of the message.
-	// controlChannel is added to the vchannels if it is not one of them,
-	// an empty controlChannel leaves the vchannels as they are.
-	OverwriteBroadcastHeader(broadcastID uint64, controlChannel string, rks ...ResourceKey) BroadcastMutableMessage
+	OverwriteBroadcastHeader(broadcastID uint64, rks ...ResourceKey) BroadcastMutableMessage
 
 	// SplitIntoMutableMessage splits the broadcast message into multiple mutable messages.
 	// The broadcast id will be set into the properties of each message.

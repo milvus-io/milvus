@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -252,16 +251,13 @@ func (m *messageImpl) OverwriteReplicateVChannel(vchannel string, broadcastVChan
 }
 
 // OverwriteBroadcastHeader overwrites the broadcast header of the message.
-func (m *messageImpl) OverwriteBroadcastHeader(id uint64, controlChannel string, rks ...ResourceKey) BroadcastMutableMessage {
+func (m *messageImpl) OverwriteBroadcastHeader(id uint64, rks ...ResourceKey) BroadcastMutableMessage {
 	bh := m.broadcastHeader()
 	if bh == nil {
 		panic("there's a bug in the message codes, broadcast header lost in properties of broadcast message")
 	}
 	bh.BroadcastId = id
 	bh.ResourceKeys = newProtoFromResourceKey(rks...)
-	if controlChannel != "" && !slices.Contains(bh.Vchannels, controlChannel) {
-		bh.Vchannels = append(bh.Vchannels, controlChannel)
-	}
 	bhVal, err := EncodeProto(bh)
 	if err != nil {
 		panic("should not happen on broadcast header proto")

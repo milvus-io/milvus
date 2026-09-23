@@ -66,6 +66,7 @@ func (s *Server) broadcastAlterLoadConfigCollectionV2ForReleasePartitions(ctx co
 				CollectionId: coll.CollectionID,
 			}).
 			WithBody(&message.DropLoadConfigMessageBody{}).
+			WithControlChannelBroadcast().
 			MustBuildBroadcast() // TODO: after we support query view in 3.0, we should broadcast the drop load config message to all vchannels.
 		collectionReleased = true
 	} else {
