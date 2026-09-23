@@ -164,6 +164,10 @@ func FromPbCollectionTarget(target *querypb.CollectionTarget, metaView metacache
 				FlushedSegmentIds:   channelSegmentIDs,
 				DroppedSegmentIds:   t.GetDroppedSegmentIDs(),
 				DeleteCheckpoint:    t.GetDeleteCheckpoint(),
+				// the split signal DataCoord reported with this seek position:
+				// without it the QueryNode would watch a split source from past
+				// its fence without recovering the split's children.
+				SplitTargetChannels: t.GetSplitTargetChannels(),
 			},
 		}
 	}
@@ -264,6 +268,8 @@ func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
 			DroppedSegmentIDs: channel.GetDroppedSegmentIds(),
 			PartitionTargets:  lo.Values(partitionTargets),
 			DeleteCheckpoint:  channel.GetDeleteCheckpoint(),
+			// saved with the seek position it was pulled with, see FromPbCollectionTarget.
+			SplitTargetChannels: channel.GetSplitTargetChannels(),
 		}
 	}
 
