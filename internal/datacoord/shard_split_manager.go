@@ -453,7 +453,9 @@ func (m *shardSplitManager) detectOnce() {
 //
 // The plan is the two targets' residues and the modulus after the split
 // (planSplitResidues). The target vchannels are allocated later, in Preparing,
-// so a failed allocation aborts this task instead of the trigger's scan.
+// so a failed allocation aborts this task instead of the trigger's scan; but
+// the allocation is asked first (probeTargetAllocation), and a shard whose
+// targets cannot be allocated now is not planned at all.
 func (m *shardSplitManager) planSplit(collectionID int64, stats *shardStats) (*datapb.SplitShardTask, error) {
 	coll, err := m.coordinator.describeSplitCollection(m.ctx, collectionID)
 	if err != nil {
@@ -495,6 +497,17 @@ func (m *shardSplitManager) planSplit(collectionID int64, stats *shardStats) (*d
 	if err != nil {
 		return nil, err
 	}
+	if err := m.probeTargetAllocation(coll); err != nil {
+		// Nothing is recorded: a task written here would only be aborted by
+		// the next tick's allocation, one dead record per check interval for
+		// as long as the collection cannot get two more pchannels.
+		mlog.RatedInfo(m.ctx, 600, "not planning a shard split whose targets cannot be allocated now",
+			mlog.FieldComponent("shard-split-manager"),
+			mlog.FieldCollectionID(collectionID),
+			mlog.String("vchannel", stats.vchannel),
+			mlog.Err(err))
+		return nil, nil
+	}
 	taskID, err := m.allocator.AllocID(m.ctx)
 	if err != nil {
 		return nil, err
@@ -512,4 +525,17 @@ func (m *shardSplitManager) planSplit(collectionID int64, stats *shardStats) (*d
 		return nil, err
 	}
 	return task, nil
+}
+
+// probeTargetAllocation asks the vchannel allocator whether a split of the
+// collection could get its two targets now, exactly as allocateTargets will
+// ask it. The allocator records nothing -- it derives names from the known
+// vchannels -- so asking twice costs nothing and reserves nothing.
+func (m *shardSplitManager) probeTargetAllocation(coll *splitCollection) error {
+	_, err := m.vchannelAllocator.AllocVirtualChannels(m.ctx, balancer.AllocVChannelParam{
+		CollectionID:      coll.CollectionID,
+		Num:               2,
+		ExistingVChannels: m.knownVChannels(coll),
+	})
+	return err
 }

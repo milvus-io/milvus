@@ -1068,3 +1068,33 @@ func TestShardSplitPreparingDoesNotReissueAWriteSwitchInFlight(t *testing.T) {
 	defer coordinator.mu.Unlock()
 	assert.Len(t, coordinator.issued, 1)
 }
+
+// A shard whose split cannot get two target vchannels -- the collection
+// already sits on every pchannel but one, say -- is not planned: the trigger
+// asks the allocator before it writes a record, so it does not persist a task
+// that the next tick aborts, again on every check interval, forever.
+func TestShardSplitTriggerPersistsNoTaskItCannotAllocate(t *testing.T) {
+	enableShardSplit(t)
+	coordinator := &fakeSplitCoordinator{
+		coll: splitCollectionFromDescribe(splitTestDescribe([]string{splitMgrV0}, nil, 0), []int64{10}),
+	}
+	manager, vchannels := newSplitTestManager(t, coordinator)
+	addSplitTestCollection(manager.meta, splitTestSchema(false), splitMgrV0)
+	addSplitTestSegment(manager.meta, 1, splitMgrV0, 1200, 1)
+	vchannels.err = errors.New("not enough pchannels to allocate, expected: 2, got: 1")
+
+	for i := 0; i < 3; i++ {
+		manager.detectOnce()
+		manager.advanceTasks()
+	}
+	assert.Empty(t, manager.store.list(), "a split that cannot be allocated left a task record")
+	require.NotEmpty(t, vchannels.params)
+	assert.Equal(t, balancer.AllocVChannelParam{
+		CollectionID: splitMgrCollection, Num: 2, ExistingVChannels: []string{splitMgrV0},
+	}, vchannels.params[0])
+
+	// Once there is headroom the split is planned.
+	vchannels.err = nil
+	manager.detectOnce()
+	assert.Len(t, manager.store.list(), 1)
+}
