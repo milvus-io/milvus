@@ -22,6 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -184,4 +186,96 @@ func (s *DelegatorDataSuite) TestSplitSourceLoadCatchesUpAChildDeleteOlderThanIt
 
 	s.True(recorder.has(20))
 	s.True(recorder.has(21), "the delete at 1015, forwarded during the load but older than the snapshot's 1030, was never caught up")
+}
+
+// registerL0 gives d a loaded L0 segment holding one delete per (pk, ts).
+func (s *DelegatorDataSuite) registerL0(d *shardDelegator, segmentID int64, deletes map[int64]uint64) {
+	l0, err := segments.NewL0Segment(d.collection, segments.SegmentTypeSealed, s.version, &querypb.SegmentLoadInfo{
+		CollectionID:  s.collectionID,
+		SegmentID:     segmentID,
+		PartitionID:   500,
+		InsertChannel: d.vchannelName,
+		Level:         datapb.SegmentLevel_L0,
+		StartPosition: &msgpb.MsgPosition{Timestamp: 1001},
+	})
+	s.Require().NoError(err)
+	deltaData := storage.NewDeltaData(int64(len(deletes)))
+	for pk, ts := range deletes {
+		s.Require().NoError(deltaData.Append(storage.NewInt64PrimaryKey(pk), ts))
+	}
+	s.Require().NoError(l0.LoadDeltaData(context.Background(), deltaData))
+	d.deleteBuffer.RegisterL0(l0)
+}
+
+// A child built from its target's recovery view -- a respawn after a
+// QueryNode restart mid-window -- consumes its WAL only from the target's
+// checkpoint. The target's deletes in (T_switch, checkpoint] are in the
+// target's L0 segments, which only the child loads; they must still reach the
+// source's view, both the segments it already serves and those it loads later.
+func (s *DelegatorDataSuite) TestSplitChildForwardsItsL0AndBufferedDeletesToTheSource() {
+	defer func() {
+		s.workerManager.ExpectedCalls = nil
+		s.loader.ExpectedCalls = nil
+	}()
+	s.expectSealedBF(30, 31, 32)
+
+	child, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID,
+		fmt.Sprintf("by-dev-rootcoord-dml_1_%dv1", s.collectionID), s.version,
+		s.workerManager, s.manager, s.loader, 10000, nil, s.chunkManager,
+		NewChannelQueryView(nil, nil, nil, initialTargetVersion), nil)
+	s.Require().NoError(err)
+	sd := child.(*shardDelegator)
+	s.T().Cleanup(sd.Close)
+	// deletes the child already holds before it is fronted: its target's L0
+	// (below the checkpoint) and one it consumed into its buffer.
+	s.registerL0(sd, 900, map[int64]uint64{30: 1005, 31: 1008})
+	sd.ProcessDelete(deleteOf(32, 1012), 1012)
+
+	// nothing is forwarded without a fronting parent.
+	s.NoError(sd.ForwardKnownDeletesToParent(context.Background()))
+
+	sd.SetFrontingParent(s.delegator)
+	s.NoError(sd.ForwardKnownDeletesToParent(context.Background()))
+
+	recorder := &deletedPKsRecorder{pks: make(map[int64]uint64)}
+	s.loadOneSealed(403, 1001, recorder)
+	s.True(recorder.has(30), "the target L0 delete at 1005 never reached a segment the source loads")
+	s.True(recorder.has(31), "the target L0 delete at 1008 never reached a segment the source loads")
+	s.True(recorder.has(32), "the child's buffered delete never reached a segment the source loads")
+}
+
+// Under the RemoteLoad L0 policy a delegator's L0 segments carry no records in
+// memory, so the forward loads them itself and releases them afterwards.
+func (s *DelegatorDataSuite) TestSplitChildForwardsRemoteLoadL0Deletes() {
+	defer func() {
+		s.loader.ExpectedCalls = nil
+	}()
+	child := s.splitChildOf(fmt.Sprintf("by-dev-rootcoord-dml_1_%dv1", s.collectionID))
+	child.l0ForwardPolicy = L0ForwardPolicyRemoteLoad
+	remote, err := segments.NewL0Segment(child.collection, segments.SegmentTypeSealed, s.version, &querypb.SegmentLoadInfo{
+		CollectionID: s.collectionID, SegmentID: 901, PartitionID: 500, Level: datapb.SegmentLevel_L0,
+		InsertChannel: child.vchannelName,
+	})
+	s.Require().NoError(err)
+	child.deleteBuffer.RegisterL0(remote)
+
+	loaded, err := segments.NewL0Segment(child.collection, segments.SegmentTypeSealed, s.version, remote.LoadInfo())
+	s.Require().NoError(err)
+	deltaData := storage.NewDeltaData(1)
+	s.Require().NoError(deltaData.Append(storage.NewInt64PrimaryKey(40), 1030))
+	s.Require().NoError(loaded.(*segments.L0Segment).LoadDeltaData(context.Background(), deltaData))
+	s.loader.EXPECT().Load(mock.Anything, s.collectionID, segments.SegmentTypeSealed, mock.Anything, mock.Anything).
+		Return([]segments.Segment{loaded}, nil).Once()
+
+	s.NoError(child.ForwardKnownDeletesToParent(context.Background()))
+	items := s.delegator.deleteBuffer.ListAfter(1030)
+	s.Require().Len(items, 1)
+	s.Equal(storage.NewInt64PrimaryKey(40).GetValue(), items[0].Data[0].DeleteData.Pks[0].GetValue())
+	pks, _ := loaded.(*segments.L0Segment).DeleteRecords()
+	s.Empty(pks, "the L0 loaded for the forward is released")
+
+	// a failed load fails the forward.
+	s.loader.EXPECT().Load(mock.Anything, s.collectionID, segments.SegmentTypeSealed, mock.Anything, mock.Anything).
+		Return(nil, errors.New("mock load failure")).Once()
+	s.Error(child.ForwardKnownDeletesToParent(context.Background()))
 }
