@@ -7693,8 +7693,8 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 
 	// ImportEnableIDRangeMsg gates the two-phase per-file ID range path: after
 	// preimport reports the row counts, the primary assigns one range per file and
-	// broadcasts them via the new ImportIDRange V2 WAL message. It is version-gated
-	// on purpose: the ImportIDRange message is a new V2 type, so broadcasting it
+	// broadcasts them via the new UpdateImport V2 WAL message. It is version-gated
+	// on purpose: the UpdateImport message is a new V2 type, so broadcasting it
 	// while a streaming node from an older build is still online crashes that node's
 	// flusher (no case for the type -> panic on WAL replay). Until the gate flips,
 	// the config resolves to "false" and import stays on the legacy local-allocator
@@ -7705,7 +7705,7 @@ and can lower this freely; 10800 was the default before idempotency keys existed
 		Export:       false,
 		PanicIfEmpty: false,
 		Doc: "Whether import assigns a per-file ID range after preimport and broadcasts it via " +
-			"the ImportIDRange WAL message. auto: switch on automatically once the whole cluster " +
+			"the UpdateImport WAL message. auto: switch on automatically once the whole cluster " +
 			"(including streaming nodes) has reached the gate version and the stability window " +
 			"elapses; false: always keep the legacy local-allocator path (escape hatch, and the safe " +
 			"value while older streaming nodes are still online); true: force enable and bypass the " +

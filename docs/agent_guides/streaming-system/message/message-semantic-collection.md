@@ -20,7 +20,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 | RestoreSnapshot | Broadcast: CChannel | No | SharedDBName + ExclusiveCollectionName + ExclusiveSnapshotName |
 | DropSnapshotsByCollection | Broadcast: CChannel | No | SharedDBName + SharedCollectionName |
 | Import | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
-| ImportIDRange | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
+| UpdateImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | CommitImport / RollbackImport | Broadcast: VChannels + CChannel | No | SharedDBName + ExclusiveCollectionName |
 | Insert | Single VChannel | No | — |
 | Delete | Single VChannel | No | — |
@@ -47,7 +47,7 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 - **Import**: Initiates a bulk import job for a collection through its broadcast callback; CChannel is excluded from the job's data-channel list.
 - **CommitImport**: The DataCoord callback persists Committing, publishes imported segment visibility at each business VChannel's own append TimeTick, then persists Completed. The broadcast task retries failures. New jobs carry `commit_by_coordinator=true` and do not require a StreamingNode Flush or per-channel commit RPC. Legacy messages keep the per-channel RPC before BroadcastAckModule Ack and the counter-based checker completion.
 - **RollbackImport**: The DataCoord callback marks an uncommitted job Failed; committed jobs are unchanged.
-- **ImportIDRange**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
+- **UpdateImport**: Assigns the per-file ID ranges to an in-progress import job once preimport reports exact row counts; replicated so both clusters derive identical PK/RowID. DataCoord ack callback only (no local recovery data work).
 - **Insert** / **Delete**: DML on a single VChannel. CipherEnabled.
 - **CreateSegment** / **Flush**: WAL-generated (SelfControlled). Allocates or seals a growing segment.
 - **ManualFlush**: Seals all growing segments for a collection on a VChannel.
@@ -99,10 +99,10 @@ CreateSegment → Insert* → (Flush | ManualFlush | DropPartition | DropCollect
 ### Import Lifecycle
 
 ```
-Import → ImportIDRange → (CommitImport | RollbackImport)
+Import → UpdateImport → (CommitImport | RollbackImport)
 ```
 
-- For the same job, **Import** must precede **ImportIDRange**, which must precede **CommitImport** or **RollbackImport**. All are broadcast to the job's data VChannels plus the CChannel, so per-PChannel WAL order enforces the sequence and the CChannel copy gives their ack callbacks a single cluster-wide order.
+- For the same job, **Import** must precede **UpdateImport**, which must precede **CommitImport** or **RollbackImport**. All are broadcast to the job's data VChannels plus the CChannel, so per-PChannel WAL order enforces the sequence and the CChannel copy gives their ack callbacks a single cluster-wide order.
 
 ### Exclusive Lock Rule
 

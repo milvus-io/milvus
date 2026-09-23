@@ -3235,11 +3235,11 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	return err
 }
 
-// broadcastImportIDRangeMessage allocates the per-file ID ranges for an import job
-// and broadcasts them as an ImportIDRange WAL message to the job's data vchannels.
+// broadcastUpdateImportMessage allocates the per-file ID ranges for an import job
+// and broadcasts them as an UpdateImport WAL message to the job's data vchannels.
 // It runs on the cluster acting as primary, inside the import checker's PreImporting
 // gate, once the post-preimport row counts are known. Each cluster's
-// importIDRangeAckCallback then applies the ranges to its local job meta so both derive
+// updateImportAckCallback then applies the ranges to its local job meta so both derive
 // identical autoID primary keys. fileRows is aligned with job.GetFiles() order.
 //
 // An allocation failure (rootcoord unavailable) is transient — the checker retries on the
@@ -3248,7 +3248,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 // WAL message, not local memory, decides which range is applied, and if a retry races a
 // persisted-but-errored broadcast, the control-channel order makes the first range win on
 // every cluster (a duplicate is ignored, never applied on one cluster only).
-func (s *Server) broadcastImportIDRangeMessage(ctx context.Context, job ImportJob, fileRows []int64) error {
+func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob, fileRows []int64) error {
 	ranges, err := importid.ReserveFileIDRanges(fileRows, s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return err
@@ -3270,15 +3270,15 @@ func (s *Server) broadcastImportIDRangeMessage(ctx context.Context, job ImportJo
 	}
 
 	// No idempotency key. A checker retry that races a persisted-but-errored broadcast may
-	// mint a second ImportIDRange, but the control-channel copy orders it after the first
+	// mint a second UpdateImport, but the control-channel copy orders it after the first
 	// on every cluster and first-wins ignores it, so a duplicate can no longer diverge.
 	// Its freshly allocated ids leak harmlessly (the id space is TSO-derived).
-	msg := message.NewImportIDRangeMessageBuilderV2().
-		WithHeader(&message.ImportIDRangeMessageHeader{
+	msg := message.NewUpdateImportMessageBuilderV2().
+		WithHeader(&message.UpdateImportMessageHeader{
 			CollectionId: job.GetCollectionID(),
 			JobId:        job.GetJobID(),
 		}).
-		WithBody(&messagespb.ImportIDRangeMessageBody{
+		WithBody(&messagespb.UpdateImportMessageBody{
 			IdRanges: idRanges,
 		}).
 		WithBroadcast(vchannels).

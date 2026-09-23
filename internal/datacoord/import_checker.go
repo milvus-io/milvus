@@ -63,7 +63,7 @@ type importCheckerHooks struct {
 	// that inject only assignImportIDRange proceed to allocate/broadcast.
 	getReplicationRole func(ctx context.Context) (role replicateutil.Role, replicating bool, err error)
 	// assignImportIDRange allocates the per-file ID ranges from the post-preimport row
-	// counts and broadcasts the ImportIDRange WAL message. Required in production for
+	// counts and broadcasts the UpdateImport WAL message. Required in production for
 	// autoID (non-backup, non-L0) imports; a nil value disables the two-phase range
 	// assignment and is only valid in tests that do not exercise the PreImporting range gate.
 	assignImportIDRange func(ctx context.Context, job ImportJob, fileRows []int64) error
@@ -300,7 +300,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 // checkPreImportingJob handles the preimport phase: it waits for every PreImport task to
 // complete, then decides how the job leaves the phase. A ranged job (resolvable primary key,
 // not backup/L0) parks in AssigningIDRange, where the primary broadcasts — and a secondary
-// waits for — the ImportIDRange message. Every other job goes straight to Import-task
+// waits for — the UpdateImport message. Every other job goes straight to Import-task
 // creation. The transition is symmetric across clusters, so the arrival order of "all
 // preimport completed" and "ranges applied" does not matter.
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
@@ -336,7 +336,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 
 // checkAssigningIDRangeJob is the wait state for the per-file ID ranges. The job completed
 // preimport and is parked here: the primary allocates the ranges and broadcasts the
-// ImportIDRange message (ensureIDRanges), a secondary waits for the replicated copy, and the
+// UpdateImport message (ensureIDRanges), a secondary waits for the replicated copy, and the
 // ack callback applies the ranges to the job meta. Once the ranges are present the job runs
 // the shared Import-task tail. Preimport is deliberately NOT re-checked here — entering the
 // state already implies it completed, both on the PreImporting transition and on restart
@@ -396,7 +396,7 @@ func (c *importChecker) createImportTasks(job ImportJob, preimports []ImportTask
 		}); divergent {
 			fileID := stat.GetImportFile().GetId()
 			localRows, reservedRows := stat.GetTotalRows(), expectedByFile[fileID]
-			log.Warn(c.ctx, "ImportIDRange divergence: local row count differs from the reserved range size; failing import — files must be identical across clusters",
+			log.Warn(c.ctx, "UpdateImport divergence: local row count differs from the reserved range size; failing import — files must be identical across clusters",
 				mlog.Int64("fileID", fileID), mlog.Int64("localRows", localRows), mlog.Int64("reservedRows", reservedRows))
 			updateJobState(internalpb.ImportJobState_Failed, UpdateJobReason(fmt.Sprintf(
 				"import file %d local row count %d does not match the reserved ID range size %d (cross-cluster file divergence)",
@@ -471,11 +471,11 @@ func (c *importChecker) createImportTasks(job ImportJob, preimports []ImportTask
 // gate reads false (the default "auto" resolves to "false" until the MixCoord confirmator
 // flips it after every node, streaming nodes included, reaches the gate version), this
 // returns false so the job never enters AssigningIDRange and never broadcasts the new
-// ImportIDRange V2 message. That is what keeps an older streaming node's flusher from
+// UpdateImport V2 message. That is what keeps an older streaming node's flusher from
 // panicking on a message type it does not know during a rolling upgrade; the legacy
 // local-allocator path takes over instead.
 //
-// A package function, not a checker method: the ImportIDRange ack callback needs the same
+// A package function, not a checker method: the UpdateImport ack callback needs the same
 // condition to reject a range message for a job that carries none.
 func needsIDRanges(job ImportJob) bool {
 	return idRangeMsgEnabled() && importid.NeedsFileIDRanges(job.GetSchema(), job.GetOptions())
@@ -500,7 +500,7 @@ func jobIDRangesSet(job ImportJob) bool {
 }
 
 // ensureIDRanges triggers (primary / non-replicating cluster) or waits for (secondary) the
-// ImportIDRange broadcast that populates the job's per-file ID ranges. Called from the
+// UpdateImport broadcast that populates the job's per-file ID ranges. Called from the
 // AssigningIDRange state when the ranges are unset; the job stays in AssigningIDRange
 // either way, bounded by its timeoutTs.
 func (c *importChecker) ensureIDRanges(job ImportJob, preimports []ImportTask) {
@@ -527,17 +527,17 @@ func (c *importChecker) ensureIDRanges(job ImportJob, preimports []ImportTask) {
 	if c.hooks.getReplicationRole != nil {
 		r, rep, err := c.hooks.getReplicationRole(ctx)
 		if err != nil {
-			log.Warn(ctx, "cannot determine replication role before ImportIDRange broadcast, will retry next tick", mlog.Err(err))
+			log.Warn(ctx, "cannot determine replication role before UpdateImport broadcast, will retry next tick", mlog.Err(err))
 			return
 		}
 		role, replicating = r, rep
 	}
 
 	if replicating && role == replicateutil.RoleSecondary {
-		// Secondary: the primary broadcasts ImportIDRange and it is replicated here; that
+		// Secondary: the primary broadcasts UpdateImport and it is replicated here; that
 		// ack callback applies the ranges. Do NOT allocate locally (it would diverge from
 		// the primary's authoritative range). Debug, not Info: this repeats every ~2s tick.
-		log.Debug(ctx, "waiting for replicated ImportIDRange")
+		log.Debug(ctx, "waiting for replicated UpdateImport")
 		return
 	}
 
@@ -554,7 +554,7 @@ func (c *importChecker) ensureIDRanges(job ImportJob, preimports []ImportTask) {
 		return
 	}
 
-	log.Info(ctx, "triggering ImportIDRange broadcast",
+	log.Info(ctx, "triggering UpdateImport broadcast",
 		mlog.Int("fileCount", len(job.GetFiles())), mlog.Int64("totalRows", lo.Sum(fileRows)))
 
 	if err := c.hooks.assignImportIDRange(ctx, job, fileRows); err != nil {
@@ -562,7 +562,7 @@ func (c *importChecker) ensureIDRanges(job ImportJob, preimports []ImportTask) {
 			// Stale role during switchover: this cluster thought it was primary but the
 			// broadcaster rejected the append. Treat as "wait" — the real primary broadcasts
 			// the authoritative range and it is replicated here. Retry next tick.
-			log.Info(ctx, "role flipped to standby while importing, waiting for replicated ImportIDRange")
+			log.Info(ctx, "role flipped to standby while importing, waiting for replicated UpdateImport")
 		} else if merr.GetErrorType(err) == merr.InputError {
 			// Permanent: the request content itself cannot be ranged (a single file holding
 			// more than one allocation batch, or a negative count). No retry changes that, so
@@ -574,7 +574,7 @@ func (c *importChecker) ensureIDRanges(job ImportJob, preimports []ImportTask) {
 				log.Warn(ctx, "failed to mark import job failed after a non-retriable range allocation error", mlog.Err(updateErr))
 			}
 		} else {
-			log.Warn(ctx, "ImportIDRange broadcast failed, will retry next tick", mlog.Err(err))
+			log.Warn(ctx, "UpdateImport broadcast failed, will retry next tick", mlog.Err(err))
 		}
 		return
 	}
