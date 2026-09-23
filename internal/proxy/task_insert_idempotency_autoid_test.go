@@ -2,10 +2,12 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -35,7 +37,7 @@ func TestReassignAutoIDByOffsetChannelsRoutesEachOffsetToStableBucket(t *testing
 		return begin, nextID, nil
 	}
 
-	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs, schemapb.DataType_Int64, channels, 0, alloc))
+	require.NoError(t, reassignAutoIDByResidue(rowIDs, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0, alloc))
 	requireOffsetRoutesToModuloChannels(t, &schemapb.IDs{
 		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: rowIDs}},
 	}, channels)
@@ -54,7 +56,7 @@ func TestReassignAutoIDByOffsetChannelsSupportsVarCharPrimary(t *testing.T) {
 		return begin, nextID, nil
 	}
 
-	require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs, schemapb.DataType_VarChar, channels, 0, alloc))
+	require.NoError(t, reassignAutoIDByResidue(rowIDs, schemapb.DataType_VarChar, legacyAutoIDPlacement(len(channels)), 0, alloc))
 	ids, err := autoIDCandidatesToPrimaryIDs(rowIDs, schemapb.DataType_VarChar)
 	require.NoError(t, err)
 	requireOffsetRoutesToModuloChannels(t, ids, channels)
@@ -74,17 +76,17 @@ func TestReassignAutoIDByOffsetChannelsRoutesAgainstGivenChannelOrder(t *testing
 		}
 	}
 
-	require.NoError(t, reassignAutoIDByOffsetChannels(
+	require.NoError(t, reassignAutoIDByResidue(
 		firstRowIDs,
 		schemapb.DataType_Int64,
-		channels,
+		legacyAutoIDPlacement(len(channels)),
 		0,
 		newRangeAlloc(100000),
 	))
-	require.NoError(t, reassignAutoIDByOffsetChannels(
+	require.NoError(t, reassignAutoIDByResidue(
 		secondRowIDs,
 		schemapb.DataType_Int64,
-		channels,
+		legacyAutoIDPlacement(len(channels)),
 		0,
 		newRangeAlloc(500000),
 	))
@@ -111,7 +113,7 @@ func TestReassignAutoIDByOffsetChannelsNoop(t *testing.T) {
 			called = true
 			return 0, 0, nil
 		}
-		require.NoError(t, reassignAutoIDByOffsetChannels(nil, schemapb.DataType_Int64, []string{"ch0", "ch1"}, 0, alloc))
+		require.NoError(t, reassignAutoIDByResidue(nil, schemapb.DataType_Int64, legacyAutoIDPlacement(2), 0, alloc))
 		require.False(t, called)
 	})
 
@@ -123,7 +125,7 @@ func TestReassignAutoIDByOffsetChannelsNoop(t *testing.T) {
 			called = true
 			return 0, 0, nil
 		}
-		require.NoError(t, reassignAutoIDByOffsetChannels(rowIDs, schemapb.DataType_Int64, []string{"ch0"}, 0, alloc))
+		require.NoError(t, reassignAutoIDByResidue(rowIDs, schemapb.DataType_Int64, legacyAutoIDPlacement(1), 0, alloc))
 		require.Equal(t, original, rowIDs)
 		require.False(t, called)
 	})
@@ -131,13 +133,13 @@ func TestReassignAutoIDByOffsetChannelsNoop(t *testing.T) {
 
 func TestReassignAutoIDByOffsetChannelsErrors(t *testing.T) {
 	t.Run("nil allocator", func(t *testing.T) {
-		err := reassignAutoIDByOffsetChannels([]int64{1, 2}, schemapb.DataType_Int64, []string{"ch0", "ch1"}, 0, nil)
+		err := reassignAutoIDByResidue([]int64{1, 2}, schemapb.DataType_Int64, legacyAutoIDPlacement(2), 0, nil)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "id allocator is nil")
 	})
 
 	t.Run("unsupported primary type", func(t *testing.T) {
-		err := reassignAutoIDByOffsetChannels([]int64{1, 2}, schemapb.DataType_Float, []string{"ch0", "ch1"}, 0,
+		err := reassignAutoIDByResidue([]int64{1, 2}, schemapb.DataType_Float, legacyAutoIDPlacement(2), 0,
 			func(uint32) (int64, int64, error) {
 				return 10, 20, nil
 			})
@@ -149,7 +151,7 @@ func TestReassignAutoIDByOffsetChannelsErrors(t *testing.T) {
 		channels := []string{"ch0", "ch1", "ch2"}
 		rowIDs := []int64{firstInt64IDNotRoutingToOffsetBucket(t, channels, 0, 1)}
 		allocErr := errors.New("alloc failed")
-		err := reassignAutoIDByOffsetChannels(rowIDs, schemapb.DataType_Int64, channels, 0,
+		err := reassignAutoIDByResidue(rowIDs, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0,
 			func(uint32) (int64, int64, error) {
 				return 0, 0, allocErr
 			})
@@ -163,7 +165,7 @@ func TestReassignAutoIDByOffsetChannelsErrors(t *testing.T) {
 		// rather than spin forever and burn the global id space.
 		channels := []string{"ch0", "ch1"}
 		rowIDs := []int64{7, 7}
-		err := reassignAutoIDByOffsetChannels(rowIDs, schemapb.DataType_Int64, channels, 0,
+		err := reassignAutoIDByResidue(rowIDs, schemapb.DataType_Int64, legacyAutoIDPlacement(len(channels)), 0,
 			func(uint32) (int64, int64, error) {
 				return 100000, 100000, nil
 			})
@@ -204,7 +206,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 		},
 	}
 
-	require.NoError(t, task.reassignAutoIDForStableIdempotency(primary, channels))
+	require.NoError(t, task.reassignAutoIDForStableIdempotency(primary, legacyWriteRoute(channels)))
 	require.Equal(t, task.insertMsg.GetRowIDs(), task.result.GetIDs().GetIntId().GetData())
 	requireOffsetRoutesToModuloChannels(t, task.result.GetIDs(), channels)
 
@@ -233,18 +235,17 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testi
 		},
 	})
 	require.NoError(t, err)
-	cache := newInsertTaskIdempotencyMockCache(t, schema, true)
-	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 	// The stored vchannel order follows pchannel load at allocation time, so it is
 	// not lexicographic; the insert must route against it verbatim.
 	storedChannels := []string{"ch2", "ch0", "ch1"}
+	cache := newInsertTaskIdempotencyMockCache(t, schema, true, storedChannels...)
+	idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 
 	var firstRowIDs []int64
 	var firstRoutes []string
 	var firstKey string
 	for idx := 0; idx < 2; idx++ {
 		chMgr := channelmgr.NewMockChannelsMgr(t)
-		chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(slices.Clone(storedChannels), nil)
 		task := newInsertTaskForIdempotencyAutoIDTest(cache, idAllocator, chMgr)
 
 		require.NoError(t, task.PreExecute(ctx))
@@ -318,8 +319,8 @@ func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(
 		AutoID:       true,
 	}
 	chMgr := channelmgr.NewMockChannelsMgr(t)
-	chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(slices.Clone(channels), nil)
 	task := insertTask{
+		baseTask:           baseTask{MetaCache: neverSplitRoutingCache(t, channels...)},
 		ctx:                ctx,
 		collectionID:       100,
 		idAllocator:        idAllocator,
@@ -379,12 +380,12 @@ func TestInsertTaskReassignAutoIDForStableIdempotencyErrors(t *testing.T) {
 		},
 	}
 
-	err := task.reassignAutoIDForStableIdempotency(primary, []string{"ch0", "ch1"})
+	err := task.reassignAutoIDForStableIdempotency(primary, legacyWriteRoute([]string{"ch0", "ch1"}))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "idempotency key is required")
 
 	task.idempotencyKey = "stable-key"
-	err = task.reassignAutoIDForStableIdempotency(primary, []string{"ch0", "ch1"})
+	err = task.reassignAutoIDForStableIdempotency(primary, legacyWriteRoute([]string{"ch0", "ch1"}))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "id allocator is required")
 }
@@ -427,4 +428,79 @@ func firstInt64IDRoutingToChannel(t *testing.T, channels []string, targetChannel
 	}
 	t.Fatalf("failed to find an id that routes to %s", targetChannel)
 	return 0
+}
+
+// legacyReassignAutoIDForParity is the pre-split bucketing, kept verbatim as a
+// reference: offset i goes to channel i % n, candidates are filed by
+// HashPK2Channels, and each top-up round allocates missing * n ids.
+func legacyReassignAutoIDForParity(t *testing.T, rowIDs []int64, channels []string, alloc func(uint32) (int64, int64, error)) {
+	t.Helper()
+	n := len(channels)
+	required := make([]int, n)
+	for offset := range rowIDs {
+		required[offset%n]++
+	}
+	buckets := make([][]int64, n)
+	file := func(ids []int64) {
+		idx, err := typeutil.HashPK2Channels(&schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: ids}}}, channels)
+		require.NoError(t, err)
+		for i, c := range idx {
+			buckets[c] = append(buckets[c], ids[i])
+		}
+	}
+	file(slices.Clone(rowIDs))
+	for {
+		missing := 0
+		for b, c := range required {
+			if c > len(buckets[b]) {
+				missing += c - len(buckets[b])
+			}
+		}
+		if missing == 0 {
+			break
+		}
+		begin, end, err := common.AllocAutoID(alloc, uint32(max(missing*n, n)), 0)
+		require.NoError(t, err)
+		var ids []int64
+		for id := begin; id < end; id++ {
+			ids = append(ids, id)
+		}
+		file(ids)
+	}
+	cursor := make([]int, n)
+	for offset := range rowIDs {
+		b := offset % n
+		rowIDs[offset] = buckets[b][cursor[b]]
+		cursor[b]++
+	}
+}
+
+// A never-split collection draws exactly the ids it drew before residue
+// placement, allocation for allocation.
+func TestReassignAutoIDByResidueIsTheLegacyBucketingForANeverSplitCollection(t *testing.T) {
+	for _, n := range []int{2, 3, 5, 16} {
+		channels := make([]string, n)
+		for i := range channels {
+			channels[i] = fmt.Sprintf("ch%d", i)
+		}
+		newAlloc := func(calls *[]uint32) func(uint32) (int64, int64, error) {
+			next := int64(1 << 24)
+			return func(count uint32) (int64, int64, error) {
+				*calls = append(*calls, count)
+				begin := next
+				next += int64(count)
+				return begin, next, nil
+			}
+		}
+		seed := make([]int64, 97)
+		for i := range seed {
+			seed[i] = int64(1000 + i*7)
+		}
+		var legacyCalls, residueCalls []uint32
+		legacy, residue := slices.Clone(seed), slices.Clone(seed)
+		legacyReassignAutoIDForParity(t, legacy, channels, newAlloc(&legacyCalls))
+		require.NoError(t, reassignAutoIDByResidue(residue, schemapb.DataType_Int64, legacyAutoIDPlacement(n), 0, newAlloc(&residueCalls)))
+		assert.Equal(t, legacy, residue, "n=%d", n)
+		assert.Equal(t, legacyCalls, residueCalls, "n=%d", n)
+	}
 }

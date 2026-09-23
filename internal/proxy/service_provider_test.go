@@ -429,6 +429,15 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 		PhysicalChannelNames: []string{"p1"},
 		Aliases:              []string{"alias"},
 		Properties:           []*commonpb.KeyValuePair{{Key: "collection_property", Value: "value"}},
+		ShardInfos: []*schemapb.CollectionShardInfo{{
+			VchannelName: "v1",
+			State:        schemapb.ShardState_ShardNormal,
+			Routing: &schemapb.CollectionShardInfo_HashRouting{
+				HashRouting: &schemapb.HashRouting{Buckets: []uint64{0, 1}},
+			},
+		}},
+		RoutingModulus: 2,
+		ShardBy:        "hash($namespace_id)",
 		Schema: &schemapb.CollectionSchema{
 			Name:               collectionName,
 			Description:        "description",
@@ -492,12 +501,22 @@ func TestDescribeCollectionCachedAndRemoteProjectionEquivalent(t *testing.T) {
 		ShardsNum:           raw.GetShardsNum(),
 		Aliases:             raw.GetAliases(),
 		Properties:          raw.GetProperties(),
+		ShardInfos:          raw.GetShardInfos(),
+		RoutingModulus:      raw.GetRoutingModulus(),
+		ShardBy:             raw.GetShardBy(),
 	}, nil)
 	cachedResp, err := (&CachedProxyServiceProvider{Proxy: &Proxy{metaCache: cache}}).DescribeCollection(ctx,
 		&milvuspb.DescribeCollectionRequest{DbName: database, CollectionName: collectionName})
 	assert.NoError(t, err)
 	assert.NoError(t, finalizeDescribeCollectionResponse(cachedResp))
 	assert.True(t, proto.Equal(remoteResp, cachedResp), "cached and remote responses differ:\nremote=%s\ncached=%s", remoteResp, cachedResp)
+	// Equality alone would pass if both paths dropped the routing facts.
+	for name, resp := range map[string]*milvuspb.DescribeCollectionResponse{"remote": remoteResp, "cached": cachedResp} {
+		assert.True(t, proto.Equal(raw.GetShardInfos()[0], resp.GetShardInfos()[0]), "%s response must carry shard_infos", name)
+		assert.Len(t, resp.GetShardInfos(), 1, name)
+		assert.Equal(t, raw.GetRoutingModulus(), resp.GetRoutingModulus(), "%s response must carry routing_modulus", name)
+		assert.Equal(t, raw.GetShardBy(), resp.GetShardBy(), "%s response must carry shard_by", name)
+	}
 	assert.IsType(t, &schemapb.ValueField_TimestamptzData{}, cacheSchema.GetFields()[2].GetDefaultValue().GetData(),
 		"cached provider must preserve the canonical TIMESTAMPTZ default")
 }
