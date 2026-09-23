@@ -19,11 +19,13 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,143 +59,196 @@ func TestMinioObjectStoragePutObjectOptions(t *testing.T) {
 	assert.False(t, opts.SendContentMd5)
 }
 
-func TestMinioObjectStorageCopyObjectCrossBucketUsesSingleCopyForSameBucket(t *testing.T) {
-	var gotDst minio.CopyDestOptions
-	var gotSrc minio.CopySrcOptions
-	copyCalled := false
-	composeCalled := false
-	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
-		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize}, nil).Build()
-	defer mockStat.UnPatch()
-	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
-		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
-			copyCalled = true
-			gotDst = dst
-			gotSrc = src
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCopy.UnPatch()
-	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
-		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
-			composeCalled = true
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCompose.UnPatch()
+func TestMinioObjectStorageCopyObjectCrossBucket(t *testing.T) {
+	params := paramtable.Get()
+	key := params.MinioCfg.MultipartCopyThreshold.Key
+	original := params.MinioCfg.MultipartCopyThreshold.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
 
-	objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
-	err := objectStorage.CopyObjectCrossBucket(context.Background(), "bucket", "src-object", "bucket", "dst-object")
-	require.NoError(t, err)
+	for _, tc := range []struct {
+		name          string
+		size          int64
+		threshold     string
+		provider      string
+		sameBucket    bool
+		wantMultipart bool
+		statErr       error
+		copyErr       error
+	}{
+		{name: "empty"},
+		{name: "below_default", size: 1024*1024*1024 - 1},
+		{name: "at_default", size: 1024 * 1024 * 1024},
+		{name: "above_default", size: 1024*1024*1024 + 1, wantMultipart: true},
+		{name: "decimal_gb_below_default", size: 1_000_000_000},
+		{name: "two_gb", size: 2_000_000_000, wantMultipart: true},
+		{name: "aliyun_two_gb", size: 2_000_000_000, provider: objectstorage.CloudProviderAliyun, wantMultipart: true},
+		{name: "aws_two_gb", size: 2_000_000_000, provider: objectstorage.CloudProviderAWS, wantMultipart: true},
+		{name: "same_bucket_at_default", size: 1024 * 1024 * 1024, sameBucket: true},
+		{name: "same_bucket_two_gb", size: 2_000_000_000, sameBucket: true, wantMultipart: true},
+		{name: "lower_threshold", size: 500_000_001, threshold: "500000000", wantMultipart: true},
+		{name: "raise_threshold", size: 2_000_000_000, threshold: "2000000000"},
+		{name: "above_custom_threshold", size: 2_000_000_001, threshold: "2000000000", wantMultipart: true},
+		{name: "legacy_threshold", size: 5 * 1024 * 1024 * 1024, threshold: "5368709120"},
+		{name: "above_legacy_threshold", size: 5*1024*1024*1024 + 1, threshold: "5368709120", wantMultipart: true},
+		{name: "large_threshold_does_not_fall_back", size: 2_000_000_000, threshold: "10737418240"},
+		{name: "large_threshold_at_protocol_limit", size: 5 * 1024 * 1024 * 1024, threshold: "10737418240"},
+		{name: "large_threshold_above_protocol_limit", size: 5*1024*1024*1024 + 1, threshold: "10737418240", wantMultipart: true},
+		{name: "gcp_exemption", size: 6 * 1024 * 1024 * 1024, provider: objectstorage.CloudProviderGCP},
+		{name: "gcp_large_threshold", size: 6 * 1024 * 1024 * 1024, threshold: "10737418240", provider: objectstorage.CloudProviderGCP},
+		{name: "gcp_custom_threshold", size: 2_000_000_000, threshold: "1", provider: objectstorage.CloudProviderGCP},
+		{name: "stat_failure", size: 2_000_000_000, statErr: context.Canceled},
+		{name: "single_copy_failure", size: 1_000_000_000, copyErr: context.Canceled},
+		{name: "multipart_failure", size: 2_000_000_000, wantMultipart: true, copyErr: context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			threshold := tc.threshold
+			if threshold == "" {
+				threshold = params.MinioCfg.MultipartCopyThreshold.DefaultValue
+			}
+			require.NoError(t, params.Save(key, threshold))
+			dstBucket := "dst-bucket"
+			if tc.sameBucket {
+				dstBucket = "src-bucket"
+			}
+			mockStat := mockey.Mock((*minio.Client).StatObject).Return(minio.ObjectInfo{Size: tc.size}, tc.statErr).Build()
+			defer mockStat.UnPatch()
+			var copyCalls, composeCalls int
+			var gotDst minio.CopyDestOptions
+			var gotSrc minio.CopySrcOptions
+			mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
+				func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
+					copyCalls++
+					gotDst, gotSrc = dst, src
+					return minio.UploadInfo{}, tc.copyErr
+				}).Build()
+			defer mockCopy.UnPatch()
+			mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
+				func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, srcs ...minio.CopySrcOptions) (minio.UploadInfo, error) {
+					composeCalls++
+					require.Len(t, srcs, 1)
+					gotDst, gotSrc = dst, srcs[0]
+					return minio.UploadInfo{}, tc.copyErr
+				}).Build()
+			defer mockCompose.UnPatch()
 
-	assert.True(t, copyCalled)
-	assert.False(t, composeCalled)
-	assert.Equal(t, "bucket", gotSrc.Bucket)
-	assert.Equal(t, "src-object", gotSrc.Object)
-	assert.Equal(t, "bucket", gotDst.Bucket)
-	assert.Equal(t, "dst-object", gotDst.Object)
+			objectStorage := &MinioObjectStorage{Client: &minio.Client{}, cloudProvider: tc.provider}
+			err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", dstBucket, "dst-object")
+			if tc.statErr != nil {
+				require.ErrorIs(t, err, tc.statErr)
+				assert.Zero(t, copyCalls+composeCalls)
+				return
+			}
+			if tc.copyErr != nil {
+				require.ErrorIs(t, err, tc.copyErr)
+			} else {
+				require.NoError(t, err)
+			}
+			if tc.wantMultipart {
+				assert.Equal(t, 1, composeCalls)
+				assert.Zero(t, copyCalls)
+			} else {
+				assert.Equal(t, 1, copyCalls)
+				assert.Zero(t, composeCalls)
+			}
+			assert.Equal(t, "src-bucket", gotSrc.Bucket)
+			assert.Equal(t, "src-object", gotSrc.Object)
+			assert.Equal(t, dstBucket, gotDst.Bucket)
+			assert.Equal(t, "dst-object", gotDst.Object)
+		})
+	}
 }
 
-func TestMinioObjectStorageCopyObjectCrossBucketUsesSingleCopyForSmallObject(t *testing.T) {
-	var gotDst minio.CopyDestOptions
-	var gotSrc minio.CopySrcOptions
-	copyCalled := false
-	composeCalled := false
-	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
-		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize}, nil).Build()
-	defer mockStat.UnPatch()
-	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
-		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
-			copyCalled = true
-			gotDst = dst
-			gotSrc = src
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCopy.UnPatch()
-	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
-		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
-			composeCalled = true
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCompose.UnPatch()
+// Exercise the real SDK without allocating or transferring the source object's bytes.
+func TestMinioObjectStorageCopyObjectCrossBucketMultipartRequests(t *testing.T) {
+	params := paramtable.Get()
+	key := params.MinioCfg.MultipartCopyThreshold.Key
+	original := params.MinioCfg.MultipartCopyThreshold.GetValue()
+	t.Cleanup(func() { require.NoError(t, params.Save(key, original)) })
+	require.NoError(t, params.Save(key, "1073741824"))
 
-	objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
-	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
-	require.NoError(t, err)
+	for _, failPart := range []string{"", "2"} {
+		name := "success"
+		if failPart != "" {
+			name = "part_access_denied"
+		}
+		t.Run(name, func(t *testing.T) {
+			var mu sync.Mutex
+			var ranges []string
+			var completed struct {
+				Parts []minio.CompletePart `xml:"Part"`
+			}
+			var initiated, finished bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				w.Header().Set("Content-Type", "application/xml")
+				query := r.URL.Query()
+				switch {
+				case r.Method == http.MethodHead && r.URL.Path == "/src-bucket/src-object":
+					w.Header().Set("Content-Length", "2000000000")
+					w.Header().Set("ETag", `"source-etag"`)
+					w.Header().Set("Last-Modified", "Wed, 23 Sep 2026 00:00:00 GMT")
+				case r.Method == http.MethodPost && query.Has("uploads"):
+					assert.Equal(t, "/dst-bucket/dst-object", r.URL.Path)
+					initiated = true
+					fmt.Fprint(w, `<InitiateMultipartUploadResult><Bucket>dst-bucket</Bucket><Key>dst-object</Key><UploadId>copy-upload</UploadId></InitiateMultipartUploadResult>`)
+				case r.Method == http.MethodPut && query.Get("uploadId") == "copy-upload":
+					assert.True(t, initiated)
+					assert.Equal(t, "/dst-bucket/dst-object", r.URL.Path)
+					assert.Equal(t, "src-bucket/src-object", r.Header.Get("X-Amz-Copy-Source"))
+					assert.Equal(t, int64(0), r.ContentLength)
+					ranges = append(ranges, r.Header.Get("X-Amz-Copy-Source-Range"))
+					assert.Equal(t, fmt.Sprint(len(ranges)), query.Get("partNumber"))
+					if query.Get("partNumber") == failPart {
+						w.WriteHeader(http.StatusForbidden)
+						fmt.Fprint(w, `<Error><Code>AccessDenied</Code><Message>part copy denied</Message></Error>`)
+						return
+					}
+					fmt.Fprintf(w, `<CopyPartResult><LastModified>2026-09-23T00:00:00Z</LastModified><ETag>"part-%s"</ETag></CopyPartResult>`, query.Get("partNumber"))
+				case r.Method == http.MethodPost && query.Get("uploadId") == "copy-upload":
+					assert.NoError(t, xml.NewDecoder(r.Body).Decode(&completed))
+					finished = true
+					fmt.Fprint(w, `<CompleteMultipartUploadResult><Bucket>dst-bucket</Bucket><Key>dst-object</Key><ETag>"complete-etag"</ETag></CompleteMultipartUploadResult>`)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+					w.WriteHeader(http.StatusBadRequest)
+				}
+			}))
+			defer server.Close()
+			client, err := minio.New(strings.TrimPrefix(server.URL, "http://"), &minio.Options{
+				Creds:        credentials.NewStaticV4("access-key", "secret-key", ""),
+				Region:       "us-east-1",
+				BucketLookup: minio.BucketLookupPath,
+			})
+			require.NoError(t, err)
+			objectStorage := &MinioObjectStorage{Client: client}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			err = objectStorage.CopyObjectCrossBucket(ctx, "src-bucket", "src-object", "dst-bucket", "dst-object")
 
-	assert.True(t, copyCalled)
-	assert.False(t, composeCalled)
-	assert.Equal(t, "src-bucket", gotSrc.Bucket)
-	assert.Equal(t, "src-object", gotSrc.Object)
-	assert.Equal(t, "dst-bucket", gotDst.Bucket)
-	assert.Equal(t, "dst-object", gotDst.Object)
-}
-
-func TestMinioObjectStorageCopyObjectCrossBucketUsesComposeForLargeObject(t *testing.T) {
-	var gotDst minio.CopyDestOptions
-	var gotSrcs []minio.CopySrcOptions
-	copyCalled := false
-	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
-		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize + 1}, nil).Build()
-	defer mockStat.UnPatch()
-	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
-		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ minio.CopySrcOptions) (minio.UploadInfo, error) {
-			copyCalled = true
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCopy.UnPatch()
-	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
-		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, srcs ...minio.CopySrcOptions) (minio.UploadInfo, error) {
-			gotDst = dst
-			gotSrcs = append([]minio.CopySrcOptions(nil), srcs...)
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCompose.UnPatch()
-
-	objectStorage := &MinioObjectStorage{Client: &minio.Client{}}
-	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
-	require.NoError(t, err)
-
-	assert.False(t, copyCalled)
-	require.Len(t, gotSrcs, 1)
-	assert.Equal(t, "src-bucket", gotSrcs[0].Bucket)
-	assert.Equal(t, "src-object", gotSrcs[0].Object)
-	assert.Equal(t, int64(0), gotSrcs[0].Start)
-	assert.Equal(t, "dst-bucket", gotDst.Bucket)
-	assert.Equal(t, "dst-object", gotDst.Object)
-}
-
-func TestMinioObjectStorageCopyObjectCrossBucketGCPUsesSingleCopyForLargeObject(t *testing.T) {
-	var gotDst minio.CopyDestOptions
-	var gotSrc minio.CopySrcOptions
-	copyCalled := false
-	composeCalled := false
-	mockStat := mockey.Mock((*minio.Client).StatObject).Return(
-		minio.ObjectInfo{Size: minioSingleCopyObjectMaxSize + 1}, nil).Build()
-	defer mockStat.UnPatch()
-	mockCopy := mockey.Mock((*minio.Client).CopyObject).To(
-		func(_ *minio.Client, _ context.Context, dst minio.CopyDestOptions, src minio.CopySrcOptions) (minio.UploadInfo, error) {
-			copyCalled = true
-			gotDst = dst
-			gotSrc = src
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCopy.UnPatch()
-	mockCompose := mockey.Mock((*minio.Client).ComposeObject).To(
-		func(_ *minio.Client, _ context.Context, _ minio.CopyDestOptions, _ ...minio.CopySrcOptions) (minio.UploadInfo, error) {
-			composeCalled = true
-			return minio.UploadInfo{}, nil
-		}).Build()
-	defer mockCompose.UnPatch()
-
-	objectStorage := &MinioObjectStorage{Client: &minio.Client{}, cloudProvider: objectstorage.CloudProviderGCP}
-	err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", "dst-bucket", "dst-object")
-	require.NoError(t, err)
-
-	assert.True(t, copyCalled)
-	assert.False(t, composeCalled)
-	assert.Equal(t, "src-bucket", gotSrc.Bucket)
-	assert.Equal(t, "src-object", gotSrc.Object)
-	assert.Equal(t, "dst-bucket", gotDst.Bucket)
-	assert.Equal(t, "dst-object", gotDst.Object)
+			mu.Lock()
+			defer mu.Unlock()
+			if failPart != "" {
+				require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+				assert.Len(t, ranges, 2)
+				assert.False(t, finished)
+				return
+			}
+			require.NoError(t, err)
+			assert.True(t, finished)
+			assert.Equal(t, []string{
+				"bytes=0-499999999",
+				"bytes=500000000-999999999",
+				"bytes=1000000000-1499999999",
+				"bytes=1500000000-1999999999",
+			}, ranges)
+			require.Len(t, completed.Parts, 4)
+			for i, part := range completed.Parts {
+				assert.Equal(t, i+1, part.PartNumber)
+				assert.Equal(t, fmt.Sprintf("part-%d", i+1), strings.Trim(part.ETag, `"`))
+			}
+		})
+	}
 }
 
 func TestMinioObjectStorage(t *testing.T) {

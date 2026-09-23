@@ -29,6 +29,7 @@ import (
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
+// S3 limits a single CopyObject request to 5 GiB, regardless of the configured threshold.
 const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
 
 type MinioObjectStorage struct {
@@ -126,6 +127,7 @@ func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, 
 }
 
 func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcBucket, srcObjectName, dstBucket, dstObjectName string) error {
+	singleCopyMaxSize := min(paramtable.Get().MinioCfg.MultipartCopyThreshold.GetAsInt64(), minioSingleCopyObjectMaxSize)
 	srcOpts := minio.CopySrcOptions{
 		Bucket: srcBucket,
 		Object: srcObjectName,
@@ -141,12 +143,12 @@ func (minioObjectStorage *MinioObjectStorage) CopyObjectCrossBucket(ctx context.
 	// GCS's XML API has no multipart copy: x-amz-copy-source-range (emitted by
 	// ComposeObject) has no x-goog-* equivalent. Its whole-object copy has no
 	// 5GiB cap though, so GCP always takes the single-copy path.
-	if srcInfo.Size <= minioSingleCopyObjectMaxSize || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
+	if srcInfo.Size <= singleCopyMaxSize || minioObjectStorage.cloudProvider == objectstorage.CloudProviderGCP {
 		_, err = minioObjectStorage.CopyObject(ctx, dstOpts, srcOpts)
 		return mapObjectStorageError(srcObjectName, err)
 	}
-	// MinIO's single CopyObject path is capped at 5GiB. ComposeObject still runs
-	// provider-side and avoids streaming snapshot data through Milvus.
+	// Copy larger objects in parts to reduce the work per request. ComposeObject
+	// runs provider-side and avoids streaming snapshot data through Milvus.
 	_, err = minioObjectStorage.ComposeObject(ctx, dstOpts, srcOpts)
 	return mapObjectStorageError(srcObjectName, err)
 }
