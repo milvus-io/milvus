@@ -2254,6 +2254,85 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		s.Zero(gc.pauseUntil.PauseUntil())
 	})
 
+	s.Run("resume_without_ticket_releases_every_pause", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		s.NoError(gc.Pause(ctx, -1, "ticket-1", time.Minute))
+		s.NoError(gc.Pause(ctx, -1, "ticket-2", time.Minute))
+		s.NoError(gc.Pause(ctx, 100, "ticket-3", time.Minute))
+		s.True(gc.GetStatus().IsPaused)
+		s.True(gc.collectionGCPaused(100))
+
+		// a caller predating collection level GC control sends no ticket, it means
+		// "GC must not be paused anymore"
+		s.NoError(gc.Resume(ctx, -1, ""))
+
+		s.Zero(gc.pauseUntil.PauseUntil())
+		s.False(gc.GetStatus().IsPaused)
+		s.False(gc.collectionGCPaused(100))
+	})
+
+	s.Run("resume_with_ticket_keeps_other_pauses", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		s.NoError(gc.Pause(ctx, -1, "ticket-1", time.Minute))
+		s.NoError(gc.Pause(ctx, -1, "ticket-2", time.Minute))
+
+		s.NoError(gc.Resume(ctx, -1, "ticket-1"))
+		s.True(gc.GetStatus().IsPaused)
+
+		s.NoError(gc.Resume(ctx, -1, "ticket-2"))
+		s.False(gc.GetStatus().IsPaused)
+	})
+
+	s.Run("resume_with_ticket_keeps_other_collection_pauses", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		s.NoError(gc.Pause(ctx, 100, "ticket-1", time.Minute))
+		s.NoError(gc.Pause(ctx, 200, "ticket-2", time.Minute))
+
+		s.NoError(gc.Resume(ctx, 100, "ticket-1"))
+
+		s.False(gc.collectionGCPaused(100))
+		s.True(gc.collectionGCPaused(200))
+	})
+
 	s.Run("pause_before_until", func() {
 		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
 			cli:              s.cli,

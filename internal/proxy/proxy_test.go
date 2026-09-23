@@ -4970,3 +4970,9 @@ func TestProxy_IsDQLQueueFull(t *testing.T) {
 	}))
 	assert.True(t, node.IsDQLQueueFull())
 }
+
+func getMixCoordClient() *mocks.MockMixCoordClient {
+	mixc := &mocks.MockMixCoordClient{}
+	mixc.EXPECT().Close().Return(nil)
+	return mixc
+}

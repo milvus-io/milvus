@@ -227,6 +227,130 @@ func TestApplyL1RerankSortLimitWithOffsetRealignsSources(t *testing.T) {
 	}
 }
 
+// A public Search may fan out to several workers. L1 pagination applies to
+// each worker's merged candidates, not to the final distributed result.
+func TestApplyL1RerankLimitIsWorkerLocal(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		workers     [][]int
+		wantIDs     [][]int64
+		wantScores  [][]float32
+		wantSources [][]segmentSource
+	}{
+		{
+			name:       "two segments on one worker",
+			workers:    [][]int{{0, 1}},
+			wantIDs:    [][]int64{{3}},
+			wantScores: [][]float32{{0.7}},
+			wantSources: [][]segmentSource{
+				{{InputIdx: 0, SegOffset: 30, OriginalIdx: 1}},
+			},
+		},
+		{
+			name:       "one segment per worker",
+			workers:    [][]int{{0}, {1}},
+			wantIDs:    [][]int64{{1}, {2}},
+			wantScores: [][]float32{{0.9}, {0.8}},
+			wantSources: [][]segmentSource{
+				{{InputIdx: 0, SegOffset: 10, OriginalIdx: 0}},
+				{{InputIdx: 0, SegOffset: 20, OriginalIdx: 0}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withBoostScoreCheckedAllocator(t)
+			segDFs := []*chain.DataFrame{
+				makeL1SegmentDF(t, defaultAllocator, []int64{1, 3}, []float32{0.9, 0.7}, []int64{10, 30}),
+				makeL1SegmentDF(t, defaultAllocator, []int64{2, 4}, []float32{0.8, 0.6}, []int64{20, 40}),
+			}
+			defer segDFs[0].Release()
+			defer segDFs[1].Release()
+			repr, err := chain.ProtoChainToRepr(l1FunctionChainForTest(
+				&schemapb.FunctionChainOp{
+					Op:     chaintypes.OpTypeSort,
+					Inputs: []string{chaintypes.IDFieldName},
+					Params: map[string]*schemapb.FunctionParamValue{
+						"desc": {Value: &schemapb.FunctionParamValue_BoolValue{BoolValue: true}},
+					},
+				},
+				&schemapb.FunctionChainOp{
+					Op: chaintypes.OpTypeLimit,
+					Params: map[string]*schemapb.FunctionParamValue{
+						"limit":  {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 1}},
+						"offset": {Value: &schemapb.FunctionParamValue_Int64Value{Int64Value: 1}},
+					},
+				},
+			))
+			require.NoError(t, err)
+			for worker, segmentIndices := range tc.workers {
+				inputs := make([]*chain.DataFrame, 0, len(segmentIndices))
+				for _, idx := range segmentIndices {
+					inputs = append(inputs, segDFs[idx])
+				}
+				task := &SearchTask{ctx: t.Context()}
+				reduced, err := task.executeGoReduce(inputs, 4, nil, 0, 1)
+				require.NoError(t, err)
+				defer reduced.DF.Release()
+				reranked, err := task.applyL1Rerank(reduced, nil, nil, &preparedL1FunctionChain{chain: repr})
+				require.NoError(t, err)
+				defer reranked.DF.Release()
+				assertL1ChunkInt64Values(t, reranked.DF, chaintypes.IDFieldName, [][]int64{tc.wantIDs[worker]})
+				assertL1ChunkFloat32Values(t, reranked.DF, chaintypes.ScoreFieldName, [][]float32{tc.wantScores[worker]})
+				assert.Equal(t, tc.wantSources[worker], reranked.Sources[0])
+			}
+		})
+	}
+}
+
+func TestApplyL1RerankAfterGroupByCandidateSelection(t *testing.T) {
+	withBoostScoreCheckedAllocator(t)
+	// Segment-local GroupBy has already selected these representatives. Group
+	// 20 spans both segments; group 40 falls outside this worker's top three.
+	seg0 := buildTestDFWithGroupBy(defaultAllocator,
+		[][]int64{{1, 3}}, [][]float32{{0, -4}}, [][]int64{{10, 20}}, groupByCol)
+	seg1 := buildTestDFWithGroupBy(defaultAllocator,
+		[][]int64{{4, 5, 6}}, [][]float32{{-9, -16, -25}}, [][]int64{{20, 30, 40}}, groupByCol)
+	defer seg0.Release()
+	defer seg1.Release()
+
+	task := &SearchTask{ctx: t.Context()}
+	reduced, err := task.executeGoReduce([]*chain.DataFrame{seg0, seg1}, 3, &groupByOptions{
+		GroupSize: 1,
+		Columns:   []string{groupByCol},
+	}, 0, 1)
+	require.NoError(t, err)
+	defer reduced.DF.Release()
+	assertL1ChunkInt64Values(t, reduced.DF, chaintypes.IDFieldName, [][]int64{{1, 3, 5}})
+
+	// Only surviving representatives are materialized for L1. It must not
+	// reselect ID 4 from group 20 or bring back the discarded fourth group.
+	mockL1FieldReader(t, defaultAllocator, []int32{0, 0, 1}, []int64{0, 1, 1}, []int64{0, 20, 10})
+	repr, err := chain.ProtoChainToRepr(l1FunctionChainForTest(mapOpWithParamsForTest(
+		chaintypes.ScoreFieldName,
+		chainexpr.NumCombineFuncName,
+		map[string]*schemapb.FunctionParamValue{
+			chaintypes.NumCombineParamMode: stringParamForTest(chaintypes.NumCombineModeSum),
+		},
+		columnArgForTest("ts"),
+		columnArgForTest(chaintypes.IDFieldName),
+	)))
+	require.NoError(t, err)
+	reranked, err := task.applyL1Rerank(reduced, []*segments.SearchResult{{}, {}}, &segcore.SearchPlan{}, &preparedL1FunctionChain{
+		chain:     repr,
+		inputPlan: inputPlanForScalarFieldForTest(101, "ts", schemapb.DataType_Int64),
+	})
+	require.NoError(t, err)
+	defer reranked.DF.Release()
+	assertL1ChunkInt64Values(t, reranked.DF, chaintypes.IDFieldName, [][]int64{{3, 5, 1}})
+	assertL1ChunkFloat32Values(t, reranked.DF, chaintypes.ScoreFieldName, [][]float32{{23, 15, 1}})
+	assertL1ChunkInt64Values(t, reranked.DF, groupByCol, [][]int64{{20, 30, 10}})
+	assert.Equal(t, []segmentSource{
+		{InputIdx: 0, SegOffset: 1, OriginalIdx: 1},
+		{InputIdx: 1, SegOffset: 1, OriginalIdx: 1},
+		{InputIdx: 0, SegOffset: 0, OriginalIdx: 0},
+	}, reranked.Sources[0])
+}
+
 func TestApplyL1RerankReadsFieldsFromReducedSources(t *testing.T) {
 	pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
 	oldAllocator := defaultAllocator

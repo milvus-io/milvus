@@ -159,6 +159,8 @@ milvus_storage	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.c
 milvus_storage	internal/core/src/segcore/storagev2translator/AsyncLoadPipeline.h
 milvus_storage	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.cpp
 milvus_storage	internal/core/src/segcore/storagev2translator/GroupChunkTranslator.h
+milvus_storage	internal/core/src/segcore/storagev2translator/JsonStatsTranslator.cpp
+milvus_storage	internal/core/src/segcore/storagev2translator/JsonStatsTranslator.h
 milvus_storage	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.cpp
 milvus_storage	internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.h
 milvus_storage	internal/core/src/segcore/TextColumnCache.cpp

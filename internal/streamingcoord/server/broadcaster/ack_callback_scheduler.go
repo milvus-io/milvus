@@ -335,9 +335,24 @@ func runAckCallbackWithTrace(baseCtx context.Context, msg message.BroadcastMutab
 	return err
 }
 
-// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel.
+// sortByControlChannelTimeTick sorts the tasks by the time tick of the control channel,
+// breaking ties by broadcastID.
+//
+// The tick is the primary key: it is the WAL order on the single control channel, which
+// orders every pair of tasks that shares a resource key -- the ack scheduler's only
+// ordering obligation. But a message not broadcast to the control channel has no tick
+// (ControlChannelTimeTick returns 0), and two such tasks tie. sort.Slice is not stable:
+// its permutation of tied elements depends on the whole slice, which differs between
+// clusters (different recovery info), so tied tasks could be ordered differently on the
+// primary and on a secondary -- e.g. two ImportIDRange broadcasts for one job applying
+// different ID ranges. broadcastID is unique and travels with the replicated message, so
+// every cluster breaks the tie the same way.
 func sortByControlChannelTimeTick(tasks []*broadcastTask) {
 	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].ControlChannelTimeTick() < tasks[j].ControlChannelTimeTick()
+		ti, tj := tasks[i].ControlChannelTimeTick(), tasks[j].ControlChannelTimeTick()
+		if ti != tj {
+			return ti < tj
+		}
+		return tasks[i].Header().BroadcastID < tasks[j].Header().BroadcastID
 	})
 }

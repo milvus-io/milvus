@@ -55,6 +55,8 @@ set(MILVUS_TEST_FILES
         test_scorer.cpp
         test_sealed.cpp
         test_storage.cpp
+        test_s3_endpoint_auth.cpp
+        test_minio_endpoint_auth.cpp
         test_plugin_loader.cpp
         test_gcp_chunk_manager.cpp
         test_string_expr.cpp

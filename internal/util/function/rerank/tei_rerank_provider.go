@@ -93,9 +93,7 @@ func (provider *teiProvider) Rerank(ctx context.Context, query string, docs []st
 	if err != nil {
 		return nil, err
 	}
-	scores := make([]float32, len(docs))
-	for i, result := range *rerankResp {
-		scores[i] = result.Score
-	}
-	return scores, nil
+	return rerankScoresByIndex(len(docs), len(*rerankResp), func(i int) (int, float32) {
+		return (*rerankResp)[i].Index, (*rerankResp)[i].Score
+	})
 }
