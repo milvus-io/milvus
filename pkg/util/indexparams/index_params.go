@@ -35,7 +35,6 @@ const (
 	PQCodeBudgetRatioKey      = "pq_code_budget_gb_ratio"
 	NumBuildThreadRatioKey    = "num_build_thread_ratio"
 	SearchCacheBudgetRatioKey = "search_cache_budget_gb_ratio"
-	NumLoadThreadRatioKey     = "num_load_thread_ratio"
 	BeamWidthRatioKey         = "beamwidth_ratio"
 
 	MaxDegreeKey         = "max_degree"
@@ -44,11 +43,9 @@ const (
 	BuildDramBudgetKey   = "build_dram_budget_gb"
 	NumBuildThreadKey    = "num_build_thread"
 	SearchCacheBudgetKey = "search_cache_budget_gb"
-	NumLoadThreadKey     = "num_load_thread"
 	BeamWidthKey         = "beamwidth"
 
-	MaxLoadThread = 64
-	MaxBeamWidth  = 16
+	MaxBeamWidth = 16
 )
 
 var configableIndexParams = typeutil.NewSet[string]()
@@ -73,7 +70,6 @@ type BigDataIndexExtraParams struct {
 	PQCodeBudgetGBRatio      float64
 	BuildNumThreadsRatio     float64
 	SearchCacheBudgetGBRatio float64
-	LoadNumThreadRatio       float64
 	BeamWidthRatio           float64
 }
 
@@ -83,7 +79,6 @@ const (
 	DefaultPQCodeBudgetGBRatio      = 0.125
 	DefaultBuildNumThreadsRatio     = 1.0
 	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
 )
 
@@ -132,7 +127,6 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 	prepareRatio, ok := value[PrepareRatioKey]
 	if !ok {
 		ret.SearchCacheBudgetGBRatio = DefaultSearchCacheBudgetGBRatio
-		ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
 	} else {
 		valueMap2 := make(map[string]float64)
 		err = json.Unmarshal([]byte(prepareRatio), &valueMap2)
@@ -142,12 +136,6 @@ func NewBigDataExtraParamsFromMap(value map[string]string) (*BigDataIndexExtraPa
 		SearchCacheBudgetGBRatio, ok := valueMap2["search_cache_budget_gb"]
 		if ok && !setSearchCache {
 			ret.SearchCacheBudgetGBRatio = SearchCacheBudgetGBRatio
-		}
-		LoadNumThreadRatio, ok := valueMap2["num_threads"]
-		if !ok {
-			ret.LoadNumThreadRatio = DefaultLoadNumThreadRatio
-		} else {
-			ret.LoadNumThreadRatio = LoadNumThreadRatio
 		}
 	}
 	beamWidthRatioStr, ok := value[BeamWidthRatioKey]
@@ -324,7 +312,6 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 	}
 
 	var searchCacheBudgetGBRatio float64
-	var loadNumThreadRatio float64
 	var beamWidthRatio float64
 
 	if params.AutoIndexConfig.Enable.GetAsBool() {
@@ -333,14 +320,9 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 			return err
 		}
 		searchCacheBudgetGBRatio = extraParams.SearchCacheBudgetGBRatio
-		loadNumThreadRatio = extraParams.LoadNumThreadRatio
 		beamWidthRatio = extraParams.BeamWidthRatio
 	} else {
 		searchCacheBudgetGBRatio, err = strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
-		if err != nil {
-			return err
-		}
-		loadNumThreadRatio, err = strconv.ParseFloat(params.CommonCfg.LoadNumThreadRatio.GetValue(), 64)
 		if err != nil {
 			return err
 		}
@@ -352,12 +334,6 @@ func SetDiskIndexLoadParams(params *paramtable.ComponentParam, indexParams map[s
 
 	indexParams[SearchCacheBudgetKey] = fmt.Sprintf("%f",
 		float32(getRowDataSizeOfFloatVector(numRows, dim))*float32(searchCacheBudgetGBRatio)/(1<<30))
-
-	numLoadThread := int(float32(hardware.GetCPUNum()) * float32(loadNumThreadRatio))
-	if numLoadThread > MaxLoadThread {
-		numLoadThread = MaxLoadThread
-	}
-	indexParams[NumLoadThreadKey] = strconv.Itoa(numLoadThread)
 
 	beamWidth := int(float32(hardware.GetCPUNum()) * float32(beamWidthRatio))
 	if beamWidth > MaxBeamWidth {
