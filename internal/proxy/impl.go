@@ -4904,6 +4904,16 @@ func (node *Proxy) GetCompactionStateWithPlans(ctx context.Context, req *milvusp
 	}
 	req.CollectionId = 0
 	if req.GetCollectionName() != "" {
+		// GetCompactionPlansRequest predates collection-scoped lookup and has no
+		// privilege annotation. Reuse ManualCompactionRequest's collection
+		// compaction annotation for the collection-name mode introduced later.
+		if _, err := PrivilegeInterceptorWithMetaCache(node.GetMetaCache)(ctx, &milvuspb.ManualCompactionRequest{
+			DbName:         req.GetDbName(),
+			CollectionName: req.GetCollectionName(),
+		}); err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
 		if err := validateCollectionName(req.GetCollectionName()); err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
