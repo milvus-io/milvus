@@ -1773,10 +1773,14 @@ func TestCreateImportJobFromAckBackupListingError(t *testing.T) {
 	s.stateCode.Store(commonpb.StateCode_Healthy)
 	listing := mockey.Mock(ListBinlogImportRequestFiles).Return([]*internalpb.ImportFile(nil), merr.ErrIoKeyNotFound).Build()
 	defer listing.UnPatch()
-	resp, err := s.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
-		Files:   []*internalpb.ImportFile{{Paths: []string{"root/insert_log", "root/delta_log"}}},
-		Options: importutilv2.Options{{Key: importutilv2.BackupFlag, Value: "true"}},
-	}, nil)
+	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{
+			Files:   []*msgpb.ImportFile{{Paths: []string{"root/insert_log", "root/delta_log"}}},
+			Options: map[string]string{importutilv2.BackupFlag: "true"},
+		}).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
+	resp, err := s.createImportJobFromAck(context.Background(), message.BroadcastResultImportMessageV1{
+		Message: message.MustAsBroadcastImportMessageV1(wal),
+	})
 	require.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrIoKeyNotFound)
 	require.Empty(t, resp.GetJobID(), "failed source listing must not allocate a job")
 }
@@ -1828,22 +1832,28 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 	allocatorPatch := mockey.Mock((*ackAllocator).AllocN).Return(int64(100), int64(110), nil).Build()
 	defer allocatorPatch.UnPatch()
 	var saved ImportJob
+	var saveErr error
 	metaPatch := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
+		if saveErr != nil {
+			return saveErr
+		}
 		saved = job
 		return nil
 	}).Build()
 	defer metaPatch.UnPatch()
 	server := &Server{handler: &ackHandler{}, allocator: &ackAllocator{}, importMeta: &ackMeta{}}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	for _, mode := range []string{"valid", "preparation", "shared_without_preparation", "inline_legacy", "inline_manifest", "lost", "unknown", "mixed_paths", "nil_file", "binding_failure", "bad_timeout"} {
+	for _, mode := range []string{"valid", "preparation", "shared_without_preparation", "inline_legacy", "inline_manifest", "lost", "unknown", "mixed_paths", "nil_file", "binding_failure", "nil_descriptor", "bad_timeout"} {
 		t.Run(mode, func(t *testing.T) {
-			req := &internalpb.ImportRequestInternal{
+			saved = nil
+			body := &msgpb.ImportMsg{
 				JobID: 12, CollectionID: 1, PartitionIDs: []int64{10},
-				Options: snapshotImportTestOptions(), Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
-					Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1), SourceCommitTimestamp: 300,
-				}}},
+				Schema: snapshotImportTestSchema(), Files: []*msgpb.ImportFile{{}},
+				Options: funcutil.KeyValuePair2Map(snapshotImportTestOptions()),
 			}
-			var bindingErr error
+			source := &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1), SourceCommitTimestamp: 300,
+			}
 			switch mode {
 			case "preparation":
 				metadata, err := proto.Marshal(&datapb.SnapshotMetadata{
@@ -1853,60 +1863,69 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 					Layout:        datapb.SnapshotLayout_SnapshotLayoutReferenced,
 				})
 				require.NoError(t, err)
-				req.Files[0].SnapshotSource = &internalpb.SnapshotImportSource{
+				source = &internalpb.SnapshotImportSource{
 					Version: importutilv2.SnapshotPreparationVersion, SnapshotMetadata: metadata,
 				}
-				req.Options = append(req.Options,
-					&commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
-					&commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"})
+				body.Options[importutilv2.SnapshotSourceURI] = "s3://source/root/snapshots/1/metadata/2.json"
+				body.Options[importutilv2.SnapshotLayout] = "referenced"
 			case "inline_legacy":
-				req.Files[0].SnapshotSource.LegacyL0Deltalogs = []string{"root/delete"}
+				source.LegacyL0Deltalogs = []string{"root/delete"}
 			case "inline_manifest":
-				req.Files[0].SnapshotSource.ManifestL0Deltalogs = []string{"root/delete"}
+				source.ManifestL0Deltalogs = []string{"root/delete"}
 			case "shared_without_preparation":
-				req.Files[0].SnapshotSource.Version = 5
-				req.Files[0].SnapshotSource.SourceChannel = "source"
-				req.Files[0].SnapshotSource.SourcePartitionId = 10
+				source.Version = 5
+				source.SourceChannel = "source"
+				source.SourcePartitionId = 10
 			case "lost":
-				req.Files[0].SnapshotSource = nil
+				source = nil
 			case "unknown":
-				req.Files[0].SnapshotSource.Version = 99
+				source.Version = 99
 			case "mixed_paths":
-				req.Files[0].Paths = []string{"legacy"}
+				body.Files[0].Paths = []string{"legacy"}
 			case "nil_file":
-				req.Files[0] = nil
+				body.Files[0], source = nil, nil
 			case "binding_failure":
-				bindingErr = merr.WrapErrServiceInternalMsg("descriptor cardinality mismatch")
-				req.Files[0].SnapshotSource.Version = 99
+				source.Version = 99
 			case "bad_timeout":
-				req.Options = append(req.Options, &commonpb.KeyValuePair{Key: "timeout", Value: "invalid"})
+				body.Options["timeout"] = "invalid"
 			}
-			resp, err := server.createImportJobFromAck(context.Background(), req, bindingErr)
-			require.NoError(t, merr.CheckRPCCall(resp, err), "a malformed durable source must not retry the ACK forever")
-			require.Equal(t, "12", resp.JobID)
-			if mode != "nil_file" && mode != "binding_failure" {
-				var sources []*internalpb.SnapshotImportSource
-				if source := req.Files[0].SnapshotSource; source != nil {
-					sources = []*internalpb.SnapshotImportSource{source}
-				}
-				wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
-					SnapshotSources: sources,
-				}).WithBody(&msgpb.ImportMsg{
-					JobID: 12, CollectionID: 1, Schema: snapshotImportTestSchema(), Files: []*msgpb.ImportFile{{Paths: req.Files[0].Paths}},
-					Options: funcutil.KeyValuePair2Map(req.Options),
-				}).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
-				callback := &DDLCallbacks{Server: server}
-				require.NoError(t, callback.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
-					Message: message.MustAsBroadcastImportMessageV1(wal), Results: map[string]*message.AppendResult{"target_v1": {TimeTick: 100}},
-				}))
+			var sources []*internalpb.SnapshotImportSource
+			if source != nil {
+				sources = []*internalpb.SnapshotImportSource{source}
 			}
+			if mode == "binding_failure" {
+				sources = append(sources, source)
+			}
+			wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
+				SnapshotSources: sources,
+			}).WithBody(body).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
+			result := message.BroadcastResultImportMessageV1{
+				Message: message.MustAsBroadcastImportMessageV1(wal),
+				Results: map[string]*message.AppendResult{"target_v1": {TimeTick: 100}},
+			}
+			if mode == "nil_descriptor" {
+				// Protobuf encodes a nil repeated message as an empty descriptor;
+				// inject the malformed decoded header at the binding boundary.
+				result.Message.Header().SnapshotSources[0] = nil
+			}
+			callback := &DDLCallbacks{Server: server}
+			if mode == "binding_failure" {
+				saveErr = merr.ErrServiceUnavailable
+				require.ErrorIs(t, callback.importV1AckCallback(context.Background(), result), saveErr,
+					"even a terminal source failure must retry until the job is persisted")
+				require.Nil(t, saved)
+				saveErr = nil
+			}
+			require.NoError(t, callback.importV1AckCallback(context.Background(), result),
+				"a malformed durable source must not retry the ACK forever")
 			require.NotNil(t, saved)
+			require.Equal(t, int64(12), saved.GetJobID())
 			if mode == "valid" || mode == "preparation" {
 				require.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
 				require.Empty(t, saved.GetSnapshotL0Sources(), "L0 inventories are produced only by Pending preparation")
 				if mode == "preparation" {
 					require.True(t, importutilv2.IsSnapshotPreparation(saved.GetFiles()))
-					require.True(t, proto.Equal(req.Files[0].SnapshotSource, saved.GetFiles()[0].GetSnapshotSource()))
+					require.True(t, proto.Equal(source, saved.GetFiles()[0].GetSnapshotSource()))
 				} else {
 					require.EqualValues(t, 300, saved.GetFiles()[0].GetSnapshotSource().GetSourceCommitTimestamp())
 				}
@@ -1919,8 +1938,11 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 				if mode == "shared_without_preparation" {
 					require.Contains(t, saved.GetReason(), "lost its shared L0 inventory")
 				}
-				if bindingErr != nil {
-					require.Equal(t, bindingErr.Error(), saved.GetReason(), "binding errors take precedence over plan validation")
+				if mode == "binding_failure" {
+					require.Contains(t, saved.GetReason(), "descriptor/file cardinality mismatch", "binding errors take precedence over plan validation")
+				}
+				if mode == "nil_descriptor" {
+					require.Contains(t, saved.GetReason(), "nil descriptor")
 				}
 				require.NotEqual(t, uint64(math.MaxUint64), saved.GetCleanupTs())
 			}
