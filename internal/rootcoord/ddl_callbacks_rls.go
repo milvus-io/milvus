@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
@@ -87,7 +86,7 @@ func broadcastAlterRLSPolicy(ctx context.Context, broadcaster broadcaster.Broadc
 				Policy: marshalRLSPolicyMessage(policy),
 			},
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err := broadcaster.Broadcast(ctx, msg)
 	return err
@@ -115,7 +114,7 @@ func (c *Core) broadcastDropRLSPolicy(ctx context.Context, req *rlsutil.DropRowP
 				PolicyName: policy.PolicyName,
 			},
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -153,7 +152,7 @@ func broadcastAlterRLSPrincipal(ctx context.Context, broadcaster broadcaster.Bro
 				Principal: principalMessage,
 			},
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
@@ -185,7 +184,7 @@ func (c *Core) broadcastDeleteRLSPrincipalTags(ctx context.Context, req *rlsutil
 				PrincipalName: principal.PrincipalName,
 			},
 		}).
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithControlChannelBroadcast().
 		MustBuildBroadcast()
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
