@@ -13,6 +13,7 @@ expr:
 	| StructFieldIdentifier                                                                                 # StructField
 	| StructIndexFieldIdentifier                                                                            # StructIndexField
 	| StructSubFieldIdentifier                                                                              # StructSubField
+	| SequenceStepFieldIdentifier                                                                           # SequenceStepField
 	| LBRACE Identifier RBRACE                                                                              # TemplateVariable
 	| '(' expr ')'											                                                # Parens
 	| '[' expr (',' expr)* ','? ']'                                                                         # Array
@@ -28,6 +29,7 @@ expr:
 	| ElementFilter'('Identifier',' expr')'                                	                                # ElementFilter
 	| op=(MATCH_ALL | MATCH_ANY) '(' Identifier ',' expr ')'                                                 # MatchSimple
 	| op=(MATCH_LEAST | MATCH_MOST | MATCH_EXACT) '(' Identifier ',' expr ',' THRESHOLD ASSIGN IntegerConstant ')'  # MatchThreshold
+	| SEQUENCEMATCH '(' Identifier ',' sequenceOrder ',' sequenceStep (',' sequenceStep)+ ')'                    # SequenceMatch
 	| expr POW expr											                                                # Power
 	| op = (ADD | SUB | BNOT | NOT) expr					                                                # Unary
 //	| '(' typeName ')' expr									                                                # Cast
@@ -59,6 +61,15 @@ expr:
 textMatchOption:
 	MINIMUM_SHOULD_MATCH ASSIGN IntegerConstant;
 
+sequenceOrder:
+	Identifier '(' StructSubFieldIdentifier ',' StructSubFieldIdentifier ')';
+
+sequenceStep:
+	Identifier '(' expr (',' sequenceWindow)? ')';
+
+sequenceWindow:
+	Identifier '(' StructSubFieldIdentifier ',' SequenceStepFieldIdentifier ',' IntegerConstant ',' IntegerConstant ')';
+
 LBRACE: '{';
 RBRACE: '}';
 
@@ -80,6 +91,7 @@ MATCH_ANY: 'match_any' | 'MATCH_ANY';
 MATCH_LEAST: 'match_least' | 'MATCH_LEAST';
 MATCH_MOST: 'match_most' | 'MATCH_MOST';
 MATCH_EXACT: 'match_exact' | 'MATCH_EXACT';
+SEQUENCEMATCH: 'sequence_match' | 'SEQUENCE_MATCH';
 INTERVAL: 'interval' | 'INTERVAL';
 ISO: 'iso' | 'ISO';
 MINIMUM_SHOULD_MATCH: 'minimum_should_match' | 'MINIMUM_SHOULD_MATCH';
@@ -153,6 +165,7 @@ JSONIdentifier: (Identifier | Meta)('[' (StringLiteral | RawStringLiteral | Deci
 StructIndexFieldIdentifier: Identifier '[' DecimalConstant ']' '[' Identifier ']';
 StructFieldIdentifier: Identifier '[' Identifier ']';
 StructSubFieldIdentifier: '$[' Identifier ']';
+SequenceStepFieldIdentifier: '@' DecimalConstant '[' Identifier ']';
 
 fragment EncodingPrefix: 'u8' | 'u' | 'U' | 'L';
 

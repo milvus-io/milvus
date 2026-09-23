@@ -329,6 +329,13 @@ func fillExpressionValue(
 		return nil
 	case *planpb.Expr_MatchExpr:
 		return fillExpressionValue(e.MatchExpr.GetPredicate(), templateValues, ctx)
+	case *planpb.Expr_SequenceMatchExpr:
+		for _, step := range e.SequenceMatchExpr.GetSteps() {
+			if err := fillExpressionValue(step.GetPredicate(), templateValues, ctx); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *planpb.Expr_CallExpr:
 		// Only the deferred membership-filter calls carry IsTemplate today; once
 		// the template value is known, the client-built blob is validated and

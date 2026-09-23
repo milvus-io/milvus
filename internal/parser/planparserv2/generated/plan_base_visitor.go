@@ -79,6 +79,10 @@ func (v *BasePlanVisitor) VisitRange(ctx *RangeContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
+func (v *BasePlanVisitor) VisitSequenceStepField(ctx *SequenceStepFieldContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
 func (v *BasePlanVisitor) VisitSTIsValid(ctx *STIsValidContext) interface{} {
 	return v.VisitChildren(ctx)
 }
@@ -120,6 +124,10 @@ func (v *BasePlanVisitor) VisitSpatialBinary(ctx *SpatialBinaryContext) interfac
 }
 
 func (v *BasePlanVisitor) VisitParens(ctx *ParensContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSequenceMatch(ctx *SequenceMatchContext) interface{} {
 	return v.VisitChildren(ctx)
 }
 
@@ -220,5 +228,17 @@ func (v *BasePlanVisitor) VisitPower(ctx *PowerContext) interface{} {
 }
 
 func (v *BasePlanVisitor) VisitTextMatchOption(ctx *TextMatchOptionContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSequenceOrder(ctx *SequenceOrderContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSequenceStep(ctx *SequenceStepContext) interface{} {
+	return v.VisitChildren(ctx)
+}
+
+func (v *BasePlanVisitor) VisitSequenceWindow(ctx *SequenceWindowContext) interface{} {
 	return v.VisitChildren(ctx)
 }

@@ -50,10 +50,13 @@ type ParserVisitor struct {
 	// currentStructArrayField stores the struct array field name while processing
 	// ElementFilter or MATCH_* predicates.
 	currentStructArrayField string
+	// sequenceStepIndex is -1 outside SEQUENCE_MATCH. While parsing a step it
+	// limits @N[field] references to steps already bound by the sequence.
+	sequenceStepIndex int
 }
 
 func NewParserVisitor(schema *typeutil.SchemaHelper, args *ParserVisitorArgs) *ParserVisitor {
-	return &ParserVisitor{schema: schema, args: args}
+	return &ParserVisitor{schema: schema, args: args, sequenceStepIndex: -1}
 }
 
 // VisitParens unpack the parentheses.
@@ -551,7 +554,13 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		return ret
 	}
 
-	expr, err := HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
+	expr, handled, err := v.sequenceDirectCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
+	if err != nil {
+		return err
+	}
+	if !handled {
+		expr, err = HandleCompare(ctx.GetOp().GetTokenType(), leftExpr, rightExpr)
+	}
 	if err != nil {
 		return err
 	}
@@ -560,6 +569,32 @@ func (v *ParserVisitor) VisitEquality(ctx *parser.EqualityContext) interface{} {
 		expr:     expr,
 		dataType: schemapb.DataType_Bool,
 	}
+}
+
+// sequenceDirectCompare keeps a historical @N[field] reference attached to the
+// existing CompareExpr column operand. Normal field-to-field comparison rejects
+// ARRAY storage columns even when they represent StructArray elements.
+func (v *ParserVisitor) sequenceDirectCompare(op int, left, right *ExprWithType) (*planpb.Expr, bool, error) {
+	if v.sequenceStepIndex < 0 || left == nil || right == nil {
+		return nil, false, nil
+	}
+	leftInfo, rightInfo := toColumnInfo(left), toColumnInfo(right)
+	if leftInfo == nil || rightInfo == nil {
+		return nil, false, nil
+	}
+	if leftInfo.SequenceStepIndex == nil && rightInfo.SequenceStepIndex == nil {
+		return nil, false, nil
+	}
+	if op != parser.PlanParserEQ && op != parser.PlanParserNE {
+		return nil, true, merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH only supports == and != for cross-step field comparisons")
+	}
+	if !leftInfo.GetIsElementLevel() || !rightInfo.GetIsElementLevel() ||
+		left.dataType != right.dataType || !canBeCompared(left, right) {
+		return nil, true, merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH cross-step comparison requires compatible element fields")
+	}
+	return &planpb.Expr{Expr: &planpb.Expr_CompareExpr{CompareExpr: &planpb.CompareExpr{
+		LeftColumnInfo: leftInfo, RightColumnInfo: rightInfo, Op: cmpOpMap[op],
+	}}}, true, nil
 }
 
 // VisitRelational translates expr to range/compare plan.
@@ -3304,6 +3339,210 @@ func (v *ParserVisitor) VisitStructSubField(ctx *parser.StructSubFieldContext) i
 		},
 		dataType:      elementType, // Expression evaluates to element type
 		nodeDependent: true,
+	}
+}
+
+// VisitSequenceStepField resolves @N[field] to the same physical StructArray
+// child as $[field], with an additional binding index for the sequence engine.
+func (v *ParserVisitor) VisitSequenceStepField(ctx *parser.SequenceStepFieldContext) interface{} {
+	if v.sequenceStepIndex < 0 || v.currentStructArrayField == "" {
+		return merr.WrapErrParameterInvalidMsg("@N[field] is only valid inside a SEQUENCE_MATCH step")
+	}
+	index, fieldName, err := parseSequenceStepField(ctx.SequenceStepFieldIdentifier().GetText())
+	if err != nil {
+		return err
+	}
+	if index >= uint64(v.sequenceStepIndex) {
+		return merr.WrapErrParameterInvalidMsg("@%d references the current or a future SEQUENCE_MATCH step", index)
+	}
+	info, err := v.getColumnInfoFromStructSubField("$[" + fieldName + "]")
+	if err != nil {
+		return err
+	}
+	stepIndex := uint32(index)
+	info.DataType = schemapb.DataType_Array
+	info.SequenceStepIndex = &stepIndex
+	return &ExprWithType{
+		expr:          &planpb.Expr{Expr: &planpb.Expr_ColumnExpr{ColumnExpr: &planpb.ColumnExpr{Info: info}}},
+		dataType:      info.ElementType,
+		nodeDependent: true,
+	}
+}
+
+func parseSequenceStepField(token string) (uint64, string, error) {
+	open := strings.IndexByte(token, '[')
+	if len(token) < 5 || token[0] != '@' || open < 2 || token[len(token)-1] != ']' {
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid SEQUENCE_MATCH step reference: %s", token)
+	}
+	index, err := strconv.ParseUint(token[1:open], 10, 32)
+	if err != nil {
+		return 0, "", merr.WrapErrParameterInvalidMsg("invalid SEQUENCE_MATCH step index: %s", token)
+	}
+	return index, token[open+1 : len(token)-1], nil
+}
+
+// VisitSequenceMatch builds a parent-row boolean predicate. Step predicates
+// stay element-level and their historical references retain the step index in
+// ColumnInfo until the sequence engine binds actual element offsets.
+func (v *ParserVisitor) VisitSequenceMatch(ctx *parser.SequenceMatchContext) interface{} {
+	if v.currentStructArrayField != "" || v.sequenceStepIndex >= 0 {
+		return merr.WrapErrParameterInvalidMsg("nested SEQUENCE_MATCH is not supported")
+	}
+	structName := ctx.Identifier().GetText()
+	if v.schema.GetStructArrayFieldFromName(structName) == nil {
+		return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH field %s must be a StructArray", structName)
+	}
+	steps := ctx.AllSequenceStep()
+	if len(steps) < 2 || len(steps) > 5 {
+		return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH requires 2 to 5 STEP clauses")
+	}
+	if !strings.EqualFold(ctx.SequenceOrder().Identifier().GetText(), "order_by") {
+		return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH requires ORDER_BY(...) before STEP clauses")
+	}
+	v.currentStructArrayField = structName
+	defer func() {
+		v.currentStructArrayField = ""
+		v.sequenceStepIndex = -1
+	}()
+
+	orderFields := ctx.SequenceOrder().AllStructSubFieldIdentifier()
+	timeInfo, err := v.getColumnInfoFromStructSubField(orderFields[0].GetText())
+	if err != nil {
+		return err
+	}
+	if !typeutil.IsIntegerType(timeInfo.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH ORDER_BY time field must be integer milliseconds")
+	}
+	tieInfo, err := v.getColumnInfoFromStructSubField(orderFields[1].GetText())
+	if err != nil {
+		return err
+	}
+	if !typeutil.IsIntegerType(tieInfo.GetDataType()) && !typeutil.IsStringType(tieInfo.GetDataType()) {
+		return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH ORDER_BY tie field must be integer or string")
+	}
+
+	result := &planpb.SequenceMatchExpr{
+		StructName: structName, OrderTimeFieldId: timeInfo.FieldId, TieFieldId: tieInfo.FieldId,
+	}
+	var isTemplate bool
+	for index, stepCtx := range steps {
+		if !strings.EqualFold(stepCtx.Identifier().GetText(), "step") {
+			return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH expects STEP(...) clause")
+		}
+		v.sequenceStepIndex = index
+		parsed := stepCtx.Expr().Accept(v)
+		if err := getError(parsed); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid SEQUENCE_MATCH STEP %d: %s", index, err)
+		}
+		stepExpr := getExpr(parsed)
+		if stepExpr == nil || stepExpr.dataType != schemapb.DataType_Bool {
+			return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH STEP %d predicate must be boolean", index)
+		}
+		if err := validateSequencePredicate(stepExpr.expr); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid SEQUENCE_MATCH STEP %d: %s", index, err)
+		}
+		step := &planpb.SequenceStep{Predicate: stepExpr.expr}
+		windowCtx := stepCtx.SequenceWindow()
+		if index == 0 && windowCtx != nil {
+			return merr.WrapErrParameterInvalidMsg("first SEQUENCE_MATCH STEP cannot have WITHIN")
+		}
+		if index > 0 && windowCtx == nil {
+			return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH STEP %d requires WITHIN", index)
+		}
+		if windowCtx != nil {
+			if !strings.EqualFold(windowCtx.Identifier().GetText(), "within") {
+				return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH STEP expects WITHIN(...) time constraint")
+			}
+			window, err := v.parseSequenceWindow(windowCtx)
+			if err != nil {
+				return err
+			}
+			step.Window = window
+		}
+		result.Steps = append(result.Steps, step)
+		isTemplate = isTemplate || stepExpr.expr.GetIsTemplate()
+	}
+	return &ExprWithType{
+		expr: &planpb.Expr{
+			Expr:       &planpb.Expr_SequenceMatchExpr{SequenceMatchExpr: result},
+			IsTemplate: isTemplate,
+		},
+		dataType: schemapb.DataType_Bool,
+	}
+}
+
+func (v *ParserVisitor) parseSequenceWindow(ctx parser.ISequenceWindowContext) (*planpb.SequenceWindow, error) {
+	currentInfo, err := v.getColumnInfoFromStructSubField(ctx.StructSubFieldIdentifier().GetText())
+	if err != nil {
+		return nil, err
+	}
+	priorIndex, priorName, err := parseSequenceStepField(ctx.SequenceStepFieldIdentifier().GetText())
+	if err != nil {
+		return nil, err
+	}
+	if priorIndex >= uint64(v.sequenceStepIndex) {
+		return nil, merr.WrapErrParameterInvalidMsg("WITHIN references the current or a future SEQUENCE_MATCH step")
+	}
+	priorInfo, err := v.getColumnInfoFromStructSubField("$[" + priorName + "]")
+	if err != nil {
+		return nil, err
+	}
+	if !typeutil.IsIntegerType(currentInfo.GetDataType()) || !typeutil.IsIntegerType(priorInfo.GetDataType()) {
+		return nil, merr.WrapErrParameterInvalidMsg("WITHIN fields must be integer milliseconds")
+	}
+	minMs, err := strconv.ParseInt(ctx.IntegerConstant(0).GetText(), 0, 64)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid WITHIN minimum: %s", err)
+	}
+	maxMs, err := strconv.ParseInt(ctx.IntegerConstant(1).GetText(), 0, 64)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("invalid WITHIN maximum: %s", err)
+	}
+	if minMs < 0 || maxMs < minMs {
+		return nil, merr.WrapErrParameterInvalidMsg("WITHIN requires 0 <= min_ms <= max_ms")
+	}
+	return &planpb.SequenceWindow{
+		CurrentFieldId: currentInfo.FieldId, PriorStepIndex: uint32(priorIndex),
+		PriorFieldId: priorInfo.FieldId, MinMs: minMs, MaxMs: maxMs,
+	}, nil
+}
+
+func validateSequencePredicate(expr *planpb.Expr) error {
+	if expr == nil {
+		return merr.WrapErrParameterInvalidMsg("missing element predicate")
+	}
+	switch e := expr.GetExpr().(type) {
+	case *planpb.Expr_UnaryRangeExpr:
+		if e.UnaryRangeExpr.GetColumnInfo() == nil || !e.UnaryRangeExpr.GetColumnInfo().GetIsElementLevel() ||
+			e.UnaryRangeExpr.GetColumnInfo().SequenceStepIndex != nil {
+			return merr.WrapErrParameterInvalidMsg("unary predicate must use a current-step element field")
+		}
+		switch e.UnaryRangeExpr.GetOp() {
+		case planpb.OpType_Equal, planpb.OpType_NotEqual,
+			planpb.OpType_GreaterThan, planpb.OpType_GreaterEqual,
+			planpb.OpType_LessThan, planpb.OpType_LessEqual:
+		default:
+			return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH only supports scalar comparison predicates")
+		}
+		return nil
+	case *planpb.Expr_CompareExpr:
+		left, right := e.CompareExpr.GetLeftColumnInfo(), e.CompareExpr.GetRightColumnInfo()
+		if left == nil || right == nil || !left.GetIsElementLevel() || !right.GetIsElementLevel() ||
+			(left.SequenceStepIndex == nil && right.SequenceStepIndex == nil) ||
+			(e.CompareExpr.GetOp() != planpb.OpType_Equal && e.CompareExpr.GetOp() != planpb.OpType_NotEqual) {
+			return merr.WrapErrParameterInvalidMsg("cross-step comparison requires element fields and == or !=")
+		}
+		return nil
+	case *planpb.Expr_BinaryExpr:
+		if e.BinaryExpr.GetOp() != planpb.BinaryExpr_LogicalAnd && e.BinaryExpr.GetOp() != planpb.BinaryExpr_LogicalOr {
+			return merr.WrapErrParameterInvalidMsg("SEQUENCE_MATCH only supports AND/OR predicates")
+		}
+		if err := validateSequencePredicate(e.BinaryExpr.GetLeft()); err != nil {
+			return err
+		}
+		return validateSequencePredicate(e.BinaryExpr.GetRight())
+	default:
+		return merr.WrapErrParameterInvalidMsg("unsupported SEQUENCE_MATCH predicate expression")
 	}
 }
 

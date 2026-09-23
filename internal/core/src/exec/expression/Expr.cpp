@@ -39,6 +39,7 @@
 #include "exec/expression/LogicalBinaryExpr.h"
 #include "exec/expression/LogicalUnaryExpr.h"
 #include "exec/expression/MatchExpr.h"
+#include "exec/expression/SequenceMatchExpr.h"
 #include "exec/expression/MembershipFilterExpr.h"
 #include "exec/expression/NullExpr.h"
 #include "exec/expression/TermExpr.h"
@@ -462,6 +463,15 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+    } else if (auto sequence_expr = std::dynamic_pointer_cast<
+                   const milvus::expr::SequenceMatchExpr>(expr)) {
+        result = std::make_shared<PhySequenceMatchFilterExpr>(
+            std::move(compiled_inputs),
+            sequence_expr,
+            op_ctx,
+            context->get_segment(),
+            context->get_active_count(),
+            context->query_config()->get_expr_batch_size());
     } else if (auto bloom_filter_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BloomFilterExpr>(expr)) {
         result = std::make_shared<PhyBloomFilterExpr>(
@@ -732,6 +742,7 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     std::vector<size_t> array_expr;
     std::vector<size_t> array_like_expr;
     std::vector<size_t> compare_expr;
+    std::vector<size_t> sequence_expr;
     std::vector<size_t> other_expr;
     // Index-less membership probes (bloom_match, roaring_match).
     std::vector<size_t> membership_expr;
@@ -755,6 +766,14 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
         }
         if (input->name() == "PhyGISRefineConjunctExpr") {
             heavy_conjunct_expr.push_back(i);
+            has_heavy_operation = true;
+            continue;
+        }
+        // Sequence matching reads and orders multiple array elements per
+        // surviving parent row. Keep it after indexable/scalar siblings so it
+        // consumes the active-row bitmap produced by the conjunction.
+        if (input->name() == "PhySequenceMatchFilterExpr") {
+            sequence_expr.push_back(i);
             has_heavy_operation = true;
             continue;
         }
@@ -900,7 +919,8 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     // 11. JSON column expressions (expensive to evaluate)
     // 12. JSON like expression (more expensive than common json compare)
     // 13. Heavy conjunct expressions (conjunctions with heavy operations)
-    // 14. Compare filter expressions (most expensive, comparing two columns)
+    // 14. Compare filter expressions (comparing two columns)
+    // 15. Sequence matching (orders and binds multiple elements per row)
     reorder.insert(reorder.end(), numeric_expr.begin(), numeric_expr.end());
     reorder.insert(reorder.end(), indexed_expr.begin(), indexed_expr.end());
     reorder.insert(reorder.end(), string_expr.begin(), string_expr.end());
@@ -926,6 +946,7 @@ ReorderConjunctExpr(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
     reorder.insert(
         reorder.end(), heavy_conjunct_expr.begin(), heavy_conjunct_expr.end());
     reorder.insert(reorder.end(), compare_expr.begin(), compare_expr.end());
+    reorder.insert(reorder.end(), sequence_expr.begin(), sequence_expr.end());
 
     size_t expected_size = inputs.size() + (has_batch_like ? 1 : 0);
     AssertInfo(reorder.size() == expected_size,

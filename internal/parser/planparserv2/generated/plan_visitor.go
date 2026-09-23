@@ -61,6 +61,9 @@ type PlanVisitor interface {
 	// Visit a parse tree produced by PlanParser#Range.
 	VisitRange(ctx *RangeContext) interface{}
 
+	// Visit a parse tree produced by PlanParser#SequenceStepField.
+	VisitSequenceStepField(ctx *SequenceStepFieldContext) interface{}
+
 	// Visit a parse tree produced by PlanParser#STIsValid.
 	VisitSTIsValid(ctx *STIsValidContext) interface{}
 
@@ -93,6 +96,9 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#Parens.
 	VisitParens(ctx *ParensContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#SequenceMatch.
+	VisitSequenceMatch(ctx *SequenceMatchContext) interface{}
 
 	// Visit a parse tree produced by PlanParser#JSONContainsAll.
 	VisitJSONContainsAll(ctx *JSONContainsAllContext) interface{}
@@ -168,4 +174,13 @@ type PlanVisitor interface {
 
 	// Visit a parse tree produced by PlanParser#textMatchOption.
 	VisitTextMatchOption(ctx *TextMatchOptionContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#sequenceOrder.
+	VisitSequenceOrder(ctx *SequenceOrderContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#sequenceStep.
+	VisitSequenceStep(ctx *SequenceStepContext) interface{}
+
+	// Visit a parse tree produced by PlanParser#sequenceWindow.
+	VisitSequenceWindow(ctx *SequenceWindowContext) interface{}
 }

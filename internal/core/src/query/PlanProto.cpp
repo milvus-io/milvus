@@ -1158,6 +1158,15 @@ ExtractBloomFilterBlobs(planpb::Expr* expr, BloomBlobOwners* owners) {
             }
             return;
         }
+        case planpb::Expr::kSequenceMatchExpr: {
+            auto* sequence = expr->mutable_sequence_match_expr();
+            for (auto& step : *sequence->mutable_steps()) {
+                if (step.has_predicate()) {
+                    ExtractBloomFilterBlobs(step.mutable_predicate(), owners);
+                }
+            }
+            return;
+        }
         default:
             return;
     }
@@ -1398,6 +1407,143 @@ ProtoParser::ParseMatchExprs(const proto::plan::MatchExpr& expr_pb) {
     auto predicate = this->ParseExprs(expr_pb.predicate());
     return std::make_shared<expr::MatchExpr>(
         struct_name, match_type, count, predicate);
+}
+
+expr::TypedExprPtr
+ProtoParser::ParseSequenceMatchExprs(
+    const proto::plan::SequenceMatchExpr& expr_pb) {
+    AssertInfo(expr_pb.steps_size() >= 2 && expr_pb.steps_size() <= 5,
+               "SEQUENCE_MATCH requires 2 to 5 steps");
+    schema->GetFirstArrayFieldInStruct(expr_pb.struct_name());
+    const auto validate_field = [&](int64_t raw_id) -> DataType {
+        const auto& field = (*schema)[FieldId(raw_id)];
+        const auto owner = GetStructNameForArrayField(field);
+        AssertInfo(owner.has_value() && *owner == expr_pb.struct_name() &&
+                       field.get_data_type() == DataType::ARRAY,
+                   "SEQUENCE_MATCH field {} is not in struct {}",
+                   raw_id,
+                   expr_pb.struct_name());
+        const auto type = field.get_element_type();
+        AssertInfo(type == DataType::BOOL || type == DataType::INT8 ||
+                       type == DataType::INT16 || type == DataType::INT32 ||
+                       type == DataType::INT64 || type == DataType::FLOAT ||
+                       type == DataType::DOUBLE || type == DataType::VARCHAR ||
+                       type == DataType::TEXT || type == DataType::TIMESTAMPTZ,
+                   "unsupported SEQUENCE_MATCH field type");
+        return type;
+    };
+    const auto is_time = [](DataType type) {
+        return type == DataType::INT8 || type == DataType::INT16 ||
+               type == DataType::INT32 || type == DataType::INT64;
+    };
+    AssertInfo(is_time(validate_field(expr_pb.order_time_field_id())),
+               "SEQUENCE_MATCH ordering time must be a signed integer");
+    const auto tie_type = validate_field(expr_pb.tie_field_id());
+    AssertInfo(is_time(tie_type) || tie_type == DataType::VARCHAR ||
+                   tie_type == DataType::TEXT,
+               "SEQUENCE_MATCH tie key must be integer or string");
+    const auto validate_column = [&](const proto::plan::ColumnInfo& column,
+                                     int step) -> DataType {
+        const auto type = validate_field(column.field_id());
+        AssertInfo(column.is_element_level() &&
+                       static_cast<DataType>(column.element_type()) == type,
+                   "SEQUENCE_MATCH requires a typed element-level column");
+        AssertInfo(!column.has_sequence_step_index() ||
+                       column.sequence_step_index() < step,
+                   "SEQUENCE_MATCH references an unbound step");
+        return type;
+    };
+    const auto validate_predicate =
+        [&](auto&& self, const proto::plan::Expr& pred, int step) -> void {
+        switch (pred.expr_case()) {
+            case proto::plan::Expr::kBinaryExpr: {
+                const auto& binary = pred.binary_expr();
+                AssertInfo(
+                    binary.op() == proto::plan::BinaryExpr::LogicalAnd ||
+                        binary.op() == proto::plan::BinaryExpr::LogicalOr,
+                    "unsupported SEQUENCE_MATCH Boolean operator");
+                self(self, binary.left(), step);
+                self(self, binary.right(), step);
+                return;
+            }
+            case proto::plan::Expr::kUnaryRangeExpr: {
+                const auto& unary = pred.unary_range_expr();
+                const auto type = validate_column(unary.column_info(), step);
+                AssertInfo(!unary.column_info().has_sequence_step_index(),
+                           "SEQUENCE_MATCH constant predicate must use the "
+                           "current element");
+                const auto constant = unary.value().val_case();
+                AssertInfo(
+                    ((type == DataType::VARCHAR || type == DataType::TEXT) &&
+                     constant == proto::plan::GenericValue::kStringVal) ||
+                        (type == DataType::BOOL &&
+                         constant == proto::plan::GenericValue::kBoolVal) ||
+                        ((type == DataType::INT8 || type == DataType::INT16 ||
+                          type == DataType::INT32 || type == DataType::INT64 ||
+                          type == DataType::TIMESTAMPTZ) &&
+                         constant == proto::plan::GenericValue::kInt64Val) ||
+                        ((type == DataType::FLOAT ||
+                          type == DataType::DOUBLE) &&
+                         (constant == proto::plan::GenericValue::kFloatVal ||
+                          constant == proto::plan::GenericValue::kInt64Val)),
+                    "SEQUENCE_MATCH constant type does not match field");
+                switch (unary.op()) {
+                    case proto::plan::OpType::Equal:
+                    case proto::plan::OpType::NotEqual:
+                    case proto::plan::OpType::GreaterThan:
+                    case proto::plan::OpType::GreaterEqual:
+                    case proto::plan::OpType::LessThan:
+                    case proto::plan::OpType::LessEqual:
+                        return;
+                    default:
+                        ThrowInfo(ExprInvalid,
+                                  "unsupported SEQUENCE_MATCH comparison");
+                }
+            }
+            case proto::plan::Expr::kCompareExpr: {
+                const auto& compare = pred.compare_expr();
+                const auto lhs =
+                    validate_column(compare.left_column_info(), step);
+                const auto rhs =
+                    validate_column(compare.right_column_info(), step);
+                AssertInfo(
+                    lhs == rhs &&
+                        (compare.left_column_info().has_sequence_step_index() !=
+                         compare.right_column_info().has_sequence_step_index()),
+                    "SEQUENCE_MATCH binding requires one current and "
+                    "one prior field of the same type");
+                AssertInfo(compare.op() == proto::plan::OpType::Equal ||
+                               compare.op() == proto::plan::OpType::NotEqual,
+                           "SEQUENCE_MATCH binding supports only == and !=");
+                return;
+            }
+            case proto::plan::Expr::kAlwaysTrueExpr:
+                return;
+            default:
+                ThrowInfo(ExprInvalid,
+                          "unsupported SEQUENCE_MATCH step predicate");
+        }
+    };
+    for (int step = 0; step < expr_pb.steps_size(); ++step) {
+        const auto& entry = expr_pb.steps(step);
+        AssertInfo(entry.has_predicate(),
+                   "SEQUENCE_MATCH step predicate is missing");
+        validate_predicate(validate_predicate, entry.predicate(), step);
+        AssertInfo((step == 0 && !entry.has_window()) ||
+                       (step > 0 && entry.has_window()),
+                   "SEQUENCE_MATCH requires WITHIN on every step after the "
+                   "first");
+        if (entry.has_window()) {
+            const auto& window = entry.window();
+            AssertInfo(step > 0 && window.prior_step_index() < step &&
+                           window.min_ms() >= 0 &&
+                           window.min_ms() <= window.max_ms() &&
+                           is_time(validate_field(window.current_field_id())) &&
+                           is_time(validate_field(window.prior_field_id())),
+                       "invalid SEQUENCE_MATCH time window");
+        }
+    }
+    return std::make_shared<expr::SequenceMatchExpr>(expr_pb);
 }
 
 expr::TypedExprPtr
@@ -1766,6 +1912,10 @@ ProtoParser::ParseExprs(const proto::plan::Expr& expr_pb,
         }
         case ppe::kMatchExpr: {
             result = ParseMatchExprs(expr_pb.match_expr());
+            break;
+        }
+        case ppe::kSequenceMatchExpr: {
+            result = ParseSequenceMatchExprs(expr_pb.sequence_match_expr());
             break;
         }
         case ppe::kBloomFilterExpr: {

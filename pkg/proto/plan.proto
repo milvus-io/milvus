@@ -114,6 +114,9 @@ message ColumnInfo {
   bool is_clustering_key = 8;
   bool nullable = 9;
   bool is_element_level = 10;
+  // Set only for a reference to an earlier SEQUENCE_MATCH step. Absent means
+  // the current element; zero is a valid prior step index.
+  optional uint32 sequence_step_index = 11;
 }
 
 message ColumnExpr {
@@ -283,6 +286,26 @@ message MatchExpr {
   int64 count = 4;             // For MatchLeast/MatchMost: the count parameter (N)
 }
 
+message SequenceWindow {
+  int64 current_field_id = 1;
+  uint32 prior_step_index = 2;
+  int64 prior_field_id = 3;
+  int64 min_ms = 4;
+  int64 max_ms = 5;
+}
+
+message SequenceStep {
+  Expr predicate = 1;
+  SequenceWindow window = 2;
+}
+
+message SequenceMatchExpr {
+  string struct_name = 1;
+  int64 order_time_field_id = 2;
+  int64 tie_field_id = 3;
+  repeated SequenceStep steps = 4;
+}
+
 message AlwaysTrueExpr {}
 
 message Interval {
@@ -342,6 +365,7 @@ message Expr {
     MatchExpr match_expr = 21;
     BloomFilterExpr bloom_filter_expr = 22;
     RoaringFilterExpr roaring_filter_expr = 23;
+    SequenceMatchExpr sequence_match_expr = 24;
   };
   bool is_template = 20;
 }

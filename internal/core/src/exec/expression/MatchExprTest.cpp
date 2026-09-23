@@ -22,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -49,6 +50,7 @@
 #include "exec/QueryContext.h"
 #include "exec/expression/EvalCtx.h"
 #include "exec/expression/MatchExpr.h"
+#include "exec/expression/SequenceMatchExpr.h"
 #include "expr/ITypeExpr.h"
 #include "gtest/gtest.h"
 #include "index/Index.h"
@@ -344,6 +346,80 @@ TEST_F(MatchExprTest, MatchAny) {
             // MatchAny: at least one element matches
             return match_count > 0;
         });
+}
+
+TEST_F(MatchExprTest, SequenceMatchGrowingHonorsActiveParentRows) {
+    proto::plan::SequenceMatchExpr spec;
+    spec.set_struct_name("struct_array");
+    spec.set_order_time_field_id(sub_int_fid_.get());
+    spec.set_tie_field_id(sub_str_fid_.get());
+    for (const auto* value : {"aaa", "bbb"}) {
+        auto* unary =
+            spec.add_steps()->mutable_predicate()->mutable_unary_range_expr();
+        unary->mutable_column_info()->set_field_id(sub_str_fid_.get());
+        unary->set_op(proto::plan::OpType::Equal);
+        unary->mutable_value()->set_string_val(value);
+    }
+    auto* window = spec.mutable_steps(1)->mutable_window();
+    window->set_current_field_id(sub_int_fid_.get());
+    window->set_prior_step_index(0);
+    window->set_prior_field_id(sub_int_fid_.get());
+    window->set_min_ms(0);
+    window->set_max_ms(10000);
+    auto logical = std::make_shared<expr::SequenceMatchExpr>(spec);
+    exec::QueryContext query_context(
+        "sequence_growing_active_test", seg_.get(), N_, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::PhySequenceMatchFilterExpr physical(
+        {}, logical, nullptr, seg_.get(), N_, 100);
+    exec::OffsetVector offsets;
+    for (int32_t i = 0; i < 100; ++i) {
+        offsets.push_back(i);
+    }
+    exec::EvalCtx eval_context(&exec_context);
+    eval_context.set_offset_input(&offsets);
+    TargetBitmap active(offsets.size(), false);
+    for (size_t i = 0; i < offsets.size(); i += 2) {
+        active[i] = true;
+    }
+    eval_context.set_bitmap_input(std::move(active));
+
+    VectorPtr result;
+    physical.Eval(eval_context, result);
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    TargetBitmapView values(output->GetRawData(), output->size());
+    TargetBitmapView valid(output->GetValidRawData(), output->size());
+    bool found_eligible = false;
+    for (size_t row = 0; row < offsets.size(); ++row) {
+        std::vector<int> elements(array_len_);
+        std::iota(elements.begin(), elements.end(), 0);
+        std::stable_sort(elements.begin(), elements.end(), [&](int a, int b) {
+            const auto time_a = sub_int_data_[row].int_data().data(a);
+            const auto time_b = sub_int_data_[row].int_data().data(b);
+            if (time_a != time_b) {
+                return time_a < time_b;
+            }
+            return sub_str_data_[row].string_data().data(a) <
+                   sub_str_data_[row].string_data().data(b);
+        });
+        bool expected = false;
+        bool saw_start = false;
+        for (int element : elements) {
+            const auto& kind = sub_str_data_[row].string_data().data(element);
+            if (kind == "aaa") {
+                saw_start = true;
+            } else if (saw_start && kind == "bbb") {
+                expected = true;
+                break;
+            }
+        }
+        expected = expected && row % 2 == 0;
+        found_eligible |= expected;
+        EXPECT_EQ(values[row], expected) << "row " << row;
+        EXPECT_TRUE(valid[row]);
+    }
+    EXPECT_TRUE(found_eligible);
 }
 
 TEST_F(MatchExprTest, MatchAll) {
@@ -2039,6 +2115,170 @@ TEST_F(SealedMatchExprTest, MatchAnyWithNestedIndex) {
             // MatchAny: at least one element matches
             return match_count > 0;
         });
+}
+
+TEST_F(SealedMatchExprTest, SequenceMatchRejectsIndexOnlySubfield) {
+    // All referenced StructArray child columns must remain resident in the
+    // MVP, even when a nested scalar index exists.
+    seg_->DropFieldData(sub_int_fid_);
+    ASSERT_FALSE(seg_->HasFieldData(sub_int_fid_));
+
+    proto::plan::SequenceMatchExpr spec;
+    spec.set_struct_name("struct_array");
+    spec.set_order_time_field_id(sub_int_fid_.get());
+    spec.set_tie_field_id(sub_str_fid_.get());
+    for (const auto* value : {"aaa", "bbb"}) {
+        auto* unary =
+            spec.add_steps()->mutable_predicate()->mutable_unary_range_expr();
+        unary->mutable_column_info()->set_field_id(sub_str_fid_.get());
+        unary->set_op(proto::plan::OpType::Equal);
+        unary->mutable_value()->set_string_val(value);
+    }
+    auto* window = spec.mutable_steps(1)->mutable_window();
+    window->set_current_field_id(sub_int_fid_.get());
+    window->set_prior_step_index(0);
+    window->set_prior_field_id(sub_int_fid_.get());
+    window->set_min_ms(0);
+    window->set_max_ms(10000);
+    auto logical = std::make_shared<expr::SequenceMatchExpr>(spec);
+    exec::QueryContext query_context(
+        "sequence_index_only_test", seg_.get(), N_, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::PhySequenceMatchFilterExpr physical(
+        {}, logical, nullptr, seg_.get(), N_, 100);
+    exec::OffsetVector offsets;
+    offsets.push_back(0);
+    exec::EvalCtx eval_context(&exec_context);
+    eval_context.set_offset_input(&offsets);
+    VectorPtr result;
+    bool rejected = false;
+    try {
+        physical.Eval(eval_context, result);
+    } catch (const std::exception& error) {
+        rejected = true;
+        EXPECT_NE(std::string(error.what()).find("requires resident raw"),
+                  std::string::npos);
+    }
+    EXPECT_TRUE(rejected);
+}
+
+TEST_F(SealedMatchExprTest, SequenceMatchRejectsMissingFirstChildBeforeOffsets) {
+    // The first child carries StructArray offsets and parent validity. Reject
+    // before asking the segment for offsets, even though its nested index is
+    // still present.
+    const auto first_id =
+        schema_->GetFirstArrayFieldInStruct("struct_array").get_id();
+    seg_->DropFieldData(first_id);
+    ASSERT_FALSE(seg_->HasFieldData(first_id));
+
+    proto::plan::SequenceMatchExpr spec;
+    spec.set_struct_name("struct_array");
+    spec.set_order_time_field_id(sub_int_fid_.get());
+    spec.set_tie_field_id(sub_str_fid_.get());
+    for (const auto* value : {"aaa", "bbb"}) {
+        auto* unary =
+            spec.add_steps()->mutable_predicate()->mutable_unary_range_expr();
+        unary->mutable_column_info()->set_field_id(sub_str_fid_.get());
+        unary->set_op(proto::plan::OpType::Equal);
+        unary->mutable_value()->set_string_val(value);
+    }
+    auto* window = spec.mutable_steps(1)->mutable_window();
+    window->set_current_field_id(sub_int_fid_.get());
+    window->set_prior_step_index(0);
+    window->set_prior_field_id(sub_int_fid_.get());
+    window->set_min_ms(0);
+    window->set_max_ms(10000);
+    auto logical = std::make_shared<expr::SequenceMatchExpr>(spec);
+    exec::QueryContext query_context(
+        "sequence_missing_first_test", seg_.get(), N_, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::PhySequenceMatchFilterExpr physical(
+        {}, logical, nullptr, seg_.get(), N_, 100);
+    exec::OffsetVector offsets;
+    offsets.push_back(0);
+    exec::EvalCtx eval_context(&exec_context);
+    eval_context.set_offset_input(&offsets);
+    VectorPtr result;
+    bool rejected = false;
+    try {
+        physical.Eval(eval_context, result);
+    } catch (const std::exception& error) {
+        rejected = true;
+        EXPECT_NE(std::string(error.what()).find("requires resident raw"),
+                  std::string::npos);
+    }
+    EXPECT_TRUE(rejected);
+}
+
+TEST_F(SealedMatchExprTest, SequenceMatchReadsSealedRawWithNestedIndex) {
+    proto::plan::SequenceMatchExpr spec;
+    spec.set_struct_name("struct_array");
+    spec.set_order_time_field_id(sub_int_fid_.get());
+    spec.set_tie_field_id(sub_str_fid_.get());
+    for (const auto* value : {"aaa", "bbb"}) {
+        auto* unary =
+            spec.add_steps()->mutable_predicate()->mutable_unary_range_expr();
+        unary->mutable_column_info()->set_field_id(sub_str_fid_.get());
+        unary->set_op(proto::plan::OpType::Equal);
+        unary->mutable_value()->set_string_val(value);
+    }
+    auto* window = spec.mutable_steps(1)->mutable_window();
+    window->set_current_field_id(sub_int_fid_.get());
+    window->set_prior_step_index(0);
+    window->set_prior_field_id(sub_int_fid_.get());
+    window->set_min_ms(0);
+    window->set_max_ms(10000);
+    const auto expected = [&](size_t row) {
+        std::vector<int> elements(array_len_);
+        std::iota(elements.begin(), elements.end(), 0);
+        std::stable_sort(elements.begin(), elements.end(), [&](int a, int b) {
+            if (sub_int_arrays_[row][a] != sub_int_arrays_[row][b]) {
+                return sub_int_arrays_[row][a] < sub_int_arrays_[row][b];
+            }
+            return sub_str_arrays_[row][a] < sub_str_arrays_[row][b];
+        });
+        bool started = false;
+        for (int element : elements) {
+            if (sub_str_arrays_[row][element] == "aaa") {
+                started = true;
+            } else if (started && sub_str_arrays_[row][element] == "bbb") {
+                return true;
+            }
+        }
+        return false;
+    };
+    exec::OffsetVector offsets;
+    bool has_match = false;
+    bool has_nonmatch = false;
+    for (int32_t row = 0;
+         row < static_cast<int32_t>(N_) && (!has_match || !has_nonmatch);
+         ++row) {
+        if (expected(row) && !has_match) {
+            offsets.push_back(row);
+            has_match = true;
+        } else if (!expected(row) && !has_nonmatch) {
+            offsets.push_back(row);
+            has_nonmatch = true;
+        }
+    }
+    ASSERT_TRUE(has_match && has_nonmatch);
+
+    auto logical = std::make_shared<expr::SequenceMatchExpr>(spec);
+    exec::QueryContext query_context(
+        "sequence_sealed_raw_test", seg_.get(), N_, MAX_TIMESTAMP);
+    exec::ExecContext exec_context(&query_context);
+    exec::PhySequenceMatchFilterExpr physical(
+        {}, logical, nullptr, seg_.get(), N_, 100);
+    exec::EvalCtx eval_context(&exec_context);
+    eval_context.set_offset_input(&offsets);
+    VectorPtr result;
+    physical.Eval(eval_context, result);
+    auto output = std::dynamic_pointer_cast<ColumnVector>(result);
+    ASSERT_NE(output, nullptr);
+    TargetBitmapView values(output->GetRawData(), output->size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        EXPECT_EQ(values[i], expected(offsets[i]));
+    }
 }
 
 TEST_F(SealedMatchExprTest, MatchAllWithNestedIndex) {

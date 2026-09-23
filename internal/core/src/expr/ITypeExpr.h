@@ -960,6 +960,31 @@ class MatchExpr : public ITypeFilterExpr {
     int64_t count_;  // Used for MatchLeast/MatchMost/MatchExact
 };
 
+// The step predicates keep their protobuf shape deliberately: unlike an
+// ordinary CompareExpr, a sequence comparison must retain which earlier step
+// owns each ColumnInfo. Ordinary expression lowering discards that binding.
+class SequenceMatchExpr : public ITypeFilterExpr {
+ public:
+    explicit SequenceMatchExpr(const proto::plan::SequenceMatchExpr& spec)
+        : spec_(spec) {
+    }
+
+    const proto::plan::SequenceMatchExpr&
+    spec() const {
+        return spec_;
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("SequenceMatchExpr(struct_name={}, steps={})",
+                           spec_.struct_name(),
+                           spec_.steps_size());
+    }
+
+ private:
+    proto::plan::SequenceMatchExpr spec_;
+};
+
 // RoaringFilterExpr: exact integer membership filter (`membership_match`, MRB1).
 // See docs/design-docs/design_docs/20260714-roaring-exact-membership-expression.md.
 //
