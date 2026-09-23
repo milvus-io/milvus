@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/samber/lo"
@@ -153,9 +154,20 @@ func (m *meta) completeHashSplitCompactionMutation(
 		if info.GetNumOfRows() == 0 {
 			info.State = commonpb.SegmentState_Dropped
 		}
+		existing := m.segments.GetSegment(info.GetID())
+		if existing != nil && !isOwnHashSplitOutput(existing, info) {
+			return nil, nil, merr.WrapErrIllegalCompactionPlanMsg(
+				"shard split rewrite output segment %d already exists on channel %q in state %s with lineage %v, which this rewrite did not write",
+				info.GetID(), existing.GetInsertChannel(), existing.GetState().String(), existing.GetCompactionFrom())
+		}
+		outputs = append(outputs, info)
+		if existing != nil {
+			// The re-run of a commit torn between catalog chunks: the output is
+			// already counted.
+			continue
+		}
 		metricMutation.addNewSeg(info.GetState(), info.GetLevel(), info.GetIsSorted(),
 			info.GetStorageVersion(), segmentMetricFormatLabel(info), info.GetNumOfRows())
-		outputs = append(outputs, info)
 	}
 
 	// Outputs first, then the input, in one write: on the ordered fallback path
@@ -188,6 +200,22 @@ func (m *meta) completeHashSplitCompactionMutation(
 		mlog.Int64s("sourceSegments", inputIDs),
 		mlog.Int64s("outputs", lo.Map(outputs, func(info *SegmentInfo, _ int) int64 { return info.GetID() })))
 	return outputs, metricMutation, nil
+}
+
+// isOwnHashSplitOutput reports whether a segment already in meta under an
+// output's id is that same output, published by an earlier attempt of this
+// very commit: the ordered-chunk catalog path can be torn after the outputs
+// are written and before the input is dropped, and the re-run commits the
+// same pre-allocated ids again. It is the rewrite's own write only when it is
+// a compaction output on the same channel, of the same lineage, in the state
+// the commit publishes. An output since sorted away on its target (Dropped
+// while the commit publishes it Flushed) or any segment of another lineage is
+// not, and overwriting it would put back rows another segment now carries.
+func isOwnHashSplitOutput(existing, output *SegmentInfo) bool {
+	return existing.GetCreatedByCompaction() &&
+		existing.GetInsertChannel() == output.GetInsertChannel() &&
+		existing.GetState() == output.GetState() &&
+		slices.Equal(existing.GetCompactionFrom(), output.GetCompactionFrom())
 }
 
 // hashSplitInputSortOrder reports whether every input of a rewrite is sorted by

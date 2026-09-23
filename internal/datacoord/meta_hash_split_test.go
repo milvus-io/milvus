@@ -419,3 +419,77 @@ func TestHashSplitMutationPublishesTheInputSortOrder(t *testing.T) {
 		assert.False(t, seg.GetIsSortedByNamespace())
 	})
 }
+
+// A rewrite commit may overwrite an output id only with what it wrote there
+// itself: the re-run of a commit torn between catalog chunks rewrites the same
+// pre-allocated ids, and must converge. Anything else under that id -- the
+// output sorted away (Dropped) on its target, or a segment of another lineage
+// -- is state the rewrite did not write, and overwriting it would resurrect
+// rows another segment now carries.
+func TestHashSplitMutationRewritesOnlyItsOwnOutputs(t *testing.T) {
+	result := &datapb.CompactionPlanResult{
+		PlanID: 900,
+		Segments: []*datapb.CompactionSegment{
+			{SegmentID: 601, NumOfRows: 60, Channel: hsTgt0},
+			{SegmentID: 602, NumOfRows: 0, Channel: hsTgt1},
+		},
+	}
+	torn := func(id int64, channel string, state commonpb.SegmentState) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, CollectionID: 77, PartitionID: 7, InsertChannel: channel, State: state,
+			CreatedByCompaction: true, CompactionFrom: []int64{500},
+		}}
+	}
+
+	t.Run("the torn commit's own outputs are rewritten", func(t *testing.T) {
+		m := newHashSplitMutationMeta(t)
+		m.segments.SetSegment(601, torn(601, hsTgt0, commonpb.SegmentState_Flushed))
+		m.segments.SetSegment(602, torn(602, hsTgt1, commonpb.SegmentState_Dropped))
+		outputs, mutation, err := m.CompleteCompactionMutation(context.Background(), hashSplitRewriteTask(), result)
+		require.NoError(t, err)
+		require.Len(t, outputs, 2)
+		assert.EqualValues(t, -100, mutation.rowCountChange, "the outputs already in meta are not counted twice")
+		assert.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(context.Background(), 500).GetState())
+		assert.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(context.Background(), 601).GetState())
+	})
+
+	refused := []struct {
+		name     string
+		existing *SegmentInfo
+	}{
+		{
+			// Sorted on its target after a torn commit: Dropped by the sort.
+			name:     "an output sorted away",
+			existing: torn(601, hsTgt0, commonpb.SegmentState_Dropped),
+		},
+		{
+			name: "a segment of another lineage",
+			existing: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 601, CollectionID: 77, PartitionID: 7, InsertChannel: hsTgt0,
+				State: commonpb.SegmentState_Flushed, CreatedByCompaction: true, CompactionFrom: []int64{499},
+			}},
+		},
+		{
+			name:     "an output on another channel",
+			existing: torn(601, hsTgt1, commonpb.SegmentState_Flushed),
+		},
+		{
+			name: "a segment no compaction wrote",
+			existing: &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 601, CollectionID: 77, PartitionID: 7, InsertChannel: hsTgt0, State: commonpb.SegmentState_Flushed,
+			}},
+		},
+	}
+	for _, tc := range refused {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newHashSplitMutationMeta(t)
+			m.segments.SetSegment(601, tc.existing)
+			outputs, mutation, err := m.CompleteCompactionMutation(context.Background(), hashSplitRewriteTask(), result)
+			assert.ErrorIs(t, err, merr.ErrIllegalCompactionPlan)
+			assert.Nil(t, outputs)
+			assert.Nil(t, mutation)
+			assert.Same(t, tc.existing, m.GetSegment(context.Background(), 601), "the existing segment is left alone")
+			assert.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(context.Background(), 500).GetState())
+		})
+	}
+}
