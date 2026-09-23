@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -106,11 +107,34 @@ func (c *compactionInspector) exemptFromSplitFreeze(task *datapb.CompactionTask)
 // An invisible one is a compaction's staging output, not a rewrite's, and is
 // not let through. A source is never a target here, even when it is a target
 // of an earlier split still in flight.
+//
+// And only an output whose rewrite has fully committed: every parent it names
+// is Dropped. A rewrite commit that takes the chunked catalog path and is torn
+// between chunks leaves an output published while its input is still Flushed,
+// and the recovery view then serves the input and hides the output
+// (retrieveSegment keeps the parents while they are all present). A sort of
+// that output would be a child whose only parent is gone, so the view would
+// serve it next to the input and read the rows of that half twice. The
+// re-run of the rewrite drops the input, and the sort is let through then.
 func (c *compactionInspector) sortsRewriteOutputsOnTarget(task *datapb.CompactionTask) bool {
 	if c.isChannelSplitTarget == nil || !c.isChannelSplitTarget(task.GetChannel()) {
 		return false
 	}
-	return c.allInputsAre(task, isVisibleCompactionOutput)
+	return c.allInputsAre(task, func(segment *SegmentInfo) bool {
+		return isVisibleCompactionOutput(segment) && c.allParentsDropped(segment)
+	})
+}
+
+// allParentsDropped reports whether every segment a compaction output names in
+// its lineage is Dropped or already gone from meta.
+func (c *compactionInspector) allParentsDropped(segment *SegmentInfo) bool {
+	for _, parentID := range segment.GetCompactionFrom() {
+		parent := c.meta.GetSegment(context.TODO(), parentID)
+		if parent != nil && parent.GetState() != commonpb.SegmentState_Dropped {
+			return false
+		}
+	}
+	return true
 }
 
 // isVisibleCompactionOutput reports whether a segment was written by a

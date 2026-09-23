@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	"github.com/milvus-io/milvus/internal/datacoord/task"
@@ -514,4 +515,50 @@ func TestSortOfARewriteOutputOnATargetIsExemptFromTheFreeze(t *testing.T) {
 	// Without the target predicate wired, nothing on a splitting channel is.
 	inspector.setChannelSplitTargetChecker(nil)
 	assert.True(t, inspector.frozenBySplit(sortOn(splitMgrV1, 10)))
+}
+
+// A rewrite commit that takes the chunked catalog path and is torn between
+// chunks leaves an output published while its input is still Flushed; the
+// recovery view then serves the input and hides the output. Sorting that output
+// would give it a child the view no longer ties to the input, and the rows of
+// that half would be served twice. So the exemption holds only once every
+// parent of every input is Dropped (or already gone from meta).
+func TestSortOfATornRewriteOutputStaysFrozen(t *testing.T) {
+	inspector, mockMeta := newFreezeTestInspector(t)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 || channel == splitMgrV1 })
+	inspector.setChannelSplitTargetChecker(func(channel string) bool { return channel == splitMgrV1 })
+
+	const (
+		liveInput    = int64(100)
+		droppedInput = int64(101)
+		goneInput    = int64(102)
+	)
+	parents := map[int64]*SegmentInfo{
+		liveInput:    {SegmentInfo: &datapb.SegmentInfo{ID: liveInput, State: commonpb.SegmentState_Flushed}},
+		droppedInput: {SegmentInfo: &datapb.SegmentInfo{ID: droppedInput, State: commonpb.SegmentState_Dropped}},
+	}
+	outputs := map[int64]*SegmentInfo{
+		// Published by a torn commit: its input is still Flushed.
+		20: {SegmentInfo: &datapb.SegmentInfo{ID: 20, CreatedByCompaction: true, CompactionFrom: []int64{liveInput}}},
+		// Published by a whole commit: its input is Dropped.
+		21: {SegmentInfo: &datapb.SegmentInfo{ID: 21, CreatedByCompaction: true, CompactionFrom: []int64{droppedInput}}},
+		// Its input is already garbage-collected out of meta.
+		22: {SegmentInfo: &datapb.SegmentInfo{ID: 22, CreatedByCompaction: true, CompactionFrom: []int64{goneInput}}},
+	}
+	mockMeta.EXPECT().GetHealthySegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) *SegmentInfo { return outputs[id] }).Maybe()
+	mockMeta.EXPECT().GetSegment(mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, id int64) *SegmentInfo { return parents[id] }).Maybe()
+	sortOn := func(inputs ...int64) *datapb.CompactionTask {
+		return &datapb.CompactionTask{Channel: splitMgrV1, Type: datapb.CompactionType_SortCompaction, InputSegments: inputs}
+	}
+
+	assert.True(t, inspector.frozenBySplit(sortOn(20)), "a torn commit's output stays frozen while its input is live")
+	assert.True(t, inspector.frozenBySplit(sortOn(21, 20)), "one torn input freezes the whole sort")
+	assert.False(t, inspector.frozenBySplit(sortOn(21)), "a whole commit's output sorts")
+	assert.False(t, inspector.frozenBySplit(sortOn(22)), "a parent gone from meta was dropped")
+
+	// Once the re-run commit drops the input, the output sorts.
+	parents[liveInput] = &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: liveInput, State: commonpb.SegmentState_Dropped}}
+	assert.False(t, inspector.frozenBySplit(sortOn(20)))
 }
