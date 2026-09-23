@@ -18,7 +18,9 @@ package querynodev2
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
@@ -35,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
@@ -268,4 +271,33 @@ func TestLoadSplitChildRecoveryFailures(t *testing.T) {
 		withSegments := &datapb.VchannelInfo{ChannelName: "v1", UnflushedSegmentIds: []int64{1}}
 		assert.Error(t, node.loadSplitChildRecovery(context.Background(), child, params, withSegments))
 	})
+}
+
+// A watch whose split recovery has not read the shard states yet refuses reads
+// through the new delegator, retriably, and serves them once it has.
+func (suite *ServiceSuite) TestWatchRefusesReadsUntilItsSplitRecoveryDescribes() {
+	ctx := context.Background()
+	release := make(chan struct{})
+	mc := mocks.NewMockMixCoordClient(suite.T())
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ *milvuspb.DescribeCollectionRequest, _ ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			<-release
+			return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), VirtualChannelNames: []string{suite.vchannel}}, nil
+		}).Once()
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(mc)
+	suite.node.mixCoord = future
+
+	status, err := suite.node.WatchDmChannels(ctx, suite.splitWatchRequest(suite.vchannel))
+	suite.Require().NoError(merr.CheckRPCCall(status, err))
+	source, ok := suite.node.delegators.Get(suite.vchannel)
+	suite.Require().True(ok)
+
+	pendingRefusal := func() bool {
+		_, err := source.Search(ctx, &querypb.SearchRequest{Req: &internalpb.SearchRequest{}, DmlChannels: []string{suite.vchannel}})
+		return errors.Is(err, merr.ErrServiceUnavailable) && strings.Contains(err.Error(), "shard split recovery pending")
+	}
+	suite.True(pendingRefusal(), "a read was not refused while the split recovery had not described the collection")
+	close(release)
+	suite.Eventually(func() bool { return !pendingRefusal() }, 5*time.Second, 10*time.Millisecond)
 }

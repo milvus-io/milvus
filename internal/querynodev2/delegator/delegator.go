@@ -102,6 +102,8 @@ type ShardDelegator interface {
 	IsUnadoptedSplitChild() bool
 	MarkReleasing()
 	RefuseReadsAsRetiredSource(ctx context.Context)
+	MarkSplitRecoveryPending()
+	FinishSplitRecovery()
 	ForwardKnownDeletesToParent(ctx context.Context) error
 	ProcessDeleteBatches(batches []DeleteBatch)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
@@ -268,6 +270,11 @@ type shardDelegator struct {
 	// targets are shards of their own by then, so it fronts no family, and every
 	// public read through it is refused (RefuseReadsAsRetiredSource).
 	retiredWithoutFamily atomic.Bool
+	// splitRecoveryPending is set on a delegator watched while the querynode
+	// cannot yet tell whether its vchannel is a split source whose children must
+	// be re-derived (respawnSplitChildrenOnRecovery), and cleared once it can.
+	// Every public read through it is refused meanwhile.
+	splitRecoveryPending atomic.Bool
 }
 
 // getLogger returns the logger with pre-defined shard attributes.
