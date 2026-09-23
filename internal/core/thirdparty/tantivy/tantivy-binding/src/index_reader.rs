@@ -733,7 +733,11 @@ impl IndexReaderWrapper {
         self.json_regex_query(json_path, &pattern, bitset)
     }
 
-    // **Note**: literal length must be larger or equal to min_gram.
+    // **Note**: literal length must be larger or equal to min_gram. The C++
+    // side (`NgramInvertedIndex::CanHandleLiteral`) is the gate; a violation
+    // here means that gate was bypassed. It is reported as an error rather
+    // than asserted: this runs under an `extern "C"` frame, where a panic
+    // cannot unwind and aborts the whole process.
     pub fn ngram_match_query(
         &self,
         literal: &str,
@@ -741,15 +745,15 @@ impl IndexReaderWrapper {
         max_gram: usize,
         bitset: *mut c_void,
     ) -> Result<()> {
-        // literal length should be larger or equal to min_gram.
-        assert!(
-            literal.chars().count() >= min_gram,
-            "literal length should be larger or equal to min_gram. literal: {}, min_gram: {}",
-            literal,
-            min_gram
-        );
+        let char_count = literal.chars().count();
+        if char_count < min_gram {
+            return Err(TantivyBindingError::InternalError(format!(
+                "ngram_match_query: literal char length {} < min_gram {}, literal: {:?}",
+                char_count, min_gram, literal
+            )));
+        }
 
-        if literal.chars().count() <= max_gram {
+        if char_count <= max_gram {
             return self.term_query_keyword(literal, bitset);
         }
 
@@ -785,14 +789,15 @@ impl IndexReaderWrapper {
         let mut tokenizer = NgramTokenizer::new(max_gram, max_gram, false).unwrap();
 
         for literal in literals {
-            assert!(
-                literal.chars().count() >= min_gram,
-                "literal '{}' must be >= min_gram {}",
-                literal,
-                min_gram
-            );
+            let char_count = literal.chars().count();
+            if char_count < min_gram {
+                return Err(TantivyBindingError::InternalError(format!(
+                    "ngram_tokenize: literal char length {} < min_gram {}, literal: {:?}",
+                    char_count, min_gram, literal
+                )));
+            }
 
-            if literal.chars().count() <= max_gram {
+            if char_count <= max_gram {
                 all_term_pairs.push((
                     literal.to_string(),
                     Term::from_field_text(self.field, literal),
@@ -808,10 +813,11 @@ impl IndexReaderWrapper {
             }
         }
 
-        assert!(
-            !all_term_pairs.is_empty(),
-            "ngram_tokenize should not produce empty terms for valid literals"
-        );
+        if all_term_pairs.is_empty() {
+            return Err(TantivyBindingError::InternalError(
+                "ngram_tokenize: no ngram terms produced, literals must be non-empty".to_string(),
+            ));
+        }
 
         // Get doc_freq for each term and sort
         let searcher = self.reader.searcher();
