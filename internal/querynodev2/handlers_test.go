@@ -18,10 +18,10 @@ package querynodev2
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -181,7 +181,7 @@ func TestQueryChannelReportsExecutedSnapshot(t *testing.T) {
 	type collectionTarget struct{ segments.CollectionManager }
 	type delegatorTarget struct{ delegator.ShardDelegator }
 	paramtable.Init()
-	for _, name := range []string{"rows", "empty", "query_error", "reduce_error", "channel_missing", "collection_missing", "remote_cost", "worker_cost"} {
+	for _, name := range []string{"rows", "empty", "query_error", "reduce_error", "channel_missing", "collection_missing", "remote_cost"} {
 		t.Run(name, func(t *testing.T) {
 			manager := &collectionTarget{}
 			sd := &delegatorTarget{}
@@ -189,15 +189,14 @@ func TestQueryChannelReportsExecutedSnapshot(t *testing.T) {
 			if name != "channel_missing" {
 				node.delegators.Insert("ch0", sd)
 			}
-			key := paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.Key
-			paramtable.Get().Save(key, fmt.Sprint(name == "worker_cost"))
-			t.Cleanup(func() { paramtable.Get().Reset(key) })
 			ref := mockey.Mock((*collectionTarget).Ref).Return(name != "collection_missing").Build()
 			defer ref.UnPatch()
 			get := mockey.Mock((*collectionTarget).Get).Return(&segments.Collection{}).Build()
 			defer get.UnPatch()
 			unref := mockey.Mock((*collectionTarget).Unref).Return(true).Build()
 			defer unref.UnPatch()
+			slowCost := &internalpb.CostAggregation{ResponseTime: 800, ServiceTime: 300, TotalNQ: 10, TotalRelatedDataSize: 64}
+			busyCost := &internalpb.CostAggregation{ResponseTime: 200, ServiceTime: 100, TotalNQ: 2000, TotalRelatedDataSize: 32}
 			query := mockey.Mock((*delegatorTarget).Query).To(func(_ *delegatorTarget, _ context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error) {
 				req.Req.MvccTimestamp = 80
 				if name == "query_error" {
@@ -207,7 +206,10 @@ func TestQueryChannelReportsExecutedSnapshot(t *testing.T) {
 					return nil, nil
 				}
 				if name == "remote_cost" {
-					return []*internalpb.RetrieveResults{{Base: &commonpb.MsgBase{SourceID: paramtable.GetNodeID() + 1}, CostAggregation: &internalpb.CostAggregation{TotalRelatedDataSize: 1}}}, nil
+					return []*internalpb.RetrieveResults{
+						{Base: &commonpb.MsgBase{SourceID: paramtable.GetNodeID() + 1}, CostAggregation: slowCost},
+						{Base: &commonpb.MsgBase{SourceID: paramtable.GetNodeID() + 2}, CostAggregation: busyCost},
+					}, nil
 				}
 				return []*internalpb.RetrieveResults{{Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}}}}}, nil
 			}).Build()
@@ -233,6 +235,18 @@ func TestQueryChannelReportsExecutedSnapshot(t *testing.T) {
 				require.EqualValues(t, 80, result.GetMvccTimestamp())
 				if name == "empty" {
 					require.Nil(t, result.GetIds())
+				}
+				if name == "remote_cost" {
+					// The slowest response and largest backlog belong to different
+					// remote workers; neither may be lost at the delegator boundary.
+					cost := result.GetCostAggregation()
+					require.NotNil(t, cost)
+					assert.EqualValues(t, 800, cost.GetResponseTime())
+					assert.EqualValues(t, 300, cost.GetServiceTime())
+					assert.EqualValues(t, 2000, cost.GetTotalNQ())
+					assert.EqualValues(t, 96, cost.GetTotalRelatedDataSize())
+					assert.EqualValues(t, 10, slowCost.GetTotalNQ())
+					assert.EqualValues(t, 64, slowCost.GetTotalRelatedDataSize())
 				}
 			}
 		})

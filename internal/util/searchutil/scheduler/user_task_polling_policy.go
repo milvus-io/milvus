@@ -22,6 +22,10 @@ type userTaskPollingPolicy struct {
 	queue *fairPollingTaskQueue
 }
 
+func (p *userTaskPollingPolicy) Classify(Task) taskClass {
+	return taskClassRegular
+}
+
 func (p *userTaskPollingPolicy) Cleanup(now time.Time) []*queuedTask {
 	return p.queue.cleanup(now)
 }

@@ -191,6 +191,7 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 			if (canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) &&
 				canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap)) &&
 				taskInQueue.MergeWith(mergeTask) {
+				q.tasks[i].originalRequestCount += task.originalRequestCount
 				return true
 			}
 		}

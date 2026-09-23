@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 )
 
@@ -19,9 +20,10 @@ func NewScheduler(policyName string) Scheduler {
 		fallthrough
 	case schedulePolicyNameFIFO:
 		return newScheduler(
-			newFIFOPolicy(),
+			newRequeryPriorityPolicy(newFIFOPolicy()),
 		)
 	case schedulePolicyNameUserTaskPolling:
+		mlog.Info(context.TODO(), "requery priority lane disabled under user-task-polling")
 		return newScheduler(
 			newUserTaskPollingPolicy(),
 		)
@@ -71,8 +73,18 @@ type ClearResult struct {
 	QueuedNQCleared int64
 }
 
+type taskClass uint8
+
+const (
+	taskClassRegular taskClass = iota
+	taskClassPriorityLane
+)
+
 // schedulePolicy is the policy of scheduler.
 type schedulePolicy interface {
+	// Classify returns the queue class used for admission and accounting.
+	Classify(task Task) taskClass
+
 	// Cleanup removes queued tasks whose context deadline has been reached.
 	// Removed tasks are returned to scheduler for error notification.
 	Cleanup(now time.Time) []*queuedTask
@@ -95,12 +107,19 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// originalRequestCount is the number of pre-merge scheduler tasks represented
+	// by this queue entry. It starts at 1 and is accumulated only after a
+	// successful MergeWith.
+	originalRequestCount int
+	// class is immutable after admission.
+	class taskClass
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
 	return &queuedTask{
-		Task:        task,
-		enqueueTime: enqueueTime,
+		Task:                 task,
+		enqueueTime:          enqueueTime,
+		originalRequestCount: 1,
 	}
 }
 
