@@ -48,6 +48,8 @@ func TestOpenerAdaptorFailure(t *testing.T) {
 	})
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).Return(
 		&streamingpb.WALCheckpoint{MessageId: &commonpb.MessageID{
 			Id:      "0",
@@ -68,6 +70,8 @@ func TestOpenRWWALCleansRecoveredShardManagerOnReplicateRecoveryFailure(t *testi
 		AccessMode: types.AccessModeRW,
 	}
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, channel.Name).Return(
 		&streamingpb.WALCheckpoint{MessageId: &commonpb.MessageID{
 			Id:      "0",

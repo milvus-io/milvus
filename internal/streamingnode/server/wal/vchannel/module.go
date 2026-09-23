@@ -5,9 +5,14 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -19,6 +24,12 @@ import (
 // ModuleConfig contains the initial state and dependencies for one vchannel
 // recovery module.
 type ModuleConfig struct {
+	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
+	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
+	QueryDispatcher            *queryresource.Dispatcher
+	TransformLogStream         wal.TransformLogStream
+	SummaryManager             *walsummary.Manager
+
 	PChannel string
 	VChannel string
 
@@ -38,6 +49,12 @@ type ModuleConfig struct {
 
 // VChannelRecoveryModule owns all recovery_storage state for one vchannel.
 type VChannelRecoveryModule struct {
+	queryResources          *queryresource.Manager
+	queryTransformLogStream wal.TransformLogStream
+	queryObservedTimeTick   uint64
+	querySealed             map[int64]bool
+	summaryManager          *walsummary.Manager
+
 	// mu serializes WAL observation with snapshot state transitions. In
 	// particular, segments may grow when CreateSegment is observed while the
 	// recovery background task is collecting dirty snapshots.
@@ -88,15 +105,19 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		return nil, merr.WrapErrServiceInternalMsg("vchannel recovery module vchannel is empty")
 	}
 	module := &VChannelRecoveryModule{
-		pchannel:          config.PChannel,
-		vchannel:          config.VChannel,
-		runtime:           config.Runtime,
-		logger:            config.Logger,
-		segments:          make(map[int64]*segment.SegmentView),
-		segmentLifecycle:  config.SegmentLifecycle,
-		segmentPackWriter: config.SegmentPackWriter,
-		onCleanup:         config.OnCleanup,
-		onL0Materialized:  config.OnL0Materialized,
+		pchannel:                config.PChannel,
+		querySealed:             make(map[int64]bool),
+		queryTransformLogStream: config.TransformLogStream,
+		summaryManager:          config.SummaryManager,
+		queryResources:          queryresource.NewManager(queryresource.Config{Builders: config.QueryRuntimeModuleBuilders, Scheduler: config.Runtime.Scheduler, Dispatcher: config.QueryDispatcher, LoadInfoProvider: config.QueryViewLoadInfoProvider}),
+		vchannel:                config.VChannel,
+		runtime:                 config.Runtime,
+		logger:                  config.Logger,
+		segments:                make(map[int64]*segment.SegmentView),
+		segmentLifecycle:        config.SegmentLifecycle,
+		segmentPackWriter:       config.SegmentPackWriter,
+		onCleanup:               config.OnCleanup,
+		onL0Materialized:        config.OnL0Materialized,
 	}
 	if config.VChannelMeta != nil {
 		if adoptVChannelMeta {
@@ -146,6 +167,7 @@ func newModule(config ModuleConfig, adoptVChannelMeta bool) (*VChannelRecoveryMo
 		OnMaterialized:            module.markL0Materialized,
 		GrowingSegmentsRegistered: module.growingSegmentsRegistered,
 	})
+	module.refreshQueryRetentionLocked()
 	return module, nil
 }
 
@@ -210,6 +232,9 @@ func (m *VChannelRecoveryModule) ObserveMessage(
 	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
 		m.flushAllSegmentsCreatedBefore(ctx, retained)
 	}
+	m.queryObservedTimeTick = max(m.queryObservedTimeTick, msg.TimeTick())
+	m.observeQueryResourceEvent(ctx, walview.VChannelResourceEvent{Message: msg})
+	m.queryResources.TryBuildLocked(m.queryWALViewLocked)
 	m.l0Materializer.ObserveMessage(retained)
 	return true
 }
@@ -418,6 +443,7 @@ func (m *VChannelRecoveryModule) handleCreateSegmentMessage(
 		}
 		view = segment.NewSegmentViewFromCreateSegmentMessageWithConfig(raw, schema, m.segmentViewConfig())
 		m.segments[id] = view
+		m.refreshQueryRetentionLocked()
 		created = true
 	}
 	if view.ObserveCreateSegmentMessageV2(ctx, msg) || created {
@@ -498,6 +524,8 @@ func (m *VChannelRecoveryModule) SegmentDataUpdated(segmentID int64, view *segme
 func (m *VChannelRecoveryModule) markSegmentViewUpdated(segmentID int64, view *segment.SegmentView) {
 	m.mu.Lock()
 	m.markSegmentViewUpdatedLocked(segmentID, view)
+	m.publishSegmentSealedLocked(segmentID)
+	m.queryResources.TryBuildLocked(m.queryWALViewLocked)
 	completed := m.completeDropsLocked()
 	m.mu.Unlock()
 	releaseDropHandles(completed)
@@ -641,6 +669,7 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 			func() { m.completeSegmentCleanup(segmentID, owner) },
 		))
 	}
+	_, queryReferenced := m.queryResources.OldestDataVersion()
 	if m.vchannelView != nil {
 		dropSnapshot, cleanupPartitions := m.vchannelView.TombstonedCleanupPlan(
 			cleanup.PhysicalTimeTick,
@@ -648,7 +677,7 @@ func (m *VChannelRecoveryModule) ConsumeCleanupSnapshots(cleanup moduleapi.Clean
 		)
 		if len(cleanupPartitions) > 0 {
 			vchannelChanged = m.vchannelView.ApplyPartitionCleanup(cleanupPartitions) || vchannelChanged
-		} else if dropSnapshot != nil && len(m.segments) == 0 &&
+		} else if dropSnapshot != nil && len(m.segments) == 0 && !queryReferenced &&
 			cleanup.SummaryRetired != nil && cleanup.SummaryRetired(m.vchannel, dropSnapshot.GetCheckpointTimeTick()) {
 			checkpointTimeTick := dropSnapshot.GetCheckpointTimeTick()
 			snapshots = append(snapshots,
@@ -707,8 +736,23 @@ func (m *VChannelRecoveryModule) completeVChannelCleanup(checkpointTimeTick uint
 }
 
 func (m *VChannelRecoveryModule) segmentCleanupReadyLocked(view *segment.SegmentView, cleanup moduleapi.CleanupContext) bool {
-	return m.vchannelView != nil &&
-		view.TombstonedCleanupReady(cleanup.PhysicalTimeTick)
+	if m.vchannelView == nil || !view.TombstonedCleanupReady(cleanup.PhysicalTimeTick) {
+		return false
+	}
+	sealed := view.AssignmentMeta().GetSealedAtDataVersion()
+	if sealed != nil {
+		version := qviews.FromProtoDataVersion(sealed)
+		if oldest, ok := m.queryResources.OldestDataVersion(); ok && version.GT(oldest) {
+			return false
+		}
+		if m.vchannelView.AdvanceSegmentDataVersionSummary(version) && m.runtime.Notifier != nil {
+			m.runtime.Notifier.NotifyModuleUpdated(moduleapi.ModuleNameVChannel)
+		}
+		if !m.vchannelView.SegmentDataVersionSummaryPersisted(version) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *segment.SegmentView) {
@@ -719,6 +763,8 @@ func (m *VChannelRecoveryModule) completeSegmentCleanup(segmentID int64, view *s
 	}
 	delete(m.pendingCleanup, segmentID)
 	delete(m.segments, segmentID)
+	delete(m.querySealed, segmentID)
+	m.refreshQueryRetentionLocked()
 	m.dirtyMu.Lock()
 	delete(m.dirtySegments, segmentID)
 	m.dirtyMu.Unlock()
