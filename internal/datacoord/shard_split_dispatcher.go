@@ -46,9 +46,37 @@ type compactionDispatcher interface {
 	enqueueCompaction(task *datapb.CompactionTask) error
 }
 
-// compactionPlanReader looks up dispatched plans to judge their state.
+// compactionPlanReader looks up dispatched plans to judge their state. It
+// reads digests, not the plans: every plan carries the collection schema, and
+// a split's trigger holds every plan it ever dispatched.
 type compactionPlanReader interface {
-	GetCompactionTasksByTriggerID(ctx context.Context, triggerID int64) []*datapb.CompactionTask
+	GetCompactionTaskDigestsByTriggerID(ctx context.Context, triggerID int64) []compactionTaskDigest
+}
+
+// hashSplitPlanIndex is one read of a split task's plans, indexed for a
+// rewrite round: by plan id for the harvest, by input segment for dispatch.
+type hashSplitPlanIndex struct {
+	byPlan    map[int64]*compactionTaskDigest
+	bySegment map[int64][]*compactionTaskDigest
+}
+
+func newHashSplitPlanIndex(digests []compactionTaskDigest) *hashSplitPlanIndex {
+	index := &hashSplitPlanIndex{
+		byPlan:    make(map[int64]*compactionTaskDigest, len(digests)),
+		bySegment: make(map[int64][]*compactionTaskDigest, len(digests)),
+	}
+	for i := range digests {
+		index.add(&digests[i])
+	}
+	return index
+}
+
+func (x *hashSplitPlanIndex) add(plan *compactionTaskDigest) {
+	x.byPlan[plan.PlanID] = plan
+	if plan.Type == datapb.CompactionType_HashSplitCompaction && len(plan.InputSegments) == 1 {
+		segmentID := plan.InputSegments[0]
+		x.bySegment[segmentID] = append(x.bySegment[segmentID], plan)
+	}
 }
 
 // inspectorRewriteDispatcher is the production rewritePlanDispatcher: it turns
@@ -66,6 +94,11 @@ type inspectorRewriteDispatcher struct {
 	alloc      allocator.Allocator
 	// taskID scopes plan lookups to one split task (forTask).
 	taskID int64
+	// plans is the scoped task's plans, read once per scope -- one rewrite
+	// round -- on first use; nil on an unscoped dispatcher, which reads fresh
+	// every time.
+	plans  *hashSplitPlanIndex
+	scoped bool
 }
 
 func newInspectorRewriteDispatcher(
@@ -86,10 +119,29 @@ func newInspectorRewriteDispatcher(
 
 // forTask scopes the dispatcher to one split task for the duration of a
 // rewrite round.
+//
+// A round reads the task's plans once. The trigger entry holds every plan the
+// split ever dispatched, until housekeeping drops the cleaned ones, so a read
+// per harvested plan and per dispatch made a round quadratic in the split's
+// own progress.
 func (d *inspectorRewriteDispatcher) forTask(taskID int64) *inspectorRewriteDispatcher {
 	scoped := *d
 	scoped.taskID = taskID
+	scoped.plans = nil
+	scoped.scoped = true
 	return &scoped
+}
+
+// plansOf returns the plans of a split task: the scope's one read for the
+// scoped task, a fresh read otherwise.
+func (d *inspectorRewriteDispatcher) plansOf(taskID int64) *hashSplitPlanIndex {
+	if !d.scoped || taskID != d.taskID {
+		return newHashSplitPlanIndex(d.planReader.GetCompactionTaskDigestsByTriggerID(d.ctx, taskID))
+	}
+	if d.plans == nil {
+		d.plans = newHashSplitPlanIndex(d.planReader.GetCompactionTaskDigestsByTriggerID(d.ctx, taskID))
+	}
+	return d.plans
 }
 
 // DispatchHashSplit enqueues the rewrite of one source segment.
@@ -182,6 +234,16 @@ func (d *inspectorRewriteDispatcher) DispatchHashSplit(task *datapb.SplitShardTa
 	if err := d.inspector.enqueueCompaction(plan); err != nil {
 		return 0, err
 	}
+	if d.scoped && task.GetTaskId() == d.taskID && d.plans != nil {
+		// The rest of the round sees the plan it just enqueued.
+		d.plans.add(&compactionTaskDigest{
+			PlanID:        planID,
+			Type:          plan.GetType(),
+			State:         plan.GetState(),
+			InputSegments: plan.GetInputSegments(),
+			StartTime:     plan.GetStartTime(),
+		})
+	}
 	return planID, nil
 }
 
@@ -197,17 +259,15 @@ func (d *inspectorRewriteDispatcher) DispatchHashSplit(task *datapb.SplitShardTa
 // two apart. The state is read from compaction meta, so the answer survives a
 // datacoord restart.
 func (d *inspectorRewriteDispatcher) HashSplitPlanState(planID int64) (done bool, running bool, inputSegments []int64) {
-	for _, plan := range d.planReader.GetCompactionTasksByTriggerID(d.ctx, d.taskID) {
-		if plan.GetPlanID() != planID {
-			continue
-		}
-		done, running = hashSplitPlanTerminalState(plan.GetState())
-		if done || running {
-			return done, running, nil
-		}
-		return false, false, plan.GetInputSegments()
+	plan, ok := d.plansOf(d.taskID).byPlan[planID]
+	if !ok {
+		return false, false, nil
 	}
-	return false, false, nil
+	done, running = hashSplitPlanTerminalState(plan.State)
+	if done || running {
+		return done, running, nil
+	}
+	return false, false, plan.InputSegments
 }
 
 // hashSplitPlanTerminalState maps a compaction task state onto the
@@ -237,21 +297,15 @@ func hashSplitPlanTerminalState(state datapb.CompactionTaskState) (done bool, ru
 func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) (int64, time.Time) {
 	failed := 0
 	var lastFailure int64
-	for _, plan := range d.planReader.GetCompactionTasksByTriggerID(d.ctx, taskID) {
-		if plan.GetType() != datapb.CompactionType_HashSplitCompaction {
-			continue
-		}
-		if len(plan.GetInputSegments()) != 1 || plan.GetInputSegments()[0] != segmentID {
-			continue
-		}
-		if done, running := hashSplitPlanTerminalState(plan.GetState()); done || running {
-			return plan.GetPlanID(), time.Time{}
+	for _, plan := range d.plansOf(taskID).bySegment[segmentID] {
+		if done, running := hashSplitPlanTerminalState(plan.State); done || running {
+			return plan.PlanID, time.Time{}
 		}
 		// Neither done nor running for an input that is still to rewrite: the
 		// plan failed. A committed plan dropped its input, which is never
 		// dispatched again.
 		failed++
-		lastFailure = max(lastFailure, plan.GetStartTime(), plan.GetEndTime())
+		lastFailure = max(lastFailure, plan.StartTime, plan.EndTime)
 	}
 	if failed == 0 {
 		return 0, time.Time{}

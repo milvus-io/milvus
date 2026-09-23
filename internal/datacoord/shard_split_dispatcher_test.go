@@ -18,24 +18,43 @@ package datacoord
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type fakePlanReader struct {
 	byTrigger map[int64][]*datapb.CompactionTask
+	calls     int // how many times the plans of a trigger were read
 }
 
-func (f *fakePlanReader) GetCompactionTasksByTriggerID(_ context.Context, triggerID int64) []*datapb.CompactionTask {
-	return f.byTrigger[triggerID]
+// GetCompactionTaskDigestsByTriggerID digests the plans through a real
+// compactionTaskMeta, so the fields read are the production ones.
+func (f *fakePlanReader) GetCompactionTaskDigestsByTriggerID(_ context.Context, triggerID int64) []compactionTaskDigest {
+	f.calls++
+	plans := make(map[int64]*datapb.CompactionTask, len(f.byTrigger[triggerID]))
+	for _, plan := range f.byTrigger[triggerID] {
+		plans[plan.GetPlanID()] = plan
+	}
+	csm := &compactionTaskMeta{compactionTasks: map[int64]map[int64]*datapb.CompactionTask{triggerID: plans}}
+	digests := csm.GetCompactionTaskDigestsByTriggerID(triggerID)
+	// Map order is random; keep the fixture's order.
+	order := make(map[int64]int, len(f.byTrigger[triggerID]))
+	for i, plan := range f.byTrigger[triggerID] {
+		order[plan.GetPlanID()] = i
+	}
+	slices.SortFunc(digests, func(a, b compactionTaskDigest) int { return order[a.PlanID] - order[b.PlanID] })
+	return digests
 }
 
 type fakeInspector struct {
@@ -395,4 +414,58 @@ func TestDispatcherBacksOffAFailingSegment(t *testing.T) {
 		assert.EqualValues(t, 9, planID)
 		assert.Empty(t, inspector.enqueued)
 	})
+}
+
+// A split's plans all share its task id as their trigger id, so that entry of
+// compaction meta grows with every plan the split ever dispatched, and each
+// read of it used to deep-clone every plan -- schema included. A round reads
+// it once, however many plans it harvests and segments it dispatches.
+func TestRewriteRoundReadsTheSplitsPlansOnce(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.ShardSplitRewriteBatchSize.Key, "8")
+	defer params.Reset(params.DataCoordCfg.ShardSplitRewriteBatchSize.Key)
+
+	sources := []int64{101, 102, 103, 104, 105, 106, 107, 108, 109, 110}
+	m := newHashRewriteMeta(t, sources)
+	c := newRewriteCase(t, m, newHashTask(nil))
+	inspector := &fakeInspector{}
+	reader := &fakePlanReader{byTrigger: map[int64][]*datapb.CompactionTask{}}
+	rewriter := newHashSplitRewriter(c.manager, newInspectorRewriteDispatcher(context.Background(), m, inspector, reader, &fakeAllocator{next: 900}))
+
+	rewriter.redistribute(context.Background(), c.task())
+	require.Len(t, inspector.enqueued, 8)
+	assert.Equal(t, 1, reader.calls, "the first round reads the plans once for all 8 dispatches")
+
+	// The plans are in flight: the next round harvests all 8 and dispatches
+	// nothing new, still in one read.
+	for _, plan := range inspector.enqueued {
+		executing := proto.Clone(plan).(*datapb.CompactionTask)
+		executing.State = datapb.CompactionTaskState_executing
+		reader.byTrigger[hashTaskID] = append(reader.byTrigger[hashTaskID], executing)
+		m.SetSegmentsCompacting(context.Background(), plan.GetInputSegments(), true)
+	}
+	reader.calls = 0
+	rewriter.redistribute(context.Background(), c.task())
+	assert.Equal(t, 1, reader.calls)
+	assert.Len(t, c.task().GetDispatchedPlanIds(), 8)
+}
+
+// Within one round the plan just enqueued is in the round's read of the plans,
+// so a second dispatch of the same segment still returns it.
+func TestScopedDispatcherSeesThePlanItJustEnqueued(t *testing.T) {
+	d, inspector, reader, _ := newTestRewriteDispatcher(t, []int64{301})
+	scoped := d.forTask(hashTaskID)
+	task := newHashTask([]int64{301})
+
+	first, err := scoped.DispatchHashSplit(task, 301)
+	require.NoError(t, err)
+	again, err := scoped.DispatchHashSplit(task, 301)
+	require.NoError(t, err)
+	assert.Equal(t, first, again)
+	assert.Len(t, inspector.enqueued, 1)
+	assert.Equal(t, 1, reader.calls)
+
+	done, running, _ := scoped.HashSplitPlanState(first)
+	assert.False(t, done)
+	assert.True(t, running, "the enqueued plan reads as running for the rest of the round")
 }

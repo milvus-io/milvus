@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -208,4 +209,27 @@ func (suite *CompactionTaskMetaSuite) TestReloadFromKV_BumpSchemaVersionTaskSurv
 	suite.Equal(1, len(tasks))
 	suite.Equal(datapb.CompactionTaskState_executing, tasks[0].State,
 		"schema bump task must survive reload even with nil PreAllocatedSegmentIDs")
+}
+
+// The digests carry what a caller follows a plan by, and none of it aliases the
+// stored task.
+func (suite *CompactionTaskMetaSuite) TestGetCompactionTaskDigestsByTriggerID() {
+	suite.NoError(suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{
+		TriggerID: 7, PlanID: 70, Type: datapb.CompactionType_HashSplitCompaction,
+		State: datapb.CompactionTaskState_failed, InputSegments: []int64{301},
+		StartTime: 11, EndTime: 12, Schema: &schemapb.CollectionSchema{Name: "c"},
+	}))
+	suite.NoError(suite.meta.SaveCompactionTask(context.TODO(), &datapb.CompactionTask{TriggerID: 8, PlanID: 80}))
+
+	digests := suite.meta.GetCompactionTaskDigestsByTriggerID(7)
+	suite.Require().Len(digests, 1)
+	suite.Equal(compactionTaskDigest{
+		PlanID: 70, Type: datapb.CompactionType_HashSplitCompaction,
+		State: datapb.CompactionTaskState_failed, InputSegments: []int64{301},
+		StartTime: 11, EndTime: 12,
+	}, digests[0])
+
+	digests[0].InputSegments[0] = 999
+	suite.EqualValues(301, suite.meta.GetCompactionTasksByTriggerID(7)[0].GetInputSegments()[0])
+	suite.Empty(suite.meta.GetCompactionTaskDigestsByTriggerID(9))
 }

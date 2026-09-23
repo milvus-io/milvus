@@ -3700,6 +3700,12 @@ func (m *meta) GetCompactionTasksByTriggerID(ctx context.Context, triggerID int6
 	return m.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
 }
 
+// GetCompactionTaskDigestsByTriggerID returns the progress digests of every
+// compaction task of a trigger, without cloning the tasks.
+func (m *meta) GetCompactionTaskDigestsByTriggerID(ctx context.Context, triggerID int64) []compactionTaskDigest {
+	return m.compactionTaskMeta.GetCompactionTaskDigestsByTriggerID(triggerID)
+}
+
 func (m *meta) CleanPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
 	removePaths := make([]string, 0)
 	partitionStatsPath := path.Join(m.chunkManager.RootPath(), common.PartitionStatsPath,
