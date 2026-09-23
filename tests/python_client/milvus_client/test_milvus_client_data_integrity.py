@@ -1210,6 +1210,9 @@ COMPACTION_INTEGRITY_INSERT_BATCHES_PER_ROUND = 10
 COMPACTION_INTEGRITY_IMPORT_ROWS_PER_ROUND = int(
     os.getenv("MILVUS_COMPACTION_INTEGRITY_IMPORT_ROWS_PER_ROUND", "10000")
 )
+COMPACTION_INTEGRITY_IMPORT_CHUNK_SIZE = int(
+    os.getenv("MILVUS_COMPACTION_INTEGRITY_IMPORT_CHUNK_SIZE", str(1024 * 1024 * 1024))
+)
 COMPACTION_INTEGRITY_ROUND_COUNTS = [int(os.getenv("MILVUS_COMPACTION_INTEGRITY_ROUNDS", "3"))]
 COMPACTION_INTEGRITY_VECTOR_DIM = 16
 COMPACTION_INTEGRITY_LOB_ROW_INTERVAL = 1000
@@ -3818,6 +3821,7 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 access_key="minioadmin",
                 secret_key="minioadmin",
             ),
+            chunk_size=COMPACTION_INTEGRITY_IMPORT_CHUNK_SIZE,
             file_type=BulkFileType.PARQUET,
         ) as remote_writer:
             for row in rows:
@@ -3831,6 +3835,7 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
             "import_ingress_payload_persisted",
             **identity,
             files=batch_files[0],
+            chunk_size=COMPACTION_INTEGRITY_IMPORT_CHUNK_SIZE,
         )
 
         self._ensure_compaction_integrity_utility_connection()
