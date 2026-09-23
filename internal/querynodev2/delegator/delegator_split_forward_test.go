@@ -84,7 +84,8 @@ func TestProcessSplitShardValidatesTheFence(t *testing.T) {
 	t.Run("an empty target name is refused before anything is pending", func(t *testing.T) {
 		sd := newTSafeTestDelegator("v0", 0)
 		err := sd.ProcessSplitShard(context.Background(), []string{"v1", ""})
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
 		assert.Empty(t, sd.spawning)
 	})
 }
