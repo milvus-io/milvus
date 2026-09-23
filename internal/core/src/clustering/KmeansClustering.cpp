@@ -373,9 +373,6 @@ KmeansClustering::StreamingAssignandUpload(
     knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
     const milvus::proto::clustering::AnalyzeInfo& config,
     const milvus::proto::clustering::ClusteringCentroidsStats& centroid_stats,
-    const std::vector<
-        milvus::proto::clustering::ClusteringCentroidIdMappingStats>&
-        id_mapping_stats,
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& insert_files,
     const std::map<int64_t, int64_t>& num_rows,
@@ -383,7 +380,7 @@ KmeansClustering::StreamingAssignandUpload(
     const Config& base_config,
     const knowhere::Json& cluster_config,
     const int64_t dim,
-    const int64_t trained_segments_num,
+    const T* full_training_data,
     const int64_t num_clusters) {
     auto byte_size = centroid_stats.ByteSizeLong();
     std::unique_ptr<uint8_t[]> data = std::make_unique<uint8_t[]>(byte_size);
@@ -428,17 +425,18 @@ KmeansClustering::StreamingAssignandUpload(
             byte_size);
     };
 
-    for (size_t i = 0; i < segment_ids.size(); i++) {
-        int64_t segment_id = segment_ids[i];
-        // id mapping has been computed, just upload to remote
-        if (i < trained_segments_num) {
-            serializeIdMappingAndUpload(segment_id, id_mapping_stats[i]);
-            for (int64_t j = 0; j < num_clusters; ++j) {
-                num_vectors_each_centroid[j] +=
-                    id_mapping_stats[i].num_in_centroid(j);
-            }
-        } else {  // streaming download raw data, assign id mapping, then upload
-            int64_t num_row = num_rows.at(segment_id);
+    int64_t full_data_row_offset = 0;
+    for (const auto segment_id : segment_ids) {
+        const auto num_row = num_rows.at(segment_id);
+        knowhere::DataSetPtr dataset;
+        if (full_training_data != nullptr) {
+            // Full training data is in segment_ids order. Borrow only this
+            // segment's rows; the caller retains the owning training dataset.
+            dataset = GenDataset(
+                num_row, dim, full_training_data + full_data_row_offset * dim);
+            dataset->SetIsOwner(false);
+            full_data_row_offset += num_row;
+        } else {
             std::unique_ptr<T[]> buf = std::make_unique<T[]>(num_row * dim);
             int64_t offset = 0;
             auto mit = manifest_paths.find(segment_id);
@@ -459,31 +457,31 @@ KmeansClustering::StreamingAssignandUpload(
                                   dim,
                                   offset);
             }
-            auto dataset = GenDataset(num_row, dim, buf.release());
+            dataset = GenDataset(num_row, dim, buf.release());
             dataset->SetIsOwner(true);
-            auto res =
-                cluster_node.AssignWithDistance(*dataset, cluster_config);
-            if (!res.has_value()) {
-                ThrowInfo(KnowhereStatusToErrorCode(res.error()),
-                          fmt::format("failed to assign with distance: {}: {}",
-                                      KnowhereStatusString(res.error()),
-                                      res.what()));
-            }
-            res.value()->SetIsOwner(true);
-            AssertInfo(res.value()->GetRows() == num_row,
-                       "cluster assignment returned {} rows, expected {}",
-                       res.value()->GetRows(),
-                       num_row);
-            const auto* ids = res.value()->GetIds();
-            const auto* distances = res.value()->GetDistance();
-            auto id_mapping_pb = CentroidIdMappingWithDistanceToPB(
-                ids, distances, num_row, num_clusters);
-            for (int64_t j = 0; j < num_clusters; ++j) {
-                num_vectors_each_centroid[j] +=
-                    id_mapping_pb.num_in_centroid(j);
-            }
-            serializeIdMappingAndUpload(segment_id, id_mapping_pb);
         }
+        // Sampling affects training only. Every segment gets a complete
+        // assignment and its own row-aligned ID/distance artifact.
+        auto res = cluster_node.AssignWithDistance(*dataset, cluster_config);
+        if (!res.has_value()) {
+            ThrowInfo(KnowhereStatusToErrorCode(res.error()),
+                      fmt::format("failed to assign with distance: {}: {}",
+                                  KnowhereStatusString(res.error()),
+                                  res.what()));
+        }
+        res.value()->SetIsOwner(true);
+        AssertInfo(res.value()->GetRows() == num_row,
+                   "cluster assignment returned {} rows, expected {}",
+                   res.value()->GetRows(),
+                   num_row);
+        const auto* ids = res.value()->GetIds();
+        const auto* distances = res.value()->GetDistance();
+        auto id_mapping_pb = CentroidIdMappingWithDistanceToPB(
+            ids, distances, num_row, num_clusters);
+        for (int64_t j = 0; j < num_clusters; ++j) {
+            num_vectors_each_centroid[j] += id_mapping_pb.num_in_centroid(j);
+        }
+        serializeIdMappingAndUpload(segment_id, id_mapping_pb);
     }
     if (IsDataSkew<T>(config, dim, num_vectors_each_centroid)) {
         LOG_INFO(msg_header_ + "data skew! skip clustering");
@@ -559,7 +557,6 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
                    "segment id {} has neither insert files nor manifest",
                    segment_id);
     }
-    size_t trained_segments_num = 0;
 
     size_t data_size = data_num * dim * sizeof(T);
     size_t train_num = train_size / sizeof(T) / dim;
@@ -569,7 +566,6 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         train_num = data_num;
         random_sample =
             false;  // all data are used for training, no need to random sampling
-        trained_segments_num = segment_ids.size();
     }
     if (train_num < num_clusters) {
         LOG_WARN(msg_header_ +
@@ -643,58 +639,25 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
         reinterpret_cast<const T*>(centroids_res.value()->GetTensor());
 
     auto centroid_stats = CentroidsToPB<T>(centroids, num_clusters, dim);
-    std::vector<milvus::proto::clustering::ClusteringCentroidIdMappingStats>
-        id_mapping_stats;
-    id_mapping_stats.reserve(trained_segments_num);
-    if (trained_segments_num > 0) {
-        auto assign_res =
-            cluster_node.AssignWithDistance(*dataset, cluster_config);
-        if (!assign_res.has_value()) {
-            ThrowInfo(
-                ErrorCode::UnexpectedError,
-                fmt::format(
-                    "failed to assign training data with distance: {}: {}",
-                    KnowhereStatusString(assign_res.error()),
-                    assign_res.what()));
-        }
-        assign_res.value()->SetIsOwner(true);
-        AssertInfo(
-            assign_res.value()->GetRows() == static_cast<int64_t>(train_num),
-            "cluster assignment returned {} rows, expected {}",
-            assign_res.value()->GetRows(),
-            train_num);
-        const auto* centroid_id_mapping = assign_res.value()->GetIds();
-        const auto* distances = assign_res.value()->GetDistance();
-        AssertInfo(centroid_id_mapping != nullptr,
-                   "cluster assignment returned no centroid ids");
-        AssertInfo(distances != nullptr,
-                   "cluster assignment returned no distances");
-        int64_t trained_row_offset = 0;
-        for (size_t i = 0; i < trained_segments_num; ++i) {
-            const auto segment_rows = num_rows.at(segment_ids[i]);
-            id_mapping_stats.emplace_back(CentroidIdMappingWithDistanceToPB(
-                centroid_id_mapping + trained_row_offset,
-                distances + trained_row_offset,
-                segment_rows,
-                num_clusters));
-            trained_row_offset += segment_rows;
-        }
+    if (random_sample) {
+        // Sampled rows are not a complete segment: release them before loading
+        // full segments. Otherwise reuse the resident data without re-reading.
+        dataset.reset();
     }
-    dataset.reset();
     // upload
-    StreamingAssignandUpload<T>(cluster_node,
-                                config,
-                                centroid_stats,
-                                id_mapping_stats,
-                                segment_ids,
-                                insert_files,
-                                num_rows,
-                                manifest_paths,
-                                base_config,
-                                cluster_config,
-                                dim,
-                                trained_segments_num,
-                                num_clusters);
+    StreamingAssignandUpload<T>(
+        cluster_node,
+        config,
+        centroid_stats,
+        segment_ids,
+        insert_files,
+        num_rows,
+        manifest_paths,
+        base_config,
+        cluster_config,
+        dim,
+        dataset ? static_cast<const T*>(dataset->GetTensor()) : nullptr,
+        num_clusters);
     rc.RecordSection("clustering result upload done");
     rc.ElapseFromBegin("clustering done");
 }
@@ -704,9 +667,6 @@ KmeansClustering::StreamingAssignandUpload<float>(
     knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
     const milvus::proto::clustering::AnalyzeInfo& config,
     const milvus::proto::clustering::ClusteringCentroidsStats& centroid_stats,
-    const std::vector<
-        milvus::proto::clustering::ClusteringCentroidIdMappingStats>&
-        id_mapping_stats,
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& insert_files,
     const std::map<int64_t, int64_t>& num_rows,
@@ -714,7 +674,7 @@ KmeansClustering::StreamingAssignandUpload<float>(
     const Config& base_config,
     const knowhere::Json& cluster_config,
     const int64_t dim,
-    const int64_t trained_segments_num,
+    const float* full_training_data,
     const int64_t num_clusters);
 
 template void
