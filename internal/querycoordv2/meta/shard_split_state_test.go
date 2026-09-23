@@ -400,10 +400,24 @@ func TestShardSplitFreezeByChannel(t *testing.T) {
 		frozen(t, f, "v0", "v1", "v2")
 		assert.NoError(t, f.CheckChannel("v9"))
 	})
-	t.Run("fence the cached states predate: the next target's marks", func(t *testing.T) {
+	t.Run("fence the cached states predate: everything", func(t *testing.T) {
+		// the marks give the fence away, but the states cannot name its source.
 		states := ShardStatesOf(&milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v0", "v9"}})
 		f := freeze(t, states, []string{"v1", "v2"}, dm("v0", "v9"), dm("v0", "v1", "v2", "v9"))
-		frozen(t, f, "v1", "v2")
+		frozen(t, f, "v0", "v1", "v2", "v9")
+	})
+	t.Run("window marks the states agree with: the marks and their source", func(t *testing.T) {
+		states := ShardStatesOf(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0", "v1", "v2", "v9"},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardSplitting},
+				{State: schemapb.ShardState_ShardCreating},
+				{State: schemapb.ShardState_ShardCreating},
+				{State: schemapb.ShardState_ShardNormal},
+			},
+		})
+		f := freeze(t, states, []string{"v1", "v2"}, dm("v0", "v9"), dm("v0", "v1", "v2", "v9"))
+		frozen(t, f, "v0", "v1", "v2")
 		assert.NoError(t, f.CheckChannel("v9"))
 	})
 	t.Run("adopted, not flipped: the retired source and the targets awaiting the flip", func(t *testing.T) {
