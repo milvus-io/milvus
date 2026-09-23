@@ -24,6 +24,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -198,6 +199,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	resp, err := client.Do(req)
 	suite.Nil(err)
 	defer resp.Body.Close()
+	suite.Equal("text/plain", resp.Header.Get("Content-Type"))
 	body, _ := io.ReadAll(resp.Body)
 	suite.Equal("OK", string(body))
 
@@ -206,6 +208,7 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	resp, err = client.Do(req)
 	suite.Nil(err)
 	defer resp.Body.Close()
+	suite.Equal("application/json", resp.Header.Get("Content-Type"))
 	body, _ = io.ReadAll(resp.Body)
 	suite.Equal("{\"state\":\"OK\",\"detail\":[{\"name\":\"m1\",\"code\":1}]}", string(body))
 
@@ -216,11 +219,93 @@ func (suite *HTTPServerTestSuite) TestHealthzHandler() {
 	resp, err = client.Do(req)
 	suite.Nil(err)
 	defer resp.Body.Close()
+	suite.Equal("application/json", resp.Header.Get("Content-Type"))
 	body, _ = io.ReadAll(resp.Body)
 	respObj := &healthz.HealthResponse{}
 	err = json.Unmarshal(body, respObj)
 	suite.NoError(err)
 	suite.NotEqual("OK", respObj.State)
+}
+
+func TestStopComponentHandler(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	key := params.CommonCfg.AdminAuthEnabled.Key
+	originalGate := params.CommonCfg.AdminAuthEnabled.GetValue()
+	require.NoError(t, params.Save(key, "false"))
+	t.Cleanup(func() { params.Save(key, originalGate) })
+
+	originalMetricsServer := metricsServer
+	metricsServer = http.NewServeMux()
+	t.Cleanup(func() { metricsServer = originalMetricsServer })
+
+	RegisterStopComponent(func(role string) error {
+		if role != "proxy" {
+			return fmt.Errorf("cannot stop role %q", role)
+		}
+		return nil
+	})
+
+	tests := []struct {
+		role         string
+		expectedCode int
+		expectedMsg  string
+	}{
+		{role: "proxy", expectedCode: http.StatusOK, expectedMsg: "OK"},
+		{role: `query"node`, expectedCode: http.StatusInternalServerError, expectedMsg: `failed to trigger component stop, cannot stop role "query\"node"`},
+	}
+	for _, test := range tests {
+		t.Run(test.role, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, RouteTriggerStopPath+"?role="+url.QueryEscape(test.role), nil)
+			recorder := httptest.NewRecorder()
+			metricsServer.ServeHTTP(recorder, req)
+			response := recorder.Result()
+			defer response.Body.Close()
+			assert.Equal(t, test.expectedCode, response.StatusCode)
+			assert.Equal(t, "application/json", response.Header.Get("Content-Type"))
+			var payload map[string]string
+			require.NoError(t, json.NewDecoder(response.Body).Decode(&payload))
+			assert.Equal(t, test.expectedMsg, payload["msg"])
+		})
+	}
+}
+
+func TestCheckComponentReadyHandler(t *testing.T) {
+	originalMetricsServer := metricsServer
+	metricsServer = http.NewServeMux()
+	t.Cleanup(func() {
+		metricsServer = originalMetricsServer
+	})
+
+	RegisterCheckComponentReady(func(role string) error {
+		if role != "proxy" {
+			return fmt.Errorf("role %q is not ready", role)
+		}
+		return nil
+	})
+
+	tests := []struct {
+		role         string
+		expectedCode int
+		expectedMsg  string
+	}{
+		{role: "proxy", expectedCode: http.StatusOK, expectedMsg: "OK"},
+		{role: `query"node`, expectedCode: http.StatusInternalServerError, expectedMsg: `failed to to check component ready, role "query\"node" is not ready`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.role, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, RouteCheckComponentReady+"?role="+url.QueryEscape(test.role), nil)
+			recorder := httptest.NewRecorder()
+			metricsServer.ServeHTTP(recorder, req)
+
+			assert.Equal(t, test.expectedCode, recorder.Code)
+			assert.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+			var response map[string]string
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.Equal(t, test.expectedMsg, response["msg"])
+		})
+	}
 }
 
 func (suite *HTTPServerTestSuite) TestEventlogHandler() {
