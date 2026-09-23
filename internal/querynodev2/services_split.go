@@ -432,12 +432,17 @@ func (node *QueryNode) describeForSplitRecovery(ctx context.Context, source dele
 			log.Warn(ctx, "failed to get coordinator client for split child recovery", mlog.Err(err))
 			return nil, false
 		}
-		resp, err := mixCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-			// The Base is not optional: rootcoord's task Prepare reads its MsgType.
-			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
-			CollectionID: collectionID,
+		// A restart re-watches every channel at once, and each watch runs this
+		// recovery: the recoveries of one collection share one describe in
+		// flight rather than each sending its own to rootcoord.
+		resp, err, _ := node.splitRecoveryDescribes.Do(fmt.Sprint(collectionID), func() (*milvuspb.DescribeCollectionResponse, error) {
+			resp, err := mixCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+				// The Base is not optional: rootcoord's task Prepare reads its MsgType.
+				Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
+				CollectionID: collectionID,
+			})
+			return resp, merr.CheckRPCCall(resp, err)
 		})
-		err = merr.CheckRPCCall(resp, err)
 		if err == nil {
 			return resp, true
 		}
