@@ -102,6 +102,7 @@ type ShardDelegator interface {
 	IsUnadoptedSplitChild() bool
 	MarkReleasing()
 	RefuseReadsAsRetiredSource(ctx context.Context)
+	ForwardKnownDeletesToParent(ctx context.Context) error
 	ProcessDeleteBatches(batches []DeleteBatch)
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadL0(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
