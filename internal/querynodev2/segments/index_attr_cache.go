@@ -24,6 +24,7 @@ package segments
 import "C"
 
 import (
+	"context"
 	"fmt"
 	"unsafe"
 
@@ -82,18 +83,29 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	engineVersion := indexInfo.GetCurrentIndexVersion()
 	isLoadWithDisk, has := c.loadWithDisk.Get(typeutil.NewPair(indexType, engineVersion))
 	if !has {
-		isLoadWithDisk, _, _ = c.sf.Do(fmt.Sprintf("%s_%d", indexType, engineVersion), func() (bool, error) {
+		isLoadWithDisk, err, _ = c.sf.Do(fmt.Sprintf("%s_%d", indexType, engineVersion), func() (bool, error) {
 			var result bool
-			GetDynamicPool().Submit(func() (any, error) {
+			_, err := GetDynamicPool().Submit(func() (any, error) {
 				cIndexType := C.CString(indexType)
 				defer C.free(unsafe.Pointer(cIndexType))
-				cEngineVersion := C.int32_t(indexInfo.GetCurrentIndexVersion())
-				result = bool(C.IsLoadWithDisk(cIndexType, cEngineVersion))
+				cEngineVersion := C.int(indexInfo.GetCurrentIndexVersion())
+				var cResult C.bool
+				status := C.IsLoadWithDisk(cIndexType, cEngineVersion, &cResult)
+				if err := HandleCStatus(context.TODO(), &status, "IsLoadWithDisk failed"); err != nil {
+					return nil, err
+				}
+				result = bool(cResult)
 				return nil, nil
 			}).Await()
+			if err != nil {
+				return false, err
+			}
 			c.loadWithDisk.Insert(typeutil.NewPair(indexType, engineVersion), result)
 			return result, nil
 		})
+		if err != nil {
+			return 0, 0, err
+		}
 	}
 
 	factor := float64(1)
