@@ -231,9 +231,20 @@ type cacheBlock[T timed] struct {
 
 // Cache adds entry into cache item.
 // returns error if item is full
+//
+// An entry older than the block's newest one is inserted in timestamp order
+// instead of appended, and never refused as full: refusing it would start a new
+// block that is older than this one. ListAfter binary-searches the block, so
+// the block must stay sorted even when its producers are not (a shard split
+// source receives the deletes its children forward from different WALs).
 func (c *cacheBlock[T]) Put(entry T) error {
 	c.mut.Lock()
 	defer c.mut.Unlock()
+
+	if n := len(c.data); n > 0 && entry.Timestamp() < c.data[n-1].Timestamp() {
+		c.insertSortedLocked(entry)
+		return nil
+	}
 
 	if c.size+entry.Size() > c.maxSize {
 		return errBufferFull
@@ -243,6 +254,38 @@ func (c *cacheBlock[T]) Put(entry T) error {
 	c.size += entry.Size()
 	c.entryNum += entry.EntryNum()
 	return nil
+}
+
+// insertSorted inserts entry at its timestamp position, whatever the block's
+// size, keeping entries of equal timestamp in arrival order.
+func (c *cacheBlock[T]) insertSorted(entry T) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	c.insertSortedLocked(entry)
+}
+
+func (c *cacheBlock[T]) insertSortedLocked(entry T) {
+	idx := sort.Search(len(c.data), func(i int) bool {
+		return c.data[i].Timestamp() > entry.Timestamp()
+	})
+	c.data = append(c.data, entry)
+	copy(c.data[idx+1:], c.data[idx:])
+	c.data[idx] = entry
+	c.size += entry.Size()
+	c.entryNum += entry.EntryNum()
+	if entry.Timestamp() < c.headTs {
+		c.headTs = entry.Timestamp()
+	}
+}
+
+// lastTs returns the newest timestamp in the block, and false when it is empty.
+func (c *cacheBlock[T]) lastTs() (uint64, bool) {
+	c.mut.RLock()
+	defer c.mut.RUnlock()
+	if len(c.data) == 0 {
+		return 0, false
+	}
+	return c.data[len(c.data)-1].Timestamp(), true
 }
 
 // ListAfter returns entries of which ts after provided value.

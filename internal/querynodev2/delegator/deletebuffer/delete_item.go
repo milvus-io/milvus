@@ -10,6 +10,11 @@ import (
 type Item struct {
 	Ts   uint64
 	Data []BufferItem
+	// Seq is the order the owning delegator put the item in, starting at 1; zero
+	// when the owner does not number its items. Unlike Ts it is monotonic even
+	// when the buffer is fed out of timestamp order, so a reader can ask for
+	// "what arrived since" by Seq when Ts cannot answer it.
+	Seq uint64
 }
 
 // Timestamp implements `timed`.
