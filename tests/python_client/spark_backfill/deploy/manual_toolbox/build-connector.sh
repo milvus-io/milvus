@@ -38,9 +38,13 @@ apt-get "${APT_NETWORK_OPTIONS[@]}" install -y --no-install-recommends \
   git \
   jq \
   libaio-dev \
+  libclang-dev \
+  libssl-dev \
   libtool \
   make \
   patchelf \
+  pkg-config \
+  protobuf-compiler \
   python3-pip \
   unzip \
   wget \
@@ -60,6 +64,9 @@ conan remote add default-conan-local2 \
   https://milvus01.jfrog.io/artifactory/api/conan/default-conan-local2 \
   || true
 conan remote list
+
+# Remove the previous archive workaround when reusing an init-container cache.
+rm -f "$(conan config home)/extensions/hooks/hook_avro_archive.py"
 
 # The pinned milvus-storage revision builds its Rust DataFusion bridge as part
 # of the JNI library. Keep the toolchain/registry under the restart-persistent
@@ -99,6 +106,42 @@ else
 fi
 cd "$SOURCE_DIR"
 git submodule update --init --recursive
+
+# The Milvus remote does not yet publish an Avro 1.12.2 recipe. Reuse only the
+# pinned recipe's C++ build instructions and export a distinct 1.12.2 package
+# with the official release archive and checksum. No 1.12.1 source or binary
+# packages are reused, and nothing is uploaded to the remote.
+AVRO_BASE_RECIPE='libavrocpp/1.12.1.1@milvus/dev#cde7bb587a29f6f233bae7e18b71815d'
+AVRO_RECIPE_DIR=/build/avro-1.12.2
+conan download "$AVRO_BASE_RECIPE" -r default-conan-local2 --only-recipe
+mkdir -p "$AVRO_RECIPE_DIR"
+cp "$(conan cache path "$AVRO_BASE_RECIPE")/conanfile.py" "$AVRO_RECIPE_DIR/"
+cat > "$AVRO_RECIPE_DIR/conandata.yml" <<'YAML'
+sources:
+  "1.12.2":
+    url: "https://dlcdn.apache.org/avro/avro-1.12.2/avro-src-1.12.2.tar.gz"
+    sha256: "449722c442ec9514d8e6933f9c7ccf2e0544cb75c951c25b804ea1d8e73d12bb"
+YAML
+AVRO_REFERENCE="$(conan export "$AVRO_RECIPE_DIR" \
+  --version=1.12.2 --user=milvus --channel=dev --format=json | jq -er '.reference')"
+
+# Pin the exported revision and override older transitive requirements too.
+# Replacing the whole requirement makes this idempotent on init retries.
+python3 - "$SOURCE_DIR/milvus-storage/cpp/conanfile.py" "$AVRO_REFERENCE" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+updated, count = re.subn(
+    r'self\.requires\("libavrocpp/[^"\n]+"(?:,\s*force=True)?\)',
+    f'self.requires("{sys.argv[2]}", force=True)',
+    path.read_text(),
+)
+if count != 1:
+    raise SystemExit(f"Expected one libavrocpp requirement in {path}, found {count}")
+path.write_text(updated)
+PY
 
 # The resolved Connector commit and its submodules pin dependency recipes.
 # Prefer the pinned Arrow binary from the Conan 2 remote instead of forcing a
@@ -142,6 +185,12 @@ CONAN_RUNTIME_DIR="$SOURCE_DIR/milvus-storage/cpp/build/Release/libs"
 test -d "$CONAN_RUNTIME_DIR"
 cp -a "$CONAN_RUNTIME_DIR"/. "$ARTIFACT_DIR/native/"
 
+# libaio comes from apt rather than Conan and is absent from the clean Spark
+# runtime image. Bundle its SONAME so JNI/Folly can load outside this builder.
+LIBAIO_LIBRARY="$(gcc -print-file-name=libaio.so.1)"
+test -f "$LIBAIO_LIBRARY"
+cp -L "$LIBAIO_LIBRARY" "$ARTIFACT_DIR/native/libaio.so.1"
+
 "$SOURCE_DIR/milvus-storage/java/patch_native_runpath.sh" "$ARTIFACT_DIR/native"
 "$SOURCE_DIR/milvus-storage/java/verify_native_dependencies.sh" \
   "$ARTIFACT_DIR/native/libmilvus-storage-jni.so"
@@ -154,6 +203,7 @@ python3 -m pip install --break-system-packages \
     minio numpy pyarrow pymilvus
 
 git rev-parse HEAD > "$ARTIFACT_DIR/evidence/connector-revision.txt"
+printf '%s\n' "$AVRO_REFERENCE" > "$ARTIFACT_DIR/evidence/avro-reference.txt"
 rustc --version > "$ARTIFACT_DIR/evidence/rust-version.txt"
 sha256sum \
   "$ARTIFACT_DIR/jars/spark-connector-assembly.jar" \
