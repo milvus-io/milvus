@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -278,4 +279,40 @@ func TestQueryNodeDoneEndsWithTheNode(t *testing.T) {
 	}
 	cancel()
 	<-node.Done()
+}
+
+// One describe that hangs (a coordinator failover can leave the RPC without an
+// answer) must not hold the recovery, and so the source's read refusal, for
+// good: each attempt has its own deadline and the loop retries.
+func TestRespawnSplitChildrenOnRecoveryTimesOutAHungDescribe(t *testing.T) {
+	backoff := mockey.Mock(splitRecoveryRetryBackoff).Return(time.Millisecond).Build()
+	defer backoff.UnPatch()
+	timeout := mockey.Mock(splitRecoveryDescribeTimeout).Return(50 * time.Millisecond).Build()
+	defer timeout.UnPatch()
+
+	mc := mocks.NewMockMixCoordClient(t)
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, _ *milvuspb.DescribeCollectionRequest, _ ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			<-ctx.Done() // hangs until the attempt's deadline
+			return nil, ctx.Err()
+		}).Once()
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:              merr.Success(),
+		VirtualChannelNames: []string{"src"},
+	}, nil).Once()
+	node := &QueryNode{mixCoord: mixCoordFuture(mc)}
+	source := delegator.NewMockShardDelegator(t)
+	source.EXPECT().Serviceable().Return(true).Maybe()
+	source.EXPECT().FinishSplitRecovery().Return().Once()
+
+	done := make(chan struct{})
+	go func() {
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a hung describe held the split recovery")
+	}
 }
