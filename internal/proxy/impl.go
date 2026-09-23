@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
 	"github.com/milvus-io/milvus/internal/proxy/rls"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -1160,15 +1161,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 	defer sp.End()
 	method := "GetStatistics"
 	tr := timerecord.NewTimeRecorder(method)
-	g := &getStatisticsTask{
-		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
-		request:   request,
-		Condition: NewTaskCondition(ctx),
-		ctx:       ctx,
-		tr:        tr,
-		mixc:      node.mixCoord,
-		lb:        node.lbPolicy,
-	}
+	g := NewGetStatisticsTask(ctx, node, request, tr)
 
 	mlog.Debug(ctx,
 		rpcReceived(method),
@@ -1210,7 +1203,7 @@ func (node *Proxy) GetStatistics(ctx context.Context, request *milvuspb.GetStati
 		mlog.Uint64("EndTS", g.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return g.result, nil
+	return g.Result(), nil
 }
 
 // GetCollectionStatistics get the collection statistics, such as `num_rows`.
@@ -1225,13 +1218,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 	defer sp.End()
 	method := "GetCollectionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
-	g := &getCollectionStatisticsTask{
-		baseTask:                       baseTask{MetaCache: node.GetMetaCache()},
-		ctx:                            ctx,
-		Condition:                      NewTaskCondition(ctx),
-		GetCollectionStatisticsRequest: request,
-		mixCoord:                       node.mixCoord,
-	}
+	g := NewGetCollectionStatisticsTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
@@ -1268,7 +1255,7 @@ func (node *Proxy) GetCollectionStatistics(ctx context.Context, request *milvusp
 		mlog.Uint64("EndTS", g.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return g.result, nil
+	return g.Result(), nil
 }
 
 // ShowCollections list all collections in Milvus.
@@ -1813,13 +1800,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 	method := "GetPartitionStatistics"
 	tr := timerecord.NewTimeRecorder(method)
 
-	g := &getPartitionStatisticsTask{
-		baseTask:                      baseTask{MetaCache: node.GetMetaCache()},
-		ctx:                           ctx,
-		Condition:                     NewTaskCondition(ctx),
-		GetPartitionStatisticsRequest: request,
-		mixCoord:                      node.mixCoord,
-	}
+	g := NewGetPartitionStatisticsTask(ctx, node, request)
 
 	mlog.Debug(ctx, rpcReceived(method))
 
@@ -1856,7 +1837,7 @@ func (node *Proxy) GetPartitionStatistics(ctx context.Context, request *milvuspb
 		mlog.Uint64("EndTS", g.EndTs()))
 
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return g.result, nil
+	return g.Result(), nil
 }
 
 // ShowPartitions list all partitions in the specific collection.
@@ -3041,31 +3022,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		}, false, false, false, nil
 	}
 
-	qt := &searchTask{
-		baseTask: baseTask{
-			MetaCache: node.GetMetaCache(),
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb.SearchRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Search),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:              paramtable.GetNodeID(),
-			IsTopkReduce:       optimizedSearch,
-			IsRecallEvaluation: isRecallEvaluation,
-		},
-		request:                request,
-		tr:                     timerecord.NewTimeRecorder("search"),
-		mixCoord:               node.mixCoord,
-		node:                   node,
-		lb:                     node.lbPolicy,
-		shardClientMgr:         node.shardMgr,
-		enableMaterializedView: node.enableMaterializedView,
-		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		chMgr:                  node.chMgr,
-	}
+	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
 
 	succeeded := false
 	defer func() {
@@ -3141,7 +3098,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
-		Add(float64(qt.result.GetResults().GetNumQueries()))
+		Add(float64(qt.Result().GetResults().GetNumQueries()))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3166,40 +3123,40 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 			metrics.SearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			nodeID,
 			metrics.SearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.result != nil {
+	if qt.Result() != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
-		sentSize := proto.Size(qt.result)
+		sentSize := proto.Size(qt.Result())
 		v := hookutil.GetExtension().Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.relatedDataSize,
-			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
+			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
+			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
-		SetReportValue(qt.result.GetStatus(), v)
-		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
-		if merr.Ok(qt.result.GetStatus()) {
+		SetReportValue(qt.Result().GetStatus(), v)
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
 	}
 
-	if qt.result != nil && qt.result.Results != nil && len(validData) > 0 {
-		adjustSearchResultsForNullVectors(qt.result, validData)
+	if qt.Result() != nil && qt.Result().Results != nil && len(validData) > 0 {
+		adjustSearchResultsForNullVectors(qt.Result(), validData)
 	}
 
 	succeeded = true
-	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, qt.isRecallEvaluation, nil
+	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), qt.IsRecallEvaluation(), nil
 }
 
 func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
@@ -3277,30 +3234,8 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
-	newSearchReq := convertHybridSearchToSearch(request)
-	qt := &searchTask{
-		baseTask: baseTask{
-			MetaCache: node.GetMetaCache(),
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		SearchRequest: &internalpb.SearchRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Search),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:        paramtable.GetNodeID(),
-			IsTopkReduce: optimizedSearch,
-		},
-		request:             newSearchReq,
-		tr:                  timerecord.NewTimeRecorder(method),
-		mixCoord:            node.mixCoord,
-		node:                node,
-		lb:                  node.lbPolicy,
-		shardClientMgr:      node.shardMgr,
-		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		chMgr:               node.chMgr,
-	}
+	newSearchReq := ConvertHybridSearchToSearch(request)
+	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
 
 	succeeded := false
 	defer func() {
@@ -3404,35 +3339,35 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			metrics.HybridSearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			nodeID,
 			metrics.HybridSearchLabel,
 			dbName,
 			collectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
-	if qt.result != nil {
-		sentSize := proto.Size(qt.result)
+	if qt.Result() != nil {
+		sentSize := proto.Size(qt.Result())
 		username := GetCurUserFromContextOrDefault(ctx)
 		v := hookutil.GetExtension().Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.relatedDataSize,
-			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
+			hookutil.RelatedDataSizeKey: qt.RelatedDataSize(),
+			hookutil.RelatedCntKey:      qt.Result().GetResults().GetAllSearchCount(),
 		})
-		SetReportValue(qt.result.GetStatus(), v)
-		SetStorageCost(qt.result.GetStatus(), qt.storageCost)
-		if merr.Ok(qt.result.GetStatus()) {
+		SetReportValue(qt.Result().GetStatus(), v)
+		SetStorageCost(qt.Result().GetStatus(), qt.StorageCost())
+		if merr.Ok(qt.Result().GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
 	}
 	succeeded = true
-	return qt.result, qt.resultSizeInsufficient, qt.isTopkReduce, nil
+	return qt.Result(), qt.ResultSizeInsufficient(), qt.IsTopkReduce(), nil
 }
 
 func adjustSearchResultsForNullVectors(results *milvuspb.SearchResults, validData []bool) {
@@ -3582,31 +3517,15 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	}
 
 	// Create queryTask to execute the retrieval
-	qt := &queryTask{
-		baseTask: baseTask{
-			MetaCache: node.GetMetaCache(),
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:            paramtable.GetNodeID(),
-			ConsistencyLevel: request.ConsistencyLevel,
-			QueryLabel:       metrics.QueryLabel,
-		},
-		request:             queryReq,
-		plan:                plan,
-		mixCoord:            node.mixCoord,
-		lb:                  node.lbPolicy,
-		shardclientMgr:      node.shardMgr,
-		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		// reQuery defaults to false - we need full query processing:
-		// partition conversion, struct field reconstruction, timestamp handling etc
-		chMgr: node.chMgr,
-	}
+	qt := NewQueryTask(ctx, node, queryReq, plan, &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:            paramtable.GetNodeID(),
+		ConsistencyLevel: request.ConsistencyLevel,
+		QueryLabel:       metrics.QueryLabel,
+	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
@@ -3673,7 +3592,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	for i := 0; i < returnedPKCount; i++ {
 		pkOffset[pkItr(i)] = i
 	}
-	orderedFieldsData, err := pickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
+	orderedFieldsData, err := PickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
 		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
 	if err != nil {
 		return nil, err
@@ -3807,11 +3726,23 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 	return ft.result, nil
 }
 
+// ExecuteQuery implements taskmodel.QueryRunner. It is the single seam through
+// which requery operators in the extracted task packages execute a query task
+// on the composition root; the concrete task type is asserted here because
+// root imports the concrete packages, not the reverse.
+func (node *Proxy) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	queryTask, ok := qt.(*queryTask)
+	if !ok {
+		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("query task of unexpected type: %T", qt)
+	}
+	return node.query(ctx, queryTask, sp)
+}
+
 // Query get the records by primary keys.
 func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-	request := qt.request
+	request := qt.Request()
 	method := "Query"
-	queryLabel := qt.getQueryLabel()
+	queryLabel := qt.GetMetricLabel()
 	if sp != nil {
 		sp.SetAttributes(attribute.String("queryLabel", queryLabel))
 	}
@@ -3887,7 +3818,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 		}, segcore.StorageCost{}, nil
 	}
 
-	if !qt.reQuery {
+	if !qt.ReQuery() {
 		span := tr.CtxRecord(ctx, "wait query result")
 		metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3913,33 +3844,20 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask, sp trace.Span) (*mi
 	}
 
 	succeeded = true
-	return qt.result, qt.storageCost, nil
+	return qt.Result(), qt.StorageCost(), nil
 }
 
 // Query get the records by primary keys.
 func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*milvuspb.QueryResults, error) {
-	qt := &queryTask{
-		baseTask: baseTask{
-			MetaCache: node.GetMetaCache(),
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:            paramtable.GetNodeID(),
-			ConsistencyLevel: request.ConsistencyLevel,
-			QueryLabel:       metrics.QueryLabel,
-		},
-		request:             request,
-		mixCoord:            node.mixCoord,
-		lb:                  node.lbPolicy,
-		shardclientMgr:      node.shardMgr,
-		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
-		chMgr:               node.chMgr,
-	}
+	qt := NewQueryTask(ctx, node, request, nil, &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:            paramtable.GetNodeID(),
+		ConsistencyLevel: request.ConsistencyLevel,
+		QueryLabel:       metrics.QueryLabel,
+	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
 
 	subLabel := GetCollectionRateSubLabel(request)
 	metrics.GetStats(ctx).
@@ -3977,14 +3895,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			metrics.QueryLabel,
 			request.DbName,
 			request.CollectionName,
-		).Add(float64(qt.storageCost.ScannedRemoteBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
 
 		metrics.ProxyScannedTotalMB.WithLabelValues(
 			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			metrics.QueryLabel,
 			request.DbName,
 			request.CollectionName,
-		).Add(float64(qt.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		).Add(float64(qt.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
 
 	if err != nil || !merr.Ok(res.Status) {
@@ -4000,14 +3918,14 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
 		hookutil.ResultDataSizeKey:  proto.Size(res),
-		hookutil.RelatedDataSizeKey: qt.totalRelatedDataSize,
-		hookutil.RelatedCntKey:      qt.allQueryCnt,
+		hookutil.RelatedDataSizeKey: qt.TotalRelatedDataSize(),
+		hookutil.RelatedCntKey:      qt.AllQueryCnt(),
 	})
 	SetReportValue(res.Status, v)
 	SetStorageCost(res.Status, storageCost)
 	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
 
-	if mlog.LevelEnabled(mlog.DebugLevel) && matchCountRule(request.OutputFields) {
+	if mlog.LevelEnabled(mlog.DebugLevel) && MatchCountRule(request.OutputFields) {
 		r, _ := protojson.Marshal(res)
 		mlog.Debug(ctx, "Count result", mlog.String("result", string(r)))
 	}

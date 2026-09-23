@@ -1869,13 +1869,13 @@ func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
 	// The retry must not allocate a separate fixed timestamp before querying.
 	task.node.(*Proxy).tsoAllocator = nil
 	queryPatch := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-		require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.request.GetConsistencyLevel())
-		require.Zero(t, qt.request.GetGuaranteeTimestamp())
+		require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.Request().GetConsistencyLevel())
+		require.Zero(t, qt.Request().GetGuaranteeTimestamp())
 		require.Zero(t, qt.GetMvccTimestamp())
 		require.False(t, qt.CanSkipAllocTimestamp())
 		for channel, meta := range task.partialUpdateCASGroups {
 			require.EqualValues(t, 10, meta.GetObservedPchannelTerm())
-			qt.actualChannelsMvcc.Insert(channel, 2000)
+			qt.RecordChannelMvcc(channel, 2000)
 		}
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
 	}).Build()
@@ -2466,20 +2466,20 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			}).Build()
 			defer partition.UnPatch()
 			query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.request.GetConsistencyLevel())
+				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.Request().GetConsistencyLevel())
 				require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.GetConsistencyLevel())
-				require.Zero(t, qt.request.GetBase().GetTimestamp())
-				require.Zero(t, qt.request.GetGuaranteeTimestamp())
+				require.Zero(t, qt.Request().GetBase().GetTimestamp())
+				require.Zero(t, qt.Request().GetGuaranteeTimestamp())
 				require.Zero(t, qt.GetMvccTimestamp())
 				if partitionKeyMode {
 					require.Equal(t, []int64{common.AllPartitionsID}, qt.GetPartitionIDs())
-					require.Empty(t, qt.request.GetPartitionNames())
+					require.Empty(t, qt.Request().GetPartitionNames())
 				} else {
 					require.Equal(t, []int64{1002}, qt.GetPartitionIDs())
-					require.Equal(t, []string{"_default"}, qt.request.GetPartitionNames())
+					require.Equal(t, []string{"_default"}, qt.Request().GetPartitionNames())
 				}
 				for channel := range task.partialUpdateCASGroups {
-					qt.actualChannelsMvcc.Insert(channel, 70)
+					qt.RecordChannelMvcc(channel, 70)
 				}
 				return &milvuspb.QueryResults{
 					Status: merr.Success(), FieldsData: []*schemapb.FieldData{partialUpdateCASPKFieldData([]int64{10, 20})},
@@ -2529,16 +2529,16 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, captured)
-	require.Equal(t, commonpb.ConsistencyLevel_Strong, captured.request.GetConsistencyLevel())
+	require.Equal(t, commonpb.ConsistencyLevel_Strong, captured.Request().GetConsistencyLevel())
 	require.Equal(t, commonpb.ConsistencyLevel_Strong, captured.GetConsistencyLevel())
-	require.False(t, captured.request.GetUseDefaultConsistency())
-	require.Zero(t, captured.request.GetGuaranteeTimestamp())
+	require.False(t, captured.Request().GetUseDefaultConsistency())
+	require.Zero(t, captured.Request().GetGuaranteeTimestamp())
 	require.Zero(t, captured.GetGuaranteeTimestamp())
-	require.Zero(t, captured.request.GetBase().GetTimestamp())
+	require.Zero(t, captured.Request().GetBase().GetTimestamp())
 	require.False(t, captured.CanSkipAllocTimestamp(), "the Query must obtain its own Strong-read timestamp")
-	require.Equal(t, []string{"id"}, captured.request.GetOutputFields())
+	require.Equal(t, []string{"id"}, captured.Request().GetOutputFields())
 	require.Zero(t, captured.GetMvccTimestamp())
-	require.Nil(t, captured.actualChannelsMvcc)
+	require.False(t, captured.HasRecordedChannelMvcc())
 	require.Empty(t, task.partialUpdateCASGroups)
 	require.Equal(t, beginTS, task.BeginTs())
 }
@@ -3281,12 +3281,12 @@ func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
 	require.NoError(t, task.preparePartialUpdateCASGroups(context.Background()))
 
 	patch := mockey.Mock((*Proxy).query).To(func(_ *Proxy, ctx context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-		require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.request.GetConsistencyLevel())
-		require.Zero(t, qt.request.GetGuaranteeTimestamp())
+		require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.Request().GetConsistencyLevel())
+		require.Zero(t, qt.Request().GetGuaranteeTimestamp())
 		require.Zero(t, qt.GetMvccTimestamp())
 		require.False(t, qt.CanSkipAllocTimestamp())
 		for i, ch := range partialUpdateCASTestVChannels {
-			qt.actualChannelsMvcc.Insert(ch, uint64(70+i*20))
+			qt.RecordChannelMvcc(ch, uint64(70+i*20))
 		}
 		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
 	}).Build()
@@ -3320,17 +3320,17 @@ func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
 			patch := mockey.Mock((*Proxy).query).To(func(_ *Proxy, ctx context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 				calls++
 				cost := segcore.StorageCost{ScannedRemoteBytes: 3, ScannedTotalBytes: 5}
-				require.NotNil(t, qt.actualChannelsMvcc)
+				require.True(t, qt.HasRecordedChannelMvcc())
 				for ch := range task.partialUpdateCASGroups {
 					if scenario == "zero" {
-						qt.actualChannelsMvcc.Insert(ch, 0)
+						qt.RecordChannelMvcc(ch, 0)
 					}
 					if scenario == "query_error" {
-						qt.actualChannelsMvcc.Insert(ch, 70)
+						qt.RecordChannelMvcc(ch, 70)
 					}
 				}
 				if scenario == "missing" {
-					qt.actualChannelsMvcc.Insert("unrelated-channel", 70)
+					qt.RecordChannelMvcc("unrelated-channel", 70)
 				}
 				if scenario == "query_error" {
 					return nil, cost, expectedErr
@@ -4235,7 +4235,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 			patch((*MetaCache).GetCollectionSchema, task.schema, nil)
 			patch((*MetaCache).GetPartitionID, int64(100), nil)
 			patch((*MetaCache).GetPartitionsIndex, []string{"_default_0"}, nil)
-			patch(getPartitionIDs, []int64{100}, nil)
+			patch(GetPartitionIDs, []int64{100}, nil)
 			patch(getDefaultPartitionsInPartitionKeyMode, []string{"_default_0"}, nil)
 			allocated := 0
 			alloc := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
@@ -4300,7 +4300,7 @@ func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
 						return nil, segcore.StorageCost{}, err
 					}
 				}
-				return qt.result, qt.storageCost, nil
+				return qt.Result(), qt.StorageCost(), nil
 			}).Build()
 			t.Cleanup(func() { query.UnPatch() })
 
@@ -7180,9 +7180,9 @@ func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
 	fakeWAL.term = 10
 	task.node.(*Proxy).tsoAllocator = nil
 	query := mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
-		require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.request.GetConsistencyLevel())
+		require.Equal(t, commonpb.ConsistencyLevel_Strong, qt.Request().GetConsistencyLevel())
 		require.Zero(t, qt.GetMvccTimestamp())
-		require.NotNil(t, qt.actualChannelsMvcc)
+		require.True(t, qt.HasRecordedChannelMvcc())
 		for _, meta := range task.partialUpdateCASGroups {
 			require.Zero(t, meta.GetReadTs())
 			require.EqualValues(t, 10, meta.GetObservedPchannelTerm())

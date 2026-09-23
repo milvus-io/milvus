@@ -32,7 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
-	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -75,7 +75,7 @@ type upsertTask struct {
 	schemaVersion   int32
 
 	// write after read, generate write part by queryPreExecute
-	node types.ProxyComponent
+	node taskmodel.TaskNode
 
 	deletePKs       *schemapb.IDs
 	insertFieldData []*schemapb.FieldData
@@ -229,36 +229,27 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
 	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.req.Namespace)
-	qt := &queryTask{
-		baseTask: baseTask{
-			MetaCache: t.GetMetaCache(),
-		},
-		ctx:       t.ctx,
-		Condition: NewTaskCondition(t.ctx),
-		RetrieveRequest: &internalpb.RetrieveRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			ReqID:            paramtable.GetNodeID(),
-			PartitionIDs:     partitionIDs,
-			ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
-			MvccTimestamp:    0,
-			QueryLabel:       metrics.UpsertQueryLabel,
-		},
-		request:            queryReq,
-		plan:               plan,
-		mixCoord:           t.node.(*Proxy).mixCoord,
-		lb:                 t.node.(*Proxy).lbPolicy,
-		shardclientMgr:     t.node.(*Proxy).shardMgr,
-		chMgr:              t.node.(*Proxy).chMgr,
-		actualChannelsMvcc: channelReadTs,
-	}
+	qt := NewQueryTask(t.ctx, t.node, queryReq, plan, &internalpb.RetrieveRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		ReqID:            paramtable.GetNodeID(),
+		PartitionIDs:     partitionIDs,
+		ConsistencyLevel: commonpb.ConsistencyLevel_Strong,
+		MvccTimestamp:    0,
+		QueryLabel:       metrics.UpsertQueryLabel,
+	}, t.GetMetaCache(), false)
+	qt.SetActualChannelsMvcc(channelReadTs)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
 		sp.End()
 	}()
-	queryResult, storageCost, err := t.node.(*Proxy).query(ctx, qt, sp)
+	queryRunner, ok := t.node.(taskmodel.QueryRunner)
+	if !ok {
+		return nil, segcore.StorageCost{}, merr.WrapErrServiceInternalMsg("host node does not implement QueryRunner")
+	}
+	queryResult, storageCost, err := queryRunner.ExecuteQuery(ctx, qt, sp)
 	if err := merr.CheckRPCCall(queryResult, err); err != nil {
 		return nil, storageCost, err
 	}
@@ -1744,7 +1735,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fill field properties failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
-	err = normalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	err = NormalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
 		log.Warn(ctx, "normalize fp32 to fp16/bf16 vector field data failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
