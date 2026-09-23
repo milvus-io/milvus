@@ -90,6 +90,75 @@ func TestInvalidUTF8(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "contains invalid UTF-8 data"))
 }
 
+func TestReadNullableTimestamptzDataFillsDefaultAndValidData(t *testing.T) {
+	const (
+		pkFieldID    = int64(100)
+		tsFieldID    = int64(101)
+		numRows      = 3
+		defaultValue = int64(1700000000000000)
+	)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: pkFieldID, Name: "pk", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+			{
+				FieldID:  tsFieldID,
+				Name:     "ts",
+				DataType: schemapb.DataType_Timestamptz,
+				Nullable: true,
+				DefaultValue: &schemapb.ValueField{
+					Data: &schemapb.ValueField_TimestamptzData{TimestamptzData: defaultValue},
+				},
+			},
+		},
+	}
+	pqSchema := arrow.NewSchema([]arrow.Field{
+		{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
+		{Name: "ts", Type: arrow.BinaryTypes.String, Nullable: true},
+	}, nil)
+
+	filePath := fmt.Sprintf("%s/test_%d_nullable_timestamptz_default_reader.parquet", t.TempDir(), rand.Int())
+	wf, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
+	require.NoError(t, err)
+	fw, err := pqarrow.NewFileWriter(pqSchema, wf,
+		parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(numRows)), pqarrow.DefaultWriterProps())
+	require.NoError(t, err)
+
+	pkBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	defer pkBuilder.Release()
+	pkBuilder.AppendValues([]int64{1, 2, 3}, nil)
+	pkArr := pkBuilder.NewArray()
+	defer pkArr.Release()
+
+	tsBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	defer tsBuilder.Release()
+	tsBuilder.Append("2024-01-01T00:00:00Z")
+	tsBuilder.AppendNull()
+	tsBuilder.Append("2024-01-02T00:00:00Z")
+	tsArr := tsBuilder.NewArray()
+	defer tsArr.Release()
+
+	recordBatch := array.NewRecord(pqSchema, []arrow.Array{pkArr, tsArr}, numRows)
+	require.NoError(t, fw.Write(recordBatch))
+	recordBatch.Release()
+	require.NoError(t, fw.Close())
+
+	ctx := context.Background()
+	f := storage.NewChunkManagerFactory("local", objectstorage.RootPath(testOutputPath))
+	cm, err := f.NewPersistentStorageChunkManager(ctx)
+	require.NoError(t, err)
+	reader, err := NewReader(ctx, cm, schema, filePath, 64*1024*1024)
+	require.NoError(t, err)
+	defer reader.Close()
+
+	insertData, err := reader.Read()
+	require.NoError(t, err)
+	tsData := insertData.Data[tsFieldID].(*storage.TimestamptzFieldData)
+	require.Equal(t, []bool{true, true, true}, tsData.ValidData)
+	require.Equal(t, defaultValue, tsData.Data[1])
+	require.Equal(t, defaultValue, tsData.GetRow(1))
+}
+
 // TestParseSparseFloatRowVector tests the parseSparseFloatRowVector function
 func TestParseSparseFloatRowVector(t *testing.T) {
 	tests := []struct {
