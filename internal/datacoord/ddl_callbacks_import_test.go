@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -64,6 +65,15 @@ func TestImportCallbacksSuite(t *testing.T) {
 	suite.Run(t, new(ImportCallbacksSuite))
 }
 
+// newTestMetaWithChunkManager returns a minimal meta carrying a chunk manager,
+// which validateImportRequest needs to resolve the storage root path when it
+// checks caller-supplied import paths against Milvus's internal directories.
+func newTestMetaWithChunkManager(t *testing.T) *meta {
+	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().RootPath().Return("files").Maybe()
+	return &meta{chunkManager: cm}
+}
+
 // --------------------------------
 // validateImportRequest Tests
 // --------------------------------
@@ -85,6 +95,32 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_InvalidTimeoutReturnsEr
 	s.Contains(err.Error(), "timeout")
 }
 
+// TestValidateImportRequest_RejectsInternalStoragePath pins the datacoord side
+// of the path-confinement gate. ValidateImportFilePaths is covered on its own
+// (import_util_test.go), but every path the suite passed here was benign, so
+// deleting the call left this package green -- the same wiring standard the
+// PreExecute and duplicate-key tests already hold the other two gates to.
+func (s *ImportCallbacksSuite) TestValidateImportRequest_RejectsInternalStoragePath() {
+	ctx := context.Background()
+
+	server := &Server{
+		meta: newTestMetaWithChunkManager(s.T()), // RootPath() == "files"
+	}
+
+	files := []*msgpb.ImportFile{
+		{Id: 1, Paths: []string{"files/insert_log/1/2/3/100/4"}},
+	}
+	options := []*commonpb.KeyValuePair{
+		{Key: "timeout", Value: "300s"},
+	}
+
+	err := server.validateImportRequest(ctx, files, options)
+
+	s.Error(err)
+	s.True(errors.Is(err, merr.ErrImportFailed))
+	s.Contains(err.Error(), "is a Milvus internal storage directory")
+}
+
 func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturnsError() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -101,6 +137,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_BalancerGetFailsReturns
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -146,6 +183,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterRetur
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -194,6 +232,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_ReplicatingClusterEnabl
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 	files := []*msgpb.ImportFile{
 		{Id: 1, Paths: []string{"/test/file1.json"}},
@@ -237,6 +276,7 @@ func (s *ImportCallbacksSuite) TestValidateImportRequest_SuccessWithValidInput()
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	files := []*msgpb.ImportFile{
@@ -266,6 +306,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 
 	server := &Server{
 		importMeta: &importMeta{},
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	_, _, err := server.broadcastImport(
@@ -315,6 +356,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	_, _, err := server.broadcastImport(
@@ -374,6 +416,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	_, _, err := server.broadcastImport(
@@ -438,6 +481,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	_, _, err := server.broadcastImport(
@@ -500,6 +544,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	_, _, err := server.broadcastImport(
@@ -561,6 +606,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	server := &Server{
 		importMeta: &importMeta{},
 		broker:     mockBroker,
+		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
 	_, _, err := server.broadcastImport(
@@ -1268,4 +1314,26 @@ func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) 
 	_, err := jobIDFromDuplicatedBroadcast(msg, 101)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
+}
+
+// TestValidateImportRequest_RejectsDuplicateOptionKeys guards the bypass found
+// by adversarial review on milvus#51894: every check reads options as a
+// repeated KV (first match wins) while the broadcast body folds them into a map
+// (last value wins), so [{backup,false},{backup,true}] used to validate as an
+// ordinary import -- skipping the ImportBinlog privilege check -- and then
+// execute as a binlog import.
+func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
+	paramtable.Init()
+
+	s := &Server{}
+
+	err := s.validateImportRequest(context.Background(),
+		[]*msgpb.ImportFile{{Paths: []string{"staging/a.json"}}},
+		[]*commonpb.KeyValuePair{
+			{Key: "backup", Value: "false"},
+			{Key: "backup", Value: "true"},
+		})
+
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "backup")
 }
