@@ -181,3 +181,14 @@ func TestPackSegmentLoadInfo_CommitTimestamp(t *testing.T) {
 	assert.Equal(t, commitTs, loadInfo.GetCommitTimestamp())
 	assert.Equal(t, dataVersion, loadInfo.GetDataVersion())
 }
+
+// The utils copy of the merge keeps the split signal the same way as
+// meta.MergeDmChannelInfo: a merged seek never loses the signal it came with.
+func TestMergeDmChannelInfoKeepsTheSplitSignal(t *testing.T) {
+	merged := MergeDmChannelInfo([]*datapb.VchannelInfo{
+		{ChannelName: "src", SeekPosition: &msgpb.MsgPosition{Timestamp: 200}},
+		{ChannelName: "src", SeekPosition: &msgpb.MsgPosition{Timestamp: 100}, SplitTargetChannels: []string{"t1", "t2"}},
+	})
+	assert.Equal(t, uint64(100), merged.GetSeekPosition().GetTimestamp())
+	assert.ElementsMatch(t, []string{"t1", "t2"}, merged.GetSplitTargetChannels())
+}
