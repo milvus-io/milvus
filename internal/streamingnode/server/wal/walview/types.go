@@ -1,6 +1,8 @@
 package walview
 
 import (
+	"context"
+
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -13,6 +15,13 @@ import (
 
 // VChannelWALView is the vchannel-owned WAL input view for one query view.
 type VChannelWALView struct {
+	// WithResourceEventLock orders a barrier after all already observed WAL events.
+	WithResourceEventLock func(func())
+	ResourceEventBarrier  func(context.Context) error
+	// PrepareQueryView checks final commits and publishes sealed notifications.
+	// QueryRuntime calls it under WithResourceEventLock before its ready barrier.
+	PrepareQueryView func() bool
+
 	PChannel     string
 	VChannel     string
 	CollectionID int64
@@ -21,10 +30,12 @@ type VChannelWALView struct {
 	BaseTransformTimeTick uint64
 
 	LoadInfoVersion uint64
-	PartitionIDs    []int64
-	LoadFields      []*messagespb.LoadFieldConfig
-	IndexInfos      []*indexpb.IndexInfo
-	Schema          *schemapb.CollectionSchema
+	// PartitionIDs is nil for an unrestricted legacy snapshot. A non-nil empty
+	// list means load metadata was resolved and no partitions are loaded.
+	PartitionIDs []int64
+	LoadFields   []*messagespb.LoadFieldConfig
+	IndexInfos   []*indexpb.IndexInfo
+	Schema       *schemapb.CollectionSchema
 
 	SegmentSnapshot                VisibleSegmentSnapshot
 	TransformLogStream             wal.TransformLogStream
@@ -73,6 +84,7 @@ type FlushedSegment struct {
 // VChannelResourceEvent is the ordered live input delivered after a
 // VChannelWALView capture.
 type VChannelResourceEvent struct {
+	Barrier       func()
 	Message       message.ImmutableMessage
 	SegmentSealed *SegmentSealedEvent
 }

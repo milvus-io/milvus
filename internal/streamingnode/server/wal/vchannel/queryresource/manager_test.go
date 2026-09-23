@@ -215,7 +215,7 @@ func TestManagerRetriesDataVersionPreparationBeforeReady(t *testing.T) {
 	require.GreaterOrEqual(t, attempts.Load(), int32(2))
 }
 
-func TestManagerReleasesDataVersionPreparedAfterViewWasDropped(t *testing.T) {
+func TestManagerDoesNotReadyViewDroppedDuringPreparation(t *testing.T) {
 	scheduler := nodescheduler.New(1)
 	defer scheduler.Close()
 	dispatcher := NewDispatcher(1)
@@ -224,7 +224,6 @@ func TestManagerReleasesDataVersionPreparedAfterViewWasDropped(t *testing.T) {
 	started := make(chan struct{})
 	finish := make(chan struct{})
 	released := make(chan struct{})
-	var prepared atomic.Bool
 	manager := NewManager(Config{
 		Scheduler:  scheduler,
 		Dispatcher: dispatcher,
@@ -236,19 +235,9 @@ func TestManagerReleasesDataVersionPreparedAfterViewWasDropped(t *testing.T) {
 				close(started)
 				select {
 				case <-finish:
-					prepared.Store(true)
 					return nil
 				case <-ctx.Done():
 					return ctx.Err()
-				}
-			},
-			release: func(version qviews.DataVersion) {
-				if version.StreamingVersion == 2 && prepared.Load() {
-					select {
-					case <-released:
-					default:
-						close(released)
-					}
 				}
 			},
 		}},
@@ -269,7 +258,7 @@ func TestManagerReleasesDataVersionPreparedAfterViewWasDropped(t *testing.T) {
 	meta2, key2 := testManagerQueryViewMetaAndKey(2)
 	manager.AcquireLocked(snview.AcquireResource{Key: key2, Meta: meta2, OnReady: func() {}}, testManagerViewBuilder)
 	<-started
-	manager.Release(snview.ReleaseResource{Key: key2})
+	manager.Release(snview.ReleaseResource{Key: key2, OnDropped: func() { close(released) }})
 	close(finish)
 	require.Eventually(t, func() bool {
 		select {
@@ -578,7 +567,7 @@ func (*versionedQueryRuntimeModule) ApplyLiveEvent(context.Context, walview.VCha
 
 func (*versionedQueryRuntimeModule) Advance(qviews.DataVersion) {}
 
-func (m *versionedQueryRuntimeModule) PrepareDataVersion(ctx context.Context, version qviews.DataVersion) error {
+func (m *versionedQueryRuntimeModule) RequestRefresh(ctx context.Context, version qviews.DataVersion) error {
 	return m.prepare(ctx, version)
 }
 
@@ -629,4 +618,33 @@ func TestManagerRejectsTruncatedBootstrapWithoutPanicking(t *testing.T) {
 	}
 	_, ok := manager.QueryRuntime(key)
 	require.False(t, ok)
+}
+
+func TestManagerDropWaitsForSharedResourceTransition(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	runtime := NewQueryRuntime()
+	meta1, key1 := testManagerQueryViewMetaAndKey(1)
+	meta2, key2 := testManagerQueryViewMetaAndKey(2)
+	manager := NewManager(Config{Scheduler: scheduler})
+	manager.runtime = runtime
+	manager.refs = map[qviews.QueryViewKey]queryViewRef{key1: {meta: meta1}, key2: {meta: meta2}}
+	defer manager.Close()
+	var canDrop, attempted, dropped atomic.Bool
+	patch := mockey.Mock((*QueryRuntime).BeforeRelease).To(func(_ *QueryRuntime, _ context.Context, version qviews.DataVersion) error {
+		require.Equal(t, key2.QueryViewVersion.DataVersion, version)
+		attempted.Store(true)
+		if !canDrop.Load() {
+			return nodescheduler.ErrDelay
+		}
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	manager.Release(snview.ReleaseResource{Key: key1, OnDropped: func() { dropped.Store(true) }})
+	require.Eventually(t, attempted.Load, time.Second, time.Millisecond)
+	require.False(t, dropped.Load())
+	canDrop.Store(true)
+	require.Eventually(t, dropped.Load, time.Second, time.Millisecond)
+	_, ok := manager.QueryRuntime(key2)
+	require.True(t, ok)
 }

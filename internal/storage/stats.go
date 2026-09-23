@@ -376,6 +376,48 @@ func (m *BM25Stats) Minus(meta *BM25Stats) {
 	m.numToken -= meta.numToken
 }
 
+// ValidateDelta checks a complete replacement before the caller publishes it.
+func (m *BM25Stats) ValidateDelta(add, remove *BM25Stats) error {
+	rows := m.numRow + add.numRow - remove.numRow
+	tokens := m.numToken + add.numToken - remove.numToken
+	if rows < 0 || tokens < 0 {
+		return merr.WrapErrDataIntegrityMsg("negative BM25 aggregate counts after replacement")
+	}
+	for key := range remove.rowsWithToken {
+		count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
+		if count < 0 || count > rows || count > math.MaxInt32 {
+			return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+		}
+	}
+	for key := range add.rowsWithToken {
+		count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
+		if count < 0 || count > rows || count > math.MaxInt32 {
+			return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+		}
+	}
+	return nil
+}
+
+// ApplyDelta applies a previously validated delta under the owner's write lock.
+// Remove zero-frequency keys and compact maps after a large vocabulary reduction.
+func (m *BM25Stats) ApplyDelta(add, remove *BM25Stats) {
+	previousSize := len(m.rowsWithToken)
+	m.Minus(remove)
+	m.Merge(add)
+	for key := range remove.rowsWithToken {
+		if m.rowsWithToken[key] == 0 {
+			delete(m.rowsWithToken, key)
+		}
+	}
+	if previousSize > 1024 && len(m.rowsWithToken)*2 < previousSize {
+		compact := make(map[uint32]int32, len(m.rowsWithToken))
+		for key, count := range m.rowsWithToken {
+			compact[key] = count
+		}
+		m.rowsWithToken = compact
+	}
+}
+
 func (m *BM25Stats) Clone() *BM25Stats {
 	return &BM25Stats{
 		rowsWithToken: maps.Clone(m.rowsWithToken),

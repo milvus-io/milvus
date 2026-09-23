@@ -83,7 +83,7 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			QueryViewVersion: lease.Version,
 		})
 	}
-	optimizer := queryresource.NewGlobalOptimizer(runtime, lease.Version.DataVersion, shard.WALFunctionRunnerKey(shardID.VChannel))
+	optimizer := queryresource.NewGlobalOptimizer(runtime, shard.WALFunctionRunnerKey(shardID.VChannel))
 	plan := &viewpb.QueryPlan{
 		Version: lease.Version.IntoProto(),
 		ShardId: viewShardID.IntoProto(),
@@ -131,6 +131,8 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 		mlog.Uint64("transformingTimeTick", mvcc.GetTransformingTimetick()),
 		mlog.Int("workNodeCount", len(plan.WorkNodes)),
 	)
+	// Preserve a full inter-phase serving window after planning completes.
+	lease.Renew()
 	return plan, nil
 }
 
@@ -177,7 +179,7 @@ func (w *walAdaptorImpl) resolveQueryPlanMVCC(ctx context.Context, req *viewpb.G
 }
 
 type queryPlanGrowingRuntime interface {
-	MayHaveVisibleGrowingSegments(growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool
+	MayHaveVisibleGrowingSegments(dataVersion qviews.DataVersion, growingTimetick uint64, transformingTimetick uint64, partitionIDs []int64) bool
 }
 
 type queryPlanWorkNodeOptions struct {
@@ -263,6 +265,7 @@ func queryPlanIncludesStreamingNode(view *viewpb.QueryViewOfShard, options query
 		return true
 	}
 	return options.runtime.MayHaveVisibleGrowingSegments(
+		qviews.FromProtoDataVersion(view.GetMeta().GetVersion().GetDataVersion()),
 		options.mvcc.GetGrowingTimetick(),
 		options.mvcc.GetTransformingTimetick(),
 		options.partitionIDs,

@@ -34,6 +34,12 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		return context.Canceled
 	}
 	r.collection = collection
+	if view.PartitionIDs != nil {
+		r.loadedPartitions = make(map[int64]struct{}, len(view.PartitionIDs))
+		for _, id := range view.PartitionIDs {
+			r.loadedPartitions[id] = struct{}{}
+		}
+	}
 	r.mu.Unlock()
 
 	prepared := false
@@ -43,6 +49,9 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		}
 	}()
 	for _, visible := range view.SegmentSnapshot.Segments {
+		if !r.partitionLoaded(visible.PartitionID) {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -58,6 +67,9 @@ func (r *Runtime) Prepare(ctx context.Context, view walview.VChannelWALView) err
 		}
 	}
 	for _, flushed := range view.SegmentSnapshot.FlushedSegments {
+		if !r.partitionLoaded(flushed.PartitionID) {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

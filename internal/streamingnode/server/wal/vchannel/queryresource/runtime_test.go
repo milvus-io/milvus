@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
@@ -157,3 +158,27 @@ func (m *messageRecordingModule) ApplyLiveEvent(_ context.Context, event walview
 }
 func (*messageRecordingModule) Advance(qviews.DataVersion) {}
 func (*messageRecordingModule) Close()                     {}
+
+func TestQueryRuntimeBarrierFollowsObservedEvents(t *testing.T) {
+	module := &recordingModule{}
+	runtime := NewQueryRuntime(module)
+	defer runtime.Close()
+	var captured walview.VChannelWALView
+	patch := mockey.Mock((*recordingModule).Prepare).To(func(_ *recordingModule, _ context.Context, view walview.VChannelWALView) error {
+		captured = view
+		return nil
+	}).Build()
+	defer patch.UnPatch()
+	require.True(t, runtime.ObserveEvent(context.Background(), walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 1}}))
+	view := testWALView(1, "ch", qviews.DataVersion{})
+	locked := false
+	view.WithResourceEventLock = func(fn func()) { locked = true; fn() }
+	require.NoError(t, runtime.Initialize(context.Background(), view))
+	require.True(t, runtime.ObserveEvent(context.Background(), walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 2}}))
+	require.NoError(t, captured.ResourceEventBarrier(context.Background()))
+	require.True(t, locked)
+	require.Equal(t, []int64{1, 2}, module.segmentIDs())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, captured.ResourceEventBarrier(ctx), context.Canceled)
+}

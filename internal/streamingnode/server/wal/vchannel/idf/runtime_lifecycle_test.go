@@ -3,6 +3,7 @@ package idf
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
@@ -33,19 +34,17 @@ func bm25Insert(t *testing.T, segmentID int64, tf float32) message.ImmutableMess
 		CollectionId: 1, Partitions: []*messagespb.PartitionSegmentAssignment{{PartitionId: 10, Rows: 1, SegmentAssignment: &messagespb.SegmentAssignment{SegmentId: segmentID}}},
 	}).WithBody(&msgpb.InsertRequest{
 		CollectionID: 1, NumRows: 1, RowIDs: []int64{1}, Timestamps: []uint64{10}, Version: msgpb.InsertDataVersion_ColumnBased,
-		FieldsData: []*schemapb.FieldData{{FieldId: 102, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: tf})}}}}}}},
+		FieldsData: []*schemapb.FieldData{{FieldId: 101, Type: schemapb.DataType_VarChar, Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"already materialized"}}}}}}, {FieldId: 102, Type: schemapb.DataType_SparseFloatVector, Field: &schemapb.FieldData_Vectors{Vectors: &schemapb.VectorField{Data: &schemapb.VectorField_SparseFloatVector{SparseFloatVector: &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: tf})}}}}}}},
 	}).BuildMutable()
 	require.NoError(t, err)
 	return raw.WithTimeTick(10).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(10))
 }
 
-// Exercises the recovery inputs and exact-version transition together: persisted
-// stats + pending inserts + live inserts must each contribute once, while a
-// segment moving to sealed must not be counted twice or leak a cache lease.
+// Persisted stats, snapshot/live inserts and sealed handoff contribute exactly once.
 func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	paramtable.Init()
 	ctx := context.Background()
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}}, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{102}}}}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar}, {FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}}, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}}}}
 	cm := storage.NewLocalChunkManager()
 	writeStats := func(name string, values ...float32) []*datapb.FieldBinlog {
 		stats := storage.NewBM25Stats()
@@ -101,7 +100,7 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	flush := message.NewFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.FlushMessageHeader{CollectionId: 1, PartitionId: 10, SegmentId: 20}).WithBody(&message.FlushMessageBody{}).MustBuildMutable().WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(11))
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: flush})
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 20, SealedAtDataVersion: next}})
-	require.NoError(t, runtime.PrepareDataVersion(ctx, next))
+	require.Eventually(t, func() bool { return runtime.oracle.BeforeRelease(ctx, next) == nil }, time.Second, time.Millisecond)
 	check(next, 4)
 	check(current, 4)
 	// A segment created after both versions were prepared belongs to both.
@@ -110,29 +109,15 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 21, 8)})
 	check(current, 5)
 	check(next, 5)
-	runtime.Advance(next)
 	check(next, 5)
-	_, _, err = runtime.BuildIDF(current, 102, query)
-	require.Error(t, err)
+	check(current, 5)
 	require.NotContains(t, runtime.oracle.growingStore.segments, int64(20))
-	// Background diff preparation retains the unchanged sealed resource again.
-	// Committing must replace, rather than accumulate, its old cache lease.
 	target := qviews.DataVersion{StreamingVersion: 12}
-	diff, err := runtime.oracle.computeDiff(ctx, target)
-	require.NoError(t, err)
-	committed, retry := runtime.oracle.commitDiff(diff)
-	require.True(t, committed)
-	require.False(t, retry)
+	require.Eventually(t, func() bool { return runtime.oracle.BeforeRelease(ctx, target) == nil }, time.Second, time.Millisecond)
+	check(current, 5)
 	check(target, 5)
-	key, err := buildSealedCacheKey(resource)
-	require.NoError(t, err)
-	require.Equal(t, 1, provider.sealedCache.entries[key].refs)
-	later := qviews.DataVersion{StreamingVersion: 13}
-	require.NoError(t, runtime.PrepareDataVersion(ctx, later))
-	runtime.ReleaseDataVersion(later)
 	runtime.Close()
 	runtime.Close()
-	require.Empty(t, provider.sealedCache.entries)
 	require.ErrorIs(t, runtime.Prepare(ctx, snapshot), context.Canceled)
-	require.Error(t, runtime.PrepareDataVersion(ctx, later))
+	require.Error(t, runtime.RequestRefresh(ctx, target))
 }

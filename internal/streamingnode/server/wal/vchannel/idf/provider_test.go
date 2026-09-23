@@ -33,9 +33,9 @@ func TestProviderCreatesNoopRuntimeWhenBM25IsNotLoaded(t *testing.T) {
 		},
 	}))
 	versioned := runtime.(interface {
-		PrepareDataVersion(context.Context, qviews.DataVersion) error
+		RequestRefresh(context.Context, qviews.DataVersion) error
 	})
-	require.NoError(t, versioned.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
+	require.NoError(t, versioned.RequestRefresh(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
 	runtime.Close()
 }
 
@@ -122,11 +122,26 @@ func TestRuntimeResourceFetchFailureIsNotReady(t *testing.T) {
 			runtime := &Runtime{provider: NewProvider(client)}
 			require.Error(t, runtime.Prepare(context.Background(), view))
 			require.Nil(t, runtime.currentOracle())
-			oracle := newScheduledOracleRuntime(nil, qviews.DataVersion{})
-			oracle.provider = runtime.provider
-			require.Error(t, oracle.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 1}))
-			_, err := oracle.computeDiff(context.Background(), qviews.DataVersion{StreamingVersion: 1})
-			require.Error(t, err)
 		})
 	}
+}
+
+// Refresh uses the QueryView's exact version even if Coord has newer data.
+func TestOracleRefreshRejectsUnrequestedCoordinatorVersion(t *testing.T) {
+	r, _ := newTestOracle(t)
+	r.provider.client = &mocks.MockMixCoordClient{}
+	target := qviews.DataVersion{StreamingVersion: 11}
+	responseVersion := qviews.DataVersion{StreamingVersion: 12}
+	patch := mockey.Mock((*mocks.MockMixCoordClient).GetStreamingNodeQueryViewResources).To(func(_ *mocks.MockMixCoordClient, _ context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest, _ ...grpc.CallOption) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+		require.Equal(t, target, qviews.FromProtoDataVersion(req.GetDataVersion()))
+		return &datapb.GetStreamingNodeQueryViewResourcesResponse{
+			Status: merr.Success(), CollectionId: req.GetCollectionId(), Vchannel: req.GetVchannel(), DataVersion: responseVersion.IntoProto(),
+		}, nil
+	}).Build()
+	defer patch.UnPatch()
+	require.Error(t, r.refresh(context.Background(), target))
+	require.Equal(t, qviews.DataVersion{StreamingVersion: 10}, r.currentVersion)
+	responseVersion = target
+	require.NoError(t, r.refresh(context.Background(), target))
+	require.Equal(t, target, r.currentVersion)
 }

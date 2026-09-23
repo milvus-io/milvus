@@ -4,9 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
@@ -31,7 +28,6 @@ var (
 type Provider struct {
 	client       datapb.DataCoordClient
 	chunkManager storage.ChunkManager
-	sealedCache  *segmentCache
 	scheduler    nodescheduler.Scheduler
 }
 
@@ -50,7 +46,7 @@ func WithNodeScheduler(scheduler nodescheduler.Scheduler) ProviderOption {
 }
 
 func NewProvider(client datapb.DataCoordClient, opts ...ProviderOption) *Provider {
-	provider := &Provider{client: client, sealedCache: newSegmentCache()}
+	provider := &Provider{client: client}
 	for _, opt := range opts {
 		opt(provider)
 	}
@@ -60,7 +56,6 @@ func NewProvider(client datapb.DataCoordClient, opts ...ProviderOption) *Provide
 type FutureProvider struct {
 	client       *syncutil.Future[types.MixCoordClient]
 	chunkManager storage.ChunkManager
-	sealedCache  *segmentCache
 	scheduler    nodescheduler.Scheduler
 }
 
@@ -72,7 +67,6 @@ func NewFutureProvider(client *syncutil.Future[types.MixCoordClient], opts ...Pr
 	return &FutureProvider{
 		client:       client,
 		chunkManager: provider.chunkManager,
-		sealedCache:  newSegmentCache(),
 		scheduler:    provider.scheduler,
 	}
 }
@@ -156,7 +150,6 @@ func (r *Runtime) resolveProvider(ctx context.Context) (*Provider, error) {
 	return &Provider{
 		client:       client,
 		chunkManager: r.future.chunkManager,
-		sealedCache:  r.future.sealedCache,
 		scheduler:    r.future.scheduler,
 	}, nil
 }
@@ -189,7 +182,7 @@ func (r *Runtime) BuildIDF(dataVersion qviews.DataVersion, fieldID int64, tfs *s
 	return oracle.BuildIDF(dataVersion, fieldID, tfs)
 }
 
-func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.DataVersion) error {
+func (r *Runtime) RequestRefresh(ctx context.Context, dataVersion qviews.DataVersion) error {
 	r.mu.RLock()
 	disabled := r.disabled
 	r.mu.RUnlock()
@@ -200,13 +193,22 @@ func (r *Runtime) PrepareDataVersion(ctx context.Context, dataVersion qviews.Dat
 	if oracle == nil {
 		return merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
 	}
-	return oracle.PrepareDataVersion(ctx, dataVersion)
+	return oracle.RequestRefresh(ctx, dataVersion)
 }
 
-func (r *Runtime) ReleaseDataVersion(dataVersion qviews.DataVersion) {
+func (r *Runtime) BeforeRelease(ctx context.Context, target qviews.DataVersion) error {
 	if oracle := r.currentOracle(); oracle != nil {
-		oracle.ReleaseDataVersion(dataVersion)
+		return oracle.BeforeRelease(ctx, target)
 	}
+	return nil
+}
+
+func (r *Runtime) BuildIDFBatch(requests []queryresource.IDFRequest) ([]queryresource.IDFResult, error) {
+	oracle := r.currentOracle()
+	if oracle == nil {
+		return nil, merr.WrapErrServiceNotReadyMsg("BM25 IDF oracle is not initialized")
+	}
+	return oracle.BuildIDFBatch(requests)
 }
 
 func (r *Runtime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
@@ -243,13 +245,10 @@ func (r *Runtime) currentOracle() *oracleRuntime {
 }
 
 func collectGrowingInsertStats(stats bm25Stats, schema *schemapb.CollectionSchema, insert walview.SegmentInsertMessage) error {
-	body := insert.Message.MustBody()
-	if body == nil {
-		return merr.WrapErrServiceInternalMsg("bm25 growing insert message has nil request")
+	request, err := walview.MaterializeInsertRequest(schema, insert)
+	if err != nil {
+		return err
 	}
-	request := proto.Clone(body).(*msgpb.InsertRequest)
-	request.PartitionID = insert.Assignment.GetPartitionId()
-	request.SegmentID = insert.Assignment.GetSegmentAssignment().GetSegmentId()
 	insertData, err := storage.ColumnBasedInsertMsgToInsertData(&msgstream.InsertMsg{InsertRequest: request}, schema)
 	if err != nil {
 		return err

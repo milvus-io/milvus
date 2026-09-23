@@ -9,7 +9,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
-	"github.com/milvus-io/milvus/internal/views/qviews"
 	sharedviewquery "github.com/milvus-io/milvus/internal/views/viewquery"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
@@ -19,19 +18,17 @@ import (
 )
 
 type idfOracle interface {
-	BuildIDF(dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
+	BuildIDFBatch([]IDFRequest) ([]IDFResult, error)
 }
 
 type globalOptimizer struct {
 	idf               idfOracle
-	dataVersion       qviews.DataVersion
 	functionRunnerKey string
 }
 
-func NewGlobalOptimizer(runtime *QueryRuntime, dataVersion qviews.DataVersion, functionRunnerKey string) optimizer.GlobalOptimizer {
+func NewGlobalOptimizer(runtime *QueryRuntime, functionRunnerKey string) optimizer.GlobalOptimizer {
 	return globalOptimizer{
 		idf:               findIDFOracle(runtime),
-		dataVersion:       dataVersion,
 		functionRunnerKey: functionRunnerKey,
 	}
 }
@@ -61,95 +58,98 @@ func (o globalOptimizer) OptimizeSearch(ctx context.Context, req *internalpb.Sea
 	return o.optimizeSearch(ctx, req)
 }
 
+// IDFRequest/IDFResult batch all BM25 subqueries against one aggregate state.
+type IDFRequest struct {
+	FieldID int64
+	TFs     *schemapb.SparseFloatArray
+}
+type IDFResult struct {
+	Vectors [][]byte
+	Avgdl   float64
+}
+
 func (o globalOptimizer) optimizeAdvancedSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
 	if len(req.GetSubReqs()) == 0 {
 		return optimizer.SearchOptimization{}, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
 	}
-
 	parent := proto.Clone(req).(*internalpb.SearchRequest)
 	parent.SubReqs = nil
-	allSkipped := true
-	for index, subReq := range req.GetSubReqs() {
-		searchReq, err := sharedviewquery.BuildSubSearchRequest(parent, subReq)
+	requests := make([]*internalpb.SearchRequest, len(req.GetSubReqs()))
+	for i, sub := range req.GetSubReqs() {
+		request, err := sharedviewquery.BuildSubSearchRequest(parent, sub)
 		if err != nil {
 			return optimizer.SearchOptimization{}, err
 		}
-		optimization, err := o.optimizeSearch(ctx, searchReq)
-		if err != nil {
-			return optimizer.SearchOptimization{}, merr.Wrapf(err, "optimize hybrid sub-search %d", index)
-		}
-		if err := sharedviewquery.UpdateSubSearchRequest(subReq, searchReq, optimization.Skip); err != nil {
-			return optimizer.SearchOptimization{}, err
-		}
-		allSkipped = allSkipped && optimization.Skip
+		requests[i] = request
 	}
-	return optimizer.SearchOptimization{Skip: allSkipped}, nil
+	if err := o.optimizeRequests(ctx, requests); err != nil {
+		return optimizer.SearchOptimization{}, err
+	}
+	for i, sub := range req.GetSubReqs() {
+		if err := sharedviewquery.UpdateSubSearchRequest(sub, requests[i], false); err != nil {
+			return optimizer.SearchOptimization{}, err
+		}
+	}
+	return optimizer.SearchOptimization{}, nil
 }
 
 func (o globalOptimizer) optimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
-	optimized, skip, err := o.optimizeBM25(ctx, req)
-	if err != nil {
-		return optimizer.SearchOptimization{}, err
-	}
-	if !optimized && req.GetMetricType() == metric.BM25 {
-		return optimizer.SearchOptimization{}, merr.WrapErrServiceInternalMsg("BM25 function runner is not initialized for field: %d", req.GetFieldId())
-	}
-	return optimizer.SearchOptimization{Skip: skip}, nil
+	return optimizer.SearchOptimization{}, o.optimizeRequests(ctx, []*internalpb.SearchRequest{req})
 }
 
 func (globalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveRequest) error {
 	return nil
 }
 
-func (o globalOptimizer) optimizeBM25(ctx context.Context, req *internalpb.SearchRequest) (bool, bool, error) {
-	optimized := false
-	skip := false
-	_, err := function.GetManager().RunWithRunner(ctx, req.GetCollectionID(), o.functionRunnerKey, req.GetFieldId(), func(functionRunner function.FunctionRunner) error {
-		functionType := functionRunner.GetSchema().GetType()
-		if functionType != schemapb.FunctionType_BM25 {
+func (o globalOptimizer) optimizeRequests(ctx context.Context, requests []*internalpb.SearchRequest) error {
+	inputs := make([]IDFRequest, 0, len(requests))
+	bm25Requests := make([]*internalpb.SearchRequest, 0, len(requests))
+	for _, req := range requests {
+		optimized := false
+		_, err := function.GetManager().RunWithRunner(ctx, req.GetCollectionID(), o.functionRunnerKey, req.GetFieldId(), func(runner function.FunctionRunner) error {
+			if runner.GetSchema().GetType() != schemapb.FunctionType_BM25 {
+				return nil
+			}
+			if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
+				return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
+			}
+			holder, err := parseBM25Placeholder(req)
+			if err != nil {
+				return err
+			}
+			tfs, err := buildBM25TermFrequency(ctx, req, holder, runner)
+			if err != nil {
+				return err
+			}
+			inputs = append(inputs, IDFRequest{FieldID: req.GetFieldId(), TFs: tfs})
+			bm25Requests = append(bm25Requests, req)
+			optimized = true
 			return nil
-		}
-		if req.GetMetricType() != metric.BM25 && req.GetMetricType() != metric.EMPTY {
-			return merr.WrapErrParameterInvalid("BM25", req.GetMetricType(), "must use BM25 metric type when searching against BM25 Function output field")
-		}
-		if o.idf == nil {
-			return merr.WrapErrServiceInternalMsg("BM25 IDF oracle is not initialized")
-		}
-		var err error
-		skip, err = o.buildBM25IDF(ctx, req, functionRunner)
+		})
 		if err != nil {
 			return err
 		}
-		optimized = true
+		if !optimized && req.GetMetricType() == metric.BM25 {
+			return merr.WrapErrServiceInternalMsg("BM25 function runner is not initialized for field: %d", req.GetFieldId())
+		}
+	}
+	if len(inputs) == 0 {
 		return nil
-	})
+	}
+	if o.idf == nil {
+		return merr.WrapErrServiceInternalMsg("BM25 IDF oracle is not initialized")
+	}
+	results, err := o.idf.BuildIDFBatch(inputs)
 	if err != nil {
-		return false, false, err
+		return merr.Wrap(err, "build BM25 IDF")
 	}
-	return optimized, skip, nil
-}
-
-func (o globalOptimizer) buildBM25IDF(ctx context.Context, req *internalpb.SearchRequest, functionRunner function.FunctionRunner) (bool, error) {
-	holder, err := parseBM25Placeholder(req)
-	if err != nil {
-		return false, err
+	for i, req := range bm25Requests {
+		if err := setBM25Params(req, results[i].Avgdl); err != nil {
+			return err
+		}
+		req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(results[i].Vectors)
 	}
-	tfArray, err := buildBM25TermFrequency(ctx, req, holder, functionRunner)
-	if err != nil {
-		return false, err
-	}
-	idfSparseVector, avgdl, err := o.idf.BuildIDF(o.dataVersion, req.GetFieldId(), tfArray)
-	if err != nil {
-		return false, merr.Wrap(err, "build BM25 IDF")
-	}
-	if avgdl <= 0 {
-		return true, nil
-	}
-	if err := setBM25Params(req, avgdl); err != nil {
-		return false, err
-	}
-	req.PlaceholderGroup = funcutil.SparseVectorDataToPlaceholderGroupBytes(idfSparseVector)
-	return false, nil
+	return nil
 }
 
 func parseBM25Placeholder(req *internalpb.SearchRequest) (*commonpb.PlaceholderValue, error) {

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
 func TestRuntimeAcquireGrowingSegmentHandlesFiltersPartitions(t *testing.T) {
@@ -21,7 +22,7 @@ func TestRuntimeAcquireGrowingSegmentHandlesFiltersPartitions(t *testing.T) {
 	require.True(t, runtime.addSegment(segment10))
 	require.True(t, runtime.addSegment(segment20))
 
-	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), []int64{100})
+	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), qviews.DataVersion{}, []int64{100})
 
 	require.NoError(t, err)
 	require.Len(t, handles, 1)
@@ -34,7 +35,7 @@ func TestRuntimeAcquireGrowingSegmentHandlesSkipsSegmentsWithoutCSegment(t *test
 	runtime := newRuntime()
 	require.True(t, runtime.addSegment(newGrowingSegment(nil, 10, 100)))
 
-	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), nil)
+	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), qviews.DataVersion{}, nil)
 
 	require.NoError(t, err)
 	require.Empty(t, handles)
@@ -47,7 +48,7 @@ func TestRuntimeGrowingSegmentHandlePinsSegmentUntilRelease(t *testing.T) {
 	segment.segment = fakeCSegment{id: 10, releaseCount: &releaseCount}
 	require.True(t, runtime.addSegment(segment))
 
-	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), nil)
+	handles, err := runtime.AcquireGrowingSegmentHandles(context.Background(), qviews.DataVersion{}, nil)
 	require.NoError(t, err)
 	require.Len(t, handles, 1)
 

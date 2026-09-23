@@ -67,10 +67,8 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	if !ok {
 		return walview.VChannelWALView{}, false
 	}
-	for _, view := range m.segments {
-		if !view.EnsureFinalCommit() {
-			return walview.VChannelWALView{}, false
-		}
+	if !m.ensureFinalCommitsLocked() {
+		return walview.VChannelWALView{}, false
 	}
 	version := qviews.FromProtoDataVersion(meta.GetVersion().GetDataVersion())
 	snapshot := m.visibleSnapshot(m.queryObservedTimeTick, version)
@@ -80,11 +78,37 @@ func (m *VChannelRecoveryModule) queryWALViewLocked(meta *viewpb.QueryViewMeta) 
 	}
 	return walview.VChannelWALView{
 		PChannel: m.pchannel, VChannel: m.vchannel, CollectionID: state.CollectionID,
-		BaseGrowingTimeTick: m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
+		WithResourceEventLock: func(fn func()) { m.mu.Lock(); defer m.mu.Unlock(); fn() },
+		PrepareQueryView:      m.prepareQueryViewLocked,
+		BaseGrowingTimeTick:   m.queryObservedTimeTick, BaseTransformTimeTick: m.queryObservedTimeTick,
 		LoadInfoVersion: meta.GetLoadInfoVersion(), Schema: state.Schema,
 		SegmentSnapshot: snapshot, TransformLogStream: m.queryTransformLogStream,
 		DeleteReplayStartAfterTimeTick: start,
 	}, true
+}
+
+// Open growing segments need no commit. Closing segments must complete their
+// final commit before either capturing a snapshot or serving a new query view.
+func (m *VChannelRecoveryModule) ensureFinalCommitsLocked() bool {
+	ready := true
+	for _, view := range m.segments {
+		if !view.EnsureFinalCommit() {
+			ready = false
+		}
+	}
+	return ready
+}
+
+func (m *VChannelRecoveryModule) prepareQueryViewLocked() bool {
+	if !m.ensureFinalCommitsLocked() {
+		return false
+	}
+	// The commit installs its version before calling NotifyDataUpdated. Publish
+	// here too so the ready barrier cannot overtake that owner notification.
+	for id := range m.segments {
+		m.publishSegmentSealedLocked(id)
+	}
+	return true
 }
 
 func (m *VChannelRecoveryModule) visibleSnapshot(baseGrowingTimeTick uint64, dataVersion qviews.DataVersion) walview.VisibleSegmentSnapshot {
