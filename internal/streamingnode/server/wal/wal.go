@@ -67,3 +67,16 @@ type ROWAL interface {
 	// Close closes the wal instance.
 	Close()
 }
+
+type WALUnwrapper interface {
+	UnwrapWAL() WAL
+}
+
+func Unwrap(l WAL) WAL {
+	if unwrapper, ok := l.(WALUnwrapper); ok {
+		if raw := unwrapper.UnwrapWAL(); raw != nil {
+			return raw
+		}
+	}
+	return l
+}

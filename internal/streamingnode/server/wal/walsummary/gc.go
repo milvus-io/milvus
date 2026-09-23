@@ -40,8 +40,8 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 	if terminal != nil {
 		return terminal
 	}
-	released := m.computeRetention()
 	m.mu.Lock()
+	released := m.computeRetentionLocked()
 	if len(released) > 0 {
 		for _, ref := range released {
 			for _, chunk := range m.manifest.Chunks {
@@ -156,6 +156,10 @@ func (t *summaryGCTask) Execute(ctx context.Context) error {
 func (m *Manager) computeRetention() []*streamingpb.PChannelSummaryChunkRef {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.computeRetentionLocked()
+}
+
+func (m *Manager) computeRetentionLocked() []*streamingpb.PChannelSummaryChunkRef {
 	if m.cfg.RetentionMaxBytes == 0 && m.cfg.MaxRetainedChunks == 0 {
 		return nil
 	}
@@ -229,6 +233,9 @@ func (m *Manager) chunkReleasedLocked(chunk *streamingpb.PChannelSummaryChunkInd
 			continue
 		}
 		floor := m.gcFrontiers[index.GetVchannel()]
+		if pinned, ok := m.queryRetention[index.GetVchannel()]; ok {
+			floor = min(floor, pinned)
+		}
 		if floor == 0 {
 			// No GC position yet: nothing of this vchannel may be released.
 			return false
@@ -259,4 +266,16 @@ func (m *Manager) CanCleanupVChannel(vchannel string, through uint64) bool {
 		}
 	}
 	return true
+}
+
+// SetQueryRetention protects Delete history needed to reconstruct retained
+// segments. Install it before recovery starts background GC. Advancing it is
+// safe only after the associated segment metadata is durably retired.
+func (m *Manager) SetQueryRetention(vchannel string, startAfter uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.queryRetention == nil {
+		m.queryRetention = make(map[string]uint64)
+	}
+	m.queryRetention[vchannel] = startAfter
 }
