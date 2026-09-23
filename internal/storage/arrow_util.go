@@ -587,6 +587,17 @@ func (b *RecordBuilder) Build() Record {
 }
 
 func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
+	return newRecordBuilder(schema, false)
+}
+
+// NewRecordBuilderWithFieldID uses the physical field names expected by V3
+// writers, including ExternalField overrides, so matching batches can be
+// written without rebuilding the Arrow record.
+func NewRecordBuilderWithFieldID(schema *schemapb.CollectionSchema) *RecordBuilder {
+	return newRecordBuilder(schema, true)
+}
+
+func newRecordBuilder(schema *schemapb.CollectionSchema, useFieldID bool) *RecordBuilder {
 	// assumes 5 sub fields per StructArrayField
 	fields := make([]*schemapb.FieldSchema, 0, len(schema.Fields)+len(schema.StructArrayFields)*5)
 	fields = append(fields, schema.Fields...)
@@ -614,7 +625,7 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType, field.GetElementNullable())
 			builders[i] = array.NewBuilder(allocator, arrowType)
 		}
-		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType)
+		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType, useFieldID)
 	}
 
 	return &RecordBuilder{
@@ -625,7 +636,14 @@ func NewRecordBuilder(schema *schemapb.CollectionSchema) *RecordBuilder {
 	}
 }
 
-func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.DataType, dim int64, elementType schemapb.DataType) arrow.Field {
+func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.DataType, dim int64, elementType schemapb.DataType, useFieldID bool) arrow.Field {
+	name := field.GetName()
+	if useFieldID {
+		name = strconv.FormatInt(field.GetFieldID(), 10)
+		if field.GetExternalField() != "" {
+			name = field.GetExternalField()
+		}
+	}
 	keys := []string{packed.ArrowFieldIdMetadataKey}
 	values := []string{strconv.Itoa(int(field.GetFieldID()))}
 
@@ -640,7 +658,7 @@ func newRecordBuilderArrowField(field *schemapb.FieldSchema, arrowType arrow.Dat
 	}
 
 	return arrow.Field{
-		Name:     field.GetName(),
+		Name:     name,
 		Type:     arrowType,
 		Nullable: field.GetNullable(),
 		Metadata: arrow.NewMetadata(keys, values),

@@ -927,6 +927,69 @@ func newClusteringTestBuffer(t *testing.T, schema *schemapb.CollectionSchema, ba
 	return buffer, observer
 }
 
+func TestClusteringMappingRejectsInvalidTimestamp(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		missing bool
+		wrapped bool
+	}{
+		{name: "wrong type"},
+		{name: "missing", missing: true},
+		{name: "missing materialized", missing: true, wrapped: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			schema := genCollectionSchema()
+			malformed := proto.Clone(schema).(*schemapb.CollectionSchema)
+			if tc.missing {
+				malformed.Fields = append(malformed.Fields[:1], malformed.Fields[2:]...)
+			} else {
+				malformed.Fields[1].DataType = schemapb.DataType_VarChar
+			}
+			record := clusteringTestRecord(t, malformed, 0, 1)
+			defer record.Release()
+			var readerRecord storage.Record
+			readerRecord = record
+			if tc.wrapped {
+				readerRecord = &materializedRecord{base: record}
+			}
+			existingFields := make(map[int64]struct{}, len(malformed.Fields))
+			for _, field := range malformed.Fields {
+				existingFields[field.FieldID] = struct{}{}
+			}
+			patch := mockey.Mock(newTextDecodedCompactionSegmentRecordReader).
+				Return(&mockReader{records: []storage.Record{readerRecord}}, existingFields, nil).Build()
+			defer patch.UnPatch()
+			segment := &datapb.CompactionSegmentBinlogs{CollectionID: CollectionID, SegmentID: 1}
+			task := &clusteringCompactionTask{
+				plan:             &datapb.CompactionPlan{Schema: schema, SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{segment}},
+				binlogIO:         mock_util.NewMockBinlogIO(t),
+				primaryKeyField:  typeutil.GetField(schema, 100),
+				compactionParams: compaction.GenParams(),
+			}
+			err := task.mappingSegment(context.Background(), segment)
+			require.ErrorIs(t, err, merr.ErrServiceInternal)
+			require.ErrorContains(t, err, "timestamp field is not an int64 column")
+		})
+	}
+}
+
+func TestClusterBufferV3BatchUsesWriterSchema(t *testing.T) {
+	schema := clusteringWideSchema()
+	schema.Fields[3].ExternalField = "source_field_101"
+	writer := &MultiSegmentWriter{schema: schema, storageVersion: storage.StorageV3, binLogMaxSize: 64 << 20}
+	buffer := newClusterBuffer(0, writer, nil)
+	defer buffer.releaseBuilder()
+	input := clusteringTestRecord(t, schema, 1, 1)
+	require.NoError(t, buffer.WriteRecord(input, 0))
+	input.Release()
+	batch := buffer.builder.Build()
+	defer batch.Release()
+	wanted, err := storage.ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	require.True(t, batch.(interface{ ArrowSchema() *arrow.Schema }).ArrowSchema().Equal(wanted),
+		"V3 batches should match the writer schema and reuse the Arrow record")
+}
+
 func TestClusterBufferRecordBatches(t *testing.T) {
 	for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
@@ -966,6 +1029,31 @@ func TestClusterBufferRecordBatches(t *testing.T) {
 	}
 }
 
+func TestClusterBufferCloseFlushesLazyWriter(t *testing.T) {
+	schema := clusteringWideSchema()
+	params := compaction.GenParams()
+	params.StorageVersion = storage.StorageV1
+	params.BinLogMaxSize = 64 << 20
+	params.StorageConfig = &indexpb.StorageConfig{StorageType: "local", RootPath: t.TempDir()}
+	binlogIO := mock_util.NewMockBinlogIO(t)
+	binlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Maybe()
+	writer, err := NewMultiSegmentWriter(context.Background(), binlogIO,
+		NewCompactionAllocator(allocator.NewLocalAllocator(1, 100), allocator.NewLocalAllocator(100, 10000)),
+		1<<30, schema, params, 10000, PartitionID, CollectionID, "", 100,
+		storage.WithStorageConfig(params.StorageConfig))
+	require.NoError(t, err)
+	require.Nil(t, writer.writer)
+	buffer := newClusterBuffer(0, writer, nil)
+	input := clusteringTestRecord(t, schema, 1, 1)
+	require.NoError(t, buffer.WriteRecord(input, 0))
+	input.Release()
+	require.Nil(t, writer.writer, "the writer should still be unopened before final close")
+	require.NoError(t, buffer.Close())
+	require.Len(t, writer.res, 1)
+	require.EqualValues(t, 1, writer.res[0].NumOfRows)
+	require.NoError(t, buffer.Close())
+}
+
 func TestClusterBufferOversizedRowAndWriteError(t *testing.T) {
 	buffer, observer := newClusteringTestBuffer(t, clusteringWideSchema(), 1024, storage.StorageV1)
 	record := clusteringTestRecord(t, clusteringWideSchema(), 1, 2)
@@ -976,7 +1064,10 @@ func TestClusterBufferOversizedRowAndWriteError(t *testing.T) {
 	observer.writeError = want
 	require.ErrorIs(t, buffer.WriteRecord(record, 1), want)
 	observer.writeError = nil
-	require.NoError(t, buffer.Close())
+	require.ErrorIs(t, buffer.WriteRecord(record, 0), want, "a failed write must poison the bucket")
+	require.Equal(t, []int{1}, observer.rows, "later rows must not reach the writer")
+	require.ErrorIs(t, buffer.FlushChunk(), want)
+	require.ErrorIs(t, buffer.Close(), want)
 	require.Nil(t, buffer.builder)
 }
 

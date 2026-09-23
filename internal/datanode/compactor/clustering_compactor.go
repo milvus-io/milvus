@@ -116,6 +116,7 @@ type ClusterBuffer struct {
 	writer                  *MultiSegmentWriter
 	builder                 *storage.RecordBuilder
 	appendErr               error
+	closed                  bool
 	clusteringKeyFieldStats *storage.FieldStats
 
 	lock sync.RWMutex
@@ -129,8 +130,15 @@ func (b *ClusterBuffer) WriteRecord(r storage.Record, row int) error {
 	if b.appendErr != nil {
 		return b.appendErr
 	}
+	if b.closed {
+		return merr.WrapErrServiceInternalMsg("cannot write to closed clustering buffer")
+	}
 	if b.builder == nil {
-		b.builder = storage.NewRecordBuilder(b.writer.schema)
+		if b.writer.storageVersion == storage.StorageV3 {
+			b.builder = storage.NewRecordBuilderWithFieldID(b.writer.schema)
+		} else {
+			b.builder = storage.NewRecordBuilder(b.writer.schema)
+		}
 	}
 	if err := b.builder.Append(r, row, row+1); err != nil {
 		// Append can leave columns at different lengths. Poison this bucket
@@ -157,7 +165,14 @@ func (b *ClusterBuffer) writeRecord() error {
 	}
 	record := b.builder.Build()
 	defer record.Release()
-	return b.writer.Write(record)
+	if err := b.writer.Write(record); err != nil {
+		// Another mapping worker may reach this bucket before cancellation.
+		// Keep the first write failure and reject every later row.
+		b.appendErr = err
+		b.releaseBuilder()
+		return err
+	}
+	return nil
 }
 
 func (b *ClusterBuffer) FlushChunk() error {
@@ -173,6 +188,10 @@ func (b *ClusterBuffer) Close() error {
 	b.lock.Lock()
 	defer b.lock.Unlock()
 	defer b.releaseBuilder()
+	if b.closed {
+		return nil
+	}
+	defer func() { b.closed = true }()
 	err := b.writeRecord()
 	closeErr := b.writer.Close()
 	// Keep the write/append failure as the primary cause while retaining any
@@ -564,7 +583,8 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	// Join every worker before Compact's deferred cleanup releases shared buffers.
 	if err := conc.BlockOnAll(futures...); err != nil {
 		// A sibling may return context.Canceled before the failed future is
-		// visited. Preserve the failure that triggered cancellation.
+		// visited. Preserve the failure that triggered cancellation. If several
+		// workers fail independently, the first cancellation cause wins.
 		if cause := context.Cause(ctx); cause != nil {
 			return nil, nil, cause
 		}
@@ -699,7 +719,11 @@ func (t *clusteringCompactionTask) mappingSegment(
 		}
 
 		pkColumn := r.Column(t.primaryKeyField.GetFieldID())
-		tsColumn := r.Column(common.TimeStampField).(*array.Int64)
+		ts, exists := storage.TryRecordColumn(r, common.TimeStampField)
+		tsColumn, ok := ts.(*array.Int64)
+		if !exists || !ok {
+			return merr.WrapErrServiceInternalMsg("timestamp field is not an int64 column in clustering compaction record")
+		}
 		for row := 0; row < r.Len(); row++ {
 			select {
 			case <-done:

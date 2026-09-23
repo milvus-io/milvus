@@ -185,6 +185,13 @@ func (r *materializedRecord) Column(fieldID storage.FieldID) arrow.Array {
 	return r.base.Column(fieldID)
 }
 
+func (r *materializedRecord) TryColumn(fieldID storage.FieldID) (arrow.Array, bool) {
+	if col, ok := r.computed[fieldID]; ok {
+		return col, true
+	}
+	return storage.TryRecordColumn(r.base, fieldID)
+}
+
 func (r *materializedRecord) Len() int {
 	return r.base.Len()
 }

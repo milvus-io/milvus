@@ -103,6 +103,55 @@ func TestToWriterRecordFastPathOnMatchingSchema(t *testing.T) {
 	require.Same(t, matchRec, rec, "matching schema must take the fast path and return the backing record")
 }
 
+func TestToWriterRecordV3BuilderFastPath(t *testing.T) {
+	field := &schemapb.FieldSchema{FieldID: 103, Name: "added", ExternalField: "source_added", DataType: schemapb.DataType_VarChar}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+	inputSchema, err := ConvertToArrowSchema(schema, false)
+	require.NoError(t, err)
+	inputBuilder := array.NewStringBuilder(memory.DefaultAllocator)
+	inputBuilder.Append("value")
+	column := inputBuilder.NewArray()
+	inputBuilder.Release()
+	input := NewSimpleArrowRecord(array.NewRecord(inputSchema, []arrow.Array{column}, 1), map[FieldID]int{103: 0})
+	column.Release()
+	builder := NewRecordBuilderWithFieldID(schema)
+	defer builder.Release()
+	require.NoError(t, builder.Append(input, 0, 1))
+	input.Release()
+	batch := builder.Build()
+	defer batch.Release()
+	writerSchema, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	converted, release, err := toWriterRecord(batch, schema, writerSchema)
+	require.NoError(t, err)
+	defer release()
+	require.Same(t, batch.(*simpleArrowRecord).r, converted)
+}
+
+func TestToWriterRecordV3BuilderNormalizesNullText(t *testing.T) {
+	field := &schemapb.FieldSchema{FieldID: 103, Name: "text", DataType: schemapb.DataType_Text, Nullable: true}
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
+	column := array.MakeArrayOfNull(memory.DefaultAllocator, arrow.BinaryTypes.Binary, 1)
+	input := NewSimpleArrowRecord(array.NewRecord(arrow.NewSchema([]arrow.Field{
+		{Name: field.Name, Type: arrow.BinaryTypes.Binary, Nullable: true},
+	}, nil), []arrow.Array{column}, 1), map[FieldID]int{103: 0})
+	column.Release()
+	builder := NewRecordBuilderWithFieldID(schema)
+	defer builder.Release()
+	require.NoError(t, builder.Append(input, 0, 1))
+	input.Release()
+	batch := builder.Build()
+	defer batch.Release()
+	writerSchema, err := ConvertToArrowSchema(schema, true)
+	require.NoError(t, err)
+	converted, release, err := toWriterRecord(batch, schema, writerSchema)
+	require.NoError(t, err)
+	defer release()
+	require.NotSame(t, batch.(*simpleArrowRecord).r, converted)
+	require.True(t, writerSchema.Equal(converted.Schema()))
+	require.Equal(t, 1, converted.Column(0).NullN())
+}
+
 func TestToWriterRecordNormalizesNullText(t *testing.T) {
 	field := &schemapb.FieldSchema{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text, Nullable: true}
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
