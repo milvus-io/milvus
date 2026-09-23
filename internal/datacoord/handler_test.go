@@ -522,6 +522,121 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	})
 }
 
+// TestGetQueryVChanPositions_ManifestOnlySegment covers segments that have no
+// stream positions and no Binlogs, e.g. an external-collection segment reloaded
+// from etcd after a DataCoord restart. Only a committed V3 manifest counts as data.
+func TestGetQueryVChanPositions_ManifestOnlySegment(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+	svr.meta.AddCollection(&collectionInfo{
+		ID:         0,
+		Partitions: []int64{0},
+		Schema:     newTestSchema(),
+	})
+
+	committedManifest := packed.MarshalManifestPath("files/insert_log/0/0/1", 1)
+	placeholderManifest := packed.MarshalManifestPath("files/insert_log/0/0/2", packed.ManifestEarliest)
+
+	cases := []struct {
+		name                string
+		id                  int64
+		channel             string
+		storageVersion      int64
+		manifestPath        string
+		state               commonpb.SegmentState
+		isImporting         bool
+		invisibleCompaction bool
+		wantFlushed         bool
+	}{
+		{
+			name:           "committed v3 manifest is recovered",
+			id:             101,
+			channel:        "ch_manifest_only_committed",
+			storageVersion: storage.StorageV3,
+			manifestPath:   committedManifest,
+			wantFlushed:    true,
+		},
+		{
+			name:           "growing segment with placeholder manifest stays excluded",
+			id:             102,
+			channel:        "ch_manifest_only_growing_placeholder",
+			storageVersion: storage.StorageV3,
+			manifestPath:   placeholderManifest,
+			state:          commonpb.SegmentState_Growing,
+		},
+		{
+			name:           "flushed segment with placeholder manifest stays excluded",
+			id:             103,
+			channel:        "ch_manifest_only_flushed_placeholder",
+			storageVersion: storage.StorageV3,
+			manifestPath:   placeholderManifest,
+		},
+		{
+			name:           "invalid manifest path stays excluded",
+			id:             104,
+			channel:        "ch_manifest_only_invalid",
+			storageVersion: storage.StorageV3,
+			manifestPath:   "invalid",
+		},
+		{
+			name:           "v2 segment without manifest stays excluded",
+			id:             105,
+			channel:        "ch_manifest_only_v2",
+			storageVersion: storage.StorageV2,
+		},
+		{
+			name:           "importing segment with committed manifest stays excluded",
+			id:             106,
+			channel:        "ch_manifest_only_importing",
+			storageVersion: storage.StorageV3,
+			manifestPath:   committedManifest,
+			isImporting:    true,
+		},
+		{
+			name:                "invisible compaction result stays excluded",
+			id:                  107,
+			channel:             "ch_manifest_only_invisible",
+			storageVersion:      storage.StorageV3,
+			manifestPath:        committedManifest,
+			invisibleCompaction: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := tc.state
+			if state == commonpb.SegmentState_SegmentStateNone {
+				state = commonpb.SegmentState_Flushed
+			}
+			segment := &datapb.SegmentInfo{
+				ID:                  tc.id,
+				CollectionID:        0,
+				PartitionID:         0,
+				InsertChannel:       tc.channel,
+				NumOfRows:           2048,
+				State:               state,
+				Level:               datapb.SegmentLevel_L1,
+				StorageVersion:      tc.storageVersion,
+				ManifestPath:        tc.manifestPath,
+				IsImporting:         tc.isImporting,
+				IsInvisible:         tc.invisibleCompaction,
+				CreatedByCompaction: tc.invisibleCompaction,
+			}
+			require.NoError(t, svr.meta.AddSegment(context.TODO(), NewSegmentInfo(segment)))
+
+			infos := svr.handler.GetQueryVChanPositions(&channelMeta{Name: tc.channel, CollectionID: 0})
+			if tc.wantFlushed {
+				assert.ElementsMatch(t, []int64{tc.id}, infos.GetFlushedSegmentIds())
+			} else {
+				assert.Empty(t, infos.GetFlushedSegmentIds())
+			}
+			assert.Empty(t, infos.GetUnflushedSegmentIds())
+			assert.Empty(t, infos.GetDroppedSegmentIds())
+			assert.Empty(t, infos.GetLevelZeroSegmentIds())
+		})
+	}
+}
+
 func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
 	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
