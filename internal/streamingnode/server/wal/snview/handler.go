@@ -2,10 +2,13 @@ package snview
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/views/optimizer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
@@ -57,13 +60,14 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
-	mu       sync.Mutex
-	closed   bool
-	ctx      context.Context
-	pchannel string
-	shards   map[qviews.ShardID]*snShardView
-	catalog  metastore.StreamingNodeCataLog
-	resMgr   StreamingNodeResourceManager
+	mu             sync.Mutex
+	closed         bool
+	ctx            context.Context
+	pchannel       string
+	shards         map[qviews.ShardID]*snShardView
+	catalog        metastore.StreamingNodeCataLog
+	resMgr         StreamingNodeResourceManager
+	localOptimizer optimizer.LocalOptimizer
 }
 
 // recoverSNQueryViewHandler reconstructs the handler from persisted views
@@ -76,11 +80,12 @@ func recoverSNQueryViewHandler(
 	views []*viewpb.QueryViewOfShard,
 ) *SNQueryViewHandler {
 	h := &SNQueryViewHandler{
-		ctx:      ctx,
-		pchannel: pchannel,
-		shards:   make(map[qviews.ShardID]*snShardView),
-		catalog:  catalog,
-		resMgr:   resMgr,
+		ctx:            ctx,
+		pchannel:       pchannel,
+		shards:         make(map[qviews.ShardID]*snShardView),
+		catalog:        catalog,
+		resMgr:         resMgr,
+		localOptimizer: optimizer.NewNoopLocalOptimizer(),
 	}
 
 	grouped := make(map[qviews.ShardID]map[qviews.QueryViewVersion]*snQueryViewStateMachine)
@@ -104,8 +109,23 @@ func recoverSNQueryViewHandler(
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
 	}
-	for _, shard := range h.shards {
-		shard.startRecovery()
+	views = slices.Clone(views)
+	// A vchannel runtime is shared by replicas. Register the oldest recovered
+	// view first across all replicas, not just within each shard.
+	slices.SortFunc(views, func(a, b *viewpb.QueryViewOfShard) int {
+		av := qviews.FromProtoQueryViewVersion(a.GetMeta().GetVersion())
+		bv := qviews.FromProtoQueryViewVersion(b.GetMeta().GetVersion())
+		if av.GT(bv) {
+			return 1
+		}
+		if bv.GT(av) {
+			return -1
+		}
+		return 0
+	})
+	for _, view := range views {
+		shard := h.shards[qviews.NewShardIDFromQVMeta(view.GetMeta())]
+		shard.startRecoveryVersions([]qviews.QueryViewVersion{qviews.FromProtoQueryViewVersion(view.GetMeta().GetVersion())})
 	}
 
 	return h
@@ -204,4 +224,39 @@ func (h *SNQueryViewHandler) makeOnEmpty(shardID qviews.ShardID) func(*snShardVi
 			delete(h.shards, shardID)
 		}
 	}
+}
+
+type QueryViewLease struct {
+	Version qviews.QueryViewVersion
+	Meta    *viewpb.QueryViewMeta
+	View    *viewpb.QueryViewOfShard
+	Release func()
+}
+
+func (h *SNQueryViewHandler) AcquireLatestUpView(ctx context.Context, shardID qviews.ShardID) (*QueryViewLease, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	h.mu.Lock()
+	shard := h.shards[shardID]
+	if shard == nil && shardID.ReplicaID == qviews.UnknownReplicaID {
+		// The client resolves shards by vchannel only and carries an unknown
+		// replica ID before Phase 1; resolve by matching vchannel.
+		// A vchannel may be served by several replicas (one shard per replica);
+		// the lookup picks one of them — unambiguous under the single-replica
+		// semantics the query client targets.
+		for id, candidate := range h.shards {
+			if id.VChannel == shardID.VChannel {
+				shard = candidate
+				break
+			}
+		}
+	}
+	h.mu.Unlock()
+	if shard == nil {
+		return nil, viewerror.NewViewNotFound("query view %s is not found", shardID.String())
+	}
+	return shard.acquireLatestUpView(ctx)
 }

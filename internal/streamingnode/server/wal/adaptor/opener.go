@@ -17,7 +17,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/shards"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/txn"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -207,6 +209,18 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, errors.Wrap(err, "when building interceptor params")
 	}
 	resources.param = param
+	queryViewCatalog := resource.Resource().StreamingNodeCatalog()
+	persistedViews, err := queryViewCatalog.ListQueryViews(ctx, opt.Channel.Name)
+	if err != nil {
+		return nil, merr.Wrap(err, "load streaming node query views")
+	}
+	var snHandler *snview.SNQueryViewHandler
+	queryRecoveryComplete := false
+	defer func() {
+		if !queryRecoveryComplete && snHandler != nil {
+			snHandler.CloseForHandoff()
+		}
+	}()
 	liveReady := make(chan struct{})
 	rs, snapshot, err := recovery.RecoverRecoveryStorage(
 		ctx,
@@ -215,6 +229,9 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		param.LastTimeTickMessage,
 		recovery.WithRecoveryTailRateLimiter(roWAL.RecoveryStorage),
 		recovery.WithRecoveryFatalHandler(roWAL.markUnavailable),
+		recovery.WithQueryViewRecovery(func(manager *vchannel.PChannelRecoveryManager) {
+			snHandler = snview.RecoverPChannelSNQueryViewHandler(roWAL.availableCtx, opt.Channel.Name, queryViewCatalog, manager, persistedViews)
+		}),
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "when recovering recovery storage")
@@ -257,7 +274,13 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		return nil, err
 	}
 
+	for vchannel := range snapshot.WritePathRecovery.VChannels {
+		param.MVCCManager.ApplyRecoveryBarrier(vchannel, param.LastTimeTickMessage.TimeTick())
+	}
 	wal := adaptImplsToRWWAL(roWAL, o.interceptorBuilders, param)
+	queryRecoveryComplete = true
+	wal.queryViewHandler = snHandler
+	wal.viewResourceManager = rs.VChannelManager()
 	close(liveReady)
 	o.walInstances.Insert(id, wal)
 	resources.Release()

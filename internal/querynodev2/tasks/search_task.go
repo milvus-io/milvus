@@ -145,6 +145,17 @@ func (t *SearchTask) PreExecute() error {
 }
 
 func (t *SearchTask) Execute() error {
+	return t.execute(nil)
+}
+
+func (t *SearchTask) ExecuteOnSegments(selected []segments.Segment) error {
+	if selected == nil {
+		selected = []segments.Segment{}
+	}
+	return t.execute(selected)
+}
+
+func (t *SearchTask) execute(selected []segments.Segment) error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
@@ -181,7 +192,10 @@ func (t *SearchTask) Execute() error {
 		results          []*segments.SearchResult
 		searchedSegments []segments.Segment
 	)
-	if req.GetScope() == querypb.DataScope_Historical {
+	if selected != nil {
+		searchedSegments = selected
+		results, err = segments.SearchSelectedSegments(t.ctx, searchReq, selected)
+	} else if req.GetScope() == querypb.DataScope_Historical {
 		results, searchedSegments, err = segments.SearchHistorical(
 			t.ctx,
 			t.segmentManager,
@@ -200,7 +214,9 @@ func (t *SearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 	}
-	defer t.segmentManager.Segment.Unpin(searchedSegments)
+	if selected == nil {
+		defer t.segmentManager.Segment.Unpin(searchedSegments)
+	}
 	defer segments.DeleteSearchResults(results)
 	if err != nil {
 		return err

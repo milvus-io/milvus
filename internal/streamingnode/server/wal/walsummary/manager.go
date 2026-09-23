@@ -52,6 +52,8 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // completed point before publishing a checkpoint.
 // mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
+	queryRetention map[string]uint64 // exclusive lower bound required by query snapshots
+
 	mu sync.Mutex
 	// Readers pin a local snapshot against physical GC. Cross-owner fencing is
 	// deliberately left to the GC design TODO.

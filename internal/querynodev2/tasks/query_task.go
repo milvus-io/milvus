@@ -112,6 +112,17 @@ func (t *QueryTask) SearchResult() *internalpb.SearchResults {
 
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
+	return t.execute(nil)
+}
+
+func (t *QueryTask) ExecuteOnSegments(selected []segments.Segment) error {
+	if selected == nil {
+		selected = []segments.Segment{}
+	}
+	return t.execute(selected)
+}
+
+func (t *QueryTask) execute(selected []segments.Segment) error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
 	}
@@ -126,14 +137,21 @@ func (t *QueryTask) Execute() error {
 	takeAllowed := requestAllowsTakeForOutput(resultCount)
 	retrievePlan.SetTakeForOutputAllowed(takeAllowed)
 
-	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
-	defer t.segmentManager.Segment.Unpin(pinnedSegments)
+	var results []segments.RetrieveSegmentResult
+	var pinnedSegments []segments.Segment
+	if selected != nil {
+		results, err = segments.RetrieveSelectedSegments(t.ctx, retrievePlan, t.req, selected)
+	} else {
+		results, pinnedSegments, err = segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+		defer t.segmentManager.Segment.Unpin(pinnedSegments)
+	}
 	// The Arrow transport hands back records that MaterializeArrowSelection
 	// reads below -- the reduce only records which rows won. They are
 	// owned here, not by the pipeline, and must be released on every path --
 	// including the error returns below, hence a defer rather than an explicit
 	// release after the reduce.
 	defer segments.ReleaseRecords(results)
+
 	if err != nil {
 		return err
 	}

@@ -60,3 +60,6 @@ func (impl *shardInterceptor) materializeFunctionFields(
 	_, err := function.GetManager().Materialize(ctx, collectionID, WALFunctionRunnerKey(insertMsg.VChannel()), schemaVersion, insertMsg)
 	return err
 }
+
+// WALFunctionRunnerKey identifies the WAL-owned runner shared by writes and query planning.
+func WALFunctionRunnerKey(vchannel string) string { return walFunctionRunnerKey(vchannel) }
