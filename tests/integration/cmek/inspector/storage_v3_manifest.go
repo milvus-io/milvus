@@ -170,6 +170,8 @@ type manifestV3File struct {
 type ParquetObjectV3 struct {
 	Path    string
 	Columns []string
+	Start   int64
+	End     int64
 	Rows    int64
 }
 
@@ -268,7 +270,7 @@ func (manifest *manifestV3) parquetObjects(basePath string) ([]ParquetObjectV3, 
 				return nil, errors.New("duplicate resolved manifest raw-data object")
 			}
 			seen[name] = true
-			objects = append(objects, ParquetObjectV3{Path: name, Columns: group.Columns, Rows: file.End - file.Start})
+			objects = append(objects, ParquetObjectV3{Path: name, Columns: group.Columns, Start: file.Start, End: file.End, Rows: file.End - file.Start})
 			if err := numericMetadata(file.Properties, "file_size", "footer_size"); err != nil {
 				return nil, err
 			}

@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -329,6 +330,30 @@ func (mp *MilvusProcess) Stop(gracefulTimeout ...time.Duration) error {
 		// after timeout, cancel the notifier to notify a force stop
 		return mp.ForceStop()
 	}
+}
+
+// Crash kills the child without giving it a graceful shutdown window.
+// It waits for the existing process monitor and cleanup callback to finish.
+func (mp *MilvusProcess) Crash() error {
+	if mp.cmd.Process == nil {
+		return merr.WrapErrServiceInternalMsg("milvus process has not started")
+	}
+	mp.Logger().Info(context.TODO(), "crash milvus process")
+	if err := mp.cmd.Process.Signal(syscall.SIGKILL); err != nil {
+		return merr.Wrap(err, "send SIGKILL to milvus process")
+	}
+	result := mp.notifier.BlockAndGetResult()
+	mp.graceful.Close()
+	var exitErr *exec.ExitError
+	if errors.As(result, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() && status.Signal() == syscall.SIGKILL {
+			return nil
+		}
+	}
+	if result == nil {
+		return merr.WrapErrServiceInternalMsg("milvus process exited without SIGKILL status")
+	}
+	return merr.Wrap(result, "milvus process exited without SIGKILL status")
 }
 
 // ForceStop forcefully stops the Milvus process

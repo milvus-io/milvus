@@ -50,18 +50,21 @@ type rawDataCampaign struct {
 	fields     []*schemapb.FieldData
 	loadFields []string
 	search     bool
+	shardsNum  int32
 }
 
-// prepareRawDataCampaign returns the complete nonempty output of this flush.
-// Compaction is disabled before the cluster starts, so the same segments are
-// inspected and then read after release/reload.
-func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCampaign) (*milvuspb.DescribeCollectionResponse, []*datapb.SegmentInfo) {
+// prepareRawDataCollection creates a collection that can accept more batches.
+func (s *rawDataSuite) prepareRawDataCollection(ctx context.Context, c rawDataCampaign) *milvuspb.DescribeCollectionResponse {
 	collection := "cmek_raw_" + c.name + "_" + funcutil.GenRandomStr()
+	shardsNum := c.shardsNum
+	if shardsNum == 0 {
+		shardsNum = common.DefaultShardsNum
+	}
 	c.schema.Name = collection
 	encoded, err := proto.Marshal(c.schema)
 	s.Require().NoError(err)
 	status, err := s.Cluster.MilvusClient.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName: s.dbName, CollectionName: collection, Schema: encoded, ShardsNum: common.DefaultShardsNum,
+		DbName: s.dbName, CollectionName: collection, Schema: encoded, ShardsNum: shardsNum,
 	})
 	s.Require().NoError(merr.CheckRPCCall(status, err))
 	s.T().Cleanup(func() { s.cleanupRawCollection(collection) })
@@ -94,12 +97,27 @@ func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCamp
 		s.Require().NoError(merr.CheckRPCCall(status, err))
 		s.WaitForLoadWithDB(ctx, s.dbName, collection)
 	}
+	return description
+}
+
+func (s *rawDataSuite) insertRawDataBatch(ctx context.Context, description *milvuspb.DescribeCollectionResponse, fields []*schemapb.FieldData, rows int) *milvuspb.MutationResult {
+	s.bindRawDataFieldIDs(description.GetSchema(), fields)
 	insert, err := s.Cluster.MilvusClient.Insert(ctx, &milvuspb.InsertRequest{
-		DbName: s.dbName, CollectionName: collection, FieldsData: c.fields,
-		HashKeys: integration.GenerateHashKeys(rawDataRows), NumRows: rawDataRows,
+		DbName: s.dbName, CollectionName: description.GetCollectionName(), FieldsData: fields,
+		HashKeys: integration.GenerateHashKeys(rows), NumRows: uint32(rows),
 	})
 	s.Require().NoError(merr.CheckRPCCall(insert, err))
-	s.Require().Equal(int64(rawDataRows), insert.GetInsertCnt())
+	s.Require().Equal(int64(rows), insert.GetInsertCnt())
+	return insert
+}
+
+// prepareRawDataCampaign returns the complete nonempty output of this flush.
+// Compaction is disabled before the cluster starts, so the same segments are
+// inspected and then read after release/reload.
+func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCampaign) (*milvuspb.DescribeCollectionResponse, []*datapb.SegmentInfo) {
+	description := s.prepareRawDataCollection(ctx, c)
+	collection := description.GetCollectionName()
+	s.insertRawDataBatch(ctx, description, c.fields, rawDataRows)
 	flush, err := s.Cluster.MilvusClient.Flush(ctx, &milvuspb.FlushRequest{DbName: s.dbName, CollectionNames: []string{collection}})
 	s.Require().NoError(merr.CheckRPCCall(flush, err))
 	ids := flush.GetCollSegIDs()[collection].GetData()

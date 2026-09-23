@@ -23,6 +23,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <iomanip>
 #include <mutex>
 #include <set>
@@ -319,6 +320,17 @@ class FixtureCipherPlugin final : public ICipherPlugin {
     GetDecryptor(int64_t ez_id,
                  int64_t coll_id,
                  const std::string& safe_key) const override {
+        // Recovery and index-consumer tests opt in to a mode where decryption
+        // requires the EZ context to have been registered in this process.
+        // Baseline mode remains stateless for independent object-format checks.
+        const char* strict = std::getenv("MILVUS_CMEK_FIXTURE_STRICT_CONTEXT");
+        if (strict != nullptr && std::string_view(strict) == "true") {
+            std::lock_guard<std::mutex> lock(context_mutex_);
+            if (contexts_.count({ez_id, coll_id}) == 0) {
+                throw std::runtime_error(
+                    "fixture cipher has no registered collection context");
+            }
+        }
         auto decoded = decodeEDEK(safe_key);
         auto ezk = deriveEZKey(ez_id);
         auto expected_tag = deriveEDEKTag(ezk, decoded.nonce, ez_id, coll_id);

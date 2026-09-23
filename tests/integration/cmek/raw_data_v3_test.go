@@ -100,7 +100,7 @@ type parquetKeySample struct {
 	column string
 }
 
-func (s *RawDataV3Suite) inspectRawDataV3(ctx context.Context, segments []*datapb.SegmentInfo, collectionID int64, baselineColumn string) (map[int64]inspector.ManifestLocatorV3, *parquetKeySample) {
+func (s *rawDataSuite) inspectRawDataV3(ctx context.Context, segments []*datapb.SegmentInfo, collectionID int64, baselineColumn string) (map[int64]inspector.ManifestLocatorV3, *parquetKeySample) {
 	expected := make(map[int64]inspector.ManifestLocatorV3, len(segments))
 	references, err := inspector.LocateManifestsV3(segments, collectionID)
 	s.Require().NoError(err)
@@ -153,7 +153,7 @@ func (snapshot v3ReadSnapshot) matches(expected, current map[int64]inspector.Man
 	return true
 }
 
-func (s *RawDataV3Suite) currentParquetSegments(ctx context.Context, collectionID int64) []*datapb.SegmentInfo {
+func (s *rawDataSuite) currentParquetSegments(ctx context.Context, collectionID int64) []*datapb.SegmentInfo {
 	// A single linearizable prefix read observes the persisted DataCoord set;
 	// unlike the legacy MetaWatcher helper, this honors the reading deadline.
 	prefix := path.Join(s.Cluster.RootPath(), "meta/datacoord-meta/s", strconv.FormatInt(collectionID, 10)) + "/"
@@ -172,7 +172,7 @@ func (s *RawDataV3Suite) currentParquetSegments(ctx context.Context, collectionI
 	return segments
 }
 
-func (s *RawDataV3Suite) manifestIdentity(segments []*datapb.SegmentInfo) map[int64]inspector.ManifestLocatorV3 {
+func (s *rawDataSuite) manifestIdentity(segments []*datapb.SegmentInfo) map[int64]inspector.ManifestLocatorV3 {
 	identity := make(map[int64]inspector.ManifestLocatorV3, len(segments))
 	for _, segment := range segments {
 		locator, err := inspector.ParseManifestLocatorV3(segment.GetManifestPath())
@@ -182,7 +182,7 @@ func (s *RawDataV3Suite) manifestIdentity(segments []*datapb.SegmentInfo) map[in
 	return identity
 }
 
-func (s *RawDataV3Suite) parquetReadSnapshot(ctx context.Context, collectionID int64) v3ReadSnapshot {
+func (s *rawDataSuite) parquetReadSnapshot(ctx context.Context, collectionID int64) v3ReadSnapshot {
 	snapshot := v3ReadSnapshot{Loaded: make(map[int64][]v3LoadedIdentity), Serving: make(map[int64][]int64)}
 	for _, client := range s.Cluster.GetAllStreamingAndQueryNodesClient() {
 		response, err := client.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{LastUpdateTs: 0, SupportDelta: false})
@@ -210,7 +210,7 @@ func (s *RawDataV3Suite) parquetReadSnapshot(ctx context.Context, collectionID i
 	return snapshot
 }
 
-func (s *RawDataV3Suite) waitParquetReleased(ctx context.Context, collectionID int64) {
+func (s *rawDataSuite) waitParquetReleased(ctx context.Context, collectionID int64) {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	request, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
@@ -241,7 +241,7 @@ func (s *RawDataV3Suite) waitParquetReleased(ctx context.Context, collectionID i
 	}
 }
 
-func (s *RawDataV3Suite) reloadRawDataV3(description *milvuspb.DescribeCollectionResponse, c rawDataCampaign, segments []*datapb.SegmentInfo, expected map[int64]inspector.ManifestLocatorV3) {
+func (s *rawDataSuite) reloadRawDataV3(description *milvuspb.DescribeCollectionResponse, c rawDataCampaign, segments []*datapb.SegmentInfo, expected map[int64]inspector.ManifestLocatorV3) {
 	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 3*time.Minute)
 	defer cancel()
 	collection, collectionID := description.GetCollectionName(), description.GetCollectionID()

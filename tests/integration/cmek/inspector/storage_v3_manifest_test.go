@@ -113,10 +113,10 @@ func TestManifestV3PreservesEveryColumnGroupAndFile(t *testing.T) {
 	objects, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture()), "root/11")
 	require.NoError(t, err)
 	require.Equal(t, []ParquetObjectV3{
-		{Path: "root/11/_data/a.parquet", Columns: []string{"0", "1", "100"}, Rows: 2},
-		{Path: "root/11/_data/b.parquet", Columns: []string{"0", "1", "100"}, Rows: 2},
-		{Path: "root/11/_data/c.parquet", Columns: []string{"101"}, Rows: 2},
-		{Path: "root/11/_data/d.parquet", Columns: []string{"101"}, Rows: 2},
+		{Path: "root/11/_data/a.parquet", Columns: []string{"0", "1", "100"}, Start: 0, End: 2, Rows: 2},
+		{Path: "root/11/_data/b.parquet", Columns: []string{"0", "1", "100"}, Start: 2, End: 4, Rows: 2},
+		{Path: "root/11/_data/c.parquet", Columns: []string{"101"}, Start: 0, End: 2, Rows: 2},
+		{Path: "root/11/_data/d.parquet", Columns: []string{"101"}, Start: 2, End: 4, Rows: 2},
 	}, objects)
 }
 

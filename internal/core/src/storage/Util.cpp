@@ -1970,6 +1970,9 @@ IterateFieldDataFromManifest(
     if (!(reader != nullptr)) {
         ThrowInfo(ErrorCode::FileReadFailed, "Failed to create reader");
     }
+    reader->set_keyretriever([](const std::string& key_metadata) {
+        return KeyRetriever().GetKey(key_metadata);
+    });
     std::shared_ptr<arrow::RecordBatch> batch;
 
     // Decode batches on a background thread pool while this thread keeps
