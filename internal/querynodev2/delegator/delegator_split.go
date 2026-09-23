@@ -21,9 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -966,6 +964,14 @@ func (sd *shardDelegator) ProcessSplitShard(ctx context.Context, targets []strin
 			return merr.WrapErrParameterInvalidMsg("split target vchannel must not be empty")
 		}
 	}
+	// Without a spawner no child can ever front a target, so nothing would ever
+	// clear a pending slot: recording one would refuse every read through this
+	// delegator for good. Every delegator the querynode builds gets a spawner
+	// (WithChildSpawner), so this is a Milvus bug, surfaced as a System error
+	// for the pipeline to log.
+	if sd.childSpawner == nil {
+		return merr.WrapErrServiceInternal("shard-split child spawner is not configured on the delegator")
+	}
 	if sd.spawning == nil {
 		sd.spawning = make(map[string]struct{})
 	}
@@ -988,12 +994,6 @@ func (sd *shardDelegator) ProcessSplitShard(ctx context.Context, targets []strin
 		pending = append(pending, target)
 	}
 
-	// Without a spawner no child can ever front the pending targets: they stay
-	// pending, so the delegator keeps refusing reads, and the error is returned
-	// for the pipeline to surface.
-	if sd.childSpawner == nil {
-		return merr.WrapErrServiceInternal("shard-split child spawner is not configured on the delegator")
-	}
 	for _, target := range pending {
 		// Detached from the request's cancellation but not from its values: the
 		// spawn must outlive the fence message that asked for it -- a child
@@ -1039,21 +1039,19 @@ func (sd *shardDelegator) spawnChildAsync(ctx context.Context, vchannel string) 
 			Parent:         sd,
 		})
 		if err == nil {
-			sd.publishSpawnedChild(ctx, vchannel, child)
-			return
+			if err = sd.publishSpawnedChild(ctx, vchannel, child); err == nil {
+				return
+			}
 		}
 		if sd.abandonSpawn(ctx, vchannel) {
 			return
 		}
-		if errors.Is(err, merr.ErrChannelReduplicate) {
-			// A delegator this source does not front already serves the target,
-			// typically one querycoord watched on its own. Retrying cannot change
-			// that, and fronting it would serve rows deleted on the target, so the
-			// target stays pending and reads through this delegator stay refused.
-			log.RatedWarn(ctx, rate.Every(10*time.Second), "split target is served by a delegator this source does not front, keeping the target pending",
-				mlog.String("targetVChannel", vchannel), mlog.Err(err))
-			return
-		}
+		// Every failure is retried, a refusal included: the spawner refuses a
+		// target served by a delegator fronted by another source
+		// (ErrChannelReduplicate), and a refusal given up on for good would keep
+		// the target pending, refusing every read through this delegator until
+		// it is released -- which during the window it is not. Retrying
+		// re-evaluates the refusal, so it ends when its cause does.
 		backoff := splitChildSpawnBackoff(attempt)
 		log.Warn(ctx, "failed to spawn split child delegator, reads through this delegator are refused until a retry succeeds",
 			mlog.String("targetVChannel", vchannel), mlog.Int("attempt", attempt+1),
@@ -1101,19 +1099,18 @@ func (sd *shardDelegator) abandonSpawn(ctx context.Context, vchannel string) boo
 // fronting set.
 //
 // Only a delegator this source fronts is published. One whose fronting parent
-// is not this source (typically a delegator querycoord watched for the target
-// on its own) forwards no delete here, so fronting it would serve rows deleted
-// on the target: it is neither published nor torn down, and the target stays
-// pending. Being adopted does not disqualify this source's own child, since
-// adoption does not detach it and querycoord can adopt it before this runs.
+// is not this source forwards no delete here, so fronting it would serve rows
+// deleted on the target: it is neither published nor torn down, the target
+// stays pending, and the retriable error makes the spawn try again. Being
+// adopted does not disqualify this source's own child, since adoption does not
+// detach it and querycoord can adopt it before this runs.
 //
 // A child of this source is aborted instead if the source was released or has
 // stopped while it spawned.
-func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel string, child ShardDelegator) {
+func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel string, child ShardDelegator) error {
 	if child.FrontingParent() != ShardDelegator(sd) {
-		sd.getLogger(ctx).RatedWarn(ctx, rate.Every(10*time.Second), "spawned split target delegator is not fronted by this source, keeping the target pending",
-			mlog.String("targetVChannel", vchannel))
-		return
+		return merr.WrapErrServiceUnavailable("spawned split target delegator is not fronted by this source",
+			fmt.Sprintf("source %s, target %s", sd.vchannelName, vchannel))
 	}
 	sd.childMut.Lock()
 	delete(sd.spawning, vchannel)
@@ -1127,10 +1124,11 @@ func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel stri
 		sd.childSpawner.AbortSplitChild(ctx, child, sd.collectionID, vchannel)
 		sd.getLogger(ctx).Info(ctx, "aborted a split child spawned after source release or stop",
 			mlog.String("targetVChannel", vchannel))
-		return
+		return nil
 	}
 	sd.children[vchannel] = child
 	sd.childMut.Unlock()
 	sd.getLogger(ctx).Info(ctx, "spawned an in-process child delegator for a split target",
 		mlog.String("targetVChannel", vchannel))
+	return nil
 }

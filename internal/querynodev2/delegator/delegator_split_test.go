@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -50,6 +51,10 @@ type fakeChildSpawner struct {
 	// foreign makes a successful spawn return a delegator fronted by nobody,
 	// like one querycoord watched for the target on its own.
 	foreign bool
+	// errTimes, when set, limits err to the first errTimes attempts, and
+	// foreignTimes likewise limits foreign.
+	errTimes     int
+	foreignTimes int
 }
 
 func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildParams) (ShardDelegator, error) {
@@ -57,7 +62,7 @@ func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildP
 	defer f.mu.Unlock()
 	f.spawned = append(f.spawned, params.TargetVChannel)
 	f.lastParent = params.Parent
-	if f.err != nil {
+	if f.err != nil && (f.errTimes == 0 || len(f.spawned) <= f.errTimes) {
 		return nil, f.err
 	}
 	if len(f.spawned) <= f.failures {
@@ -65,7 +70,7 @@ func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildP
 	}
 	// like the querynode, wire the source as the child's fronting parent.
 	child := &shardDelegator{vchannelName: params.TargetVChannel}
-	if !f.foreign {
+	if !f.foreign || (f.foreignTimes > 0 && len(f.spawned) > f.foreignTimes) {
 		child.SetFrontingParent(params.Parent)
 	}
 	return child, nil
@@ -393,11 +398,14 @@ func TestProcessSplitShard(t *testing.T) {
 		assert.Empty(t, childVChannels(sd))
 	})
 
-	t.Run("a spawn that returns a delegator this source does not front is never published", func(t *testing.T) {
-		// e.g. querycoord adopted the target and watched a delegator of its own
-		// while this spawn was retrying: that delegator forwards no delete to
-		// this source, so fronting it would serve rows it has deleted.
-		spawner := &fakeChildSpawner{foreign: true}
+	t.Run("a spawn that returns a delegator this source does not front is never published, and is retried", func(t *testing.T) {
+		// e.g. the spawner handed back a delegator whose fronting parent is not
+		// this source: it forwards no delete here, so fronting it would serve
+		// rows it has deleted. It is a failed attempt like any other, retried,
+		// so the target does not stay pending (reads refused) for good.
+		backoff := mockey.Mock(splitChildSpawnBackoff).Return(time.Millisecond).Build()
+		defer backoff.UnPatch()
+		spawner := &fakeChildSpawner{foreign: true, foreignTimes: 1}
 		sd := &shardDelegator{
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
@@ -406,16 +414,24 @@ func TestProcessSplitShard(t *testing.T) {
 		}
 
 		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
-		require.Eventually(t, func() bool { return spawner.attempts() == 1 }, time.Second, time.Millisecond)
-		assert.Never(t, func() bool { return len(childVChannels(sd)) > 0 }, 300*time.Millisecond, 5*time.Millisecond,
-			"a delegator that does not forward its deletes to this source was fronted")
+		require.Eventually(t, func() bool { return len(childVChannels(sd)) == 1 }, 3*time.Second, time.Millisecond,
+			"the target stayed pending after a spawn returned a delegator this source does not front")
+		assert.Equal(t, 2, spawner.attempts())
+		for _, child := range sd.frontingChildren() {
+			assert.Equal(t, ShardDelegator(sd), child.FrontingParent(), "a delegator that does not forward its deletes to this source was fronted")
+		}
 		_, err := sd.frontingFamily()
-		assert.ErrorIs(t, err, merr.ErrServiceUnavailable, "the target stays pending, so reads through the source stay refused")
+		assert.NoError(t, err)
 		assert.Empty(t, spawner.abortedVChannels(), "the source must not tear down a delegator it does not own")
 	})
 
-	t.Run("a spawn refused because another delegator serves the target is not retried", func(t *testing.T) {
-		spawner := &fakeChildSpawner{err: merr.WrapErrChannelReduplicate("v1", "served by a delegator this source does not front")}
+	t.Run("a spawn refused because another delegator serves the target is retried", func(t *testing.T) {
+		// Refusing for good would refuse every read through the source until it
+		// is released, which during the window it is not. The refusal is
+		// re-evaluated on every attempt, so it ends when its cause does.
+		backoff := mockey.Mock(splitChildSpawnBackoff).Return(time.Millisecond).Build()
+		defer backoff.UnPatch()
+		spawner := &fakeChildSpawner{err: merr.WrapErrChannelReduplicate("v1", "served by a delegator this source does not front"), errTimes: 2}
 		sd := &shardDelegator{
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
@@ -424,11 +440,11 @@ func TestProcessSplitShard(t *testing.T) {
 		}
 
 		require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
-		require.Eventually(t, func() bool { return spawner.attempts() == 1 }, time.Second, time.Millisecond)
-		// the first retry would come after one second of backoff.
-		assert.Never(t, func() bool { return spawner.attempts() > 1 }, 1500*time.Millisecond, 10*time.Millisecond)
+		require.Eventually(t, func() bool { return len(childVChannels(sd)) == 1 }, 3*time.Second, time.Millisecond,
+			"the target stayed pending after the other delegator's refusal went away")
+		assert.Equal(t, 3, spawner.attempts())
 		_, err := sd.frontingFamily()
-		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		assert.NoError(t, err)
 	})
 
 	t.Run("a child spawned after the delegator stopped is aborted, not fronted", func(t *testing.T) {
@@ -457,7 +473,7 @@ func TestProcessSplitShard(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("a missing spawner is an internal error and leaves the targets pending, refusing reads", func(t *testing.T) {
+	t.Run("a missing spawner is an internal error and leaves nothing pending", func(t *testing.T) {
 		sd := &shardDelegator{
 			vchannelName: "v0",
 			children:     make(map[string]ShardDelegator),
@@ -465,10 +481,12 @@ func TestProcessSplitShard(t *testing.T) {
 
 		err := sd.ProcessSplitShard(context.Background(), newSplitTargets("v1"))
 		assert.ErrorIs(t, err, merr.ErrServiceInternal)
-		// the fence was consumed but nothing can front its target: reads through
-		// the source are refused rather than served without the target's writes.
-		_, err = sd.frontingFamily()
-		assert.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
+		// no spawn can ever clear a pending slot here, so none is recorded: a
+		// slot would refuse every read through the source for good.
+		sd.childMut.Lock()
+		assert.Empty(t, sd.spawning)
+		sd.childMut.Unlock()
 	})
 
 	t.Run("a child spawned after the source is releasing is aborted, not fronted", func(t *testing.T) {
