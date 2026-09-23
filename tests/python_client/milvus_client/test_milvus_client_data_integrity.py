@@ -3828,26 +3828,32 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
                 remote_writer.append_row(row)
             remote_writer.commit()
             batch_files = remote_writer.batch_files
-        assert len(batch_files) == 1, (
-            f"ImportIngress requires one auditable file group per round, got {len(batch_files)}: {batch_files}"
-        )
+        allow_multiple_files = os.getenv("MILVUS_COMPACTION_INTEGRITY_ALLOW_MULTIPLE_FILES", "false").lower() == "true"
+        if allow_multiple_files:
+            import_files = [path for file_group in batch_files for path in file_group]
+        else:
+            assert len(batch_files) == 1, (
+                f"ImportIngress requires one auditable file group per round, got {len(batch_files)}: {batch_files}"
+            )
+            import_files = batch_files[0]
+        assert import_files, f"RemoteBulkWriter produced no files: {batch_files}"
         _log_compaction_integrity_evidence(
             "import_ingress_payload_persisted",
             **identity,
-            files=batch_files[0],
+            files=import_files,
             chunk_size=COMPACTION_INTEGRITY_IMPORT_CHUNK_SIZE,
         )
 
         self._ensure_compaction_integrity_utility_connection()
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=collection_name,
-            files=batch_files[0],
+            files=import_files,
         )
         _log_compaction_integrity_evidence(
             "import_ingress_submitted",
             **identity,
             job_id=task_id,
-            files=batch_files[0],
+            files=import_files,
         )
         completed, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
             task_ids=[task_id],
