@@ -444,6 +444,27 @@ func TestRewriteSkipsASegmentItsDispatcherDefers(t *testing.T) {
 	assert.ElementsMatch(t, []int64{101}, c.tick().dispatched)
 }
 
+// L4-N1: a rewrite commit torn between catalog chunks leaves an output naming
+// its input while the input is still Flushed. If the plan is then lost, the
+// input must be rewritten again -- counting it rewritten because the orphan
+// names it would keep it on the source forever and the drain would never hold.
+func TestRewriteRedispatchesAnInputATornCommitLeftLive(t *testing.T) {
+	c := newRewriteCase(t, newHashRewriteMeta(t, []int64{101}), newHashTask([]int64{101}))
+	c.tick()
+	firstPlan := c.dispatcher.dispatched[101]
+
+	// Torn: the output is published, the input is not dropped; then the plan
+	// is lost.
+	addRewriteOutputKeepingInput(c.meta, 901, hashTgtA, 101)
+	c.dispatcher.lose(firstPlan)
+
+	res := c.tick()
+	assert.Contains(t, res.dispatched, int64(101), "the input is rewritten again")
+	assert.NotEqual(t, firstPlan, c.dispatcher.dispatched[101])
+	assert.ElementsMatch(t, []int64{101}, c.pending())
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state())
+}
+
 // A plan the dispatcher already runs for a segment, but the task record lost
 // (a crash between the enqueue and the task write), is watched again rather
 // than duplicated.
@@ -559,7 +580,8 @@ func TestRewriteAdoptingWaitsForTheSourceToBeEmpty(t *testing.T) {
 		addRewriteOutputKeepingInput(c.meta, 901, hashTgtA, 101)
 
 		c.tick()
-		assert.Empty(t, c.pending(), "nothing left to rewrite")
+		assert.ElementsMatch(t, []int64{101}, c.pending(),
+			"an output naming a live input is a torn commit's, not a rewrite")
 		assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, c.state(),
 			"caught up is not drained while the source holds a live segment")
 

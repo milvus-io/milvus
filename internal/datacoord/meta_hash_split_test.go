@@ -493,3 +493,74 @@ func TestHashSplitMutationRewritesOnlyItsOwnOutputs(t *testing.T) {
 		})
 	}
 }
+
+// L4-N1: a commit torn between catalog chunks whose plan is then lost leaves
+// orphan outputs naming the still-live input. A later plan of the same input
+// writes fresh ids; its commit drops the orphans in the same write that
+// publishes its own outputs and drops the input, so the rows are never on the
+// targets twice.
+func TestHashSplitMutationDropsATornCommitsOrphanOutputs(t *testing.T) {
+	m := newHashSplitMutationMeta(t)
+	orphan := func(id int64, channel string) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, CollectionID: 77, PartitionID: 7, InsertChannel: channel, NumOfRows: 50,
+			State: commonpb.SegmentState_Flushed, CreatedByCompaction: true, CompactionFrom: []int64{500},
+		}}
+	}
+	m.segments.SetSegment(601, orphan(601, hsTgt0))
+	m.segments.SetSegment(602, orphan(602, hsTgt1))
+	// Another input's output on the same target is not touched.
+	other := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 603, CollectionID: 77, PartitionID: 7, InsertChannel: hsTgt0, NumOfRows: 10,
+		State: commonpb.SegmentState_Flushed, CreatedByCompaction: true, CompactionFrom: []int64{499},
+	}}
+	m.segments.SetSegment(603, other)
+
+	var got []metastore.UpdateAction
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().Update(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(_ context.Context, actions ...metastore.UpdateAction) error {
+			got = actions
+			return nil
+		}).Once()
+	m.catalog = catalog
+
+	outputs, mutation, err := m.CompleteCompactionMutation(context.Background(), hashSplitRewriteTask(),
+		&datapb.CompactionPlanResult{
+			PlanID: 900,
+			Segments: []*datapb.CompactionSegment{
+				{SegmentID: 701, NumOfRows: 60, Channel: hsTgt0},
+				{SegmentID: 702, NumOfRows: 40, Channel: hsTgt1},
+			},
+		})
+	require.NoError(t, err)
+	require.Len(t, outputs, 2)
+
+	// One write: new outputs, then the orphans dropped, then the input.
+	require.Len(t, got, 5)
+	ids := make([]int64, 0, len(got))
+	for _, action := range got {
+		ids = append(ids, action.Entry.(metastore.SegmentEntry).Segment.GetID())
+	}
+	assert.Equal(t, []int64{701, 702, 601, 602, 500}, ids)
+
+	ctx := context.Background()
+	for _, id := range []int64{601, 602, 500} {
+		assert.Equal(t, commonpb.SegmentState_Dropped, m.GetSegment(ctx, id).GetState(), "segment %d", id)
+	}
+	for _, id := range []int64{701, 702} {
+		assert.Equal(t, commonpb.SegmentState_Flushed, m.GetSegment(ctx, id).GetState(), "segment %d", id)
+	}
+	assert.Same(t, other, m.GetSegment(ctx, 603))
+	// Rows on the targets: the new outputs only.
+	var rows int64
+	for _, ch := range []string{hsTgt0, hsTgt1} {
+		for _, seg := range m.GetSegmentsByChannel(ch) {
+			if seg.GetID() != 603 {
+				rows += seg.GetNumOfRows()
+			}
+		}
+	}
+	assert.EqualValues(t, 100, rows, "the input's rows are on the targets exactly once")
+	assert.EqualValues(t, -100, mutation.rowCountChange, "input and orphans leave, the new outputs arrive")
+}

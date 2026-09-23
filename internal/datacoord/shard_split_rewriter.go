@@ -494,11 +494,24 @@ func (m *shardSplitManager) rewriteInputIDs(vchannel string) []int64 {
 // Dropped by their rewrite's commit, so every reader of this set also treats
 // a segment that is no longer a rewrite input as done (planAlreadyCommitted,
 // forgetNonInputSegments), and neither is ever queued again.
+//
+// Only a parent that is Dropped (or already gone from meta) counts. A commit
+// torn between catalog chunks publishes outputs naming an input it has not
+// dropped yet; if its plan is then lost, that input is still to rewrite, and
+// counting it done would keep it live on the source forever. Its next plan's
+// commit drops the torn outputs (tornHashSplitOutputs).
 func (m *shardSplitManager) rewrittenSourceSegments(task *datapb.SplitShardTask) typeutil.Set[int64] {
 	out := typeutil.NewSet[int64]()
 	for _, target := range task.GetTargets() {
 		for _, segment := range m.meta.GetSegmentsByChannel(target.GetVchannel()) {
-			out.Insert(segment.GetCompactionFrom()...)
+			for _, parentID := range segment.GetCompactionFrom() {
+				if out.Contain(parentID) {
+					continue
+				}
+				if parent := m.meta.GetSegment(m.ctx, parentID); parent == nil || parent.GetState() == commonpb.SegmentState_Dropped {
+					out.Insert(parentID)
+				}
+			}
 		}
 	}
 	return out

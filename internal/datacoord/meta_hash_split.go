@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"cmp"
 	"context"
 	"slices"
 	"time"
@@ -170,14 +171,27 @@ func (m *meta) completeHashSplitCompactionMutation(
 			info.GetStorageVersion(), segmentMetricFormatLabel(info), info.GetNumOfRows())
 	}
 
-	// Outputs first, then the input, in one write: on the ordered fallback path
-	// an input is never retired before its outputs are published. A plan with no
-	// output at all -- every row of its input deleted or expired -- takes this
-	// same path and only drops its input: no output names it in its lineage, so
-	// its Dropped state is the only record that it is rewritten.
-	actions := make([]metastore.UpdateAction, 0, len(outputs)+len(inputs))
+	// An earlier plan of the same input may have left outputs behind: its
+	// commit took the ordered-chunk path, was torn after publishing them and
+	// before dropping the input, and the plan was then lost. The recovery view
+	// hides them while their input is live; this commit replaces them, so it
+	// drops them in the same write, and the input's rows are never on the
+	// targets twice.
+	orphans := m.tornHashSplitOutputs(targets, inputIDs, outputs, metricMutation)
+
+	// Outputs first, then the orphans, then the input, in one write: on the
+	// ordered fallback path an input is never retired before its outputs are
+	// published, and a commit torn again leaves the input live, which the view
+	// serves in place of every output naming it. A plan with no output at all
+	// -- every row of its input deleted or expired -- takes this same path and
+	// only drops its input: no output names it in its lineage, so its Dropped
+	// state is the only record that it is rewritten.
+	actions := make([]metastore.UpdateAction, 0, len(outputs)+len(orphans)+len(inputs))
 	for _, info := range outputs {
 		actions = append(actions, metastore.AddSegment(info.SegmentInfo))
+	}
+	for _, info := range orphans {
+		actions = append(actions, metastore.AlterSegment(info.SegmentInfo))
 	}
 	for _, info := range inputs {
 		// The legacy encoding, as mix retires its inputs (see
@@ -188,6 +202,9 @@ func (m *meta) completeHashSplitCompactionMutation(
 		mlog.Warn(m.ctx, "fail to publish the shard split rewrite outputs", mlog.Int64("planID", t.GetPlanID()), mlog.Err(err))
 		return nil, nil, err
 	}
+	lo.ForEach(orphans, func(info *SegmentInfo, _ int) {
+		m.segments.SetSegment(info.GetID(), info)
+	})
 	lo.ForEach(inputs, func(info *SegmentInfo, _ int) {
 		m.segments.SetSegment(info.GetID(), info)
 	})
@@ -198,8 +215,40 @@ func (m *meta) completeHashSplitCompactionMutation(
 	mlog.Info(m.ctx, "published the shard split rewrite outputs",
 		mlog.Int64("planID", t.GetPlanID()),
 		mlog.Int64s("sourceSegments", inputIDs),
-		mlog.Int64s("outputs", lo.Map(outputs, func(info *SegmentInfo, _ int) int64 { return info.GetID() })))
+		mlog.Int64s("outputs", lo.Map(outputs, func(info *SegmentInfo, _ int) int64 { return info.GetID() })),
+		mlog.Int64s("droppedTornOutputs", lo.Map(orphans, func(info *SegmentInfo, _ int) int64 { return info.GetID() })))
 	return outputs, metricMutation, nil
+}
+
+// tornHashSplitOutputs returns, cloned and marked Dropped, the healthy
+// segments on the plan's targets that name exactly these inputs in their
+// lineage and are not among this commit's own outputs: what a torn commit of an
+// earlier, lost plan of the same inputs published. Nothing else writes that
+// lineage: two plans of one input never run at once (the input is marked
+// compacting), and while the input is live a torn output is neither compacted
+// nor sorted on its target (sortsRewriteOutputsOnTarget).
+func (m *meta) tornHashSplitOutputs(
+	targets typeutil.Set[string],
+	inputIDs []int64,
+	outputs []*SegmentInfo,
+	metricMutation *segMetricMutation,
+) []*SegmentInfo {
+	own := typeutil.NewSet(lo.Map(outputs, func(info *SegmentInfo, _ int) int64 { return info.GetID() })...)
+	orphans := make([]*SegmentInfo, 0)
+	for _, channel := range targets.Collect() {
+		for _, segment := range m.segments.GetSegmentsBySelector(WithChannel(channel), SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return isSegmentHealthy(info) && !own.Contain(info.GetID()) &&
+				info.GetCreatedByCompaction() && slices.Equal(info.GetCompactionFrom(), inputIDs)
+		})) {
+			cloned := segment.Clone()
+			cloned.DroppedAt = uint64(time.Now().UnixNano())
+			cloned.Compacted = true
+			updateSegStateAndPrepareMetrics(cloned, commonpb.SegmentState_Dropped, metricMutation)
+			orphans = append(orphans, cloned)
+		}
+	}
+	slices.SortFunc(orphans, func(a, b *SegmentInfo) int { return cmp.Compare(a.GetID(), b.GetID()) })
+	return orphans
 }
 
 // isOwnHashSplitOutput reports whether a segment already in meta under an
