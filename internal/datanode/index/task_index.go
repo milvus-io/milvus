@@ -382,9 +382,6 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	var err error
 	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
-		if it.index != nil && it.index.CleanLocalData() != nil {
-			log.Warn(ctx, "failed to clean cached data on disk after build index failed")
-		}
 		log.Warn(ctx, "failed to build index", mlog.Err(err))
 		return err
 	}
