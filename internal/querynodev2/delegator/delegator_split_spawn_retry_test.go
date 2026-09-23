@@ -86,3 +86,29 @@ func TestSpawnDoesNotRaceWithSetChildSpawner(t *testing.T) {
 	require.Eventually(t, func() bool { return len(childVChannels(sd)) == 1 }, 3*time.Second, time.Millisecond)
 	assert.Equal(t, 4, first.attempts(), "the spawn switched spawners mid-flight")
 }
+
+// The spawn outlives the fence message (its context drops cancellation), so it
+// must end with the node: once the spawner's lifetime is over, a failing spawn
+// gives its slot up instead of retrying every thirty seconds until the process
+// exits.
+func TestFailedSpawnGivesUpWhenTheNodeStops(t *testing.T) {
+	backoff := mockey.Mock(splitChildSpawnBackoff).Return(time.Hour).Build()
+	defer backoff.UnPatch()
+	spawner := &fakeChildSpawner{err: errors.New("spawn boom"), done: make(chan struct{})}
+	sd := &shardDelegator{
+		vchannelName: "v0",
+		children:     make(map[string]ShardDelegator),
+		childSpawner: spawner,
+		lifetime:     lifetime.NewLifetime(lifetime.Working),
+	}
+	require.NoError(t, sd.ProcessSplitShard(context.Background(), newSplitTargets("v1")))
+	require.Eventually(t, func() bool { return spawner.attempts() == 1 }, time.Second, time.Millisecond)
+	close(spawner.done)
+
+	assert.Eventually(t, func() bool {
+		sd.childMut.Lock()
+		defer sd.childMut.Unlock()
+		return len(sd.spawning) == 0
+	}, 3*time.Second, 10*time.Millisecond, "the spawn kept retrying after the node stopped")
+	assert.Equal(t, 1, spawner.attempts())
+}

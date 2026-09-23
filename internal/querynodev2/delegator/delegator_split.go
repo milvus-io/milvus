@@ -67,6 +67,10 @@ type ChildSpawner interface {
 	// AbortSplitChild tears down a child that was spawned but must not be
 	// published, because the source was released while the spawn was in flight.
 	AbortSplitChild(ctx context.Context, child ShardDelegator, collectionID int64, vchannel string)
+	// Done is closed when the spawner stops (the querynode's lifetime). A spawn
+	// runs detached from the fence message's cancellation, so this is what ends
+	// its retries on node shutdown.
+	Done() <-chan struct{}
 }
 
 // Search serves a search on this delegator's logical shard. During a shard
@@ -1047,7 +1051,7 @@ func (sd *shardDelegator) spawnChildAsync(ctx context.Context, spawner ChildSpaw
 				return
 			}
 		}
-		if sd.abandonSpawn(ctx, vchannel) {
+		if sd.abandonSpawn(ctx, spawner, vchannel) {
 			return
 		}
 		// Every failure is retried, a refusal included: the spawner refuses a
@@ -1060,7 +1064,7 @@ func (sd *shardDelegator) spawnChildAsync(ctx context.Context, spawner ChildSpaw
 		log.Warn(ctx, "failed to spawn split child delegator, reads through this delegator are refused until a retry succeeds",
 			mlog.String("targetVChannel", vchannel), mlog.Int("attempt", attempt+1),
 			mlog.Duration("retryIn", backoff), mlog.Err(err))
-		if sd.waitSpawnBackoff(ctx, vchannel, backoff) {
+		if sd.waitSpawnBackoff(ctx, spawner, vchannel, backoff) {
 			return
 		}
 	}
@@ -1074,11 +1078,11 @@ const spawnBackoffPoll = 50 * time.Millisecond
 // (see abandonSpawn) as soon as the source is being released or the delegator
 // has stopped, rather than sleeping through a backoff of up to thirty seconds
 // first. It reports whether the spawn was given up.
-func (sd *shardDelegator) waitSpawnBackoff(ctx context.Context, vchannel string, backoff time.Duration) bool {
+func (sd *shardDelegator) waitSpawnBackoff(ctx context.Context, spawner ChildSpawner, vchannel string, backoff time.Duration) bool {
 	deadline := time.Now().Add(backoff)
 	for remaining := backoff; remaining > 0; remaining = time.Until(deadline) {
 		time.Sleep(min(remaining, spawnBackoffPoll))
-		if sd.abandonSpawn(ctx, vchannel) {
+		if sd.abandonSpawn(ctx, spawner, vchannel) {
 			return true
 		}
 	}
@@ -1086,9 +1090,10 @@ func (sd *shardDelegator) waitSpawnBackoff(ctx context.Context, vchannel string,
 }
 
 // abandonSpawn gives up a failed spawn, clearing its pending slot, once the
-// source is being released or the delegator has stopped.
-func (sd *shardDelegator) abandonSpawn(ctx context.Context, vchannel string) bool {
-	if !sd.releasing.Load() && !sd.Stopped() {
+// source is being released, the delegator has stopped, or the spawner (the
+// querynode) has stopped.
+func (sd *shardDelegator) abandonSpawn(ctx context.Context, spawner ChildSpawner, vchannel string) bool {
+	if !sd.releasing.Load() && !sd.Stopped() && !spawnerDone(spawner) {
 		return false
 	}
 	sd.childMut.Lock()
@@ -1097,6 +1102,16 @@ func (sd *shardDelegator) abandonSpawn(ctx context.Context, vchannel string) boo
 	sd.getLogger(ctx).Info(ctx, "gave up spawning a split child, its source is released or stopped",
 		mlog.String("targetVChannel", vchannel))
 	return true
+}
+
+// spawnerDone reports whether the spawner has stopped.
+func spawnerDone(spawner ChildSpawner) bool {
+	select {
+	case <-spawner.Done():
+		return true
+	default:
+		return false
+	}
 }
 
 // publishSpawnedChild clears the pending slot and adds the spawned child to the
