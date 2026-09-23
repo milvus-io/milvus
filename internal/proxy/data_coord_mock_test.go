@@ -223,6 +223,14 @@ func (coord *DataCoordMock) WatchChannels(ctx context.Context, req *datapb.Watch
 	return &datapb.WatchChannelsResponse{}, nil
 }
 
+func (coord *DataCoordMock) CommitShardSplit(ctx context.Context, req *datapb.CommitShardSplitRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return merr.Success(), nil
+}
+
+func (coord *DataCoordMock) CheckShardSplitDrained(ctx context.Context, req *datapb.CheckShardSplitDrainedRequest, opts ...grpc.CallOption) (*datapb.CheckShardSplitDrainedResponse, error) {
+	return &datapb.CheckShardSplitDrainedResponse{Status: merr.Success()}, nil
+}
+
 func (coord *DataCoordMock) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest, opts ...grpc.CallOption) (*milvuspb.GetFlushStateResponse, error) {
 	return &milvuspb.GetFlushStateResponse{}, nil
 }

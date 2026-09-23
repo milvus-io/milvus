@@ -32,6 +32,11 @@ var (
 	RegisterDropLoadConfigV2AckCallback     = registerMessageAckCallback[*message.DropLoadConfigMessageHeader, *message.DropLoadConfigMessageBody]
 	RegisterAlterRLSMetadataV2AckCallback   = registerMessageAckCallback[*message.AlterRLSMetadataMessageHeader, *message.AlterRLSMetadataMessageBody]
 	RegisterDropRLSMetadataV2AckCallback    = registerMessageAckCallback[*message.DropRLSMetadataMessageHeader, *message.DropRLSMetadataMessageBody]
+	// SplitShard is the one WAL record of a shard split's write switch. Its ack
+	// callback fires only once every replica -- the sources' fences and the
+	// targets' genesis -- has landed, which is precisely when the routing
+	// post-image it carries becomes safe to commit.
+	RegisterSplitShardV2AckCallback = registerMessageAckCallback[*message.SplitShardMessageHeader, *message.SplitShardMessageBody]
 
 	// Partition
 	RegisterCreatePartitionV1AckCallback = registerMessageAckCallback[*message.CreatePartitionMessageHeader, *message.CreatePartitionRequest]
@@ -104,6 +109,7 @@ func resetMessageAckCallbacks() {
 		message.MessageTypeDropLoadConfigV2:     syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeAlterRLSMetadataV2:   syncutil.NewFuture[messageInnerAckCallback](),
 		message.MessageTypeDropRLSMetadataV2:    syncutil.NewFuture[messageInnerAckCallback](),
+		message.MessageTypeSplitShardV2:         syncutil.NewFuture[messageInnerAckCallback](),
 
 		// Partition
 		message.MessageTypeCreatePartitionV1: syncutil.NewFuture[messageInnerAckCallback](),
