@@ -18,7 +18,10 @@ package querynodev2
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -300,4 +303,45 @@ func (suite *ServiceSuite) TestWatchRefusesReadsUntilItsSplitRecoveryDescribes()
 	suite.True(pendingRefusal(), "a read was not refused while the split recovery had not described the collection")
 	close(release)
 	suite.Eventually(func() bool { return !pendingRefusal() }, 5*time.Second, 10*time.Millisecond)
+}
+
+// Every channel watch runs a split recovery, and each needs the collection's
+// shard states. A restart re-watches every channel at once, so the recoveries
+// of one collection share one DescribeCollection instead of each firing its
+// own at rootcoord.
+func TestConcurrentSplitRecoveriesOfOneCollectionShareOneDescribe(t *testing.T) {
+	const watches = 8
+	release := make(chan struct{})
+	var calls atomic.Int32
+	mc := mocks.NewMockMixCoordClient(t)
+	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(
+		func(context.Context, *milvuspb.DescribeCollectionRequest, ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
+			calls.Add(1)
+			<-release
+			names := make([]string, watches)
+			for i := range names {
+				names[i] = fmt.Sprintf("v%d", i)
+			}
+			return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), VirtualChannelNames: names}, nil
+		})
+	future := syncutil.NewFuture[types.MixCoordClient]()
+	future.Set(mc)
+	node := &QueryNode{ctx: context.Background(), mixCoord: future}
+
+	var wg sync.WaitGroup
+	for i := 0; i < watches; i++ {
+		source := delegator.NewMockShardDelegator(t)
+		source.EXPECT().FinishSplitRecovery().Return().Once()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, fmt.Sprintf("v%d", i))
+		}()
+	}
+	require.Eventually(t, func() bool { return calls.Load() >= 1 }, 5*time.Second, time.Millisecond)
+	// let every other recovery reach the describe before the first one returns.
+	time.Sleep(200 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	assert.EqualValues(t, 1, calls.Load(), "each recovery described the collection on its own")
 }
