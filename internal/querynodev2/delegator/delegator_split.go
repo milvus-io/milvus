@@ -1001,7 +1001,7 @@ func (sd *shardDelegator) ProcessSplitShard(ctx context.Context, targets []strin
 		// trace context should still follow it. Not the request ctx itself,
 		// deliberately.
 		ctx := context.WithoutCancel(ctx)
-		go sd.spawnChildAsync(ctx, target) //nolint:gosec // G118: the spawn must outlive the request that carried the fence; canceling it with the request would leave the target unfronted. Values (trace) are kept, only cancellation is dropped.
+		go sd.spawnChildAsync(ctx, sd.childSpawner, target) //nolint:gosec // G118: the spawn must outlive the request that carried the fence; canceling it with the request would leave the target unfronted. Values (trace) are kept, only cancellation is dropped.
 	}
 	return nil
 }
@@ -1015,7 +1015,9 @@ func splitChildSpawnBackoff(attempt int) time.Duration {
 // spawnChildAsync runs one child spawn off the flow-graph goroutine. The spawner
 // itself drives its blocking recovery-info wait off the node lifetime context,
 // so node shutdown unblocks it. On success the child is published into the
-// fronting set.
+// fronting set. spawner is the one ProcessSplitShard read under childMut; the
+// spawn never reads sd.childSpawner itself, which SetChildSpawner writes under
+// that lock.
 //
 // A failed spawn is retried with backoff, and its target stays pending
 // meanwhile. Clearing the slot instead would leave reads through this delegator
@@ -1027,10 +1029,10 @@ func splitChildSpawnBackoff(attempt int) time.Duration {
 // coordinator hiccup, recovery info not yet visible) heal. Retrying stops, and
 // the slot is cleared, only once the source is being released or the delegator
 // has stopped, when no read comes through it any more.
-func (sd *shardDelegator) spawnChildAsync(ctx context.Context, vchannel string) {
+func (sd *shardDelegator) spawnChildAsync(ctx context.Context, spawner ChildSpawner, vchannel string) {
 	log := sd.getLogger(ctx)
 	for attempt := 0; ; attempt++ {
-		child, err := sd.childSpawner.SpawnSplitChild(ctx, SpawnChildParams{
+		child, err := spawner.SpawnSplitChild(ctx, SpawnChildParams{
 			CollectionID:   sd.collectionID,
 			ReplicaID:      sd.replicaID,
 			Version:        sd.version,
@@ -1039,7 +1041,7 @@ func (sd *shardDelegator) spawnChildAsync(ctx context.Context, vchannel string) 
 			Parent:         sd,
 		})
 		if err == nil {
-			if err = sd.publishSpawnedChild(ctx, vchannel, child); err == nil {
+			if err = sd.publishSpawnedChild(ctx, spawner, vchannel, child); err == nil {
 				return
 			}
 		}
@@ -1107,7 +1109,7 @@ func (sd *shardDelegator) abandonSpawn(ctx context.Context, vchannel string) boo
 //
 // A child of this source is aborted instead if the source was released or has
 // stopped while it spawned.
-func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel string, child ShardDelegator) error {
+func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, spawner ChildSpawner, vchannel string, child ShardDelegator) error {
 	if child.FrontingParent() != ShardDelegator(sd) {
 		return merr.WrapErrServiceUnavailable("spawned split target delegator is not fronted by this source",
 			fmt.Sprintf("source %s, target %s", sd.vchannelName, vchannel))
@@ -1121,7 +1123,7 @@ func (sd *shardDelegator) publishSpawnedChild(ctx context.Context, vchannel stri
 		// snapshot is taken under childMut, so it could not have seen this
 		// not-yet-published child — hence we, not it, must tear the child down.
 		sd.childMut.Unlock()
-		sd.childSpawner.AbortSplitChild(ctx, child, sd.collectionID, vchannel)
+		spawner.AbortSplitChild(ctx, child, sd.collectionID, vchannel)
 		sd.getLogger(ctx).Info(ctx, "aborted a split child spawned after source release or stop",
 			mlog.String("targetVChannel", vchannel))
 		return nil
