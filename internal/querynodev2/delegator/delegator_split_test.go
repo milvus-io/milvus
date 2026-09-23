@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 )
 
 // fakeChildSpawner records every target it was asked to spawn and returns a
@@ -185,25 +186,73 @@ func TestSourceServesAtMinChildTSafe(t *testing.T) {
 			distribution:               NewDistribution("child", qv),
 		}
 	}
-	// the source's own tsafe (50) is not what bounds the merged shard after the
-	// fence; the two children happen to be ahead of it here.
 	source := &shardDelegator{
 		vchannelName: "v0",
-		latestTsafe:  atomic.NewUint64(50),
+		latestTsafe:  atomic.NewUint64(150),
 		children: map[string]ShardDelegator{
 			"v1": child(100),
 			"v2": child(200),
 		},
 	}
 
-	// the serviceable timestamp is min(child tsafes), not the source's own 50.
+	// the serviceable timestamp is the min over the family: here a child's 100.
 	assert.Equal(t, uint64(100), source.GetTSafe())
 
-	// waiting for a guarantee below both children returns the same min, never
-	// waiting on the source's own tsafe.
+	// waiting for a guarantee below everyone returns the same min.
 	got, err := source.waitTSafe(context.Background(), 40)
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(100), got)
+}
+
+// The source's own tsafe is part of the family's serviceable timestamp. After
+// the fence the source takes no new DML, but its delete node can still be
+// behind the filter node that consumed the fence, and a bulk delete replay in
+// loadStreamDelete stalls it; until its own tsafe passes t, deletes <= t may
+// not be applied to what it serves. Answering at the children's tsafe alone
+// would return those rows.
+func TestSourceWaitsForItsOwnTSafeAsWellAsItsChildren(t *testing.T) {
+	child := func(tsafe uint64) *shardDelegator {
+		return &shardDelegator{
+			vchannelName:               "child",
+			latestTsafe:                atomic.NewUint64(tsafe),
+			latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+			distribution:               NewDistribution("child", NewChannelQueryView(nil, nil, nil, InitialTargetVersion)),
+		}
+	}
+	source := &shardDelegator{
+		vchannelName:               "v0",
+		latestTsafe:                atomic.NewUint64(50),
+		latestRequiredMVCCTimeTick: atomic.NewUint64(0),
+		tsCond:                     syncutil.NewContextCond(&sync.Mutex{}),
+		lifetime:                   lifetime.NewLifetime(lifetime.Working),
+		catchingUpStreamingData:    atomic.NewBool(false),
+		children: map[string]ShardDelegator{
+			"v1": child(100),
+			"v2": child(200),
+		},
+	}
+
+	// the source's own 50 is behind both children: it bounds the family.
+	assert.Equal(t, uint64(50), source.GetTSafe())
+
+	done := make(chan uint64, 1)
+	go func() {
+		got, err := source.waitTSafe(context.Background(), 80)
+		assert.NoError(t, err)
+		done <- got
+	}()
+	select {
+	case got := <-done:
+		t.Fatalf("served at %d before the source's own tsafe reached the guarantee", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+	source.UpdateTSafe(90)
+	select {
+	case got := <-done:
+		assert.Equal(t, uint64(90), got, "served at min(own, children)")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read never woke up once the source's own tsafe passed the guarantee")
+	}
 }
 
 // A delegator built with WithChildSpawner fronts its own split with that
