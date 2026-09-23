@@ -16,7 +16,7 @@ ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 # Upgrade openssl to fix CVE-2026-45447 (base image is a pinned/legacy ubuntu20.04 build)
 RUN apt-get update && \
-    apt-get upgrade -y openssl libssl1.1 && \
+    apt-get upgrade -y openssl libssl1.1 curl libcurl4 tar zlib1g libc6 libc-bin && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r milvus && useradd -r -g milvus milvus && \
