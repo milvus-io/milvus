@@ -55,7 +55,8 @@ var messageTypePropertiesMap = map[MessageType]MessageTypeProperties{
 	MessageTypeDropPartition: {
 		ExclusiveRequired: true,
 	},
-	MessageTypeImport: {},
+	MessageTypeImport:       {},
+	MessageTypeUpdateImport: {},
 	MessageTypeCommitImport: {
 		ExclusiveRequired: true,
 	},

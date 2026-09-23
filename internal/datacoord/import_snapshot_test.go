@@ -1743,9 +1743,12 @@ func TestSnapshotImportWALReference(t *testing.T) {
 	require.Equal(t, decoded.MustBody().Options, replica.MustBody().Options)
 	require.True(t, proto.Equal(files[0], importFilesFromMessage(replica.MustBody().Files, funcutil.Map2KeyValuePair(replica.MustBody().Options))[0]))
 
-	reserved := &commonpb.IDRange{Begin: 10, End: 20}
-	ordinary := importFilesFromMessage([]*msgpb.ImportFile{{Id: 1, Paths: []string{"legacy"}, PreAllocatedAutoIds: reserved}}, nil)
-	require.Equal(t, []*internalpb.ImportFile{{Id: 1, Paths: []string{"legacy"}, PreAllocatedAutoIds: reserved}}, ordinary)
+	// The two-phase flow carries no ID range on ImportMsg: a wire value is ignored.
+	ordinary := importFilesFromMessage([]*msgpb.ImportFile{{
+		Id: 1, Paths: []string{"legacy"},
+		PreAllocatedAutoIds: &commonpb.IDRange{Begin: 10, End: 20},
+	}}, nil)
+	require.Equal(t, []*internalpb.ImportFile{{Id: 1, Paths: []string{"legacy"}}}, ordinary)
 }
 
 func TestSnapshotImportMessageAdmission(t *testing.T) {

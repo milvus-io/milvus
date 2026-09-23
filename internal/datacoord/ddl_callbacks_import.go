@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -26,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
@@ -39,7 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
 const (
@@ -67,12 +69,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 // options. Reconstruct only the Pending marker, without source I/O or a second
 // positional array. ACK validates the complete reference before persisting it.
 func importFilesFromMessage(msgFiles []*msgpb.ImportFile, options importutilv2.Options) []*internalpb.ImportFile {
+	// The two-phase flow carries no ID range on ImportMsg: every per-file range
+	// arrives later in the UpdateImport broadcast. A range on the wire is ignored.
 	files := lo.Map(msgFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-		// Preserve the 3.0 broadcast-time reservation for ordinary autoID
-		// imports. Backup imports, including snapshots, carry no reservation.
 		return &internalpb.ImportFile{
 			Id: file.GetId(), Paths: file.GetPaths(),
-			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
 		}
 	})
 	if importutilv2.IsSnapshotSource(options) && len(files) == 1 && len(files[0].GetPaths()) == 0 {
@@ -178,25 +179,36 @@ func isReplicatingCluster(cfg *commonpb.ReplicateConfiguration) bool {
 	return cfg != nil && (len(cfg.GetCrossClusterTopology()) > 0 || len(cfg.GetClusters()) > 1)
 }
 
-// isReplicatingClusterNow reports whether this cluster is currently part of a CDC
-// replication topology. A non-nil error means the status could not be determined (e.g. a
-// transient balancer error, or OnShutdownError while streamingcoord is stopping before
-// datacoord); the caller must treat that as indeterminate rather than "not replicating",
-// because at GC time a false "not replicating" would irreversibly drop a replicating job
-// without releasing the peer. A nil assignment is an unambiguous "not replicating".
-func (s *Server) isReplicatingClusterNow(ctx context.Context) (bool, error) {
+// getReplicationRole reports this cluster's live replication role (primary/secondary) and
+// whether it is part of a CDC replication topology at all. It is modeled on
+// isReplicatingClusterNow and reads the same balancer channel assignment. A non-nil
+// error means the role could not be determined (a transient balancer error, or
+// OnShutdownError while streamingcoord stops before datacoord); the caller must treat
+// that as indeterminate and NOT allocate, because a secondary that allocated its own
+// range would diverge from the primary's authoritative range. A nil assignment or a
+// non-replicating configuration is an unambiguous "not replicating" → (RolePrimary,
+// false, nil), so a standalone cluster proceeds to allocate and broadcast.
+func (s *Server) getReplicationRole(ctx context.Context) (replicateutil.Role, bool, error) {
 	balancer, err := balance.GetWithContext(ctx)
 	if err != nil {
-		return false, err
+		return replicateutil.RolePrimary, false, err
 	}
 	assignment, err := balancer.GetLatestChannelAssignment()
 	if err != nil {
-		return false, err
+		return replicateutil.RolePrimary, false, err
 	}
 	if assignment == nil {
-		return false, nil
+		return replicateutil.RolePrimary, false, nil
 	}
-	return isReplicatingCluster(assignment.ReplicateConfiguration), nil
+	cfg := assignment.ReplicateConfiguration
+	if !isReplicatingCluster(cfg) {
+		return replicateutil.RolePrimary, false, nil
+	}
+	helper, err := replicateutil.NewConfigHelper(Params.CommonCfg.ClusterPrefix.GetValue(), cfg)
+	if err != nil {
+		return replicateutil.RolePrimary, true, err
+	}
+	return helper.GetCurrentCluster().Role(), true, nil
 }
 
 // jobIDFromDuplicatedBroadcast recovers the original import jobID from the broadcast
@@ -259,8 +271,10 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
-	// Size autoID files from a canonical schema snapshot before taking the
-	// collection lock: sizing may perform object-store I/O for every file.
+	// Read the collection metadata before taking the collection lock: its names are
+	// the broadcast's resource keys. Per-file ID ranges are NOT allocated here -- the
+	// two-phase flow allocates exact ranges after preimport and broadcasts them via
+	// the UpdateImport WAL message.
 	preparedColl, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err := merr.CheckRPCCall(preparedColl, err); err != nil {
 		return 0, false, merr.Wrap(err, "failed to get collection metadata before import preparation")
@@ -268,20 +282,6 @@ func (s *Server) broadcastImport(ctx context.Context,
 	preparedSchema := preparedColl.GetSchema()
 	if preparedSchema == nil || preparedSchema.GetName() == "" {
 		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
-	}
-	if pkField, pkErr := typeutil.GetPrimaryFieldSchema(preparedSchema); pkErr == nil &&
-		pkField.GetAutoID() && !importutilv2.IsBackup(options) && !importutilv2.IsL0Import(options) {
-		if err := assignPKRangesToFiles(ctx, s.meta.chunkManager, preparedSchema, files,
-			s.allocator.AllocN,
-			Params.CommonCfg.ClusterID.GetAsUint64(),
-		); err != nil {
-			return 0, false, merr.Wrap(err, "failed to assign per-file PK ranges")
-		}
-		// msgFiles is a 1:1 lo.Map of files; bound the walk by both lengths so the
-		// pairing stays provable rather than assumed.
-		for i := 0; i < len(files) && i < len(msgFiles); i++ {
-			msgFiles[i].PreAllocatedAutoIds = files[i].GetPreAllocatedAutoIds()
-		}
 	}
 
 	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx,
@@ -295,9 +295,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	// Re-check the replication state now that the broadcast holds the shared-cluster
 	// resource key. AlterReplicateConfig takes the exclusive-cluster key, so it cannot
 	// change the replication topology while this lock is held. The pre-lock check in
-	// validateImportRequest can go stale before the lock is acquired: if CDC was enabled
-	// in that window, an auto_commit / non-enableInReplicatingCluster import would
-	// otherwise be broadcast into a replicating topology and diverge.
+	// validateImportRequest can go stale before the lock is acquired: if CDC was
+	// enabled in that window, an auto_commit / non-enableInReplicatingCluster import
+	// would otherwise be broadcast into a replicating topology and diverge.
 	if err := s.validateImportReplication(ctx, options); err != nil {
 		return 0, false, merr.Wrap(err, "failed to re-validate import replication under broadcast lock")
 	}
@@ -313,8 +313,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if schema == nil || schema.GetName() == "" {
 		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
 	}
-	// The collection changed during the lock-free sizing window. Fail retriably
-	// instead of publishing ranges computed from a different schema snapshot.
+	// The collection changed between the metadata read above and the lock. Fail
+	// retriably instead of publishing a request prepared from a different snapshot.
 	if preparedColl.GetDbName() != coll.GetDbName() ||
 		preparedColl.GetCollectionName() != coll.GetCollectionName() ||
 		!proto.Equal(preparedSchema, schema) {
@@ -337,11 +337,11 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// Snapshot preparation is pinned by body options. Empty legacy paths make
 	// old coordinators reject it instead of treating metadata as row data.
+	// The two-phase flow carries no ID range on ImportMsg; UpdateImport ships it.
 	msgFiles = lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
-			Id:                  file.GetId(),
-			Paths:               file.GetPaths(),
-			PreAllocatedAutoIds: file.GetPreAllocatedAutoIds(),
+			Id:    file.GetId(),
+			Paths: file.GetPaths(),
 		}
 	})
 	msgOptions := funcutil.KeyValuePair2Map(options)
@@ -353,6 +353,10 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if skipRLS {
 		msgOptions[importutilv2.SkipRLS] = "true"
 	}
+	// The control channel is added on top of the data vchannels for ordering only: the
+	// flusher drops the control-channel copy, while the ack-callback scheduler uses it as
+	// the task's ordering anchor (ControlChannelTimeTick).
+	channels := append(vchannels, streaming.WAL().ControlChannel())
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -379,7 +383,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 		// importing twice. The broadcaster adds the message type; everything else about
 		// the dedup identity is this scope.
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
-		WithBroadcast(vchannels).
+		WithBroadcast(channels).
 		MustBuildBroadcast()
 	if importutilv2.IsSnapshotSource(options) {
 		if err := validateSnapshotImportMessageSize(msg); err != nil {
@@ -433,6 +437,7 @@ func (c *DDLCallbacks) registerImportCallbacks() {
 	registry.RegisterImportV1AckCallback(c.importV1AckCallback)
 	registry.RegisterCommitImportV2AckCallback(c.commitImportV2AckCallback)
 	registry.RegisterRollbackImportV2AckCallback(c.rollbackImportV2AckCallback)
+	registry.RegisterUpdateImportV2AckCallback(c.updateImportAckCallback)
 }
 
 // commitImportV2AckCallback handles the ack callback for CommitImport WAL message.
@@ -514,4 +519,134 @@ func (c *DDLCallbacks) rollbackImportV2AckCallback(ctx context.Context, result m
 		UpdateJobState(internalpb.ImportJobState_Failed),
 		UpdateJobReason(importJobReasonAbortedByUser),
 	)
+}
+
+// updateImportAckCallback handles the ack callback for the UpdateImport WAL message.
+// It runs on BOTH clusters (primary: from its own broadcast; secondary: from the
+// REPLICATED broadcast task rebuilt by the secondary's broadcast manager) and applies
+// the primary-allocated per-file ID ranges to the local import job meta, so every
+// cluster derives identical autoID primary keys (and RowIDs). Concurrency safety is
+// guaranteed by the broadcaster framework's resource-key lock (exclusive collection-level
+// lock), so no CAS is needed here.
+func (c *DDLCallbacks) updateImportAckCallback(ctx context.Context, result message.BroadcastResultUpdateImportMessageV2) error {
+	header := result.Message.Header()
+	jobID := header.GetJobId()
+	body := result.Message.MustBody()
+
+	job := c.importMeta.GetJob(ctx, jobID)
+	if job == nil {
+		// No local job, and none will appear: the ImportMsg broadcast precedes UpdateImport
+		// on every channel (on the primary ImportV2 does not even return until the
+		// job-creating callback finishes), so a missing job is unrecoverable. It means this
+		// cluster never created the job:
+		//   - a secondary that joined the topology mid-import never received the ImportMsg;
+		//   - the ImportMsg callback skipped job creation because the collection was dropped
+		//     (itself a replicated DDL, so the peer fails its job independently).
+		// A retry cannot create the job, so give up immediately (no-op success) rather than
+		// pin the collection's exclusive resource-key lock; the import is simply invisible on
+		// this cluster.
+		mlog.Warn(ctx, "UpdateImport ack found no local job; the import is not visible on this cluster",
+			mlog.FieldJobID(jobID))
+		return nil
+	}
+
+	// The gate holds a ranged import in PreImporting/AssigningIDRange until the ranges
+	// are applied, so an in-flight job can only be Pending, PreImporting or
+	// AssigningIDRange when this lands. A job further along already advanced, failed or
+	// committed: no-op success, except for Uncommitted below, which still holds no Import
+	// task and where a ranged job without ranges is a divergence rather than a race.
+	switch job.GetState() {
+	case internalpb.ImportJobState_Failed, internalpb.ImportJobState_Completed,
+		internalpb.ImportJobState_Committing:
+		mlog.Info(ctx, "UpdateImport: job already past the range gate, no-op",
+			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
+		return nil
+	case internalpb.ImportJobState_Uncommitted:
+		// Uncommitted is the zero-rows exit for a 2PC import: it holds no Import task yet,
+		// so failing it still prevents the commit. A ranged job that reached it without
+		// ranges counted zero rows locally while the peer ranged rows for the same files,
+		// i.e. the two clusters disagree about the file content. Fail loudly instead of
+		// no-op'ing and letting the commit land an empty import against the peer's rows.
+		if needsIDRanges(job) && !jobIDRangesSet(job) {
+			var peerRows int64
+			for _, r := range body.GetIdRanges() {
+				peerRows += r.GetEnd() - r.GetBegin()
+			}
+			reason := fmt.Sprintf("UpdateImport carries %d rows but no ID range was assigned locally (cross-cluster file divergence)", peerRows)
+			mlog.Warn(ctx, "UpdateImport arrived for a job without ID ranges; failing import",
+				mlog.FieldJobID(jobID), mlog.Int64("peerRows", peerRows))
+			return c.importMeta.UpdateJob(ctx, jobID,
+				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
+		}
+		mlog.Info(ctx, "UpdateImport: job already past the range gate, no-op",
+			mlog.FieldJobID(jobID), mlog.String("state", job.GetState().String()))
+		return nil
+	}
+
+	// Protocol invariant: exactly one range per job file, keyed by the file's zero-based
+	// position. A violation means the two clusters disagree on the job's shape — fail loudly
+	// rather than apply a partial or misaligned range. The range sizes are not re-checked
+	// here: each cluster settles its own local row count against them at the range gate.
+	//
+	// A map cannot carry a duplicate key, and a decoded map value is never nil (an absent
+	// key is what a missing range looks like after the WAL round-trip), so len(idRanges) ==
+	// len(files) plus every key in range means the keys are exactly 0..len-1: every file gets
+	// a range, and a value that is empty is a legal zero-width range the gate rejects if the
+	// file has rows.
+	idRanges := body.GetIdRanges()
+	files := job.GetFiles()
+	if len(idRanges) != len(files) {
+		reason := fmt.Sprintf("UpdateImport carries %d file ranges but the job has %d files", len(idRanges), len(files))
+		mlog.Warn(ctx, "UpdateImport file count does not match the job; failing import",
+			mlog.FieldJobID(jobID), mlog.Int("fileRanges", len(idRanges)), mlog.Int("jobFiles", len(files)))
+		return c.importMeta.UpdateJob(ctx, jobID,
+			UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
+	}
+	for idx := range idRanges {
+		if idx < 0 || idx >= int64(len(files)) {
+			reason := fmt.Sprintf("UpdateImport file index %d out of range [0,%d)", idx, len(files))
+			mlog.Warn(ctx, "UpdateImport file index out of range; failing import",
+				mlog.FieldJobID(jobID), mlog.Int64("index", idx), mlog.Int("jobFiles", len(files)))
+			return c.importMeta.UpdateJob(ctx, jobID,
+				UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(reason))
+		}
+	}
+
+	// Idempotency / first-range-wins. If every file already carries a range,
+	// compare per file. An equal range is an at-least-once redelivery — a clean
+	// no-op. A different range is possible by design: a checker retry whose previous
+	// broadcast's ctx deadline expired (while that task ultimately succeeded)
+	// allocates a fresh range and broadcasts a second message. Authority comes from
+	// the persisted WAL message and the first applied range wins on every cluster
+	// (control-channel order, BroadcastID tie-break), so keep the existing range and
+	// ignore the later one. This is a benign retry, not cluster divergence.
+	if jobIDRangesSet(job) {
+		for idx, applied := range idRanges {
+			existing := files[idx].GetIdRange()
+			if existing.GetBegin() != applied.GetBegin() || existing.GetEnd() != applied.GetEnd() {
+				mlog.Warn(ctx, "UpdateImport conflicts with an already-applied range; ignoring it, first applied range wins",
+					mlog.FieldJobID(jobID), mlog.Int64("index", idx),
+					mlog.Int64("existingBegin", existing.GetBegin()), mlog.Int64("existingEnd", existing.GetEnd()),
+					mlog.Int64("incomingBegin", applied.GetBegin()), mlog.Int64("incomingEnd", applied.GetEnd()))
+				return nil
+			}
+		}
+		mlog.Info(ctx, "UpdateImport already applied, no-op (at-least-once redelivery)", mlog.FieldJobID(jobID))
+		return nil
+	}
+
+	// Apply: index each range by file position.
+	ranges := make([]*commonpb.IDRange, len(files))
+	var totalReserved int64
+	for idx, r := range idRanges {
+		ranges[idx] = r
+		totalReserved += r.GetEnd() - r.GetBegin()
+	}
+	if err := c.importMeta.UpdateJob(ctx, jobID, UpdateJobIDRanges(ranges)); err != nil {
+		// Transient persistence failure → return the error so the scheduler retries.
+		return err
+	}
+	mlog.Info(ctx, "UpdateImport applied to import job",
+		mlog.FieldJobID(jobID), mlog.Int("fileCount", len(ranges)), mlog.Int64("totalReservedIDs", totalReserved))
+	return nil
 }
