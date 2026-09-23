@@ -317,7 +317,15 @@ func (mgr *TargetManager) readShardStates(ctx context.Context, collectionID int6
 	return states, nil
 }
 
-func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
+// MergeDmChannelInfo merges the recovery infos DataCoord reported for one
+// channel: the earliest seek position wins, and the segment lists are joined.
+//
+// The split signal (split_target_channels) travels with the seek. A channel any
+// info reports as an unfinished split source stays one: the signal is the union
+// over the infos, so a seek taken from an info that carried the signal -- a
+// seek past the split's fence -- is never paired with an empty signal, which
+// would keep the QueryNode from recovering the split's children.
+func MergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 	var dmChannel *DmChannel
 
 	for _, info := range infos {
@@ -332,6 +340,11 @@ func mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
 		dmChannel.DroppedSegmentIds = append(dmChannel.DroppedSegmentIds, info.DroppedSegmentIds...)
 		dmChannel.UnflushedSegmentIds = append(dmChannel.UnflushedSegmentIds, info.UnflushedSegmentIds...)
 		dmChannel.FlushedSegmentIds = append(dmChannel.FlushedSegmentIds, info.FlushedSegmentIds...)
+		for _, target := range info.GetSplitTargetChannels() {
+			if !lo.Contains(dmChannel.SplitTargetChannels, target) {
+				dmChannel.SplitTargetChannels = append(dmChannel.SplitTargetChannels, target)
+			}
+		}
 	}
 
 	return dmChannel
