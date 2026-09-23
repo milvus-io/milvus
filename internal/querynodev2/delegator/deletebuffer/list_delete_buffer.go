@@ -132,13 +132,23 @@ func (b *listDeleteBuffer[T]) updateMetrics() {
 	metrics.QueryNodeDeleteBufferSize.WithLabelValues(b.labels...).Set(float64(b.size))
 }
 
+// Put adds entry to the buffer, keeping the whole list sorted by timestamp.
+//
+// Entries normally arrive in timestamp order (one WAL feeds one delegator), and
+// then Put appends. A shard split source also receives the deletes its children
+// forward, each child from its own WAL, so an entry can be older than the
+// newest one buffered. It is then inserted into the block its timestamp falls
+// in: ListAfter binary-searches every block, the load-time catch-up takes the
+// last entry as the newest, and tryCleanDelete drops whole blocks by their
+// head timestamp, and all three need the order.
 func (b *listDeleteBuffer[T]) Put(entry T) {
 	b.mut.Lock()
 	defer b.mut.Unlock()
 
 	tail := b.list[len(b.list)-1]
-	err := tail.Put(entry)
-	if errors.Is(err, errBufferFull) {
+	if last, ok := tail.lastTs(); ok && entry.Timestamp() < last {
+		b.blockFor(entry.Timestamp()).insertSorted(entry)
+	} else if err := tail.Put(entry); errors.Is(err, errBufferFull) {
 		b.list = append(b.list, newCacheBlock(entry.Timestamp(), b.sizePerBlock, entry))
 	}
 
@@ -146,6 +156,18 @@ func (b *listDeleteBuffer[T]) Put(entry T) {
 	b.rowNum += entry.EntryNum()
 	b.size += entry.Size()
 	b.updateMetrics()
+}
+
+// blockFor returns the block an out-of-order entry with timestamp ts belongs
+// to: the last block whose head is not newer than ts, or the first block when
+// every head is (the entry then becomes the first block's new head).
+func (b *listDeleteBuffer[T]) blockFor(ts uint64) *cacheBlock[T] {
+	for idx := len(b.list) - 1; idx > 0; idx-- {
+		if b.list[idx].headTs <= ts {
+			return b.list[idx]
+		}
+	}
+	return b.list[0]
 }
 
 func (b *listDeleteBuffer[T]) ListAfter(ts uint64) []T {
