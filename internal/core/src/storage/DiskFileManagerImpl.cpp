@@ -656,7 +656,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_internal(const Config& config) {
         config, INSERT_FILES_KEY);
     AssertInfo(insert_files.has_value(),
                "insert file paths is empty when build index");
-    auto remote_files = insert_files.value();
+    auto& remote_files = insert_files.value();
     SortByPath(remote_files);
 
     auto local_chunk_manager =
@@ -934,7 +934,7 @@ DiskFileManagerImpl::cache_raw_data_to_disk_storage_v2(const Config& config) {
             config, SEGMENT_INSERT_FILES_KEY);
     AssertInfo(segment_insert_files.has_value(),
                "segment insert files is empty when build index");
-    auto all_remote_files = segment_insert_files.value();
+    auto& all_remote_files = segment_insert_files.value();
     for (auto& remote_files : all_remote_files) {
         SortByPath(remote_files);
     }
@@ -1262,7 +1262,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(const Config& config) {
     }
 
     // legacy path
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (num_of_fields > 1) {
         ThrowInfo(
@@ -1331,12 +1331,12 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v2(const Config& config) {
     AssertInfo(segment_insert_files.has_value(),
                "segment insert files is empty when build index while "
                "caching opt fields");
-    auto remote_files_storage_v2 = segment_insert_files.value();
+    auto& remote_files_storage_v2 = segment_insert_files.value();
     for (auto& remote_files : remote_files_storage_v2) {
         SortByPath(remote_files);
     }
 
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";
@@ -1398,7 +1398,7 @@ DiskFileManagerImpl::cache_opt_field_to_disk_v3(const Config& config) {
     if (!opt_fields.has_value()) {
         return "";
     }
-    auto fields_map = opt_fields.value();
+    auto& fields_map = opt_fields.value();
     const uint32_t num_of_fields = fields_map.size();
     if (0 == num_of_fields) {
         return "";

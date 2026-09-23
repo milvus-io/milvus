@@ -145,7 +145,7 @@ struct CompareElementFunc {
 class PhyCompareFilterExpr : public Expr {
  public:
     PhyCompareFilterExpr(
-        const std::vector<std::shared_ptr<Expr>>& input,
+        std::vector<std::shared_ptr<Expr>> input,
         const std::shared_ptr<const milvus::expr::CompareExpr>& expr,
         const std::string& name,
         milvus::OpContext* op_ctx,

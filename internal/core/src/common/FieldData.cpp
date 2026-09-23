@@ -456,23 +456,21 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
 
                         auto data_size = num_vectors * bytes_per_vec;
                         auto data_ptr =
-                            data_size > 0
-                                ? std::make_unique<uint8_t[]>(data_size)
-                                : nullptr;
+                            data_size > 0 ? std::make_unique<char[]>(data_size)
+                                          : nullptr;
 
                         for (int64_t i = 0; i < num_vectors; i++) {
                             const uint8_t* binary_data =
                                 binary_array->GetValue(start_offset + i);
-                            uint8_t* dest = data_ptr.get() + i * bytes_per_vec;
+                            char* dest = data_ptr.get() + i * bytes_per_vec;
                             milvus::fastmem::FastMemcpy(
                                 dest, binary_data, bytes_per_vec);
                         }
 
-                        values.emplace_back(
-                            static_cast<const void*>(data_ptr.get()),
-                            num_vectors,
-                            dim,
-                            element_type);
+                        values.emplace_back(std::move(data_ptr),
+                                            num_vectors,
+                                            dim,
+                                            element_type);
                     }
                     break;
                 }

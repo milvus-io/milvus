@@ -67,10 +67,8 @@ ConvertPredicateToFilteredBitset(TargetBitmapView data,
         return true;
     }
 
+    data.inplace_and(valid, size);
     data.flip();
-    TargetBitmap invalid(valid);
-    invalid.flip();
-    data.inplace_or(invalid, size);
     valid.set();
     return false;
 }
@@ -161,7 +159,7 @@ PhyFilterBitsNode::GetOutput() {
                 cached.result->clone(),
                 cached.valid_result ? cached.valid_result->clone()
                                     : TargetBitmap(need_process_rows_, true)));
-            return std::make_shared<RowVector>(col_res);
+            return std::make_shared<RowVector>(std::move(col_res));
         }
     }
 
@@ -225,7 +223,7 @@ PhyFilterBitsNode::GetOutput() {
         milvus::monitor::internal_core_search_latency_scalar.Observe(
             scalar_cost / 1000);
 
-        return std::make_shared<RowVector>(col_res);
+        return std::make_shared<RowVector>(std::move(col_res));
     }
 
     while (num_processed_rows_ < need_process_rows_) {
@@ -290,7 +288,7 @@ PhyFilterBitsNode::GetOutput() {
     milvus::monitor::internal_core_search_latency_scalar.Observe(scalar_cost /
                                                                  1000);
 
-    return std::make_shared<RowVector>(col_res);
+    return std::make_shared<RowVector>(std::move(col_res));
 }
 
 }  // namespace exec

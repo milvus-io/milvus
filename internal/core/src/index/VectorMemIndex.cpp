@@ -294,7 +294,8 @@ VectorMemIndex<T>::Upload(const Config& config) {
     auto binary_set = Serialize(config);
     file_manager_->AddFile(binary_set);
 
-    auto remote_paths_to_size = file_manager_->GetRemotePathsToFileSize();
+    const auto& remote_paths_to_size =
+        file_manager_->GetRemotePathsToFileSize();
     return IndexStats::NewFromSizeMap(file_manager_->GetAddedTotalMemSize(),
                                       remote_paths_to_size);
 }

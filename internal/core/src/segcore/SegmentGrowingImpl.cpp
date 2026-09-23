@@ -1032,7 +1032,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (total != info.row_count) {
             AssertInfo(total <= info.row_count,
                        "binlog number should less than or equal row_count");
-            auto field_meta = (*schema)[field_id];
+            const auto& field_meta = (*schema)[field_id];
             AssertInfo(field_meta.is_nullable(),
                        "nullable must be true when lack rows");
             auto lack_num = info.row_count - total;
@@ -1115,7 +1115,7 @@ SegmentGrowingImpl::load_field_data_common(
         return;
     }
 
-    auto field_meta = (*schema)[field_id];
+    const auto& field_meta = (*schema)[field_id];
 
     if (insert_record_.is_valid_data_exist(field_id)) {
         insert_record_.get_valid_data(field_id)->set_data_raw(field_data);

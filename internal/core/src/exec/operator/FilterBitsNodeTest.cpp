@@ -116,6 +116,36 @@ TEST(FilterBitsNodeTest, PredicateConversionFiltersOutInvalidResults) {
     EXPECT_TRUE(valid.all());
 }
 
+TEST(FilterBitsNodeTest, PredicateConversionPreservesUnalignedViewBoundaries) {
+    for (const size_t size : {0, 1, 7, 8, 63, 64, 65, 127, 128, 129, 4097}) {
+        for (const size_t offset : {0, 1, 7, 63}) {
+            TargetBitmap data(size + offset + 70, true);
+            TargetBitmap valid(size + offset + 70, false);
+            TargetBitmapView data_view(data.data(), offset, size);
+            TargetBitmapView valid_view(valid.data(), offset + 3, size);
+            for (size_t i = 0; i < size; ++i) {
+                data_view[i] = i % 2 == 0;
+                valid_view[i] = i % 3 != 0;
+            }
+            EXPECT_EQ(
+                ConvertPredicateToFilteredBitset(data_view, valid_view, size),
+                size == 0);
+            for (size_t i = 0; i < size; ++i) {
+                EXPECT_EQ(data_view[i], !(i % 2 == 0 && i % 3 != 0));
+                EXPECT_TRUE(valid_view[i]);
+            }
+            for (size_t i = 0; i < data.size(); ++i) {
+                if (i < offset || i >= offset + size) {
+                    EXPECT_TRUE(data[i]);
+                }
+                if (i < offset + 3 || i >= offset + 3 + size) {
+                    EXPECT_FALSE(valid[i]);
+                }
+            }
+        }
+    }
+}
+
 }  // namespace
 }  // namespace exec
 }  // namespace milvus

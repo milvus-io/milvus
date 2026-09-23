@@ -216,6 +216,21 @@ class Json {
         return *this;
     }
 
+    Json&
+    operator=(Json&& json) noexcept {
+        if (this != &json) {
+            if (json.own_data_.has_value()) {
+                own_data_ = std::move(json.own_data_);
+                data_ = own_data_.value();
+            } else {
+                // A borrowed view may alias our current owned buffer. Keep
+                // that buffer alive, just as copy assignment does.
+                data_ = json.data_;
+            }
+        }
+        return *this;
+    }
+
     operator std::string_view() const {
         return data_;
     }

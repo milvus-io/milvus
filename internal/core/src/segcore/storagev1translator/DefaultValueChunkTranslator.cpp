@@ -174,7 +174,7 @@ DefaultValueChunkTranslator::value_size() const {
         case milvus::DataType::TEXT:
         case milvus::DataType::GEOMETRY:
             if (field_meta_.default_value().has_value()) {
-                auto default_value = field_meta_.default_value().value();
+                const auto& default_value = field_meta_.default_value().value();
                 value_size = default_value.string_data().size() +
                              1;  // +1 for null terminator
             } else {

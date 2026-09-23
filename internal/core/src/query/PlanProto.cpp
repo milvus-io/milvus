@@ -455,11 +455,9 @@ BuildProjectAndAggregationNodes(
     // filtered rows, so AggregationNode always receives input where
     // size() == number of existing rows (needed for count(*)).
     {
-        auto project_field_id_list = std::vector<FieldId>(
-            project_id_list.begin(), project_id_list.end());
         plannode = std::make_shared<plan::ProjectNode>(
             milvus::plan::GetNextPlanNodeId(),
-            std::move(project_field_id_list),
+            std::move(project_id_list),
             std::move(project_name_list),
             std::move(project_type_list),
             sources);
@@ -473,7 +471,7 @@ BuildProjectAndAggregationNodes(
         std::move(groupingKeys),
         std::move(agg_names),
         std::move(aggregates),
-        agg_sources);
+        std::move(agg_sources));
 }
 // Helper function to build ProjectNode for ORDER BY queries.
 // Returns {ProjectNode, deferred_field_ids, pipeline_field_ids}.
@@ -1288,7 +1286,7 @@ ProtoParser::ParseUnaryRangeExprs(const proto::plan::UnaryRangeExpr& expr_pb) {
         expr::ColumnInfo(column_info),
         expr_pb.op(),
         expr_pb.value(),
-        extra_values);
+        std::move(extra_values));
 }
 
 expr::TypedExprPtr
@@ -1510,7 +1508,7 @@ ProtoParser::ParseTermExprs(const proto::plan::TermExpr& expr_pb) {
         values.emplace_back(expr_pb.values(i));
     }
     return std::make_shared<expr::TermFilterExpr>(
-        columnInfo, values, expr_pb.is_in_field());
+        columnInfo, std::move(values), expr_pb.is_in_field());
 }
 
 expr::TypedExprPtr
@@ -1785,7 +1783,7 @@ ProtoParser::ExtractFilterOnlyPlan(
             return nullptr;
         }
         if (std::dynamic_pointer_cast<plan::VectorSearchNode>(node)) {
-            auto sources = node->sources();
+            const auto& sources = node->sources();
             if (sources.empty()) {
                 return nullptr;
             }
