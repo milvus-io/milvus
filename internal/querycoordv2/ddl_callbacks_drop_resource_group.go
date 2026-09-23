@@ -21,23 +21,19 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (ignored bool, err error) {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	// Resource groups describe this cluster's own nodes, so the change is applied on
+	// every replicate role and never replicated.
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
-		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeDropResourceGroup) {
-			return false, err
-		}
+		return false, err
 	}
-	if broadcaster != nil {
-		defer broadcaster.Close()
-	}
+	defer broadcaster.Close()
 
 	replicas := s.meta.GetByResourceGroup(ctx, req.GetResourceGroup())
 	if len(replicas) > 0 {
@@ -53,12 +49,8 @@ func (s *Server) broadcastDropResourceGroup(ctx context.Context, req *milvuspb.D
 			ResourceGroupName: req.GetResourceGroup(),
 		}).
 		WithBody(&message.DropResourceGroupMessageBody{}).
-		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast()
-	if broadcaster == nil {
-		return false, registry.CallMessageAckCallback(ctx, msg, nil)
-	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return false, err
 }

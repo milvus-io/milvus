@@ -117,6 +117,17 @@ type broadcastTaskManager struct {
 
 // WithResourceKeys acquires the resource keys for the broadcast task.
 func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	return bm.withResourceKeys(ctx, bm.checkClusterRole, false, resourceKeys...)
+}
+
+// WithUnreplicableResourceKeys acquires the resource keys for a broadcast that stays in this cluster.
+// The message never leaves this cluster, so the replicate role is not checked.
+func (bm *broadcastTaskManager) WithUnreplicableResourceKeys(ctx context.Context, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
+	return bm.withResourceKeys(ctx, func(ctx context.Context) error { return ctx.Err() }, true, resourceKeys...)
+}
+
+// withResourceKeys acquires the resource keys, then checks the cluster with checkCluster.
+func (bm *broadcastTaskManager) withResourceKeys(ctx context.Context, checkCluster func(context.Context) error, unreplicable bool, resourceKeys ...message.ResourceKey) (BroadcastAPI, error) {
 	// Resolved before any lock is taken: it blocks until the first assignment
 	// arrives, and it panics when the streaming client is closing.
 	controlChannel := streaming.WAL().ControlChannel()
@@ -131,8 +142,8 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 		return nil, merr.Wrapf(err, "allocate new id failed")
 	}
 
-	if err := bm.checkClusterRole(ctx); err != nil {
-		// unlock the guards if the cluster role is not primary.
+	if err := checkCluster(ctx); err != nil {
+		// unlock the guards if the cluster check fails.
 		guards.Unlock()
 		return nil, err
 	}
@@ -142,6 +153,7 @@ func (bm *broadcastTaskManager) WithResourceKeys(ctx context.Context, resourceKe
 		broadcaster:    bm,
 		broadcastID:    id,
 		controlChannel: controlChannel,
+		unreplicable:   unreplicable,
 		guards:         guards,
 	}, nil
 }

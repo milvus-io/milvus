@@ -21,25 +21,21 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
-	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/registry"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 )
 
 func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb.CreateResourceGroupRequest) (ignored bool, err error) {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	// Resource groups describe this cluster's own nodes, so the change is applied on
+	// every replicate role and never replicated.
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
-		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
-			return false, err
-		}
+		return false, err
 	}
-	if broadcaster != nil {
-		defer broadcaster.Close()
-	}
+	defer broadcaster.Close()
 
 	cfg := req.GetConfig()
 	if cfg == nil {
@@ -55,12 +51,8 @@ func (s *Server) broadcastCreateResourceGroup(ctx context.Context, req *milvuspb
 			ResourceGroupConfigs: map[string]*rgpb.ResourceGroupConfig{req.GetResourceGroup(): cfg},
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
-		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast()
-	if broadcaster == nil {
-		return false, registry.CallMessageAckCallback(ctx, msg, nil)
-	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return false, err
 }
@@ -70,15 +62,13 @@ func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb
 		return nil
 	}
 
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	// Resource groups describe this cluster's own nodes, so the change is applied on
+	// every replicate role and never replicated.
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
-		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
-			return err
-		}
+		return err
 	}
-	if broadcaster != nil {
-		defer broadcaster.Close()
-	}
+	defer broadcaster.Close()
 
 	if err := s.meta.CheckIfResourceGroupsUpdatable(ctx, req.GetResourceGroups()); err != nil {
 		return err
@@ -89,26 +79,20 @@ func (s *Server) broadcastUpdateResourceGroups(ctx context.Context, req *querypb
 			ResourceGroupConfigs: req.GetResourceGroups(),
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
-		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast()
-	if broadcaster == nil {
-		return registry.CallMessageAckCallback(ctx, msg, nil)
-	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }
 
 func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) error {
-	broadcaster, err := broadcast.StartBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
+	// Resource groups describe this cluster's own nodes, so the change is applied on
+	// every replicate role and never replicated.
+	broadcaster, err := broadcast.StartUnreplicableBroadcastWithResourceKeys(ctx, message.NewExclusiveClusterResourceKey())
 	if err != nil {
-		if !shouldApplyLocallyOnNonPrimary(err, message.MessageTypeAlterResourceGroup) {
-			return err
-		}
+		return err
 	}
-	if broadcaster != nil {
-		defer broadcaster.Close()
-	}
+	defer broadcaster.Close()
 
 	// Move node from source resource group to target resource group.
 	rgs, err := s.meta.CheckIfTransferNode(ctx, req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
@@ -122,12 +106,8 @@ func (s *Server) broadcastTransferNode(ctx context.Context, req *milvuspb.Transf
 			ResourceGroupConfigs: rgs,
 		}).
 		WithBody(&message.AlterResourceGroupMessageBody{}).
-		// Applied locally on a secondary cluster without the broadcaster, so the control channel is set here.
-		WithBroadcast([]string{streaming.WAL().ControlChannel()}).
+		WithUnreplicable().
 		MustBuildBroadcast()
-	if broadcaster == nil {
-		return registry.CallMessageAckCallback(ctx, msg, nil)
-	}
 	_, err = broadcaster.Broadcast(ctx, msg)
 	return err
 }

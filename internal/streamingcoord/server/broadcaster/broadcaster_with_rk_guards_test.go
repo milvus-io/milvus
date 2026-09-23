@@ -90,3 +90,26 @@ func TestBroadcastLeavesGuardsWithTheTaskWhenTheAckWaitFails(t *testing.T) {
 		return true
 	}, 10*time.Second, 10*time.Millisecond)
 }
+
+// TestUnreplicableBroadcastRejectsReplicableMessage pins that a broadcast api from
+// WithUnreplicableResourceKeys only accepts unreplicable messages, and that the
+// rejection leaves the guards with the caller so Close() releases them.
+func TestUnreplicableBroadcastRejectsReplicableMessage(t *testing.T) {
+	locker := newResourceKeyLocker()
+	key := message.NewExclusiveClusterResourceKey()
+	b := &broadcasterWithRK{
+		broadcaster:    &broadcastTaskManager{},
+		broadcastID:    1,
+		controlChannel: "by-dev-rootcoord-dml_0_vcchan",
+		unreplicable:   true,
+		guards:         locker.Lock(key),
+	}
+
+	_, err := b.Broadcast(context.Background(), createNewBroadcastMsg([]string{"v1"}))
+	require.Error(t, err)
+	b.Close()
+
+	guards, err := locker.FastLock(key)
+	require.NoError(t, err, "the caller's Close() must release the resource key")
+	guards.Unlock()
+}

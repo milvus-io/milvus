@@ -495,6 +495,47 @@ func TestGetPendingSchemaFileResources(t *testing.T) {
 	assert.ElementsMatch(t, []int64{10, 20, 30}, result[100])
 }
 
+func TestWithUnreplicableResourceKeys(t *testing.T) {
+	registry.ResetRegistration()
+	paramtable.Init()
+	balance.ResetBalancer()
+
+	mb := mock_balancer.NewMockBalancer(t)
+	mb.EXPECT().ReplicateRole().Return(replicateutil.RoleSecondary).Maybe()
+	mb.EXPECT().WatchChannelAssignments(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, cb balancer.WatchChannelAssignmentsCallback) error {
+		time.Sleep(100 * time.Second)
+		return nil
+	}).Maybe()
+	balance.Register(mb)
+
+	meta := mock_metastore.NewMockStreamingCoordCataLog(t)
+	meta.EXPECT().ListBroadcastTask(mock.Anything).Return([]*streamingpb.BroadcastTask{}, nil).Times(1)
+	meta.EXPECT().SaveBroadcastTask(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	rc := idalloc.NewMockRootCoordClient(t)
+	f := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	f.Set(rc)
+	resource.InitForTest(resource.OptStreamingCatalog(meta), resource.OptMixCoordClient(f))
+
+	mw := mock_streaming.NewMockWALAccesser(t)
+	mw.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0_vcchan").Maybe()
+	streaming.SetWALForTest(mw)
+
+	bc, err := RecoverBroadcaster(context.Background())
+	assert.NoError(t, err)
+
+	// A replicable broadcast is still rejected on a secondary cluster.
+	_, err = bc.WithResourceKeys(context.Background(), message.NewExclusiveClusterResourceKey())
+	assert.ErrorIs(t, err, ErrNotPrimary)
+
+	// An unreplicable broadcast is accepted on a secondary cluster.
+	api, err := bc.WithUnreplicableResourceKeys(context.Background(), message.NewExclusiveClusterResourceKey())
+	assert.NoError(t, err)
+	assert.NotNil(t, api)
+	api.Close()
+
+	bc.Close()
+}
+
 func TestWithSecondaryClusterResourceKey(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		registry.ResetRegistration()
