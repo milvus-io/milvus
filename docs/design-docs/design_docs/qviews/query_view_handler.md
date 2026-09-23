@@ -124,7 +124,7 @@ Duplicate QueryViewKey handling is owned by the handler/SM pair, not by
 1. Coord pushes Preparing → handler creates SM (generates Preparing report immediately) → calls `resMgr.Acquire(OnReady, OnUnrecoverable)`.
 2. ResourceManager prepares resources asynchronously. `OnReady` advances Preparing → Ready; `OnUnrecoverable` advances Preparing → Unrecoverable and reports the failure to Coord.
 3. Coord pushes Up → SM advances Ready → Up → **persist Up** → report Up to Coord.
-4. Coord pushes Down → SM advances Up → Down → **persist Down (= delete recovery info)** → report Down to Coord.
+4. Coord pushes Down → shard records pending Down → waits for the [serving lease](query_view_lease.md) deadline and active query references → SM advances Up → Down → **persist Down (= delete recovery info)** → report Down to Coord. Duplicate Down pushes replace callbacks without renewing or generating an Up/Down report loop.
 5. Coord pushes Dropped → SM enters Dropping → **persist Dropped (= delete recovery info)** → calls `resMgr.Release(OnDropped)`.
 6. ResourceManager releases resources asynchronously → calls `OnDropped` → SM advances Dropping → Dropped → report Dropped to Coord → entry cleaned up.
 

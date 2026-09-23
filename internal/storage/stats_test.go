@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/json"
@@ -345,4 +346,24 @@ func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int64(5), restored.NumRow())
 	})
+}
+
+func TestBM25StatsAtomicDeltaAndVocabularyCleanup(t *testing.T) {
+	aggregate, remove, add := NewBM25Stats(), NewBM25Stats(), NewBM25Stats()
+	for i := uint32(0); i < 2048; i++ {
+		remove.Append(map[uint32]float32{i: 2})
+	}
+	aggregate.Merge(remove)
+	add.Append(map[uint32]float32{9000: 3})
+	require.NoError(t, aggregate.ValidateDelta(add, remove))
+	aggregate.ApplyDelta(add, remove)
+	require.Equal(t, int64(1), aggregate.NumRow())
+	require.Equal(t, float64(3), aggregate.GetAvgdl())
+	require.Len(t, aggregate.rowsWithToken, 1)
+	before := aggregate.Clone()
+	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), remove))
+	require.Equal(t, before, aggregate)
+	corrupt := NewBM25Stats()
+	corrupt.rowsWithToken[9000] = 2
+	require.Error(t, aggregate.ValidateDelta(NewBM25Stats(), corrupt))
 }

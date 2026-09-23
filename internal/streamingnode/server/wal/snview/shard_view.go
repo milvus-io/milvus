@@ -3,8 +3,7 @@ package snview
 import (
 	"context"
 	"sync"
-
-	"google.golang.org/protobuf/proto"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
@@ -33,6 +32,7 @@ type snShardView struct {
 	views           map[qviews.QueryViewVersion]*snViewEntry
 	catalog         metastore.StreamingNodeCataLog
 	resMgr          StreamingNodeResourceManager
+	leaseDuration   time.Duration
 	onEmpty         func(*snShardView) // called (under mu) when the last view entry is removed
 }
 
@@ -41,6 +41,9 @@ type snViewEntry struct {
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
 	queryRefs      int
+	leaseExpireAt  time.Time
+	pendingDown    bool
+	downTimer      *time.Timer
 	releasePending bool
 	releaseStarted bool
 	releaseDone    chan struct{}
@@ -136,6 +139,7 @@ func (s *snShardView) CloseForHandoff() {
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
 	for version, entry := range s.views {
+		entry.cancelPendingDown()
 		releases = append(releases, s.startReleaseLocked(version, entry))
 	}
 	s.views = make(map[qviews.QueryViewVersion]*snViewEntry)
@@ -204,6 +208,14 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	// Existing view: replace callback and deliver coord push.
 	entry.ApplyView = *av
 	entry.sm.UpdateView(av.View.IntoProto())
+	if pushedState == qviews.QueryViewStateDown && entry.sm.State() == qviews.QueryViewStateUp {
+		entry.pendingDown = true
+		s.advancePendingDownLocked(key.QueryViewVersion, entry)
+		return
+	}
+	if pushedState == qviews.QueryViewStateDropped {
+		entry.cancelPendingDown()
+	}
 	entry.sm.OnCoordStateDelivered(pushedState)
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
 }
@@ -380,6 +392,7 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 	var selected *snViewEntry
 	var selectedVersion qviews.QueryViewVersion
 	for version, entry := range s.views {
+		s.advancePendingDownLocked(version, entry)
 		if entry.sm.State() != qviews.QueryViewStateUp {
 			continue
 		}
@@ -391,15 +404,7 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 	if selected == nil {
 		return nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
 	}
-	selected.queryRefs++
-	view := proto.Clone(selected.View.IntoProto()).(*viewpb.QueryViewOfShard)
-	var once sync.Once
-	return &QueryViewLease{
-		Version: selectedVersion,
-		Meta:    proto.Clone(view.GetMeta()).(*viewpb.QueryViewMeta),
-		View:    view,
-		Release: func() { once.Do(func() { s.releaseQueryViewLease(selectedVersion) }) },
-	}, nil
+	return s.newQueryViewLeaseLocked(selectedVersion, selected), nil
 }
 
 func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
@@ -411,6 +416,7 @@ func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
 		return
 	}
 	entry.queryRefs--
+	s.advancePendingDownLocked(version, entry)
 	if entry.queryRefs == 0 && entry.releasePending {
 		entry.releasePending = false
 		s.startReleaseLocked(version, entry)

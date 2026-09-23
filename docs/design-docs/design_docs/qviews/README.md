@@ -229,6 +229,9 @@ Key constraints:
 - Workflows across multiple view versions are completely independent, but through Coord state machine constraints, each node has at most one view in Preparing state.
 - QueryNode loss is handled only for active QN-targeted syncs: in Preparing it makes the view Unrecoverable, and in Dropping it counts that QN cleanup as complete. StreamingNode unavailability is handled by channel assignment, not by the QueryView per-view state machine.
 
+The SN renewable serving lease delays local Up → Down during active use; see
+[StreamingNode QueryView Serving Lease](query_view_lease.md).
+
 ## 8. Incremental Query Segment Lifecycle
 
 In the target QueryView integration, incremental Segments generated from WAL on
@@ -298,8 +301,8 @@ TODO(snview/streamingnode_resource_manager.md): add the StreamingNode query
 runtime manager design when that resource module is picked.
 TODO(snview/growing_segment_runtime.md): add the StreamingNode growing segment
 runtime design when that resource module is picked.
-TODO(snview/idf_oracle_runtime.md): add the StreamingNode IDF oracle runtime
-design when that resource module is picked.
+[StreamingNode IDF Oracle Runtime](snview/idf_oracle_runtime.md) defines the
+single locally prepared BM25 aggregate shared by all QueryView DataVersions.
 
 ## 11. Coord and Node Interactions
 
@@ -372,3 +375,12 @@ StreamingNode already implements Pub-Sub capability. PureDeleteStreamManager wra
 - Bloom filter filtering + batch merge of delete data at the Node level.
 - Remote Load L0 (conflicts with Bloom filter filtering; choose one of the two).
 - Subscription catch-up merging.
+
+## 15. TODO: DDL Query Visibility
+
+[Truncate and Partition Drop Query Visibility](ddl_visibility.md) records the
+agreed follow-up: typed TransformLog entries delivered to the affected SN/QN
+consumers enable MVCC-based segment exclusion. Until then, DDL query visibility
+uses a QueryView handoff fence (QueryCoord target update in the legacy model).
+The MVCC extension and distributed delivery are outside the current SN query
+extraction PR; a progress barrier alone does not implement DDL visibility.
