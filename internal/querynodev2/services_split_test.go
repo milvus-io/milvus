@@ -114,9 +114,9 @@ func TestWaitSplitTargetRecovery(t *testing.T) {
 		future.Set(mixCoord)
 		node := &QueryNode{ctx: context.Background(), mixCoord: future}
 
-		pos, err := node.waitSplitTargetRecovery(1, "v1")
+		info, err := node.waitSplitTargetRecovery(1, "v1")
 		assert.NoError(t, err)
-		assert.Equal(t, uint64(42), pos.GetTimestamp())
+		assert.Equal(t, uint64(42), info.GetSeekPosition().GetTimestamp())
 	})
 
 	t.Run("keeps waiting while the position cannot be seeked from", func(t *testing.T) {
@@ -145,9 +145,9 @@ func TestWaitSplitTargetRecovery(t *testing.T) {
 		future.Set(mixCoord)
 		node := &QueryNode{ctx: context.Background(), mixCoord: future}
 
-		pos, err := node.waitSplitTargetRecovery(1, "v1")
+		info, err := node.waitSplitTargetRecovery(1, "v1")
 		assert.NoError(t, err)
-		assert.Equal(t, uint64(99), pos.GetTimestamp(),
+		assert.Equal(t, uint64(99), info.GetSeekPosition().GetTimestamp(),
 			"the unseekable position must be skipped, not returned")
 	})
 }

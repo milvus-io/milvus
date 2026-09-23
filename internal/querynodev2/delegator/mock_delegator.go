@@ -214,6 +214,52 @@ func (_c *MockShardDelegator_DetachSplitChild_Call) RunAndReturn(run func(string
 	return _c
 }
 
+// ForwardKnownDeletesToParent provides a mock function with given fields: ctx
+func (_m *MockShardDelegator) ForwardKnownDeletesToParent(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ForwardKnownDeletesToParent")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ForwardKnownDeletesToParent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForwardKnownDeletesToParent'
+type MockShardDelegator_ForwardKnownDeletesToParent_Call struct {
+	*mock.Call
+}
+
+// ForwardKnownDeletesToParent is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockShardDelegator_Expecter) ForwardKnownDeletesToParent(ctx interface{}) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	return &MockShardDelegator_ForwardKnownDeletesToParent_Call{Call: _e.mock.On("ForwardKnownDeletesToParent", ctx)}
+}
+
+func (_c *MockShardDelegator_ForwardKnownDeletesToParent_Call) Run(run func(ctx context.Context)) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ForwardKnownDeletesToParent_Call) Return(_a0 error) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ForwardKnownDeletesToParent_Call) RunAndReturn(run func(context.Context) error) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FrontingParent provides a mock function with no fields
 func (_m *MockShardDelegator) FrontingParent() ShardDelegator {
 	ret := _m.Called()
