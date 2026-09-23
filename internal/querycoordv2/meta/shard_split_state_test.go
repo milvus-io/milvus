@@ -561,3 +561,46 @@ func TestShardSplitStateCacheReadsADroppingCollection(t *testing.T) {
 	assert.True(t, ok)
 	assert.True(t, states.Splitting())
 }
+
+// RR-L6-N3: the shared read runs on its own context. A caller that started it
+// and then went away -- a user's LoadBalance whose client cancelled -- must not
+// fail the checkers waiting on the same read.
+func TestShardSplitStateCacheSharedReadOutlivesItsFirstCaller(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var calls atomic.Int32
+	broker := NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).RunAndReturn(
+		func(ctx context.Context, _ int64) (*milvuspb.DescribeCollectionResponse, error) {
+			if calls.Add(1) == 1 {
+				close(started)
+			}
+			select {
+			case <-release:
+				return splittingCollectionResp(), nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		})
+	cache := NewShardSplitStateCache(broker, time.Minute)
+
+	userCtx, cancel := context.WithCancel(context.Background())
+	firstDone := make(chan struct{})
+	go func() {
+		defer close(firstDone)
+		cache.ChannelStates(userCtx, 1)
+	}()
+	<-started
+	joined := make(chan bool)
+	go func() {
+		_, ok := cache.ChannelStates(context.Background(), 1)
+		joined <- ok
+	}()
+	time.Sleep(50 * time.Millisecond) // let the checker join the in-flight read
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	assert.True(t, <-joined, "the checker gets the shared read although its first caller cancelled")
+	<-firstDone
+	assert.Equal(t, int32(1), calls.Load())
+}
