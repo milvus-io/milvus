@@ -74,6 +74,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -157,6 +158,9 @@ type QueryNode struct {
 	// vchannel's recovery seek position (GetRecoveryInfoV2) when spawning an
 	// in-process child delegator. Resolved asynchronously by the grpc server.
 	mixCoord *syncutil.Future[types.MixCoordClient]
+	// splitRecoveryDescribes coalesces the DescribeCollection calls concurrent
+	// shard-split recoveries (one per watched channel) make for one collection.
+	splitRecoveryDescribes conc.Singleflight[*milvuspb.DescribeCollectionResponse]
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
