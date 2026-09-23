@@ -1699,8 +1699,8 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 		partitionID  = int64(2)
 		segmentID    = int64(100)
 		channelName  = "recovery_manifest_v0"
-		manifestPath = "files/binlogs/1/2/100/manifest_0"
 	)
+	manifestPath := packed.MarshalManifestPath("files/binlogs/1/2/100", 1)
 	ctx := context.Background()
 	channel := &channelMeta{Name: channelName, CollectionID: collectionID}
 	checkpoint := &msgpb.MsgPosition{ChannelName: channelName, MsgID: []byte{1}, Timestamp: 10}
@@ -1713,9 +1713,30 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 		name          string
 		prepare       func(*datapb.SegmentInfo)
 		wantFlushed   bool
+		wantGrowing   bool
 		wantRecovered bool
 	}{
 		{name: "manifest_only", wantFlushed: true, wantRecovered: true},
+		{name: "earliest_flushed", prepare: func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = packed.MarshalManifestPath("files/binlogs/1/2/100", packed.ManifestEarliest)
+		}},
+		{name: "earliest_growing", prepare: func(seg *datapb.SegmentInfo) {
+			seg.State = commonpb.SegmentState_Growing
+			seg.NumOfRows = 0
+			seg.ManifestPath = packed.MarshalManifestPath("files/binlogs/1/2/100", packed.ManifestEarliest)
+		}},
+		{name: "committed_growing", prepare: func(seg *datapb.SegmentInfo) {
+			seg.State = commonpb.SegmentState_Growing
+		}, wantGrowing: true},
+		{name: "latest_placeholder", prepare: func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = packed.MarshalManifestPath("files/binlogs/1/2/100", packed.ManifestLatest)
+		}},
+		{name: "invalid_manifest", prepare: func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = "invalid"
+		}},
+		{name: "non_v3_manifest", prepare: func(seg *datapb.SegmentInfo) {
+			seg.StorageVersion = storage.StorageV2
+		}},
 		{name: "empty", prepare: func(seg *datapb.SegmentInfo) { seg.ManifestPath = "" }},
 		{name: "legacy_binlog", prepare: func(seg *datapb.SegmentInfo) {
 			seg.ManifestPath = ""
@@ -1779,6 +1800,11 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 				assert.Equal(t, []int64{segmentID}, resp.GetChannels()[0].GetFlushedSegmentIds())
 			} else {
 				assert.Empty(t, resp.GetChannels()[0].GetFlushedSegmentIds())
+			}
+			if test.wantGrowing {
+				assert.Equal(t, []int64{segmentID}, resp.GetChannels()[0].GetUnflushedSegmentIds())
+			} else {
+				assert.Empty(t, resp.GetChannels()[0].GetUnflushedSegmentIds())
 			}
 			if test.wantRecovered {
 				require.Len(t, resp.GetSegments(), 1)
