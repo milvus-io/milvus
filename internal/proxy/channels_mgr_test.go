@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/mocks"
 )
 
@@ -51,6 +52,10 @@ func Test_newChannels(t *testing.T) {
 }
 
 func Test_getDmlChannelsFunc(t *testing.T) {
+	previous := globalMetaCache
+	globalMetaCache = nil
+	t.Cleanup(func() { globalMetaCache = previous })
+
 	t.Run("failed to describe collection", func(t *testing.T) {
 		ctx := context.Background()
 		rc := mocks.NewMockMixCoordClient(t)
@@ -86,6 +91,47 @@ func Test_getDmlChannelsFunc(t *testing.T) {
 		// assert.ElementsMatch(t, []string{"111"}, got.pchans)
 		assert.ElementsMatch(t, []string{"111", "111"}, got.pchans)
 	})
+}
+
+func Test_getDmlChannelsFunc_MetaCache(t *testing.T) {
+	ctx := context.Background()
+	rc := mocks.NewMockMixCoordClient(t)
+	cache, err := NewMetaCache(rc)
+	assert.NoError(t, err)
+	previous := globalMetaCache
+	globalMetaCache = cache
+	t.Cleanup(func() { globalMetaCache = previous })
+	cache.collInfo["db"] = map[string]*collectionInfo{
+		"collection": {collID: 100, schema: &schemaInfo{}, vChannels: []string{"v0", "v1"}, pChannels: []string{"p0", "p0"}},
+	}
+	f := getDmlChannelsFunc(ctx, rc)
+	got, err := f(100)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"v0", "v1"}, got.vchans)
+	assert.Equal(t, []string{"p0", "p0"}, got.pchans)
+	rc.AssertNotCalled(t, "DescribeCollection", mock.Anything, mock.Anything)
+
+	cache.RemoveCollection(ctx, "db", "collection", 0)
+	rc.EXPECT().DescribeCollection(mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+		return req.GetCollectionID() == 100 && req.GetCollectionName() == ""
+	})).Return(&milvuspb.DescribeCollectionResponse{
+		Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+		DbName:               "db",
+		CollectionID:         100,
+		Schema:               &schemapb.CollectionSchema{Name: "collection"},
+		VirtualChannelNames:  []string{"v0", "v1"},
+		PhysicalChannelNames: []string{"p0", "p0"},
+	}, nil).Once()
+	rc.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
+		return req.GetDbName() == "db" && req.GetCollectionID() == 100
+	})).Return(&milvuspb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Once()
+	for i := 0; i < 2; i++ {
+		got, err = f(100)
+		assert.NoError(t, err)
+		assert.Equal(t, []string{"v0", "v1"}, got.vchans)
+	}
+	assert.Contains(t, cache.collInfo["db"], "collection")
+	assert.NotContains(t, cache.collInfo, "")
 }
 
 func Test_singleTypeChannelsMgr_getAllChannels(t *testing.T) {

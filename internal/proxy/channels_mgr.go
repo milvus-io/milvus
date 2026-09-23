@@ -86,6 +86,14 @@ type repackFuncType = func(tsMsgs []msgstream.TsMsg, hashKeys [][]int32) (map[in
 // getDmlChannelsFunc returns a function about how to get dml channels of a collection.
 func getDmlChannelsFunc(ctx context.Context, mixc types.MixCoordClient) getChannelsFuncType {
 	return func(collectionID UniqueID) (channelInfos, error) {
+		if globalMetaCache != nil {
+			info, err := globalMetaCache.GetCollectionInfo(ctx, "", "", collectionID)
+			if err != nil {
+				return channelInfos{}, err
+			}
+			return newChannels(info.vChannels, info.pChannels)
+		}
+
 		req := &milvuspb.DescribeCollectionRequest{
 			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
 			CollectionID: collectionID,
