@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -263,17 +262,8 @@ func (m *shardSplitManager) IsVChannelSplitting(vchannel string) bool {
 // source. The compaction freeze lets the sort of a rewrite output through on
 // such a channel only.
 func (m *shardSplitManager) IsVChannelSplitTarget(vchannel string) bool {
-	target := false
-	for _, task := range m.store.list() {
-		if !isSplitShardTaskActive(task) {
-			continue
-		}
-		if slices.Contains(splitSourceVChannels(task), vchannel) {
-			return false
-		}
-		target = target || slices.Contains(splitTaskTargetVChannels(task), vchannel)
-	}
-	return target
+	source, target := m.store.activeSplitRoles(vchannel)
+	return target && !source
 }
 
 // setCompactionPreempter wires the compaction inspector in.
