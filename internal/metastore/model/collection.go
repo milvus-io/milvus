@@ -360,6 +360,17 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 			if updates.ShardBy != "" {
 				c.ShardBy = updates.ShardBy
 			}
+			// last_truncate_time_tick is not owned by a routing commit: it is
+			// written only by TruncateCollection (meta_table.go), directly on the
+			// live collection, never through this mask. The post-image was frozen
+			// into the WAL message at plan time, so its copy of the field for a
+			// shard the commit does not create can be stale by the time this
+			// commit applies -- a truncate landing inside the split window would
+			// otherwise be reverted. Keep the collection's own current value for
+			// every vchannel that already had a shard info; only a vchannel this
+			// commit creates (a split's target) has none yet, so it is seeded from
+			// the post-image (0, same as CreateCollection's).
+			oldShardInfos := c.ShardInfos
 			shardInfos := make(map[string]*ShardInfo, len(updates.VirtualChannelNames))
 			for i, vchannel := range updates.VirtualChannelNames {
 				var pchannel string
@@ -370,7 +381,11 @@ func (c *Collection) ApplyUpdates(header *message.AlterCollectionMessageHeader, 
 				if i < len(updates.ShardInfos) {
 					si = updates.ShardInfos[i]
 				}
-				shardInfos[vchannel] = shardInfoFromPB(vchannel, pchannel, si)
+				shardInfo := shardInfoFromPB(vchannel, pchannel, si)
+				if old, ok := oldShardInfos[vchannel]; ok {
+					shardInfo.LastTruncateTimeTick = old.LastTruncateTimeTick
+				}
+				shardInfos[vchannel] = shardInfo
 			}
 			c.ShardInfos = shardInfos
 			c.ShardsNum = routableShardCount(updates.ShardInfos)

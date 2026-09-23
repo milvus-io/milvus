@@ -163,6 +163,58 @@ func TestApplyUpdatesShardSplitRouting(t *testing.T) {
 	assert.Equal(t, schemapb.ShardState_ShardCreating, coll.ShardInfos["v2"].State)
 }
 
+// last_truncate_time_tick is not owned by a routing commit: the post-image is
+// frozen into the WAL message at plan time, so its copy of the field for a
+// shard the commit does not create (here the fenced source, v0) can be stale
+// by the time the commit applies. A TruncateCollection landing inside the
+// split window stamps the live collection's shard info directly
+// (meta_table.go), never through this mask, so a routing commit must not
+// revert that write back to whatever the plan-time snapshot carried for a
+// shard it did not itself create (AV-L1-L1: adv-L1-report.md).
+func TestApplyUpdatesShardSplitRoutingKeepsUntouchedShardsLastTruncateTimeTick(t *testing.T) {
+	coll := &Collection{
+		CollectionID:         1,
+		Name:                 "col",
+		VirtualChannelNames:  []string{"v0"},
+		PhysicalChannelNames: []string{"p0"},
+		ShardInfos: map[string]*ShardInfo{
+			// A truncate landed on v0 after the split's post-image was frozen
+			// but before this routing commit applied.
+			"v0": {VChannelName: "v0", PChannelName: "p0", State: schemapb.ShardState_ShardNormal, LastTruncateTimeTick: 55},
+		},
+	}
+
+	header := &message.AlterCollectionMessageHeader{
+		CollectionId: 1,
+		UpdateMask:   &fieldmaskpb.FieldMask{Paths: []string{message.FieldMaskCollectionShardSplitRouting}},
+	}
+	body := &message.AlterCollectionMessageBody{
+		Updates: &message.AlterCollectionMessageUpdates{
+			VirtualChannelNames:  []string{"v0", "v1", "v2"},
+			PhysicalChannelNames: []string{"p0", "p1", "p2"},
+			RoutingModulus:       2,
+			ShardBy:              "hash(pk)",
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				// The plan-time snapshot of the fenced source: no truncate had
+				// happened yet when the split's post-image was built.
+				{State: schemapb.ShardState_ShardSplitting, LastTruncateTimeTick: 0},
+				pbShard(schemapb.ShardState_ShardCreating, "", 0),
+				pbShard(schemapb.ShardState_ShardCreating, "", 1),
+			},
+		},
+	}
+
+	coll.ApplyUpdates(header, body)
+
+	// v0 existed before the commit: its live LastTruncateTimeTick survives,
+	// even though the post-image's copy of it is stale.
+	assert.Equal(t, uint64(55), coll.ShardInfos["v0"].LastTruncateTimeTick)
+	// v1/v2 are new: they have nothing to preserve, so they take the
+	// post-image's value (0, same as a freshly created shard's).
+	assert.Zero(t, coll.ShardInfos["v1"].LastTruncateTimeTick)
+	assert.Zero(t, coll.ShardInfos["v2"].LastTruncateTimeTick)
+}
+
 // shard_by is written only when the commit carries one. A later split of a
 // collection that already declared it leaves the declaration alone rather than
 // clearing it, so a commit that has nothing to back-fill cannot erase the
