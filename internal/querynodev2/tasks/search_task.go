@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -37,6 +38,9 @@ var (
 	// assertion a signature drift would silently fall back to the
 	// single-task path and stop isolating cancellation inside a group.
 	_ scheduler.PrunableTask = &SearchTask{}
+	// Likewise for the queue's expiry sweep, which would otherwise decide on
+	// the owner's context alone and end every request merged behind it.
+	_ scheduler.ExpirableGroup = &SearchTask{}
 )
 
 type SearchTask struct {
@@ -512,25 +516,30 @@ func (t *SearchTask) resetGroup() {
 // context error and leave the group. The survivors are regrouped, with the
 // first of them as the new owner, so that canceling the owner does not end
 // the requests merged behind it.
-func (t *SearchTask) PruneCanceled() scheduler.Task {
+func (t *SearchTask) PruneCanceled() (scheduler.Task, int, error) {
 	members := t.members()
 	alive := make([]*SearchTask, 0, len(members))
+	var cause error
 	for _, m := range members {
 		if err := cancellationOf(m.ctx); err != nil {
 			m.finishPruned(err)
+			if cause == nil {
+				cause = err
+			}
 			continue
 		}
 		alive = append(alive, m)
 	}
-	if len(alive) == len(members) {
-		return t
+	dropped := len(members) - len(alive)
+	if dropped == 0 {
+		return t, 0, nil
 	}
 	if cancellationOf(t.ctx) != nil {
 		// The old owner is finished; drop its references to the survivors.
 		t.resetGroup()
 	}
 	if len(alive) == 0 {
-		return nil
+		return nil, dropped, cause
 	}
 	owner := alive[0]
 	owner.resetGroup()
@@ -538,9 +547,54 @@ func (t *SearchTask) PruneCanceled() scheduler.Task {
 		m.resetGroup()
 		owner.absorb(m)
 	}
-	return owner
+	return owner, dropped, cause
 }
 
+// ExpiryReady implements scheduler.ExpirableGroup. The group may be taken out
+// of the queue only when every request in it is canceled or due by
+// cleanupTime: members can carry deadlines up to the merge gap apart, and one
+// member's reaching its deadline says nothing about the others'.
+func (t *SearchTask) ExpiryReady(cleanupTime time.Time) bool {
+	if !t.dueBy(cleanupTime) {
+		return false
+	}
+	for _, m := range t.others {
+		if !m.dueBy(cleanupTime) {
+			return false
+		}
+	}
+	return true
+}
+
+// dueBy reports whether this request is canceled or has a deadline no later
+// than cleanupTime.
+func (t *SearchTask) dueBy(cleanupTime time.Time) bool {
+	if cancellationOf(t.ctx) != nil {
+		return true
+	}
+	if t.ctx == nil {
+		return false
+	}
+	deadline, ok := t.ctx.Deadline()
+	return ok && !cleanupTime.Before(deadline)
+}
+
+// FinishExpired implements scheduler.ExpirableGroup. Every request is told its
+// own reason: its context error if it has one, otherwise DeadlineExceeded for
+// a request taken out a little ahead of its deadline.
+func (t *SearchTask) FinishExpired() {
+	for _, m := range t.members() {
+		err := cancellationOf(m.ctx)
+		if err == nil {
+			err = context.DeadlineExceeded
+		}
+		m.finishPruned(err)
+	}
+}
+
+// finishPruned completes a request that leaves without running, pruned or
+// expired. It records none of the group histograms that Done records: those
+// describe the groups that reach the executor, and this request is not in one.
 func (t *SearchTask) finishPruned(err error) {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
@@ -592,6 +646,11 @@ func (t *SearchTask) useGroupContext() func() {
 }
 
 func (t *SearchTask) Done(err error) {
+	// The group histograms describe the groups that reach the executor, once
+	// each, at the size they reach it with. A request pruned or expired before
+	// then leaves through finishPruned and is not counted, and a group every
+	// one of whose requests was canceled never reaches the executor and is not
+	// counted at all.
 	if !t.merged {
 		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.groupSize))
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.nq))

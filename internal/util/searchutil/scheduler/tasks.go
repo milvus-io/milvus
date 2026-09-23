@@ -135,6 +135,12 @@ func (t *queuedTask) cleanupReady(now time.Time) bool {
 	if !t.valid() {
 		return false
 	}
+	// A task standing for a merged group answers for all of it. Its own
+	// context belongs to the owner alone, so reading that would end the whole
+	// group as soon as the owner was canceled or near its deadline.
+	if g, ok := t.Task.(ExpirableGroup); ok {
+		return g.ExpiryReady(now)
+	}
 	if t.Context().Err() != nil {
 		return true
 	}
@@ -169,24 +175,44 @@ type PrunableTask interface {
 
 	// PruneCanceled completes every member whose context is canceled with
 	// that member's own context error and returns the task to execute for the
-	// remaining members. It returns the receiver when nothing was pruned and
-	// nil when no member remains.
-	PruneCanceled() Task
+	// remaining members: the receiver when nothing was pruned, nil when no
+	// member remains. It also reports how many members it dropped and the
+	// context error of the first of them, so that the caller can say why.
+	PruneCanceled() (survivor Task, dropped int, cause error)
+}
+
+// ExpirableGroup is a Task that may stand for a group of merged requests and
+// answers the queue's expiry sweep for the whole group. The sweep runs when the
+// queue is full and takes out the tasks that are done; for a group that must
+// mean every request in it, not only the owner whose context the queue holds.
+type ExpirableGroup interface {
+	Task
+
+	// ExpiryReady reports whether every request in the group is canceled or
+	// has a deadline no later than cleanupTime.
+	ExpiryReady(cleanupTime time.Time) bool
+
+	// FinishExpired completes every request in the group with its own
+	// reason: its context error if it has one, otherwise
+	// context.DeadlineExceeded, for a request the sweep takes out shortly
+	// before its deadline.
+	FinishExpired()
 }
 
 // pruneCanceled drops a task whose context is canceled, or the canceled
 // members of a prunable group. It returns the task to execute, or nil when
-// there is nothing left to run. A dropped task has been completed with its own
-// context error.
-func pruneCanceled(t Task) Task {
+// there is nothing left to run, together with how many requests it dropped and
+// why the first of them was dropped. A dropped task has been completed with its
+// own context error.
+func pruneCanceled(t Task) (Task, int, error) {
 	if p, ok := t.(PrunableTask); ok {
 		return p.PruneCanceled()
 	}
 	if err := t.Context().Err(); err != nil {
 		t.Done(err)
-		return nil
+		return nil, 1, err
 	}
-	return t
+	return t, 0, nil
 }
 
 // A task is execute unit of scheduler.

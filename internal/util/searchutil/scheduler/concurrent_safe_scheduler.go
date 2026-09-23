@@ -288,11 +288,19 @@ func (s *scheduler) exec() {
 		// Drop the task, or the canceled members of a merged group, if the
 		// cancellation happened between dequeue and execution. Members that
 		// are dropped here have already been completed with their own
-		// context error; the survivors keep running.
-		if t = pruneCanceled(t); t == nil {
-			mlog.Warn(context.TODO(), "task canceled before executing")
-			continue
+		// context error; the survivors keep running. The cause is logged
+		// because it is what tells a client that went away from a request
+		// that ran out of time.
+		survivor, dropped, cause := pruneCanceled(t)
+		if dropped > 0 {
+			if survivor == nil {
+				mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(cause))
+				continue
+			}
+			mlog.Warn(context.TODO(), "canceled requests dropped from a search group before executing",
+				mlog.Int("dropped", dropped), mlog.Err(cause))
 		}
+		t = survivor
 		if err := t.PreExecute(); err != nil {
 			mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
 			t.Done(err)
@@ -357,7 +365,7 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			// A canceled task is dropped; a merged group loses only its
 			// canceled members and goes on with the rest. Dropped members
 			// are completed with their own context error.
-			survivor := pruneCanceled(lastWaitingTask.Task)
+			survivor, _, _ := pruneCanceled(lastWaitingTask.Task)
 			if survivor == nil {
 				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
@@ -385,6 +393,12 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 	for _, task := range tasks {
 		s.updateWaitingTaskCounter(-1, -task.NQ())
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
+		// A group is only taken out once every request in it is done, and
+		// each is told its own reason rather than the owner's.
+		if g, ok := task.Task.(ExpirableGroup); ok {
+			g.FinishExpired()
+			continue
+		}
 		task.Done(cleanupTaskError(task))
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -482,9 +483,9 @@ func (s *SchedulerSuite) TestPruneCanceledBeforeExec() {
 			},
 		})
 		mock := task.(*MockTask)
-		mock.prune = func() Task {
+		mock.prune = func() (Task, int, error) {
 			mock.Done(context.Canceled)
-			return nil
+			return nil, 1, context.Canceled
 		}
 		s.NoError(scheduler.Add(task))
 		s.ErrorIs(mock.Wait(), context.Canceled)
@@ -510,10 +511,10 @@ func (s *SchedulerSuite) TestPruneCanceledBeforeExec() {
 				return nil
 			},
 		})
-		group.(*MockTask).prune = func() Task {
+		group.(*MockTask).prune = func() (Task, int, error) {
 			// the owner was canceled: it is told so, the survivor goes on
 			group.(*MockTask).Done(context.Canceled)
-			return survivor
+			return survivor, 1, context.Canceled
 		}
 		s.NoError(scheduler.Add(group))
 		s.ErrorIs(group.(*MockTask).Wait(), context.Canceled)
@@ -522,6 +523,137 @@ func (s *SchedulerSuite) TestPruneCanceledBeforeExec() {
 			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
 		}, time.Second, 10*time.Millisecond, "the group was credited with 5 and must be debited with 5")
 	})
+}
+
+// TestPruneCanceledRightBeforeExec covers the second pruning point on its own:
+// the task is still live when it leaves the queue and is canceled before the
+// executor takes it. That point also has to say why it dropped what it
+// dropped, since the cause is what separates a client that went away from a
+// request that ran out of time.
+func (s *SchedulerSuite) TestPruneCanceledRightBeforeExec() {
+	paramtable.Init()
+	logs := mlog.CaptureGlobalLogs(s.T(), &mlog.Config{
+		Level:             "debug",
+		Format:            "text",
+		DisableCaller:     true,
+		DisableTimestamp:  true,
+		DisableStacktrace: true,
+	})
+	scheduler := newScheduler(newFIFOPolicy())
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	s.Run("dropped whole before it runs", func() {
+		task := newMockTask(mockTaskConfig{
+			nq:          5,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				s.Fail("a task canceled before execution must not run")
+				return nil
+			},
+		})
+		mock := task.(*MockTask)
+		calls := 0
+		mock.prune = func() (Task, int, error) {
+			calls++
+			if calls == 1 {
+				return mock, 0, nil // live when it leaves the queue
+			}
+			mock.Done(context.Canceled)
+			return nil, 1, context.Canceled // canceled before the executor takes it
+		}
+		s.NoError(scheduler.Add(task))
+		s.ErrorIs(mock.Wait(), context.Canceled)
+		s.Equal(2, calls, "pruned once at dequeue and once before execution")
+		s.Eventually(func() bool {
+			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
+		}, time.Second, 10*time.Millisecond)
+		s.Contains(logs.String(), "task canceled before executing")
+		s.Contains(logs.String(), context.Canceled.Error())
+	})
+
+	s.Run("part of a group dropped, the rest runs", func() {
+		survivor := newMockTask(mockTaskConfig{
+			nq:          2,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				return nil
+			},
+		})
+		group := newMockTask(mockTaskConfig{
+			nq:          5,
+			executeCost: time.Millisecond,
+			execution: func(ctx context.Context) error {
+				s.Fail("the canceled owner must not run")
+				return nil
+			},
+		})
+		calls := 0
+		group.(*MockTask).prune = func() (Task, int, error) {
+			calls++
+			if calls == 1 {
+				return group, 0, nil
+			}
+			group.(*MockTask).Done(context.Canceled)
+			return survivor, 1, context.Canceled
+		}
+		s.NoError(scheduler.Add(group))
+		s.ErrorIs(group.(*MockTask).Wait(), context.Canceled)
+		s.NoError(survivor.(*MockTask).Wait(), "the survivor runs")
+		s.Eventually(func() bool {
+			return scheduler.GetWaitingTaskTotal() == 0 && scheduler.GetWaitingTaskTotalNQ() == 0
+		}, time.Second, 10*time.Millisecond, "the group was credited with 5 and must be debited with 5")
+		s.Contains(logs.String(), "canceled requests dropped from a search group before executing")
+	})
+}
+
+// expirableMock stands for a merged group that decides for itself whether all
+// of it is done, as a search group does.
+type expirableMock struct {
+	*MockTask
+	ready    bool
+	finished int
+}
+
+func (m *expirableMock) ExpiryReady(time.Time) bool {
+	return m.ready
+}
+
+func (m *expirableMock) FinishExpired() {
+	m.finished++
+	m.Done(context.DeadlineExceeded)
+}
+
+// TestExpirySweepAsksTheGroup checks that the sweep, which runs once the queue
+// is full, asks a group whether all of it is done instead of reading the
+// owner's context, which is the only context the queue holds.
+func (s *SchedulerSuite) TestExpirySweepAsksTheGroup() {
+	paramtable.Init()
+	now := time.Now()
+	sched := &scheduler{
+		policy:           newFIFOPolicy(),
+		schedulerCounter: schedulerCounter{},
+	}
+
+	// The owner's client is gone, but another request in the group is not.
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	cancelOwner()
+	group := &expirableMock{MockTask: newMockTask(mockTaskConfig{ctx: ownerCtx, nq: 3}).(*MockTask)}
+	queued := newQueuedTask(group, now.Add(-time.Second))
+	added, err := sched.policy.Push(queued)
+	s.NoError(err)
+	sched.updateWaitingTaskCounter(int64(added), queued.NQ())
+
+	sched.cleanupExpiredTasks(now)
+	s.Zero(group.finished, "a group with a live request stays in the queue")
+	s.Equal(int64(1), sched.GetWaitingTaskTotal())
+	s.Equal(int64(3), sched.GetWaitingTaskTotalNQ())
+
+	group.ready = true
+	sched.cleanupExpiredTasks(now)
+	s.Equal(1, group.finished, "once all of it is done it is taken out, as a group")
+	s.Zero(sched.GetWaitingTaskTotal())
+	s.Zero(sched.GetWaitingTaskTotalNQ())
 }
 
 func (s *SchedulerSuite) TestQueuedTaskTimingHelpers() {
