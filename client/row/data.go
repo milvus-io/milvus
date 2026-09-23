@@ -227,9 +227,14 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 			case entity.FieldTypeText:
 				data := make([]string, 0, rowsLen)
 				col = column.NewColumnText(field.Name, data)
+			case entity.FieldTypeTimestamptz:
+				col = column.NewColumnTimestamptz(field.Name, nil)
 			case entity.FieldTypeJSON:
 				data := make([][]byte, 0, rowsLen)
 				col = column.NewColumnJSONBytes(field.Name, data)
+			case entity.FieldTypeGeometry:
+				data := make([]string, 0, rowsLen)
+				col = column.NewColumnGeometryWKT(field.Name, data)
 			case entity.FieldTypeArray:
 				if field.ElementType == entity.FieldTypeStruct {
 					structColumn, err := column.NewColumnStructArrayFromSchema(field.Name, field.StructSchema)

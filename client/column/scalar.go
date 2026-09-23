@@ -237,6 +237,23 @@ func (c *ColumnTimestamptz) Slice(start, end int) Column {
 	}
 }
 
+// AppendValue appends a value into the column. It accepts time.Time, *time.Time
+// and ISO 8601 string (RFC3339Nano), since the column stores timestamptz as
+// RFC3339Nano strings internally.
+func (c *ColumnTimestamptz) AppendValue(a any) error {
+	switch v := a.(type) {
+	case time.Time:
+		return c.genericColumnBase.AppendValue(v.Format(time.RFC3339Nano))
+	case *time.Time:
+		if v == nil {
+			return c.AppendNull()
+		}
+		return c.genericColumnBase.AppendValue(v.Format(time.RFC3339Nano))
+	default:
+		return c.genericColumnBase.AppendValue(a)
+	}
+}
+
 var _ Column = (*ColumnTimestampTzIsoString)(nil)
 
 type ColumnTimestampTzIsoString struct {

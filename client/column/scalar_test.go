@@ -294,6 +294,26 @@ func (s *ScalarSuite) TestBasic() {
 	})
 }
 
+func (s *ScalarSuite) TestTimestamptzAppendValue() {
+	name := fmt.Sprintf("field_%d", rand.Intn(1000))
+	column := NewColumnTimestamptz(name, nil)
+
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	s.NoError(column.AppendValue(now))
+	s.NoError(column.AppendValue(now.Add(time.Hour)))
+	s.NoError(column.AppendValue(now.Format(time.RFC3339Nano)))
+
+	expected := []string{
+		now.Format(time.RFC3339Nano),
+		now.Add(time.Hour).Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+	}
+	s.Equal(expected, column.Data())
+	s.Equal(expected, column.FieldData().GetScalars().GetStringData().GetData())
+
+	s.Error(column.AppendValue(now.UnixMilli()))
+}
+
 func (s *ScalarSuite) TestSlice() {
 	n := 100
 	s.Run("column_bool", func() {
