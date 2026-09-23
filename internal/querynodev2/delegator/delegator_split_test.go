@@ -593,3 +593,25 @@ func TestARetiredSourceWithoutItsFamilyRefusesReads(t *testing.T) {
 		assert.ErrorIs(t, read(), merr.ErrServiceUnavailable, name)
 	}
 }
+
+// A source watched after a restart cannot tell whether it is mid-split until
+// the collection's shard states are read (the fence is behind its checkpoint
+// and is not replayed). Until then it must not answer from its own view alone:
+// that misses every target's rows and deletes, silently. Reads are refused
+// retriably while the recovery is pending, and served once it is done.
+func TestASourceRefusesReadsWhileItsSplitRecoveryIsPending(t *testing.T) {
+	sd := &shardDelegator{
+		vchannelName: "v0",
+		children:     make(map[string]ShardDelegator),
+		lifetime:     lifetime.NewLifetime(lifetime.Working),
+	}
+	sd.MarkSplitRecoveryPending()
+	_, err := sd.frontingFamily()
+	assertRetriableFamilyRefusal(t, err)
+	_, err = sd.Search(context.Background(), &querypb.SearchRequest{DmlChannels: []string{"v0"}})
+	assertRetriableFamilyRefusal(t, err)
+
+	sd.FinishSplitRecovery()
+	_, err = sd.frontingFamily()
+	assert.NoError(t, err)
+}
