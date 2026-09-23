@@ -155,6 +155,9 @@ func TestStrongReadThroughSplitSourceSeesChildDeletes(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 				go consumeDeleteWhenRequired(ctx, child1, deleteTs, child1NextTSafe)
+				// the source's own pipeline keeps consuming time ticks after the
+				// fence, and the read waits on its tsafe too.
+				go consumeDeleteWhenRequired(ctx, source, deleteTs, child1NextTSafe+10)
 
 				mvcc, err := tc.read(ctx, source)
 				require.ErrorIs(t, err, errPin)
@@ -233,6 +236,7 @@ func TestFamilySpeedupKeepsTheGuaranteeWhenAChildMVCCIsUnknown(t *testing.T) {
 	defer cancel()
 	go consumeDeleteWhenRequired(ctx, child1, guaranteeTs, 310)
 	go consumeDeleteWhenRequired(ctx, child2, guaranteeTs, 320)
+	go consumeDeleteWhenRequired(ctx, source, guaranteeTs, 330)
 	tsafe, err := source.waitTSafe(ctx, got)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(310), tsafe)
@@ -396,6 +400,7 @@ func TestStrongReadCoversChildrenDetachedAfterTheFanOutSnapshot(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			go consumeDeleteWhenRequired(ctx, child1, deleteTs, 130)
+			go consumeDeleteWhenRequired(ctx, source, deleteTs, 140)
 
 			mvcc, err := tc.read(ctx, source)
 			require.ErrorIs(t, err, errPin)

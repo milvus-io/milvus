@@ -129,7 +129,9 @@ func TestReadThroughSourceIsRefusedWhileAChildIsSpawning(t *testing.T) {
 			assert.Zero(t, source.GetLatestRequiredMVCCTimeTick(), "the read must be refused before it resolves its timestamp")
 
 			// the spawn completes: the retried read passes the family gate and is
-			// served through the child.
+			// served through the child. The source's own pipeline keeps consuming
+			// time ticks, and the read waits on its tsafe too.
+			go consumeDeleteWhenRequired(ctx, source, deleteTs, 140)
 			publishChild(source, newTSafeTestDelegator("v1", 130))
 			mvcc, err := tc.read(ctx, source)
 			require.Error(t, err)
