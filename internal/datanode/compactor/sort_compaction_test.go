@@ -585,34 +585,45 @@ func TestSortCompactionTaskBasic(t *testing.T) {
 	assert.Equal(t, datapb.CompactionType_SortCompaction, task.GetCompactionType())
 }
 
-func TestWarnIfParallelReadIgnored(t *testing.T) {
+func TestLogIfParallelReadIgnored(t *testing.T) {
 	ctx := context.Background()
 	const message = "sort read in parallel is ignored"
 
-	t.Run("manifest with parallel read warns", func(t *testing.T) {
+	t.Run("manifest with configured parallel read warns", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 8)
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 8, true)
 		assert.Contains(t, sink.String(), message)
 		assert.Contains(t, sink.String(), "manifest", "the reason must name the manifest route")
 		assert.Contains(t, sink.String(), "100", "the segment ID must be in the log")
+		assert.Contains(t, sink.String(), "[WARN]", "an operator's own setting being ignored is a warning")
 	})
 
-	t.Run("StorageV1 segment with parallel read warns", func(t *testing.T) {
+	t.Run("StorageV1 segment with configured parallel read warns", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV1, "", 8)
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV1, "", 8, true)
 		assert.Contains(t, sink.String(), message)
 		assert.Contains(t, sink.String(), "StorageV1", "the reason must name the V1 route")
 	})
 
-	t.Run("binlog V2 path does not warn", func(t *testing.T) {
+	// Every unconfigured multi-core DataNode resolves the default to >= 2, so
+	// warning here would fire on clusters that never asked for parallel reads.
+	t.Run("derived concurrency reports at info", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV2, "", 8)
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 8, false)
+		assert.Contains(t, sink.String(), message, "the no-op is still reported")
+		assert.Contains(t, sink.String(), "[INFO]")
+		assert.NotContains(t, sink.String(), "[WARN]", "a default nobody chose is not a misconfiguration")
+	})
+
+	t.Run("binlog V2 path stays quiet", func(t *testing.T) {
+		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV2, "", 8, true)
 		assert.NotContains(t, sink.String(), message)
 	})
 
-	t.Run("concurrency 1 does not warn", func(t *testing.T) {
+	t.Run("concurrency 1 stays quiet", func(t *testing.T) {
 		sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
-		warnIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 1)
+		logIfParallelReadIgnored(ctx, mlog.With(), 100, storage.StorageV3, "base_path/_metadata/manifest-1", 1, true)
 		assert.NotContains(t, sink.String(), message)
 	})
 }
