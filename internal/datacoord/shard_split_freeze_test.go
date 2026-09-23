@@ -336,3 +336,52 @@ func TestLoadMetaPreemptsACompactionOnAFrozenChannel(t *testing.T) {
 	assert.Nil(t, inspector.getCompactionTask(1), "a compaction on a frozen channel was revived from the catalog")
 	assert.NotNil(t, inspector.getCompactionTask(2))
 }
+
+// The freeze predicate runs once per compaction plan and once per dropped
+// segment of every GC round, and task records are never removed: it is an
+// index lookup, not a walk of every task ever recorded. The index follows the
+// task through every write -- the targets allocated, the task finished --
+// whichever writer makes it.
+func TestIsVChannelSplittingIsAnIndexLookup(t *testing.T) {
+	manager, _ := newSplitTestManager(t, &fakeSplitCoordinator{})
+	ctx := context.Background()
+	for id := int64(1001); id <= 2000; id++ {
+		manager.store.cache(&datapb.SplitShardTask{
+			TaskId: id, CollectionId: splitMgrCollection, State: datapb.SplitShardTaskState_SplitShardTaskDone,
+			Sources: []*datapb.SplitShardTaskSource{{Vchannel: splitMgrV3}},
+			Targets: []*datapb.SplitShardTaskTarget{{Vchannel: splitMgrV4}, {Vchannel: "by-dev-rootcoord-dml_5_1v5"}},
+		})
+	}
+	require.NoError(t, manager.store.create(ctx, manager.catalog, preparingTask()))
+	assert.Zero(t, testing.AllocsPerRun(100, func() { manager.IsVChannelSplitting(splitMgrV3) }),
+		"the freeze predicate allocates per call")
+	assert.False(t, manager.IsVChannelSplitting(splitMgrV3), "a Done split freezes nothing")
+	assert.True(t, manager.IsVChannelSplitting(splitMgrV0))
+	assert.False(t, manager.IsVChannelSplitting(splitMgrV1), "no target is allocated yet")
+
+	_, err := manager.store.modify(ctx, manager.catalog, 100, func(task *datapb.SplitShardTask) bool {
+		task.Targets[0].Vchannel, task.Targets[1].Vchannel = splitMgrV1, splitMgrV2
+		return true
+	})
+	require.NoError(t, err)
+	for _, vchannel := range []string{splitMgrV0, splitMgrV1, splitMgrV2} {
+		assert.True(t, manager.IsVChannelSplitting(vchannel), vchannel)
+	}
+	source, target := manager.store.activeSplitRoles(splitMgrV1)
+	assert.False(t, source)
+	assert.True(t, target)
+	source, target = manager.store.activeSplitRoles(splitMgrV0)
+	assert.True(t, source)
+	assert.False(t, target)
+
+	manager.finishTask(mustTask(t, manager, 100), "")
+	for _, vchannel := range []string{splitMgrV0, splitMgrV1, splitMgrV2} {
+		assert.False(t, manager.IsVChannelSplitting(vchannel), vchannel)
+	}
+
+	// A restart rebuilds it from the catalog.
+	store := newShardSplitTasks()
+	require.NoError(t, store.load(ctx, manager.catalog))
+	source, target = store.activeSplitRoles(splitMgrV0)
+	assert.False(t, source || target)
+}

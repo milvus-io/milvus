@@ -316,15 +316,8 @@ func (m *shardSplitManager) activeTaskCount() int {
 // freezes (IsVChannelSplitting). The trigger needs no such check -- it skips a
 // collection with any active split (hasActiveTaskOnCollection).
 func (m *shardSplitManager) hasActiveTaskOnVChannel(vchannel string) bool {
-	for _, task := range m.store.list() {
-		if !isSplitShardTaskActive(task) {
-			continue
-		}
-		if slices.Contains(splitSourceVChannels(task), vchannel) || slices.Contains(splitTaskTargetVChannels(task), vchannel) {
-			return true
-		}
-	}
-	return false
+	source, target := m.store.activeSplitRoles(vchannel)
+	return source || target
 }
 
 // hasActiveTaskOnCollection reports whether a split of the collection is not
