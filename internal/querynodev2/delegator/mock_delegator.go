@@ -214,6 +214,38 @@ func (_c *MockShardDelegator_DetachSplitChild_Call) RunAndReturn(run func(string
 	return _c
 }
 
+// FinishSplitRecovery provides a mock function with no fields
+func (_m *MockShardDelegator) FinishSplitRecovery() {
+	_m.Called()
+}
+
+// MockShardDelegator_FinishSplitRecovery_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishSplitRecovery'
+type MockShardDelegator_FinishSplitRecovery_Call struct {
+	*mock.Call
+}
+
+// FinishSplitRecovery is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) FinishSplitRecovery() *MockShardDelegator_FinishSplitRecovery_Call {
+	return &MockShardDelegator_FinishSplitRecovery_Call{Call: _e.mock.On("FinishSplitRecovery")}
+}
+
+func (_c *MockShardDelegator_FinishSplitRecovery_Call) Run(run func()) *MockShardDelegator_FinishSplitRecovery_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_FinishSplitRecovery_Call) Return() *MockShardDelegator_FinishSplitRecovery_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_FinishSplitRecovery_Call) RunAndReturn(run func()) *MockShardDelegator_FinishSplitRecovery_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ForwardKnownDeletesToParent provides a mock function with given fields: ctx
 func (_m *MockShardDelegator) ForwardKnownDeletesToParent(ctx context.Context) error {
 	ret := _m.Called(ctx)
@@ -973,6 +1005,38 @@ func (_c *MockShardDelegator_MarkReleasing_Call) Return() *MockShardDelegator_Ma
 }
 
 func (_c *MockShardDelegator_MarkReleasing_Call) RunAndReturn(run func()) *MockShardDelegator_MarkReleasing_Call {
+	_c.Run(run)
+	return _c
+}
+
+// MarkSplitRecoveryPending provides a mock function with no fields
+func (_m *MockShardDelegator) MarkSplitRecoveryPending() {
+	_m.Called()
+}
+
+// MockShardDelegator_MarkSplitRecoveryPending_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkSplitRecoveryPending'
+type MockShardDelegator_MarkSplitRecoveryPending_Call struct {
+	*mock.Call
+}
+
+// MarkSplitRecoveryPending is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) MarkSplitRecoveryPending() *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	return &MockShardDelegator_MarkSplitRecoveryPending_Call{Call: _e.mock.On("MarkSplitRecoveryPending")}
+}
+
+func (_c *MockShardDelegator_MarkSplitRecoveryPending_Call) Run(run func()) *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkSplitRecoveryPending_Call) Return() *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkSplitRecoveryPending_Call) RunAndReturn(run func()) *MockShardDelegator_MarkSplitRecoveryPending_Call {
 	_c.Run(run)
 	return _c
 }
