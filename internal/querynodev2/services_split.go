@@ -26,7 +26,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -351,17 +350,23 @@ func reuseSplitChild(ctx context.Context, existing delegator.ShardDelegator, par
 // respawnSplitChildrenOnRecovery re-creates the in-process split children for a
 // source vchannel that is mid-split, after the source delegator is (re)watched.
 // On a restart the SplitShard fence may sit behind the channel checkpoint and
-// never be re-consumed, so the children would otherwise be lost; instead the
-// targets are re-derived from durable coordinator state (the collection's
-// shard infos). It is a no-op unless this vchannel is itself a fenced split
-// source, and ProcessSplitShard is idempotent so an already-spawned child is
-// left untouched (the common, non-restart case). The source refuses reads until
-// it returns (MarkSplitRecoveryPending, set by the watch); a failing describe is
-// retried rather than given up on.
-func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, source delegator.ShardDelegator, collectionID int64, sourceVChannel string) {
+// never be re-consumed, so the children would otherwise be lost.
+//
+// The watch runs it only for a channel whose recovery info names split targets
+// (VchannelInfo.split_target_channels): DataCoord fills it from the split task
+// on an unfinished split source, so it is exactly the targets this source
+// fronts -- also when several sources of a collection split at once, where the
+// collection meta could not tell which source fronts which target. The
+// collection is still described once, as a safeguard: a source the collection
+// no longer lists was retired by an adoption, its targets are shards of their
+// own, and it must refuse reads instead of fronting them. ProcessSplitShard is
+// idempotent, so a child the replayed fence already spawned is left untouched.
+// The source refuses reads until it returns (MarkSplitRecoveryPending, set by
+// the watch); a failing describe is retried rather than given up on.
+func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, source delegator.ShardDelegator, collectionID int64, sourceVChannel string, targets []string) {
 	log := mlog.With(mlog.Int64("collectionID", collectionID), mlog.String("sourceVChannel", sourceVChannel))
-	// Deferred, so it runs after ProcessSplitShard below has made the re-derived
-	// targets pending spawns: reads go from refused-while-recovering straight to
+	// Deferred, so it runs after ProcessSplitShard below has made the targets
+	// pending spawns: reads go from refused-while-recovering straight to
 	// refused-while-spawning, never answered without the targets in between.
 	defer source.FinishSplitRecovery()
 	if node.mixCoord == nil {
@@ -377,84 +382,17 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 		return
 	}
 
-	vchannels := resp.GetVirtualChannelNames()
-	shardInfos := resp.GetShardInfos()
-
-	// A source the collection no longer lists was retired by an adoption: there
-	// is no target left to re-derive, and it must never serve alone.
-	if len(vchannels) > 0 && !lo.Contains(vchannels, sourceVChannel) {
+	// A source the collection no longer lists was retired by an adoption: its
+	// targets are shards of their own, and it must never serve alone.
+	if vchannels := resp.GetVirtualChannelNames(); len(vchannels) > 0 && !lo.Contains(vchannels, sourceVChannel) {
 		source.RefuseReadsAsRetiredSource(ctx)
-		return
-	}
-
-	stateOf := func(vchannel string) schemapb.ShardState {
-		for i, name := range vchannels {
-			if name == vchannel && i < len(shardInfos) {
-				return shardInfos[i].GetState()
-			}
-		}
-		return schemapb.ShardState_ShardNormal
-	}
-
-	// only a fenced split source recovers children; a Normal vchannel does not.
-	if stateOf(sourceVChannel) != schemapb.ShardState_ShardSplitting {
-		return
-	}
-
-	// Re-front the not-yet-adopted (Creating) targets, but only when this source
-	// is the collection's ONLY splitting one.
-	//
-	// A read fans out to every source, so a target fronted by two of them has its
-	// post-fence rows returned twice. Which single source fronts which target is
-	// the coordinator's choice, made when it built the fence messages; it is
-	// provenance with the split task's lifetime and is not in the collection
-	// meta, so this rebuild cannot reproduce it from a DescribeCollection alone.
-	//
-	// With one splitting source the choice is forced -- every Creating target is
-	// fronted by it -- and the rebuild is exact. With several (a rehash, where
-	// every target draws from every source) it is not derivable here, and
-	// guessing would double-count rows. Today the trigger (DataCoord
-	// shard_split_manager.go's detectOnce, "one split per collection at a
-	// time") never plans a second active task for a collection that already has
-	// one, so two of ITS shards being simultaneously Splitting cannot happen
-	// regardless of dataCoord.shardSplit.maxConcurrentTasks (which only bounds
-	// how many collections split concurrently, not shards within one) -- this
-	// branch is unreached in practice and kept only as a defensive fallback
-	// should that invariant ever change. Skipping the respawn instead (I-2)
-	// does not refuse reads and is not visible as the vchannel "not serving": the
-	// source is up and answers every read on its own, from its own (pre-fence)
-	// view alone, exactly like frontingChildren() with an empty snapshot. What is
-	// missing is the unfronted target's rows written after the fence -- silently,
-	// not as an error -- until the target is adopted and the proxy starts routing
-	// its key range there directly. Accepted as a known gap (see doc §11); not
-	// fixed this round.
-	splittingSources := 0
-	for i := range vchannels {
-		if i < len(shardInfos) && shardInfos[i].GetState() == schemapb.ShardState_ShardSplitting {
-			splittingSources++
-		}
-	}
-	if splittingSources > 1 {
-		log.Warn(ctx, "several sources are splitting; the fronting assignment is not derivable from meta, skipping the child respawn",
-			mlog.Int("splittingSources", splittingSources))
-		return
-	}
-
-	var targets []string
-	for i, vchannel := range vchannels {
-		if i >= len(shardInfos) || shardInfos[i].GetState() != schemapb.ShardState_ShardCreating {
-			continue
-		}
-		targets = append(targets, vchannel)
-	}
-	if len(targets) == 0 {
 		return
 	}
 	if err := source.ProcessSplitShard(ctx, targets); err != nil {
 		log.Warn(ctx, "failed to respawn split children on recovery", mlog.Err(err))
 		return
 	}
-	log.Info(ctx, "respawned in-process split children on recovery", mlog.Int("targetCount", len(targets)))
+	log.Info(ctx, "respawned in-process split children on recovery", mlog.Strings("targets", targets))
 }
 
 // describeForSplitRecovery describes the collection for a split recovery,

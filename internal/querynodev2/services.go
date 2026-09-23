@@ -394,11 +394,14 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		return merr.Status(err), nil
 	}
 
-	// Until the split recovery below has read the collection's shard states,
-	// this vchannel may be a split source whose fence is behind its checkpoint;
-	// refuse reads through it rather than answer without its targets. A node
-	// without a coordinator handle cannot recover anything (tests only).
-	recoverSplit := node.mixCoord != nil
+	// A split source whose fence is behind its checkpoint must re-front its
+	// targets, which DataCoord names on its recovery info; until the recovery
+	// below has made them pending spawns, reads through it are refused rather
+	// than answered without the targets. Every other channel -- no target named
+	// -- skips both. A node without a coordinator handle cannot recover
+	// anything (tests only).
+	splitTargets := channel.GetSplitTargetChannels()
+	recoverSplit := node.mixCoord != nil && len(splitTargets) > 0
 	if recoverSplit {
 		delegator.MarkSplitRecoveryPending()
 	}
@@ -409,11 +412,9 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	node.distDeltaTracker.markChannelUpsert(channel.GetChannelName())
 	// recover in-process split children if this source vchannel is mid-split: on a
 	// restart the SplitShard fence may sit behind the channel checkpoint and never
-	// be re-consumed, so re-derive the targets from durable coordinator state. This
-	// runs in the background so it does not slow the watch, and is a no-op on a
-	// normal watch (the vchannel is not yet a fenced split source).
+	// be re-consumed. This runs in the background so it does not slow the watch.
 	if recoverSplit {
-		go node.respawnSplitChildrenOnRecovery(node.ctx, delegator, req.GetCollectionID(), channel.GetChannelName())
+		go node.respawnSplitChildrenOnRecovery(node.ctx, delegator, req.GetCollectionID(), channel.GetChannelName(), splitTargets)
 	}
 	log.Info(ctx, "watch dml channel success")
 	return merr.Success(), nil

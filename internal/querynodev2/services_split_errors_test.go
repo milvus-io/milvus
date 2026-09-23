@@ -121,10 +121,9 @@ func TestWaitSplitTargetRecoveryGivesUp(t *testing.T) {
 	})
 }
 
-// The recovery respawn stops without spawning when there is nothing to recover
-// or no way to: the node is shutting down, the source was released, no target
-// is Creating any more, or the source refuses the spawn. In every case it lifts
-// the source's recovery refusal.
+// The recovery respawn stops without spawning when there is no way to: the node
+// is shutting down, the source was released, or the source refuses the spawn.
+// In every case it lifts the source's recovery refusal.
 func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 	describe := func(states ...schemapb.ShardState) *milvuspb.DescribeCollectionResponse {
 		resp := &milvuspb.DescribeCollectionResponse{Status: merr.Success()}
@@ -142,7 +141,7 @@ func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 		node := &QueryNode{mixCoord: syncutil.NewFuture[types.MixCoordClient]()}
 		source := delegator.NewMockShardDelegator(t)
 		source.EXPECT().FinishSplitRecovery().Return().Once()
-		node.respawnSplitChildrenOnRecovery(ctx, source, 1, "src")
+		node.respawnSplitChildrenOnRecovery(ctx, source, 1, "src", []string{"t1", "t2"})
 	})
 
 	t.Run("a released source stops retrying a failing describe", func(t *testing.T) {
@@ -154,17 +153,7 @@ func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 		source := delegator.NewMockShardDelegator(t)
 		source.EXPECT().Serviceable().Return(false)
 		source.EXPECT().FinishSplitRecovery().Return().Once()
-		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
-	})
-
-	t.Run("every target already adopted", func(t *testing.T) {
-		mc := mocks.NewMockMixCoordClient(t)
-		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
-			describe(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
-		node := &QueryNode{mixCoord: mixCoordFuture(mc)}
-		source := delegator.NewMockShardDelegator(t)
-		source.EXPECT().FinishSplitRecovery().Return().Once()
-		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 	})
 
 	t.Run("the source refuses the respawn", func(t *testing.T) {
@@ -175,7 +164,7 @@ func TestRespawnSplitChildrenOnRecoveryBailsOut(t *testing.T) {
 		source := delegator.NewMockShardDelegator(t)
 		source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).Return(errors.New("no spawner")).Once()
 		source.EXPECT().FinishSplitRecovery().Return().Once()
-		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 	})
 }
 
@@ -211,7 +200,7 @@ func TestRespawnSplitChildrenOnRecoveryRetriesAFailingDescribe(t *testing.T) {
 	}).Once()
 	source.EXPECT().FinishSplitRecovery().Run(func() { steps = append(steps, "finish") }).Once()
 
-	node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+	node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 	// the targets are pending spawns (reads refused) before the recovery's own
 	// refusal is lifted, so no read is ever served without them.
 	assert.Equal(t, []string{"spawn", "finish"}, steps)
@@ -303,11 +292,12 @@ func TestRespawnSplitChildrenOnRecoveryTimesOutAHungDescribe(t *testing.T) {
 	node := &QueryNode{mixCoord: mixCoordFuture(mc)}
 	source := delegator.NewMockShardDelegator(t)
 	source.EXPECT().Serviceable().Return(true).Maybe()
+	source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).Return(nil).Once()
 	source.EXPECT().FinishSplitRecovery().Return().Once()
 
 	done := make(chan struct{})
 	go func() {
-		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+		node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 		close(done)
 	}()
 	select {
