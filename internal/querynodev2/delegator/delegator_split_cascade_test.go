@@ -237,6 +237,10 @@ func TestStrongReadCoversGrandchildrenDetachedMidRead(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			go consumeDeleteWhenRequired(ctx, family.grandchild, deleteTs, 130)
+			// the source and v1 keep consuming time ticks, and the read waits on
+			// their own tsafes too.
+			go consumeDeleteWhenRequired(ctx, family.source, deleteTs, 140)
+			go consumeDeleteWhenRequired(ctx, family.child1, deleteTs, 150)
 
 			mvcc, err := tc.read(ctx, family.source)
 			require.ErrorIs(t, err, errPin)
