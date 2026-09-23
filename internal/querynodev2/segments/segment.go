@@ -1164,7 +1164,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	if s.IsSorted() && fieldSchema.GetIsPrimaryKey() {
 		log.Info("skip loading index for pk field in sorted segment")
 		// set field index, preventing repeated loading index task
-		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+		s.fieldIndexes.Insert(indexInfo.GetIndexID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{
 				FieldID: indexInfo.GetFieldID(),
 			},
