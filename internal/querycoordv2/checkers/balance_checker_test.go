@@ -2028,7 +2028,7 @@ func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) 
 	}
 	describeAs := func(resp *milvuspb.DescribeCollectionResponse) func(*meta.MockBroker) {
 		return func(broker *meta.MockBroker) {
-			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(resp, nil).Maybe()
+			broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(resp, nil).Maybe()
 		}
 	}
 
@@ -2052,7 +2052,7 @@ func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) 
 	})
 	t.Run("shard states unknown: frozen", func(t *testing.T) {
 		assert.Zero(t, run(t, channels("v0"), nil, func(broker *meta.MockBroker) {
-			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
+			broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).
 				Return(nil, merr.WrapErrServiceUnavailable("rootcoord down")).Maybe()
 		}), "without the shard states the freeze cannot be ruled out")
 	})
@@ -2064,7 +2064,7 @@ func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) 
 func splitFreezeChecker(t *testing.T) (*BalanceChecker, *assign.PriorityQueue) {
 	checker := createTestBalanceChecker()
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
 		VirtualChannelNames: []string{"v0", "v1", "v2", "v9"},
 		ShardInfos: []*schemapb.CollectionShardInfo{
 			{State: schemapb.ShardState_ShardSplitting},

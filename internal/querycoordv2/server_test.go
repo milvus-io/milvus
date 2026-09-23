@@ -789,13 +789,16 @@ func (suite *ServerSuite) hackServer() {
 	suite.broker.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil).Maybe()
 	for _, collection := range suite.collections {
 		suite.broker.EXPECT().GetPartitions(mock.Anything, collection).Return(suite.partitions[collection], nil).Maybe()
-		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(&milvuspb.DescribeCollectionResponse{
+		described := &milvuspb.DescribeCollectionResponse{
 			DbName:         util.DefaultDBName,
 			DbId:           1,
 			CollectionID:   collection,
 			CollectionName: "collection_" + strconv.FormatInt(collection, 10),
 			Schema:         &schemapb.CollectionSchema{},
-		}, nil).Maybe()
+		}
+		suite.broker.EXPECT().DescribeCollection(mock.Anything, collection).Return(described, nil).Maybe()
+		// the shard split state cache reads through the internal describe.
+		suite.broker.EXPECT().DescribeCollectionInternal(mock.Anything, collection).Return(described, nil).Maybe()
 		suite.expectGetRecoverInfo(collection)
 	}
 	mlog.Debug(suite.ctx, "server hacked")
@@ -812,6 +815,10 @@ func (suite *ServerSuite) hackBroker(server *Server) {
 
 	for _, collection := range suite.collections {
 		mockRootCoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Success(),
+			Schema: &schemapb.CollectionSchema{},
+		}, nil).Maybe()
+		mockRootCoord.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 			Status: merr.Success(),
 			Schema: &schemapb.CollectionSchema{},
 		}, nil).Maybe()

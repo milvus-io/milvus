@@ -51,7 +51,7 @@ func TestShardSplitStateCache(t *testing.T) {
 	t.Run("reports the splitting source channels and caches within the TTL", func(t *testing.T) {
 		broker := NewMockBroker(t)
 		// only one DescribeCollection despite several queries: the TTL caches it.
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(splittingCollectionResp(), nil).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		assert.True(t, cache.IsShardSplitting(ctx, 1))
@@ -61,7 +61,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("a collection with no splitting shard is not frozen", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(2)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(2)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"v0", "v1"},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: schemapb.ShardState_ShardNormal},
@@ -76,8 +76,8 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("a transient error falls back to the last known value", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(3)).Return(splittingCollectionResp(), nil).Once()
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(3)).Return(nil, errors.New("coord down")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(3)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(3)).Return(nil, errors.New("coord down")).Once()
 		cache := NewShardSplitStateCache(broker, 0) // TTL 0 forces a refetch every query
 
 		assert.Equal(t, []string{"v0"}, cache.SplittingSourceChannels(ctx, 3))
@@ -87,7 +87,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("reports sources and creating targets by state", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(5)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(5)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"src", "t1", "t2", "other"},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: schemapb.ShardState_ShardSplitting}, // src: fenced source
@@ -105,7 +105,7 @@ func TestShardSplitStateCache(t *testing.T) {
 	t.Run("adoption lifts the freeze", func(t *testing.T) {
 		broker := NewMockBroker(t)
 		// adoption makes the targets Normal and delists the source in one commit.
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(6)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(6)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"t1", "t2"},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: schemapb.ShardState_ShardNormal},
@@ -120,11 +120,11 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("ReadShardStates reads past the TTL and refreshes the cache", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(8)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(8)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"v0"},
 			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
 		}, nil).Once()
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(8)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(8)).Return(splittingCollectionResp(), nil).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		assert.Empty(t, cache.CreatingTargetChannels(ctx, 8))
@@ -138,8 +138,8 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("ReadShardStates falls back to the last cached read when the fresh read fails", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(9)).Return(splittingCollectionResp(), nil).Once()
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(9)).Return(nil, errors.New("coord down")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(9)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(9)).Return(nil, errors.New("coord down")).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		assert.NotEmpty(t, cache.CreatingTargetChannels(ctx, 9))
@@ -151,7 +151,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("ReadShardStates reports the error when nothing is cached", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(12)).Return(nil, errors.New("coord down")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(12)).Return(nil, errors.New("coord down")).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		states, err := cache.ReadShardStates(ctx, 12)
@@ -161,7 +161,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("SplitWindowTargets marks every pulled channel the read did not see settled", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(10)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(10)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"normal", "splitting", "dropped", "creating"},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: schemapb.ShardState_ShardNormal},
@@ -184,7 +184,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("a listed vchannel without a shard info is a Normal legacy shard", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(11)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(11)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"a", "b"},
 			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardCreating}},
 		}, nil).Once()
@@ -199,7 +199,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("CreatingTargetChannelsAsOf reports not-known for an entry that predates the pull", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(13)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(13)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"src"},
 			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
 		}, nil).Once()
@@ -216,7 +216,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("CreatingTargetChannelsAsOf reports the creating channels for an entry no older than the pull", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(14)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(14)).Return(splittingCollectionResp(), nil).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		before := time.Now()
@@ -227,7 +227,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("CreatingTargetChannelsAsOf reports not-known when nothing is cached", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(15)).Return(nil, errors.New("coord down")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(15)).Return(nil, errors.New("coord down")).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		channels, ok := cache.CreatingTargetChannelsAsOf(ctx, 15, time.Time{})
@@ -237,7 +237,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("ChannelStates returns one read of every channel's state", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(16)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(16)).Return(splittingCollectionResp(), nil).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		states, ok := cache.ChannelStates(ctx, 16)
@@ -257,7 +257,7 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("ChannelStates reports not-known when nothing is cached", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(17)).Return(nil, errors.New("coord down")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(17)).Return(nil, errors.New("coord down")).Once()
 		cache := NewShardSplitStateCache(broker, time.Minute)
 
 		states, ok := cache.ChannelStates(ctx, 17)
@@ -267,9 +267,9 @@ func TestShardSplitStateCache(t *testing.T) {
 
 	t.Run("Invalidate forces a refetch", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(4)).Return(splittingCollectionResp(), nil).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(4)).Return(splittingCollectionResp(), nil).Once()
 		// after the split completes the shards are Normal again.
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(4)).Return(&milvuspb.DescribeCollectionResponse{
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(4)).Return(&milvuspb.DescribeCollectionResponse{
 			VirtualChannelNames: []string{"v0", "v1", "v2"},
 			ShardInfos: []*schemapb.CollectionShardInfo{
 				{State: schemapb.ShardState_ShardNormal},
@@ -321,7 +321,7 @@ func TestCheckShardSplitMovable(t *testing.T) {
 	ctx := context.Background()
 	check := func(t *testing.T, resp *milvuspb.DescribeCollectionResponse, describeErr error, window []string, current ...string) error {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(resp, describeErr).Maybe()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(resp, describeErr).Maybe()
 		targetMgr := NewMockTargetManager(t)
 		var marks typeutil.Set[string]
 		if len(window) > 0 {
@@ -434,7 +434,7 @@ func TestShardSplitFreezeByChannel(t *testing.T) {
 	})
 	t.Run("states unknown: everything", func(t *testing.T) {
 		broker := NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(nil, errors.New("coord down"))
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(nil, errors.New("coord down"))
 		f := EvalShardSplitFreeze(ctx, NewShardSplitStateCache(broker, time.Minute), NewMockTargetManager(t), 1)
 		frozen(t, f, "v9")
 	})
@@ -452,7 +452,7 @@ func TestShardSplitStateCacheSharesAnInFlightRead(t *testing.T) {
 	release := make(chan struct{})
 	calls := atomic.Int32{}
 	broker := NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).RunAndReturn(
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).RunAndReturn(
 		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 			calls.Add(1)
 			<-release
@@ -485,7 +485,7 @@ func TestShardSplitStateCacheKeepsTheNewerRead(t *testing.T) {
 	oldIssued := make(chan struct{})
 	var calls atomic.Int32
 	broker := NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).RunAndReturn(
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).RunAndReturn(
 		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 			if calls.Add(1) == 1 {
 				close(oldIssued)
@@ -525,7 +525,7 @@ func TestShardSplitStateCacheInvalidateKeepsTheFallback(t *testing.T) {
 	var fail atomic.Bool
 	var calls atomic.Int32
 	broker := NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).RunAndReturn(
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).RunAndReturn(
 		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 			calls.Add(1)
 			if fail.Load() {
@@ -543,5 +543,21 @@ func TestShardSplitStateCacheInvalidateKeepsTheFallback(t *testing.T) {
 	states, ok := cache.ChannelStates(ctx, 1)
 	assert.Equal(t, int32(2), calls.Load(), "an invalidated entry is refreshed")
 	assert.True(t, ok, "a failed refresh falls back to the last read")
+	assert.True(t, states.Splitting())
+}
+
+// AV-L6-M1: rootcoord's DescribeCollection reports a collection that is being
+// dropped as not found. The shard states are read through the internal
+// describe, which still answers for it, so a Dropping collection's channels
+// keep being watched (and released) instead of failing closed as "states
+// unknown".
+func TestShardSplitStateCacheReadsADroppingCollection(t *testing.T) {
+	broker := NewMockBroker(t)
+	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(nil, merr.WrapErrCollectionNotFound(int64(1))).Maybe()
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(splittingCollectionResp(), nil).Maybe()
+	cache := NewShardSplitStateCache(broker, time.Minute)
+
+	states, ok := cache.ChannelStates(context.Background(), 1)
+	assert.True(t, ok)
 	assert.True(t, states.Splitting())
 }

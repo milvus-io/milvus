@@ -85,7 +85,7 @@ func newSplitMoveServer(t *testing.T, c splitMoveCase) *Server {
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.NextTarget).Return(nil).Maybe()
 
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(c.states, c.describeErr).Maybe()
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(c.states, c.describeErr).Maybe()
 
 	server := &Server{
 		meta:       m,

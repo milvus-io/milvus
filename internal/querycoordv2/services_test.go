@@ -303,7 +303,7 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+	describe := func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
 		for _, collection := range suite.collections {
 			if collection == collectionID {
 				return &milvuspb.DescribeCollectionResponse{
@@ -325,7 +325,10 @@ func (suite *ServiceSuite) SetupTest() {
 		return &milvuspb.DescribeCollectionResponse{
 			Status: merr.Status(merr.ErrCollectionNotFound),
 		}, nil
-	}).Maybe()
+	}
+	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).RunAndReturn(describe).Maybe()
+	// the shard split state cache reads through the internal describe.
+	suite.broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(describe).Maybe()
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) ([]int64, error) {
 		partitionIDs, ok := suite.partitions[collectionID]
 		if !ok {

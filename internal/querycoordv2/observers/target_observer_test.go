@@ -1291,13 +1291,15 @@ func newSplitHandoffFixture(t *testing.T) *splitHandoffFixture {
 	assert.NoError(t, f.meta.PutCollection(f.ctx, utils.CreateTestCollection(f.collectionID, 1)))
 
 	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, f.collectionID).RunAndReturn(
-		func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
-			if f.describeErr != nil {
-				return nil, f.describeErr
-			}
-			return f.describe, nil
-		}).Maybe()
+	describe := func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
+		if f.describeErr != nil {
+			return nil, f.describeErr
+		}
+		return f.describe, nil
+	}
+	broker.EXPECT().DescribeCollection(mock.Anything, f.collectionID).RunAndReturn(describe).Maybe()
+	// the shard split state cache reads through the internal describe.
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, f.collectionID).RunAndReturn(describe).Maybe()
 	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, f.collectionID).RunAndReturn(
 		func(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
 			return f.channels, f.segments, nil
