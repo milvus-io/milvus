@@ -226,6 +226,8 @@ func structArrayFieldFromProto(p *schemapb.StructArrayFieldSchema) *Field {
 	typeParams := KvPairsMap(p.GetTypeParams())
 	for _, sf := range p.GetFields() {
 		field := NewField().ReadProto(sf)
+		// Like PyMilvus, expose nullable only on the parent struct field.
+		field.Nullable = false
 		// unwrap Array/ArrayOfVector wrapper added by ProtoMessage()
 		switch sf.GetDataType() {
 		case schemapb.DataType_Array, schemapb.DataType_ArrayOfVector:
