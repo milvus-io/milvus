@@ -1358,17 +1358,6 @@ common:
     downloadTimeout: 5m # Timeout for downloading a single file resource. It accepts duration strings such as 30s or 5m.
   groupBy:
     maxGroups: 100000 # Maximum number of groups allowed in GROUP BY aggregation, enforced both per segment and during cross-segment merge. Exceeding this limit fails the query.
-  AiSAQIndex:
-    maxDegree: 56
-    searchListSize: 100
-    pqCodeBudgetGBRatio: 0.125
-    searchCacheBudgetGBRatio: 0
-    diskPQCodeBudgetGBRatio: 0.25
-    inlinePQ: -1 # Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by the node size.
-    pqCacheSize: 0 # compressed vectors cache DRAM size in bytes.
-    rearrange: true # Enable vectors rearrangement during build.
-    pqReadPageCacheSize: 0 # compressed vectors read cache DRAM size in bytes per thread.
-    numEntryPoints: 100 # Number of entry points that should be generated to be used as a search start points
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -1733,8 +1722,15 @@ knowhere:
       max_degree: 56 # Maximum degree of the Vamana graph
       pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
       search_list_size: 100 # Size of the candidate list during building graph
+      disk_pq_code_budget_gb_ratio: 0.25 # Controls the size of the PQ codes of the high precision vectors stored in the index (used for re-ranking), compared to the size of the uncompressed data
+      search_cache_budget_gb_ratio: 0.0 # Controls the amount of DRAM to be used for caching frequently accessed index nodes
+      inline_pq: -1 # Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by max degree
+      pq_cache_size: 0 # Compressed vectors cache DRAM size in bytes, default 0
+      rearrange: true # Enable compressed vectors reordering search optimization, default false
+      num_entry_points: 100 # Number of entry points valid only with aisaq option
     search:
       beam_width_ratio: 4 # Ratio between the maximum number of IO requests per search iteration and CPU number
+      pq_read_page_cache_size: 0 # Enable compressed vectors read-page cache DRAM size per thread, default 0
   DISKANN:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph
