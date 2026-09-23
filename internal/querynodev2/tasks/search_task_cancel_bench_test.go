@@ -58,7 +58,7 @@ func BenchmarkPruneCanceledStandalone(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = t.PruneCanceled()
+		_, _, _ = t.PruneCanceled()
 	}
 }
 
@@ -67,7 +67,7 @@ func BenchmarkPruneCanceledGroupOf8(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = t.PruneCanceled()
+		_, _, _ = t.PruneCanceled()
 	}
 }
 
@@ -76,7 +76,7 @@ func BenchmarkPruneCanceledGroupOf3(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = t.PruneCanceled()
+		_, _, _ = t.PruneCanceled()
 	}
 }
 

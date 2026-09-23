@@ -90,13 +90,21 @@ func TestMergeRefusesCanceledTasks(t *testing.T) {
 	assert.Equal(t, int64(3), owner.nq)
 }
 
+// survivorOf prunes t and returns only the task left to execute.
+func survivorOf(t scheduler.PrunableTask) scheduler.Task {
+	survivor, _, _ := t.PruneCanceled()
+	return survivor
+}
+
 func TestPruneCanceledKeepsGroupIntact(t *testing.T) {
 	owner := newGroupMember(context.Background(), 1)
 	m1 := newGroupMember(context.Background(), 2)
 	require.True(t, owner.Merge(m1))
 
-	pruned := owner.PruneCanceled()
+	pruned, dropped, cause := owner.PruneCanceled()
 	assert.Same(t, owner, pruned)
+	assert.Zero(t, dropped)
+	assert.NoError(t, cause)
 	assert.Equal(t, []*SearchTask{m1}, owner.others)
 	assert.Equal(t, int64(3), owner.nq)
 	assertNotNotified(t, owner)
@@ -113,9 +121,11 @@ func TestPruneCanceledDropsCanceledMember(t *testing.T) {
 	require.Equal(t, int64(7), owner.nq)
 
 	cancelM1()
-	pruned := owner.PruneCanceled()
+	pruned, dropped, cause := owner.PruneCanceled()
 
 	require.NotNil(t, pruned)
+	assert.Equal(t, 1, dropped)
+	assert.ErrorIs(t, cause, context.Canceled, "the caller is told why, so it can log it")
 	assert.Same(t, owner, pruned, "the owner survives and keeps owning the group")
 	assert.Equal(t, []*SearchTask{m2}, owner.others)
 	assert.Equal(t, int64(5), owner.nq)
@@ -136,9 +146,10 @@ func TestPruneCanceledRegroupsWhenOwnerIsCanceled(t *testing.T) {
 	require.True(t, owner.Merge(m2))
 
 	cancelOwner()
-	pruned := owner.PruneCanceled()
+	pruned, dropped, _ := owner.PruneCanceled()
 
 	require.NotNil(t, pruned)
+	assert.Equal(t, 1, dropped)
 	newOwner, ok := pruned.(*SearchTask)
 	require.True(t, ok)
 	assert.Same(t, m1, newOwner, "the first surviving member becomes the owner")
@@ -164,20 +175,23 @@ func TestPruneCanceledReturnsNilWhenEveryoneIsCanceled(t *testing.T) {
 	require.True(t, owner.Merge(m1))
 
 	cancel()
-	assert.Nil(t, owner.PruneCanceled())
+	survivor, dropped, cause := owner.PruneCanceled()
+	assert.Nil(t, survivor)
+	assert.Equal(t, 2, dropped)
+	assert.ErrorIs(t, cause, context.Canceled)
 	assert.ErrorIs(t, waitResult(t, owner), context.Canceled)
 	assert.ErrorIs(t, waitResult(t, m1), context.Canceled)
 }
 
 func TestPruneCanceledStandaloneTask(t *testing.T) {
 	live := newGroupMember(context.Background(), 1)
-	assert.Same(t, live, live.PruneCanceled())
+	assert.Same(t, live, survivorOf(live))
 	assertNotNotified(t, live)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	dead := newGroupMember(ctx, 1)
-	assert.Nil(t, dead.PruneCanceled())
+	assert.Nil(t, survivorOf(dead))
 	assert.ErrorIs(t, waitResult(t, dead), context.Canceled)
 }
 
@@ -299,7 +313,7 @@ func TestMergeWithoutContext(t *testing.T) {
 	assert.Equal(t, int64(2), owner.groupSize)
 
 	// The rest of the group handling has to survive the absent context too.
-	assert.Same(t, owner, owner.PruneCanceled())
+	assert.Same(t, owner, survivorOf(owner))
 	assert.NoError(t, owner.resultErr(nil))
 }
 
@@ -314,9 +328,89 @@ func TestSearchTaskIsPrunableThroughTheSchedulerInterface(t *testing.T) {
 	require.True(t, ok, "the scheduler must recognize a search group as prunable")
 
 	cancelOwner()
-	pruned := prunable.PruneCanceled()
+	pruned, _, _ := prunable.PruneCanceled()
 	require.NotNil(t, pruned)
 	assert.Same(t, scheduler.Task(survivor), pruned, "the surviving member is what the scheduler executes")
 	assert.ErrorIs(t, waitResult(t, owner), context.Canceled)
 	assertNotNotified(t, survivor)
+}
+
+// The queue's expiry sweep runs when the queue is full and takes out the
+// waiting tasks that are done. For a merged group, done has to mean every
+// request in it. Read from the owner's context alone, it would end the whole
+// group as soon as the owner's client went away, which is the collateral
+// failure the rest of this change prevents at the other two exits from the
+// queue.
+func TestExpiryWaitsForTheWholeGroup(t *testing.T) {
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	memberCtx, cancelMember := context.WithCancel(context.Background())
+	owner := newGroupMember(ownerCtx, 1)
+	member := newGroupMember(memberCtx, 2)
+	require.True(t, owner.Merge(member))
+
+	now := time.Now()
+	cancelOwner()
+	assert.False(t, owner.ExpiryReady(now), "a group with a live request is not done")
+
+	cancelMember()
+	assert.True(t, owner.ExpiryReady(now), "once every request is canceled, it is")
+}
+
+// Members can carry deadlines up to the merge gap apart, and the sweep acts a
+// little ahead of a deadline. One member coming due says nothing about the
+// others.
+func TestExpiryByDeadlineIsPerMember(t *testing.T) {
+	now := time.Now()
+	ownerCtx, cancelOwner := context.WithDeadline(context.Background(), now.Add(time.Hour))
+	defer cancelOwner()
+	memberCtx, cancelMember := context.WithDeadline(context.Background(), now.Add(2*time.Hour))
+	defer cancelMember()
+	owner := newGroupMember(ownerCtx, 1)
+	member := newGroupMember(memberCtx, 2)
+	require.True(t, owner.Merge(member))
+
+	assert.False(t, owner.ExpiryReady(now.Add(90*time.Minute)), "the owner is due, the member is not")
+	assert.True(t, owner.ExpiryReady(now.Add(2*time.Hour)), "both are due")
+}
+
+// When the sweep does take a group out, each request is told its own reason.
+func TestFinishExpiredTellsEachRequestItsOwnReason(t *testing.T) {
+	now := time.Now()
+	ownerCtx, cancelOwner := context.WithCancel(context.Background())
+	// Due within the sweep's window but not yet past its deadline, so its own
+	// context has no error of its own to report.
+	memberCtx, cancelMember := context.WithDeadline(context.Background(), now.Add(time.Hour))
+	defer cancelMember()
+	owner := newGroupMember(ownerCtx, 1)
+	member := newGroupMember(memberCtx, 2)
+	require.True(t, owner.Merge(member))
+
+	cancelOwner()
+	require.True(t, owner.ExpiryReady(now.Add(time.Hour)))
+	owner.FinishExpired()
+
+	assert.ErrorIs(t, waitResult(t, owner), context.Canceled, "the owner's client went away")
+	assert.ErrorIs(t, waitResult(t, member), context.DeadlineExceeded, "the member ran out of time")
+	assertNotNotified(t, owner)
+	assertNotNotified(t, member)
+}
+
+// A standalone search is a group of one, and expires exactly as it did.
+func TestExpiryOfAStandaloneSearch(t *testing.T) {
+	now := time.Now()
+	live := newGroupMember(context.Background(), 1)
+	assert.False(t, live.ExpiryReady(now), "no deadline and not canceled: never due")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	dead := newGroupMember(ctx, 1)
+	require.True(t, dead.ExpiryReady(now))
+	dead.FinishExpired()
+	assert.ErrorIs(t, waitResult(t, dead), context.Canceled)
+}
+
+func TestSearchTaskAnswersTheExpirySweepThroughTheSchedulerInterface(t *testing.T) {
+	var asTask scheduler.Task = newGroupMember(context.Background(), 1)
+	_, ok := asTask.(scheduler.ExpirableGroup)
+	assert.True(t, ok, "the sweep must recognize a search group, or it falls back to the owner's context")
 }
