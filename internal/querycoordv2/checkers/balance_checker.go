@@ -202,17 +202,38 @@ func (b *BalanceChecker) readyToCheck(ctx context.Context, collectionID int64) b
 // The queue a collection is popped from may have been built rounds before, and
 // a split may have fenced one of its shards since; the split state is
 // re-evaluated here, once tasks exist, rather than trusted from the queue.
-func (b *BalanceChecker) dropShardSplitFrozen(ctx context.Context, collectionID int64, segmentTasks, channelTasks []task.Task) ([]task.Task, []task.Task) {
+//
+// Normal balance is optional, and stays frozen for the whole collection while
+// any split of it is in progress. Stopping balance is how a node is drained
+// before it stops, and holding all of it back would pin the node until
+// gracefulStopTimeout and then force-stop it anyway; it moves every channel and
+// segment except the split's own sources and targets, which stay until the
+// flip or the force-stop.
+func (b *BalanceChecker) dropShardSplitFrozen(ctx context.Context, collectionID int64, segmentTasks, channelTasks []task.Task, isStoppingBalance bool) ([]task.Task, []task.Task) {
 	if b.splitState == nil || len(segmentTasks)+len(channelTasks) == 0 {
 		return segmentTasks, channelTasks
 	}
-	if err := meta.CheckShardSplitMovable(ctx, b.splitState, b.targetMgr, collectionID); err != nil {
-		mlog.RatedInfo(ctx, rate.Limit(0.1), "drop balance tasks of a collection a shard split freezes",
-			mlog.FieldCollectionID(collectionID), mlog.Int("segmentTasks", len(segmentTasks)),
-			mlog.Int("channelTasks", len(channelTasks)), mlog.Err(err))
-		return nil, nil
+	freeze := meta.EvalShardSplitFreeze(ctx, b.splitState, b.targetMgr, collectionID)
+	if !isStoppingBalance {
+		if err := freeze.CheckCollection(); err != nil {
+			mlog.RatedInfo(ctx, rate.Limit(0.1), "drop balance tasks of a collection a shard split freezes",
+				mlog.FieldCollectionID(collectionID), mlog.Int("segmentTasks", len(segmentTasks)),
+				mlog.Int("channelTasks", len(channelTasks)), mlog.Err(err))
+			return nil, nil
+		}
+		return segmentTasks, channelTasks
 	}
-	return segmentTasks, channelTasks
+	movable := func(tasks []task.Task) []task.Task {
+		return lo.Filter(tasks, func(t task.Task, _ int) bool {
+			if err := freeze.CheckChannel(t.Shard()); err != nil {
+				mlog.RatedInfo(ctx, rate.Limit(0.1), "keep a shard split's source or target on a stopping node",
+					mlog.FieldCollectionID(collectionID), mlog.String("channel", t.Shard()), mlog.Err(err))
+				return false
+			}
+			return true
+		})
+	}
+	return movable(segmentTasks), movable(channelTasks)
 }
 
 type ReadyForBalanceFilter func(ctx context.Context, collectionID int64) bool
@@ -493,7 +514,7 @@ func (b *BalanceChecker) processBalanceQueue(
 		}
 
 		newSegmentTasks, newChannelTasks := b.generateBalanceTasksFromReplicas(ctx, balancer, replicasToBalance, config, isStoppingBalance)
-		newSegmentTasks, newChannelTasks = b.dropShardSplitFrozen(ctx, item.collectionID, newSegmentTasks, newChannelTasks)
+		newSegmentTasks, newChannelTasks = b.dropShardSplitFrozen(ctx, item.collectionID, newSegmentTasks, newChannelTasks, isStoppingBalance)
 		generatedSegmentTaskNum += len(newSegmentTasks)
 		generatedChannelTaskNum += len(newChannelTasks)
 		b.submitTasks(newSegmentTasks, newChannelTasks)

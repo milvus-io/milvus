@@ -406,12 +406,15 @@ func CheckShardSplitMovable(ctx context.Context, cache *ShardSplitStateCache, ta
 //     targets waiting for that flip.
 //
 // Without a read of the shard states none of this can be ruled out, and
-// nothing of the collection moves. Every other channel, and every segment
-// attributed to one, may move.
+// nothing of the collection moves. Neither does anything when the states are
+// behind the marks -- a marked channel they do not show Creating: the fence
+// that opened that window postdates the read, so the read cannot name its
+// source. Every other channel, and every segment attributed to one, may move.
 type ShardSplitFreeze struct {
 	collectionID int64
-	// unknown is set when the shard states could not be read.
-	unknown error
+	// everything is set when nothing of the collection may move: the shard
+	// states could not be read, or are behind the window marks.
+	everything error
 	// family are the channels of the collection's splits: sources and targets.
 	family typeutil.Set[string]
 }
@@ -426,7 +429,7 @@ func EvalShardSplitFreeze(ctx context.Context, cache *ShardSplitStateCache, targ
 	if !ok {
 		return &ShardSplitFreeze{
 			collectionID: collectionID,
-			unknown: merr.WrapErrServiceUnavailable("shard split state unknown",
+			everything: merr.WrapErrServiceUnavailable("shard split state unknown",
 				fmt.Sprintf("collection %d: its shard states could not be read", collectionID)),
 		}
 	}
@@ -437,7 +440,16 @@ func EvalShardSplitFreeze(ctx context.Context, cache *ShardSplitStateCache, targ
 // states, for a caller that has just read them fresh.
 func NewShardSplitFreeze(ctx context.Context, targetMgr TargetManagerInterface, collectionID int64, states ShardStates) *ShardSplitFreeze {
 	family := typeutil.NewSet[string]()
-	family.Insert(targetMgr.GetSplitWindowTargets(ctx, collectionID, NextTarget).Collect()...)
+	for channel := range targetMgr.GetSplitWindowTargets(ctx, collectionID, NextTarget) {
+		if states[channel] != schemapb.ShardState_ShardCreating {
+			return &ShardSplitFreeze{
+				collectionID: collectionID,
+				everything: merr.WrapErrServiceUnavailable("shard split states behind the window marks",
+					fmt.Sprintf("collection %d: the next target marks %s, which the shard states do not show as a split target", collectionID, channel)),
+			}
+		}
+		family.Insert(channel)
+	}
 	for channel, state := range states {
 		if state == schemapb.ShardState_ShardSplitting || state == schemapb.ShardState_ShardCreating {
 			family.Insert(channel)
@@ -458,8 +470,8 @@ func NewShardSplitFreeze(ctx context.Context, targetMgr TargetManagerInterface, 
 // CheckCollection returns nil when no shard split freezes anything of the
 // collection, else a retriable System error naming why.
 func (f *ShardSplitFreeze) CheckCollection() error {
-	if f.unknown != nil {
-		return f.unknown
+	if f.everything != nil {
+		return f.everything
 	}
 	if len(f.family) > 0 {
 		return merr.WrapErrServiceUnavailable("shard split in progress",
@@ -471,8 +483,8 @@ func (f *ShardSplitFreeze) CheckCollection() error {
 // CheckChannel returns nil when the channel -- its delegator, or a segment
 // attributed to it -- may move, else a retriable System error naming why.
 func (f *ShardSplitFreeze) CheckChannel(channel string) error {
-	if f.unknown != nil {
-		return f.unknown
+	if f.everything != nil {
+		return f.everything
 	}
 	if f.family.Contain(channel) {
 		return merr.WrapErrServiceUnavailable("shard split in progress",
