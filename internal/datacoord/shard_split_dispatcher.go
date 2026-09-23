@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // compactionDispatcher is the part of the compaction inspector the rewrite
@@ -228,8 +229,8 @@ func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) int64 
 	return 0
 }
 
-// hashSplitDeleteSources lists the L0 segments a rewrite plan on this channel
-// and partition folds, as plan segment entries carrying their deltalogs.
+// hashSplitDeleteSourceBinlogs turns the L0 segments a rewrite plan folds into
+// plan segment entries carrying their deltalogs.
 //
 // The rewrite commit drops its input, and the source's L0s are retired once no
 // data is left on the source to fold them. So the rewrite is the last chance to
@@ -248,8 +249,8 @@ func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) int64 
 // rebuilt every time it is assigned to a worker, so a retry after a restart
 // re-reads the set from meta. Nothing is dispatched before the source is past
 // its T_switch, from which point its L0 set is final.
-func hashSplitDeleteSources(ctx context.Context, m CompactionMeta, channel string, partitionID int64) []*datapb.CompactionSegmentBinlogs {
-	return lo.Map(hashSplitDeleteSourceSegments(ctx, m, channel, partitionID), func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
+func hashSplitDeleteSourceBinlogs(segments []*SegmentInfo) []*datapb.CompactionSegmentBinlogs {
+	return lo.Map(segments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 		return &datapb.CompactionSegmentBinlogs{
 			SegmentID:     info.GetID(),
 			CollectionID:  info.GetCollectionID(),
@@ -262,17 +263,59 @@ func hashSplitDeleteSources(ctx context.Context, m CompactionMeta, channel strin
 	})
 }
 
-// hashSplitDeleteSourceSegments is the one definition of which L0 segments a
-// rewrite plan on this channel and partition folds, in id order so the same
-// plan rebuilt twice is identical.
+// isHashSplitDeleteSource is the one definition of which L0 segment a rewrite
+// plan on a channel and partition folds.
+func isHashSplitDeleteSource(info *SegmentInfo, partitionID int64) bool {
+	return isSegmentHealthy(info) &&
+		info.GetLevel() == datapb.SegmentLevel_L0 &&
+		(info.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == partitionID)
+}
+
+// hashSplitDeleteSourceSegments lists the L0 segments a rewrite plan on this
+// channel and partition folds, in id order so the same plan rebuilt twice is
+// identical.
 func hashSplitDeleteSourceSegments(ctx context.Context, m CompactionMeta, channel string, partitionID int64) []*SegmentInfo {
 	segments := m.SelectSegments(ctx, WithChannel(channel), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return isSegmentHealthy(info) &&
-			info.GetLevel() == datapb.SegmentLevel_L0 &&
-			(info.GetPartitionID() == common.AllPartitionsID || info.GetPartitionID() == partitionID)
+		return isHashSplitDeleteSource(info, partitionID)
 	}))
-	slices.SortFunc(segments, func(a, b *SegmentInfo) int { return cmp.Compare(a.GetID(), b.GetID()) })
+	sortSegmentsByID(segments)
 	return segments
+}
+
+// hashSplitPlanSegments reads, in ONE meta scan of the source channel (one
+// segMu acquisition), a rewrite plan's healthy inputs by id and the L0 segments
+// it folds, in id order.
+//
+// One snapshot is what keeps the plan's delete set whole: an L0 compaction
+// commit appends the L0s' deletes to the input's deltalogs and retires those
+// L0s in the same write, so reading the input before such a commit and the L0
+// set after it would miss the deletes on both sides. An input that is not on
+// the channel, or not healthy, is absent from the map.
+func hashSplitPlanSegments(
+	ctx context.Context,
+	m CompactionMeta,
+	channel string,
+	partitionID int64,
+	inputIDs []int64,
+) (map[int64]*SegmentInfo, []*SegmentInfo) {
+	wanted := typeutil.NewSet(inputIDs...)
+	inputs := make(map[int64]*SegmentInfo, len(inputIDs))
+	deleteSources := make([]*SegmentInfo, 0)
+	for _, info := range m.SelectSegments(ctx, WithChannel(channel), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (wanted.Contain(info.GetID()) && isSegmentHealthy(info)) || isHashSplitDeleteSource(info, partitionID)
+	})) {
+		if wanted.Contain(info.GetID()) {
+			inputs[info.GetID()] = info
+			continue
+		}
+		deleteSources = append(deleteSources, info)
+	}
+	sortSegmentsByID(deleteSources)
+	return inputs, deleteSources
+}
+
+func sortSegmentsByID(segments []*SegmentInfo) {
+	slices.SortFunc(segments, func(a, b *SegmentInfo) int { return cmp.Compare(a.GetID(), b.GetID()) })
 }
 
 // hashSplitDeleteSourceRows counts the delete entries a rewrite plan on this

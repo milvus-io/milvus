@@ -82,13 +82,13 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitRouting() {
 		{Vchannel: "t1", Buckets: []uint64{1}},
 	}
 	meta := NewMockCompactionMeta(s.T())
-	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+	// The input is read with the source's L0 set, in one channel scan.
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{
 		ID:            200,
 		Level:         datapb.SegmentLevel_L1,
 		InsertChannel: "src",
 		State:         commonpb.SegmentState_Flushed,
-	}}).Once()
-	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+	}}})
 	task := newMixCompactionTask(&datapb.CompactionTask{
 		PlanID:           1,
 		Type:             datapb.CompactionType_HashSplitCompaction,
@@ -145,7 +145,6 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitCarriesSour
 	}
 	buildPlan := func(pool []*SegmentInfo) *datapb.CompactionPlan {
 		meta := NewMockCompactionMeta(s.T())
-		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(input).Once()
 		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(selectFrom(pool))
 		task := newMixCompactionTask(&datapb.CompactionTask{
@@ -179,7 +178,6 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitCarriesSour
 
 	s.Run("the L0s are delete sources, not inputs", func() {
 		meta := NewMockCompactionMeta(s.T())
-		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(input).Once()
 		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(selectFrom([]*SegmentInfo{input, levelZero(301, partitionID)}))
 		task := newMixCompactionTask(&datapb.CompactionTask{
@@ -223,6 +221,102 @@ func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitCarriesSour
 		plan := buildPlan([]*SegmentInfo{input})
 		s.Len(plan.GetSegmentBinlogs(), 1)
 	})
+}
+
+// An L0 compaction commit moves deletes from the source's L0s into the input's
+// own deltalogs and retires those L0s in one write. A plan that read the input
+// before such a commit and the L0 set after it would carry the deletes in
+// neither, and its commit drops the input, so those rows would come back on the
+// targets for good. The input and the L0 set are read from one meta snapshot.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitReadsInputAndLevelZeroTogether() {
+	const (
+		srcChannel  = "src"
+		partitionID = int64(10)
+		foldedDelta = "delta/folded-by-l0-compaction"
+	)
+	// Before the L0 commit: the input has no deltalog, the delete is in an L0.
+	before := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: srcChannel,
+		PartitionID: partitionID, State: commonpb.SegmentState_Flushed,
+	}}
+	// After it: the delete is in the input's deltalogs, the L0 is Dropped.
+	after := before.Clone()
+	after.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: foldedDelta}}}}
+	retiredL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 301, Level: datapb.SegmentLevel_L0, InsertChannel: srcChannel,
+		PartitionID: partitionID, State: commonpb.SegmentState_Dropped,
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "delta/301"}}}},
+	}}
+
+	meta := NewMockCompactionMeta(s.T())
+	// A per-segment read still sees the state before the commit; the channel
+	// scan runs after it.
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(before).Maybe()
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			return lo.Filter([]*SegmentInfo{after, retiredL0}, func(info *SegmentInfo, _ int) bool {
+				for _, filter := range filters {
+					if !filter.Match(info) {
+						return false
+					}
+				}
+				return true
+			})
+		})
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_HashSplitCompaction,
+		Channel:          srcChannel,
+		PartitionID:      partitionID,
+		InputSegments:    []int64{200},
+		Schema:           &schemapb.CollectionSchema{Version: 1},
+		HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+		HashSplitModulus: 2,
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	var paths []string
+	for _, seg := range plan.GetSegmentBinlogs() {
+		for _, field := range seg.GetDeltalogs() {
+			for _, binlog := range field.GetBinlogs() {
+				paths = append(paths, binlog.GetLogPath())
+			}
+		}
+	}
+	s.Contains(paths, foldedDelta, "the delete the L0 commit moved must reach the plan")
+}
+
+// A rewrite input the channel scan does not find healthy -- dropped by an
+// earlier plan, or not on the plan's channel -- refuses the plan.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitInputMissingFromTheScan() {
+	dropped := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: "src", State: commonpb.SegmentState_Dropped,
+	}}
+	meta := NewMockCompactionMeta(s.T())
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			for _, filter := range filters {
+				if !filter.Match(dropped) {
+					return nil
+				}
+			}
+			return []*SegmentInfo{dropped}
+		})
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_HashSplitCompaction,
+		Channel:          "src",
+		InputSegments:    []int64{200},
+		Schema:           &schemapb.CollectionSchema{Version: 1},
+		HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+		HashSplitModulus: 2,
+	}, nil, meta, newMockVersionManager())
+	_, err := task.BuildCompactionRequest()
+	s.ErrorIs(err, merr.ErrSegmentNotFound)
 }
 
 // A rewrite plan carries its source channel's L0 delete set and the datanode

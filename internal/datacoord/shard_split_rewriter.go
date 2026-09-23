@@ -248,7 +248,7 @@ func (m *shardSplitManager) rewriteRound(
 // holds no data left to fold them.
 //
 // Safe because every rewrite plan carries its source's L0s
-// (hashSplitDeleteSources) and folds them into the outputs it writes, so a row
+// (hashSplitPlanSegments) and folds them into the outputs it writes, so a row
 // deleted through a source L0 is already gone from the targets. The guard is
 // wider than "no rewrite input": a Sealed or Growing segment is data about to
 // become an input that has folded nothing, and datacoord does not assume the
