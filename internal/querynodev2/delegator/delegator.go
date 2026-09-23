@@ -174,6 +174,15 @@ type shardDelegator struct {
 	// stream delete buffer
 	deleteMut    sync.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
+	// deleteSeq numbers every item put into deleteBuffer (deletebuffer.Item.Seq);
+	// maxBufferedDeleteTs is the newest timestamp put so far; deletesUnordered
+	// latches once an item older than that was put, i.e. the buffer has been fed
+	// out of timestamp order (a shard split source receiving its children's
+	// forwarded deletes). All three are guarded by deleteMut: written under its
+	// write lock, read under either lock.
+	deleteSeq           uint64
+	maxBufferedDeleteTs uint64
+	deletesUnordered    bool
 
 	sf          conc.Singleflight[struct{}]
 	loader      segments.Loader
