@@ -414,6 +414,18 @@ func (m *MetaCache) getCollection(database, collectionName string, collectionID 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// Collection IDs are globally unique; channel lookups do not carry a database.
+	if database == "" && collectionName == "" && collectionID != 0 {
+		for _, db := range m.collInfo {
+			for _, info := range db {
+				if info.collID == collectionID {
+					return info, info.isCollectionCached()
+				}
+			}
+		}
+		return nil, false
+	}
+
 	db, ok := m.collInfo[database]
 	if !ok {
 		return nil, false
@@ -449,6 +461,15 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	collection, err := m.describeCollection(ctx, database, collectionName, collectionID)
 	if err != nil {
 		return nil, err
+	}
+
+	// An ID-only miss must populate the same database cache as name lookups.
+	// Older coordinators may omit DbName. The request database is not
+	// authoritative for an ID-only lookup, so serve that response uncached
+	// rather than putting it in a guessed database's name/invalidation bucket.
+	unknownDatabase := collectionName == "" && collectionID != 0 && collection.GetDbName() == ""
+	if database == "" && collectionName == "" && collectionID != 0 {
+		database = collection.GetDbName()
 	}
 
 	partitions, err := m.showPartitions(ctx, database, collectionName, collectionID)
@@ -488,6 +509,29 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
+
+	if unknownDatabase {
+		replicateID, _ := common.GetReplicateID(collection.Properties)
+		return &collectionInfo{
+			collID:                collection.CollectionID,
+			schema:                schemaInfo,
+			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+			createdTimestamp:      collection.CreatedTimestamp,
+			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+			consistencyLevel:      collection.ConsistencyLevel,
+			partitionKeyIsolation: isolation,
+			queryMode:             queryMode,
+			replicateID:           replicateID,
+			updateTimestamp:       collection.UpdateTimestamp,
+			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
+			vChannels:             collection.VirtualChannelNames,
+			pChannels:             collection.PhysicalChannelNames,
+			numPartitions:         collection.NumPartitions,
+			shardsNum:             collection.ShardsNum,
+			aliases:               collection.Aliases,
+			properties:            collection.Properties,
+		}, nil
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -638,7 +682,7 @@ func (m *MetaCache) GetCollectionName(ctx context.Context, database string, coll
 }
 
 func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, collectionName string, collectionID int64) (*collectionInfo, error) {
-	collInfo, ok := m.getCollection(database, collectionName, 0)
+	collInfo, ok := m.getCollection(database, collectionName, collectionID)
 
 	method := "GetCollectionInfo"
 	// if collInfo.collID != collectionID, means that the cache is not trustable
@@ -1029,6 +1073,9 @@ func (m *MetaCache) RemoveCollectionsByID(ctx context.Context, collectionID Uniq
 
 func (m *MetaCache) removeCollectionByID(ctx context.Context, collectionID UniqueID, version uint64, removeVersion bool) []string {
 	curVersion := m.collectionCacheVersion[collectionID]
+	if version == 0 || curVersion <= version {
+		m.sfGlobal.Forget(buildSfKeyById("", collectionID))
+	}
 	var collNames []string
 	for database, db := range m.collInfo {
 		for k, v := range db {
