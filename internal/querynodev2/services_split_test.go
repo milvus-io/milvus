@@ -278,126 +278,42 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 		future.Set(mc)
 		return &QueryNode{ctx: context.Background(), mixCoord: future}
 	}
-	// vchannels src/t1/t2 with the given per-shard states.
-	descResp := func(states ...schemapb.ShardState) *milvuspb.DescribeCollectionResponse {
-		infos := make([]*schemapb.CollectionShardInfo, len(states))
-		for i, s := range states {
-			infos[i] = &schemapb.CollectionShardInfo{State: s}
-		}
-		return &milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"src", "t1", "t2"},
-			ShardInfos:          infos,
-		}
+	listed := func(vchannels ...string) *milvuspb.DescribeCollectionResponse {
+		return &milvuspb.DescribeCollectionResponse{Status: merr.Success(), VirtualChannelNames: vchannels}
 	}
 
-	t.Run("respawns the creating targets when the source is splitting", func(t *testing.T) {
+	t.Run("re-fronts the targets its recovery info names", func(t *testing.T) {
 		mc := mocks.NewMockMixCoordClient(t)
-		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
-			descResp(schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil)
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(listed("src", "t1", "t2"), nil)
 		source := delegator.NewMockShardDelegator(t)
-		var got []string
-		source.EXPECT().ProcessSplitShard(mock.Anything, mock.Anything).RunAndReturn(
-			func(_ context.Context, targets []string) error {
-				got = append(got, targets...)
-				return nil
-			})
-
+		source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).Return(nil).Once()
 		source.EXPECT().FinishSplitRecovery().Return().Once()
-		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
-		// only the not-yet-adopted (Creating) targets are re-fronted.
-		assert.ElementsMatch(t, []string{"t1", "t2"}, got)
+		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 	})
 
-	t.Run("refuses to guess the fronting host under concurrent splits", func(t *testing.T) {
+	t.Run("fronts exactly its own targets while another source also splits", func(t *testing.T) {
+		// The collection meta cannot tell which source fronts which target when
+		// two split at once; DataCoord's per-source target list can, so the
+		// recovery is exact instead of skipped.
 		mc := mocks.NewMockMixCoordClient(t)
-		// Two shards split at once. Which source fronts which target is the
-		// coordinator's choice and lives in the split task, so it is not
-		// derivable from a DescribeCollection -- and guessing would let two
-		// sources front one target and return its rows twice.
-		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"src", "other", "t1", "t2", "o1"},
-			ShardInfos: []*schemapb.CollectionShardInfo{
-				{State: schemapb.ShardState_ShardSplitting},
-				{State: schemapb.ShardState_ShardSplitting},
-				{State: schemapb.ShardState_ShardCreating},
-				{State: schemapb.ShardState_ShardCreating},
-				{State: schemapb.ShardState_ShardCreating},
-			},
-		}, nil)
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(listed("src", "other", "t1", "t2", "o1"), nil)
 		source := delegator.NewMockShardDelegator(t)
-		// ProcessSplitShard is never set up, so the mock fails the test if the
-		// rebuild fronts anything at all. The targets stay unfronted until they
-		// are adopted (I-2): reads through "src" still succeed, from its own
-		// pre-fence view alone, missing the targets' post-fence rows -- never
-		// returned twice.
+		source.EXPECT().ProcessSplitShard(mock.Anything, []string{"t1", "t2"}).Return(nil).Once()
 		source.EXPECT().FinishSplitRecovery().Return().Once()
-		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 	})
 
 	t.Run("a source the collection no longer lists refuses reads", func(t *testing.T) {
 		mc := mocks.NewMockMixCoordClient(t)
 		// adoption delisted src: the post-image names only its targets.
-		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			Status:              merr.Success(),
-			VirtualChannelNames: []string{"t1", "t2"},
-			ShardInfos: []*schemapb.CollectionShardInfo{
-				{State: schemapb.ShardState_ShardNormal},
-				{State: schemapb.ShardState_ShardNormal},
-			},
-		}, nil)
+		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(listed("t1", "t2"), nil)
 		source := delegator.NewMockShardDelegator(t)
-		// ProcessSplitShard is never set up: the retired source has no target
-		// left to front, so it must refuse reads instead of serving alone.
+		// ProcessSplitShard is never set up: the retired source's targets are
+		// shards of their own, so it must refuse reads instead of fronting them.
 		source.EXPECT().RefuseReadsAsRetiredSource(mock.Anything).Return().Once()
 		source.EXPECT().FinishSplitRecovery().Return().Once()
-		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
+		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src", []string{"t1", "t2"})
 	})
-
-	t.Run("no-op when the source is not splitting", func(t *testing.T) {
-		mc := mocks.NewMockMixCoordClient(t)
-		mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(
-			descResp(schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
-		source := delegator.NewMockShardDelegator(t)
-		// ProcessSplitShard is never set up, so the mock fails the test if it is called.
-		source.EXPECT().FinishSplitRecovery().Return().Once()
-		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
-	})
-}
-
-// With one splitting source the fronting choice is forced -- every Creating
-// target is fronted by it -- so the rebuild is exact and needs no provenance.
-func TestRespawnSplitChildrenFrontsEveryTargetOfTheOnlySource(t *testing.T) {
-	mc := mocks.NewMockMixCoordClient(t)
-	mc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-		Status:              merr.Success(),
-		VirtualChannelNames: []string{"src", "normal", "t0", "t1", "t2"},
-		ShardInfos: []*schemapb.CollectionShardInfo{
-			{State: schemapb.ShardState_ShardSplitting},
-			{State: schemapb.ShardState_ShardNormal},
-			{State: schemapb.ShardState_ShardCreating},
-			{State: schemapb.ShardState_ShardCreating},
-			{State: schemapb.ShardState_ShardCreating},
-		},
-	}, nil)
-
-	source := delegator.NewMockShardDelegator(t)
-	var got []string
-	source.EXPECT().ProcessSplitShard(mock.Anything, mock.Anything).RunAndReturn(
-		func(_ context.Context, targets []string) error {
-			got = append(got, targets...)
-			return nil
-		})
-
-	future := syncutil.NewFuture[types.MixCoordClient]()
-	future.Set(mc)
-	node := &QueryNode{ctx: context.Background(), mixCoord: future}
-	source.EXPECT().FinishSplitRecovery().Return().Once()
-	node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
-
-	// Every Creating target, and only those: the Normal shard is not a target.
-	assert.ElementsMatch(t, []string{"t0", "t1", "t2"}, got)
 }
 
 // adoptionNode builds the smallest QueryNode that can reach the adoption branch
