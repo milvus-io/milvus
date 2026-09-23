@@ -1734,6 +1734,18 @@ func TestGetRecoveryInfoV2_ManifestOnlySegment(t *testing.T) {
 		{name: "invalid_manifest", prepare: func(seg *datapb.SegmentInfo) {
 			seg.ManifestPath = "invalid"
 		}},
+		{name: "invalid_manifest_with_binlog", prepare: func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = "invalid"
+			seg.Binlogs = []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{EntriesNum: 50}}}}
+		}},
+		{name: "invalid_manifest_with_start_position", prepare: func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = "invalid"
+			seg.StartPosition = checkpoint
+		}},
+		{name: "invalid_manifest_with_dml_position", prepare: func(seg *datapb.SegmentInfo) {
+			seg.ManifestPath = "invalid"
+			seg.DmlPosition = checkpoint
+		}},
 		{name: "non_v3_manifest", prepare: func(seg *datapb.SegmentInfo) {
 			seg.StorageVersion = storage.StorageV2
 		}},

@@ -172,16 +172,14 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		if filterWithPartition && !validPartitionsMap[s.GetPartitionID()] {
 			continue
 		}
-		if s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
-			committed, err := hasCommittedManifest(s)
-			if err != nil {
-				mlog.RatedWarn(h.s.ctx, 1.0, "skip segment with invalid manifest during query recovery",
-					mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
-				continue
-			}
-			if !committed {
-				continue
-			}
+		committed, err := hasCommittedManifest(s)
+		if err != nil {
+			mlog.RatedWarn(h.s.ctx, 1.0, "skip segment with invalid manifest during query recovery",
+				mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
+			continue
+		}
+		if !committed && s.GetStartPosition() == nil && s.GetDmlPosition() == nil && len(s.GetBinlogs()) == 0 {
+			continue
 		}
 		if s.GetIsImporting() {
 			// Skip bulk insert segments.
