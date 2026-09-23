@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/samber/lo"
+	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -290,9 +291,15 @@ func reuseSplitChild(ctx context.Context, existing delegator.ShardDelegator, par
 // targets are re-derived from durable coordinator state (the collection's
 // shard infos). It is a no-op unless this vchannel is itself a fenced split
 // source, and ProcessSplitShard is idempotent so an already-spawned child is
-// left untouched (the common, non-restart case).
+// left untouched (the common, non-restart case). The source refuses reads until
+// it returns (MarkSplitRecoveryPending, set by the watch); a failing describe is
+// retried rather than given up on.
 func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, source delegator.ShardDelegator, collectionID int64, sourceVChannel string) {
 	log := mlog.With(mlog.Int64("collectionID", collectionID), mlog.String("sourceVChannel", sourceVChannel))
+	// Deferred, so it runs after ProcessSplitShard below has made the re-derived
+	// targets pending spawns: reads go from refused-while-recovering straight to
+	// refused-while-spawning, never answered without the targets in between.
+	defer source.FinishSplitRecovery()
 	if node.mixCoord == nil {
 		// This runs in a goroutine spawned by WatchDmChannels, so a nil
 		// dereference here takes the whole node down rather than failing one
@@ -301,18 +308,8 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 		log.Warn(ctx, "no coordinator handle, skip split child recovery")
 		return
 	}
-	mixCoord, err := node.mixCoord.GetWithContext(ctx)
-	if err != nil {
-		log.Warn(ctx, "failed to get coordinator client for split child recovery", mlog.Err(err))
-		return
-	}
-	resp, err := mixCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
-		// The Base is not optional: rootcoord's task Prepare reads its MsgType.
-		Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
-		CollectionID: collectionID,
-	})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn(ctx, "failed to describe collection for split child recovery", mlog.Err(err))
+	resp, ok := node.describeForSplitRecovery(ctx, source, collectionID)
+	if !ok {
 		return
 	}
 
@@ -394,6 +391,50 @@ func (node *QueryNode) respawnSplitChildrenOnRecovery(ctx context.Context, sourc
 		return
 	}
 	log.Info(ctx, "respawned in-process split children on recovery", mlog.Int("targetCount", len(targets)))
+}
+
+// describeForSplitRecovery describes the collection for a split recovery,
+// retrying until the coordinator answers. It gives up only when the recovery is
+// moot: ctx ends (node shutdown) or the source is no longer serviceable
+// (released). Meanwhile the source refuses every read (MarkSplitRecoveryPending):
+// without the shard states it cannot tell whether it must front targets, and a
+// source that must, answering alone, misses their rows and deletes silently.
+func (node *QueryNode) describeForSplitRecovery(ctx context.Context, source delegator.ShardDelegator, collectionID int64) (*milvuspb.DescribeCollectionResponse, bool) {
+	log := mlog.With(mlog.Int64("collectionID", collectionID))
+	for attempt := 0; ; attempt++ {
+		mixCoord, err := node.mixCoord.GetWithContext(ctx)
+		if err != nil {
+			log.Warn(ctx, "failed to get coordinator client for split child recovery", mlog.Err(err))
+			return nil, false
+		}
+		resp, err := mixCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+			// The Base is not optional: rootcoord's task Prepare reads its MsgType.
+			Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
+			CollectionID: collectionID,
+		})
+		err = merr.CheckRPCCall(resp, err)
+		if err == nil {
+			return resp, true
+		}
+		backoff := splitRecoveryRetryBackoff(attempt)
+		log.RatedWarn(ctx, rate.Every(10*time.Second), "failed to describe collection for split child recovery, reads through the vchannel are refused until it answers",
+			mlog.Int("attempt", attempt+1), mlog.Duration("retryIn", backoff), mlog.Err(err))
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(backoff):
+		}
+		if !source.Serviceable() {
+			log.Info(ctx, "split child recovery given up, the source is released")
+			return nil, false
+		}
+	}
+}
+
+// splitRecoveryRetryBackoff is how long a split recovery waits before
+// describing the collection again: doubling from one second, capped at thirty.
+func splitRecoveryRetryBackoff(attempt int) time.Duration {
+	return min(time.Second<<min(attempt, 5), 30*time.Second)
 }
 
 // releaseSplitChildren handles the source delegator's in-process split children
