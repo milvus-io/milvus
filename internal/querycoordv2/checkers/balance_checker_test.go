@@ -228,28 +228,6 @@ func TestBalanceChecker_ReadyToCheck_NoTarget(t *testing.T) {
 	assert.False(t, result)
 }
 
-func TestBalanceChecker_ReadyToCheck_FrozenWhileSplitting(t *testing.T) {
-	checker := createTestBalanceChecker()
-	ctx := context.Background()
-	collectionID := int64(1)
-
-	// the collection is otherwise ready for balance.
-	mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
-	defer mockGetCollection.UnPatch()
-	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
-	defer mockIsNextTargetExist.UnPatch()
-
-	// but one of its shards is a fenced split source, so balance is frozen.
-	broker := meta.NewMockBroker(t)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(&milvuspb.DescribeCollectionResponse{
-		VirtualChannelNames: []string{"v0"},
-		ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardSplitting}},
-	}, nil)
-	checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
-
-	assert.False(t, checker.readyToCheck(ctx, collectionID))
-}
-
 func TestBalanceChecker_FilterCollectionForBalance_Success(t *testing.T) {
 	checker := createTestBalanceChecker()
 	ctx := context.Background()
@@ -1997,7 +1975,8 @@ func TestBalanceChecker_Check_TimeoutWarning(t *testing.T) {
 // it on another node without the in-process children it fronts, and reads still
 // route to it. Balance stays frozen while the current target lists a vchannel
 // the collection no longer lists, and lifts once the current target drops it.
-func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *testing.T) {
+// The freeze is evaluated when the collection's tasks are submitted.
+func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) {
 	ctx := context.Background()
 	collectionID := int64(1)
 	adopted := &milvuspb.DescribeCollectionResponse{
@@ -2015,22 +1994,16 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 		return out
 	}
 
-	run := func(t *testing.T, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (ready bool, stopping int) {
+	// run returns how many of one channel move and one segment move of v0 the
+	// balance checker would submit.
+	run := func(t *testing.T, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (submitted int) {
 		checker := createTestBalanceChecker()
-		mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
-		defer mockGetCollection.UnPatch()
-		mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{collectionID}).Build()
-		defer mockGetAll.UnPatch()
-		mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
-		defer mockIsNextTargetExist.UnPatch()
-		mockRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
-		defer mockRowCount.UnPatch()
 		mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
 			To(func(_ context.Context, _ int64, scope meta.TargetScope) map[string]*meta.DmChannel {
 				if scope == meta.CurrentTarget {
 					return current
 				}
-				return channels("v0", "v1", "v2")
+				return channels("v1", "v2")
 			}).Build()
 		defer mockChannels.UnPatch()
 		mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).
@@ -2045,7 +2018,9 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 		broker := meta.NewMockBroker(t)
 		describe(broker)
 		checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
-		return checker.readyToCheck(ctx, collectionID), checker.constructStoppingBalanceQueue(ctx).Len()
+		segmentTasks, channelTasks := balanceTasksOn(t, "v0")
+		segmentTasks, channelTasks = checker.dropShardSplitFrozen(ctx, collectionID, segmentTasks, channelTasks)
+		return len(segmentTasks) + len(channelTasks)
 	}
 	describeAs := func(resp *milvuspb.DescribeCollectionResponse) func(*meta.MockBroker) {
 		return func(broker *meta.MockBroker) {
@@ -2054,14 +2029,11 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 	}
 
 	t.Run("delisted source still current: frozen", func(t *testing.T) {
-		ready, stopping := run(t, channels("v0"), nil, describeAs(adopted))
-		assert.False(t, ready, "normal balance must not move a delisted source still in the current target")
-		assert.Zero(t, stopping, "stopping balance must not move it either")
+		assert.Zero(t, run(t, channels("v0"), nil, describeAs(adopted)),
+			"balance must not move a delisted source still in the current target")
 	})
 	t.Run("current target flipped past the source: unfrozen", func(t *testing.T) {
-		ready, stopping := run(t, channels("v1", "v2"), nil, describeAs(adopted))
-		assert.True(t, ready)
-		assert.Equal(t, 1, stopping)
+		assert.Equal(t, 2, run(t, channels("v1", "v2"), nil, describeAs(adopted)))
 	})
 	t.Run("fresh fence, cached state still pre-fence, next target marks window targets: frozen", func(t *testing.T) {
 		// the TTL cache still holds a read from before the fence: v0 Normal, no
@@ -2071,17 +2043,14 @@ func TestBalanceChecker_ReadyToCheck_FrozenWhileADelistedSourceIsCurrent(t *test
 			VirtualChannelNames: []string{"v0"},
 			ShardInfos:          []*schemapb.CollectionShardInfo{{State: schemapb.ShardState_ShardNormal}},
 		}
-		ready, stopping := run(t, channels("v0"), []string{"v1", "v2"}, describeAs(preFence))
-		assert.False(t, ready, "a freshly fenced source must not be balanced on a stale state")
-		assert.Zero(t, stopping)
+		assert.Zero(t, run(t, channels("v0"), []string{"v1", "v2"}, describeAs(preFence)),
+			"a freshly fenced source must not be balanced on a stale state")
 	})
 	t.Run("shard states unknown: frozen", func(t *testing.T) {
-		ready, stopping := run(t, channels("v0"), nil, func(broker *meta.MockBroker) {
+		assert.Zero(t, run(t, channels("v0"), nil, func(broker *meta.MockBroker) {
 			broker.EXPECT().DescribeCollection(mock.Anything, collectionID).
 				Return(nil, merr.WrapErrServiceUnavailable("rootcoord down")).Maybe()
-		})
-		assert.False(t, ready, "without the shard states the freeze cannot be ruled out")
-		assert.Zero(t, stopping)
+		}), "without the shard states the freeze cannot be ruled out")
 	})
 }
 
@@ -2167,4 +2136,27 @@ func runSplitFreezeRound(t *testing.T, stopping bool, shards ...string) []string
 func TestBalanceChecker_ProcessBalanceQueue_RechecksShardSplitFreezeAtSubmit(t *testing.T) {
 	assert.Empty(t, runSplitFreezeRound(t, false, "v0", "v9"),
 		"normal balance must not move anything of a collection a split froze after its queue was built")
+}
+
+// AV-L6-M-H: building a balance queue must not describe every loaded
+// collection -- the checker runs every few hundred milliseconds, and a slow
+// coordinator would stall it. The freeze is evaluated when a collection's
+// tasks are about to be submitted (see RechecksShardSplitFreezeAtSubmit).
+func TestBalanceChecker_QueueConstructionReadsNoShardStates(t *testing.T) {
+	checker := createTestBalanceChecker()
+	ctx := context.Background()
+	// no DescribeCollection expectation: a call fails the test.
+	checker.splitState = meta.NewShardSplitStateCache(meta.NewMockBroker(t), time.Minute)
+
+	mockGetCollection := mockey.Mock(mockey.GetMethod(checker.meta.CollectionManager, "GetCollection")).Return(&meta.Collection{}).Build()
+	defer mockGetCollection.UnPatch()
+	mockGetAll := mockey.Mock((*meta.CollectionManager).GetAll).Return([]int64{1, 2, 3}).Build()
+	defer mockGetAll.UnPatch()
+	mockIsNextTargetExist := mockey.Mock(mockey.GetMethod(checker.targetMgr, "IsNextTargetExist")).Return(true).Build()
+	defer mockIsNextTargetExist.UnPatch()
+	mockRowCount := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetCollectionRowCount")).Return(int64(100)).Build()
+	defer mockRowCount.UnPatch()
+
+	assert.Equal(t, 3, checker.constructStoppingBalanceQueue(ctx).Len())
+	assert.True(t, checker.readyToCheck(ctx, 1))
 }
