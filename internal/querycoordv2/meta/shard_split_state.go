@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -173,7 +174,14 @@ func (c *ShardSplitStateCache) entryFor(ctx context.Context, collectionID int64)
 
 	key := fmt.Sprintf("%d@%d", collectionID, invalidatedAt.UnixNano())
 	fetched, err, _ := c.flight.Do(key, func() (*shardSplitEntry, error) {
-		return c.fetch(ctx, collectionID)
+		// The read is shared by every caller that joins it, so it must not end
+		// with the one that started it: a user RPC's cancelled context would
+		// otherwise fail the checkers waiting on the same read. It keeps the
+		// caller's values (trace, logging) and gets a timeout of its own.
+		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx),
+			paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+		defer cancel()
+		return c.fetch(readCtx, collectionID)
 	})
 	if err != nil {
 		if ok {
