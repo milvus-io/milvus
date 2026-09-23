@@ -32,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -41,6 +42,10 @@ const clusterStatsVersion = 1
 // A block has a 16-byte header followed by fixed-width keys. Blocks are
 // independently bounded; a segment never requires buffering all of its keys.
 const clusterStatsBlockRows = 4096
+
+func clusterStatsKey(fieldID int64) string {
+	return fmt.Sprintf("%s.%d", common.ClusterStats, fieldID)
+}
 
 func encodeClusterStatsBlock(keys []clusterLayoutSortKey) []byte {
 	buf := make([]byte, 16+len(keys)*clusterLayoutSortKeySize)
@@ -102,11 +107,11 @@ func newClusterStatsWriter(writer *MultiSegmentWriter, ref *datapb.ClusterStats)
 
 func (w *clusterStatsWriter) blockPath(segmentID int64, name string) string {
 	if w.writer.params.StorageVersion == storage.StorageV3 {
-		return path.Join(w.writer.params.StorageConfig.GetRootPath(), "insert_log",
+		return path.Join(w.writer.params.StorageConfig.GetRootPath(), common.SegmentInsertLogPath,
 			strconv.FormatInt(w.writer.collectionID, 10), strconv.FormatInt(w.writer.partitionID, 10), strconv.FormatInt(segmentID, 10),
-			"_stats", fmt.Sprintf("cluster_stats.%d", w.template.FieldId), w.attempt, name)
+			"_stats", clusterStatsKey(w.template.FieldId), w.attempt, name)
 	}
-	return path.Join(w.writer.params.StorageConfig.GetRootPath(), "cluster_stats",
+	return path.Join(w.writer.params.StorageConfig.GetRootPath(), common.ClusterStats,
 		strconv.FormatInt(w.writer.collectionID, 10), strconv.FormatInt(w.writer.partitionID, 10),
 		strconv.FormatInt(segmentID, 10), w.attempt, name)
 }
@@ -247,7 +252,7 @@ func (w *clusterStatsWriter) Close(ctx context.Context) (segments []*datapb.Comp
 			}
 			segment.Manifest, err = packed.CommitManifestUpdates(base, version, w.writer.params.StorageConfig,
 				&packed.ManifestUpdates{Stats: []packed.StatEntry{{
-					Key: fmt.Sprintf("cluster_stats.%d", ref.FieldId), Files: files,
+					Key: clusterStatsKey(ref.FieldId), Files: files,
 					Metadata: map[string]string{"version": "1", "sorted": strconv.FormatBool(ref.Sorted), "num_rows": strconv.FormatInt(ref.NumRows, 10), "memory_size": strconv.FormatInt(extraBytes, 10)},
 				}}})
 			if err != nil {

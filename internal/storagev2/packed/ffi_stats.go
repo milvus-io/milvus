@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -49,7 +50,7 @@ func StatsBinlogSizeFromManifest(manifestPath string, storageConfig *indexpb.Sto
 	var total int64
 	for key, stat := range stats {
 		prefix, _, ok := ParseStatKey(key)
-		if !ok || (prefix != "bloom_filter" && prefix != "bm25" && prefix != "cluster_stats") {
+		if !ok || (prefix != "bloom_filter" && prefix != "bm25" && prefix != common.ClusterStats) {
 			continue
 		}
 		memStr, ok := stat.Metadata["memory_size"]
