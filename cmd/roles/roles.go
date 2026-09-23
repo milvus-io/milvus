@@ -404,6 +404,18 @@ func (mr *MilvusRoles) handleSignals() func() {
 	}
 }
 
+// componentNum counts the components that Run will actually start.
+func (mr *MilvusRoles) componentNum() int {
+	return lo.CountBy([]bool{
+		mr.EnableProxy,
+		mr.EnableQueryNode,
+		mr.EnableDataNode,
+		mr.EnableStreamingNode,
+		mr.EnableMixCoord || (mr.EnableRootCoord && mr.EnableQueryCoord && mr.EnableDataCoord),
+		mr.EnableCDC,
+	}, func(enabled bool) bool { return enabled })
+}
+
 // Run Milvus components.
 func (mr *MilvusRoles) Run() {
 	// start signal handler, defer close func
@@ -480,21 +492,7 @@ func (mr *MilvusRoles) Run() {
 	// init tracer before run any component
 	tracer.Init()
 
-	enableComponents := []bool{
-		mr.EnableProxy,
-		mr.EnableQueryNode,
-		mr.EnableDataNode,
-		mr.EnableStreamingNode,
-		mr.EnableMixCoord,
-		mr.EnableRootCoord,
-		mr.EnableQueryCoord,
-		mr.EnableDataCoord,
-		mr.EnableCDC,
-	}
-	enableComponents = lo.Filter(enableComponents, func(v bool, _ int) bool {
-		return v
-	})
-	healthz.SetComponentNum(len(enableComponents))
+	healthz.SetComponentNum(mr.componentNum())
 
 	mr.setupLogger()
 	defer mlog.Cleanup()
