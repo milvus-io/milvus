@@ -961,7 +961,9 @@ func (sd *shardDelegator) ProcessSplitShard(ctx context.Context, targets []strin
 	}
 	for _, target := range targets {
 		if target == "" {
-			return merr.WrapErrParameterInvalidMsg("split target vchannel must not be empty")
+			// The fence is consumed from the WAL, not from a request: an empty
+			// target is a coordinator bug, so a System error.
+			return merr.WrapErrServiceInternal("shard-split fence names an empty target vchannel")
 		}
 	}
 	// Without a spawner no child can ever front a target, so nothing would ever

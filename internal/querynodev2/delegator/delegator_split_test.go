@@ -470,7 +470,10 @@ func TestProcessSplitShard(t *testing.T) {
 		}
 
 		err := sd.ProcessSplitShard(context.Background(), newSplitTargets(""))
-		assert.Error(t, err)
+		// a fence consumed from the WAL naming an empty target is a coordinator
+		// bug, not a request's fault: a System error, not an Input one.
+		assert.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Equal(t, merr.SystemError, merr.GetErrorType(err))
 	})
 
 	t.Run("a missing spawner is an internal error and leaves nothing pending", func(t *testing.T) {
