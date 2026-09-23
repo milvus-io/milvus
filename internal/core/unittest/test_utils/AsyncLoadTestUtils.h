@@ -395,11 +395,11 @@ OpenAsyncIndexEntryReader(std::vector<uint8_t> bytes,
     std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = tracking_file;
     auto input =
         std::make_shared<storage::RemoteInputStream>(std::move(arrow_file));
-    auto reader = folly::coro::blockingWait(
+    auto reader = folly::coro::blockingWait(folly::coro::co_withExecutor(
+        storage::ResolveAsyncLoadExecutor({},
+                                          proto::common::LoadPriority::HIGH),
         storage::AsyncIndexEntryReader::Open(
-            input, 0, proto::common::LoadPriority::HIGH, {})
-            .scheduleOn(storage::ResolveAsyncLoadExecutor(
-                {}, proto::common::LoadPriority::HIGH)));
+            input, 0, proto::common::LoadPriority::HIGH, {})));
     tracking_file->ResetCounters();
     return reader;
 }
@@ -414,11 +414,11 @@ OpenDirectIndexEntryReader(std::vector<uint8_t> bytes,
     std::shared_ptr<arrow::io::RandomAccessFile> arrow_file = direct_file;
     auto input =
         std::make_shared<storage::RemoteInputStream>(std::move(arrow_file));
-    auto reader = folly::coro::blockingWait(
+    auto reader = folly::coro::blockingWait(folly::coro::co_withExecutor(
+        storage::ResolveAsyncLoadExecutor({},
+                                          proto::common::LoadPriority::HIGH),
         storage::AsyncIndexEntryReader::Open(
-            input, collection_id, proto::common::LoadPriority::HIGH, {})
-            .scheduleOn(storage::ResolveAsyncLoadExecutor(
-                {}, proto::common::LoadPriority::HIGH)));
+            input, collection_id, proto::common::LoadPriority::HIGH, {})));
     direct_file->ResetCounters();
     return reader;
 }

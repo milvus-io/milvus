@@ -41,7 +41,6 @@
 #include "gtest/gtest.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
-#include "index/IndexInfo.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/config.h"

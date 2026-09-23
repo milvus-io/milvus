@@ -23,6 +23,28 @@ set(TANTIVY_NAME "libtantivy_binding${CMAKE_STATIC_LIBRARY_SUFFIX}")
 set(LIB_FILE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_DIR}/${TANTIVY_NAME}")
 set(LIB_HEADER_FOLDER "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/include")
 
+file(GLOB_RECURSE TANTIVY_RUST_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/src/*.rs")
+list(FILTER TANTIVY_RUST_SOURCES EXCLUDE REGEX "/analyzer/gen/")
+set(TANTIVY_BUILD_INPUTS
+        ${TANTIVY_RUST_SOURCES}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/Cargo.toml
+        ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/Cargo.lock
+        ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/build.rs
+        ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding/cbindgen.toml
+        ${TOKENIZER_PROTO})
+
+set(TANTIVY_PUBLIC_HEADERS
+        ${LIB_HEADER_FOLDER}/tantivy-binding.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-wrapper.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/rust-binding.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/rust-array.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/rust-hashmap.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/tokenizer.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/token-stream.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h)
+
 # In fact, cargo was already installed on our builder environment.
 # Below settings are used to suit for first local development.
 set(HOME_VAR $ENV{HOME})
@@ -41,16 +63,27 @@ add_custom_command(
                 "CARGO_TARGET_DIR=${CMAKE_CURRENT_BINARY_DIR}"
                 ${CARGO_CMD}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
+        DEPENDS ${TANTIVY_BUILD_INPUTS}
         VERBATIM
 )
 
 # Set the installed library path
 set(INSTALLED_LIB_FILE "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}")
+set(INSTALLED_TANTIVY_HEADERS
+        ${TANTIVY_INCLUDE_DIR}/tantivy-binding.h
+        ${TANTIVY_INCLUDE_DIR}/tantivy-wrapper.h
+        ${TANTIVY_INCLUDE_DIR}/rust-binding.h
+        ${TANTIVY_INCLUDE_DIR}/rust-array.h
+        ${TANTIVY_INCLUDE_DIR}/rust-hashmap.h
+        ${TANTIVY_INCLUDE_DIR}/tokenizer.h
+        ${TANTIVY_INCLUDE_DIR}/token-stream.h
+        ${TANTIVY_INCLUDE_DIR}/phrase_match.h
+        ${TANTIVY_INCLUDE_DIR}/time_recorder.h)
 
 # Install tantivy library and headers to output directory
-# This custom command produces the installed library file
+# This custom command produces the installed library and header files.
 add_custom_command(
-        OUTPUT ${INSTALLED_LIB_FILE}
+        OUTPUT ${INSTALLED_LIB_FILE} ${INSTALLED_TANTIVY_HEADERS}
         COMMENT "Installing tantivy binding to ${TANTIVY_LIB_DIR}"
         COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_LIB_DIR}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${TANTIVY_INCLUDE_DIR}
@@ -64,12 +97,13 @@ add_custom_command(
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/token-stream.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/phrase_match.h ${TANTIVY_INCLUDE_DIR}/
         COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/time_recorder.h ${TANTIVY_INCLUDE_DIR}/
-        DEPENDS ${LIB_FILE}
+        DEPENDS ${LIB_FILE} ${TANTIVY_PUBLIC_HEADERS}
         VERBATIM
 )
 
 # Create a target that other targets can depend on
-add_custom_target(install_tantivy_target DEPENDS ${INSTALLED_LIB_FILE})
+add_custom_target(install_tantivy_target
+        DEPENDS ${INSTALLED_LIB_FILE} ${INSTALLED_TANTIVY_HEADERS})
 
 add_library(tantivy_binding STATIC IMPORTED)
 add_dependencies(tantivy_binding
