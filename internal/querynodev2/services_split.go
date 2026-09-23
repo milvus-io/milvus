@@ -25,17 +25,19 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // make sure QueryNode implements the shard-split child spawner.
@@ -46,7 +48,9 @@ var _ delegator.ChildSpawner = (*QueryNode)(nil)
 // (frontingParent set, adopted=false), so GetDataDistribution skips it
 // (IsUnadoptedSplitChild) and no proxy read reaches it until querycoord adopts
 // it; the source delegator reaches it only through the returned in-process
-// handle. It is started so it consumes its WAL and serves fronted reads.
+// handle. It is started so it consumes its WAL and serves fronted reads, after
+// it has loaded what its target already persisted before the checkpoint it
+// seeks from (loadSplitChildRecovery).
 //
 // It is idempotent: a re-consume of the fence finds the source's child already
 // registered and returns it. A registered delegator the source does not front
@@ -71,10 +75,11 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 	// The target vchannel is created just after the fence, so its recovery info
 	// (channel list + channel-checkpoint seek) may not be visible yet; wait for
 	// it, the same seek path any delegator uses.
-	seekPosition, err := node.waitSplitTargetRecovery(params.CollectionID, targetVChannel)
+	channelInfo, err := node.waitSplitTargetRecovery(params.CollectionID, targetVChannel)
 	if err != nil {
 		return nil, err
 	}
+	seekPosition := channelInfo.GetSeekPosition()
 
 	// The wait can take minutes, and querycoord may watch the target meanwhile.
 	// Claim the channel the way WatchDmChannels does, so neither registers a
@@ -144,6 +149,15 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 		}
 	}()
 
+	defer func() {
+		if !success {
+			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(targetVChannel), segments.WithType(segments.SegmentTypeGrowing))
+		}
+	}()
+	if err := node.loadSplitChildRecovery(ctx, child, params, channelInfo); err != nil {
+		return nil, err
+	}
+
 	if err := pipeline.ConsumeMsgStream(ctx, seekPosition); err != nil {
 		return nil, merr.Wrap(err, "failed to seek split child pipeline")
 	}
@@ -159,6 +173,98 @@ func (node *QueryNode) SpawnSplitChild(ctx context.Context, params delegator.Spa
 		mlog.Uint64("seekTimestamp", seekPosition.GetTimestamp()))
 	return child, nil
 }
+
+// loadSplitChildRecovery brings a freshly built split child to the state
+// WatchDmChannels would give a delegator of the target, from the target's
+// recovery view, before its pipeline seeks to the target's checkpoint:
+//
+//   - the target's L0 segments, the deletes on the target up to the checkpoint;
+//   - its unflushed segments, loaded as growing (with those L0 deletes applied):
+//     the synced part of its growing data and every flushed segment still
+//     IsInvisible (at defaults, every target-flushed segment until it is sorted
+//     after Done), which DataCoord reports as unflushed and the source's view
+//     never takes in;
+//   - the exclusions that keep the pipeline from re-creating what is loaded, or
+//     what the source serves as sealed (the target's visible flushed segments,
+//     attributed to the source).
+//
+// It then forwards every delete it now holds to the fronting parent. The child
+// consumes only from the checkpoint, so without the L0 records the parent would
+// never apply the target's deletes in (T_switch, checkpoint] to its own view.
+//
+// On a first spawn the target has flushed nothing and all of this is empty; it
+// matters for a respawn after a QueryNode restart mid-window, and for a first
+// spawn delayed past the target's first sync.
+func (node *QueryNode) loadSplitChildRecovery(ctx context.Context, child delegator.ShardDelegator, params delegator.SpawnChildParams,
+	channelInfo *datapb.VchannelInfo,
+) error {
+	// shaped like QueryCoord's watch request so the watch path's loaders apply.
+	req := &querypb.WatchDmChannelsRequest{
+		CollectionID: params.CollectionID,
+		Infos:        []*datapb.VchannelInfo{channelInfo},
+		Version:      params.Version,
+	}
+	segmentIDs := append(append([]int64(nil), channelInfo.GetUnflushedSegmentIds()...), channelInfo.GetLevelZeroSegmentIds()...)
+	if len(segmentIDs) > 0 {
+		infos, err := node.getSplitTargetSegmentInfos(ctx, segmentIDs)
+		if err != nil {
+			return err
+		}
+		req.SegmentInfos = infos
+	}
+
+	growingInfo := lo.SliceToMap(channelInfo.GetUnflushedSegmentIds(), func(id int64) (int64, uint64) {
+		return id, req.GetSegmentInfos()[id].GetDmlPosition().GetTimestamp()
+	})
+	child.AddExcludedSegments(growingInfo)
+	sealedInfo := lo.SliceToMap(append(append([]int64(nil), channelInfo.GetFlushedSegmentIds()...), channelInfo.GetDroppedSegmentIds()...),
+		func(id int64) (int64, uint64) { return id, typeutil.MaxTimestamp })
+	child.AddExcludedSegments(sealedInfo)
+
+	if err := loadL0Segments(ctx, child, req); err != nil {
+		return merr.Wrap(err, "failed to load split target L0 segments")
+	}
+	if err := loadGrowingSegments(ctx, child, req); err != nil {
+		return merr.Wrap(err, "failed to load split target unflushed segments")
+	}
+	if err := child.ForwardKnownDeletesToParent(ctx); err != nil {
+		return merr.Wrap(err, "failed to forward split target deletes to the source")
+	}
+	return nil
+}
+
+// getSplitTargetSegmentInfos fetches the full segment infos (binlogs included)
+// of a split target's segments, the way QueryCoord fills a watch request.
+func (node *QueryNode) getSplitTargetSegmentInfos(ctx context.Context, segmentIDs []int64) (map[int64]*datapb.SegmentInfo, error) {
+	if node.mixCoord == nil {
+		return nil, merr.WrapErrServiceInternalMsg("no coordinator handle to fetch split target segment infos")
+	}
+	mixCoord, err := node.mixCoord.GetWithContext(ctx)
+	if err != nil {
+		return nil, merr.Wrap(err, "failed to get coordinator client for split target segment infos")
+	}
+	infos := make(map[int64]*datapb.SegmentInfo, len(segmentIDs))
+	for _, batch := range lo.Chunk(segmentIDs, splitTargetSegmentInfoBatch) {
+		resp, err := mixCoord.GetSegmentInfo(ctx, &datapb.GetSegmentInfoRequest{
+			SegmentIDs:       batch,
+			IncludeUnHealthy: true,
+		})
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			return nil, merr.Wrap(err, "failed to get split target segment infos")
+		}
+		if err := binlog.DecompressMultiBinLogs(resp.GetInfos()); err != nil {
+			return nil, merr.Wrap(err, "failed to decompress split target segment binlogs")
+		}
+		for _, info := range resp.GetInfos() {
+			infos[info.GetID()] = info
+		}
+	}
+	return infos, nil
+}
+
+// splitTargetSegmentInfoBatch bounds one GetSegmentInfo call, as QueryCoord's
+// broker does.
+const splitTargetSegmentInfoBatch = 1000
 
 // reuseSplitChild returns a delegator already registered for a split target
 // only if the spawning source fronts it, i.e. it is that source's own child
@@ -349,10 +455,11 @@ func (node *QueryNode) AbortSplitChild(ctx context.Context, child delegator.Shar
 }
 
 // waitSplitTargetRecovery polls the coordinator's recovery info until the split
-// target vchannel appears with a seek position. It is bounded so a target that
+// target vchannel appears with a seek position, and returns the target's whole
+// recovery view (seek position, unflushed and L0 segment ids). It is bounded so a target that
 // never materializes (e.g. the split aborted before creation) does not block
 // forever; it is driven by the node lifetime context so node shutdown cancels it.
-func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChannel string) (*msgpb.MsgPosition, error) {
+func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChannel string) (*datapb.VchannelInfo, error) {
 	if node.mixCoord == nil {
 		// The spawn runs off the flow graph in its own goroutine, so a nil
 		// dereference here would take the whole node down. Fail this spawn: the
@@ -364,7 +471,7 @@ func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChanne
 		return nil, merr.Wrap(err, "failed to get coordinator client for split child recovery")
 	}
 
-	var seekPosition *msgpb.MsgPosition
+	var channelInfo *datapb.VchannelInfo
 	err = retry.Do(node.ctx, func() error {
 		resp, err := mixCoord.GetRecoveryInfoV2(node.ctx, &datapb.GetRecoveryInfoRequestV2{CollectionID: collectionID})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
@@ -385,7 +492,7 @@ func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChanne
 					return merr.WrapErrChannelNotFound(targetVChannel,
 						"split target has no seekable position yet")
 				}
-				seekPosition = channel.GetSeekPosition()
+				channelInfo = channel
 				return nil
 			}
 		}
@@ -394,5 +501,5 @@ func (node *QueryNode) waitSplitTargetRecovery(collectionID int64, targetVChanne
 	if err != nil {
 		return nil, merr.Wrapf(err, "split target %s recovery info not available", targetVChannel)
 	}
-	return seekPosition, nil
+	return channelInfo, nil
 }
