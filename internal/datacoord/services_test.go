@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -4357,8 +4358,33 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		return s
 	}
 
-	// V3 happy path: 2 V3 segments both belong to collection 100, broadcast is
-	// captured and inspected.
+	// captureManifestCommits intercepts meta.CommitSegmentManifests so tests can
+	// assert the exact commit units the backfill handler builds, instead of
+	// inspecting broadcast payloads.
+	captureManifestCommits := func(t *testing.T) (*[]SegmentManifestCommit, func()) {
+		var captured []SegmentManifestCommit
+		patch := mockey.Mock((*meta).CommitSegmentManifests).To(
+			func(_ *meta, _ context.Context, commits []SegmentManifestCommit, _ ...UpdateOperator) error {
+				captured = append(captured, commits...)
+				return nil
+			}).Build()
+		return &captured, func() { patch.UnPatch() }
+	}
+
+	// emptyManifestColumnGroups stubs the delta replay check to see an empty
+	// manifest (no pre-existing columns), so the add/replace proceeds to the
+	// manifest commit. The real manifest-descriptor path is covered by the
+	// replay/conflict subtests below.
+	emptyManifestColumnGroups := func(t *testing.T) func() {
+		patch := mockey.Mock(packed.ReadManifestColumnGroups).To(
+			func(_ string, _ *indexpb.StorageConfig) ([]packed.ColumnGroupEntry, error) {
+				return nil, nil
+			}).Build()
+		return func() { patch.UnPatch() }
+	}
+
+	// V3 legacy happy path: 2 V3 segments with pre-baked versions are adopted
+	// through meta.CommitSegmentManifests (Noop mutations, no broadcast).
 	t.Run("v3_happy_path", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
@@ -4391,36 +4417,16 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 				Status:         merr.Success(),
 				DbName:         "default",
 				CollectionName: "test_collection",
-			}, nil)
+			}, nil).Maybe()
 
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		var captured message.BroadcastMutableMessage
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				captured = msg
-				return &types2.BroadcastAppendResult{
-					BroadcastID: 1,
-					AppendResults: map[string]*types2.AppendResult{
-						"by-dev-rootcoord-dml_0": {
-							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-							LastConfirmedMessageID: rmq.NewRmqID(1),
-						},
-					},
-				}, nil
-			})
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bucket/path/to/result.json",
@@ -4430,15 +4436,14 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int32(2), resp.GetTotalSegments())
 		assert.Equal(t, int32(2), resp.GetCommittedSegments())
 		assert.Equal(t, int32(0), resp.GetFailedSegments())
-		// Ensure the broadcast carries exactly two V3 items.
-		assert.NotNil(t, captured)
-		// Access the message body through the specialized wrapper.
-		specialized := message.MustAsMutableBatchUpdateManifestMessageV2(captured)
-		body := specialized.MustBody()
-		assert.Len(t, body.GetItems(), 2)
-		for _, it := range body.GetItems() {
-			assert.Nil(t, it.GetV2ColumnGroups())
-			assert.Greater(t, it.GetManifestVersion(), int64(0))
+		// Both entries are legacy Noop adoptions with no source-version pin.
+		require.Len(t, *captured, 2)
+		for _, c := range *captured {
+			assert.Equal(t, ManifestMutationNoop, c.Mutation.Type)
+			assert.Equal(t, "", c.ExpectedManifest)
+			_, ver, err := packed.UnmarshalManifestPath(c.Mutation.ManifestPath)
+			require.NoError(t, err)
+			assert.Greater(t, ver, int64(0))
 		}
 	})
 
@@ -4530,27 +4535,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
-			BroadcastID: 1,
-			AppendResults: map[string]*types2.AppendResult{
-				"by-dev-rootcoord-dml_0": {
-					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-					LastConfirmedMessageID: rmq.NewRmqID(1),
-				},
-			},
-		}, nil)
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/result.json",
@@ -4559,13 +4549,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		assert.Equal(t, int32(0), resp.GetFailedSegments())
+		require.Len(t, *captured, 1)
+		assert.Equal(t, ManifestMutationNoop, (*captured)[0].Mutation.Type)
 	})
 
-	// Schema-version fence: the pre-broadcast check passes, but the version
-	// read again under the broadcast's resource keys no longer matches (a
-	// drop/alter-function committed in the window between the two reads). The
-	// broadcast must be aborted and every segment reported failed.
-	t.Run("schema_version_changed_before_broadcast_rejected", func(t *testing.T) {
+	// Schema-version fence: the fast-fail pre-check passes, but the version
+	// re-read before the batch commit no longer matches (a drop/alter-function
+	// committed in the window between the two reads). The commit must be
+	// aborted and every segment reported failed.
+	t.Run("schema_version_changed_before_commit_rejected", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
@@ -4582,8 +4574,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
             "504": {"version": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
           }
         }`
-		// First read (pre-broadcast) sees version 5; the second read (inside
-		// the broadcast boundary) sees version 6, as if an alter/drop-function
+		// First read (fast-fail) sees version 5; the second read (immediately
+		// before the batch commit) sees version 6, as if an alter/drop-function
 		// committed between the two.
 		mockBroker := broker.NewMockBroker(t)
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
@@ -4601,18 +4593,6 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 				Schema:         &schemapb.CollectionSchema{Version: 6},
 			}, nil).Once()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
-
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/result.json",
@@ -4657,27 +4637,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
-			BroadcastID: 1,
-			AppendResults: map[string]*types2.AppendResult{
-				"by-dev-rootcoord-dml_0": {
-					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-					LastConfirmedMessageID: rmq.NewRmqID(1),
-				},
-			},
-		}, nil)
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/result.json",
@@ -4686,6 +4651,7 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		assert.Equal(t, int32(0), resp.GetFailedSegments())
+		require.Len(t, *captured, 1)
 	})
 
 	t.Run("success_false_rejected", func(t *testing.T) {
@@ -4740,8 +4706,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "not found")
 	})
 
-	// Mixed: one segment passes pre-validation (goes to broadcast), one fails
-	// (wrong collection).
+	// Mixed: one segment passes pre-validation (goes to the manifest commit),
+	// one fails (wrong collection).
 	t.Run("partial_failure_reported", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
@@ -4774,27 +4740,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).Return(&types2.BroadcastAppendResult{
-			BroadcastID: 1,
-			AppendResults: map[string]*types2.AppendResult{
-				"by-dev-rootcoord-dml_0": {
-					MessageID:              rmq.NewRmqID(1),
-					TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-					LastConfirmedMessageID: rmq.NewRmqID(1),
-				},
-			},
-		}, nil)
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bucket/result.json",
@@ -4804,10 +4755,13 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int32(2), resp.GetTotalSegments())
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		// Only the passing segment reaches the manifest commit.
+		require.Len(t, *captured, 1)
+		assert.Equal(t, int64(101), (*captured)[0].SegmentID)
 	})
 
-	// V2 happy path: one V2 column-group entry reaches broadcast with V2
-	// payload populated.
+	// V2 happy path: the column-group upsert operator is applied directly via
+	// UpdateSegmentsInfo and lands on the segment's FieldBinlogs.
 	t.Run("v2_happy_path", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
@@ -4836,35 +4790,8 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil)
+			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
-
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		var captured message.BroadcastMutableMessage
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				captured = msg
-				return &types2.BroadcastAppendResult{
-					BroadcastID: 1,
-					AppendResults: map[string]*types2.AppendResult{
-						"by-dev-rootcoord-dml_0": {
-							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-							LastConfirmedMessageID: rmq.NewRmqID(1),
-						},
-					},
-				}, nil
-			})
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bucket/result.json",
@@ -4873,17 +4800,20 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(1), resp.GetCommittedSegments())
 
-		specialized := message.MustAsMutableBatchUpdateManifestMessageV2(captured)
-		body := specialized.MustBody()
-		require.Len(t, body.GetItems(), 1)
-		it := body.GetItems()[0]
-		assert.Equal(t, int64(201), it.GetSegmentId())
-		assert.Equal(t, int64(0), it.GetManifestVersion())
-		require.NotNil(t, it.GetV2ColumnGroups())
-		require.Contains(t, it.GetV2ColumnGroups().GetColumnGroups(), int64(100))
-		fb := it.GetV2ColumnGroups().GetColumnGroups()[100]
+		// The upsert is committed to the segment's FieldBinlogs in-process.
+		updated := m.GetSegment(ctx, 201)
+		require.NotNil(t, updated)
+		var fb *datapb.FieldBinlog
+		for _, b := range updated.GetBinlogs() {
+			if b.GetFieldID() == 100 {
+				fb = b
+				break
+			}
+		}
+		require.NotNil(t, fb)
 		require.Len(t, fb.GetBinlogs(), 1)
 		assert.Equal(t, int64(100), fb.GetBinlogs()[0].GetEntriesNum())
+		assert.Equal(t, []int64{100}, fb.GetChildFields())
 	})
 
 	// Partition-scoped backfill: result.PartitionID != 0 and segment belongs
@@ -4947,35 +4877,15 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil)
+			}, nil).Maybe()
 		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		var captured message.BroadcastMutableMessage
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				captured = msg
-				return &types2.BroadcastAppendResult{
-					BroadcastID: 1,
-					AppendResults: map[string]*types2.AppendResult{
-						"by-dev-rootcoord-dml_0": {
-							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-							LastConfirmedMessageID: rmq.NewRmqID(1),
-						},
-					},
-				}, nil
-			})
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
-			}).Build()
-		defer patch.UnPatch()
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
 
 		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
 			ResultPath: "s3a://bkt/foo",
@@ -4985,13 +4895,12 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Equal(t, int32(2), resp.GetTotalSegments())
 		assert.Equal(t, int32(2), resp.GetCommittedSegments())
 		assert.Equal(t, int32(0), resp.GetFailedSegments())
-		specialized := message.MustAsMutableBatchUpdateManifestMessageV2(captured)
-		require.Len(t, specialized.MustBody().GetItems(), 2)
+		require.Len(t, *captured, 2)
 	})
 
 	// V3 entry pointing at a segment whose actual storage version is V2 must
-	// be rejected: UpdateManifestVersion would no-op and the caller would see
-	// a fake committed=true.
+	// be rejected: CommitSegmentManifests requires StorageV3 and the caller
+	// would otherwise see a fake committed=true.
 	t.Run("v3_rejected_on_non_v3_segment", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
@@ -5053,9 +4962,9 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "not greater than current")
 	})
 
-	// Same-version retry must also be rejected -- UpdateManifestVersion
-	// short-circuits on equality so the item would otherwise broadcast as a
-	// no-op while we report committed=true.
+	// Same-version retry must also be rejected -- the manifest commit
+	// framework short-circuits on equality so the entry would otherwise
+	// commit as a no-op while we report committed=true.
 	t.Run("v3_rejected_on_equal_version", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
@@ -5135,15 +5044,617 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.Contains(t, resp.GetStatus().GetReason(), "exceeds limit")
 	})
 
-	// More items than maxItemsPerBroadcast must be split across several
-	// broadcast messages so the payload stays under typical MQ limits.
-	t.Run("items_split_across_broadcast_batches", func(t *testing.T) {
+	// Legacy V3 entry whose sourceVersion no longer matches the segment's
+	// current manifest version must be rejected: stats/index committed past the
+	// base the pre-baked version was built from, so adopting it would silently
+	// drop those changes.
+	t.Run("v3_legacy_rejected_on_source_version_mismatch", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 403, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			// current manifest version = 10
+			ManifestPath: packed.MarshalManifestPath("/seg/403", 10),
+		}})
+		// Result was built against source version 6, current is 10.
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "403": {"version": 12, "sourceVersion": 6, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "source manifest version")
+	})
+
+	// V3 delta happy path: ops (add) generate a ManifestMutationCommitUpdates
+	// commit carrying the column-group descriptor, with no source-version pin.
+	t.Run("v3_delta_add_happy_path", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 601, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/601", 3),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "601": {
+              "rowCount": 5,
+              "outputPath": "x",
+              "ops": [
+                {"type": "add", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "_data/100_abc.parquet", "startIndex": 0, "endIndex": 5}]}
+              ]
+            }
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		require.Len(t, *captured, 1)
+		commit := (*captured)[0]
+		assert.Equal(t, ManifestMutationCommitUpdates, commit.Mutation.Type)
+		assert.Equal(t, "", commit.ExpectedManifest)
+		require.NotNil(t, commit.Mutation.Updates)
+		assert.Len(t, commit.Mutation.Updates.ColumnGroups, 1)
+		cg := commit.Mutation.Updates.ColumnGroups[0]
+		assert.Equal(t, []string{"100"}, cg.Columns)
+		require.Len(t, cg.Files, 1)
+		assert.Equal(t, "_data/100_abc.parquet", cg.Files[0].Path)
+		assert.Equal(t, int64(5), cg.Files[0].EndIndex)
+	})
+
+	// V3 delta replace: the target column is dropped and re-added in the same
+	// transaction (DropColumns + ColumnGroups), no source-version pin.
+	t.Run("v3_delta_replace_happy_path", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 602, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/602", 3),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "602": {
+              "rowCount": 5,
+              "outputPath": "x",
+              "ops": [
+                {"type": "replace", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "_data/100_xyz.parquet", "startIndex": 0, "endIndex": 5}]}
+              ]
+            }
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+		require.Len(t, *captured, 1)
+		commit := (*captured)[0]
+		assert.Equal(t, ManifestMutationCommitUpdates, commit.Mutation.Type)
+		assert.Equal(t, "", commit.ExpectedManifest)
+		require.NotNil(t, commit.Mutation.Updates)
+		assert.Equal(t, []string{"100"}, commit.Mutation.Updates.DropColumns)
+		require.Len(t, commit.Mutation.Updates.ColumnGroups, 1)
+		assert.Equal(t, []string{"100"}, commit.Mutation.Updates.ColumnGroups[0].Columns)
+	})
+
+	// A replace of a column with a live Finished SegmentIndex record retracts
+	// the record atomically with the manifest pointer (whose DropColumns strips
+	// the column's index entries): after the commit, GetIndexInfos no longer
+	// serves the stale index and the inspector rebuilds against the new data.
+	t.Run("v3_delta_replace_indexed_field_removes_index", func(t *testing.T) {
+		ctx := context.Background()
+		localRoot := t.TempDir()
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, localRoot)
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+
+		cfg := createStorageConfig()
+		basePath := path.Join("files", "backfill_replace_indexed", "seg810")
+		oldPath := path.Join(basePath, "_data", "100_old.parquet")
+		// Seed a manifest holding an old group for field 100 plus an index
+		// entry on that column.
+		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			ColumnGroups: []packed.ColumnGroupEntry{{
+				Columns: []string{"100"},
+				Format:  "parquet",
+				Files:   []packed.ColumnGroupFileEntry{{Path: oldPath, StartIndex: 0, EndIndex: 5}},
+			}},
+			Indexes: []packed.ManifestIndexInfo{{
+				ColumnName: "100", IndexName: "idx_100", IndexType: "HNSW",
+				Path: "../idx_100.idx", FieldID: 100, IndexID: 10, BuildID: 500,
+				IndexVersion: 1, NumRows: 5, SerializedSize: 2048, MemSize: 4096,
+				CurrentIndexVersion: 5, CurrentScalarIndexVersion: 6,
+				IndexStorePathVersion: indexpb.IndexStorePathVersion_INDEX_STORE_PATH_VERSION_COLLECTION_ROOTED,
+				IndexFileKeys:         []string{"0"},
+			}},
+		})
+		require.NoError(t, err)
+		_, _, err = packed.UnmarshalManifestPath(seedManifest)
+		require.NoError(t, err)
+
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		}})
+		require.NoError(t, m.indexMeta.CreateIndex(ctx, &model.Index{
+			CollectionID: 100, FieldID: 100, IndexID: 10, IndexName: "idx_100",
+		}))
+		require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, &model.SegmentIndex{
+			CollectionID: 100, SegmentID: 810, IndexID: 10, BuildID: 500,
+			IndexState: commonpb.IndexState_Finished, IndexVersion: 1,
+		}))
+
+		newPath := path.Join(basePath, "_data", "100_new.parquet")
+		jsonStr := fmt.Sprintf(`{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "810": {
+              "rowCount": 5,
+              "outputPath": "x",
+              "ops": [
+                {"type": "replace", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "%s", "startIndex": 0, "endIndex": 5}]}
+              ]
+            }
+          }
+        }`, newPath)
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetCommittedSegments())
+
+		// The SegmentIndex record is retracted in the same transaction, so the
+		// stale Finished record no longer serves the old artifact and the
+		// inspector will rebuild against the new column data.
+		require.Empty(t, m.indexMeta.GetSegmentIndexes(100, 810))
+		// The manifest dropped the column's index entries and re-registered
+		// the field with the new files.
+		manifestPath := m.GetSegment(ctx, 810).GetManifestPath()
+		indexes, err := packed.GetManifestIndexInfos(manifestPath, cfg)
+		require.NoError(t, err)
+		require.Empty(t, indexes)
+		groups, err := packed.ReadManifestColumnGroups(manifestPath, cfg)
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		require.Equal(t, []string{"100"}, groups[0].Columns)
+		require.Len(t, groups[0].Files, 1)
+		require.Equal(t, newPath, groups[0].Files[0].Path)
+	})
+
+	// Re-submitting an already-committed delta add must return success instead
+	// of failing on milvus-storage's existing-column rejection. Uses the real
+	// manifest commit framework against a local manifest.
+	t.Run("v3_delta_add_replay_idempotent", func(t *testing.T) {
+		ctx := context.Background()
+		localRoot := t.TempDir()
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, localRoot)
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+
+		cfg := createStorageConfig()
+		basePath := path.Join("files", "backfill_replay", "seg810")
+		// Seed a manifest with a 5-row group for field 101. Column-group file
+		// paths are absolute object keys under the segment base (the form the
+		// loon writer emits); ToRelative strips `<base>/_data/` at write and
+		// ToAbsolute re-adds it at read.
+		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			ColumnGroups: []packed.ColumnGroupEntry{{
+				Columns: []string{"101"},
+				Format:  "parquet",
+				Files:   []packed.ColumnGroupFileEntry{{Path: path.Join(basePath, "_data", "101.parquet"), StartIndex: 0, EndIndex: 5}},
+			}},
+		})
+		require.NoError(t, err)
+		_, seedVersion, err := packed.UnmarshalManifestPath(seedManifest)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), seedVersion)
+
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 810, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		}})
+
+		addPath := path.Join(basePath, "_data", "100_a.parquet")
+		jsonStr := fmt.Sprintf(`{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "810": {
+              "rowCount": 5,
+              "outputPath": "x",
+              "ops": [
+                {"type": "add", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "%s", "startIndex": 0, "endIndex": 5}]}
+              ]
+            }
+          }
+        }`, addPath)
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		// First submission commits the real manifest revision.
+		first, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(first.GetStatus()))
+		assert.Equal(t, int32(1), first.GetCommittedSegments())
+		updated := m.GetSegment(ctx, 810)
+		require.NotNil(t, updated)
+		assert.Equal(t, packed.MarshalManifestPath(basePath, 2), updated.GetManifestPath())
+
+		// Replay after a lost response: detected as already applied, reported
+		// committed, no new manifest revision.
+		second, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(second.GetStatus()))
+		assert.Equal(t, int32(1), second.GetCommittedSegments())
+		assert.Equal(t, int32(0), second.GetFailedSegments())
+		assert.Equal(t, packed.MarshalManifestPath(basePath, 2), m.GetSegment(ctx, 810).GetManifestPath())
+	})
+
+	// An add whose target column already exists in the manifest with different
+	// file descriptors is a conflict and must be rejected, not silently
+	// overwritten.
+	t.Run("v3_delta_add_conflict_rejected", func(t *testing.T) {
+		ctx := context.Background()
+		localRoot := t.TempDir()
+		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
+		paramtable.Get().Save(Params.LocalStorageCfg.Path.Key, localRoot)
+		defer paramtable.Get().Reset(Params.CommonCfg.StorageType.Key)
+		defer paramtable.Get().Reset(Params.LocalStorageCfg.Path.Key)
+
+		cfg := createStorageConfig()
+		basePath := path.Join("files", "backfill_conflict", "seg811")
+		oldPath := path.Join(basePath, "_data", "100_old.parquet")
+		seedManifest, err := packed.CommitManifestUpdates(basePath, packed.ManifestEarliest, cfg, &packed.ManifestUpdates{
+			ColumnGroups: []packed.ColumnGroupEntry{{
+				Columns: []string{"100"},
+				Format:  "parquet",
+				Files:   []packed.ColumnGroupFileEntry{{Path: oldPath, StartIndex: 0, EndIndex: 5}},
+			}},
+		})
+		require.NoError(t, err)
+		_, _, err = packed.UnmarshalManifestPath(seedManifest)
+		require.NoError(t, err)
+
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 811, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath(basePath, 1),
+		}})
+		newPath := path.Join(basePath, "_data", "100_new.parquet")
+		jsonStr := fmt.Sprintf(`{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "811": {
+              "rowCount": 5,
+              "outputPath": "x",
+              "ops": [
+                {"type": "add", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "%s", "startIndex": 0, "endIndex": 5}]}
+              ]
+            }
+          }
+        }`, newPath)
+		server := newServerForCommit(t, m, nil, []byte(jsonStr))
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "already exists with different files")
+	})
+
+	// A single result mixing delta and legacy entries produces both commit
+	// kinds in one batch, dispatched together.
+	t.Run("v3_mixed_delta_and_legacy_batch", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 901, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/901", 3),
+		}})
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 902, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/902", 10),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "901": {
+              "rowCount": 5,
+              "outputPath": "x",
+              "ops": [
+                {"type": "add", "columns": ["100"], "format": "parquet", "rowCount": 5,
+                 "files": [{"path": "_data/100_a.parquet", "startIndex": 0, "endIndex": 5}]}
+              ]
+            },
+            "902": {"version": 12, "sourceVersion": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		captured, unpatch := captureManifestCommits(t)
+		defer unpatch()
+		// Stub the delta replay check to an empty manifest view; the real
+		// descriptor path is covered by the replay/conflict subtests.
+		unpatchReadCGs := emptyManifestColumnGroups(t)
+		defer unpatchReadCGs()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(resp.GetStatus()))
+		assert.Equal(t, int32(2), resp.GetCommittedSegments())
+		require.Len(t, *captured, 2)
+		var delta, legacy *SegmentManifestCommit
+		for i := range *captured {
+			switch (*captured)[i].Mutation.Type {
+			case ManifestMutationCommitUpdates:
+				delta = &(*captured)[i]
+			case ManifestMutationNoop:
+				legacy = &(*captured)[i]
+			}
+		}
+		require.NotNil(t, delta, "expected a delta CommitUpdates unit")
+		require.NotNil(t, legacy, "expected a legacy Noop unit")
+		require.NotNil(t, delta.Mutation.Updates)
+		assert.Len(t, delta.Mutation.Updates.ColumnGroups, 1)
+		assert.Equal(t, int64(902), legacy.SegmentID)
+		assert.Equal(t, packed.MarshalManifestPath("/seg/902", 10), legacy.ExpectedManifest)
+		assert.Equal(t, packed.MarshalManifestPath("/seg/902", 12), legacy.Mutation.ManifestPath)
+	})
+
+	// A stats/index commit landing between the handler's pre-check and the
+	// manifest lock acquisition must be caught by the framework's in-lock CAS
+	// (the enforcement itself is covered by segment_manifest_commit_test.go).
+	// This test verifies the backfill handler maps that typed stale error to a
+	// per-segment failure instead of reporting a fake committed=true.
+	t.Run("v3_legacy_stale_cas_surfaces_failed", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 701, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/701", 10),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "701": {"version": 12, "sourceVersion": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		// The framework's own stale error, as produced when the pointer moved
+		// past the pinned source version between pre-check and lock.
+		patch := mockey.Mock((*meta).CommitSegmentManifests).To(
+			func(_ *meta, _ context.Context, _ []SegmentManifestCommit, _ ...UpdateOperator) error {
+				return staleSegmentManifestError(701,
+					packed.MarshalManifestPath("/seg/701", 10),
+					packed.MarshalManifestPath("/seg/701", 11))
+			}).Build()
+		defer patch.UnPatch()
+
+		resp, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Error(t, merr.Error(resp.GetStatus()))
+		assert.Equal(t, int32(1), resp.GetFailedSegments())
+		require.Len(t, resp.GetSegmentStatuses(), 1)
+		assert.False(t, resp.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, resp.GetSegmentStatuses()[0].GetReason(), "stale segment manifest")
+	})
+
+	// Re-submitting the same legacy result after a successful commit must be
+	// rejected: the pointer already advanced past the source version, so the
+	// legacy CAS treats the replay as stale rather than rolling back.
+	t.Run("v3_legacy_idempotent_replay", func(t *testing.T) {
+		ctx := context.Background()
+		m, err := newMemoryMeta(t)
+		require.NoError(t, err)
+		m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 702, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+			StorageVersion: storage.StorageV3,
+			ManifestPath:   packed.MarshalManifestPath("/seg/702", 10),
+		}})
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "702": {"version": 12, "sourceVersion": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status: merr.Success(), DbName: "default", CollectionName: "c",
+			}, nil).Maybe()
+		server := newServerForCommit(t, m, mockBroker, []byte(jsonStr))
+
+		first, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(first.GetStatus()))
+		assert.Equal(t, int32(1), first.GetCommittedSegments())
+		updated := m.GetSegment(ctx, 702)
+		require.NotNil(t, updated)
+		assert.Equal(t, packed.MarshalManifestPath("/seg/702", 12), updated.GetManifestPath())
+
+		second, err := server.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, int32(1), second.GetFailedSegments())
+		require.Len(t, second.GetSegmentStatuses(), 1)
+		assert.False(t, second.GetSegmentStatuses()[0].GetOk())
+		assert.Contains(t, second.GetSegmentStatuses()[0].GetReason(), "source manifest version")
+	})
+
+	// Global-cluster convention: the primary and the standby each commit the
+	// same result against their own independent metadata; both succeed and
+	// neither depends on the other's state.
+	t.Run("v3_global_cluster_primary_standby_independent", func(t *testing.T) {
+		ctx := context.Background()
+		jsonStr := `{
+          "success": true,
+          "collectionId": 100,
+          "segments": {
+            "801": {"version": 12, "sourceVersion": 10, "rowCount": 1, "outputPath": "x", "manifestPaths": []}
+          }
+        }`
+		newStandalone := func(t *testing.T) *Server {
+			mm, err := newMemoryMeta(t)
+			require.NoError(t, err)
+			mm.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID: 801, CollectionID: 100, State: commonpb.SegmentState_Flushed,
+				StorageVersion: storage.StorageV3,
+				ManifestPath:   packed.MarshalManifestPath("/seg/801", 10),
+			}})
+			b := broker.NewMockBroker(t)
+			b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
+				Return(&milvuspb.DescribeCollectionResponse{
+					Status: merr.Success(), DbName: "default", CollectionName: "c",
+				}, nil).Maybe()
+			return newServerForCommit(t, mm, b, []byte(jsonStr))
+		}
+
+		primary := newStandalone(t)
+		primaryResp, err := primary.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(primaryResp.GetStatus()))
+		assert.Equal(t, int32(1), primaryResp.GetCommittedSegments())
+
+		standby := newStandalone(t)
+		standbyResp, err := standby.CommitBackfillResult(ctx, &datapb.CommitBackfillResultRequest{
+			ResultPath: "s3a://bkt/foo",
+		})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(standbyResp.GetStatus()))
+		assert.Equal(t, int32(1), standbyResp.GetCommittedSegments())
+
+		assert.Equal(t, packed.MarshalManifestPath("/seg/801", 12),
+			primary.meta.GetSegment(ctx, 801).GetManifestPath())
+		assert.Equal(t, packed.MarshalManifestPath("/seg/801", 12),
+			standby.meta.GetSegment(ctx, 801).GetManifestPath())
+	})
+
+	// More commits than maxBackfillCommitBatch must be split across several
+	// meta.CommitSegmentManifests calls so one failing commit cannot drag an
+	// arbitrarily large batch.
+	t.Run("commits_split_across_manifest_batches", func(t *testing.T) {
 		ctx := context.Background()
 		m, err := newMemoryMeta(t)
 		require.NoError(t, err)
 
-		segIDs := make([]int64, 0, maxItemsPerBroadcast+5)
-		for i := int64(1); i <= int64(maxItemsPerBroadcast+5); i++ {
+		segIDs := make([]int64, 0, maxBackfillCommitBatch+5)
+		for i := int64(1); i <= int64(maxBackfillCommitBatch+5); i++ {
 			segIDs = append(segIDs, 10000+i)
 			m.AddSegment(ctx, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 				ID: 10000 + i, CollectionID: 100, State: commonpb.SegmentState_Flushed,
@@ -5166,34 +5677,17 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 			Return(&milvuspb.DescribeCollectionResponse{
 				Status: merr.Success(), DbName: "default", CollectionName: "c",
-			}, nil)
+			}, nil).Maybe()
 
 		server := newServerForCommit(t, m, mockBroker, []byte(b.String()))
 
-		wal := mock_streaming.NewMockWALAccesser(t)
-		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
-		streaming.SetWALForTest(wal)
-
-		bapi := mock_broadcaster.NewMockBroadcastAPI(t)
-		var broadcastCalls int
-		bapi.EXPECT().Broadcast(mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, msg message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
-				broadcastCalls++
-				return &types2.BroadcastAppendResult{
-					BroadcastID: uint64(broadcastCalls),
-					AppendResults: map[string]*types2.AppendResult{
-						"by-dev-rootcoord-dml_0": {
-							MessageID:              rmq.NewRmqID(1),
-							TimeTick:               tsoutil.ComposeTSByTime(time.Now()),
-							LastConfirmedMessageID: rmq.NewRmqID(1),
-						},
-					},
-				}, nil
-			})
-		bapi.EXPECT().Close().Return()
-		patch := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
-			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
-				return bapi, nil
+		var commitCalls int
+		var committed []SegmentManifestCommit
+		patch := mockey.Mock((*meta).CommitSegmentManifests).To(
+			func(_ *meta, _ context.Context, cs []SegmentManifestCommit, _ ...UpdateOperator) error {
+				commitCalls++
+				committed = append(committed, cs...)
+				return nil
 			}).Build()
 		defer patch.UnPatch()
 
@@ -5204,8 +5698,10 @@ func TestServer_CommitBackfillResult(t *testing.T) {
 		assert.True(t, merr.Ok(resp.GetStatus()))
 		assert.Equal(t, int32(len(segIDs)), resp.GetCommittedSegments())
 		assert.Equal(t, int32(0), resp.GetFailedSegments())
-		// 517 items split across batches of 512 = 2 broadcasts.
-		assert.Equal(t, 2, broadcastCalls)
+		// maxBackfillCommitBatch+5 commits split across batches of
+		// maxBackfillCommitBatch = 2 calls.
+		assert.Equal(t, 2, commitCalls)
+		assert.Len(t, committed, len(segIDs))
 	})
 }
 

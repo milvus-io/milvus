@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -47,15 +48,47 @@ type BackfillResult struct {
 
 // BackfillSegment is one entry in BackfillResult.Segments.
 //
-// V3 entries carry {version, manifestPaths} and omit storage_version/column_groups.
+// V3 entries come in two mutually exclusive forms:
+//   - legacy: {version, sourceVersion, manifestPaths} — a pre-baked manifest
+//     version plus the base version it was built from; DataCoord adopts the
+//     version only when the current manifest still equals sourceVersion.
+//   - delta: {ops, ...} — the backfill's manifest operations (add/replace file
+//     lists); DataCoord applies them to the segment's current manifest via
+//     meta.CommitSegmentManifests. sourceVersion is NOT compared for delta.
+//
 // V2 entries carry {storage_version: 2, column_groups: [...]} and have version == -1.
 type BackfillSegment struct {
-	Version        int64                   `json:"version"` // V3: committedVersion (>0); V2: -1
+	Version        int64                   `json:"version"`       // V3 legacy: committedVersion (>0); V2: -1
+	SourceVersion  int64                   `json:"sourceVersion"` // V3 legacy: manifest base the pre-baked version was built from
 	RowCount       int64                   `json:"rowCount"`
 	OutputPath     string                  `json:"outputPath"`
 	ManifestPaths  []string                `json:"manifestPaths"`
+	Ops            []BackfillManifestOp    `json:"ops"`                       // V3 delta: operations, mutually exclusive with Version
 	StorageVersion *int64                  `json:"storage_version,omitempty"` // ptr to distinguish absent vs 0
 	ColumnGroups   []BackfillV2ColumnGroup `json:"column_groups,omitempty"`
+}
+
+// BackfillManifestOp is one StorageV3 manifest operation produced by a delta
+// backfill. Files are absolute object keys under the segment's manifest base
+// (e.g. "<base>/_data/<file>.parquet"), the form the loon writer emits and
+// milvus-storage's ToRelative strips to base-relative on write; matching the
+// SegmentManifestDelta contract that compaction's in-place schema-bump
+// materialization uses.
+type BackfillManifestOp struct {
+	Type     string                 `json:"type"`    // "add" | "replace"
+	Columns  []string               `json:"columns"` // Milvus field IDs as column names
+	Format   string                 `json:"format"`  // e.g. "parquet"; defaults to "parquet"
+	Files    []BackfillManifestFile `json:"files"`
+	RowCount int64                  `json:"rowCount"`
+}
+
+// BackfillManifestFile is one file inside a BackfillManifestOp, with its
+// inclusive-start / exclusive-end row range.
+type BackfillManifestFile struct {
+	Path       string            `json:"path"`
+	StartIndex int64             `json:"startIndex"`
+	EndIndex   int64             `json:"endIndex"`
+	Properties map[string]string `json:"properties,omitempty"`
 }
 
 // BackfillV2ColumnGroup describes one V2 column group produced by backfill.
@@ -69,6 +102,13 @@ type BackfillV2ColumnGroup struct {
 // IsV2 reports whether this entry represents a StorageV2 segment.
 func (s *BackfillSegment) IsV2() bool {
 	return s.StorageVersion != nil && *s.StorageVersion == storage.StorageV2 && len(s.ColumnGroups) > 0
+}
+
+// IsV3Delta reports whether this entry carries the delta-based V3 commit form
+// (a list of manifest operations) rather than a pre-baked version. Mutually
+// exclusive with IsV2.
+func (s *BackfillSegment) IsV3Delta() bool {
+	return !s.IsV2() && len(s.Ops) > 0
 }
 
 // knownObjectSchemes lists URI schemes recognized by normalizeObjectKey.
@@ -206,6 +246,97 @@ func buildV2Groups(bucket string, entry *BackfillSegment) (map[int64]*datapb.Fie
 		}
 	}
 	return out, nil
+}
+
+// opsToManifestUpdates converts the delta backfill's manifest operations into
+// the structured ManifestUpdates payload DataCoord replays onto the segment's
+// current manifest. "add" registers a new single-field column group;
+// "replace" first drops the target columns (no-op when absent, auto-dropping
+// their indexes) and then registers the replacement group, so the drop and the
+// re-add travel in one loon transaction.
+//
+// This function does NOT read parquet footers. It trusts the row ranges in the
+// result JSON per the backfill contract (the loon writer stored the same
+// ranges when the manifest was produced).
+func opsToManifestUpdates(entry *BackfillSegment) (*packed.ManifestUpdates, error) {
+	if len(entry.Ops) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("backfill segment has no manifest ops")
+	}
+	// A column must be handled by exactly one op. Two ops targeting the same
+	// column (two adds, or an add plus a replace) would register two column
+	// groups claiming the same column, which milvus-storage does not merge in a
+	// single transaction and would corrupt the manifest.
+	seenColumns := make(map[string]struct{}, 0)
+	updates := &packed.ManifestUpdates{}
+	for i := range entry.Ops {
+		op := &entry.Ops[i]
+		for _, col := range op.Columns {
+			if _, dup := seenColumns[col]; dup {
+				return nil, merr.WrapErrParameterInvalidMsg(
+					"backfill manifest column %q appears in more than one op", col)
+			}
+			seenColumns[col] = struct{}{}
+		}
+		switch op.Type {
+		case "add":
+		case "replace":
+			updates.DropColumns = append(updates.DropColumns, op.Columns...)
+		default:
+			return nil, merr.WrapErrParameterInvalidMsg("unsupported backfill manifest op %q", op.Type)
+		}
+		cg, err := buildManifestColumnGroup(op)
+		if err != nil {
+			return nil, err
+		}
+		updates.ColumnGroups = append(updates.ColumnGroups, *cg)
+	}
+	return updates, nil
+}
+
+// buildManifestColumnGroup validates one backfill manifest op and converts it
+// into the serializable column-group descriptor DataCoord registers via
+// loon_transaction_add_column_group. Malformed ops are Input errors: they
+// violate the external (Spark) result contract and retrying cannot fix them.
+func buildManifestColumnGroup(op *BackfillManifestOp) (*packed.ColumnGroupEntry, error) {
+	if len(op.Columns) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op has no columns")
+	}
+	format := op.Format
+	if format == "" {
+		format = "parquet"
+	}
+	if len(op.Files) == 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op for columns %v has no files", op.Columns)
+	}
+	files := make([]packed.ColumnGroupFileEntry, 0, len(op.Files))
+	var totalRows int64
+	for i := range op.Files {
+		f := &op.Files[i]
+		if f.Path == "" {
+			return nil, merr.WrapErrParameterInvalidMsg("backfill manifest op for columns %v has an empty file path", op.Columns)
+		}
+		if f.EndIndex <= f.StartIndex {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"backfill manifest file %q has invalid row range [%d,%d)", f.Path, f.StartIndex, f.EndIndex)
+		}
+		totalRows += f.EndIndex - f.StartIndex
+		files = append(files, packed.ColumnGroupFileEntry{
+			Path:       f.Path,
+			StartIndex: f.StartIndex,
+			EndIndex:   f.EndIndex,
+			Properties: f.Properties,
+		})
+	}
+	if op.RowCount > 0 && totalRows != op.RowCount {
+		return nil, merr.WrapErrParameterInvalidMsg(
+			"backfill manifest op for columns %v reports rowCount %d but files sum to %d",
+			op.Columns, op.RowCount, totalRows)
+	}
+	return &packed.ColumnGroupEntry{
+		Columns: op.Columns,
+		Format:  format,
+		Files:   files,
+	}, nil
 }
 
 // bucketFromChunkManager returns the bucket name of the given chunk manager if

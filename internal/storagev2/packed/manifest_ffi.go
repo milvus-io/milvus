@@ -763,6 +763,32 @@ func readColumnGroupsFromManifest(
 	return groups, nil
 }
 
+// ReadManifestColumnGroups returns the serializable column-group descriptors
+// of the manifest revision pointed to by manifestPath. It is the exported
+// counterpart of readColumnGroupsFromManifest, used for pre-commit descriptor
+// comparison — e.g. detecting an already-applied backfill delta before a
+// replay would re-add a column that milvus-storage rejects on existing columns.
+func ReadManifestColumnGroups(manifestPath string, storageConfig *indexpb.StorageConfig) ([]ColumnGroupEntry, error) {
+	groups, err := readColumnGroupsFromManifest(manifestPath, storageConfig)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ColumnGroupEntry, 0, len(groups))
+	for _, g := range groups {
+		files := make([]ColumnGroupFileEntry, 0, len(g.Fragments))
+		for _, f := range g.Fragments {
+			files = append(files, ColumnGroupFileEntry{
+				Path:       f.FilePath,
+				StartIndex: f.StartRow,
+				EndIndex:   f.EndRow,
+				Properties: f.Properties,
+			})
+		}
+		out = append(out, ColumnGroupEntry{Columns: g.Columns, Format: g.Format, Files: files})
+	}
+	return out, nil
+}
+
 func deltaLogsFromManifest(manifest *C.LoonManifest) ([]*datapb.FieldBinlog, error) {
 	if manifest == nil {
 		return nil, nil
