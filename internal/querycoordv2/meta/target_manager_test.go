@@ -1152,7 +1152,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, time.Minute))
 		described := false
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).RunAndReturn(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
 			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 				described = true
 				return splitShardStates(channelNames,
@@ -1179,7 +1179,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, time.Minute))
 		// the state read commits before the fence: only the source, still Normal.
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
 		// the pull reads after the fence: it lists the targets, data under the source.
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
@@ -1192,7 +1192,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, time.Minute))
 		// the state read commits before the adoption: targets still Creating.
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(channelNames,
 				schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil).Once()
 		// the pull reads after it: the source is delisted.
@@ -1208,11 +1208,11 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 		cache := NewShardSplitStateCache(broker, time.Minute)
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, cache)
 		// an earlier cached query saw the pre-fence meta.
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
 		suite.Empty(cache.CreatingTargetChannels(ctx, collectionID))
 		// the fresh read fails; the pull, taken after the fence, still happens.
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
 
 		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
@@ -1223,10 +1223,10 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 		broker := NewMockBroker(suite.T())
 		cache := NewShardSplitStateCache(broker, time.Minute)
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, cache)
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
 		suite.Empty(cache.CreatingTargetChannels(ctx, collectionID))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[:1], segments, nil).Once()
 
 		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
@@ -1237,7 +1237,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 	suite.Run("a pull with no split leaves the mark empty", func() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, time.Minute))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(channelNames[:1], schemapb.ShardState_ShardNormal), nil).Once()
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[:1], segments, nil).Once()
 
@@ -1249,8 +1249,8 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 	suite.Run("a failed state read is retried together with the pull", func() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, time.Minute))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Once()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(channelNames,
 				schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil).Once()
 		// the pull happens once, and only after a successful state read.
@@ -1263,7 +1263,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget_MarksSplitWindowTargets() 
 	suite.Run("no next target is built when the states cannot be read", func() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, time.Minute))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Maybe()
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing")).Maybe()
 		// GetRecoveryInfoV2 has no expectation: an unmarked pull must never happen.
 		timeoutCtx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 		defer cancel()
@@ -1302,7 +1302,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 	suite.Run("the window snapshot is promoted without its window targets", func() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).RunAndReturn(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
 			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) { return windowStates(), nil })
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
 		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
@@ -1338,7 +1338,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
 		adopted := false
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).RunAndReturn(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
 			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 				if adopted {
 					return splitShardStates(names,
@@ -1364,7 +1364,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 		// Excluding them would report a collection Loaded that serves nothing.
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).RunAndReturn(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
 			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) { return windowStates(), nil })
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels[1:], nil, nil).Once()
 		suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
@@ -1381,7 +1381,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
 		// the state read never listed t1/t2, so the pull marks them; by the time
 		// the promotion asks, nothing is fenced and they read Creating.
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(names,
 				schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardCreating), nil)
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
@@ -1404,7 +1404,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 		}
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(cascaded,
 				schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating,
 				schemapb.ShardState_ShardCreating, schemapb.ShardState_ShardNormal), nil)
@@ -1439,7 +1439,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
 		bAdopted := false
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).RunAndReturn(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).RunAndReturn(
 			func(context.Context, int64) (*milvuspb.DescribeCollectionResponse, error) {
 				if bAdopted {
 					return splitShardStates(all,
@@ -1471,7 +1471,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_SplitWindowSnapshot() {
 	suite.Run("a pull with no window targets is promoted whole and consumes the next target", func() {
 		broker := NewMockBroker(suite.T())
 		mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
-		broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 			splitShardStates(names,
 				schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
 		broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, segments, nil).Once()
@@ -1522,7 +1522,7 @@ func (suite *TargetManagerSuite) TestUpdateCurrentTarget_RefusesAnEmptyNarrowedT
 	})
 	broker := NewMockBroker(suite.T())
 	mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, NewShardSplitStateCache(broker, 0))
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 		splitShardStates(names, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating), nil)
 	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, nil, nil).Once()
 	suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
@@ -1548,7 +1548,7 @@ func (suite *TargetManagerSuite) TestSplitWindowExclusionsWithoutReadableStates(
 	broker := NewMockBroker(suite.T())
 	cache := NewShardSplitStateCache(broker, 0)
 	mgr := NewTargetManagerWithSplitState(broker, suite.meta, suite.store, cache)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 		splitShardStates(names, schemapb.ShardState_ShardSplitting, schemapb.ShardState_ShardCreating), nil).Once()
 	broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(vchannels, nil, nil).Once()
 	suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
@@ -1558,7 +1558,7 @@ func (suite *TargetManagerSuite) TestSplitWindowExclusionsWithoutReadableStates(
 	// is unreachable: the states cannot be read at all. An invalidated entry
 	// would not do, since it stays the fallback of a failed refresh.
 	unreachable := NewMockBroker(suite.T())
-	unreachable.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+	unreachable.EXPECT().DescribeCollectionInternal(mock.Anything, collectionID).Return(
 		nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing"))
 	mgr.splitStates = NewShardSplitStateCache(unreachable, 0)
 
