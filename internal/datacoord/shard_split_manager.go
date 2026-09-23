@@ -135,6 +135,12 @@ type shardSplitManager struct {
 	// policy-driven compactions started with (Server.startCompaction).
 	compactionEnabled bool
 
+	// issuing holds the ids of the tasks whose broadcast issue is in flight off
+	// the loop (issueOffLoop), and spawn runs one: a goroutine, a seam so the
+	// task machine can be tested step by step.
+	issuing *typeutil.ConcurrentSet[int64]
+	spawn   func(issue func())
+
 	lastDetect time.Time
 }
 
@@ -158,6 +164,8 @@ func newShardSplitManager(
 		controlChannel:    func() string { return streaming.WAL().ControlChannel() },
 		replicationRole:   balancerReplicationRole,
 		compactionEnabled: paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool(),
+		issuing:           typeutil.NewConcurrentSet[int64](),
+		spawn:             func(issue func()) { go issue() },
 	}
 }
 
@@ -197,10 +205,42 @@ func (m *shardSplitManager) Start() {
 	}()
 }
 
-// Stop stops the loop and waits for it.
+// Stop stops the loop and waits for it. It does not wait for a broadcast issue
+// in flight (issueOffLoop): that may be waiting on the collection's resource
+// keys, whose lock takes no context.
 func (m *shardSplitManager) Stop() {
 	m.cancel()
 	m.wg.Wait()
+}
+
+// issueOffLoop runs a task's broadcast issue -- its write switch or its
+// adoption -- off the manager's loop, at most one per task.
+//
+// An issue takes the collection's resource keys, and the lock behind them
+// takes no context: it waits as long as another broadcast of the collection
+// holds them, and a broadcast holds them until its ack callbacks succeed --
+// an adoption whose callback waits for a drain, a SplitShard callback that
+// retries. Run on the loop, one such wait would stop every task of every
+// collection and Stop with them. Off the loop it stops only its own task: the
+// loop skips the issue while it is in flight and keeps advancing the rest.
+// Nothing of the task's state depends on it having returned, since every issue
+// is idempotent and its effect is observed on a later tick. A cancelled
+// manager does not wait for it; it ends once it gets the keys, on its
+// cancelled context.
+func (m *shardSplitManager) issueOffLoop(task *datapb.SplitShardTask, issue func()) {
+	if !m.issuing.Insert(task.GetTaskId()) {
+		m.taskLogger(task).RatedInfo(m.ctx, 60, "the task's previous broadcast issue is still in flight, not issuing again")
+		return
+	}
+	m.spawn(func() {
+		defer m.issuing.Remove(task.GetTaskId())
+		issue()
+	})
+}
+
+// issueInFlight reports whether a task's broadcast issue has not returned.
+func (m *shardSplitManager) issueInFlight(task *datapb.SplitShardTask) bool {
+	return m.issuing.Contain(task.GetTaskId())
 }
 
 // tick runs one round of the loop at now.

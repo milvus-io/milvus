@@ -76,7 +76,10 @@ func splitTargetsAllocated(task *datapb.SplitShardTask) bool {
 // the write switch. Until the vchannels are persisted nothing outside this
 // datacoord has happened, and the task may be aborted.
 func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
-	logger := m.taskLogger(task)
+	if m.issueInFlight(task) {
+		m.taskLogger(task).RatedInfo(m.ctx, 60, "the shard split write switch issue is still in flight")
+		return
+	}
 	if !splitTargetsAllocated(task) {
 		allocated, ok := m.allocateTargets(task)
 		if !ok {
@@ -88,6 +91,13 @@ func (m *shardSplitManager) advancePreparing(task *datapb.SplitShardTask) {
 	// created; what is already running on it is killed before the fence, so
 	// the split never waits behind a long compaction.
 	m.preemptSourceCompactions(task)
+	m.issueOffLoop(task, func() { m.issueWriteSwitch(task) })
+}
+
+// issueWriteSwitch issues a Preparing task's write switch and records it as
+// Fencing. It runs off the loop (issueOffLoop).
+func (m *shardSplitManager) issueWriteSwitch(task *datapb.SplitShardTask) {
+	logger := m.taskLogger(task)
 	if err := m.coordinator.issueShardSplit(m.ctx, task, m.controlChannel()); err != nil {
 		if m.finishOnDroppedCollection(task, err, "collection dropped before the write switch") {
 			return

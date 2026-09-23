@@ -484,6 +484,7 @@ func newAllocatedPreparingCase(t *testing.T, descs ...*milvuspb.DescribeCollecti
 	}
 	manager := newShardSplitManager(context.Background(), svr.meta, newMockAllocator(t), svr.shardSplitTasks, coordinator)
 	manager.controlChannel = func() string { return splitMgrControl }
+	manager.spawn = func(issue func()) { issue() }
 	return manager, svr, bapi
 }
 

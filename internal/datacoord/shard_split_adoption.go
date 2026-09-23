@@ -241,13 +241,15 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 			logger.RatedInfo(m.ctx, 60, "waiting for the primary's shard split adoption to be applied here")
 			return
 		}
-		if err := m.coordinator.issueShardSplitAdoption(m.ctx, task, m.controlChannel()); err != nil {
-			if !m.finishOnDroppedCollection(task, err, "collection dropped during adoption") {
-				logger.RatedWarn(m.ctx, 30, "issue the shard split adoption failed, retrying", mlog.Err(err))
+		m.issueOffLoop(task, func() {
+			if err := m.coordinator.issueShardSplitAdoption(m.ctx, task, m.controlChannel()); err != nil {
+				if !m.finishOnDroppedCollection(task, err, "collection dropped during adoption") {
+					logger.RatedWarn(m.ctx, 30, "issue the shard split adoption failed, retrying", mlog.Err(err))
+				}
+				return
 			}
-			return
-		}
-		logger.RatedInfo(m.ctx, 60, "shard split adoption issued, waiting for it to apply")
+			logger.RatedInfo(m.ctx, 60, "shard split adoption issued, waiting for it to apply")
+		})
 		return
 	}
 	served, err := m.coordinator.splitSourceServed(m.ctx, task.GetCollectionId(), source)
