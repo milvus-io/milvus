@@ -22,6 +22,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -128,9 +129,10 @@ func (suite *ServiceSuite) TestSplitChildFrontsItsOwnSplit() {
 }
 
 // A spawn waits up to minutes for the target's recovery info. If querycoord
-// watches the target meanwhile, its delegator must win: the spawn must neither
+// watches the target meanwhile, its delegator must win: the spawn must not
 // overwrite it (and then remove it from the node on its own failure while its
-// pipeline keeps running) nor hand it to the source as a child.
+// pipeline keeps running), nor start a pipeline of its own. It attaches that
+// delegator to the source instead.
 func (suite *ServiceSuite) TestSpawnSplitChildNeverOverwritesADelegatorWatchedDuringItsWait() {
 	ctx := context.Background()
 	const target = "by-dev-rootcoord-dml_2_111v3"
@@ -142,6 +144,9 @@ func (suite *ServiceSuite) TestSpawnSplitChildNeverOverwritesADelegatorWatchedDu
 
 	watched := delegator.NewMockShardDelegator(suite.T())
 	watched.EXPECT().FrontingParent().Return(nil).Maybe()
+	watched.EXPECT().MarkAdopted().Return().Once()
+	watched.EXPECT().SetFrontingParent(source).Return().Once()
+	watched.EXPECT().ForwardKnownDeletesToParent(mock.Anything).Return(nil).Once()
 	recovery := mockey.Mock((*QueryNode).waitSplitTargetRecovery).To(
 		func(node *QueryNode, _ int64, vchannel string) (*datapb.VchannelInfo, error) {
 			// querycoord's watch of the target lands while the spawn waits.
@@ -157,8 +162,8 @@ func (suite *ServiceSuite) TestSpawnSplitChildNeverOverwritesADelegatorWatchedDu
 		TargetVChannel: target,
 		Parent:         source,
 	})
-	suite.ErrorIs(err, merr.ErrChannelReduplicate)
-	suite.Nil(child)
+	suite.NoError(err)
+	suite.Same(watched, child, "the delegator querycoord watched was not attached")
 	current, ok := suite.node.delegators.Get(target)
 	suite.True(ok)
 	suite.Same(watched, current, "the spawn overwrote the delegator querycoord watched")
