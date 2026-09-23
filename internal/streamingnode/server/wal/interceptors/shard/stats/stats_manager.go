@@ -8,7 +8,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 
-	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/policy"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -38,9 +37,8 @@ type StatsManager struct {
 	totalFlushSize             uint64
 	pchannelStats              map[string]*aggregatedMetrics
 	vchannelStats              map[string]*aggregatedMetrics
-	segmentStats               map[int64]*SegmentStats  // map[SegmentID]SegmentStats
-	segmentIndex               map[int64]SegmentBelongs // map[SegmentID]channels
-	segmentFlushSourceModes    map[int64]metacache.FlushSourceMode
+	segmentStats               map[int64]*SegmentStats       // map[SegmentID]SegmentStats
+	segmentIndex               map[int64]SegmentBelongs      // map[SegmentID]channels
 	pchannelIndex              map[string]map[int64]struct{} // map[PChannel]SegmentID
 	growingL1SegmentsByChannel map[channelKey]map[int64]struct{}
 	segmentDeletePressures     map[int64]deletePressure // map[SegmentID]aggregated delete pressure
@@ -78,7 +76,6 @@ func NewStatsManager() *StatsManager {
 		vchannelStats:              make(map[string]*aggregatedMetrics),
 		segmentStats:               make(map[int64]*SegmentStats),
 		segmentIndex:               make(map[int64]SegmentBelongs),
-		segmentFlushSourceModes:    make(map[int64]metacache.FlushSourceMode),
 		pchannelIndex:              make(map[string]map[int64]struct{}),
 		growingL1SegmentsByChannel: make(map[channelKey]map[int64]struct{}),
 		segmentDeletePressures:     make(map[int64]deletePressure),
@@ -245,9 +242,6 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtim
 
 	// update the total stats if inserted.
 	if inserted {
-		if m.segmentFlushSourceModes[segmentID] == metacache.FlushSourceWriteBuffer {
-			runtimeFlushSize = insert.BinarySize
-		}
 		stat.AllocRuntimeFlushSize(runtimeFlushSize)
 		m.totalFlushSize = utils.SaturatingAddUint64(m.totalFlushSize, runtimeFlushSize)
 		m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
@@ -265,37 +259,6 @@ func (m *StatsManager) allocRows(segmentID int64, insert ModifiedMetrics, runtim
 		return stat.ShouldBeSealed(), nil
 	}
 	return stat.ShouldBeSealed(), ErrNotEnoughSpace
-}
-
-// UpdateFlushSourceMode records the segment-level sticky flush source chosen by writebuffer.
-func (m *StatsManager) UpdateFlushSourceMode(segmentID int64, mode metacache.FlushSourceMode) {
-	if mode != metacache.FlushSourceWriteBuffer && mode != metacache.FlushSourceGrowing {
-		return
-	}
-
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	stat, ok := m.segmentStats[segmentID]
-	if !ok {
-		return
-	}
-	current := m.segmentFlushSourceModes[segmentID]
-	if current != metacache.FlushSourceUnknown && current != mode {
-		return
-	}
-	m.segmentFlushSourceModes[segmentID] = mode
-	if mode == metacache.FlushSourceWriteBuffer {
-		oldFlushSize := stat.FlushSize()
-		stat.RuntimeFlushSize = stat.Modified.BinarySize
-		newFlushSize := stat.FlushSize()
-		if oldFlushSize > newFlushSize {
-			m.totalFlushSize = utils.SaturatingSubUint64(m.totalFlushSize, oldFlushSize-newFlushSize)
-		} else if newFlushSize > oldFlushSize {
-			m.totalFlushSize = utils.SaturatingAddUint64(m.totalFlushSize, newFlushSize-oldFlushSize)
-		}
-		m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
-	}
 }
 
 // RecordDelete records local delete metrics on matching growing L1 segments.
@@ -402,7 +365,6 @@ func (m *StatsManager) unregisterSealedSegment(segmentID int64) *SegmentStats {
 	m.metricHelper.ObserveFlushPressureBytesUpdate(m.totalFlushSize)
 	delete(m.segmentStats, segmentID)
 	delete(m.segmentIndex, segmentID)
-	delete(m.segmentFlushSourceModes, segmentID)
 	delete(m.segmentDeletePressures, segmentID)
 	if stats.Level == datapb.SegmentLevel_L1 {
 		key := channelKey{pchannel: info.PChannel, vchannel: info.VChannel}

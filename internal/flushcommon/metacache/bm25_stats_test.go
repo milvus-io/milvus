@@ -17,6 +17,8 @@
 package metacache
 
 import (
+	"testing"
+
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/storage"
@@ -36,13 +38,15 @@ func (s *BM25StatsSetSuite) SetupTest() {
 }
 
 func (suite *BM25StatsSetSuite) TestMergeAndSeralize() {
+	// NewBM25Stats, not a bare composite literal: BM25Stats.Append writes into
+	// rowsWithToken, which the zero value leaves nil.
 	statsA := map[int64]*storage.BM25Stats{
-		101: {},
+		101: storage.NewBM25Stats(),
 	}
 	statsA[101].Append(map[uint32]float32{1: 1, 2: 2})
 
 	statsB := map[int64]*storage.BM25Stats{
-		101: {},
+		101: storage.NewBM25Stats(),
 	}
 	statsB[101].Append(map[uint32]float32{1: 1, 2: 2})
 
@@ -58,4 +62,8 @@ func (suite *BM25StatsSetSuite) TestMergeAndSeralize() {
 	suite.NoError(err)
 
 	suite.Equal(storageStats.NumRow(), int64(2))
+}
+
+func TestBM25StatsSet(t *testing.T) {
+	suite.Run(t, new(BM25StatsSetSuite))
 }

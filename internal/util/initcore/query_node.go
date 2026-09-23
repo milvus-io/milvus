@@ -91,7 +91,7 @@ func doInitQueryNodeOnce(ctx context.Context) error {
 	C.SegcoreSetMaxGroupByGroups(cMaxGroupByGroups)
 
 	SyncPreferFieldDataWhenIndexHasRawData(ctx, paramtable.Get())
-	SyncEnableGrowingSourceFlush(ctx, paramtable.Get())
+	SyncStorageV3Enabled(ctx, paramtable.Get())
 
 	cKnowhereThreadPoolSize := C.uint32_t(paramtable.Get().QueryNodeCfg.KnowhereThreadPoolSize.GetAsUint32())
 	C.SegcoreSetKnowhereSearchThreadPoolNum(cKnowhereThreadPoolSize)
@@ -273,15 +273,10 @@ func SyncPreferFieldDataWhenIndexHasRawData(ctx context.Context, params *paramta
 	}
 }
 
-// SyncEnableGrowingSourceFlush pushes the effective growing-source flush switch
-// into segcore so growing segments only retain raw chunks when the Go flush path
-// may later persist them through StorageV3 FlushGrowingSegmentData.
-func SyncEnableGrowingSourceFlush(ctx context.Context, params *paramtable.ComponentParam) {
-	storageV3Enabled := params.CommonCfg.UseLoonFFI.GetAsBool()
-	v := storageV3Enabled && params.CommonCfg.EnableGrowingSourceFlush.GetAsBool()
-	C.SegcoreSetStorageV3Enabled(C.bool(storageV3Enabled))
-	C.SegcoreSetEnableGrowingSourceFlush(C.bool(v))
-	if v {
-		mlog.Info(ctx, "enableGrowingSourceFlush=true: growing segments retain raw field chunks for StorageV3 growing-source flush")
-	}
+// SyncStorageV3Enabled pushes the StorageV3 switch into segcore. This is the
+// only caller of C.SegcoreSetStorageV3Enabled in the repository, so the
+// function must survive the removal of growing-source flush even though that
+// is what originally brought it here.
+func SyncStorageV3Enabled(ctx context.Context, params *paramtable.ComponentParam) {
+	C.SegcoreSetStorageV3Enabled(C.bool(params.CommonCfg.UseLoonFFI.GetAsBool()))
 }

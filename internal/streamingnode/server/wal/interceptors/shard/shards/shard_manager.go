@@ -3,8 +3,6 @@ package shards
 import (
 	"context"
 	"fmt"
-	"math"
-	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -14,14 +12,12 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/stats"
-	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors/shard/utils"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/recovery"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -266,15 +262,6 @@ func (c *CollectionInfo) SchemaVersion() int32 {
 	return s.GetVersion()
 }
 
-func (c *CollectionInfo) AllowGrowingSourceFlush() bool {
-	if c == nil || c.Schema == nil {
-		return false
-	}
-	return typeutil.AllowGrowingSourceFlush(c.Schema.GetSchema(),
-		paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool(),
-		paramtable.Get().CommonCfg.EnableGrowingSourceFlush.GetAsBool())
-}
-
 func (c *CollectionInfo) RequiresStorageV3() bool {
 	return c.HasTextField()
 }
@@ -288,101 +275,7 @@ func (c *CollectionInfo) HasTextField() bool {
 
 // RuntimeFlushSize estimates the in-memory footprint used by flush pressure decisions.
 func (c *CollectionInfo) RuntimeFlushSize(modified stats.ModifiedMetrics) uint64 {
-	if modified.Rows == 0 || modified.BinarySize == 0 {
-		return modified.BinarySize
-	}
-	if !c.shouldEstimateInterimIndexExtra() {
-		return modified.BinarySize
-	}
-
-	extra := estimateInterimIndexExtra(c.Schema.GetSchema(), modified.Rows)
-	if extra == 0 {
-		return modified.BinarySize
-	}
-	return utils.SaturatingAddUint64(modified.BinarySize, extra)
-}
-
-func (c *CollectionInfo) shouldEstimateInterimIndexExtra() bool {
-	if c == nil || c.Schema == nil || c.Schema.GetSchema() == nil || !c.AllowGrowingSourceFlush() {
-		return false
-	}
-	params := paramtable.Get()
-	return params.QueryNodeCfg.EnableInterminSegmentIndex.GetAsBool() &&
-		!params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
-}
-
-func estimateInterimIndexExtra(schema *schemapb.CollectionSchema, rows uint64) uint64 {
-	var extra uint64
-	for _, field := range schema.GetFields() {
-		switch field.GetDataType() {
-		case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-			dim, err := typeutil.GetDim(field)
-			if err != nil || dim <= 0 {
-				continue
-			}
-			extra = utils.SaturatingAddUint64(extra, estimateDenseInterimIndexExtra(field.GetDataType(), uint64(dim), rows))
-		case schemapb.DataType_SparseFloatVector:
-			// Sparse interim indexes keep their own representation roughly at
-			// raw sparse-vector size. Modified.BinarySize already accounts for
-			// the raw insert payload, so add one more sparse estimate as index
-			// overhead when chunks are retained for growing-source flush.
-			extra = utils.SaturatingAddUint64(extra, utils.SaturatingMulUint64(rows, uint64(typeutil.GetSparseFloatVectorEstimateLength())))
-		}
-	}
-	return extra
-}
-
-func estimateDenseInterimIndexExtra(dataType schemapb.DataType, dim uint64, rows uint64) uint64 {
-	params := paramtable.Get()
-	indexType := params.QueryNodeCfg.DenseVectorInterminIndexType.GetValue()
-	switch {
-	case strings.EqualFold(indexType, "IVF_FLAT_CC"):
-		rawBytes := utils.SaturatingMulUint64(rows, denseVectorRawBytes(dataType, dim))
-		expansionRate := params.QueryNodeCfg.InterimIndexMemExpandRate.GetAsFloat()
-		if expansionRate <= 0 {
-			expansionRate = 1
-		}
-		return ceilMulFloat(rawBytes, expansionRate)
-	case strings.EqualFold(indexType, "SCANN_DVR"):
-		return utils.SaturatingMulUint64(rows, scannDVRBytesPerRow(dim))
-	default:
-		return 0
-	}
-}
-
-func denseVectorRawBytes(dataType schemapb.DataType, dim uint64) uint64 {
-	switch dataType {
-	case schemapb.DataType_FloatVector:
-		return utils.SaturatingMulUint64(dim, 4)
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		return utils.SaturatingMulUint64(dim, 2)
-	default:
-		return 0
-	}
-}
-
-func scannDVRBytesPerRow(dim uint64) uint64 {
-	params := paramtable.Get()
-	subDim := uint64(params.QueryNodeCfg.InterimIndexSubDim.GetAsInt64())
-	bytes := utils.SaturatingMulUint64(subDim/8, dim)
-	switch strings.ToUpper(params.QueryNodeCfg.InterimIndexRefineQuantType.GetValue()) {
-	case "UINT8":
-		bytes = utils.SaturatingAddUint64(bytes, dim)
-	case "FLOAT16", "BFLOAT16":
-		bytes = utils.SaturatingAddUint64(bytes, utils.SaturatingMulUint64(dim, 2))
-	}
-	return bytes
-}
-
-func ceilMulFloat(value uint64, factor float64) uint64 {
-	if value == 0 || factor <= 0 {
-		return 0
-	}
-	result := math.Ceil(float64(value) * factor)
-	if result >= float64(math.MaxUint64) {
-		return math.MaxUint64
-	}
-	return uint64(result)
+	return modified.BinarySize
 }
 
 func (m *shardManagerImpl) Channel() types.PChannelInfo {

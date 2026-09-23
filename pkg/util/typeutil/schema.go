@@ -114,22 +114,6 @@ func ValidateTextRequiresStorageV3(schema *schemapb.CollectionSchema, storageV3E
 	return nil
 }
 
-// AllowGrowingSourceFlush returns whether insert payload for the schema may try
-// flushing from QueryNode growing source when available.
-func AllowGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
-	if !storageV3Enabled {
-		return false
-	}
-	return enableGrowingSourceFlush
-}
-
-// UseGrowingSourceFlush is kept for compatibility. Prefer
-// AllowGrowingSourceFlush for new code to avoid implying the source choice is
-// mandatory.
-func UseGrowingSourceFlush(schema *schemapb.CollectionSchema, storageV3Enabled bool, enableGrowingSourceFlush bool) bool {
-	return AllowGrowingSourceFlush(schema, storageV3Enabled, enableGrowingSourceFlush)
-}
-
 // EstimateSizePerRecord returns the estimate size of a record in a collection
 func EstimateSizePerRecord(schema *schemapb.CollectionSchema) (int, error) {
 	return estimateSizeBy(schema, custom)

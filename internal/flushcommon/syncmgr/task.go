@@ -19,6 +19,7 @@ package syncmgr
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -55,6 +56,10 @@ type SyncTask struct {
 	startPosition *msgpb.MsgPosition
 	checkpoint    *msgpb.MsgPosition
 	dataSource    string
+	// reservation owns this batch's row accounting; settled exactly once.
+	reservation *metacache.SyncReservation
+	// errorOnce keeps HandleError to one report per failed sync.
+	errorOnce sync.Once
 	// batchRows is the row number of this sync task,
 	// not the total num of rows of segemnt
 	batchRows int64
@@ -107,15 +112,59 @@ func (t *SyncTask) getLogger() *mlog.Logger {
 	)
 }
 
+// HandleError reports one failed sync exactly once. Both Run's defer and the
+// sync manager's submit handler call it for the same failure, so without the
+// guard the failure callback fires twice and both failure metrics double-count.
 func (t *SyncTask) HandleError(err error) {
-	if t.failureCallback != nil {
-		t.failureCallback(err)
-	}
+	t.errorOnce.Do(func() {
+		if t.failureCallback != nil {
+			t.failureCallback(err)
+		}
 
-	metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
-	if !t.pack.isFlush {
-		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+		metrics.DataNodeFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+		if !t.pack.isFlush {
+			metrics.DataNodeAutoFlushBufferCount.WithLabelValues(paramtable.GetStringNodeID(), metrics.FailLabel, t.level.String()).Inc()
+		}
+	})
+}
+
+// settleAction returns the metacache action that ends this task's row
+// accounting. Applying it more than once is safe: SyncReservation.Settle is
+// guarded by sync.Once, and the reservation-less commit below is idempotent
+// only in the sense that each terminal path applies it at most once.
+func (t *SyncTask) settleAction(outcome metacache.SettleOutcome) metacache.SegmentAction {
+	if t.reservation == nil {
+		// A task built without a reservation, which today means the bulk-import
+		// path: it has no write buffer to reserve rows from. A commit must still
+		// record what reached storage, because importv2 reports FlushedRows()
+		// as the job's ImportedRows. Nothing was reserved, so the other two
+		// outcomes have nothing to unwind.
+		if outcome == metacache.SettleCommitted {
+			return metacache.AddFlushedRows(t.batchRows)
+		}
+		return func(*metacache.SegmentInfo) {}
 	}
+	return t.reservation.Settle(outcome)
+}
+
+// settle applies the reservation outcome directly, for terminal paths that do
+// not otherwise touch the metacache.
+//
+// When the segment is already absent the update matches nothing and the
+// reservation is never marked settled. That is harmless: the counters it would
+// have adjusted live on a SegmentInfo that no longer exists, so there is
+// nothing left to leak.
+func (t *SyncTask) settle(outcome metacache.SettleOutcome) {
+	if t.metacache == nil {
+		return
+	}
+	if t.reservation == nil && outcome != metacache.SettleCommitted {
+		// Nothing was reserved, so there is nothing for a non-commit outcome to
+		// unwind. Skip the update rather than take the metacache write lock to
+		// apply a no-op.
+		return
+	}
+	t.metacache.UpdateSegments(t.settleAction(outcome), metacache.WithSegmentIDs(t.segmentID))
 }
 
 func (t *SyncTask) Run(ctx context.Context) (err error) {
@@ -124,17 +173,25 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 	logger := t.getLogger()
 	defer func() {
 		if err != nil {
+			// Rows are neither persisted nor still buffered: the payload was
+			// yielded out of the write buffer. Drop the accounting, and leave
+			// the checkpoint pin to the caller so a replay re-reads them.
+			t.settle(metacache.SettleFailed)
 			t.HandleError(err)
 		}
 	}()
 
 	segmentInfo, has := t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
+		// The segment left the metacache because an earlier task flushed it or
+		// because it was dropped. A segment id is never reissued, so nothing is
+		// left for this task to write. Terminal, not a failure.
 		if t.pack.isDrop {
 			logger.Info(ctx, "segment dropped, discard sync task")
-			return nil
+		} else {
+			logger.Warn(ctx, "segment not found in metacache, may be already synced")
 		}
-		logger.Warn(ctx, "segment not found in metacache, may be already synced")
+		t.settle(metacache.SettleDiscarded)
 		return nil
 	}
 
@@ -199,7 +256,7 @@ func (t *SyncTask) Run(ctx context.Context) (err error) {
 
 	t.pack.ReleaseData()
 
-	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchRows), metacache.UpdateManifestPath(t.manifestPath)}
+	actions := []metacache.SegmentAction{t.settleAction(metacache.SettleCommitted), metacache.UpdateManifestPath(t.manifestPath)}
 	if columnGroups != nil {
 		actions = append(actions, metacache.UpdateCurrentSplit(columnGroups))
 	}

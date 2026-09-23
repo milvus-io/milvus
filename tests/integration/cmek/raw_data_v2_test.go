@@ -71,7 +71,6 @@ func (s *RawDataV2Suite) SetupSuite() {
 	s.WithOptions(integration.WithoutResetDeploymentWhenTestTearDown())
 	s.WithMilvusConfig("common.storage.useLoonFFI", "false")
 	s.WithMilvusConfig("dataNode.storage.format", "parquet")
-	s.WithMilvusConfig("common.storage.enableGrowingSourceFlush", "false")
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", "1024")
 	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarField", "sync")
