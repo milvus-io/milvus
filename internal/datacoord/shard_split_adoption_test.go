@@ -19,11 +19,13 @@ package datacoord
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -38,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
@@ -417,4 +420,74 @@ func TestIssueShardSplitAdoptionRefusals(t *testing.T) {
 		svr.broker = b
 		assert.ErrorIs(t, svr.issueShardSplitAdoption(ctx, adoptionTask(), splitMgrControl), merr.ErrCollectionNotFound)
 	})
+}
+
+// wedgedAdoptionCoordinator's adoption for one task never returns, whatever
+// its context says: the resource-key lock the issue takes has no context, and
+// waits as long as another broadcast of the collection holds the keys (an
+// adoption whose callback waits for a drain, a SplitShard callback retrying).
+type wedgedAdoptionCoordinator struct {
+	*fakeSplitCoordinator
+	wedged  int64
+	release chan struct{}
+	calls   *atomic.Int32
+}
+
+func (w *wedgedAdoptionCoordinator) issueShardSplitAdoption(ctx context.Context, task *datapb.SplitShardTask, controlChannel string) error {
+	if task.GetTaskId() == w.wedged {
+		w.calls.Inc()
+		<-w.release
+	}
+	return w.fakeSplitCoordinator.issueShardSplitAdoption(ctx, task, controlChannel)
+}
+
+// One task whose broadcast issue is wedged on the collection's resource keys
+// stops only itself: the manager's loop keeps advancing every other task,
+// issues nothing more for the wedged one while its issue is in flight, and
+// Stop returns.
+func TestShardSplitAWedgedIssueStopsOnlyItsOwnTask(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.DataCoordCfg.ShardSplitTaskInterval.Key, "0.01")
+	defer params.Reset(params.DataCoordCfg.ShardSplitTaskInterval.Key)
+
+	manager, fake := adoptingCase(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, fencedDescribe())
+	coordinator := &wedgedAdoptionCoordinator{fakeSplitCoordinator: fake, wedged: 100, release: make(chan struct{}), calls: atomic.NewInt32(0)}
+	defer close(coordinator.release)
+	manager.coordinator = coordinator
+	manager.spawn = func(issue func()) { go issue() }
+	require.NoError(t, manager.store.create(context.Background(), manager.catalog, &datapb.SplitShardTask{
+		TaskId: 101, CollectionId: splitMgrCollection, State: datapb.SplitShardTaskState_SplitShardTaskRedistributing,
+		Fenced:  true,
+		Sources: []*datapb.SplitShardTaskSource{{Vchannel: splitMgrV3, SwitchTimeTick: 10}},
+		Targets: []*datapb.SplitShardTaskTarget{{Vchannel: splitMgrV4}, {Vchannel: "by-dev-rootcoord-dml_5_1v5"}},
+	}))
+
+	ticked := make(chan struct{})
+	go func() {
+		manager.tick(time.Now())
+		manager.tick(time.Now())
+		close(ticked)
+	}()
+	select {
+	case <-ticked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the manager's loop is blocked behind one task's broadcast issue")
+	}
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, mustTask(t, manager, 101).GetState(),
+		"another task kept advancing")
+	assert.Eventually(t, func() bool { return coordinator.calls.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+	assert.EqualValues(t, 1, coordinator.calls.Load(), "no second issue while the first is in flight")
+
+	manager.Start()
+	stopped := make(chan struct{})
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		manager.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop waits behind a wedged broadcast issue")
+	}
 }

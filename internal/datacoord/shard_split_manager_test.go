@@ -183,6 +183,8 @@ func newSplitTestManager(t *testing.T, coordinator *fakeSplitCoordinator) (*shar
 	manager.vchannelAllocator = vchannels
 	manager.controlChannel = func() string { return splitMgrControl }
 	manager.replicationRole = func(context.Context) (replicateutil.Role, error) { return replicateutil.RolePrimary, nil }
+	// Issues run in step, so a test observes each one's effect on the next line.
+	manager.spawn = func(issue func()) { issue() }
 	return manager, vchannels
 }
 
@@ -1033,4 +1035,36 @@ func TestShardSplitTriggerSeesTargetsAfterTheAlteredCollectionBroadcast(t *testi
 	require.Len(t, tasks, 1, "the trigger must consider the split's target after the broadcast")
 	assert.Equal(t, splitMgrV1, splitTaskSource(tasks[0]))
 	assert.EqualValues(t, 4, tasks[0].GetRoutingModulus(), "a single-residue target doubles the modulus")
+}
+
+// A write switch issue still in flight is not issued again, and the task is
+// not re-allocated or re-preempted meanwhile; once it returns, its effect is
+// what the next tick sees.
+func TestShardSplitPreparingDoesNotReissueAWriteSwitchInFlight(t *testing.T) {
+	manager, coordinator, vchannels := newPreparingCase(t)
+	release := make(chan struct{})
+	coordinator.onIssue = func(*datapb.SplitShardTask) { <-release }
+	manager.spawn = func(issue func()) { go issue() }
+	preempter := &fakePreempter{}
+	manager.setCompactionPreempter(preempter)
+
+	manager.advanceTasks()
+	require.Eventually(t, func() bool {
+		coordinator.mu.Lock()
+		defer coordinator.mu.Unlock()
+		return len(coordinator.issued) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	manager.advanceTasks()
+	manager.advanceTasks()
+	assert.Len(t, vchannels.params, 1)
+	assert.Len(t, preempter.channels, 1)
+	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskPreparing, mustTask(t, manager, 100).GetState())
+
+	close(release)
+	require.Eventually(t, func() bool {
+		return mustTask(t, manager, 100).GetState() == datapb.SplitShardTaskState_SplitShardTaskFencing
+	}, 5*time.Second, 10*time.Millisecond)
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	assert.Len(t, coordinator.issued, 1)
 }
