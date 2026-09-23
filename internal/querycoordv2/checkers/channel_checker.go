@@ -291,11 +291,18 @@ func (c *ChannelChecker) getDmChannelDiff(ctx context.Context, collectionID int6
 		}
 	}
 
-	// get channels which exists on next target, but not on dist
-	watchable := c.shardSplitWatchable(ctx, collectionID)
+	// get channels which exists on next target, but not on dist. The shard
+	// split rule needs a read of the shard states, so it is only looked up
+	// once there is a channel to watch.
+	var watchable func(string) bool
 	for name, channel := range nextTargetMap {
-		_, existOnDist := distMap[name]
-		if !existOnDist && watchable(name) {
+		if _, existOnDist := distMap[name]; existOnDist {
+			continue
+		}
+		if watchable == nil {
+			watchable = c.shardSplitWatchable(ctx, collectionID)
+		}
+		if watchable(name) {
 			toLoad = append(toLoad, channel)
 		}
 	}
