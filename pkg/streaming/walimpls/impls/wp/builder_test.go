@@ -268,3 +268,126 @@ func TestGetWpConfigFailsClosedWhenRefreshFails(t *testing.T) {
 	_, err = (&builderImpl{}).getWpConfig()
 	require.NoError(t, err)
 }
+
+// TestSetCustomWpConfigCompactionParams covers the six compaction and flush settings, which
+// between them carry both unit conversions in this mapping -- a duration read in seconds and a
+// byte size -- and three values whose bad forms switch off the bound they configure rather than
+// failing loudly.
+func TestSetCustomWpConfigCompactionParams(t *testing.T) {
+	params := paramtable.Get()
+	attemptKey := params.WoodpeckerCfg.AuditorCompactionAttemptTimeout.Key
+	budgetKey := params.WoodpeckerCfg.AuditorCompactionPassBudget.Key
+	timeoutKey := params.WoodpeckerCfg.CompactionTimeout.Key
+	memoryKey := params.WoodpeckerCfg.CompactionMaxInflightMemory.Key
+	watermarkKey := params.WoodpeckerCfg.CompactionMemoryHighWatermark.Key
+	workersKey := params.WoodpeckerCfg.SyncSchedulerMaxWorkers.Key
+
+	setup := func(t *testing.T, attempt, budget, timeout, memory, watermark, workers string) *config.Configuration {
+		for k, v := range map[string]string{
+			attemptKey: attempt, budgetKey: budget, timeoutKey: timeout,
+			memoryKey: memory, watermarkKey: watermark, workersKey: workers,
+		} {
+			require.NoError(t, params.Save(k, v))
+		}
+		t.Cleanup(func() {
+			for _, k := range []string{attemptKey, budgetKey, timeoutKey, memoryKey, watermarkKey, workersKey} {
+				params.Reset(k)
+			}
+		})
+		wpConfig, err := config.NewConfiguration()
+		require.NoError(t, err)
+		return wpConfig
+	}
+
+	t.Run("MilvusDefaults", func(t *testing.T) {
+		wpConfig, err := config.NewConfiguration()
+		require.NoError(t, err)
+		require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+		assert.Equal(t, 330, wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout.Seconds())
+		assert.Equal(t, 60, wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget.Seconds())
+		assert.Equal(t, 300, wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout.Seconds())
+		assert.Equal(t, int64(1000000000), wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory.Int64())
+		assert.InDelta(t, 0.7, wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark, 1e-9)
+		assert.Equal(t, 32, wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers)
+	})
+
+	// Distinct values in every field, so a mapping written into the wrong field cannot pass.
+	t.Run("CustomValues", func(t *testing.T) {
+		wpConfig := setup(t, "90s", "45s", "600s", "2G", "0.85", "12")
+		require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+		assert.Equal(t, 90, wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout.Seconds())
+		assert.Equal(t, 45, wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget.Seconds())
+		assert.Equal(t, 600, wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout.Seconds())
+		assert.Equal(t, int64(2*1024*1024*1024), wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory.Int64())
+		assert.InDelta(t, 0.85, wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark, 1e-9)
+		assert.Equal(t, 12, wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers)
+	})
+
+	// Values Woodpecker's Validate() would refuse, which it cannot here because it runs
+	// before Milvus applies its overrides. Each case names what the field must end up as:
+	// the sentinel when the override is skipped, a real value when it is taken.
+	//
+	// The two parsers differ, and the table pins that. GetAsSize and GetAsFloat return 0 on
+	// malformed input, so a typo silently switches off the bound. GetAsDurationByParse falls
+	// back to the item's own DefaultValue instead, so a malformed duration is already safe --
+	// the only way Timeout reaches 0 is a value that parses and then truncates, which is what
+	// SubSecondTimeout covers.
+	const (
+		sentinelTimeout   = 123
+		sentinelMemory    = int64(777)
+		sentinelWatermark = 0.42
+	)
+	for _, tc := range []struct {
+		name            string
+		timeout         string
+		memory          string
+		watermark       string
+		expectTimeout   int
+		expectMemory    int64
+		expectWatermark float64
+	}{
+		{
+			name: "MalformedValues", timeout: "bad-duration", memory: "bad-size", watermark: "bad-float",
+			// A malformed duration falls back to this item's 300s default, which is valid.
+			expectTimeout: 300, expectMemory: sentinelMemory, expectWatermark: sentinelWatermark,
+		},
+		{
+			name: "ZeroValues", timeout: "0s", memory: "0", watermark: "0",
+			expectTimeout: sentinelTimeout, expectMemory: sentinelMemory, expectWatermark: sentinelWatermark,
+		},
+		{
+			name: "NegativeValues", timeout: "-1s", memory: "-1M", watermark: "-0.5",
+			expectTimeout: sentinelTimeout, expectMemory: sentinelMemory, expectWatermark: sentinelWatermark,
+		},
+		{
+			// Parses cleanly, then int(0.5) truncates to 0 -- every compaction would expire at once.
+			name: "SubSecondTimeout", timeout: "500ms", memory: "1G", watermark: "0.7",
+			expectTimeout: sentinelTimeout, expectMemory: 1024 * 1024 * 1024, expectWatermark: 0.7,
+		},
+		{
+			// The key is a fraction, but its name invites a percentage; 70 would put the
+			// pressure gate 70x above the node's limit, so it could never fire.
+			name: "WatermarkAsPercentage", timeout: "300s", memory: "1G", watermark: "70",
+			expectTimeout: 300, expectMemory: 1024 * 1024 * 1024, expectWatermark: sentinelWatermark,
+		},
+	} {
+		t.Run(tc.name+"KeepValidatedValues", func(t *testing.T) {
+			wpConfig := setup(t, "90s", "45s", tc.timeout, tc.memory, tc.watermark, "12")
+			// Sentinels distinct from both the Milvus and the Woodpecker defaults, so a value
+			// that survives proves the override was skipped rather than coincidentally equal.
+			wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout = config.NewDurationSecondsFromInt(sentinelTimeout)
+			wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory = config.NewByteSize(sentinelMemory)
+			wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark = sentinelWatermark
+			require.NoError(t, setCustomWpConfig(wpConfig, &params.WoodpeckerCfg))
+
+			policy := &wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy
+			assert.Equal(t, tc.expectTimeout, policy.Timeout.Seconds())
+			assert.Equal(t, tc.expectMemory, policy.MaxInflightMemory.Int64())
+			assert.InDelta(t, tc.expectWatermark, policy.MemoryHighWatermark, 1e-9)
+			// The unguarded three are unaffected by a neighbour's bad value.
+			assert.Equal(t, 90, wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout.Seconds())
+			assert.Equal(t, 45, wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget.Seconds())
+			assert.Equal(t, 12, wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers)
+		})
+	}
+}
