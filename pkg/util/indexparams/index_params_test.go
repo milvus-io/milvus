@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/vecindex"
 )
 
 func TestDiskIndexParams(t *testing.T) {
@@ -37,12 +38,12 @@ func TestDiskIndexParams(t *testing.T) {
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 
 		indexParams := make(map[string]string)
-		indexParams[common.IndexTypeKey] = "AISAQ"
-		params.Save(params.CommonCfg.AiSAQCfg.InlinePQ.Key, "0")
-		params.Save(params.CommonCfg.AiSAQCfg.PQCacheSize.Key, "536870912")
-		params.Save(params.CommonCfg.AiSAQCfg.Rearrange.Key, "true")
-		params.Save(params.CommonCfg.AiSAQCfg.PQReadPageCacheSize.Key, "512")
-		params.Save(params.CommonCfg.AiSAQCfg.NumEntryPoints.Key, "100")
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, InlinePQKey), "0")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, PQCacheSizeKey), "536870912")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, RearrangeKey), "true")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.SearchStage, PQReadPageCacheSizeKey), "512")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, NumEntryPointsKey), "100")
 		err := FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
@@ -131,20 +132,20 @@ func TestDiskIndexParams(t *testing.T) {
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.Error(t, err)
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		str, err = json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.Error(t, err)
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		indexParams["max_degree"] = "56"
 		str, err = json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.Error(t, err)
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		indexParams["max_degree"] = "56"
 		indexParams["search_list_size"] = "100"
 		str, err = json.Marshal(indexParams)
@@ -162,7 +163,7 @@ func TestDiskIndexParams(t *testing.T) {
 		assert.NoError(t, err2)
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, string(str2))
 		err = FillDiskIndexParams(&params, indexParams)
-		assert.NoError(t, err) // pq_cache_size falls back to CommonCfg.AiSAQCfg.PQCacheSize default
+		assert.NoError(t, err) // pq_cache_size falls back to PQCacheSize default
 		indexParams["max_degree"] = "56"
 		indexParams["search_list_size"] = "100"
 		indexParams["pq_cache_size"] = "xxx"
@@ -198,13 +199,13 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[MaxDegreeKey] = "56"
 		indexParams[SearchListSizeKey] = "100"
 		indexParams[PQCacheSizeKey] = "512"
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		str, err = json.Marshal(indexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 
 		indexParams = make(map[string]string)
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 	})
@@ -369,7 +370,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams = append(indexParams,
 			&commonpb.KeyValuePair{
 				Key:   common.IndexTypeKey,
-				Value: "AISAQ",
+				Value: vecindex.IndexAISAQ,
 			})
 
 		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
@@ -397,7 +398,7 @@ func TestDiskIndexParams(t *testing.T) {
 			`
 		params.Save(params.AutoIndexConfig.Enable.Key, "false")
 		params.Save(params.AutoIndexConfig.ExtraParams.Key, newJSONStr)
-		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "")
 		indexParams, err = UpdateDiskIndexBuildParams(&params, indexParams)
 		assert.Error(t, err)
 
@@ -454,7 +455,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[DiskPQCodeBudgetRatioKey] = "0.2"
 		indexParams[PQCodeBudgetRatioKey] = "0.125"
 		indexParams[NumBuildThreadRatioKey] = "1.0"
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.NoError(t, err)
@@ -468,11 +469,11 @@ func TestDiskIndexParams(t *testing.T) {
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 		indexParams[DiskPQCodeBudgetRatioKey] = "ccc"
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 		indexParams[DiskPQCodeBudgetRatioKey] = "0.2"
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
 		indexParams[common.DimKey] = "ddd"
@@ -489,7 +490,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams[DiskPQCodeBudgetRatioKey] = "0.2"
 		indexParams[PQCodeBudgetRatioKey] = "0.125"
 		indexParams[NumBuildThreadRatioKey] = "aaa"
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		indexParams[common.DimKey] = "128"
 		err = SetDiskIndexBuildParams(indexParams, 100, schemapb.DataType_FloatVector)
 		assert.Error(t, err)
@@ -511,7 +512,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 		searchCacheBudget, ok := indexParams[SearchCacheBudgetKey]
 		assert.True(t, ok)
-		searchCacheBudgetRatio, err := strconv.ParseFloat(params.CommonCfg.SearchCacheBudgetGBRatio.GetValue(), 64)
+		searchCacheBudgetRatio, err := strconv.ParseFloat(params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), 64)
 		assert.NoError(t, err)
 		assert.Equal(t, fmt.Sprintf("%f", float32(getRowDataSizeOfFloatVector(100, 128))*float32(searchCacheBudgetRatio)/(1<<30)), searchCacheBudget)
 
@@ -527,7 +528,7 @@ func TestDiskIndexParams(t *testing.T) {
 
 		beamWidth, ok := indexParams[BeamWidthKey]
 		assert.True(t, ok)
-		beamWidthRatio, err := strconv.ParseFloat(params.CommonCfg.BeamWidthRatio.GetValue(), 64)
+		beamWidthRatio, err := strconv.ParseFloat(params.KnowhereConfig.GetIndexParamValue(vecindex.IndexDiskANN, paramtable.SearchStage, KnowhereBeamWidthRatioKey), 64)
 		assert.NoError(t, err)
 		expectedBeamWidth := int(float32(hardware.GetCPUNum()) * float32(beamWidthRatio))
 		if expectedBeamWidth > MaxBeamWidth {
@@ -535,17 +536,17 @@ func TestDiskIndexParams(t *testing.T) {
 		}
 		assert.Equal(t, strconv.Itoa(expectedBeamWidth), beamWidth)
 
-		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "w1")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "w1")
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
-		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.1")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.1")
 		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "w1")
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
 		params.Save(params.CommonCfg.LoadNumThreadRatio.Key, "8.0")
-		params.Save(params.CommonCfg.BeamWidthRatio.Key, "w1")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.SearchStage, KnowhereBeamWidthRatioKey), "w1")
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 
@@ -553,7 +554,7 @@ func TestDiskIndexParams(t *testing.T) {
 		indexParams["max_degree"] = "56"
 		indexParams["search_list"] = "100"
 		indexParams[common.DimKey] = "128"
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		err = SetDiskIndexLoadParams(&params, indexParams, 100)
 		assert.Error(t, err)
 	})
@@ -749,13 +750,13 @@ func TestDiskIndexParams(t *testing.T) {
 		autoIndexParams[MaxDegreeKey] = "56"
 		autoIndexParams[SearchListSizeKey] = "100"
 		autoIndexParams[PQCacheSizeKey] = "512"
-		autoIndexParams[common.IndexTypeKey] = "AISAQ"
+		autoIndexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		str, err = json.Marshal(autoIndexParams)
 		assert.NoError(t, err)
 		params.Save(params.AutoIndexConfig.IndexParams.Key, string(str))
 
 		indexParams := make(map[string]string)
-		indexParams[common.IndexTypeKey] = "AISAQ"
+		indexParams[common.IndexTypeKey] = vecindex.IndexAISAQ
 		err = FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
 
@@ -1073,20 +1074,20 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 		// Config A: small PQ budget, low thread ratio, low cache
 		var paramsA paramtable.ComponentParam
 		paramsA.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-		paramsA.Save(paramsA.CommonCfg.PQCodeBudgetGBRatio.Key, "0.05")
-		paramsA.Save(paramsA.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.05")
+		paramsA.Save(paramsA.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, PQCodeBudgetRatioKey), "0.05")
+		paramsA.Save(paramsA.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.05")
 		paramsA.Save(paramsA.CommonCfg.BuildNumThreadsRatio.Key, "0.5")
 		paramsA.Save(paramsA.CommonCfg.LoadNumThreadRatio.Key, "0.1")
-		paramsA.Save(paramsA.CommonCfg.BeamWidthRatio.Key, "0.1")
+		paramsA.Save(paramsA.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.SearchStage, KnowhereBeamWidthRatioKey), "0.1")
 
 		// Config B: large PQ budget, high thread ratio, high cache
 		var paramsB paramtable.ComponentParam
 		paramsB.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
-		paramsB.Save(paramsB.CommonCfg.PQCodeBudgetGBRatio.Key, "0.25")
-		paramsB.Save(paramsB.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.20")
+		paramsB.Save(paramsB.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, PQCodeBudgetRatioKey), "0.25")
+		paramsB.Save(paramsB.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.20")
 		paramsB.Save(paramsB.CommonCfg.BuildNumThreadsRatio.Key, "2.0")
 		paramsB.Save(paramsB.CommonCfg.LoadNumThreadRatio.Key, "0.5")
-		paramsB.Save(paramsB.CommonCfg.BeamWidthRatio.Key, "0.5")
+		paramsB.Save(paramsB.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.SearchStage, KnowhereBeamWidthRatioKey), "0.5")
 
 		resA := runPipeline(t, &paramsA, "DISKANN")
 		resB := runPipeline(t, &paramsB, "DISKANN")
@@ -1211,7 +1212,7 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 		paramsA.Save(paramsA.AutoIndexConfig.ExtraParams.Key, string(strA))
 		autoIdxA := map[string]string{
 			MaxDegreeKey: "48", SearchListSizeKey: "64",
-			PQCacheSizeKey: "256", common.IndexTypeKey: "AISAQ",
+			PQCacheSizeKey: "256", common.IndexTypeKey: vecindex.IndexAISAQ,
 		}
 		strAIdx, _ := json.Marshal(autoIdxA)
 		paramsA.Save(paramsA.AutoIndexConfig.IndexParams.Key, string(strAIdx))
@@ -1229,13 +1230,13 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 		paramsB.Save(paramsB.AutoIndexConfig.ExtraParams.Key, string(strB))
 		autoIdxB := map[string]string{
 			MaxDegreeKey: "64", SearchListSizeKey: "128",
-			PQCacheSizeKey: "512", common.IndexTypeKey: "AISAQ",
+			PQCacheSizeKey: "512", common.IndexTypeKey: vecindex.IndexAISAQ,
 		}
 		strBIdx, _ := json.Marshal(autoIdxB)
 		paramsB.Save(paramsB.AutoIndexConfig.IndexParams.Key, string(strBIdx))
 
-		resA := runPipeline(t, &paramsA, "AISAQ")
-		resB := runPipeline(t, &paramsB, "AISAQ")
+		resA := runPipeline(t, &paramsA, vecindex.IndexAISAQ)
+		resB := runPipeline(t, &paramsB, vecindex.IndexAISAQ)
 
 		// Build stage
 		assert.NotEqual(t, resA.afterBuild[PQCodeBudgetKey], resB.afterBuild[PQCodeBudgetKey])
@@ -1306,7 +1307,7 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 
 		// Step 1: Create index with initial config (user does NOT specify search_cache_budget_gb_ratio)
-		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.10")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.10")
 		indexParams := map[string]string{
 			common.IndexTypeKey: "DISKANN",
 		}
@@ -1319,7 +1320,7 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 			"SearchCacheBudgetRatioKey should not be persisted when defaulted from global config")
 
 		// Step 2: Simulate "time passes" — admin changes the config
-		params.Save(params.CommonCfg.SearchCacheBudgetGBRatio.Key, "0.25")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexDiskANN, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.25")
 
 		// Step 3: Load the index (simulates QueryNode loading existing index)
 		indexParams[common.DimKey] = strconv.FormatInt(testDim, 10)
@@ -1385,14 +1386,14 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 		params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 
 		// Step 1: Create AISAQ index without user specifying search_cache_budget_gb_ratio
-		params.Save(params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.Key, "0.05")
-		params.Save(params.CommonCfg.AiSAQCfg.PQCacheSize.Key, "512")
-		params.Save(params.CommonCfg.AiSAQCfg.InlinePQ.Key, "0")
-		params.Save(params.CommonCfg.AiSAQCfg.Rearrange.Key, "true")
-		params.Save(params.CommonCfg.AiSAQCfg.PQReadPageCacheSize.Key, "512")
-		params.Save(params.CommonCfg.AiSAQCfg.NumEntryPoints.Key, "100")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.05")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, PQCacheSizeKey), "512")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, InlinePQKey), "0")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, RearrangeKey), "true")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.SearchStage, PQReadPageCacheSizeKey), "512")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, NumEntryPointsKey), "100")
 		indexParams := map[string]string{
-			common.IndexTypeKey: "AISAQ",
+			common.IndexTypeKey: vecindex.IndexAISAQ,
 		}
 		err := FillDiskIndexParams(&params, indexParams)
 		assert.NoError(t, err)
@@ -1403,7 +1404,7 @@ func TestDiskIndexParamsPipelineE2E(t *testing.T) {
 			"SearchCacheBudgetRatioKey should not be persisted for AISAQ when defaulted from global config")
 
 		// Step 2: Admin changes the config
-		params.Save(params.CommonCfg.AiSAQCfg.SearchCacheBudgetGBRatio.Key, "0.20")
+		params.Save(params.KnowhereConfig.GetIndexParamKey(vecindex.IndexAISAQ, paramtable.BuildStage, SearchCacheBudgetRatioKey), "0.20")
 
 		// Step 3: Load the index
 		indexParams[common.DimKey] = strconv.FormatInt(testDim, 10)
