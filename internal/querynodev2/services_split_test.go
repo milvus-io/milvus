@@ -183,6 +183,7 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 				return nil
 			})
 
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 		// only the not-yet-adopted (Creating) targets are re-fronted.
 		assert.ElementsMatch(t, []string{"t1", "t2"}, got)
@@ -211,6 +212,7 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 		// are adopted (I-2): reads through "src" still succeed, from its own
 		// pre-fence view alone, missing the targets' post-fence rows -- never
 		// returned twice.
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
 
@@ -229,6 +231,7 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 		// ProcessSplitShard is never set up: the retired source has no target
 		// left to front, so it must refuse reads instead of serving alone.
 		source.EXPECT().RefuseReadsAsRetiredSource(mock.Anything).Return().Once()
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
 
@@ -238,6 +241,7 @@ func TestRespawnSplitChildrenOnRecovery(t *testing.T) {
 			descResp(schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal, schemapb.ShardState_ShardNormal), nil)
 		source := delegator.NewMockShardDelegator(t)
 		// ProcessSplitShard is never set up, so the mock fails the test if it is called.
+		source.EXPECT().FinishSplitRecovery().Return().Once()
 		makeNode(mc).respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 	})
 }
@@ -269,6 +273,7 @@ func TestRespawnSplitChildrenFrontsEveryTargetOfTheOnlySource(t *testing.T) {
 	future := syncutil.NewFuture[types.MixCoordClient]()
 	future.Set(mc)
 	node := &QueryNode{ctx: context.Background(), mixCoord: future}
+	source.EXPECT().FinishSplitRecovery().Return().Once()
 	node.respawnSplitChildrenOnRecovery(context.Background(), source, 1, "src")
 
 	// Every Creating target, and only those: the Normal shard is not a target.
