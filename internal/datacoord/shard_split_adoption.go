@@ -47,7 +47,9 @@ import (
 //
 // The task stays Adopting after the adoption applies, until this cluster's
 // QueryCoord no longer serves the source; only then is it Done, and only then
-// do the compaction freeze and the trigger's exclusion lift.
+// do the compaction freeze and the trigger's exclusion lift. Before the
+// adoption applies, a drain that stops holding sends the task back to
+// Redistributing (reopenRedistribution).
 
 // buildAdoptionPostImage builds a split's adoption: the collection as it
 // stands minus the split's source, with both of its targets moved to Normal,
@@ -227,12 +229,16 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 	logger := m.taskLogger(task)
 	source := splitTaskSource(task)
 	if slices.Contains(coll.VirtualChannelNames, source) {
-		if m.clusterIsReplicationSecondary() {
-			logger.RatedInfo(m.ctx, 60, "waiting for the primary's shard split adoption to be applied here")
+		if reason := m.coordinator.splitDrainBlockReason(m.ctx, task); reason != "" {
+			// The drain held when the task moved to Adopting and no longer does.
+			// Nothing but the redistribution can make it hold again -- and an
+			// adoption already broadcast holds the collection's keys until it
+			// does -- so the task goes back to it, on every cluster alike.
+			m.reopenRedistribution(task, reason)
 			return
 		}
-		if reason := m.coordinator.splitDrainBlockReason(m.ctx, task); reason != "" {
-			logger.RatedWarn(m.ctx, 60, "an adopting shard split is not drained, not issuing its adoption", mlog.String("reason", reason))
+		if m.clusterIsReplicationSecondary() {
+			logger.RatedInfo(m.ctx, 60, "waiting for the primary's shard split adoption to be applied here")
 			return
 		}
 		if err := m.coordinator.issueShardSplitAdoption(m.ctx, task, m.controlChannel()); err != nil {
@@ -254,4 +260,30 @@ func (m *shardSplitManager) advanceAdopting(task *datapb.SplitShardTask) {
 		return
 	}
 	m.finishTask(task, "")
+}
+
+// reopenRedistribution moves an Adopting task whose adoption has not applied
+// here back to Redistributing, because its drain stopped holding: data landed
+// on the source after the task moved on (design doc §11). The
+// redistribution rewrites it like any other source segment, and the task
+// moves to Adopting again once the drain holds, re-issuing the adoption, which
+// its idempotency key resolves to the one already out, if any.
+//
+// Nothing but the manager reads the difference between the two states: the
+// freeze, the GC hold and the drain gate key on the task being active, and a
+// redelivered SplitShard callback leaves a Redistributing task where it is.
+func (m *shardSplitManager) reopenRedistribution(task *datapb.SplitShardTask, reason string) {
+	logger := m.taskLogger(task)
+	if _, err := m.store.modify(m.ctx, m.catalog, task.GetTaskId(), func(t *datapb.SplitShardTask) bool {
+		if t.GetState() != datapb.SplitShardTaskState_SplitShardTaskAdopting {
+			return false
+		}
+		t.State = datapb.SplitShardTaskState_SplitShardTaskRedistributing
+		return true
+	}); err != nil {
+		logger.Warn(m.ctx, "persist the reopened shard split redistribution failed", mlog.Err(err))
+		return
+	}
+	logger.Warn(m.ctx, "an adopting shard split is no longer drained, redistributing its source again",
+		mlog.String("reason", reason))
 }

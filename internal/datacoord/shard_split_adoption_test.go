@@ -160,6 +160,7 @@ func TestShardSplitAdoptionWaitsForTheDrain(t *testing.T) {
 
 	coordinator.drainReason = ""
 	manager.advanceTasks()
+	manager.advanceTasks()
 	require.Len(t, coordinator.adopted, 1)
 	assert.Equal(t, int64(100), coordinator.adopted[0].GetTaskId())
 
@@ -173,6 +174,42 @@ func TestShardSplitAdoptionWaitsForTheDrain(t *testing.T) {
 	coordinator.adoptErr = merr.WrapErrCollectionNotFound(splitMgrCollection)
 	manager.advanceTasks()
 	assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskDone, mustTask(t, manager, 100).GetState())
+}
+
+// A drain that stops holding while the task is Adopting -- data that landed
+// on the source after the task moved on, or after its adoption was broadcast
+// and while that adoption's callback waits for the drain holding the
+// collection's keys -- sends the task back to Redistributing, whose rewrite
+// takes the late segments. Without it the task, and the keys of a callback
+// already out, would wait forever. Once drained again, the adoption is issued
+// again (the broadcast is deduplicated by the task id).
+func TestShardSplitAdoptingReopensTheRedistributionWhenItsDrainRegresses(t *testing.T) {
+	for _, role := range []replicateutil.Role{replicateutil.RolePrimary, replicateutil.RoleSecondary} {
+		t.Run(role.String(), func(t *testing.T) {
+			manager, coordinator := adoptingCase(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, fencedDescribe())
+			manager.replicationRole = func(context.Context) (replicateutil.Role, error) { return role, nil }
+			redistributor := &fakeRedistributor{}
+			manager.setRedistributor(redistributor)
+			coordinator.drainReason = "source by-dev-rootcoord-dml_0_1v0 still has a live segment 9"
+
+			manager.advanceTasks()
+			assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskRedistributing, mustTask(t, manager, 100).GetState())
+			assert.Empty(t, coordinator.adopted)
+
+			manager.advanceTasks()
+			assert.Equal(t, []int64{100}, redistributor.rounds, "the late segments are rewritten")
+
+			coordinator.drainReason = ""
+			manager.advanceTasks()
+			assert.Equal(t, datapb.SplitShardTaskState_SplitShardTaskAdopting, mustTask(t, manager, 100).GetState())
+			manager.advanceTasks()
+			if role == replicateutil.RolePrimary {
+				assert.Len(t, coordinator.adopted, 1)
+			} else {
+				assert.Empty(t, coordinator.adopted)
+			}
+		})
+	}
 }
 
 func TestShardSplitAdoptionIsNeverIssuedByASecondary(t *testing.T) {
