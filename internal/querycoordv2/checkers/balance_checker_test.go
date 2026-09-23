@@ -2175,3 +2175,64 @@ func TestBalanceChecker_StoppingBalanceMovesWhatASplitDoesNotInvolve(t *testing.
 	assert.Empty(t, runSplitFreezeRound(t, false, "v0", "v1", "v9"),
 		"normal balance keeps the collection frozen as a whole")
 }
+
+// segmentDrainBalancer plans only the frozen source's channel off the stopping
+// node, as the stopping balancer does while any channel is left there, and
+// plans segments only when asked for segments alone.
+type segmentDrainBalancer struct {
+	balance.Balance
+	replica  *meta.Replica
+	segments []string
+}
+
+func (b *segmentDrainBalancer) BalanceReplicaSegments(_ context.Context, replica *meta.Replica) []assign.SegmentAssignPlan {
+	plans := make([]assign.SegmentAssignPlan, 0, len(b.segments))
+	for i, shard := range b.segments {
+		plans = append(plans, assign.SegmentAssignPlan{
+			Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: int64(200 + i), CollectionID: 1, InsertChannel: shard}},
+			Replica: replica, From: 1, To: 2,
+		})
+	}
+	return plans
+}
+
+// CZ-L6 / AV-L6-M3: the stopping balancer plans segments only once no channel
+// is left to move off the stopping node. A frozen split source that stays
+// there would otherwise block every segment of the collection from draining:
+// when every channel it plans is frozen, the checker asks for the segments
+// alone, and moves those of the shards the split does not involve.
+func TestBalanceChecker_StoppingBalanceDrainsSegmentsPastAFrozenChannel(t *testing.T) {
+	checker, queue := splitFreezeChecker(t)
+	replica := meta.NewReplica(&querypb.Replica{ID: 10, CollectionID: 1, Nodes: []int64{1, 2}}, typeutil.NewUniqueSet(1, 2))
+	mockReplica := mockey.Mock(mockey.GetMethod(checker.meta.ReplicaManager, "Get")).Return(replica).Build()
+	defer mockReplica.UnPatch()
+	mockWindow := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetSplitWindowTargets")).Return(typeutil.Set[string](nil)).Build()
+	defer mockWindow.UnPatch()
+	mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
+		Return(map[string]*meta.DmChannel{
+			"v0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v0"}},
+			"v9": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v9"}},
+		}).Build()
+	defer mockChannels.UnPatch()
+	_, channelTasks := balanceTasksOn(t, "v0")
+	mockGenerate := mockey.Mock((*BalanceChecker).generateBalanceTasksFromReplicas).Return([]task.Task{}, channelTasks).Build()
+	defer mockGenerate.UnPatch()
+	var submitted []string
+	mockSubmit := mockey.Mock((*BalanceChecker).submitTasks).To(func(_ *BalanceChecker, segmentTasks, channelTasks []task.Task) {
+		for _, submittedTask := range append(append([]task.Task{}, segmentTasks...), channelTasks...) {
+			submitted = append(submitted, submittedTask.Shard())
+		}
+	}).Build()
+	defer mockSubmit.UnPatch()
+
+	config := balanceConfig{segmentBatchSize: 5, channelBatchSize: 5, maxCheckCollectionCount: 5, balanceOnMultipleCollections: true}
+	segments, channels := checker.processBalanceQueue(context.Background(),
+		&segmentDrainBalancer{replica: replica, segments: []string{"v0", "v9"}},
+		func(context.Context, int64) []int64 { return []int64{10} },
+		func(context.Context) *assign.PriorityQueue { return queue },
+		func() *assign.PriorityQueue { return queue },
+		config, true)
+	assert.Equal(t, []string{"v9"}, submitted, "the untouched shard's segment drains; the source's stays")
+	assert.Equal(t, 1, segments)
+	assert.Zero(t, channels)
+}
