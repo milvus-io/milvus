@@ -75,7 +75,11 @@ func NewEtcdSource(etcdCli *clientv3.Client, etcdInfo *EtcdInfo) (*EtcdSource, e
 	if etcdCli == nil {
 		return nil, merr.WrapErrServiceInternal("nil etcd client")
 	}
-	log.Ctx(context.TODO()).Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
+	// Do not log EtcdInfo directly: it contains the etcd username/password and
+	// certificate paths. Auth and TLS enablement are protected settings too.
+	log.Ctx(context.TODO()).Debug("init etcd source",
+		zap.Bool("useEmbed", etcdInfo.UseEmbed),
+		zap.Int("endpointCount", len(etcdInfo.Endpoints)))
 	es := &EtcdSource{
 		etcdCli:        etcdCli,
 		ctx:            context.Background(),
@@ -182,7 +186,6 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 
 	ctx, cancel := context.WithTimeout(es.ctx, ReadConfigTimeout)
 	defer cancel()
-	log.RatedDebug(10, "etcd refreshConfigurations", zap.String("prefix", prefix), zap.Any("endpoints", es.etcdCli.Endpoints()))
 	opts := append([]clientv3.OpOption{clientv3.WithPrefix()}, extraOpts...)
 	response, err := es.etcdCli.Get(ctx, prefix, opts...)
 	if err != nil {
@@ -190,12 +193,16 @@ func (es *EtcdSource) refreshConfigurationsWithOpts(extraOpts ...clientv3.OpOpti
 	}
 	newConfig := make(map[string]string, len(response.Kvs))
 	for _, kv := range response.Kvs {
-		key := string(kv.Key)
-		key = strings.TrimPrefix(key, prefix+"/")
-		newConfig[key] = string(kv.Value)
-		newConfig[formatKey(key)] = string(kv.Value)
-		log.Debug("got config from etcd", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		key := strings.TrimPrefix(string(kv.Key), prefix+"/")
+		value := string(kv.Value)
+		newConfig[key] = value
+		newConfig[formatKey(key)] = value
 	}
+	// Keep the polling loop cheap and bounded. Values may be credentials and key
+	// names and the etcd prefix may be operator-supplied topology, so an aggregate
+	// count is sufficient here.
+	log.RatedDebug(10, "loaded configurations from etcd",
+		zap.Int("configCount", len(response.Kvs)))
 	return es.update(newConfig)
 }
 
@@ -204,17 +211,29 @@ func (es *EtcdSource) update(configs map[string]string) error {
 	es.updateMu.Lock()
 	defer es.updateMu.Unlock()
 
-	es.Lock()
-	events, err := PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
+	es.RLock()
+	manager := es.manager
+	es.RUnlock()
+	var events []*Event
+	err := publishSourceSnapshot(manager, es.GetSourceName(), configs, func() error {
+		es.Lock()
+		defer es.Unlock()
+		var err error
+		events, err = PopulateEvents(es.GetSourceName(), es.currentConfigs, configs)
+		if err != nil {
+			return err
+		}
+		es.currentConfigs = configs
+		return nil
+	})
 	if err != nil {
-		es.Unlock()
 		log.Ctx(es.ctx).Warn("generating event error", zap.Error(err))
 		return err
 	}
-	es.currentConfigs = configs
-	es.Unlock()
-	if es.manager != nil {
-		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
+	// Cache eviction and callbacks may read configuration; keep them outside
+	// both the source lock and the manager snapshot publication section.
+	if manager != nil {
+		manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
 	}
 
 	es.configRefresher.fireEvents(events...)

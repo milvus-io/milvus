@@ -1,6 +1,7 @@
 package hookutil
 
 import (
+	"context"
 	"plugin"
 	"sync"
 
@@ -22,7 +23,7 @@ func LoadPlugin[T any](path string, symbol string) (T, error) {
 		return zero, merr.WrapErrParameterInvalidMsg("empty plugin path for symbol %q", symbol)
 	}
 
-	log.Info("loading plugin", zap.String("path", path), zap.String("symbol", symbol))
+	log.Ctx(context.TODO()).Info("loading plugin", zap.String("symbol", symbol))
 
 	pluginMutex.Lock()
 	defer pluginMutex.Unlock()

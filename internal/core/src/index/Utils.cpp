@@ -66,7 +66,7 @@ ScalarIndexStreamMemoryOverhead(uint64_t index_size_in_bytes,
 
     auto& pool = ThreadPools::GetThreadPool(PriorityForLoad(load_priority));
     const auto worker_count = std::max<size_t>(1, pool.GetMaxThreadNum());
-    const auto pool_download_peak = SaturatingMultiply(
+    const auto pool_download_peak = SaturatingMultiply<uint64_t>(
         worker_count, static_cast<uint64_t>(DEFAULT_INDEX_FILE_SLICE_SIZE));
     return std::min(index_size_in_bytes, pool_download_peak);
 }
