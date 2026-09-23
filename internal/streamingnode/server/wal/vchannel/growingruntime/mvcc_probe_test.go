@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
 func TestRuntimeMayHaveVisibleGrowingSegmentsReturnsFalseWhenVisibleCandidateSetIsEmpty(t *testing.T) {
@@ -16,7 +18,7 @@ func TestRuntimeMayHaveVisibleGrowingSegmentsReturnsFalseWhenVisibleCandidateSet
 	runtime.markGrowingTimeTick(20)
 	runtime.markTransformTimeTick(10)
 
-	mayHave := runtime.MayHaveVisibleGrowingSegments(20, 10, []int64{200})
+	mayHave := runtime.MayHaveVisibleGrowingSegments(qviews.DataVersion{}, 20, 10, []int64{200})
 
 	assert.False(t, mayHave)
 }
@@ -29,7 +31,7 @@ func TestRuntimeMayHaveVisibleGrowingSegmentsReturnsTrueWhenNotVisible(t *testin
 	runtime.markGrowingTimeTick(19)
 	runtime.markTransformTimeTick(10)
 
-	mayHave := runtime.MayHaveVisibleGrowingSegments(20, 10, []int64{100})
+	mayHave := runtime.MayHaveVisibleGrowingSegments(qviews.DataVersion{}, 20, 10, []int64{100})
 
 	assert.True(t, mayHave)
 }
@@ -42,7 +44,7 @@ func TestRuntimeMayHaveVisibleGrowingSegmentsReturnsTrueForMatchingPartition(t *
 	runtime.markGrowingTimeTick(20)
 	runtime.markTransformTimeTick(10)
 
-	mayHave := runtime.MayHaveVisibleGrowingSegments(20, 10, []int64{100})
+	mayHave := runtime.MayHaveVisibleGrowingSegments(qviews.DataVersion{}, 20, 10, []int64{100})
 
 	assert.True(t, mayHave)
 }

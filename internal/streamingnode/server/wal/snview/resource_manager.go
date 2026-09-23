@@ -78,7 +78,7 @@ type QueryRuntimeProvider interface {
 
 type QueryRuntime interface {
 	WaitMVCCVisible(ctx context.Context, growingTimetick uint64, transformingTimetick uint64) error
-	AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs []int64) ([]GrowingSegmentHandle, error)
+	AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]GrowingSegmentHandle, error)
 }
 
 type GrowingSegmentHandle interface {

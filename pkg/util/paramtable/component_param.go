@@ -115,6 +115,7 @@ type ComponentParam struct {
 	RoleCfg        roleConfig
 	RbacConfig     rbacConfig
 	StreamingCfg   streamingConfig
+	QueryViewCfg   queryViewConfig
 	FunctionCfg    functionConfig
 	CredentialCfg  credentialConfig
 
@@ -170,6 +171,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)
 	p.StreamingCfg.init(bt)
+	p.QueryViewCfg.init(bt)
 	p.HTTPCfg.init(bt)
 	p.LogCfg.init(bt)
 	p.RoleCfg.init(bt)
@@ -8772,6 +8774,21 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.ExternalCollectionTargetRowsPerSegment.Init(base.mgr)
+}
+
+type queryViewConfig struct {
+	LeaseDuration ParamItem `refreshable:"false"`
+}
+
+func (p *queryViewConfig) init(base *BaseTable) {
+	p.LeaseDuration = ParamItem{
+		Key:          "queryView.leaseDuration",
+		Version:      "3.1.0",
+		DefaultValue: "60s",
+		Doc:          "Renewable SN Up-view retention after query access. Delays normal Down; non-positive durations disable timed retention. Not refreshable.",
+		Export:       true,
+	}
+	p.LeaseDuration.Init(base.mgr)
 }
 
 type streamingConfig struct {

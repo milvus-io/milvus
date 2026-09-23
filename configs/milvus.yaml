@@ -1606,6 +1606,12 @@ streamingNode:
     clientMaxSendSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can send, unit: byte
     clientMaxRecvSize: 268435456 # The maximum size of each RPC request that the clients on streamingNode can receive, unit: byte
 
+# Any configuration related to query views.
+queryView:
+  # Renewable SN Up-view retention after query access; delays normal Down. Not refreshable.
+  # Non-positive durations disable timed retention, preserving active query references.
+  leaseDuration: 60s
+
 # Any configuration related to the streaming service.
 streaming:
   # Whether StreamingNode splits oversized logical messages into physical WAL records.

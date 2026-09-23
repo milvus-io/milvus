@@ -74,6 +74,7 @@ func TestSNHandler_AcquireSearchSegmentTasksWaitsRuntimeAndReleasesViewRef(t *te
 
 	require.NoError(t, err)
 	assert.True(t, optimizer.searchCalled)
+	assert.Equal(t, view.QueryViewKey().QueryViewVersion.DataVersion, runtime.dataVersion)
 	assert.Equal(t, uint64(11), runtime.growingTimetick)
 	assert.Equal(t, uint64(10), runtime.transformingTimetick)
 	assert.Equal(t, []int64{10}, runtime.partitionIDs)
@@ -130,6 +131,7 @@ func TestSNHandler_AcquireQuerySegmentTasksWaitsRuntimeAndReleasesViewRef(t *tes
 
 	require.NoError(t, err)
 	assert.True(t, optimizer.queryCalled)
+	assert.Equal(t, view.QueryViewKey().QueryViewVersion.DataVersion, runtime.dataVersion)
 	assert.Equal(t, uint64(11), runtime.growingTimetick)
 	assert.Equal(t, uint64(10), runtime.transformingTimetick)
 	assert.Equal(t, []int64{20}, runtime.partitionIDs)
@@ -168,6 +170,7 @@ func TestSNHandler_AcquireSearchSegmentTasksReleasesViewRefOnRuntimeError(t *tes
 }
 
 type mockQueryRuntime struct {
+	dataVersion          qviews.DataVersion
 	growingTimetick      uint64
 	transformingTimetick uint64
 	partitionIDs         []int64
@@ -182,7 +185,8 @@ func (r *mockQueryRuntime) WaitMVCCVisible(_ context.Context, growingTimetick ui
 	return r.waitErr
 }
 
-func (r *mockQueryRuntime) AcquireGrowingSegmentHandles(_ context.Context, partitionIDs []int64) ([]GrowingSegmentHandle, error) {
+func (r *mockQueryRuntime) AcquireGrowingSegmentHandles(_ context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]GrowingSegmentHandle, error) {
+	r.dataVersion = dataVersion
 	r.partitionIDs = append([]int64(nil), partitionIDs...)
 	return r.handles, r.handleErr
 }
@@ -209,6 +213,7 @@ func TestSNHandlerDownRejectsNewTasksButRetainsAcquiredHandles(t *testing.T) {
 	held := &mockGrowingSegmentHandle{id: 100, partitionID: 10}
 	mgr.runtime = &mockQueryRuntime{handles: []GrowingSegmentHandle{held}}
 	h := recoverSNQueryViewHandler(context.Background(), testPChannel, newMockCatalog(), mgr, nil)
+	h.leaseDuration = 0 // Exercise admission after immediate Down with timed retention disabled.
 	view := newPreparingSNView(1)
 	h.ApplyViews([]handler.ApplyView{{View: view}})
 	resource, ok := mgr.getAcquired(view.QueryViewKey())

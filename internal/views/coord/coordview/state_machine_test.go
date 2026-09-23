@@ -11,6 +11,30 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+func TestDownKeepsQueryNodesUntilSNLeaseDrains(t *testing.T) {
+	view := buildTestView(2)
+	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
+	sm := RecoverCoordQueryViewStateMachine(view)
+	sm.EnterDown()
+	flush := sm.ConsumeFlush()
+	require.Len(t, flush.Sync, 1)
+	require.IsType(t, qviews.StreamingNode{}, flush.Sync[0].WorkNode())
+	// SN remains Up while the renewable lease is active. Reconnect reports
+	// cannot advance cleanup or send Dropped to any QN.
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
+	require.Equal(t, qviews.QueryViewStateDown, sm.State())
+	flush = sm.ConsumeFlush()
+	require.Len(t, flush.Sync, 1)
+	require.IsType(t, qviews.StreamingNode{}, flush.Sync[0].WorkNode())
+	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDown))
+	require.Equal(t, qviews.QueryViewStateDropping, sm.State())
+	flush = sm.ConsumeFlush()
+	require.Len(t, flush.Sync, 3)
+	for _, target := range flush.Sync {
+		require.Equal(t, qviews.QueryViewStateDropped, target.State())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

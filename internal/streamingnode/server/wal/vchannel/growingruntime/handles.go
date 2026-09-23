@@ -6,10 +6,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
+func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, dataVersion qviews.DataVersion, partitionIDs []int64) ([]snview.GrowingSegmentHandle, error) {
 	if r == nil {
 		return nil, nil
 	}
@@ -23,16 +24,22 @@ func (r *Runtime) AcquireGrowingSegmentHandles(ctx context.Context, partitionIDs
 		r.mu.Unlock()
 		return nil, merr.WrapErrServiceInternalMsg("growing runtime closed")
 	}
+	for _, id := range partitionIDs {
+		if !r.partitionLoaded(id) {
+			r.mu.Unlock()
+			return nil, merr.WrapErrPartitionNotLoaded(id)
+		}
+	}
 	handles := make([]snview.GrowingSegmentHandle, 0, len(r.segments))
 	for _, segmentID := range r.segmentIDs {
 		segment := r.segments[segmentID]
 		if segment == nil {
 			continue
 		}
-		if !partitionSelected(selectedPartitions, segment.partitionID) {
+		if !r.partitionLoaded(segment.partitionID) || !partitionSelected(selectedPartitions, segment.partitionID) {
 			continue
 		}
-		csegment, ok := segment.pinIfNotReleased()
+		csegment, ok := segment.pinIfVisible(dataVersion)
 		if !ok {
 			continue
 		}
@@ -111,4 +118,13 @@ func (h growingSegmentHandle) Release() {
 			h.runtime.unpinQuery()
 		}
 	})
+}
+
+// The loaded scope is installed during Prepare, before live events/queries.
+func (r *Runtime) partitionLoaded(id int64) bool {
+	if r.loadedPartitions == nil {
+		return true
+	}
+	_, ok := r.loadedPartitions[id]
+	return ok
 }

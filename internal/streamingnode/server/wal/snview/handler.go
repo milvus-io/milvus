@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/optimizer"
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
@@ -34,7 +36,8 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //
 // Every view pushed via ApplyViews is guaranteed to eventually produce a
 // response (via OnReport callback), provided the StreamingNodeResourceManager
-// fulfills its liveness contracts (see StreamingNodeResourceManager doc).
+// fulfills its liveness contracts (see StreamingNodeResourceManager doc) and
+// queries eventually stop renewing a view requested Down.
 // The response paths are:
 //
 // View does not exist in handler:
@@ -58,6 +61,8 @@ var _ handler.QueryViewHandler = (*SNQueryViewHandler)(nil)
 //     Response depends on prior Release's OnDropped callback.
 //   - Dropped, SM in Dropped: responds immediately with Dropped re-report.
 //     (In practice unreachable — entry is deleted upon reaching Dropped.)
+//   - Down while Up: response waits for the serving lease and active calls.
+//     Repeated Down pushes update the callback without renewing the lease.
 //   - Other states: SM handles coord push and responds accordingly.
 type SNQueryViewHandler struct {
 	mu             sync.Mutex
@@ -68,6 +73,7 @@ type SNQueryViewHandler struct {
 	catalog        metastore.StreamingNodeCataLog
 	resMgr         StreamingNodeResourceManager
 	localOptimizer optimizer.LocalOptimizer
+	leaseDuration  time.Duration
 }
 
 // recoverSNQueryViewHandler reconstructs the handler from persisted views
@@ -86,6 +92,7 @@ func recoverSNQueryViewHandler(
 		catalog:        catalog,
 		resMgr:         resMgr,
 		localOptimizer: optimizer.NewNoopLocalOptimizer(),
+		leaseDuration:  max(0, paramtable.Get().QueryViewCfg.LeaseDuration.GetAsDurationByParse()),
 	}
 
 	grouped := make(map[qviews.ShardID]map[qviews.QueryViewVersion]*snQueryViewStateMachine)
@@ -106,6 +113,7 @@ func recoverSNQueryViewHandler(
 
 	for shardID, shardViews := range grouped {
 		shard := recoverSnShardView(ctx, pchannel, shardID, shardViews, catalog, resMgr)
+		shard.leaseDuration = h.leaseDuration
 		shard.onEmpty = h.makeOnEmpty(shardID)
 		h.shards[shardID] = shard
 	}
@@ -203,13 +211,14 @@ func (h *SNQueryViewHandler) getOrCreateShard(shardID qviews.ShardID) *snShardVi
 	shard, ok := h.shards[shardID]
 	if !ok {
 		shard = &snShardView{
-			ctx:      h.ctx,
-			pchannel: h.pchannel,
-			shardID:  shardID,
-			views:    make(map[qviews.QueryViewVersion]*snViewEntry),
-			catalog:  h.catalog,
-			resMgr:   h.resMgr,
-			onEmpty:  h.makeOnEmpty(shardID),
+			ctx:           h.ctx,
+			pchannel:      h.pchannel,
+			shardID:       shardID,
+			views:         make(map[qviews.QueryViewVersion]*snViewEntry),
+			catalog:       h.catalog,
+			resMgr:        h.resMgr,
+			onEmpty:       h.makeOnEmpty(shardID),
+			leaseDuration: h.leaseDuration,
 		}
 		h.shards[shardID] = shard
 	}
@@ -230,6 +239,8 @@ type QueryViewLease struct {
 	Version qviews.QueryViewVersion
 	Meta    *viewpb.QueryViewMeta
 	View    *viewpb.QueryViewOfShard
+	// Renew extends timed Up retention while this call still owns its reference.
+	Renew   func()
 	Release func()
 }
 

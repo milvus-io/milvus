@@ -2,12 +2,18 @@ package idf
 
 import (
 	"context"
+	"slices"
 	"sync"
+
+	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -16,7 +22,7 @@ import (
 
 type bm25Stats map[int64]*storage.BM25Stats
 
-func newBM25StatsFromSchema(schema *schemapb.CollectionSchema) bm25Stats {
+func newBM25StatsFromSchema(schema *schemapb.CollectionSchema, loadedFields []int64) bm25Stats {
 	stats := make(bm25Stats)
 	if schema == nil {
 		return stats
@@ -25,7 +31,11 @@ func newBM25StatsFromSchema(schema *schemapb.CollectionSchema) bm25Stats {
 		if function.GetType() != schemapb.FunctionType_BM25 || len(function.GetOutputFieldIds()) == 0 {
 			continue
 		}
-		stats.getOrCreate(function.GetOutputFieldIds()[0])
+		fieldID := function.GetOutputFieldIds()[0]
+		if len(loadedFields) > 0 && !slices.Contains(loadedFields, fieldID) {
+			continue
+		}
+		stats.getOrCreate(fieldID)
 	}
 	return stats
 }
@@ -39,16 +49,6 @@ func (s bm25Stats) getOrCreate(fieldID int64) *storage.BM25Stats {
 	return stats
 }
 
-func (s bm25Stats) clone() bm25Stats {
-	cloned := make(bm25Stats, len(s))
-	for fieldID, stats := range s {
-		if stats != nil {
-			cloned[fieldID] = stats.Clone()
-		}
-	}
-	return cloned
-}
-
 func (s bm25Stats) merge(src bm25Stats) {
 	for fieldID, srcStats := range src {
 		if srcStats == nil {
@@ -58,49 +58,30 @@ func (s bm25Stats) merge(src bm25Stats) {
 	}
 }
 
-func (s bm25Stats) minus(src bm25Stats) {
-	for fieldID, srcStats := range src {
-		if srcStats == nil {
-			continue
-		}
-		s.getOrCreate(fieldID).Minus(srcStats)
-	}
-}
-
-type sealedContribution struct {
-	segmentID   int64
-	partitionID int64
-	stats       bm25Stats
-	lease       *segmentCacheLease
-}
-
-type growingContribution struct {
-	segmentID   int64
-	partitionID int64
-	stats       bm25Stats
-}
-
 type growingSegmentStats struct {
-	partitionID int64
-	stats       bm25Stats
-	flushed     bool
-	sealedAt    *qviews.DataVersion
+	createTimeTick uint64
+	partitionID    int64
+	stats          bm25Stats
+	flushed        bool
+	sealedAt       *qviews.DataVersion
 }
 
 type growingStatsStore struct {
 	mu       sync.RWMutex
 	schema   *schemapb.CollectionSchema
+	fieldIDs []int64
 	segments map[int64]*growingSegmentStats
 }
 
-func newGrowingStatsStore(schema *schemapb.CollectionSchema) *growingStatsStore {
+func newGrowingStatsStore(schema *schemapb.CollectionSchema, loadedFields []int64) *growingStatsStore {
 	return &growingStatsStore{
+		fieldIDs: loadedFields,
 		schema:   schema,
 		segments: make(map[int64]*growingSegmentStats),
 	}
 }
 
-func (s *growingStatsStore) registerSegment(segmentID int64, partitionID int64) {
+func (s *growingStatsStore) registerSegment(segmentID int64, partitionID int64, createTimeTick uint64) {
 	if segmentID == 0 {
 		return
 	}
@@ -110,8 +91,9 @@ func (s *growingStatsStore) registerSegment(segmentID int64, partitionID int64) 
 		return
 	}
 	s.segments[segmentID] = &growingSegmentStats{
-		partitionID: partitionID,
-		stats:       newBM25StatsFromSchema(s.schema),
+		createTimeTick: createTimeTick,
+		partitionID:    partitionID,
+		stats:          newBM25StatsFromSchema(s.schema, s.fieldIDs),
 	}
 }
 
@@ -125,7 +107,7 @@ func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stat
 	if segment == nil {
 		segment = &growingSegmentStats{
 			partitionID: partitionID,
-			stats:       newBM25StatsFromSchema(s.schema),
+			stats:       newBM25StatsFromSchema(s.schema, s.fieldIDs),
 		}
 		s.segments[segmentID] = segment
 	}
@@ -138,7 +120,7 @@ func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stat
 func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (int64, bm25Stats, error) {
 	segmentID := insert.Assignment.GetSegmentAssignment().GetSegmentId()
 	partitionID := insert.Assignment.GetPartitionId()
-	stats := newBM25StatsFromSchema(s.schema)
+	stats := newBM25StatsFromSchema(s.schema, s.fieldIDs)
 	if err := collectGrowingInsertStats(stats, s.schema, insert); err != nil {
 		return 0, nil, err
 	}
@@ -148,7 +130,7 @@ func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (i
 	if segment == nil {
 		segment = &growingSegmentStats{
 			partitionID: partitionID,
-			stats:       newBM25StatsFromSchema(s.schema),
+			stats:       newBM25StatsFromSchema(s.schema, s.fieldIDs),
 		}
 		s.segments[segmentID] = segment
 	}
@@ -166,17 +148,21 @@ func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (i
 }
 
 func (s *growingStatsStore) markFlushed(segmentID int64) {
-	if segmentID == 0 {
-		return
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	segment := s.segments[segmentID]
 	if segment == nil {
-		segment = &growingSegmentStats{stats: newBM25StatsFromSchema(s.schema)}
-		s.segments[segmentID] = segment
+		return
 	}
-	segment.flushed = true
+	for _, stats := range segment.stats {
+		if stats.NumRow() > 0 {
+			segment.flushed = true
+			return
+		}
+	}
+	// Empty segments retire without a sealed DataVersion or a seal notification.
+	// Their zero contribution must not hold up the next aggregate publication.
+	delete(s.segments, segmentID)
 }
 
 func (s *growingStatsStore) markSealed(segmentID int64, sealedAt qviews.DataVersion) {
@@ -187,7 +173,7 @@ func (s *growingStatsStore) markSealed(segmentID int64, sealedAt qviews.DataVers
 	defer s.mu.Unlock()
 	segment := s.segments[segmentID]
 	if segment == nil {
-		segment = &growingSegmentStats{stats: newBM25StatsFromSchema(s.schema)}
+		segment = &growingSegmentStats{stats: newBM25StatsFromSchema(s.schema, s.fieldIDs)}
 		s.segments[segmentID] = segment
 	}
 	if segment.sealedAt != nil && !segment.sealedAt.EQ(sealedAt) {
@@ -197,132 +183,90 @@ func (s *growingStatsStore) markSealed(segmentID int64, sealedAt qviews.DataVers
 	segment.sealedAt = &value
 }
 
-func (s *growingStatsStore) snapshotForDataVersion(target qviews.DataVersion, targetSealed map[int64]struct{}) map[int64]growingContribution {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make(map[int64]growingContribution)
-	for segmentID, segment := range s.segments {
-		if _, ok := targetSealed[segmentID]; ok {
-			continue
-		}
-		if segment.sealedAt != nil && !segment.sealedAt.GT(target) {
-			continue
-		}
-		result[segmentID] = growingContribution{
-			segmentID:   segmentID,
-			partitionID: segment.partitionID,
-			stats:       segment.stats.clone(),
-		}
-	}
-	return result
-}
-
-func (s *growingStatsStore) cleanup(currentDataVersion qviews.DataVersion, currentGrowing map[int64]growingContribution) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for segmentID, segment := range s.segments {
-		if _, ok := currentGrowing[segmentID]; ok {
-			continue
-		}
-		if segment.sealedAt != nil && !segment.sealedAt.GT(currentDataVersion) {
-			delete(s.segments, segmentID)
-		}
-	}
-}
-
-type idfDiff struct {
-	target        qviews.DataVersion
-	revision      uint64
-	positive      bm25Stats
-	negative      bm25Stats
-	nextSealed    map[int64]sealedContribution
-	nextGrowing   map[int64]growingContribution
-	acquiredLease []*segmentCacheLease
-}
-
-type preparedOracleVersion struct {
-	version qviews.DataVersion
-	stats   bm25Stats
-	sealed  map[int64]sealedContribution
-	growing map[int64]growingContribution
-}
-
+// Sealed contributions retain only immutable resource descriptors. Growing
+// contributions are owned exclusively by growingStore and the aggregate.
 type oracleRuntime struct {
-	provider *Provider
-
-	collectionID    int64
-	vchannel        string
-	partitionIDs    []int64
-	loadInfoVersion uint64
-	schema          *schemapb.CollectionSchema
-
-	scheduler nodescheduler.Scheduler
-
+	provider         *Provider
+	scheduler        nodescheduler.Scheduler
+	collectionID     int64
+	vchannel         string
+	partitionIDs     []int64
+	fieldIDs         []int64
+	loadInfoVersion  uint64
+	schema           *schemapb.CollectionSchema
+	barrier          func(context.Context) error
+	ctx              context.Context
+	cancel           context.CancelFunc
+	ioMu             sync.Mutex
 	mu               sync.RWMutex
-	pending          qviews.DataVersion
-	hasPending       bool
-	advanceHandle    nodescheduler.TaskHandle
-	advanceScheduled bool
 	closed           bool
 	currentVersion   qviews.DataVersion
 	currentStats     bm25Stats
-	currentSealed    map[int64]sealedContribution
-	currentGrowing   map[int64]growingContribution
-	prepared         map[qviews.DataVersion]*preparedOracleVersion
+	currentSealed    map[int64]*datapb.StreamingNodeBM25Resource
 	growingStore     *growingStatsStore
-	revision         uint64
-
-	closeOnce sync.Once
+	pending          qviews.DataVersion
+	advanceScheduled bool
+	advanceHandle    nodescheduler.TaskHandle
 }
 
-func newOracleRuntime(
-	ctx context.Context,
-	provider *Provider,
-	walView walview.VChannelWALView,
-	initialResources []*datapb.StreamingNodeBM25Resource,
-) (*oracleRuntime, error) {
+func newOracleRuntime(ctx context.Context, provider *Provider, view walview.VChannelWALView, resources []*datapb.StreamingNodeBM25Resource) (*oracleRuntime, error) {
 	scheduler := provider.scheduler
 	if scheduler == nil {
 		scheduler = nodescheduler.Get()
 	}
+	schema := proto.Clone(view.Schema).(*schemapb.CollectionSchema)
+	loadedFields := loadFieldIDs(view.LoadFields)
+	lifetime, cancel := context.WithCancel(context.Background())
 	r := &oracleRuntime{
 		provider:        provider,
 		scheduler:       scheduler,
-		collectionID:    walView.CollectionID,
-		vchannel:        walView.VChannel,
-		partitionIDs:    append([]int64(nil), walView.PartitionIDs...),
-		loadInfoVersion: walView.LoadInfoVersion,
-		schema:          walView.Schema,
-		currentVersion:  walView.SegmentSnapshot.DataVersion,
-		currentStats:    newBM25StatsFromSchema(walView.Schema),
-		currentSealed:   make(map[int64]sealedContribution),
-		currentGrowing:  make(map[int64]growingContribution),
-		prepared:        make(map[qviews.DataVersion]*preparedOracleVersion),
-		growingStore:    newGrowingStatsStore(walView.Schema),
+		collectionID:    view.CollectionID,
+		vchannel:        view.VChannel,
+		partitionIDs:    slices.Clone(view.PartitionIDs),
+		fieldIDs:        loadedFields,
+		loadInfoVersion: view.LoadInfoVersion,
+		schema:          schema,
+		barrier:         view.ResourceEventBarrier,
+		ctx:             lifetime,
+		cancel:          cancel,
+		currentVersion:  view.SegmentSnapshot.DataVersion,
+		currentStats:    newBM25StatsFromSchema(schema, loadedFields),
+		currentSealed:   make(map[int64]*datapb.StreamingNodeBM25Resource),
+		growingStore:    newGrowingStatsStore(schema, loadedFields),
 	}
-	sealed, err := provider.acquireSealedContributions(ctx, initialResources)
-	if err != nil {
+
+	for _, resource := range resources {
+		if !r.includesPartition(resource.GetPartitionId()) {
+			continue
+		}
+		stats, err := loadSealedSegmentStats(ctx, provider.chunkManager, resource, r.currentStats)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		r.currentStats.merge(stats)
+		r.currentSealed[resource.GetSegmentId()] = proto.Clone(resource).(*datapb.StreamingNodeBM25Resource)
+	}
+	if err := r.loadInitialGrowing(ctx, view); err != nil {
+		cancel()
 		return nil, err
 	}
-	for _, contribution := range sealed {
-		r.currentSealed[contribution.segmentID] = contribution
-		r.currentStats.merge(contribution.stats)
-	}
-	if err := r.loadInitialGrowing(ctx, walView); err != nil {
-		r.releaseSealed(sealed)
-		return nil, err
-	}
-	targetSealed := segmentSetFromSealed(r.currentSealed)
-	r.currentGrowing = r.growingStore.snapshotForDataVersion(walView.SegmentSnapshot.DataVersion, targetSealed)
-	for _, contribution := range r.currentGrowing {
-		r.currentStats.merge(contribution.stats)
+	for id, segment := range r.growingStore.segments {
+		if _, sealed := r.currentSealed[id]; sealed || segment.sealedAt != nil && !segment.sealedAt.GT(r.currentVersion) {
+			delete(r.growingStore.segments, id)
+		} else {
+			r.currentStats.merge(segment.stats)
+		}
 	}
 	return r, nil
 }
 
 func (r *oracleRuntime) loadInitialGrowing(ctx context.Context, walView walview.VChannelWALView) error {
 	for _, segment := range walView.SegmentSnapshot.Segments {
-		r.growingStore.registerSegment(segment.SegmentID, segment.PartitionID)
+		if !r.includesPartition(segment.PartitionID) {
+			continue
+		}
+		r.growingStore.registerSegment(segment.SegmentID, segment.PartitionID, segment.Assignment.GetStat().GetCreateSegmentTimeTick())
 		if err := r.collectPersistedGrowingStats(ctx, segment); err != nil {
 			return err
 		}
@@ -345,7 +289,7 @@ func (r *oracleRuntime) collectPersistedGrowingStats(ctx context.Context, segmen
 	if r.provider.chunkManager == nil || segment.Data.PersistedStorage == nil {
 		return nil
 	}
-	stats := newBM25StatsFromSchema(r.schema)
+	stats := newBM25StatsFromSchema(r.schema, r.fieldIDs)
 	resource := &datapb.StreamingNodeBM25Resource{
 		SegmentId:      segment.SegmentID,
 		StorageVersion: storage.StorageV2,
@@ -358,7 +302,7 @@ func (r *oracleRuntime) collectPersistedGrowingStats(ctx context.Context, segmen
 		resource.Bm25Binlogs = append(resource.Bm25Binlogs, binlogs.GetBm25Binlog()...)
 	}
 	// StorageV3 keeps BM25 paths in the manifest rather than explicit binlogs.
-	loaded, err := loadSealedSegmentStats(ctx, r.provider.chunkManager, resource)
+	loaded, err := loadSealedSegmentStats(ctx, r.provider.chunkManager, resource, r.currentStats)
 	if err != nil {
 		return err
 	}
@@ -367,488 +311,298 @@ func (r *oracleRuntime) collectPersistedGrowingStats(ctx context.Context, segmen
 	return nil
 }
 
-func (r *oracleRuntime) BuildIDF(dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
+func (r *oracleRuntime) includesPartition(id int64) bool {
+	return r.partitionIDs == nil || slices.Contains(r.partitionIDs, id)
+}
+
+// BuildIDF deliberately ignores the query DataVersion: all views share the
+// latest successfully published aggregate.
+func (r *oracleRuntime) BuildIDF(_ qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error) {
+	results, err := r.BuildIDFBatch([]queryresource.IDFRequest{{FieldID: fieldID, TFs: tfs}})
+	if err != nil {
+		return nil, 0, err
+	}
+	return results[0].Vectors, results[0].Avgdl, nil
+}
+
+func (r *oracleRuntime) BuildIDFBatch(requests []queryresource.IDFRequest) ([]queryresource.IDFResult, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-
-	versionStats, ok := r.statsForVersionLocked(dataVersion)
-	if !ok {
-		return nil, 0, merr.WrapErrServiceNotReadyMsg("BM25 stats for data version %s are not ready", dataVersion.String())
-	}
-	stats, ok := versionStats[fieldID]
-	if !ok {
-		return nil, 0, merr.WrapErrServiceInternalMsg("BM25 field %d not found in oracle for data version %s", fieldID, dataVersion.String())
-	}
-	idfs := make([][]byte, 0, len(tfs.GetContents()))
-	for _, tf := range tfs.GetContents() {
-		idfs = append(idfs, stats.BuildIDF(tf))
-	}
-	return idfs, stats.GetAvgdl(), nil
-}
-
-func (r *oracleRuntime) statsForVersionLocked(dataVersion qviews.DataVersion) (bm25Stats, bool) {
-	if r.currentVersion.EQ(dataVersion) {
-		return r.currentStats, true
-	}
-	prepared := r.prepared[dataVersion]
-	if prepared == nil {
-		return nil, false
-	}
-	return prepared.stats, true
-}
-
-func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.DataVersion) error {
-	r.mu.RLock()
 	if r.closed {
-		r.mu.RUnlock()
-		return context.Canceled
+		return nil, context.Canceled
 	}
-	_, ready := r.statsForVersionLocked(target)
-	r.mu.RUnlock()
-	if ready {
-		return nil
+	results := make([]queryresource.IDFResult, len(requests))
+	for i, req := range requests {
+		stats, ok := r.currentStats[req.FieldID]
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("BM25 field %d not found in oracle", req.FieldID)
+		}
+		result := &results[i]
+		result.Avgdl = stats.GetAvgdl()
+		// An empty latest corpus does not imply an older query view is empty.
+		if result.Avgdl <= 0 {
+			result.Avgdl = 1
+		}
+		for _, tf := range req.TFs.GetContents() {
+			result.Vectors = append(result.Vectors, stats.BuildIDF(tf))
+		}
 	}
+	return results, nil
+}
 
-	resources, err := r.provider.getSealedBM25Resources(ctx, r.collectionID, r.vchannel, target, r.partitionIDs, r.loadInfoVersion)
-	if err != nil {
-		return err
-	}
-	sealed, err := r.provider.acquireSealedContributions(ctx, resources)
-	if err != nil {
-		return err
-	}
-
+// Preparing a query view requests refresh, but never builds a versioned oracle.
+func (r *oracleRuntime) RequestRefresh(_ context.Context, target qviews.DataVersion) error {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed {
-		r.mu.Unlock()
-		r.releaseSealed(sealed)
 		return context.Canceled
 	}
-	if _, ready := r.statsForVersionLocked(target); ready {
-		r.mu.Unlock()
-		r.releaseSealed(sealed)
-		return nil
-	}
-	targetSealed := segmentSetFromSealed(sealed)
-	growing := r.growingStore.snapshotForDataVersion(target, targetSealed)
-	stats := newBM25StatsFromSchema(r.schema)
-	for _, contribution := range sealed {
-		stats.merge(contribution.stats)
-	}
-	for _, contribution := range growing {
-		stats.merge(contribution.stats)
-	}
-	if r.prepared == nil {
-		r.prepared = make(map[qviews.DataVersion]*preparedOracleVersion)
-	}
-	r.prepared[target] = &preparedOracleVersion{
-		version: target,
-		stats:   stats,
-		sealed:  sealed,
-		growing: growing,
-	}
-	r.mu.Unlock()
+	r.scheduleLocked(target)
 	return nil
 }
 
-func (r *oracleRuntime) ReleaseDataVersion(dataVersion qviews.DataVersion) {
+func (r *oracleRuntime) Advance(target qviews.DataVersion) {
 	r.mu.Lock()
-	prepared := r.prepared[dataVersion]
-	delete(r.prepared, dataVersion)
-	r.mu.Unlock()
-	if prepared != nil {
-		r.releaseSealed(prepared.sealed)
+	defer r.mu.Unlock()
+	if !r.closed {
+		r.scheduleLocked(target)
 	}
+}
+
+func (r *oracleRuntime) scheduleLocked(target qviews.DataVersion) {
+	if target.GT(r.pending) {
+		r.pending = target
+	}
+	if r.advanceScheduled || !r.pending.GT(r.currentVersion) {
+		return
+	}
+	r.advanceScheduled = true
+	r.advanceHandle = r.scheduler.Submit(oracleAdvanceTask{runtime: r})
 }
 
 func (r *oracleRuntime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
-	if event.Message != nil {
-		if err := r.applyLiveMessage(ctx, event.Message); err != nil {
-			panic(merr.Wrap(err, "failed to apply live event to IDF oracle runtime"))
-		}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
 		return
 	}
 	if event.SegmentSealed != nil {
-		r.applySegmentSealed(event.SegmentSealed.SegmentID, event.SegmentSealed.SealedAtDataVersion)
+		id := event.SegmentSealed.SegmentID
+		if _, exists := r.growingStore.segments[id]; exists {
+			r.growingStore.markSealed(id, event.SegmentSealed.SealedAtDataVersion)
+		}
 	}
-}
-
-func (r *oracleRuntime) applyLiveMessage(_ context.Context, msg message.ImmutableMessage) error {
+	msg := event.Message
 	if msg == nil {
-		return nil
+		return
 	}
 	switch msg.MessageType() {
 	case message.MessageTypeCreateSegment:
 		created := message.MustAsImmutableCreateSegmentMessageV2(msg)
-		segmentID := created.Header().GetSegmentId()
-		partitionID := created.Header().GetPartitionId()
-		r.mu.Lock()
-		r.growingStore.registerSegment(segmentID, partitionID)
-		changed := false
-		if _, ok := r.currentSealed[segmentID]; !ok {
-			if _, ok := r.currentGrowing[segmentID]; !ok {
-				r.currentGrowing[segmentID] = growingContribution{
-					segmentID:   segmentID,
-					partitionID: partitionID,
-					stats:       newBM25StatsFromSchema(r.schema),
-				}
-				changed = true
-			}
+		if !r.includesPartition(created.Header().GetPartitionId()) {
+			return
 		}
-		if changed {
-			r.revision++
-		}
-		for _, prepared := range r.prepared {
-			if _, ok := prepared.sealed[segmentID]; ok {
-				continue
-			}
-			if _, ok := prepared.growing[segmentID]; ok {
-				continue
-			}
-			prepared.growing[segmentID] = growingContribution{
-				segmentID:   segmentID,
-				partitionID: partitionID,
-				stats:       newBM25StatsFromSchema(r.schema),
-			}
-		}
-		r.mu.Unlock()
+		r.growingStore.registerSegment(created.Header().GetSegmentId(), created.Header().GetPartitionId(), msg.TimeTick())
 	case message.MessageTypeInsert, message.MessageTypeTxn:
-		return walview.ForEachSegmentInsertMessage(msg, 0, func(insert walview.SegmentInsertMessage) error {
-			r.mu.Lock()
-			defer r.mu.Unlock()
-			segmentID, stats, err := r.growingStore.appendInsert(insert)
-			if err != nil {
-				return err
+		err := walview.ForEachSegmentInsertMessage(msg, 0, func(insert walview.SegmentInsertMessage) error {
+			if !r.includesPartition(insert.Assignment.GetPartitionId()) {
+				return nil
 			}
-			if contribution, ok := r.currentGrowing[segmentID]; ok {
-				contribution.stats.merge(stats)
-				r.currentGrowing[segmentID] = contribution
+			_, stats, err := r.growingStore.appendInsert(insert)
+			if err == nil {
 				r.currentStats.merge(stats)
 			}
-			for _, prepared := range r.prepared {
-				if contribution, ok := prepared.growing[segmentID]; ok {
-					contribution.stats.merge(stats)
-					prepared.growing[segmentID] = contribution
-					prepared.stats.merge(stats)
-				}
-			}
-			r.revision++
-			return nil
+			return err
 		})
+		if err != nil {
+			panic(merr.Wrap(err, "apply live BM25 insert"))
+		}
+	case message.MessageTypeManualFlush, message.MessageTypeFlushAll, message.MessageTypeAlterWAL, message.MessageTypeCreateSnapshot:
+		// Match VChannelRecoveryModule.flushAllSegmentsCreatedBefore, including
+		// flushes whose compaction output no longer contains the original IDs.
+		for id, segment := range r.growingStore.segments {
+			if segment.createTimeTick < msg.TimeTick() {
+				r.growingStore.markFlushed(id)
+			}
+		}
 	case message.MessageTypeFlush:
-		r.mu.Lock()
-		r.growingStore.markFlushed(message.MustAsImmutableFlushMessageV2(msg).Header().GetSegmentId())
-		r.revision++
-		r.mu.Unlock()
+		flushed := message.MustAsImmutableFlushMessageV2(msg).Header()
+		if _, exists := r.growingStore.segments[flushed.GetSegmentId()]; exists {
+			r.growingStore.markFlushed(flushed.GetSegmentId())
+		}
 	}
+}
+
+// BeforeRelease keeps the old DataView alive until its sealed descriptors have
+// been replaced. The last view closes the entire oracle instead.
+func (r *oracleRuntime) BeforeRelease(ctx context.Context, target qviews.DataVersion) error {
+	r.mu.RLock()
+	ready := r.closed || r.currentVersion.GTE(target)
+	r.mu.RUnlock()
+	if ready {
+		return nil
+	}
+	return r.refresh(ctx, target)
+}
+
+func (r *oracleRuntime) refresh(ctx context.Context, target qviews.DataVersion) error {
+	if !r.ioMu.TryLock() {
+		return nodescheduler.ErrDelay
+	}
+	defer r.ioMu.Unlock()
+	r.mu.RLock()
+	if r.closed || r.currentVersion.GTE(target) {
+		r.mu.RUnlock()
+		return nil
+	}
+	r.mu.RUnlock()
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(r.ctx, cancel)
+	defer stop()
+	defer cancel()
+	response, err := r.provider.fetchResources(ctx, r.collectionID, r.vchannel, target, r.partitionIDs, r.loadInfoVersion)
+	if err != nil {
+		return err
+	}
+	r.mu.RLock()
+	previous := r.currentSealed // Only refresh replaces this immutable map, under ioMu.
+	r.mu.RUnlock()
+	next := make(map[int64]*datapb.StreamingNodeBM25Resource)
+	for _, resource := range response.GetBm25Resources() {
+		if !r.includesPartition(resource.GetPartitionId()) {
+			continue
+		}
+		next[resource.GetSegmentId()] = proto.Clone(resource).(*datapb.StreamingNodeBM25Resource)
+	}
+	positive, negative := make(bm25Stats), make(bm25Stats)
+	for id, resource := range previous {
+		if proto.Equal(resource, next[id]) {
+			continue
+		}
+		stats, err := loadSealedSegmentStats(ctx, r.provider.chunkManager, resource, newBM25StatsFromSchema(r.schema, r.fieldIDs))
+		if err != nil {
+			return err
+		}
+		negative.merge(stats)
+	}
+	for id, resource := range next {
+		if proto.Equal(resource, previous[id]) {
+			continue
+		}
+		stats, err := loadSealedSegmentStats(ctx, r.provider.chunkManager, resource, newBM25StatsFromSchema(r.schema, r.fieldIDs))
+		if err != nil {
+			return err
+		}
+		positive.merge(stats)
+	}
+	// The owner lock orders the barrier after any flush that could have produced
+	// this Coord snapshot, including compaction outputs with different segment IDs.
+	if r.barrier != nil {
+		if err := r.barrier(ctx); err != nil {
+			return err
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return nil
+	}
+	evicted := make([]int64, 0)
+	for id, segment := range r.growingStore.segments {
+		if segment.flushed && segment.sealedAt == nil {
+			return nodescheduler.ErrDelay
+		}
+		_, sealed := next[id]
+		if sealed && segment.sealedAt == nil {
+			return nodescheduler.ErrDelay
+		}
+		if sealed || segment.sealedAt != nil && !segment.sealedAt.GT(target) {
+			negative.merge(segment.stats)
+			evicted = append(evicted, id)
+		}
+	}
+	// Validate every field first: no partial commit on a corrupt resource read.
+	for field, stats := range r.currentStats {
+		if err := stats.ValidateDelta(positive.getOrCreate(field), negative.getOrCreate(field)); err != nil {
+			return err
+		}
+	}
+	for field, stats := range r.currentStats {
+		stats.ApplyDelta(positive[field], negative[field])
+	}
+	for _, id := range evicted {
+		delete(r.growingStore.segments, id)
+	}
+	r.currentVersion, r.currentSealed = target, next
 	return nil
 }
 
-func (r *oracleRuntime) applySegmentSealed(segmentID int64, sealedAt qviews.DataVersion) {
-	r.mu.Lock()
-	r.growingStore.markSealed(segmentID, sealedAt)
-	currentVersion := r.currentVersion
-	currentGrowing := cloneGrowingContributions(r.currentGrowing)
-	r.revision++
-	r.mu.Unlock()
-	r.growingStore.cleanup(currentVersion, currentGrowing)
-}
-
-func (r *oracleRuntime) MaybeAdvance(target qviews.DataVersion) {
-	r.mu.Lock()
-	if r.closed || !target.GT(r.currentVersion) {
-		r.mu.Unlock()
-		return
-	}
-	if prepared := r.prepared[target]; prepared != nil {
-		oldSealed := r.currentSealed
-		r.currentVersion = prepared.version
-		r.currentStats = prepared.stats
-		r.currentSealed = prepared.sealed
-		r.currentGrowing = prepared.growing
-		delete(r.prepared, target)
-		obsolete := make([]map[int64]sealedContribution, 0)
-		for version, candidate := range r.prepared {
-			if !version.GT(target) {
-				obsolete = append(obsolete, candidate.sealed)
-				delete(r.prepared, version)
-			}
-		}
-		r.revision++
-		currentGrowing := cloneGrowingContributions(r.currentGrowing)
-		r.mu.Unlock()
-		r.releaseSealed(oldSealed)
-		for _, sealed := range obsolete {
-			r.releaseSealed(sealed)
-		}
-		r.growingStore.cleanup(target, currentGrowing)
-		return
-	}
-	if !r.hasPending || target.GT(r.pending) {
-		r.pending = target
-		r.hasPending = true
-	}
-	if !r.advanceScheduled {
-		r.advanceScheduled = true
-		r.advanceHandle = r.scheduler.Submit(oracleAdvanceTask{runtime: r})
-	}
-	r.mu.Unlock()
-}
-
-func (r *oracleRuntime) Advance(target qviews.DataVersion) {
-	r.MaybeAdvance(target)
-}
-
-func (r *oracleRuntime) Close() {
-	r.closeOnce.Do(func() {
-		r.mu.Lock()
-		r.closed = true
-		handle := r.advanceHandle
-		r.mu.Unlock()
-		if handle != nil {
-			handle.Cancel()
-			_ = handle.Wait(context.Background())
-		}
-		r.mu.Lock()
-		sealed := r.currentSealed
-		prepared := r.prepared
-		r.currentSealed = nil
-		r.currentGrowing = nil
-		r.prepared = nil
-		r.mu.Unlock()
-		r.releaseSealed(sealed)
-		for _, version := range prepared {
-			r.releaseSealed(version.sealed)
-		}
-	})
-}
-
-type oracleAdvanceTask struct {
-	runtime *oracleRuntime
-}
+type oracleAdvanceTask struct{ runtime *oracleRuntime }
 
 func (t oracleAdvanceTask) Execute(ctx context.Context) error {
 	r := t.runtime
-	target, ok := r.popPending()
-	if !ok {
-		return r.finishAdvance(ctx, nil)
+	r.mu.RLock()
+	target, closed := r.pending, r.closed
+	if r.currentVersion.GT(target) {
+		target = r.currentVersion
 	}
-	diff, err := r.computeDiff(ctx, target)
-	if err != nil {
-		return r.finishAdvance(ctx, err)
+	r.mu.RUnlock()
+	if closed {
+		return nil
 	}
-	if committed, retry := r.commitDiff(diff); !committed && retry {
-		r.restorePending(target)
-	}
-	return r.finishAdvance(ctx, nil)
-}
-
-func (r *oracleRuntime) popPending() (qviews.DataVersion, bool) {
+	err := r.refresh(ctx, target)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if !r.hasPending {
-		return qviews.DataVersion{}, false
+	if r.closed {
+		return nil
 	}
-	target := r.pending
-	r.pending = qviews.DataVersion{}
-	r.hasPending = false
-	return target, true
+	if err != nil && !errors.Is(err, nodescheduler.ErrDelay) {
+		mlog.RatedWarn(ctx, 0.2, "refresh shared BM25 aggregate failed", mlog.FieldVChannel(r.vchannel), mlog.Err(err))
+	}
+	if err != nil || r.pending.GT(r.currentVersion) {
+		return nodescheduler.ErrDelay
+	}
+	r.advanceScheduled = false
+	return nil
 }
 
-func (r *oracleRuntime) restorePending(target qviews.DataVersion) {
+func (r *oracleRuntime) Close() {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed || !target.GT(r.currentVersion) {
+	if r.closed {
+		r.mu.Unlock()
 		return
 	}
-	if !r.hasPending || target.GT(r.pending) {
-		r.pending = target
-		r.hasPending = true
-	}
-}
-
-func (r *oracleRuntime) finishAdvance(ctx context.Context, err error) error {
-	r.mu.Lock()
-	if r.hasPending && !r.pending.GT(r.currentVersion) {
-		r.pending = qviews.DataVersion{}
-		r.hasPending = false
-	}
-	if r.closed || ctx.Err() != nil || !r.hasPending {
-		r.advanceScheduled = false
-		r.mu.Unlock()
-		return err
+	r.closed = true
+	r.cancel()
+	if r.advanceHandle != nil {
+		r.advanceHandle.Cancel()
 	}
 	r.mu.Unlock()
-	return nodescheduler.ErrDelay
+	// Do not wait for a queued scheduler task: Close can itself run on a worker.
+	r.ioMu.Lock()
+	defer r.ioMu.Unlock()
+	r.mu.Lock()
+	r.currentStats, r.currentSealed, r.growingStore.segments = nil, nil, nil
+	r.mu.Unlock()
 }
 
-func (r *oracleRuntime) computeDiff(ctx context.Context, target qviews.DataVersion) (*idfDiff, error) {
-	resources, err := r.provider.getSealedBM25Resources(ctx, r.collectionID, r.vchannel, target, r.partitionIDs, r.loadInfoVersion)
+func (p *Provider) getSealedBM25Resources(ctx context.Context, collectionID int64, vchannel string, version qviews.DataVersion, partitions []int64, loadInfo uint64) ([]*datapb.StreamingNodeBM25Resource, error) {
+	response, err := p.fetchResources(ctx, collectionID, vchannel, version, partitions, loadInfo)
 	if err != nil {
 		return nil, err
 	}
-	nextSealed, err := r.provider.acquireSealedContributions(ctx, resources)
-	if err != nil {
-		return nil, err
-	}
-	targetSealed := segmentSetFromSealed(nextSealed)
-
-	r.mu.RLock()
-	nextGrowing := r.growingStore.snapshotForDataVersion(target, targetSealed)
-	currentSealed := cloneSealedContributions(r.currentSealed)
-	currentGrowing := cloneGrowingContributions(r.currentGrowing)
-	revision := r.revision
-	r.mu.RUnlock()
-
-	diff := &idfDiff{
-		target:      target,
-		revision:    revision,
-		positive:    make(bm25Stats),
-		negative:    make(bm25Stats),
-		nextSealed:  nextSealed,
-		nextGrowing: nextGrowing,
-	}
-	for _, contribution := range nextSealed {
-		diff.acquiredLease = append(diff.acquiredLease, contribution.lease)
-	}
-	for segmentID, contribution := range currentSealed {
-		if _, ok := nextSealed[segmentID]; !ok {
-			diff.negative.merge(contribution.stats)
-		}
-	}
-	for segmentID, contribution := range currentGrowing {
-		if _, ok := nextGrowing[segmentID]; !ok {
-			diff.negative.merge(contribution.stats)
-		}
-	}
-	for segmentID, contribution := range nextSealed {
-		if _, ok := currentSealed[segmentID]; !ok {
-			diff.positive.merge(contribution.stats)
-		}
-	}
-	for segmentID, contribution := range nextGrowing {
-		if _, ok := currentGrowing[segmentID]; !ok {
-			diff.positive.merge(contribution.stats)
-		}
-	}
-	return diff, nil
+	return response.GetBm25Resources(), nil
 }
 
-func (r *oracleRuntime) commitDiff(diff *idfDiff) (bool, bool) {
-	var oldSealed map[int64]sealedContribution
-	releaseNew := false
-	retry := false
-	r.mu.Lock()
-	if diff.revision != r.revision {
-		releaseNew = true
-		retry = diff.target.GT(r.currentVersion)
-	} else if !diff.target.GT(r.currentVersion) {
-		releaseNew = true
-	} else {
-		r.currentStats.minus(diff.negative)
-		r.currentStats.merge(diff.positive)
-		r.currentVersion = diff.target
-		oldSealed = r.currentSealed
-		r.currentSealed = diff.nextSealed
-		r.currentGrowing = diff.nextGrowing
-		r.revision++
-	}
-	currentVersion := r.currentVersion
-	currentGrowing := cloneGrowingContributions(r.currentGrowing)
-	r.mu.Unlock()
-
-	if releaseNew {
-		for _, lease := range diff.acquiredLease {
-			lease.Close()
-		}
-		return false, retry
-	}
-	// computeDiff acquires a new lease even for unchanged sealed segments.
-	// The committed map owns those leases, so release every previous lease.
-	r.releaseSealed(oldSealed)
-	r.growingStore.cleanup(currentVersion, currentGrowing)
-	return true, false
-}
-
-func (r *oracleRuntime) releaseSealed(sealed map[int64]sealedContribution) {
-	for _, contribution := range sealed {
-		if contribution.lease != nil {
-			contribution.lease.Close()
-		}
-	}
-}
-
-func (p *Provider) getSealedBM25Resources(
-	ctx context.Context,
-	collectionID int64,
-	vchannel string,
-	dataVersion qviews.DataVersion,
-	partitionIDs []int64,
-	loadInfoVersion uint64,
-) ([]*datapb.StreamingNodeBM25Resource, error) {
-	resp, err := p.client.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{
-		CollectionId:    collectionID,
-		Vchannel:        vchannel,
-		DataVersion:     dataVersion.IntoProto(),
-		LoadInfoVersion: loadInfoVersion,
-		PartitionIds:    append([]int64(nil), partitionIDs...),
+func (p *Provider) fetchResources(ctx context.Context, collectionID int64, vchannel string, version qviews.DataVersion, partitions []int64, loadInfo uint64) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	response, err := p.client.GetStreamingNodeQueryViewResources(ctx, &datapb.GetStreamingNodeQueryViewResourcesRequest{
+		CollectionId: collectionID, Vchannel: vchannel, DataVersion: version.IntoProto(), PartitionIds: partitions, LoadInfoVersion: loadInfo,
 	})
-	if err := merr.CheckRPCCall(resp, err); err != nil {
+	if err := merr.CheckRPCCall(response, err); err != nil {
 		return nil, err
 	}
-	if err := validateResourceResponseFor(collectionID, vchannel, dataVersion, resp); err != nil {
+	if err := validateResourceResponseFor(collectionID, vchannel, version, response); err != nil {
 		return nil, err
 	}
-	return resp.GetBm25Resources(), nil
-}
-
-func (p *Provider) acquireSealedContributions(
-	ctx context.Context,
-	resources []*datapb.StreamingNodeBM25Resource,
-) (map[int64]sealedContribution, error) {
-	contributions := make(map[int64]sealedContribution, len(resources))
-	for _, resource := range resources {
-		stats, lease, err := p.sealedCache.acquire(ctx, p.chunkManager, resource)
-		if err != nil {
-			for _, contribution := range contributions {
-				if contribution.lease != nil {
-					contribution.lease.Close()
-				}
-			}
-			return nil, err
-		}
-		contributions[resource.GetSegmentId()] = sealedContribution{
-			segmentID:   resource.GetSegmentId(),
-			partitionID: resource.GetPartitionId(),
-			stats:       stats,
-			lease:       lease,
-		}
-	}
-	return contributions, nil
-}
-
-func segmentSetFromSealed(sealed map[int64]sealedContribution) map[int64]struct{} {
-	result := make(map[int64]struct{}, len(sealed))
-	for segmentID := range sealed {
-		result[segmentID] = struct{}{}
-	}
-	return result
-}
-
-func cloneSealedContributions(src map[int64]sealedContribution) map[int64]sealedContribution {
-	dst := make(map[int64]sealedContribution, len(src))
-	for segmentID, contribution := range src {
-		contribution.stats = contribution.stats.clone()
-		dst[segmentID] = contribution
-	}
-	return dst
-}
-
-func cloneGrowingContributions(src map[int64]growingContribution) map[int64]growingContribution {
-	dst := make(map[int64]growingContribution, len(src))
-	for segmentID, contribution := range src {
-		contribution.stats = contribution.stats.clone()
-		dst[segmentID] = contribution
-	}
-	return dst
+	return response, nil
 }

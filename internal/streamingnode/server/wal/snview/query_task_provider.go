@@ -45,7 +45,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, selectedPartitionIDs(req.GetPartitionIDs()))
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	if err := runtime.WaitMVCCVisible(ctx, mvcc.GetGrowingTimetick(), mvcc.GetTransformingTimetick()); err != nil {
 		return nil, err
 	}
-	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, selectedPartitionIDs(req.GetPartitionIDs()))
+	handles, err := runtime.AcquireGrowingSegmentHandles(ctx, version.DataVersion, selectedPartitionIDs(req.GetPartitionIDs()))
 	if err != nil {
 		return nil, err
 	}

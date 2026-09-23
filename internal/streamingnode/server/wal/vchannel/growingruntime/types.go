@@ -32,6 +32,7 @@ type Runtime struct {
 	mvccCond                 *sync.Cond
 	closed                   bool
 	collection               *segcore.CCollection
+	loadedPartitions         map[int64]struct{} // nil: unrestricted; empty: none
 	segments                 map[int64]*growingSegment
 	segmentIDs               []int64
 	truncateDataVersion      qviews.DataVersion

@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -41,6 +42,11 @@ func (r *Runtime) getOrCreateSegment(segmentID int64, partitionID int64) *growin
 	}
 	if segment := r.segments[segmentID]; segment != nil {
 		return segment
+	}
+	// Seal notifications identify an existing segment without a partition ID.
+	// Only new allocations need to validate the message's partition scope.
+	if !r.partitionLoaded(partitionID) {
+		return nil
 	}
 	segment := newGrowingSegment(r.collection, segmentID, partitionID)
 	r.segments[segmentID] = segment
@@ -153,7 +159,7 @@ func (r *Runtime) applyDeleteRequest(ctx context.Context, timeTick uint64, reque
 	if request == nil {
 		return nil
 	}
-	return r.deleteFromAllSegments(ctx, storage.ParseIDs2PrimaryKeysBatch(request.GetPrimaryKeys()), deleteTimestampsFromRequest(timeTick, request))
+	return r.deleteFromSegments(ctx, request.GetPartitionID(), storage.ParseIDs2PrimaryKeysBatch(request.GetPrimaryKeys()), deleteTimestampsFromRequest(timeTick, request))
 }
 
 func (r *Runtime) applyTransformLogEntry(ctx context.Context, entry *streamingpb.TransformLogEntry) error {
@@ -161,18 +167,21 @@ func (r *Runtime) applyTransformLogEntry(ctx context.Context, entry *streamingpb
 		return nil
 	}
 	for _, block := range entry.GetDelete().GetBlocks() {
-		if err := r.deleteFromAllSegments(ctx, storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block)); err != nil {
+		if err := r.deleteFromSegments(ctx, block.GetPartitionId(), storage.ParseIDs2PrimaryKeysBatch(block.GetPrimaryKeys()), deleteTimestampsFromTransformLogBlock(entry.GetTimeTick(), block)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Runtime) deleteFromAllSegments(ctx context.Context, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
+func (r *Runtime) deleteFromSegments(ctx context.Context, partitionID int64, primaryKeys storage.PrimaryKeys, timestamps []typeutil.Timestamp) error {
 	if primaryKeys.Len() == 0 {
 		return nil
 	}
 	for _, segment := range r.segmentsSnapshot() {
+		if partitionID != common.AllPartitionsID && segment.partitionID != partitionID {
+			continue
+		}
 		if err := segment.applyDelete(ctx, primaryKeys, timestamps); err != nil {
 			return err
 		}

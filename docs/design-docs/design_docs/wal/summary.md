@@ -11,11 +11,11 @@ checkpoint gating and startup idempotency-window restoration (§7).
 The existing object-key encoding is retained; §8 describes forward
 generation-prefix discovery and its recovery cost.
 The cross-owner GC protocol is not yet designed; see the TODO in §9.
-The shared bounded-read contract (§5.4) and [L0Materializer](l0_materializer.md)
-implementation is retained for future wiring, including range statistics and Summary-owned
-materialization-backlog requests described in
-[L0Materializer §5](l0_materializer.md#5-read-and-materialize). TransformLog
-subscriptions (§5.5) are a separate future integration.
+The shared bounded-read contract (§5.4) is used by local SN TransformLog
+bootstrap subscriptions (§5.5). The Summary-based L0 consumer remains unwired,
+including range-statistics admission and Summary-owned materialization-backlog
+requests described in [L0Materializer §5](l0_materializer.md#5-read-and-materialize).
+Remote/QN subscription integration remains planned.
 
 The protocol added by this feature is still under development. Intermediate
 branch versions are not compatibility targets: removed draft messages and
@@ -49,7 +49,7 @@ It exists for two reasons:
 RecoveryStorage             -> walsummary (sole record observation/storage)
 RecoveryStorage             -> vchannel (owns SegmentViews and L0Materializer)
 vchannel/l0materializer     -> walsummary read interface
-TransformLog adaptor        -> walsummary read interface (future)
+SN TransformLog adaptor     -> walsummary read interface (implemented)
 walsummary                  -> no dependency on its consumers
 ```
 
@@ -430,13 +430,16 @@ older manifest that still references retired objects.
 
 L0Materializer's GC position advances only after its corresponding VChannel
 metadata is durable. L0 materialization and Summary persistence remain
-independent. Before future subscriptions are enabled, the integration must also
-supply the minimum historical start point required by retained QueryViews,
+independent. Subscription integration must also supply the minimum historical
+start point required by retained QueryViews,
 DataViews, and protected local replays. The effective release position is the
 minimum of those requirements and the durable materialization/cleanup position;
 subscription delivery cursors are not retention acknowledgements. Unknown
 requirements during recovery keep history pinned until they are reconstructed.
 Summary accepts storage retention constraints, not QueryView-specific types.
+The SN integration supplies retained-segment replay floors via
+`VChannelRecoveryModule.refreshQueryRetentionLocked` and `SetQueryRetention`;
+remote/QN view retention remains separate integration work.
 
 The read contract also requires a durable fast-forward boundary (§5.4).
 Reference removal and that boundary must be published consistently, so restart
@@ -514,9 +517,9 @@ history required by every consumer.
 
 ### 5.4 Transform Read Contract
 
-This is the shared storage contract required by L0Materializer now and the
-future TransformLog adaptor. Exact Go interface names remain an implementation
-choice; the semantic result is:
+This is the shared storage contract implemented by `TransformReader`, used by
+the local SN TransformLog adaptor and available to the retained Summary L0
+consumer. The semantic result is:
 
 ```text
 ReadTransform(vchannel, after, through, row/byte limit)
@@ -550,7 +553,8 @@ The contract is:
    skip, not proof that retired history was empty. Persist the per-VChannel
    `transform_fast_forward_time_tick` with reference removal, even when the
    last chunk is removed. L0 rejects any fast-forward beyond its materialized
-   cursor. Future subscription adaptors must expose the skip to their caller.
+   cursor. The SN adaptor rejects a skip with `ErrTransformLogStartPointTruncated`;
+   future remote consumers must explicitly reconcile or reject it.
 6. Missing or corrupt referenced objects fail the read; an absent VChannel
    section means an empty interval only within known complete retained coverage.
 7. Pin a read's required objects against local deletion. Pins have bounded read
@@ -568,8 +572,9 @@ A change token is captured consistently with progress. Notifications wake
 consumers to recheck state, avoiding a missed update between reading and waiting;
 they do not carry record ownership or subscription delivery guarantees. The
 revised materializer re-evaluates admission after observation, L1 completion,
-and Summary backlog requests. Notifications alone do not force L0 output. Future subscriptions use progress notifications to follow
-the tail without adding another WAL observer.
+and Summary backlog requests. Notifications alone do not force L0 output. Local
+subscriptions use progress notifications to follow the tail without adding
+another WAL observer.
 
 Summary owns any decoded cache and shared object-fetch coordination. Cache
 memory must be bounded independently of total retained history. PChannel
@@ -577,17 +582,21 @@ objects can contain many VChannels; reuse reads where possible instead of
 fetching the same object for each subscriber. Section indexes do not imply
 section-only I/O: the current Store downloads the whole chunk (§2.5).
 
-### 5.5 Future TransformLog Adaptor
+### 5.5 TransformLog Adaptor
 
-[TransformLog](transform_log.md) wraps §5.4 to provide local and remote
-subscriptions. It has no ObserveMessage, independent storage, or L0 execution.
-Entry/SyncUp delivery, resume cursors, stream backpressure, and QueryView
-consumer integration are outside this PR. The storage interfaces must not
-require those components to exist for L0 materialization to run.
+[TransformLog](transform_log.md) wraps §5.4 without ObserveMessage, independent
+storage, or L0 execution. The local `walsummary.Stream` is wired into SN growing
+resource preparation. It reads bounded batches, waits for coverage through the
+captured end TimeTick and reports SyncUp only after that complete interval has
+been delivered. The GrowingRuntime caller rejects truncated history and applies
+the returned Delete entries before readiness. Later events use the VChannel
+live event path.
 
-Before enabling subscriptions, wire the additional history retention constraints
-in §4 and preserve the [WAL-view handoff](streamingnode_vchannel_wal_view.md).
-L0 completion alone is insufficient to release history required by those readers.
+Remote transport, QN continuous subscriptions and their view retention are
+planned consumers. Their protocol must not be treated as enabled merely because
+the local SN adaptor exists. The current WAL L0 materializer remains independent
+of all TransformLog subscriptions. See the [WAL-view handoff](streamingnode_vchannel_wal_view.md)
+for local snapshot, live-event and retention ownership.
 
 ## 6. Recovery And Term Takeover
 
@@ -758,7 +767,7 @@ only to the upper bound. L0 resolves uncertain admission by bounded async reads.
 Summary backlog similarly resolves a partial section's oldest remaining Delete
 with a bounded read in its existing worker. Object I/O never enters Observe.
 
-Count-budget wiring remains absent (§3.4). Future subscription retention and
+Count-budget wiring remains absent (§3.4). Remote/QN subscription retention and
 cross-owner GC fencing remain separate follow-up work.
 
 ## 8. Object Listing And Recovery Cost

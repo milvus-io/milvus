@@ -5,24 +5,28 @@
 - Independent Approver: @weiliu1031
 - Design Review: 2026-07-29
 
-**Status:** Future integration, outside the current recovery-storage PR.
-This is the agreed subscription contract. L0 materialization is implemented
-separately in [L0 Materializer](l0_materializer.md); the former
-`vchannel/transformlog` package has been removed.
+**Status:** The local SN bootstrap adaptor is implemented in
+`internal/streamingnode/server/wal/walsummary/stream.go` and wired through
+`vchannel.PChannelRecoveryManager` into GrowingRuntime. It performs bounded Delete replay for
+QueryRuntime preparation. Remote transport and QN continuous-subscription
+integration remain planned; the general subscription contract below includes
+those future consumers.
 
 TransformLog is a read-only subscription adaptor over
 [WALSummary](summary.md#54-transform-read-contract). It owns no record storage,
-has no `ObserveMessage`, and does not materialize L0. L0 materialization and
-TransformLog subscriptions are independent consumers of the same Summary.
+has no `ObserveMessage`, and does not materialize L0. The current WAL L0
+materializer retains WAL handles independently; the retained Summary-based L0
+consumer is not enabled by this adaptor. See [L0 Materializer](l0_materializer.md).
+The former `vchannel/transformlog` storage package has been removed.
 
 ## 1. Ownership
 
 ```text
 WALSummary (one store per PChannel)
-  +-- L0Materializer per VChannel       [implemented]
-  +-- TransformLog subscription adaptor [future integration]
-        +-- local / remote PChannel streams
-              +-- VChannel subscriptions
+  +-- Summary L0 consumer               [retained, not wired]
+  +-- TransformLog subscription adaptor
+        +-- local SN bounded replay     [implemented]
+        +-- remote / QN subscriptions   [planned]
 ```
 
 TransformLog owns stream and subscription lifetimes, delivery cursors,
@@ -50,11 +54,13 @@ strictly after its start cursor. An unset end means continuous delivery; a set
 end means bounded replay through that position. Stream closure releases all
 subscriptions; closing one subscription does not close a shared stream.
 
-QueryNode uses continuous subscriptions to catch loaded sealed Segments up and
-then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
+The planned QueryNode integration uses continuous subscriptions to catch loaded
+sealed Segments up and then apply live Deletes. StreamingNode uses bounded subscriptions when preparing
 growing resources from a captured WAL view; subsequent resource events arrive
-through the VChannel's ordered live event path. Both consumers use the same
-Summary-backed read semantics.
+through the VChannel's ordered live event path. Both consumers are specified to use the same Summary-backed read semantics.
+The current SN adaptor rejects a skipped historical interval with
+`ErrTransformLogStartPointTruncated`; it does not expose successful fast-forward
+to GrowingRuntime.
 
 ## 3. Entry And SyncUp Semantics
 
@@ -120,7 +126,7 @@ history, fast-forward, or SyncUp.
 
 ## 6. Retention Prerequisite
 
-Before subscriptions are enabled, QueryView/DataView integration must protect
+QueryView/DataView integration must protect
 the historical start points needed for future Segment loads, reconnects, and
 local bounded replays. Already delivered data can still be needed by a retained
 view; subscription delivery is not permission to delete it.
@@ -129,6 +135,9 @@ The owner of those view requirements reports retention constraints to Summary.
 TransformLog does not own object deletion or infer view lifetime from a stream's
 cursor. Unknown requirements during recovery are not equivalent to no readers.
 New requirements must be installed before GC can remove the requested history.
+For local SN preparation, `VChannelRecoveryModule.refreshQueryRetentionLocked`
+publishes the retained segments' earliest Delete replay requirement through
+`WALSummary.SetQueryRetention`. Remote/QN consumers require their own integration.
 See [Summary retention](summary.md#4-retention-gc) for the shared-store contract
 and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 
@@ -141,3 +150,39 @@ and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 5. Historical/live handoff and storage transitions lose no records.
 6. Subscription cursors do not advance L0 materialization or authorize GC.
 7. L0 materialization does not depend on this adaptor or on external subscribers.
+
+## 8. TODO: DDL Visibility Entries (Outside This PR)
+
+The agreed [Truncate and Partition Drop visibility TODO](../qviews/ddl_visibility.md)
+extends TransformLogEntry with explicit TruncateCollection and DropPartition
+payloads. All affected SN/QN consumers would use their ordered application and
+request MVCC to exclude invalidated segments. This requires extending the
+current Delete-only delivery/SyncUp coverage contract; payload-free barriers
+are insufficient. Until the distributed protocol is implemented, retain the
+QueryView handoff visibility fence described there. No entry, transport or
+runtime implementation is added by this design note.
+
+## 9. TODO: Bound SN Bootstrap Consumer Memory (Deferred)
+
+The current local subscription bounds the replay interval and the adaptor's
+delivery batches, but not GrowingRuntime's total bootstrap replay buffer.
+`growingruntime.drainDeleteReplay` collects every entry in the requested interval
+before `Runtime.Prepare` applies them. Its additional retained payload therefore
+grows with the entire replay interval, despite WALSummary's paged reads and the
+handler's bounded event channel.
+
+This optimization is explicitly deferred from the current PR. A follow-up should
+apply entries incrementally to the unpublished runtime, preserving partition
+scope, transaction commit timestamps and ordered application. Only complete
+replay through the target SyncUp may publish the preparation frontiers. A read or
+apply failure must discard the partial runtime and use the existing fresh-build
+retry path; cancellation must unblock delivery before waiting for subscription
+shutdown.
+
+The intended bound covers the current read batch, bounded queued entries and one
+active entry. A single oversized entry or transaction can exceed the batch soft
+limits. This does not bound WALSummary's own retained data or the delete state
+that segcore must retain. No new disk cache or per-version resources are planned.
+Validation should cover multi-page replay, midstream failures, cancellation with
+a full queue and peak extra replay memory. The current implementation remains
+unchanged by this TODO.
