@@ -1125,6 +1125,53 @@ func (_c *DataCoordCatalog_DropSegment_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// DropSegmentChangeGroups provides a mock function with given fields: ctx, collectionID
+func (_m *DataCoordCatalog) DropSegmentChangeGroups(ctx context.Context, collectionID int64) error {
+	ret := _m.Called(ctx, collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DropSegmentChangeGroups")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropSegmentChangeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropSegmentChangeGroups'
+type DataCoordCatalog_DropSegmentChangeGroups_Call struct {
+	*mock.Call
+}
+
+// DropSegmentChangeGroups is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *DataCoordCatalog_Expecter) DropSegmentChangeGroups(ctx interface{}, collectionID interface{}) *DataCoordCatalog_DropSegmentChangeGroups_Call {
+	return &DataCoordCatalog_DropSegmentChangeGroups_Call{Call: _e.mock.On("DropSegmentChangeGroups", ctx, collectionID)}
+}
+
+func (_c *DataCoordCatalog_DropSegmentChangeGroups_Call) Run(run func(ctx context.Context, collectionID int64)) *DataCoordCatalog_DropSegmentChangeGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegmentChangeGroups_Call) Return(_a0 error) *DataCoordCatalog_DropSegmentChangeGroups_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropSegmentChangeGroups_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropSegmentChangeGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropSegmentIndex provides a mock function with given fields: ctx, collID, partID, segID, buildID
 func (_m *DataCoordCatalog) DropSegmentIndex(ctx context.Context, collID int64, partID int64, segID int64, buildID int64) error {
 	ret := _m.Called(ctx, collID, partID, segID, buildID)
@@ -2127,6 +2174,64 @@ func (_c *DataCoordCatalog_ListPreImportTasks_Call) Return(_a0 []*datapb.PreImpo
 }
 
 func (_c *DataCoordCatalog_ListPreImportTasks_Call) RunAndReturn(run func(context.Context) ([]*datapb.PreImportTask, error)) *DataCoordCatalog_ListPreImportTasks_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListSegmentChangeGroups provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error) {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListSegmentChangeGroups")
+	}
+
+	var r0 []*model.SegmentChangeGroup
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.SegmentChangeGroup, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*model.SegmentChangeGroup); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*model.SegmentChangeGroup)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListSegmentChangeGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListSegmentChangeGroups'
+type DataCoordCatalog_ListSegmentChangeGroups_Call struct {
+	*mock.Call
+}
+
+// ListSegmentChangeGroups is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListSegmentChangeGroups(ctx interface{}) *DataCoordCatalog_ListSegmentChangeGroups_Call {
+	return &DataCoordCatalog_ListSegmentChangeGroups_Call{Call: _e.mock.On("ListSegmentChangeGroups", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListSegmentChangeGroups_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListSegmentChangeGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListSegmentChangeGroups_Call) Return(_a0 []*model.SegmentChangeGroup, _a1 error) *DataCoordCatalog_ListSegmentChangeGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListSegmentChangeGroups_Call) RunAndReturn(run func(context.Context) ([]*model.SegmentChangeGroup, error)) *DataCoordCatalog_ListSegmentChangeGroups_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3352,6 +3457,67 @@ func (_c *DataCoordCatalog_ShouldDropChannel_Call) Return(_a0 bool) *DataCoordCa
 }
 
 func (_c *DataCoordCatalog_ShouldDropChannel_Call) RunAndReturn(run func(context.Context, string) bool) *DataCoordCatalog_ShouldDropChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Update provides a mock function with given fields: ctx, actions
+func (_m *DataCoordCatalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	_va := make([]interface{}, len(actions))
+	for _i := range actions {
+		_va[_i] = actions[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, ...metastore.UpdateAction) error); ok {
+		r0 = rf(ctx, actions...)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
+type DataCoordCatalog_Update_Call struct {
+	*mock.Call
+}
+
+// Update is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actions ...metastore.UpdateAction
+func (_e *DataCoordCatalog_Expecter) Update(ctx interface{}, actions ...interface{}) *DataCoordCatalog_Update_Call {
+	return &DataCoordCatalog_Update_Call{Call: _e.mock.On("Update",
+		append([]interface{}{ctx}, actions...)...)}
+}
+
+func (_c *DataCoordCatalog_Update_Call) Run(run func(ctx context.Context, actions ...metastore.UpdateAction)) *DataCoordCatalog_Update_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]metastore.UpdateAction, len(args)-1)
+		for i, a := range args[1:] {
+			if a != nil {
+				variadicArgs[i] = a.(metastore.UpdateAction)
+			}
+		}
+		run(args[0].(context.Context), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_Update_Call) Return(_a0 error) *DataCoordCatalog_Update_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_Update_Call) RunAndReturn(run func(context.Context, ...metastore.UpdateAction) error) *DataCoordCatalog_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

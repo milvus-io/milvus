@@ -75,11 +75,17 @@ type MetaReloadSuite struct {
 
 func (suite *MetaReloadSuite) SetupTest() {
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	suite.catalog = catalog
 }
 
 func (suite *MetaReloadSuite) resetMock() {
 	suite.catalog.ExpectedCalls = nil
+	// newMeta calls ListSegmentChangeGroups (group recovery) on every
+	// construction; SetupTest runs once per test method, not per subtest, so
+	// resetMock must re-register this default or the subtests that reach
+	// loadSegmentChangeGroups fail on an unexpected call (C12).
+	suite.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 }
 
 func (suite *MetaReloadSuite) TestReloadFromKV() {
@@ -1742,6 +1748,7 @@ func (suite *MetaBasicSuite) TestCompleteCompactionMutation_RecalculatePositions
 func (suite *MetaBasicSuite) TestSetSegment() {
 	meta := suite.meta
 	catalog := mocks2.NewDataCoordCatalog(suite.T())
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	meta.catalog = catalog
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -5619,6 +5626,7 @@ func TestChannelCP(t *testing.T) {
 func Test_meta_GcConfirm(t *testing.T) {
 	m := &meta{}
 	catalog := mocks2.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
 	m.catalog = catalog
 
 	catalog.On("GcConfirm",

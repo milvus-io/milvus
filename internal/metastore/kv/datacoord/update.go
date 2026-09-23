@@ -1,0 +1,173 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package datacoord
+
+import (
+	"context"
+
+	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/metastore/kv/txn"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+)
+
+// Update applies a composite set of UpdateActions as a single write. Each
+// action is dispatched on its (Entry, Type) into a kv encoding, accumulated
+// into a txn.Builder, and committed via txn.Commit - atomically when the op
+// count fits the store's txn op limit (metastore.maxEtcdTxnNum), else via the
+// caller-ordered chunked fallback.
+//
+// The segment encoding is chosen by action type: an ActionAdd writes the
+// segment record plus its binlog KVs (a new segment); an ActionUpdate writes
+// the segment record, record-only by default, or via the legacy AlterSegments
+// encoding (record + GC-compat binlog KVs for a dropped pre-prefix segment)
+// when SegmentEntry.AlterEncoding is set. Entries this catalog does not own,
+// or Type/Entry combinations it does not implement, are a caller programming
+// error and are rejected with a ServiceInternal error and no write.
+func (kc *Catalog) Update(ctx context.Context, actions ...metastore.UpdateAction) error {
+	b := txn.New()
+	for _, action := range actions {
+		switch e := action.Entry.(type) {
+		case metastore.SegmentEntry:
+			if err := kc.applySegmentEntry(ctx, b, action.Type, e); err != nil {
+				return err
+			}
+		case metastore.SegmentChangeGroupEntry:
+			switch action.Type {
+			case metastore.ActionUpdate:
+				// Same encoding as catalog.SaveSegmentChangeGroup.
+				if e.Group == nil {
+					return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment change group in UpdateAction")
+				}
+				value, err := model.MarshalSegmentChangeGroup(e.Group)
+				if err != nil {
+					return err
+				}
+				if e.Group.IsTerminal() {
+					// Terminal states (COMMITTED/FAILED/ABORTED) are the
+					// visibility marker of the composite write: CommitSave lands
+					// the record LAST in the chunked-fallback flush, so a visible
+					// terminal record implies every non-commit op (member flips,
+					// superseded retirement) already landed.
+					b.CommitSave(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				} else {
+					// ALIVE states (STAGED/READY) are NOT a commit marker (C13):
+					// for STAGED creation the group record must land BEFORE its
+					// staged members in the fallback flush, otherwise a crash
+					// between the two leaves invisible members with no group
+					// record — unrecoverable without SegmentInfo.change_group_id.
+					// Plain in-order Save lets the caller control that ordering.
+					b.Save(buildSegmentChangeGroupKey(e.Group.CollectionID, e.Group.GroupID), string(value))
+				}
+			case metastore.ActionDelete:
+				// CommitRemove marks the group removal as the visibility point:
+				// the group must land last when its members/superseded
+				// retirement are composed before it on the ordered fallback path.
+				b.CommitRemove(buildSegmentChangeGroupKey(e.CollectionID, e.GroupID))
+			default:
+				return unsupportedAction(action)
+			}
+		default:
+			return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply entry %T", action.Entry)
+		}
+	}
+	return txn.Commit(ctx, kc.MetaKv, paramtable.Get().MetaStoreCfg.MaxEtcdTxnNum.GetAsInt(), b)
+}
+
+// applySegmentEntry stages the kv writes for a segment action.
+//   - ActionAdd    -> segment record + its binlog KVs (a new segment).
+//   - ActionUpdate -> segment record rewrite; the caller supplies the
+//     already-mutated segment value. AlterEncoding selects the encoding:
+//     false -> record-only (SaveDroppedSegmentsInBatch), true -> the legacy
+//     AlterSegments encoding, which for a Dropped segment also writes the
+//     handleDroppedSegment GC-compat binlog KVs.
+//   - anything else (e.g. ActionDelete: physical segment removal) is not
+//     wired yet and is rejected.
+func (kc *Catalog) applySegmentEntry(ctx context.Context, b *txn.Builder, t metastore.ActionType, e metastore.SegmentEntry) error {
+	if e.Segment == nil {
+		return merr.WrapErrServiceInternalMsg("datacoord catalog: nil segment in UpdateAction")
+	}
+	switch t {
+	case metastore.ActionAdd:
+		// C26: honor the caller's increments (including DroppedBinlogFieldIDs
+		// removals) instead of silently overwriting them with a default; a
+		// dropped binlog field whose removal is omitted would be resurrected by
+		// the prefix scan in listBinlogs on restart. Fall back to the full
+		// segment increment only when none is supplied.
+		increments := e.Binlogs
+		if len(increments) == 0 {
+			increments = []metastore.BinlogsIncrement{{Segment: e.Segment}}
+		}
+		kvs, removals, err := kc.buildAlterSegmentsKvs(ctx,
+			[]*datapb.SegmentInfo{e.Segment},
+			increments)
+		if err != nil {
+			return err
+		}
+		for k, v := range kvs {
+			b.Save(k, v)
+		}
+		for _, k := range removals {
+			b.Remove(k)
+		}
+	case metastore.ActionUpdate:
+		if e.AlterEncoding {
+			// Legacy AlterSegments encoding. A nil binlog increment persists no
+			// new binlog KVs (the segment is being retired, not extended); for a
+			// Dropped segment buildAlterSegmentsKvs still emits the
+			// handleDroppedSegment GC-compat write when the segment predates
+			// binlog-prefix persistence, keeping compaction's compactFrom
+			// retirement byte-identical to catalog.AlterSegments.
+			kvs, removals, err := kc.buildAlterSegmentsKvs(ctx, []*datapb.SegmentInfo{e.Segment}, e.Binlogs)
+			if err != nil {
+				return err
+			}
+			for k, v := range kvs {
+				b.Save(k, v)
+			}
+			for _, k := range removals {
+				b.Remove(k)
+			}
+			return nil
+		}
+		kvs, err := buildDroppedSegmentKvs([]*datapb.SegmentInfo{e.Segment})
+		if err != nil {
+			return err
+		}
+		for k, v := range kvs {
+			b.Save(k, v)
+		}
+		if len(e.Binlogs) > 0 {
+			// C26: the record-only (non-AlterEncoding) ActionUpdate persists no
+			// binlog KVs and cannot honor DroppedBinlogFieldIDs removals —
+			// silently dropping them would resurrect zombie binlog entries.
+			// Reject per the Update contract ("reject what you cannot
+			// implement") instead of losing the removals without an error.
+			return merr.WrapErrServiceInternalMsg(
+				"datacoord catalog: binlog increments are not supported on a record-only segment update; use AlterEncoding")
+		}
+	default:
+		return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply action type %v to a segment", t)
+	}
+	return nil
+}
+
+func unsupportedAction(action metastore.UpdateAction) error {
+	return merr.WrapErrServiceInternalMsg("datacoord catalog cannot apply action type %v to entry %T", action.Type, action.Entry)
+}
