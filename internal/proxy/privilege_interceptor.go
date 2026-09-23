@@ -231,6 +231,10 @@ func PrivilegeInterceptorWithMetaCache(GetMetaCache func() Cache) PrivilegeFunc 
 
 		log.Info(ctx, "permission deny", mlog.Strings("roles", roleNames))
 
+		if replicas, ok := req.(*milvuspb.GetReplicasRequest); ok && replicas.GetCollectionName() == "" {
+			return ctx, replicaPrivilegeDenied()
+		}
+
 		if password == util.PasswordHolder {
 			username = "apikey user"
 		}

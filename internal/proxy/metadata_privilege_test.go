@@ -25,6 +25,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -225,6 +226,54 @@ func TestReplicaPrivilegeUsesResolvedIdentity(t *testing.T) {
 	}
 }
 
+func TestReplicaPrivilegeHidesCollectionIdentity(t *testing.T) {
+	for _, username := range []string{"no_roles", "reader"} {
+		t.Run(username, func(t *testing.T) {
+			coord, setPolicy := setupMetadataPrivileges(t)
+			// A grant on the same collection name in another database must not
+			// reveal whether an ID in tenant_b exists or which database owns it.
+			setPolicy("tenant_a", commonpb.ObjectPrivilege_PrivilegeGetLoadState)
+			cache, err := metacache.NewMetaCache(coord)
+			require.NoError(t, err)
+			t.Cleanup(cache.Close)
+			check := PrivilegeInterceptorWithMetaCache(func() Cache { return cache })
+			ctx := NewContextWithMetadata(context.Background(), username, "tenant_a")
+			for range 2 { // Exercise both the cold and warm identity cache.
+				_, existingErr := check(ctx, &milvuspb.GetReplicasRequest{DbName: "tenant_a", CollectionID: 41})
+				_, missingErr := check(ctx, &milvuspb.GetReplicasRequest{DbName: "tenant_a", CollectionID: 999})
+				assert.Equal(t, codes.PermissionDenied, status.Code(existingErr))
+				assert.Equal(t, codes.PermissionDenied, status.Code(missingErr))
+				assert.True(t, proto.Equal(status.Convert(existingErr).Proto(), status.Convert(missingErr).Proto()),
+					"existing and missing IDs must have indistinguishable gRPC errors: %v / %v", existingErr, missingErr)
+				assert.NotContains(t, status.Convert(existingErr).Message(), "tenant_b")
+				assert.NotContains(t, status.Convert(existingErr).Message(), "records")
+			}
+		})
+	}
+}
+
+func TestProxyReplicaPrivilegeHidesCollectionIdentity(t *testing.T) {
+	coord, _ := setupMetadataPrivileges(t)
+	cache, err := metacache.NewMetaCache(coord)
+	require.NoError(t, err)
+	t.Cleanup(cache.Close)
+	node := &Proxy{metaCache: cache, mixCoord: coord}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	ctx := NewContextWithMetadata(context.Background(), "no_roles", "tenant_a")
+	for range 2 {
+		existing, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{DbName: "tenant_a", CollectionID: 41})
+		require.NoError(t, err)
+		missing, err := node.GetReplicas(ctx, &milvuspb.GetReplicasRequest{DbName: "tenant_a", CollectionID: 999})
+		require.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(existing.GetStatus()), merr.ErrPrivilegeNotPermitted)
+		assert.ErrorIs(t, merr.Error(missing.GetStatus()), merr.ErrPrivilegeNotPermitted)
+		assert.True(t, proto.Equal(existing, missing), "direct calls must also hide existence in the response status")
+		assert.NotContains(t, existing.GetStatus().GetReason(), "tenant_b")
+		assert.NotContains(t, existing.GetStatus().GetDetail(), "tenant_b")
+	}
+	require.Zero(t, coord.metadataCalls, "denied calls must not fetch replica data")
+}
+
 type incompleteMetadataCache struct {
 	Cache
 	info *collectionInfo
@@ -233,6 +282,40 @@ type incompleteMetadataCache struct {
 
 func (c incompleteMetadataCache) GetCollectionInfo(context.Context, string, string, int64) (*collectionInfo, error) {
 	return c.info, c.err
+}
+
+func TestReplicaPrivilegeLookupErrors(t *testing.T) {
+	setupMetadataPrivileges(t)
+	ctx := NewContextWithMetadata(context.Background(), "no_roles", "tenant_a")
+	for _, tc := range []struct {
+		name string
+		err  error
+		hide bool
+	}{
+		{"collection_missing", merr.Wrap(merr.WrapErrCollectionNotFound(999), "describe collection"), true},
+		{"database_missing", merr.WrapErrDatabaseNotFound("tenant_b"), true},
+		{"unavailable", merr.WrapErrServiceUnavailable("coordinator unavailable"), false},
+		{"not_ready", merr.WrapErrServiceNotReady("rootcoord", 1, "Initializing"), false},
+		{"canceled", context.Canceled, false},
+		{"deadline", context.DeadlineExceeded, false},
+		{"grpc_unavailable", status.Error(codes.Unavailable, "coordinator unavailable"), false},
+		{"grpc_deadline", status.Error(codes.DeadlineExceeded, "describe timed out"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := incompleteMetadataCache{err: tc.err}
+			_, err := PrivilegeInterceptorWithMetaCache(func() Cache { return cache })(ctx, &milvuspb.GetReplicasRequest{CollectionID: 999})
+			if tc.hide {
+				assert.Equal(t, codes.PermissionDenied, status.Code(err))
+				assert.NotContains(t, err.Error(), "tenant_b")
+				assert.NotContains(t, err.Error(), "999")
+			} else {
+				assert.ErrorIs(t, err, tc.err, "operational failures must not be relabeled as missing privileges")
+				assert.Equal(t, merr.Code(tc.err), merr.Code(err))
+				assert.Equal(t, status.Code(tc.err), status.Code(err))
+				assert.Equal(t, merr.IsRetryableErr(tc.err), merr.IsRetryableErr(err))
+			}
+		})
+	}
 }
 
 func TestReplicaPrivilegeFailsClosed(t *testing.T) {

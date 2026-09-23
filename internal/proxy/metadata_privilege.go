@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -52,6 +53,12 @@ func replicaPrivilegeRequestByID(ctx context.Context, cache Cache, req *milvuspb
 	}
 	info, err := cache.GetCollectionInfo(ctx, GetCurDBNameFromRequestOrContext(ctx, req), "", req.GetCollectionID())
 	if err != nil {
+		// Identity resolution runs before authorization. An absent collection or
+		// database must be indistinguishable from an existing, forbidden ID.
+		// Keep operational failures intact so callers can still retry them.
+		if errors.Is(err, merr.ErrCollectionNotFound) || errors.Is(err, merr.ErrDatabaseNotFound) {
+			return nil, replicaPrivilegeDenied()
+		}
 		return nil, err
 	}
 	// IDs are cluster-wide: neither the connection database nor a caller-supplied
@@ -61,6 +68,12 @@ func replicaPrivilegeRequestByID(ctx context.Context, cache Cache, req *milvuspb
 		return nil, merr.WrapErrServiceUnavailable("cannot resolve collection identity for authorization")
 	}
 	return &milvuspb.GetLoadStateRequest{DbName: info.DBName, CollectionName: info.Schema.GetName()}, nil
+}
+
+func replicaPrivilegeDenied() error {
+	// Do not include the resolved database, collection name, or lookup error:
+	// none of that identity has been authorized for the caller to see.
+	return status.Error(codes.PermissionDenied, "GetReplicas: permission deny")
 }
 
 // Guard the Proxy methods as well as gRPC dispatch: in-process HTTP handlers
