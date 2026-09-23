@@ -81,6 +81,8 @@ func newSplitMoveServer(t *testing.T, c splitMoveCase) *Server {
 		current[name] = &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: name}}
 	}
 	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.CurrentTarget).Return(current).Maybe()
+	// the freeze reads the next target for the adopted targets awaiting the flip.
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), meta.NextTarget).Return(nil).Maybe()
 
 	broker := meta.NewMockBroker(t)
 	broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(c.states, c.describeErr).Maybe()

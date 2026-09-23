@@ -331,6 +331,7 @@ func TestCheckShardSplitMovable(t *testing.T) {
 			channels[name] = &DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: name}}
 		}
 		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), CurrentTarget).Return(channels).Maybe()
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), NextTarget).Return(channels).Maybe()
 		return CheckShardSplitMovable(ctx, NewShardSplitStateCache(broker, time.Minute), targetMgr, 1)
 	}
 	normal := &milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v0", "v9"}}
@@ -348,4 +349,82 @@ func TestCheckShardSplitMovable(t *testing.T) {
 		assert.True(t, merr.IsRetryableErr(err), name)
 	}
 	assert.NoError(t, CheckShardSplitMovable(ctx, nil, nil, 1), "no cache, no rule")
+}
+
+// CZ-L6 / AV-L6-M3 / AV-L6-H1: the freeze is one rule with two granularities.
+// The collection is frozen while any split is in progress, but only the
+// split's family -- its sources and its targets -- is frozen channel by
+// channel, so a stopping node can still be drained of everything else.
+func TestShardSplitFreezeByChannel(t *testing.T) {
+	ctx := context.Background()
+	dm := func(names ...string) map[string]*DmChannel {
+		out := make(map[string]*DmChannel, len(names))
+		for _, name := range names {
+			out[name] = &DmChannel{VchannelInfo: &datapb.VchannelInfo{ChannelName: name}}
+		}
+		return out
+	}
+	freeze := func(t *testing.T, states ShardStates, window []string, current, next map[string]*DmChannel) *ShardSplitFreeze {
+		targetMgr := NewMockTargetManager(t)
+		var marks typeutil.Set[string]
+		if len(window) > 0 {
+			marks = typeutil.NewSet(window...)
+		}
+		targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), NextTarget).Return(marks).Maybe()
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), CurrentTarget).Return(current).Maybe()
+		targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), NextTarget).Return(next).Maybe()
+		return NewShardSplitFreeze(ctx, targetMgr, 1, states)
+	}
+	frozen := func(t *testing.T, f *ShardSplitFreeze, channels ...string) {
+		for _, channel := range channels {
+			err := f.CheckChannel(channel)
+			assert.ErrorIs(t, err, merr.ErrServiceUnavailable, channel)
+			assert.True(t, merr.IsRetryableErr(err), channel)
+		}
+		assert.ErrorIs(t, f.CheckCollection(), merr.ErrServiceUnavailable)
+	}
+
+	t.Run("window: the fenced source and its Creating targets", func(t *testing.T) {
+		states := ShardStatesOf(&milvuspb.DescribeCollectionResponse{
+			VirtualChannelNames: []string{"v0", "v1", "v2", "v9"},
+			ShardInfos: []*schemapb.CollectionShardInfo{
+				{State: schemapb.ShardState_ShardSplitting},
+				{State: schemapb.ShardState_ShardCreating},
+				{State: schemapb.ShardState_ShardCreating},
+				{State: schemapb.ShardState_ShardNormal},
+			},
+		})
+		f := freeze(t, states, nil, dm("v0", "v9"), dm("v0", "v1", "v2", "v9"))
+		frozen(t, f, "v0", "v1", "v2")
+		assert.NoError(t, f.CheckChannel("v9"))
+	})
+	t.Run("fence the cached states predate: the next target's marks", func(t *testing.T) {
+		states := ShardStatesOf(&milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v0", "v9"}})
+		f := freeze(t, states, []string{"v1", "v2"}, dm("v0", "v9"), dm("v0", "v1", "v2", "v9"))
+		frozen(t, f, "v1", "v2")
+		assert.NoError(t, f.CheckChannel("v9"))
+	})
+	t.Run("adopted, not flipped: the retired source and the targets awaiting the flip", func(t *testing.T) {
+		states := ShardStatesOf(&milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v1", "v2", "v9"}})
+		f := freeze(t, states, nil, dm("v0", "v9"), dm("v1", "v2", "v9"))
+		frozen(t, f, "v0", "v1", "v2")
+		assert.NoError(t, f.CheckChannel("v9"))
+	})
+	t.Run("flipped: nothing", func(t *testing.T) {
+		states := ShardStatesOf(&milvuspb.DescribeCollectionResponse{VirtualChannelNames: []string{"v1", "v2", "v9"}})
+		f := freeze(t, states, nil, dm("v1", "v2", "v9"), dm("v1", "v2", "v9"))
+		assert.NoError(t, f.CheckCollection())
+		assert.NoError(t, f.CheckChannel("v1"))
+	})
+	t.Run("states unknown: everything", func(t *testing.T) {
+		broker := NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, int64(1)).Return(nil, errors.New("coord down"))
+		f := EvalShardSplitFreeze(ctx, NewShardSplitStateCache(broker, time.Minute), NewMockTargetManager(t), 1)
+		frozen(t, f, "v9")
+	})
+	t.Run("no cache: nothing", func(t *testing.T) {
+		f := EvalShardSplitFreeze(ctx, nil, nil, 1)
+		assert.NoError(t, f.CheckCollection())
+		assert.NoError(t, f.CheckChannel("v0"))
+	})
 }

@@ -415,6 +415,34 @@ func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 	}
 }
 
+// checkShardSplitMove refuses a watch of the channel on node that moves it while a
+// shard split freezes it (meta.ShardSplitFreeze), judged on the shard states
+// just read fresh.
+//
+// A watch moves the channel when another node of the task's replica already
+// serves it. A watch no node of the replica serves is recovery and is left to
+// the shard's own recovery path, since refusing it would leave the channel
+// with no delegator at all.
+func (ex *Executor) checkShardSplitMove(ctx context.Context, task *ChannelTask, node int64, channel string, states meta.ShardStates) error {
+	servedElsewhere := false
+	for _, delegator := range ex.dist.ChannelDistManager.GetByFilter(
+		meta.WithReplica2Channel(task.replica), meta.WithChannelName2Channel(channel)) {
+		if delegator.Node != node {
+			servedElsewhere = true
+			break
+		}
+	}
+	if !servedElsewhere {
+		return nil
+	}
+	if err := meta.NewShardSplitFreeze(ctx, ex.targetMgr, task.CollectionID(), states).CheckChannel(channel); err != nil {
+		mlog.Warn(ctx, "refuse to move a channel a shard split freezes",
+			mlog.String("channel", channel), mlog.Err(err))
+		return err
+	}
+	return nil
+}
+
 func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	defer ex.removeTask(task, step)
 	startTs := time.Now()
@@ -434,12 +462,16 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 		mlog.Warn(context.TODO(), "failed to get collection info", mlog.Err(err))
 		return err
 	}
-	// The channel checker chose this channel from a shard-state view that may be
+	// The checkers chose this watch from a shard-state view that may be
 	// seconds old. This describe is fresh, so it has the last word on whether a
-	// shard split still allows the watch.
-	if err = meta.ShardStatesOf(collectionInfo).CheckWatchable(action.ChannelName()); err != nil {
+	// shard split still allows the watch, and the move it may be part of.
+	states := meta.ShardStatesOf(collectionInfo)
+	if err = states.CheckWatchable(action.ChannelName()); err != nil {
 		mlog.Warn(ctx, "refuse to watch a channel a shard split does not allow to watch",
 			mlog.String("channel", action.ChannelName()), mlog.Err(err))
+		return err
+	}
+	if err = ex.checkShardSplitMove(ctx, task, action.Node(), action.ChannelName(), states); err != nil {
 		return err
 	}
 	loadFields := ex.meta.GetLoadFields(ctx, task.CollectionID())
