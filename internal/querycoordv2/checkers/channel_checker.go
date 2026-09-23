@@ -375,7 +375,52 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 		}
 	}
 
-	return dupChannels
+	if len(dupChannels) == 0 || c.splitState == nil {
+		return dupChannels
+	}
+	return c.keepOlderSplitDelegators(ctx, replica, delegatorList, dupChannels)
+}
+
+// keepOlderSplitDelegators revises which duplicated delegators to release for
+// a shard split's channels. Anywhere else the newest delegator is kept. A
+// split's source is duplicated only by a re-watch that the distribution did not
+// show the original delegator to (a node not heard from yet); the original
+// consumed the fence and fronts the split's in-process children, which the
+// newer one never had. So for a split's channel the OLDEST delegator is kept.
+// When the split's channels cannot be told, nothing of the collection is
+// released this round: a surplus delegator costs resources, releasing the
+// wrong one loses the children.
+func (c *ChannelChecker) keepOlderSplitDelegators(ctx context.Context, replica *meta.Replica,
+	delegators, dupChannels []*meta.DmChannel,
+) []*meta.DmChannel {
+	freeze := meta.EvalShardSplitFreeze(ctx, c.splitState, c.targetMgr, replica.GetCollectionID())
+	if !freeze.Known() {
+		mlog.RatedInfo(ctx, rate.Limit(0.1), "hold duplicated delegators until the shard split states can be read",
+			mlog.FieldCollectionID(replica.GetCollectionID()), mlog.Err(freeze.CheckCollection()))
+		return nil
+	}
+	released := lo.Filter(dupChannels, func(ch *meta.DmChannel, _ int) bool {
+		return !freeze.InFamily(ch.GetChannelName())
+	})
+	oldest := make(map[string]*meta.DmChannel)
+	for _, delegator := range delegators {
+		name := delegator.GetChannelName()
+		if !freeze.InFamily(name) {
+			continue
+		}
+		if kept, ok := oldest[name]; !ok || delegator.Version < kept.Version {
+			oldest[name] = delegator
+		}
+	}
+	for _, delegator := range delegators {
+		if kept, ok := oldest[delegator.GetChannelName()]; ok && delegator != kept {
+			mlog.Info(ctx, "release the newer delegator of a duplicated shard split channel, keep the one that fronts its children",
+				mlog.FieldCollectionID(replica.GetCollectionID()), mlog.String("channel", delegator.GetChannelName()),
+				mlog.Int64("releasedNode", delegator.Node), mlog.Int64("keptNode", kept.Node))
+			released = append(released, delegator)
+		}
+	}
+	return released
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
