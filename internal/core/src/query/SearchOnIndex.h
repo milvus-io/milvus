@@ -15,14 +15,14 @@
 #include "common/OpContext.h"
 #include "common/QueryInfo.h"
 #include "common/QueryResult.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "query/helper.h"
 
 namespace milvus::query {
 
 void
 SearchOnIndex(const dataset::SearchDataset& search_dataset,
-              const index::VectorIndex& indexing,
+              const index::IVectorReader& reader,
               const SearchInfo& search_conf,
               const BitsetView& bitset,
               milvus::OpContext* op_context,

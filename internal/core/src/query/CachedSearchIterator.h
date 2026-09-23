@@ -27,7 +27,7 @@
 #include "common/QueryResult.h"
 #include "common/Types.h"
 #include "common/protobuf_utils.h"
-#include "index/VectorIndex.h"
+#include "index/contracts/query/IVectorReader.h"
 #include "knowhere/dataset.h"
 #include "knowhere/index/index_node.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -50,7 +50,7 @@ namespace milvus::query {
 class CachedSearchIterator {
  public:
     // For sealed segment with vector index
-    CachedSearchIterator(const milvus::index::VectorIndex& index,
+    CachedSearchIterator(const milvus::index::IVectorReader& reader,
                          const knowhere::DataSetPtr& dataset,
                          const SearchInfo& search_info,
                          const BitsetView& bitset,
