@@ -295,6 +295,7 @@ func TestTranslateOutputFields_StructArrayField(t *testing.T) {
 	assert.ElementsMatch(t, []string{}, userDynamicFields)
 	assert.False(t, requestedPK)
 }
+
 func Test_MaxQueryResultWindow(t *testing.T) {
 	paramtable.Init()
 	assert.Nil(t, validateMaxQueryResultWindow(0, 16384, false))
