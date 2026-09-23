@@ -1399,11 +1399,13 @@ func (suite *TargetManagerSuite) TestSplitWindowExclusionsWithoutReadableStates(
 	suite.NoError(mgr.UpdateCollectionNextTarget(ctx, collectionID))
 	suite.Equal(typeutil.NewSet("t1"), mgr.GetSplitWindowTargets(ctx, collectionID, NextTarget))
 
-	// the cached entry is dropped and the coordinator is unreachable, so the
-	// states cannot be read at all.
-	cache.Invalidate(collectionID)
-	broker.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
+	// a cache that holds no read (a restarted querycoord) and a coordinator that
+	// is unreachable: the states cannot be read at all. An invalidated entry
+	// would not do, since it stays the fallback of a failed refresh.
+	unreachable := NewMockBroker(suite.T())
+	unreachable.EXPECT().DescribeCollection(mock.Anything, collectionID).Return(
 		nil, merr.WrapErrServiceNotReady("rootcoord", 1, "initializing"))
+	mgr.splitStates = NewShardSplitStateCache(unreachable, 0)
 
 	_, promotable := mgr.GetSplitWindowExclusions(ctx, collectionID, NextTarget)
 	suite.False(promotable)
