@@ -16,7 +16,9 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/idf"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/internal/util/idalloc"
@@ -68,6 +70,11 @@ func RecoverRecoveryStorage(
 		rs.closeRecoveryResources()
 		return nil, nil, err
 	}
+	// Register recovered QueryView references before background cleanup can
+	// advance the segment-version floor or reclaim their bootstrap resources.
+	if rs.recoverQueryViews != nil {
+		rs.recoverQueryViews(rs.vchannelManager)
+	}
 	// recovery storage start work.
 	rs.metrics.ObserveStateChange(recoveryStorageStateWorking)
 	rs.SetLogger(resource.Resource().Logger().With(
@@ -84,6 +91,12 @@ func RecoverRecoveryStorage(
 }
 
 type RecoveryStorageOption func(*recoveryStorageImpl)
+
+// WithQueryViewRecovery installs query references at the startup barrier, before
+// background persistence and cleanup begin. The callback must not block on I/O.
+func WithQueryViewRecovery(recoverViews func(*vchannel.PChannelRecoveryManager)) RecoveryStorageOption {
+	return func(r *recoveryStorageImpl) { r.recoverQueryViews = recoverViews }
+}
 
 func WithNodeScheduler(scheduler nodescheduler.Scheduler) RecoveryStorageOption {
 	return func(r *recoveryStorageImpl) {
@@ -164,6 +177,7 @@ type recoveryStorageImpl struct {
 	tailController          *recoveryTailController
 	recoveryTailRateLimiter RecoveryTailRateLimiter
 	broadcastAck            *broadcastAckModule
+	recoverQueryViews       func(*vchannel.PChannelRecoveryManager)
 	vchannelManager         *vchannel.PChannelRecoveryManager
 	summaryManager          *walsummary.Manager
 	nodeScheduler           nodescheduler.Scheduler
@@ -249,12 +263,17 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	// checkpoint-propagation path lands.
 	coordinatorBroker := broker.NewCoordBroker(coord, paramtable.GetNodeID())
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
-		PChannel:         r.channel.Name,
-		VChannelMetas:    vchannels,
-		Segments:         segments,
-		Runtime:          moduleRuntime,
-		Logger:           r.Logger(),
-		SegmentLifecycle: segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
+		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
+			queryresource.NewGrowingRuntimeModuleBuilder(nil),
+			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager()), idf.WithNodeScheduler(r.nodeScheduler)),
+		},
+		QueryViewLoadInfoProvider: queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient()),
+		PChannel:                  r.channel.Name,
+		VChannelMetas:             vchannels,
+		Segments:                  segments,
+		Runtime:                   moduleRuntime,
+		Logger:                    r.Logger(),
+		SegmentLifecycle:          segment.NewSegmentLifecycleWriter(coord, paramtable.GetNodeID()),
 		SegmentPackWriter: segment.NewBulkPackWriter(
 			resource.Resource().ChunkManager(),
 			idalloc.NewMAllocator(resource.Resource().IDAllocator()),

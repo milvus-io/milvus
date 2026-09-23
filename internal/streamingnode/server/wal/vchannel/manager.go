@@ -8,10 +8,13 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/queryresource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/segment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -22,6 +25,9 @@ import (
 )
 
 type PChannelManagerConfig struct {
+	QueryRuntimeModuleBuilders []queryresource.QueryRuntimeModuleBuilder
+	QueryViewLoadInfoProvider  queryresource.LoadInfoProvider
+
 	PChannel string
 
 	VChannelMetas map[string]*streamingpb.VChannelMeta
@@ -50,6 +56,9 @@ type PChannelManagerConfig struct {
 
 // PChannelRecoveryManager owns all vchannel recovery modules on one pchannel.
 type PChannelRecoveryManager struct {
+	queryDispatcher         *queryresource.Dispatcher
+	queryTransformLogStream *walsummary.Stream
+
 	pchannel string
 	modules  *typeutil.ConcurrentMap[string, *VChannelRecoveryModule]
 
@@ -74,12 +83,14 @@ func NewPChannelRecoveryManager(config PChannelManagerConfig) (*PChannelRecovery
 	}
 	segmentsByVChannel := groupSegmentsByVChannel(config.Segments)
 	manager := &PChannelRecoveryManager{
-		pchannel:           config.PChannel,
-		modules:            typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
-		segmentsByVChannel: segmentsByVChannel,
-		dirtyModules:       make(map[string]*VChannelRecoveryModule),
-		config:             config,
-		closeCh:            make(chan struct{}),
+		pchannel:                config.PChannel,
+		queryDispatcher:         queryresource.NewDispatcher(4),
+		queryTransformLogStream: walsummary.NewStream(config.SummaryManager),
+		modules:                 typeutil.NewConcurrentMap[string, *VChannelRecoveryModule](),
+		segmentsByVChannel:      segmentsByVChannel,
+		dirtyModules:            make(map[string]*VChannelRecoveryModule),
+		config:                  config,
+		closeCh:                 make(chan struct{}),
 	}
 	if config.GetRecoveryCheckpoint != nil && config.CoordinatorBroker != nil {
 		manager.checkpointUpdater = newPChannelCheckpointUpdater(
@@ -281,7 +292,12 @@ func (m *PChannelRecoveryManager) Start() {
 }
 
 func (m *PChannelRecoveryManager) Close() {
-	m.closeOnce.Do(func() { close(m.closeCh) })
+	m.closeOnce.Do(func() {
+		m.modules.Range(func(_ string, module *VChannelRecoveryModule) bool { module.CloseQueryResources(); return true })
+		_ = m.queryTransformLogStream.Close()
+		m.queryDispatcher.Close()
+		close(m.closeCh)
+	})
 	if m.checkpointUpdater != nil {
 		m.checkpointUpdater.Close()
 	}
@@ -335,18 +351,23 @@ func (m *PChannelRecoveryManager) newModule(vchannel string) (*VChannelRecoveryM
 		},
 	}
 	module, err := newModuleFromOwnedRecoveryState(ModuleConfig{
-		PChannel:           m.pchannel,
-		VChannel:           vchannel,
-		VChannelMeta:       m.config.VChannelMetas[vchannel],
-		Segments:           m.segmentsByVChannel[vchannel],
-		Runtime:            runtime,
-		Logger:             m.config.Logger,
-		SegmentLifecycle:   m.config.SegmentLifecycle,
-		SegmentPackWriter:  m.config.SegmentPackWriter,
-		L0Materializer:     m.config.L0Materializer,
-		L0MaterializeRows:  m.config.L0MaterializeRows,
-		L0MaterializeBytes: m.config.L0MaterializeBytes,
-		OnCleanup:          m.removeModule,
+		QueryRuntimeModuleBuilders: m.config.QueryRuntimeModuleBuilders,
+		QueryViewLoadInfoProvider:  m.config.QueryViewLoadInfoProvider,
+		QueryDispatcher:            m.queryDispatcher,
+		TransformLogStream:         m.queryTransformLogStream,
+		SummaryManager:             m.config.SummaryManager,
+		PChannel:                   m.pchannel,
+		VChannel:                   vchannel,
+		VChannelMeta:               m.config.VChannelMetas[vchannel],
+		Segments:                   m.segmentsByVChannel[vchannel],
+		Runtime:                    runtime,
+		Logger:                     m.config.Logger,
+		SegmentLifecycle:           m.config.SegmentLifecycle,
+		SegmentPackWriter:          m.config.SegmentPackWriter,
+		L0Materializer:             m.config.L0Materializer,
+		L0MaterializeRows:          m.config.L0MaterializeRows,
+		L0MaterializeBytes:         m.config.L0MaterializeBytes,
+		OnCleanup:                  m.removeModule,
 		OnL0Materialized: func(through uint64) {
 			if m.config.SummaryManager != nil {
 				m.config.SummaryManager.ReportMaterialized(vchannel, through)
@@ -426,4 +447,55 @@ func (n *dirtyTrackingNotifier) NotifyModuleUpdated(name moduleapi.ModuleName) {
 	if n.inner != nil {
 		n.inner.NotifyModuleUpdated(name)
 	}
+}
+
+func (m *PChannelRecoveryManager) Acquire(req snview.AcquireResource) {
+	if m == nil || req.Meta == nil {
+		panic("query resource acquire misses meta")
+	}
+	module := m.Module(req.Meta.GetVchannel())
+	if module == nil {
+		go func() {
+			if req.OnUnrecoverable != nil {
+				req.OnUnrecoverable()
+			}
+		}()
+		return
+	}
+	module.AcquireQueryResource(req)
+}
+
+func (m *PChannelRecoveryManager) Release(req snview.ReleaseResource) {
+	if m == nil {
+		return
+	}
+	module := m.Module(req.Key.ShardID.VChannel)
+	if module == nil {
+		go func() {
+			if req.OnDropped != nil {
+				req.OnDropped()
+			}
+		}()
+		return
+	}
+	module.ReleaseQueryResource(req)
+}
+
+func (m *PChannelRecoveryManager) QueryRuntime(key qviews.QueryViewKey) (snview.QueryRuntime, bool) {
+	runtime, ok := m.GetQueryRuntime(key)
+	if !ok {
+		return nil, false
+	}
+	return runtime, true
+}
+
+func (m *PChannelRecoveryManager) GetQueryRuntime(key qviews.QueryViewKey) (*queryresource.QueryRuntime, bool) {
+	if m == nil {
+		return nil, false
+	}
+	module := m.Module(key.ShardID.VChannel)
+	if module == nil {
+		return nil, false
+	}
+	return module.QueryRuntime(key)
 }

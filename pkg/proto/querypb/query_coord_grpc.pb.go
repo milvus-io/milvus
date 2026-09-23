@@ -22,6 +22,7 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
+	QueryCoord_GetQueryViewLoadInfo_FullMethodName       = "/milvus.proto.query.QueryCoord/GetQueryViewLoadInfo"
 	QueryCoord_ShowLoadCollections_FullMethodName        = "/milvus.proto.query.QueryCoord/ShowLoadCollections"
 	QueryCoord_ShowLoadPartitions_FullMethodName         = "/milvus.proto.query.QueryCoord/ShowLoadPartitions"
 	QueryCoord_LoadPartitions_FullMethodName             = "/milvus.proto.query.QueryCoord/LoadPartitions"
@@ -69,6 +70,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type QueryCoordClient interface {
+	GetQueryViewLoadInfo(ctx context.Context, in *GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*GetQueryViewLoadInfoResponse, error)
 	ShowLoadCollections(ctx context.Context, in *ShowCollectionsRequest, opts ...grpc.CallOption) (*ShowCollectionsResponse, error)
 	ShowLoadPartitions(ctx context.Context, in *ShowPartitionsRequest, opts ...grpc.CallOption) (*ShowPartitionsResponse, error)
 	LoadPartitions(ctx context.Context, in *LoadPartitionsRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
@@ -122,6 +124,15 @@ type queryCoordClient struct {
 
 func NewQueryCoordClient(cc grpc.ClientConnInterface) QueryCoordClient {
 	return &queryCoordClient{cc}
+}
+
+func (c *queryCoordClient) GetQueryViewLoadInfo(ctx context.Context, in *GetQueryViewLoadInfoRequest, opts ...grpc.CallOption) (*GetQueryViewLoadInfoResponse, error) {
+	out := new(GetQueryViewLoadInfoResponse)
+	err := c.cc.Invoke(ctx, QueryCoord_GetQueryViewLoadInfo_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *queryCoordClient) ShowLoadCollections(ctx context.Context, in *ShowCollectionsRequest, opts ...grpc.CallOption) (*ShowCollectionsResponse, error) {
@@ -498,6 +509,7 @@ func (c *queryCoordClient) ValidateAnalyzer(ctx context.Context, in *ValidateAna
 // All implementations should embed UnimplementedQueryCoordServer
 // for forward compatibility
 type QueryCoordServer interface {
+	GetQueryViewLoadInfo(context.Context, *GetQueryViewLoadInfoRequest) (*GetQueryViewLoadInfoResponse, error)
 	ShowLoadCollections(context.Context, *ShowCollectionsRequest) (*ShowCollectionsResponse, error)
 	ShowLoadPartitions(context.Context, *ShowPartitionsRequest) (*ShowPartitionsResponse, error)
 	LoadPartitions(context.Context, *LoadPartitionsRequest) (*commonpb.Status, error)
@@ -549,6 +561,9 @@ type QueryCoordServer interface {
 type UnimplementedQueryCoordServer struct {
 }
 
+func (UnimplementedQueryCoordServer) GetQueryViewLoadInfo(context.Context, *GetQueryViewLoadInfoRequest) (*GetQueryViewLoadInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetQueryViewLoadInfo not implemented")
+}
 func (UnimplementedQueryCoordServer) ShowLoadCollections(context.Context, *ShowCollectionsRequest) (*ShowCollectionsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ShowLoadCollections not implemented")
 }
@@ -682,6 +697,24 @@ type UnsafeQueryCoordServer interface {
 
 func RegisterQueryCoordServer(s grpc.ServiceRegistrar, srv QueryCoordServer) {
 	s.RegisterService(&QueryCoord_ServiceDesc, srv)
+}
+
+func _QueryCoord_GetQueryViewLoadInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetQueryViewLoadInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryCoordServer).GetQueryViewLoadInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: QueryCoord_GetQueryViewLoadInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryCoordServer).GetQueryViewLoadInfo(ctx, req.(*GetQueryViewLoadInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _QueryCoord_ShowLoadCollections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -1429,6 +1462,10 @@ var QueryCoord_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "milvus.proto.query.QueryCoord",
 	HandlerType: (*QueryCoordServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetQueryViewLoadInfo",
+			Handler:    _QueryCoord_GetQueryViewLoadInfo_Handler,
+		},
 		{
 			MethodName: "ShowLoadCollections",
 			Handler:    _QueryCoord_ShowLoadCollections_Handler,
