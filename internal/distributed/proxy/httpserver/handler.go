@@ -168,7 +168,10 @@ func (h *Handlers) handleDescribeCollection(c *gin.Context) (interface{}, error)
 	if err != nil {
 		return nil, badRequestf(err, "parse body failed")
 	}
-	return h.proxy.DescribeCollection(c, &req)
+	// The HTTP authentication middleware owns ContextUsername. Carry that
+	// verified identity into the same visibility checks as the gRPC API.
+	ctx := proxy.NewContextWithMetadata(c.Request.Context(), c.GetString(ContextUsername), req.GetDbName())
+	return h.proxy.DescribeCollection(ctx, &req)
 }
 
 func (h *Handlers) handleLoadCollection(c *gin.Context) (interface{}, error) {

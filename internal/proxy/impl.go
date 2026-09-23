@@ -910,6 +910,11 @@ func (node *Proxy) ReleaseCollection(ctx context.Context, request *milvuspb.Rele
 
 // DescribeCollection get the meta information of specific collection, such as schema, created timestamp and etc.
 func (node *Proxy) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest) (*milvuspb.DescribeCollectionResponse, error) {
+	// This is the user-facing boundary. Internal metadata lookups use MetaCache
+	// or the coordinator directly and do not need a user identity.
+	if err := checkDescribeCollectionUser(ctx); err != nil {
+		return &milvuspb.DescribeCollectionResponse{Status: merr.Status(err)}, nil
+	}
 	interceptor, err := NewInterceptor[*milvuspb.DescribeCollectionRequest, *milvuspb.DescribeCollectionResponse](node, "DescribeCollection")
 	if err != nil {
 		return &milvuspb.DescribeCollectionResponse{
