@@ -574,6 +574,10 @@ func (sd *shardDelegator) frontingFamily() (*familyNode, error) {
 		return nil, merr.WrapErrServiceUnavailable("retired shard split source",
 			fmt.Sprintf("source %s is no longer listed by its collection and fronts none of its split targets", sd.vchannelName))
 	}
+	if sd.splitRecoveryPending.Load() {
+		return nil, merr.WrapErrServiceUnavailable("shard split recovery pending",
+			fmt.Sprintf("%s does not know yet whether it fronts a shard split", sd.vchannelName))
+	}
 	return sd.takeFamily(true)
 }
 
@@ -909,6 +913,27 @@ func (sd *shardDelegator) l0DeleteBatches(ctx context.Context, l0Segments []segm
 		})
 	}
 	return batches, nil
+}
+
+// MarkSplitRecoveryPending makes every public read through this delegator fail
+// with a retriable error until FinishSplitRecovery.
+//
+// The querynode sets it on a delegator it watches before the delegator starts,
+// when the vchannel may be a split source whose fence is behind its checkpoint
+// and so is never re-consumed: until the collection's shard states say whether
+// it is, and which targets to re-derive, answering from its own view alone
+// could miss every target's rows and deletes without an error. The refusal is a
+// System error (nothing in the request causes it) and retriable.
+func (sd *shardDelegator) MarkSplitRecoveryPending() {
+	sd.splitRecoveryPending.Store(true)
+}
+
+// FinishSplitRecovery lifts MarkSplitRecoveryPending. The querynode calls it
+// once the recovery has decided: after the targets it re-derived are pending
+// spawns (which refuse reads on their own until their children publish), or
+// once it found nothing to re-derive.
+func (sd *shardDelegator) FinishSplitRecovery() {
+	sd.splitRecoveryPending.Store(false)
 }
 
 // ProcessSplitShard reacts to the SplitShard fence message consumed on the
