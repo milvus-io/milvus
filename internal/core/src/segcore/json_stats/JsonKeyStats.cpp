@@ -43,9 +43,9 @@
 #include "folly/ScopeGuard.h"
 #include "folly/coro/BlockingWait.h"
 #include "index/Utils.h"
-#include "index/json_stats/JsonKeyStats.h"
-#include "index/json_stats/bson_builder.h"
-#include "index/json_stats/parquet_writer.h"
+#include "segcore/json_stats/JsonKeyStats.h"
+#include "segcore/json_stats/bson_builder.h"
+#include "segcore/json_stats/parquet_writer.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/common/constants.h"
 #include "milvus-storage/common/extend_status.h"
@@ -211,8 +211,8 @@ JsonKeyStats::JsonKeyStats(const storage::FileManagerContext& ctx,
                            double json_stats_shredding_ratio_threshold,
                            int64_t json_stats_write_batch_size,
                            uint32_t tantivy_index_version)
-    : ScalarIndex<std::string>(JSON_KEY_STATS_INDEX_TYPE),
-      file_manager_context_(ctx) {
+    // JSON layout state is constructed directly, without a scalar-index base.
+    : file_manager_context_(ctx) {
     schema_ = ctx.fieldDataMeta.field_schema;
     field_id_ = ctx.fieldDataMeta.field_id;
     segment_id_ = ctx.fieldDataMeta.segment_id;
@@ -1570,7 +1570,7 @@ JsonKeyStats::Load(milvus::tracer::TraceContext ctx, const Config& config) {
         shared_key_index_files, enable_mmap, index_size, warmup_policy);
 }
 
-IndexStatsPtr
+storage::ArtifactStats
 JsonKeyStats::Upload(const Config& config) {
     // upload inverted index
     auto bson_index_stats = bson_inverted_index_->UploadIndex();
@@ -1588,12 +1588,12 @@ JsonKeyStats::Upload(const Config& config) {
     const auto& shredding_remote_paths_to_size =
         parquet_writer_->GetPathsToSize();
     const auto& shared_key_index_remote_paths_to_size =
-        bson_index_stats->GetSerializedIndexFileInfo();
+        bson_index_stats.Files();
     const auto& meta_remote_paths_to_size =
         disk_file_manager_->GetRemotePathsToFileSize();
 
     // get all index files for meta
-    std::vector<SerializedIndexFileInfo> index_files;
+    std::vector<storage::SerializedFileInfo> index_files;
     index_files.reserve(shredding_remote_paths_to_size.size() +
                         shared_key_index_remote_paths_to_size.size() + 1);
 
@@ -1632,15 +1632,15 @@ JsonKeyStats::Upload(const Config& config) {
         "and shredding data mem size: {} and meta file size: {} "
         "and index files size: {}",
         segment_id_,
-        bson_index_stats->GetMemSize(),
+        bson_index_stats.MemSize(),
         parquet_writer_->GetTotalSize(),
         meta_file_size_,
         index_files.size());
 
-    return IndexStats::New(bson_index_stats->GetMemSize() +
-                               parquet_writer_->GetTotalSize() +
-                               meta_file_size_,
-                           std::move(index_files));
+    return storage::ArtifactStats(bson_index_stats.MemSize() +
+                                      parquet_writer_->GetTotalSize() +
+                                      meta_file_size_,
+                                  std::move(index_files));
 }
 
 }  // namespace milvus::index

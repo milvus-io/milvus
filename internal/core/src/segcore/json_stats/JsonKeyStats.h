@@ -52,13 +52,11 @@
 #include "common/protobuf_utils.h"
 #include "folly/FBVector.h"
 #include "glog/logging.h"
-#include "index/IndexStats.h"
 #include "index/Meta.h"
-#include "index/ScalarIndex.h"
 #include "index/SkipIndex.h"
-#include "index/json_stats/bson_inverted.h"
-#include "index/json_stats/parquet_writer.h"
-#include "index/json_stats/utils.h"
+#include "segcore/json_stats/bson_inverted.h"
+#include "segcore/json_stats/parquet_writer.h"
+#include "segcore/json_stats/utils.h"
 #include "log/Log.h"
 #include "mmap/ChunkedColumnFilter.h"
 #include "mmap/ChunkedColumnInterface.h"
@@ -69,6 +67,7 @@
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/FileManager.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/artifact/ArtifactStats.h"
 
 class CollectSingleJsonStatsInfoAccessor;
 // Forward declaration of test accessor in global namespace for friend declaration
@@ -77,7 +76,17 @@ class JsonStatsProjectionTestAccessor;
 class JsonStatsScanTestAccessor;
 
 namespace milvus::index {
-class JsonKeyStats : public ScalarIndex<std::string> {
+
+// Segment-owned JSON shredding layout and per-path statistics, not a scalar
+// predicate index. Execution uses its concrete shredding/shared-data accessors.
+// ManifestGroupTranslator and runtime JSON layout ownership keep it in segcore;
+// its namespace remains milvus::index pending a separate type/namespace cleanup.
+//
+// TODO: integrate typed sub-columns with ordinary column interfaces and unify
+// their chunk-skipping statistics. This class still has its own Build/Serialize/
+// Upload/Load pipeline rather than storage::Artifact. JSON layout routing and
+// sub-column promotion are not implemented by merely moving this class.
+class JsonKeyStats {
  public:
     explicit JsonKeyStats(
         const storage::FileManagerContext& ctx,
@@ -87,128 +96,36 @@ class JsonKeyStats : public ScalarIndex<std::string> {
         int64_t json_stats_write_batch_size = 81920,
         uint32_t tantivy_index_version = TANTIVY_INDEX_LATEST_VERSION);
 
-    ~JsonKeyStats() override;
-
-    using ScalarIndex<std::string>::BuildWithFieldData;
+    ~JsonKeyStats();
 
  public:
+    // Build/persist/load methods used directly by indexbuilder and segment loading.
+    // This class is not wired to storage::Artifact or LoaderRegistry; its
+    // independent pipeline remains until the column-layout integration is
+    // implemented.
     void
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas, bool nullable);
 
     void
-    Load(milvus::tracer::TraceContext ctx, const Config& config = {}) override;
+    Load(milvus::tracer::TraceContext ctx, const Config& config = {});
 
     void
-    Load(const BinarySet& binary_set, const Config& config) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "Load not supported for JsonKeyStats");
-    }
+    Build(const Config& config = {});
 
-    /*
-     * deprecated.
-     * TODO: why not remove this?
-     */
-    void
-    BuildWithDataset(const DatasetPtr& dataset,
-                     const Config& config = {}) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "BuildWithDataset should be deprecated");
-    }
+    BinarySet
+    Serialize(const Config& config);
 
-    ScalarIndexType
-    GetIndexType() const override {
-        return ScalarIndexType::JSONSTATS;
-    }
+    storage::ArtifactStats
+    Upload(const Config& config = {});
 
-    void
-    Build(const Config& config = {}) override;
-
+    // ---- Self-description ----------------------------------------------------
     int64_t
-    Count() override {
+    Count() const {
         return num_rows_;
     }
 
-    BinarySet
-    Serialize(const Config& config) override;
-
-    IndexStatsPtr
-    Upload(const Config& config = {}) override;
-
-    const bool
-    HasRawData() const override {
-        return false;
-    }
-
-    int64_t
-    Size() override {
-        return Count();
-    }
-
-    void
-    BuildWithRawDataForUT(size_t n,
-                          const void* values,
-                          const Config& config) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "BuildWithRawDataForUT Not supported for JsonKeyStats");
-    }
-
-    void
-    Build(size_t n,
-          const std::string* values,
-          const bool* valid_data = nullptr) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "Build not supported for JsonKeyStats");
-    }
-
-    const TargetBitmap
-    In(size_t n, const std::string* values) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "In not supported for JsonKeyStats");
-    }
-
-    const TargetBitmap
-    IsNull() override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "IsNull not supported for JsonKeyStats");
-    }
-
-    // Declaring IsNotNull() here hides the base's row-count-aware
-    // IsNotNull(int64_t) overload; keep it visible so a call through this
-    // static type still finds it.
-    using ScalarIndex<std::string>::IsNotNull;
-
-    TargetBitmap
-    IsNotNull() override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "IsNotNull not supported for JsonKeyStats");
-    }
-
-    const TargetBitmap
-    NotIn(size_t n, const std::string* values) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "NotIn not supported for JsonKeyStats");
-    }
-
-    const TargetBitmap
-    Range(const std::string& value, OpType op) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "Range not supported for JsonKeyStats");
-    }
-
-    const TargetBitmap
-    Range(const std::string& lower_bound_value,
-          bool lb_inclusive,
-          const std::string& upper_bound_value,
-          bool ub_inclusive) override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "Range not supported for JsonKeyStats");
-    }
-
-    std::optional<std::string>
-    Reverse_Lookup(size_t offset) const override {
-        ThrowInfo(ErrorCode::NotImplemented,
-                  "Reverse_Lookup not supported for JsonKeyStats");
-    }
+    // Query access is through ExecutorForShreddingData and ExecuteForSharedData on
+    // the concrete layout object, not scalar-index predicate virtual methods.
 
  public:
     PinWrapper<BsonInvertedIndex*>
@@ -675,6 +592,9 @@ class JsonKeyStats : public ScalarIndex<std::string> {
 
     std::string shared_column_field_name_;
     std::shared_ptr<milvus::ChunkedColumnInterface> shared_column_;
+    // TODO: unify this per-layout chunk-skipping statistic with ordinary column
+    // zone maps when typed sub-columns use the shared column interface. Keeping
+    // separate copies duplicates the same pruning concept.
     SkipIndex skip_index_;
 
     // Meta file for storing layout type map and other metadata
