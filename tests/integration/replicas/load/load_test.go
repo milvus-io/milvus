@@ -54,6 +54,9 @@ type LoadTestSuite struct {
 }
 
 func (s *LoadTestSuite) SetupSuite() {
+	// Keep segment counts stable for the replica distribution assertions.
+	// TestLoadWithCompact still triggers compaction explicitly.
+	s.WithMilvusConfig(paramtable.Get().DataCoordCfg.EnableAutoCompaction.Key, "false")
 	s.WithMilvusConfig(paramtable.Get().RootCoordCfg.DmlChannelNum.Key, "16")
 	s.WithMilvusConfig(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "100")
 	s.WithMilvusConfig(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")

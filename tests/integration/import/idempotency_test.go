@@ -45,7 +45,7 @@ import (
 // actually connected: a key dropped anywhere along the way leaves every unit test
 // green while silently disabling deduplication.
 type IdempotencySuite struct {
-	integration.MiniClusterSuite
+	importSuite
 }
 
 // withIdempotencyKey attaches the key the way a real client does — as outgoing
