@@ -46,6 +46,7 @@
 #include "gtest/gtest.h"
 #include "index/BitmapIndex.h"
 #include "index/InvertedIndexTantivy.h"
+#include "index/SkipIndex.h"
 #include "index/VectorIndex.h"
 #include "knowhere/comp/index_param.h"
 #include "pb/plan.pb.h"
@@ -343,8 +344,7 @@ class ArrayEqualityCountingSegment : public ChunkedSegmentSealedImpl {
     mutable int64_t materialized_array_rows = 0;
     mutable int64_t data_resource_reads = 0;
 
-    std::pair<std::shared_ptr<ChunkedColumnInterface>,
-              std::shared_ptr<const SkipIndex>>
+    std::pair<std::shared_ptr<ChunkedColumnInterface>, FieldSkipMetricsView>
     GetDataScanResources(FieldId field_id) const override {
         ++data_resource_reads;
         return ChunkedSegmentSealedImpl::GetDataScanResources(field_id);
