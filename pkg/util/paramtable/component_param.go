@@ -8162,7 +8162,6 @@ type dataNodeConfig struct {
 	// clustering compaction
 	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 	ClusteringCompactionWorkerPoolSize    ParamItem `refreshable:"true"`
-	ClusteringCompactionSpillPoolSize     ParamItem `refreshable:"true"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 
@@ -8686,16 +8685,6 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       true,
 	}
 	p.ClusteringCompactionWorkerPoolSize.Init(base.mgr)
-
-	p.ClusteringCompactionSpillPoolSize = ParamItem{
-		Key:          "dataNode.clusteringCompaction.spillPoolSize",
-		Version:      "3.1.0",
-		Doc:          "worker pool size for the sorted-layout spill phase; non-positive values fall back to workPoolSize.",
-		DefaultValue: "0",
-		PanicIfEmpty: false,
-		Export:       true,
-	}
-	p.ClusteringCompactionSpillPoolSize.Init(base.mgr)
 
 	p.BloomFilterApplyParallelFactor = ParamItem{
 		Key:          "dataNode.bloomFilterApplyParallelFactor",

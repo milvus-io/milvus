@@ -78,6 +78,12 @@ func (b *clusterRowBatcher) flush() error {
 	return nil
 }
 
+func (t *clusteringCompactionTask) clusterRowBatchBudget() int64 {
+	// Use the initialized pool, not refreshable workPoolSize: changing config
+	// during a task must not increase the aggregate budget of its workers.
+	return max(int64(1), min(int64(8<<20), t.memoryLimit/int64(t.mappingPool.Cap())/8))
+}
+
 func (t *clusteringCompactionTask) mappingClusterLayoutRemote(ctx context.Context) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
@@ -93,10 +99,10 @@ func (t *clusteringCompactionTask) mappingClusterLayoutRemote(ctx context.Contex
 		writers[id].keyLimit = int(max(int64(1), min(int64(clusterStatsBlockRows), t.memoryLimit/int64(max(1, len(writers)))/8/clusterLayoutSortKeySize)))
 	}
 	futures := make([]*conc.Future[any], 0, len(t.plan.SegmentBinlogs))
-	budget := max(int64(1), min(int64(8<<20), t.memoryLimit/int64(max(1, t.getSpillPoolSize()))/8))
+	budget := t.clusterRowBatchBudget()
 	for ordinal, segment := range t.plan.SegmentBinlogs {
 		ordinal, segment := ordinal, segment
-		futures = append(futures, t.spillPool.Submit(func() (any, error) {
+		futures = append(futures, t.mappingPool.Submit(func() (any, error) {
 			batcher := &clusterRowBatcher{limit: budget, write: func(group int, rows []clusterLayoutSortRow) error {
 				if err := writers[group].WriteBatch(ctx, rows); err != nil {
 					return err

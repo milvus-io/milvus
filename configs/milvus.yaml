@@ -1071,7 +1071,6 @@ dataNode:
   clusteringCompaction:
     memoryBufferRatio: 0.3 # The ratio of memory buffer of clustering compaction. Data larger than threshold will be flushed to storage.
     workPoolSize: 8 # worker pool size for one clustering compaction job.
-    spillPoolSize: 0 # worker pool size for the sorted-layout spill phase; 0 falls back to workPoolSize.
   bloomFilterApplyParallelFactor: 2 # parallel factor when to apply pk to bloom filter, default to 2*CPU_CORE_NUM
   storage:
     format: parquet # storage format for insert data, options: [parquet, vortex]

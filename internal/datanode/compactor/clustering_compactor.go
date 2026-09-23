@@ -75,7 +75,6 @@ type clusteringCompactionTask struct {
 	tr          *timerecord.TimeRecorder
 	mappingPool *conc.Pool[any]
 	flushPool   *conc.Pool[any]
-	spillPool   *conc.Pool[any]
 
 	plan *datapb.CompactionPlan
 
@@ -265,12 +264,9 @@ func (t *clusteringCompactionTask) init() error {
 	workerPoolSize := t.getWorkerPoolSize()
 	t.mappingPool = conc.NewPool[any](workerPoolSize)
 	t.flushPool = conc.NewPool[any](workerPoolSize)
-	spillPoolSize := t.getSpillPoolSize()
-	t.spillPool = conc.NewPool[any](spillPoolSize)
-	mlog.Info(context.TODO(), "clustering compaction task initialed",
+	mlog.Info(t.ctx, "clustering compaction task initialed",
 		mlog.Int64("memory_buffer_size", t.memoryLimit),
-		mlog.Int("worker_pool_size", workerPoolSize),
-		mlog.Int("spill_pool_size", spillPoolSize))
+		mlog.Int("worker_pool_size", workerPoolSize))
 	return nil
 }
 
@@ -829,14 +825,6 @@ func (t *clusteringCompactionTask) getWorkerPoolSize() int {
 	return int(math.Max(float64(paramtable.Get().DataNodeCfg.ClusteringCompactionWorkerPoolSize.GetAsInt()), 1.0))
 }
 
-func (t *clusteringCompactionTask) getSpillPoolSize() int {
-	poolSize := paramtable.Get().DataNodeCfg.ClusteringCompactionSpillPoolSize.GetAsInt()
-	if poolSize <= 0 {
-		return t.getWorkerPoolSize()
-	}
-	return poolSize
-}
-
 // getMemoryLimit returns the maximum memory that a clustering compaction task is allowed to use
 func (t *clusteringCompactionTask) getMemoryLimit() int64 {
 	return int64(float64(hardware.GetMemoryCount()) * paramtable.Get().DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
@@ -949,9 +937,6 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 	}
 	if t.flushPool != nil {
 		t.flushPool.Release()
-	}
-	if t.spillPool != nil {
-		t.spillPool.Release()
 	}
 }
 

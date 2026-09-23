@@ -598,7 +598,7 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	}
 	scanTasks := []scanTask{
 		{
-			prefix: path.Join(gc.option.cli.RootPath(), "cluster_stats"),
+			prefix: path.Join(gc.option.cli.RootPath(), common.ClusterStats),
 			checker: func(info *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				if segment == nil {
 					return false

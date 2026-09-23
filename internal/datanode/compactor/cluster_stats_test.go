@@ -81,6 +81,26 @@ func clusterStatsTestRow(id int64) clusterLayoutSortRow {
 	return clusterLayoutSortRow{value: &storage.Value{ID: id, PK: storage.NewInt64PrimaryKey(id), Timestamp: row[1].(int64), Value: row}, key: clusterLayoutSortKey{centroidID: uint32(id % 2), distance: float32(id), sourceRowOffset: uint64(id)}}
 }
 
+func TestClusterStatsStorageNaming(t *testing.T) {
+	root := t.TempDir()
+	w := &clusterStatsWriter{
+		writer: &MultiSegmentWriter{
+			collectionID: 10,
+			partitionID:  20,
+			params:       compaction.Params{StorageConfig: &indexpb.StorageConfig{RootPath: root}},
+		},
+		template: &datapb.ClusterStats{FieldId: 103},
+		attempt:  "attempt",
+	}
+	require.Equal(t, "cluster_stats.103", clusterStatsKey(103))
+	for _, version := range []int64{storage.StorageV1, storage.StorageV2} {
+		w.writer.params.StorageVersion = version
+		require.Equal(t, path.Join(root, "cluster_stats/10/20/100/attempt/0.keys"), w.blockPath(100, "0.keys"))
+	}
+	w.writer.params.StorageVersion = storage.StorageV3
+	require.Equal(t, path.Join(root, "insert_log/10/20/100/_stats/cluster_stats.103/attempt/0.keys"), w.blockPath(100, "0.keys"))
+}
+
 func TestClusterStatsWriterRotationAndPoison(t *testing.T) {
 	w, cm, params := clusterStatsTestWriter(t, 1)
 	rows := []clusterLayoutSortRow{clusterStatsTestRow(0), clusterStatsTestRow(1), clusterStatsTestRow(2)}

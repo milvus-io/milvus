@@ -24,13 +24,14 @@ import (
 	"time"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func parseClusterStatsSegmentID(root, file string) (int64, error) {
-	prefix := path.Join(root, "cluster_stats") + "/"
+	prefix := path.Join(root, common.ClusterStats) + "/"
 	if !strings.HasPrefix(file, prefix) {
 		return 0, merr.WrapErrServiceInternalMsg("invalid cluster_stats path")
 	}
