@@ -475,6 +475,8 @@ func (node *QueryNode) describeForSplitRecovery(ctx context.Context, source dele
 		// recovery: the recoveries of one collection share one describe in
 		// flight rather than each sending its own to rootcoord.
 		resp, err, _ := node.splitRecoveryDescribes.Do(fmt.Sprint(collectionID), func() (*milvuspb.DescribeCollectionResponse, error) {
+			ctx, cancel := context.WithTimeout(ctx, splitRecoveryDescribeTimeout())
+			defer cancel()
 			resp, err := mixCoord.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 				// The Base is not optional: rootcoord's task Prepare reads its MsgType.
 				Base:         commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
@@ -498,6 +500,13 @@ func (node *QueryNode) describeForSplitRecovery(ctx context.Context, source dele
 			return nil, false
 		}
 	}
+}
+
+// splitRecoveryDescribeTimeout bounds one describe attempt of a split recovery:
+// a coordinator failover can leave an RPC unanswered, and the loop only retries
+// an attempt that returns.
+func splitRecoveryDescribeTimeout() time.Duration {
+	return 10 * time.Second
 }
 
 // splitRecoveryRetryBackoff is how long a split recovery waits before
