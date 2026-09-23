@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
 
@@ -210,19 +211,6 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
 		assert.Equal(t, database, int64(100))
 		assert.Empty(t, col2part)
-
-		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.ExportSnapshotRequest{
-			DbName:         "db1",
-			CollectionName: "foo",
-			Name:           "snapshot",
-			TargetS3Path:   "s3://bucket/export-root",
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, 1, size)
-		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.Equal(t, database, int64(100))
-		assert.Equal(t, 1, len(col2part))
-		assert.Equal(t, 0, len(col2part[1]))
 
 		database, col2part, rt, size, err = GetRequestInfo(context.Background(), mockCache, &milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
@@ -402,7 +390,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		testGetFailedResponse(&milvuspb.QueryRequest{}, internalpb.RateType_DQLQuery, merr.ErrServiceQuotaExceeded, "query")
 		testGetFailedResponse(&milvuspb.CreateCollectionRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "createCollection")
 		testGetFailedResponse(&milvuspb.RestoreExternalSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "restoreExternalSnapshot")
-		testGetFailedResponse(&milvuspb.ExportSnapshotRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "exportSnapshot")
+		assert.NotNil(t, GetFailedResponse(&milvuspb.ExportSnapshotRequest{}, merr.ErrServiceRateLimit))
 		testGetFailedResponse(&milvuspb.FlushRequest{}, internalpb.RateType_DDLFlush, merr.ErrServiceRateLimit, "flush")
 		testGetFailedResponse(&milvuspb.ManualCompactionRequest{}, internalpb.RateType_DDLCompaction, merr.ErrServiceRateLimit, "compaction")
 		testGetFailedResponse(&milvuspb.AddFileResourceRequest{}, internalpb.RateType_DDLCollection, merr.ErrServiceRateLimit, "addFileResource")
@@ -595,6 +583,48 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
 	})
+}
+
+func TestRateLimitInterceptor_ExportSnapshotBypassesDDLLimit(t *testing.T) {
+	quotaConfig := &Params.QuotaConfig.QuotaAndLimitsEnabled
+	originalValue := quotaConfig.GetValue()
+	require.NoError(t, Params.Save(quotaConfig.Key, "true"))
+	t.Cleanup(func() { _ = Params.Save(quotaConfig.Key, originalValue) })
+
+	limiter := NewSimpleLimiter(0, 0)
+	limiter.rateLimiter.GetRootLimiters().GetLimiters().Insert(
+		internalpb.RateType_DDLCollection, ratelimitutil.NewLimiter(0, 0))
+	require.ErrorIs(t, limiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLCollection, 1), merr.ErrServiceQuotaExceeded)
+
+	ctx := context.Background()
+	req := &milvuspb.ExportSnapshotRequest{
+		DbName:         "db1",
+		CollectionName: "foo",
+		Name:           "snapshot",
+		TargetS3Path:   "s3://bucket/export-root",
+	}
+	metaCache := &struct{ Cache }{}
+	dbID, collections, rateType, tokens, err := GetRequestInfo(ctx, metaCache, req)
+	require.NoError(t, err)
+	assert.Equal(t, util.InvalidDBID, dbID)
+	assert.Empty(t, collections)
+	assert.Zero(t, rateType)
+	assert.Zero(t, tokens)
+	require.NoError(t, limiter.Check(dbID, collections, rateType, tokens))
+
+	want := &milvuspb.ExportSnapshotResponse{Status: merr.Success()}
+	handlerCalled := false
+	interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return metaCache }, limiter)
+	resp, err := interceptor(ctx, req, &grpc.UnaryServerInfo{},
+		func(_ context.Context, request interface{}) (interface{}, error) {
+			handlerCalled = true
+			assert.Same(t, req, request)
+			return want, nil
+		})
+	require.NoError(t, err)
+	assert.True(t, handlerCalled)
+	assert.Same(t, want, resp)
+	require.ErrorIs(t, limiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLCollection, 1), merr.ErrServiceQuotaExceeded)
 }
 
 func TestGetInfo(t *testing.T) {

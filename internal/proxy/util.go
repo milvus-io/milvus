@@ -3065,9 +3065,6 @@ func GetRequestInfo(ctx context.Context, metaCache Cache, req proto.Message) (in
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.RestoreExternalSnapshotRequest:
 		return getDatabaseID(metaCache, r.GetDbName()), map[int64][]int64{}, internalpb.RateType_DDLCollection, 1, nil
-	case *milvuspb.ExportSnapshotRequest:
-		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
-		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
 	case *milvuspb.DropCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(metaCache, req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
