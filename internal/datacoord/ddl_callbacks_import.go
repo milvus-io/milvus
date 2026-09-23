@@ -51,70 +51,14 @@ const (
 
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
-	body := result.Message.MustBody()
-	options := funcutil.Map2KeyValuePair(body.GetOptions())
-	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
-	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
-	var rlsPrincipal string
-	var skipRLS bool
-	var err error
-	if trustedRLSContext {
-		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
-	}
-	if !trustedRLSContext || err != nil {
-		// Import options predate RLS and were client-controlled. Only a message
-		// marked after DataCoord sanitizes the options may carry authorized RLS
-		// context. Malformed marked context also fails closed without wedging the
-		// indefinitely retried ACK callback.
-		if err != nil {
-			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
-		}
-		rlsPrincipal, skipRLS = "", false
-	}
-	options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
-		return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
-	})
-	files, sourceErr := bindSnapshotImportSources(body.GetFiles(), result.Message.Header().GetSnapshotSources())
-
-	// Ensure Schema.DbName is populated from the broadcast message's DbName,
-	// matching the behavior in master where this was set before calling ImportV2.
-	if body.Schema != nil {
-		body.Schema.DbName = body.DbName
-	}
-
-	// Process each vchannel with its own TimeTick (not deprecated MsgBase)
-	// Each vchannel gets its own import job with the corresponding TimeTick.
-	// The control channel copy is ordering-only, not a data vchannel: it is excluded
-	// from the job's channel list. DataTs keeps using the broadcast's max tick.
-	vchannels := make([]string, 0, len(result.Results))
-	for vchannel := range result.Results {
-		if funcutil.IsControlChannel(vchannel) {
-			continue
-		}
-		vchannels = append(vchannels, vchannel)
-	}
-
 	// Call createImportJobFromAck directly instead of ImportV2
 	// ImportV2 is only for proxy broadcast, not for ack callback
-	importResp, err := c.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
-		DbID:           0, // already deprecated.
-		CollectionID:   body.GetCollectionID(),
-		CollectionName: body.GetCollectionName(),
-		PartitionIDs:   body.GetPartitionIDs(),
-		ChannelNames:   vchannels,
-		Schema:         body.GetSchema(),
-		Files:          files,
-		Options:        options,
-		DataTimestamp:  result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
-		JobID:          body.GetJobID(),
-		RlsPrincipal:   rlsPrincipal,
-		SkipRls:        skipRLS,
-	}, result.Message.Header().GetCommitByCoordinator(), sourceErr)
+	importResp, err := c.createImportJobFromAck(ctx, result)
 
 	err = merr.CheckRPCCall(importResp, err)
 	if errors.Is(err, merr.ErrCollectionNotFound) {
 		mlog.Warn(ctx, "import job creation failed because of collection not found, skip it",
-			mlog.Strings("vchannels", vchannels),
+			mlog.Strings("channels", lo.Keys(result.Results)),
 			mlog.String("job_id", importResp.GetJobID()), mlog.Err(err))
 		return nil
 	}
