@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/pkg/v3/config"
