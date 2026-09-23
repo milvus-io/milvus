@@ -42,6 +42,10 @@ namespace segcore {
 class SegmentReadLease;
 }
 
+namespace index {
+class GrowingIndexSnapshotPin;
+}
+
 // scan cost in each search/query
 struct StorageCost {
     int64_t scanned_remote_bytes = 0;
@@ -364,6 +368,20 @@ struct SearchResult {
     // original search call independently from segment snapshot publication.
     std::vector<std::shared_ptr<void>> resource_pins_;
 
+    // Declared before iterator fields so C++ destroys the iterators before
+    // the bitmaps they borrow.
+    std::vector<TargetBitmapPtr> pinned_bitsets_{};
+
+    // Growing native iterators borrow the reader, engine and frozen offset
+    // mapping from one published generation. Keep that typed generation alive
+    // until after vector_iterators_ and element_iterators_ are destroyed.
+    std::shared_ptr<index::GrowingIndexSnapshotPin> growing_index_pin_;
+
+    // Other iterator backing owners. Keep every lifetime anchor before the
+    // iterator fields for reverse-order destruction.
+    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
+    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
+
     // first fill data during search, and then update data after reducing search results
     std::vector<float> distances_;
     std::vector<int64_t> seg_offsets_;
@@ -401,9 +419,6 @@ struct SearchResult {
     std::vector<int32_t> element_indices_;
     std::optional<std::vector<std::shared_ptr<VectorIterator>>>
         element_iterators_;
-    std::shared_ptr<const IArrayOffsets> array_offsets_{nullptr};
-    std::vector<std::unique_ptr<uint8_t[]>> chunk_buffers_{};
-    std::vector<TargetBitmapPtr> pinned_bitsets_{};
     VectorIteratorRecreateFn vector_iterator_recreate_fn_{};
     TargetBitmapPtr vector_iterator_base_filter_{};
     BitsetView vector_iterator_base_filter_view_{};
