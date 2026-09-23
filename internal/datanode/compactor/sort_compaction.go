@@ -422,6 +422,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		mlog.Duration("initReaderCost", initReaderCost),
 		mlog.Int("sortBatches", sortTimings.NumBatches),
 		mlog.Duration("sortReadCost", sortTimings.ReadCost),
+		mlog.Duration("sortFetchCost", sortTimings.FetchCost),
+		mlog.Duration("sortFilterCost", sortTimings.ReadCost-sortTimings.FetchCost),
 		mlog.Duration("sortSortCost", sortTimings.SortCost),
 		mlog.Duration("sortWriteCost", sortTimings.WriteCost),
 		mlog.Duration("flushCost", flushCost),
