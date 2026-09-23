@@ -706,9 +706,11 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
-	// segment data satisfies next target spec
+	// segment data satisfies next target spec. A segment attributed to an
+	// excluded split window target is not part of what the promotion serves,
+	// exactly as CollectionObserver leaves it out of the load progress.
 	return !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
-		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
+		utils.CheckSegmentDataReadyExcluding(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget, exclusions) == nil
 }
 
 // sync next target info to delegator as readable snapshot

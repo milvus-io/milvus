@@ -31,6 +31,8 @@ import (
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type UtilTestSuite struct {
@@ -332,6 +334,29 @@ func (suite *UtilTestSuite) TestCheckSegmentDataReady_ManifestComparison() {
 		err := CheckSegmentDataReady(context.Background(), collectionID, dm, newTargetMgr(targetManifest), meta.NextTarget)
 		suite.Error(err)
 	})
+}
+
+// AV-L6-M4: a segment attributed to an excluded shard split window target is
+// not waited for; every other segment still is.
+func (suite *UtilTestSuite) TestCheckSegmentDataReadyExcluding() {
+	collectionID := int64(100)
+	targetMgr := meta.NewMockTargetManager(suite.T())
+	targetMgr.EXPECT().GetSealedSegmentsByCollection(mock.Anything, collectionID, mock.Anything).
+		Return(map[int64]*datapb.SegmentInfo{
+			1: {ID: 1, CollectionID: collectionID, InsertChannel: "src"},
+			2: {ID: 2, CollectionID: collectionID, InsertChannel: "t1"},
+		})
+	dist := meta.NewDistributionManager(session.NewNodeManager())
+	dist.SegmentDistManager.Update(1, &meta.Segment{
+		SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: collectionID, InsertChannel: "src"},
+		Node:        1,
+	})
+
+	suite.NoError(CheckSegmentDataReadyExcluding(context.Background(), collectionID, dist, targetMgr, meta.NextTarget, typeutil.NewSet("t1")))
+	suite.ErrorIs(CheckSegmentDataReadyExcluding(context.Background(), collectionID, dist, targetMgr, meta.NextTarget, nil),
+		merr.ErrSegmentLack, "without the exclusion the window target's segment is waited for")
+	suite.ErrorIs(CheckSegmentDataReadyExcluding(context.Background(), collectionID, dist, targetMgr, meta.NextTarget, typeutil.NewSet("t2")),
+		merr.ErrSegmentLack, "a segment of a channel that stays is still waited for")
 }
 
 func (suite *UtilTestSuite) TestCheckSegmentDataReady_DataVersion() {
