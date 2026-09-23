@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
@@ -35,6 +37,12 @@ import (
 
 type AzureObjectStorage struct {
 	*service.Client
+
+	// sourceService addresses the copy source account when it differs from the
+	// client's own account. Cross-account source reads cannot be authorized by
+	// the client credential, so source URLs built from it carry sourceSAS.
+	sourceService *service.Client
+	sourceSAS     string
 }
 
 const (
@@ -49,7 +57,43 @@ func newAzureObjectStorageWithConfig(ctx context.Context, c *objectstorage.Confi
 	if err != nil {
 		return nil, err
 	}
-	return &AzureObjectStorage{Client: client}, nil
+	storage := &AzureObjectStorage{Client: client}
+	if c.AzureSourceSAS == "" {
+		return storage, nil
+	}
+	sourceURL, err := azureServiceURL(c.AzureSourceEndpoint, c.AzureSourceUseSSL)
+	if err != nil {
+		return nil, err
+	}
+	// NoCredential keeps this client anonymous: the source account is
+	// authorized by the SAS token carried on each source URL, not by any
+	// credential pipeline of its own.
+	sourceService, err := service.NewClientWithNoCredential(sourceURL, nil)
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidErr(err, "invalid azure copy source endpoint")
+	}
+	storage.sourceService = sourceService
+	storage.sourceSAS = strings.TrimPrefix(c.AzureSourceSAS, "?")
+	return storage, nil
+}
+
+func azureServiceURL(host string, useSSL bool) (string, error) {
+	host = strings.ToLower(strings.TrimSpace(strings.TrimSuffix(host, ".")))
+	if host == "" {
+		return "", merr.WrapErrParameterInvalidMsg("azure copy source endpoint is empty")
+	}
+	scheme := "https"
+	if !useSSL {
+		scheme = "http"
+	}
+	// Round-trip through url.Parse so anything that is not a bare host — a
+	// path, query, fragment, userinfo, or an invalid character — is rejected
+	// here rather than producing a malformed copy source URL.
+	u, err := url.Parse(scheme + "://" + host + "/")
+	if err != nil || u.Host != host || u.Path != "/" || u.RawQuery != "" || u.Fragment != "" {
+		return "", merr.WrapErrParameterInvalidMsg("azure copy source endpoint %q must be a bare service host", host)
+	}
+	return u.String(), nil
 }
 
 // BlobReader is implemented because Azure's stream body does not have ReadAt and Seek interfaces.
@@ -205,9 +249,20 @@ func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, 
 }
 
 func (AzureObjectStorage *AzureObjectStorage) CopyObjectCrossBucket(ctx context.Context, srcContainer, srcObjectName, dstContainer, dstObjectName string) error {
-	srcURL := AzureObjectStorage.NewContainerClient(srcContainer).NewBlockBlobClient(srcObjectName).URL()
+	srcURL := AzureObjectStorage.sourceCopyURL(srcContainer, srcObjectName)
 	dstBlobClient := AzureObjectStorage.NewContainerClient(dstContainer).NewBlockBlobClient(dstObjectName)
 	return startOrResumeAzureCopy(ctx, dstBlobClient, srcURL, dstObjectName)
+}
+
+// sourceCopyURL builds the read-side URL of a server-side copy. Same-account
+// copies reuse the client's own service URL; cross-account copies address the
+// source account directly and append the SAS that authorizes the read.
+func (AzureObjectStorage *AzureObjectStorage) sourceCopyURL(srcContainer, srcObjectName string) string {
+	if AzureObjectStorage.sourceService == nil {
+		return AzureObjectStorage.NewContainerClient(srcContainer).NewBlockBlobClient(srcObjectName).URL()
+	}
+	return AzureObjectStorage.sourceService.NewContainerClient(srcContainer).NewBlockBlobClient(srcObjectName).URL() +
+		"?" + AzureObjectStorage.sourceSAS
 }
 
 // startOrResumeAzureCopy starts one asynchronous Azure copy. If an SDK retry
@@ -267,14 +322,21 @@ func waitAzureCopyComplete(
 			continue
 		}
 		if expectedSource != "" {
-			if props.CopySource == nil || *props.CopySource != expectedSource {
-				actualSource := ""
-				if props.CopySource != nil {
-					actualSource = *props.CopySource
-				}
+			// The service echoes the copy source without a guarantee about the
+			// query string, so compare the URL identity only: a SAS-bearing
+			// source must still verify against its credential-free form.
+			expectedIdentity := azureCopySourceIdentity(expectedSource)
+			actualIdentity := ""
+			if props.CopySource != nil {
+				actualIdentity = azureCopySourceIdentity(*props.CopySource)
+			}
+			if actualIdentity != expectedIdentity {
+				// Report credential-free identities only: the raw URLs may carry
+				// the source SAS in their query strings, and this error bubbles
+				// into snapshot job failure reasons and logs.
 				return merr.WrapErrIoFailedMsg(
 					"azure copy source mismatch for %s: expected %s, actual %s",
-					dstObjectName, expectedSource, actualSource)
+					dstObjectName, expectedIdentity, actualIdentity)
 			}
 		}
 		if copyID == "" && props.CopyID != nil {
@@ -320,4 +382,16 @@ func waitAzureCopyPoll(ctx context.Context, ticker *time.Ticker) error {
 	case <-ticker.C:
 		return nil
 	}
+}
+
+func azureCopySourceIdentity(sourceURL string) string {
+	if i := strings.Index(sourceURL, "?"); i >= 0 {
+		sourceURL = sourceURL[:i]
+	}
+	// Compare the unescaped form: the service may echo an equivalent source
+	// URL with different percent-encoding than the request carried.
+	if unescaped, err := url.PathUnescape(sourceURL); err == nil {
+		return unescaped
+	}
+	return sourceURL
 }

@@ -29,6 +29,17 @@ import (
 // #nosec G101 -- this is an external spec field name, not a credential value.
 const snapshotExtfsKeyCredentialJSON = "credential_json"
 
+// #nosec G101 -- this is an external spec field name, not a credential value.
+const snapshotExtfsKeySourceSAS = "source_sas_token"
+
+// snapshotExtfsOnlyKeys are snapshot-specific and unknown to the generic
+// external-spec parser, so parseSnapshotExternalSpec strips them before that
+// parse and re-injects them afterwards.
+var snapshotExtfsOnlyKeys = map[string]struct{}{
+	snapshotExtfsKeyCredentialJSON: {},
+	snapshotExtfsKeySourceSAS:      {},
+}
+
 var snapshotExtfsKeys = map[string]struct{}{
 	externalspec.ExtfsKeyAccessKeyID:    {},
 	externalspec.ExtfsKeyAccessKeyValue: {},
@@ -41,6 +52,7 @@ var snapshotExtfsKeys = map[string]struct{}{
 	externalspec.ExtfsKeyUseSSL:         {},
 	externalspec.ExtfsKeyUseVirtualHost: {},
 	snapshotExtfsKeyCredentialJSON:      {},
+	snapshotExtfsKeySourceSAS:           {},
 }
 
 func parseSnapshotForeignURI(direction Direction, foreignURI string) (bucket, root, scheme, endpoint string, err error) {
@@ -89,23 +101,37 @@ func applySnapshotExternalSpecToConfig(
 		return false, "", err
 	}
 	// Snapshot APIs intentionally mirror Milvus instance storage config:
-	// instance credentials, IAM mode, or raw AK/SK. Generic role_arn, SAS,
+	// instance credentials, IAM mode, or raw AK/SK. Generic role_arn,
 	// service-account impersonation, and dual credential modes are not accepted
-	// here because there is no corresponding instance-config contract.
+	// here because there is no corresponding instance-config contract. The one
+	// exception is the Azure source SAS: it authorizes the read side of a
+	// cross-account server-side copy, which no destination credential can do,
+	// and is not a credential mode of its own.
 	if err := validateCredentialModes(parsed.Extfs); err != nil {
 		return false, "", err
+	}
+	// The no-spec same-account check must compare the instance's configured
+	// Azure endpoint against the URI host. applySnapshotURILocationToConfig
+	// rewrites cfg to the URI's own account below, so capture the instance
+	// endpoint first; otherwise the comparison sees the URI's account on both
+	// sides and a different-account URI is never rejected. A cfg without Azure
+	// account info has nothing to compare and skips the check.
+	var instanceAzureEndpoint string
+	if !hasSpec && (scheme == "azure" || scheme == "az") {
+		instanceAzureEndpoint, err = effectiveAzureSnapshotEndpoint(cfg)
+		if err != nil {
+			instanceAzureEndpoint = ""
+		}
 	}
 	uriIdentity, transportKnown, err := applySnapshotURILocationToConfig(cfg, scheme, endpoint)
 	if err != nil {
 		return false, "", err
 	}
 	if !hasSpec {
-		if uriIdentity.azureAccount != "" {
-			configuredEndpoint, err := effectiveAzureSnapshotEndpoint(cfg)
-			if err != nil {
-				return false, "", err
-			}
-			if !strings.EqualFold(configuredEndpoint, endpoint) {
+		if uriIdentity.azureAccount != "" && instanceAzureEndpoint != "" {
+			// azure:// snapshot URIs are TLS; an explicit :443 on the URI host
+			// names the same endpoint as the canonical configured form.
+			if !strings.EqualFold(instanceAzureEndpoint, stripDefaultEndpointPort(endpoint, true)) {
 				return false, "", merr.WrapErrParameterInvalidMsg(
 					"snapshot URI Azure account does not match the instance storage credential",
 				)
@@ -203,6 +229,17 @@ func applySnapshotExternalSpecToConfig(
 		}
 	}
 
+	if sourceSAS := strings.TrimSpace(extfs[snapshotExtfsKeySourceSAS]); sourceSAS != "" {
+		if !strings.EqualFold(cfg.CloudProvider, objectstorage.CloudProviderAzure) {
+			return false, "", merr.WrapErrParameterInvalidMsg(
+				"extfs.%s requires cloud_provider=%q",
+				snapshotExtfsKeySourceSAS,
+				objectstorage.CloudProviderAzure,
+			)
+		}
+		cfg.AzureSourceSAS = strings.TrimPrefix(sourceSAS, "?")
+	}
+
 	if value := strings.ToLower(strings.TrimSpace(extfs[externalspec.ExtfsKeyStorageType])); value != "" {
 		switch value {
 		case "remote", "minio", "opendal":
@@ -261,7 +298,9 @@ func applySnapshotURILocationToConfig(
 				if err != nil {
 					return storageEndpointIdentity{}, false, err
 				}
-				if !strings.EqualFold(configuredEndpoint, endpoint) {
+				// azure:// snapshot URIs are TLS; an explicit :443 on the URI
+				// host names the same endpoint as the canonical configured form.
+				if !strings.EqualFold(configuredEndpoint, stripDefaultEndpointPort(endpoint, true)) {
 					return storageEndpointIdentity{}, false, merr.WrapErrParameterInvalidMsg(
 						"Azure snapshot URI endpoint %q does not match the configured endpoint",
 						endpoint,
@@ -316,11 +355,16 @@ func parseSnapshotExternalSpec(externalSpec string) (*externalspec.ExternalSpec,
 	if err := json.Unmarshal([]byte(externalSpec), &snapshotSpec); err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "invalid external spec JSON")
 	}
-	credentialJSON, ok := snapshotSpec.Extfs[snapshotExtfsKeyCredentialJSON]
-	if !ok {
+	snapshotOnly := make(map[string]string)
+	for key := range snapshotExtfsOnlyKeys {
+		if value, ok := snapshotSpec.Extfs[key]; ok {
+			snapshotOnly[key] = value
+			delete(snapshotSpec.Extfs, key)
+		}
+	}
+	if len(snapshotOnly) == 0 {
 		return externalspec.ParseExternalSpec(externalSpec)
 	}
-	delete(snapshotSpec.Extfs, snapshotExtfsKeyCredentialJSON)
 	sanitizedSpec, err := json.Marshal(snapshotSpec)
 	if err != nil {
 		return nil, merr.WrapErrParameterInvalidErr(err, "failed to validate external_spec")
@@ -332,7 +376,9 @@ func parseSnapshotExternalSpec(externalSpec string) (*externalspec.ExternalSpec,
 	if parsed.Extfs == nil {
 		parsed.Extfs = make(map[string]string)
 	}
-	parsed.Extfs[snapshotExtfsKeyCredentialJSON] = credentialJSON
+	for key, value := range snapshotOnly {
+		parsed.Extfs[key] = value
+	}
 	return parsed, nil
 }
 
@@ -386,6 +432,14 @@ func validateCredentialModes(extfs map[string]string) error {
 	if credentialModeCount > 1 {
 		return merr.WrapErrParameterInvalidMsg(
 			"snapshot foreign storage credential modes are mutually exclusive: use_iam, raw credentials, and credential_json",
+		)
+	}
+	sourceSAS := strings.TrimSpace(extfs[snapshotExtfsKeySourceSAS])
+	_, sourceSASSet := extfs[snapshotExtfsKeySourceSAS]
+	if sourceSASSet && sourceSAS == "" {
+		return merr.WrapErrParameterInvalidMsg(
+			"extfs.%s must be non-empty for snapshot foreign storage",
+			snapshotExtfsKeySourceSAS,
 		)
 	}
 	return nil
