@@ -34,9 +34,13 @@ import (
 // would replace rewrite outputs the source's view presents, before the
 // cross-channel lineage and the index fallback on targets are tested. Every
 // compaction path -- mix, L0, clustering, sort, manual, an import's sort step
-// -- funnels through enqueueCompaction, which is the single freeze point, and
-// a compaction already running on the source when the split starts is
-// preempted (preemptTasksByChannel).
+// -- funnels through enqueueCompaction, which refuses it. A task created
+// before the freeze is caught where it would run: the schedule loop drops a
+// frozen task instead of dispatching it (and re-checks under the executing
+// guard, so a freeze landing after the dequeue is seen either there or by the
+// preemption), loadMeta preempts a frozen task it revives from the catalog
+// after a restart, and a compaction already running on the source when the
+// split starts is preempted (preemptTasksByChannel).
 
 // compactionPreempter kills the queued and executing compactions of a
 // channel; implemented by the compaction inspector.
@@ -123,18 +127,35 @@ func (c *compactionInspector) preemptTasksByChannel(channel string) {
 
 	for _, task := range preempted {
 		c.scheduler.AbortAndRemoveTask(task.GetTaskProto().GetPlanID())
-		mlog.Info(ctx, "compaction task preempted by a shard split",
-			mlog.String("channel", channel),
-			mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
-			mlog.String("type", task.GetTaskProto().GetType().String()),
-			mlog.String("state", task.GetTaskProto().GetState().String()))
-		if !task.Clean() {
-			mlog.Warn(ctx, "clean the preempted compaction task failed, the clean loop retries it",
-				mlog.String("channel", channel), mlog.Int64("planID", task.GetTaskProto().GetPlanID()))
-			c.cleaningGuard.Lock()
-			c.cleaningTasks[task.GetTaskProto().GetPlanID()] = task
-			c.cleaningGuard.Unlock()
-		}
+		c.cleanPreemptedTask(ctx, task, "compaction task preempted by a shard split")
+	}
+}
+
+// dropFrozenQueuedTask drops a task the schedule loop dequeued on a channel a
+// split freezes. It was never handed to the global scheduler, so there is
+// nothing to abort on a worker; it is cleaned like a preempted one.
+func (c *compactionInspector) dropFrozenQueuedTask(task CompactionTask) {
+	metrics.DataCoordCompactionTaskNum.WithLabelValues(fmt.Sprintf("%d", task.GetTaskProto().GetNodeID()), task.GetTaskProto().GetType().String(), metrics.Pending).Dec()
+	c.cleanPreemptedTask(context.TODO(), task, "queued compaction task dropped, a shard split froze its channel")
+}
+
+// cleanPreemptedTask cleans a task taken off a frozen channel: its cleaned
+// state is persisted (it is not revived from the catalog after a restart) and
+// its inputs' compacting flags are released. A failed clean is left to the
+// clean loop.
+func (c *compactionInspector) cleanPreemptedTask(ctx context.Context, task CompactionTask, msg string) {
+	channel := task.GetTaskProto().GetChannel()
+	mlog.Info(ctx, msg,
+		mlog.String("channel", channel),
+		mlog.Int64("planID", task.GetTaskProto().GetPlanID()),
+		mlog.String("type", task.GetTaskProto().GetType().String()),
+		mlog.String("state", task.GetTaskProto().GetState().String()))
+	if !task.Clean() {
+		mlog.Warn(ctx, "clean the preempted compaction task failed, the clean loop retries it",
+			mlog.String("channel", channel), mlog.Int64("planID", task.GetTaskProto().GetPlanID()))
+		c.cleaningGuard.Lock()
+		c.cleaningTasks[task.GetTaskProto().GetPlanID()] = task
+		c.cleaningGuard.Unlock()
 	}
 }
 

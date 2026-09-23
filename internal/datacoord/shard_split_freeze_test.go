@@ -236,3 +236,103 @@ func TestPreemptedExecutingCompactionNeverCommits(t *testing.T) {
 	assert.False(t, committed.Load(), "a preempted compaction committed on the source")
 	assert.Equal(t, datapb.CompactionTaskState_cleaned, executing.GetTaskProto().GetState())
 }
+
+// newFrozenScheduleCase enqueues a mix compaction on the source while it is not
+// frozen yet and returns a switch that turns the freeze on.
+func newFrozenScheduleCase(t *testing.T) (*compactionInspector, *MockCompactionMeta, *task.MockGlobalScheduler, *atomic.Bool) {
+	inspector, mockMeta, scheduler := newFreezeTestInspectorWithScheduler(t)
+	frozen := atomic.NewBool(false)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 && frozen.Load() })
+	mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Maybe()
+	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	require.NoError(t, inspector.enqueueCompaction(&datapb.CompactionTask{
+		TriggerID: 1, PlanID: 1, Channel: splitMgrV0, Type: datapb.CompactionType_MixCompaction, InputSegments: []int64{100},
+	}))
+	return inspector, mockMeta, scheduler, frozen
+}
+
+// A compaction queued before the split froze its channel -- one the
+// preemption missed because schedule() held it between its Dequeue and its
+// re-Enqueue -- is never dispatched: the schedule loop checks the freeze where
+// it dispatches, drops the task and releases its inputs.
+func TestScheduleNeverDispatchesACompactionOnAFrozenChannel(t *testing.T) {
+	inspector, mockMeta, _, frozen := newFrozenScheduleCase(t)
+	frozen.Store(true)
+	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{100}, false).Return().Once()
+
+	assert.Empty(t, inspector.schedule())
+	assert.Nil(t, inspector.getCompactionTask(1), "a frozen compaction was dispatched or put back in the queue")
+	assert.Zero(t, inspector.queueTasks.Len())
+}
+
+// A compaction the schedule loop set aside because its channel was busy is not
+// put back in the queue once the channel is frozen: preemptTasksByChannel
+// cannot see a task schedule() holds in its excluded list.
+func TestScheduleDropsAnExcludedCompactionOnAFrozenChannel(t *testing.T) {
+	inspector, mockMeta, _, frozen := newFrozenScheduleCase(t)
+	// An L0 already running on the source excludes the mix this round.
+	l0 := newL0CompactionTask(&datapb.CompactionTask{
+		PlanID: 2, TriggerID: 1, Channel: splitMgrV0, Type: datapb.CompactionType_Level0DeleteCompaction,
+		State: datapb.CompactionTaskState_executing,
+	}, nil, mockMeta)
+	inspector.executingGuard.Lock()
+	inspector.executingTasks[2] = l0
+	inspector.executingGuard.Unlock()
+
+	assert.Empty(t, inspector.schedule())
+	require.Equal(t, 1, inspector.queueTasks.Len(), "the mix waits behind the L0")
+
+	// The freeze lands while the mix waits in the queue; the next round drops it.
+	frozen.Store(true)
+	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{100}, false).Return().Once()
+	assert.Empty(t, inspector.schedule())
+	assert.Zero(t, inspector.queueTasks.Len(), "a frozen compaction was put back in the queue")
+	inspector.executingGuard.RLock()
+	defer inspector.executingGuard.RUnlock()
+	assert.NotContains(t, inspector.executingTasks, int64(1))
+}
+
+// The freeze is checked again where the task is handed to the executing set,
+// under the guard preemptTasksByChannel scans that set with: a split frozen
+// after the task was dequeued either sees it executing and preempts it, or is
+// seen here.
+func TestScheduleRechecksTheFreezeWhereItDispatches(t *testing.T) {
+	inspector, mockMeta, _, _ := newFrozenScheduleCase(t)
+	calls := atomic.NewInt32(0)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return calls.Inc() > 1 })
+	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{100}, false).Return().Once()
+
+	assert.Empty(t, inspector.schedule())
+	assert.Nil(t, inspector.getCompactionTask(1), "a compaction frozen after its dequeue was dispatched")
+}
+
+// A compaction restored from the catalog after a restart on a channel a split
+// freezes is preempted like one found running: aborted on its worker, cleaned,
+// never committed.
+func TestLoadMetaPreemptsACompactionOnAFrozenChannel(t *testing.T) {
+	inspector, mockMeta, scheduler := newFreezeTestInspectorWithScheduler(t)
+	inspector.setChannelSplittingChecker(func(channel string) bool { return channel == splitMgrV0 })
+	mockMeta.EXPECT().GetCompactionTasks(mock.Anything).Return(map[int64][]*datapb.CompactionTask{
+		1: {
+			{
+				PlanID: 1, TriggerID: 1, Channel: splitMgrV0, NodeID: 7, Type: datapb.CompactionType_MixCompaction,
+				State: datapb.CompactionTaskState_executing, InputSegments: []int64{100},
+			},
+			{
+				PlanID: 2, TriggerID: 1, Channel: splitMgrV3, NodeID: 7, Type: datapb.CompactionType_MixCompaction,
+				State: datapb.CompactionTaskState_executing, InputSegments: []int64{200},
+			},
+		},
+	})
+	mockMeta.EXPECT().ValidateSegmentStateBeforeCompleteCompactionMutation(mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().CheckAndSetSegmentsCompacting(mock.Anything, mock.Anything).Return(true, true).Times(2)
+	mockMeta.EXPECT().SaveCompactionTask(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mockMeta.EXPECT().SetSegmentsCompacting(mock.Anything, []int64{100}, false).Return().Once()
+	scheduler.EXPECT().AbortAndRemoveTask(int64(1)).Return().Once()
+
+	inspector.loadMeta()
+
+	assert.Nil(t, inspector.getCompactionTask(1), "a compaction on a frozen channel was revived from the catalog")
+	assert.NotNil(t, inspector.getCompactionTask(2))
+}
