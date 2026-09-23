@@ -190,9 +190,32 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxBytes = config.NewByteSize(cfg.CompactionSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelUploads = cfg.CompactionMaxParallelUploads.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxParallelReads = cfg.CompactionMaxParallelReads.GetAsInt()
-	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout = config.NewDurationSecondsFromInt(int(cfg.CompactionTimeout.GetAsDurationByParse().Seconds()))
-	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory = config.NewByteSize(cfg.CompactionMaxInflightMemory.GetAsSize())
-	wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark = cfg.CompactionMemoryHighWatermark.GetAsFloat()
+	// Woodpecker's Validate() rejects a non-positive timeout, a non-positive inflight
+	// ceiling and a watermark outside (0, 1], but it runs inside NewConfiguration above,
+	// before these overrides land, so nothing re-checks them here. Each bad value fails
+	// silently rather than loudly: a sub-second timeout truncates to 0 and makes every
+	// compaction expire immediately, and either memory value out of range switches off
+	// the bound it configures. Keep the already-validated Woodpecker value and warn.
+	if v := int(cfg.CompactionTimeout.GetAsDurationByParse().Seconds()); v > 0 {
+		wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout = config.NewDurationSecondsFromInt(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy timeout, keeping woodpecker built-in default",
+			mlog.String("value", cfg.CompactionTimeout.GetValue()))
+	}
+	if v := cfg.CompactionMaxInflightMemory.GetAsSize(); v > 0 {
+		wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory = config.NewByteSize(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy maxInflightMemory, keeping woodpecker built-in default",
+			mlog.String("value", cfg.CompactionMaxInflightMemory.GetValue()))
+	}
+	if v := cfg.CompactionMemoryHighWatermark.GetAsFloat(); v > 0 && v <= 1 {
+		wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark = v
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy memoryHighWatermark, keeping woodpecker built-in default",
+			mlog.String("value", cfg.CompactionMemoryHighWatermark.GetValue()))
+	}
+	// Non-positive is safe for the rest of this range: NewSyncScheduler falls back to its
+	// own default, and the two auditor deadlines set above are skipped entirely when <= 0.
 	wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers = cfg.SyncSchedulerMaxWorkers.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()

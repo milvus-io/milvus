@@ -843,8 +843,8 @@ type WoodpeckerConfig struct {
 	SegmentRollingMaxTime           ParamItem `refreshable:"true"`
 	SegmentRollingMaxBlocks         ParamItem `refreshable:"true"`
 	AuditorMaxInterval              ParamItem `refreshable:"true"`
-	AuditorCompactionAttemptTimeout ParamItem `refreshable:"true"`
-	AuditorCompactionPassBudget     ParamItem `refreshable:"true"`
+	AuditorCompactionAttemptTimeout ParamItem `refreshable:"false"`
+	AuditorCompactionPassBudget     ParamItem `refreshable:"false"`
 	DirectReadEnabled               ParamItem `refreshable:"false"`
 	DirectReadMaxBatchSize          ParamItem `refreshable:"false"`
 	DirectReadMaxFetchThreads       ParamItem `refreshable:"false"`
@@ -874,9 +874,9 @@ type WoodpeckerConfig struct {
 	CompactionSize                 ParamItem `refreshable:"true"`
 	CompactionMaxParallelUploads   ParamItem `refreshable:"true"`
 	CompactionMaxParallelReads     ParamItem `refreshable:"true"`
-	CompactionTimeout              ParamItem `refreshable:"true"`
-	CompactionMaxInflightMemory    ParamItem `refreshable:"true"`
-	CompactionMemoryHighWatermark  ParamItem `refreshable:"true"`
+	CompactionTimeout              ParamItem `refreshable:"false"`
+	CompactionMaxInflightMemory    ParamItem `refreshable:"false"`
+	CompactionMemoryHighWatermark  ParamItem `refreshable:"false"`
 	SyncSchedulerMaxWorkers        ParamItem `refreshable:"false"`
 	ReaderMaxBatchSize             ParamItem `refreshable:"true"`
 	ReaderMaxFetchThreads          ParamItem `refreshable:"true"`
