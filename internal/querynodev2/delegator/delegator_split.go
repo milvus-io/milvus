@@ -479,10 +479,11 @@ func (sd *shardDelegator) familyMVCCTimestamp(ctx context.Context, family *famil
 }
 
 // waitChildrenTSafe waits for every fronted child's tsafe to reach ts and
-// returns the minimum, so the source delegator serves the merged shard at
-// min(child tsafes): it never answers at a timestamp before every child has
-// consumed (and forwarded the deletes) up to it. A child that fronts children of
-// its own is waited on through them, over its node of the read's family tree.
+// returns the minimum; waitFamilyTSafe serves the merged shard at the min of it
+// and the source's own tsafe, so it never answers at a timestamp before every
+// child has consumed (and forwarded the deletes) up to it. A child that fronts
+// children of its own is waited on through them, over its node of the read's
+// family tree.
 //
 // Every child is first told that a read needs ts, before the wait on any of
 // them. A child's pipeline filters empty time ticks unless a read requires them,
