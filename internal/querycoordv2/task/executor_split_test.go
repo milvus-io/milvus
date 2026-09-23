@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -212,4 +213,28 @@ func TestShardSplitMoveCheckTrustsOnlyAPulledDistribution(t *testing.T) {
 	assert.NoError(t, check(t, "v0", pulled), "every node reported: the source is truly unserved")
 	assert.NoError(t, check(t, "v0", gone), "the previous holder is gone from the node manager")
 	assert.NoError(t, check(t, "v9", neverPulled), "a shard the split does not touch is not held back")
+}
+
+// The VchannelInfo a QueryNode is watched with is the next target's, and a
+// next target recovered after a QueryCoord restart must still carry the split
+// signal DataCoord reported with its seek position.
+func TestWatchRequestCarriesTheSplitSignalOfARestoredTarget(t *testing.T) {
+	restored := meta.FromPbCollectionTarget(&querypb.CollectionTarget{
+		CollectionID: 1,
+		ChannelTargets: []*querypb.ChannelTarget{{
+			ChannelName:         "src",
+			SeekPosition:        &msgpb.MsgPosition{ChannelName: "src", Timestamp: 200},
+			SplitTargetChannels: []string{"t1", "t2"},
+		}},
+	})
+	channelTask, err := NewChannelTask(context.Background(), time.Minute, WrapIDSource(0), 1, meta.NilReplica,
+		NewChannelAction(1, ActionTypeGrow, "src"))
+	require.NoError(t, err)
+	defer channelTask.Cancel(nil)
+
+	req := packSubChannelRequest(channelTask, channelTask.Actions()[0], &schemapb.CollectionSchema{}, nil, &querypb.LoadMetaInfo{},
+		restored.GetAllDmChannels()["src"], nil, nil, 1)
+	require.Len(t, req.GetInfos(), 1)
+	assert.Equal(t, []string{"t1", "t2"}, req.GetInfos()[0].GetSplitTargetChannels())
+	assert.Equal(t, uint64(200), req.GetInfos()[0].GetSeekPosition().GetTimestamp())
 }
