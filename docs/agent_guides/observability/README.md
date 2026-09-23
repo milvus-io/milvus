@@ -10,6 +10,7 @@ configuration.
 |---|---|
 | [mlog - AI Agent Logging Guide](logging.md) | Adding or changing application logs. Covers `mlog` usage, context requirements, fields, levels, and logging rules. |
 | [WAL Tracing](../streaming-system/wal/tracing.md) | Understanding or changing WAL trace span semantics across append, consume, transaction, broadcast, and replication paths. |
+| [Native segment Load phases](native-load-phases.md) | Reading the per-attempt phase breakdown of native sealed-segment Load. |
 
 ## Rules of Thumb
 

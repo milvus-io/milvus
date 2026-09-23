@@ -116,6 +116,7 @@
 #include "mmap/Types.h"
 #include "common/VirtualPK.h"
 #include "monitor/Monitor.h"
+#include "monitor/SegmentLoadMetrics.h"
 #include "monitor/scope_metric.h"
 #include "parquet/metadata.h"
 #include "pb/index_cgo_msg.pb.h"
@@ -7850,8 +7851,11 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
     SegmentLoadInfo& segment_load_info,
     LoadDiff& diff,
     const SchemaPtr& schema_snapshot,
-    StagedStateCommitter& committer) {
+    StagedStateCommitter& committer,
+    milvus::monitor::SegmentLoadTiming* timing) {
     milvus::tracer::TraceContext trace_ctx;
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::Indexes);
 
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.indexes_to_load.empty()) {
@@ -7873,11 +7877,15 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                          committer);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::ReloadColumns);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.fields_to_reload.empty()) {
         ReloadColumns(diff.fields_to_reload, op_ctx);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::ColumnGroups);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (diff.load_external_manifest) {
         LoadColumnGroups(segment_load_info,
@@ -7957,12 +7965,16 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
         }
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::TextLob);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (segment_load_info.HasManifestPath()) {
         InitTextLobPaths(
             segment_load_info.GetManifestPath(), schema_snapshot, committer);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::FieldData);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.binlogs_to_load.empty()) {
         LoadBatchFieldData(trace_ctx,
@@ -7985,6 +7997,8 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                            &committer);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::TextIndexes);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.text_indexes_to_load.empty()) {
         LoadBatchTextIndexes(op_ctx,
@@ -7994,6 +8008,8 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                              committer);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::JsonStats);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.json_stats_to_load.empty()) {
         LoadBatchJsonKeyIndexes(op_ctx,
@@ -8010,6 +8026,8 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                 committer);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::DefaultFields);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.fields_to_fill_default.empty()) {
         FillDefaultValueFields(diff.fields_to_fill_default,
@@ -8018,6 +8036,8 @@ ChunkedSegmentSealedImpl::PrepareLoadDiffForReopen(
                                committer);
     }
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::CreateTextIndexes);
     CheckCancellation(op_ctx, id_, "ChunkedSegmentSealedImpl::ApplyLoadDiff()");
     if (!diff.text_indexes_to_create.empty()) {
         for (const auto& field_id : diff.text_indexes_to_create) {
@@ -8284,10 +8304,14 @@ ChunkedSegmentSealedImpl::Reopen(
 }
 
 void
-ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
-                                        SegmentLoadInfo& segment_load_info,
-                                        LoadDiff& diff,
-                                        const SchemaPtr& schema_snapshot) {
+ChunkedSegmentSealedImpl::ApplyLoadDiff(
+    milvus::OpContext* op_ctx,
+    SegmentLoadInfo& segment_load_info,
+    LoadDiff& diff,
+    const SchemaPtr& schema_snapshot,
+    milvus::monitor::SegmentLoadTiming* timing) {
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::CloneState);
     auto current = CapturePublishedState();
     auto next_runtime = CloneMutableRuntimeResourceState();
     auto staged = ClonePublishedState(current);
@@ -8299,9 +8323,13 @@ ChunkedSegmentSealedImpl::ApplyLoadDiff(milvus::OpContext* op_ctx,
     NormalizePublishedState(*staged);
     StagedStateCommitter committer(*this, next_runtime.get(), staged.get());
     PrepareLoadDiffForReopen(
-        op_ctx, segment_load_info, diff, schema_snapshot, committer);
+        op_ctx, segment_load_info, diff, schema_snapshot, committer, timing);
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::Finalize);
     FinalizeLoadDiffForReopen(
         op_ctx, segment_load_info, diff, schema_snapshot, committer);
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        timing, milvus::monitor::SegmentLoadPhase::Publish);
     segment_load_info.CompactRuntimeInfoForManifest();
     auto published = std::make_shared<const SegmentLoadInfo>(segment_load_info);
     auto delta = MakeStateDelta(schema_snapshot,
@@ -9393,10 +9421,13 @@ ChunkedSegmentSealedImpl::LoadBatchFieldData(
 void
 ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
                                milvus::OpContext* op_ctx) {
+    milvus::monitor::SegmentLoadTiming timing;
     // Serialize with Reopen(pb)/SetLoadInfo. Runtime-only updates produced by
     // ApplyLoadDiff are committed through COW helpers after the data is loaded.
     std::lock_guard<std::mutex> reopen_guard(reopen_mutex_);
 
+    milvus::monitor::SegmentLoadTiming::SwitchTo(
+        &timing, milvus::monitor::SegmentLoadPhase::Prepare);
     auto snapshot = CapturePublishedState();
     auto num_rows = snapshot->load_info->GetNumOfRows();
     LOG_DEBUG("Loading segment {} with {} rows", id_, num_rows);
@@ -9411,7 +9442,7 @@ ChunkedSegmentSealedImpl::Load(milvus::tracer::TraceContext& trace_ctx,
     auto diff = mutable_copy.GetLoadDiff();
     LOG_DEBUG("Load segment {} with diff {}", id_, diff.ToString());
 
-    ApplyLoadDiff(op_ctx, mutable_copy, diff);
+    ApplyLoadDiff(op_ctx, mutable_copy, diff, CaptureSchemaSnapshot(), &timing);
 
     LOG_DEBUG("Successfully loaded segment {} with {} rows", id_, num_rows);
 }
