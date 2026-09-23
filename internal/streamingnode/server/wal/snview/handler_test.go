@@ -84,6 +84,7 @@ func (c *mockCatalog) savedCount() int {
 // ---------------------------------------------------------------------------
 
 type mockResourceManager struct {
+	runtime         QueryRuntime
 	mu              sync.Mutex
 	acquired        map[qviews.QueryViewKey]AcquireResource
 	acquiredOrder   []qviews.QueryViewKey
@@ -997,4 +998,8 @@ func TestSNHandler_Recover_AcquireCallbackFlow(t *testing.T) {
 
 	require.Equal(t, 1, rc.count())
 	assert.Equal(t, qviews.QueryViewStateUp, rc.last().State())
+}
+
+func (m *mockResourceManager) QueryRuntime(qviews.QueryViewKey) (QueryRuntime, bool) {
+	return m.runtime, m.runtime != nil
 }

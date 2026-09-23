@@ -304,7 +304,7 @@ the crash-recovery path.
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Down | Received Down push from Coord | Delete persisted recovery info; stop generating query plans from this view (but can still serve query execution requests) |
+| Down | Received Down push from Coord | Delete persisted recovery info; stop accepting new query plans or execution tasks; tasks that already acquired segment handles may finish |
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Up / Down → SN does nothing; normal.
@@ -351,7 +351,7 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 **Automatic Behavior:**
 1. Delete persisted recovery info.
-2. Stop generating query plans from this view (but can still serve query execution requests under plans already generated).
+2. Stop accepting new query plans or execution tasks. A Phase 2 request for an old plan must replan if it has not acquired segment handles before Down; tasks that already hold handles may finish.
 3. Report Down to Coord.
 
 **Transitions:**
