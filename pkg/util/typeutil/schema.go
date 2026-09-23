@@ -4173,7 +4173,7 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			return merr.WrapErrParameterInvalidMsg("nil sparse float vector")
 		}
 		if len(row)%8 != 0 {
-			return merr.WrapErrParameterInvalidMsg("invalid data length in sparse float vector: %d", len(row))
+			return merr.WrapErrParameterInvalidMsg("invalid data length in sparse float vector: %d (must be 8-byte aligned)", len(row))
 		}
 		for i := 0; i < SparseFloatRowElementCount(row); i++ {
 			idx := SparseFloatRowIndexAt(row, i)
