@@ -193,6 +193,9 @@ const (
 	// SegmentBm25LogPath storage path const for bm25 statistic
 	SegmentBm25LogPath = `bm25_stats`
 
+	// ClusterStats identifies cluster sidecars in storage paths and manifest stat keys.
+	ClusterStats = "cluster_stats"
+
 	// PartitionStatsPath storage path const for partition stats files
 	PartitionStatsPath = `part_stats`
 
@@ -286,6 +289,7 @@ var InternalStorageRootSegments = []string{
 	SegmentIndexV0Path,
 	SegmentIndexV1Path,
 	SegmentBm25LogPath,
+	ClusterStats,
 	PartitionStatsPath,
 	AnalyzeStatsPath,
 	TextIndexPath,

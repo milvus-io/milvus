@@ -155,17 +155,22 @@ func TestClusterLayoutResultRejectsInvalidRanges(t *testing.T) {
 	}
 }
 
-func TestClusterLayoutSpillPoolSize(t *testing.T) {
+func TestClusterLayoutMappingBatchBudget(t *testing.T) {
 	params := paramtable.Get()
 	require.NoError(t, params.Save(params.DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key, "2"))
 	defer params.Reset(params.DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key)
-	require.NoError(t, params.Save(params.DataNodeCfg.ClusteringCompactionSpillPoolSize.Key, "0"))
-	defer params.Reset(params.DataNodeCfg.ClusteringCompactionSpillPoolSize.Key)
 
-	task := &clusteringCompactionTask{}
-	require.Equal(t, 2, task.getSpillPoolSize())
-	require.NoError(t, params.Save(params.DataNodeCfg.ClusteringCompactionSpillPoolSize.Key, "3"))
-	require.Equal(t, 3, task.getSpillPoolSize())
+	task := &clusteringCompactionTask{memoryLimit: 16 << 20}
+	task.mappingPool = conc.NewPool[any](task.getWorkerPoolSize())
+	defer task.mappingPool.Release()
+	require.EqualValues(t, 1<<20, task.clusterRowBatchBudget())
+	// A running task retains its actual M even if the config is refreshed.
+	require.NoError(t, params.Save(params.DataNodeCfg.ClusteringCompactionWorkerPoolSize.Key, "1"))
+	require.EqualValues(t, 1<<20, task.clusterRowBatchBudget())
+	task.memoryLimit = 1
+	require.EqualValues(t, 1, task.clusterRowBatchBudget())
+	task.memoryLimit = 1 << 30
+	require.EqualValues(t, 8<<20, task.clusterRowBatchBudget())
 }
 
 func TestClusterLayoutRemoteRejectsMissingAssignments(t *testing.T) {
@@ -196,9 +201,9 @@ func TestClusterLayoutRemoteRejectsMissingAssignments(t *testing.T) {
 		writtenRowNum:          atomic.NewInt64(0),
 		layoutPlan:             &clustercompaction.LayoutPlan{CentroidCount: 1},
 		segmentIDOffsetMapping: map[int64]string{},
-		spillPool:              conc.NewPool[any](1),
+		mappingPool:            conc.NewPool[any](1),
 	}
-	defer task.spillPool.Release()
+	defer task.mappingPool.Release()
 
 	_, _, err := task.mappingClusterLayoutRemote(context.Background())
 	require.ErrorContains(t, err, "missing clustering assignment artifact")
@@ -217,14 +222,16 @@ func TestClusterLayoutRemoteTwoStages(t *testing.T) {
 			{"same group rotation", 1, 120},
 			{"multiple groups rotation", 2, 120},
 		} {
-			t.Run(fmt.Sprintf("v%d/%s", version, test.name), func(t *testing.T) {
-				testClusterLayoutRemoteTwoStages(t, version, test.groups, test.segmentSize)
-			})
+			for _, workers := range []int{1, 2} {
+				t.Run(fmt.Sprintf("v%d/%s/workers%d", version, test.name, workers), func(t *testing.T) {
+					testClusterLayoutRemoteTwoStages(t, version, test.groups, test.segmentSize, workers)
+				})
+			}
 		}
 	}
 }
 
-func testClusterLayoutRemoteTwoStages(t *testing.T, version int64, groupCount int, segmentSize int64) {
+func testClusterLayoutRemoteTwoStages(t *testing.T, version int64, groupCount int, segmentSize int64, workers int) {
 	root := t.TempDir()
 	localRoot := path.Join(root, "local")
 	outputRoot := path.Join(root, "output")
@@ -305,11 +312,9 @@ func testClusterLayoutRemoteTwoStages(t *testing.T, version int64, groupCount in
 		segmentIDOffsetMapping: assignmentPaths,
 		layoutPlan:             layoutPlan,
 		centroidGroupIndex:     map[uint32]int{0: 0, 1: 0},
-		mappingPool:            conc.NewPool[any](1),
-		spillPool:              conc.NewPool[any](2),
+		mappingPool:            conc.NewPool[any](workers),
 	}
 	defer task.mappingPool.Release()
-	defer task.spillPool.Release()
 
 	for group, layout := range layoutPlan.CentroidGroups {
 		fieldStats, err := storage.NewFieldStats(103, schema.GetFields()[5].GetDataType(), 0)
