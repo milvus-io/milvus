@@ -66,6 +66,15 @@ import (
 // Import Callbacks Test Suite
 // ================================
 
+func patchSnapshotImportWAL(t *testing.T) {
+	t.Helper()
+	type snapshotWAL struct{ streaming.WALAccesser }
+	control := mockey.Mock((*snapshotWAL).ControlChannel).Return(funcutil.GetControlChannel("snapshot-test")).Build()
+	t.Cleanup(func() { control.UnPatch() })
+	wal := mockey.Mock(streaming.WAL).Return(&snapshotWAL{}).Build()
+	t.Cleanup(func() { wal.UnPatch() })
+}
+
 func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 	ctx := context.Background()
 	type mappingBroker struct{ broker.Broker }
@@ -100,6 +109,7 @@ func TestSnapshotPartitionTargetsValidation(t *testing.T) {
 }
 
 func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
+	patchSnapshotImportWAL(t)
 	patchSnapshotImportInstance(t)
 	ctx := context.Background()
 	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
@@ -168,6 +178,7 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 }
 
 func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
+	patchSnapshotImportWAL(t)
 	ctx := context.Background()
 	// Exercise the real broadcast path while replacing external validation,
 	// metadata I/O, and WAL transport. Source expansion does not select targets.
@@ -218,8 +229,9 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 }
 
 func TestBroadcastImportBoundaryFailures(t *testing.T) {
+	patchSnapshotImportWAL(t)
 	type boundaryBroker struct{ broker.Broker }
-	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "pk_ranges", "auto_id"} {
+	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "auto_id"} {
 		t.Run(stage, func(t *testing.T) {
 			cause := merr.ErrServiceNotReady
 			errFor := func(name string) error {
@@ -235,7 +247,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
 				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
 			}}
-			if stage == "pk_ranges" || stage == "auto_id" {
+			if stage == "auto_id" {
 				opts = nil
 				files = []*internalpb.ImportFile{{Paths: []string{"rows.json"}}}
 				schema.Fields[0].AutoID = true
@@ -250,15 +262,22 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 			defer partitions.UnPatch()
 			size := mockey.Mock(validateSnapshotImportMessageSize).Return(errFor("message_size")).Build()
 			defer size.UnPatch()
-			pkRanges := mockey.Mock(assignPKRangesToFiles).Return(errFor("pk_ranges")).Build()
-			defer pkRanges.UnPatch()
 			api := newMockBroadcastAPIImpl()
 			start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
 			defer start.UnPatch()
 			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
 				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
 			defer describe.UnPatch()
-			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).Return(&types.BroadcastAppendResult{}, nil).Build()
+			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+					decoded := message.MustAsBroadcastImportMessageV1(msg)
+					// ID allocation follows preimport, not the initial broadcast.
+					for _, file := range decoded.MustBody().GetFiles() {
+						require.Nil(t, file.GetPreAllocatedAutoIds())
+					}
+					require.ElementsMatch(t, []string{"v1", funcutil.GetControlChannel("snapshot-test")}, msg.BroadcastHeader().VChannels)
+					return &types.BroadcastAppendResult{}, nil
+				}).Build()
 			defer transport.UnPatch()
 			if stage == "public_options" {
 				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
@@ -269,7 +288,6 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 				opts, schema, 1, []string{"v1"}, "")
 			if stage == "auto_id" {
 				require.NoError(t, err)
-				require.Equal(t, 1, pkRanges.Times())
 				require.Equal(t, 1, transport.Times())
 			} else {
 				if stage == "public_options" {
@@ -284,6 +302,7 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 }
 
 func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
+	patchSnapshotImportWAL(t)
 	patchSnapshotImportInstance(t)
 	ctx := context.Background()
 	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
