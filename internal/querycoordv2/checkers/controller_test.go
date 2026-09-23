@@ -84,7 +84,7 @@ func (suite *CheckerControllerSuite) SetupTest() {
 	// The channel and balance checkers consult the shard-split state cache,
 	// which reads the collection's per-shard routing from the coordinator. No
 	// split is in flight in these tests, so an empty topology is the answer.
-	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).
+	suite.broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).
 		Return(&milvuspb.DescribeCollectionResponse{}, nil).Maybe()
 	suite.targetManager = meta.NewTargetManager(suite.broker, suite.meta)
 

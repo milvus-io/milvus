@@ -77,7 +77,7 @@ func (e *shardSplitEntry) channelsInState(state schemapb.ShardState) []string {
 	return out
 }
 
-// NewShardSplitStateCache builds a cache backed by broker.DescribeCollection.
+// NewShardSplitStateCache builds a cache backed by broker.DescribeCollectionInternal.
 func NewShardSplitStateCache(broker Broker, ttl time.Duration) *ShardSplitStateCache {
 	return &ShardSplitStateCache{
 		broker:        broker,
@@ -276,7 +276,10 @@ func (c *ShardSplitStateCache) Invalidate(collectionID int64) {
 
 func (c *ShardSplitStateCache) fetch(ctx context.Context, collectionID int64) (*shardSplitEntry, error) {
 	issuedAt := time.Now()
-	resp, err := c.broker.DescribeCollection(ctx, collectionID)
+	// The internal describe also answers for a collection being dropped, which
+	// DescribeCollection reports as not found: its channels must keep being
+	// watched until querycoord releases it, not fail closed as "states unknown".
+	resp, err := c.broker.DescribeCollectionInternal(ctx, collectionID)
 	if err != nil {
 		return nil, err
 	}
