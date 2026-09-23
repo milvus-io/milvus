@@ -31,6 +31,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+const (
+	// hashSplitRetryBackoffBase is how long a source segment waits after its
+	// first failed rewrite plan before it is dispatched again; every further
+	// failed plan compaction meta still holds for it doubles the wait.
+	hashSplitRetryBackoffBase = 30 * time.Second
+	// hashSplitRetryBackoffMax caps that wait.
+	hashSplitRetryBackoffMax = 30 * time.Minute
+)
+
 // compactionDispatcher is the part of the compaction inspector the rewrite
 // dispatches through.
 type compactionDispatcher interface {
@@ -90,11 +99,20 @@ func (d *inspectorRewriteDispatcher) forTask(taskID int64) *inspectorRewriteDisp
 // -- or a restart that replays the work list -- does not fan out duplicate
 // rewrites of the same segment.
 //
+// A segment whose earlier plans failed is backed off (hashSplitRetryDelay):
+// while it waits, the call returns plan id 0 and no error, allocating nothing.
+// A rewrite that fails deterministically would otherwise mint a new plan id,
+// two segment ids and a persisted compaction task every round, forever.
+//
 // Every refusal is a System error: the plan is built from what the split task
 // recorded and what datacoord's meta holds, never from a request.
 func (d *inspectorRewriteDispatcher) DispatchHashSplit(task *datapb.SplitShardTask, segmentID int64) (int64, error) {
-	if existing := d.livePlanFor(task.GetTaskId(), segmentID); existing != 0 {
+	existing, retryAt := d.livePlanFor(task.GetTaskId(), segmentID)
+	if existing != 0 {
 		return existing, nil
+	}
+	if time.Now().Before(retryAt) {
+		return 0, nil
 	}
 	segment := d.meta.GetSegment(d.ctx, segmentID)
 	if segment == nil {
@@ -213,8 +231,12 @@ func hashSplitPlanTerminalState(state datapb.CompactionTaskState) (done bool, ru
 }
 
 // livePlanFor returns the id of a plan already dispatched for this segment that
-// is done or still running, or 0 when there is none.
-func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) int64 {
+// is done or still running, or 0 when there is none; and, when there is none,
+// the earliest time the segment may be dispatched again after its failed
+// plans (zero when it has none).
+func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) (int64, time.Time) {
+	failed := 0
+	var lastFailure int64
 	for _, plan := range d.planReader.GetCompactionTasksByTriggerID(d.ctx, taskID) {
 		if plan.GetType() != datapb.CompactionType_HashSplitCompaction {
 			continue
@@ -223,10 +245,30 @@ func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) int64 
 			continue
 		}
 		if done, running := hashSplitPlanTerminalState(plan.GetState()); done || running {
-			return plan.GetPlanID()
+			return plan.GetPlanID(), time.Time{}
 		}
+		// Neither done nor running for an input that is still to rewrite: the
+		// plan failed. A committed plan dropped its input, which is never
+		// dispatched again.
+		failed++
+		lastFailure = max(lastFailure, plan.GetStartTime(), plan.GetEndTime())
 	}
-	return 0
+	if failed == 0 {
+		return 0, time.Time{}
+	}
+	return 0, time.Unix(lastFailure, 0).Add(hashSplitRetryDelay(failed))
+}
+
+// hashSplitRetryDelay is how long a segment with this many failed rewrite
+// plans waits after the last one: the base, doubled per further failure,
+// capped. Failed plans leave compaction meta a while after they are cleaned,
+// so the count, and the delay, relax over time.
+func hashSplitRetryDelay(failedPlans int) time.Duration {
+	delay := hashSplitRetryBackoffBase
+	for i := 1; i < failedPlans && delay < hashSplitRetryBackoffMax; i++ {
+		delay *= 2
+	}
+	return min(delay, hashSplitRetryBackoffMax)
 }
 
 // hashSplitDeleteSourceBinlogs turns the L0 segments a rewrite plan folds into

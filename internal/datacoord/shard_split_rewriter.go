@@ -50,7 +50,8 @@ type rewritePlanDispatcher interface {
 	// DispatchHashSplit enqueues a HashSplitCompaction rewriting segmentID into
 	// one output segment per target, and returns its plan id. Idempotent per
 	// (task, segment): a re-dispatch of a segment whose plan is still live
-	// returns that plan.
+	// returns that plan. Plan id 0 with no error means the segment is backing
+	// off after failed plans and is not dispatched this round.
 	DispatchHashSplit(task *datapb.SplitShardTask, segmentID int64) (int64, error)
 	// HashSplitPlanState reports whether a dispatched plan has committed (done),
 	// is still running, or is neither; in the neither case inputSegments names
@@ -226,6 +227,12 @@ func (m *shardSplitManager) rewriteRound(
 				// cannot be dispatched is retried next round.
 				logger.RatedWarn(ctx, 30, "dispatch a shard split rewrite failed, retrying next round",
 					mlog.Int64("segmentID", segmentID), mlog.Err(err))
+				result.skipped++
+				continue
+			}
+			if planID == 0 {
+				logger.RatedInfo(ctx, 30, "shard split rewrite of a segment backs off after failed plans",
+					mlog.Int64("segmentID", segmentID))
 				result.skipped++
 				continue
 			}

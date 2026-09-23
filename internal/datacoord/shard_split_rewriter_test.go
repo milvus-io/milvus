@@ -57,6 +57,9 @@ type fakeRewriteDispatcher struct {
 	done        typeutil.Set[int64]
 	running     typeutil.Set[int64]
 	failSegment int64 // dispatch of this segment errors
+	// deferSegment is backing off after failed plans: its dispatch returns
+	// no plan and no error.
+	deferSegment int64
 }
 
 func newFakeRewriteDispatcher() *fakeRewriteDispatcher {
@@ -71,6 +74,9 @@ func newFakeRewriteDispatcher() *fakeRewriteDispatcher {
 func (f *fakeRewriteDispatcher) DispatchHashSplit(_ *datapb.SplitShardTask, segmentID int64) (int64, error) {
 	if segmentID == f.failSegment {
 		return 0, errors.New("dispatch refused")
+	}
+	if segmentID == f.deferSegment {
+		return 0, nil
 	}
 	if planID, ok := f.dispatched[segmentID]; ok {
 		return planID, nil // idempotent per segment
@@ -418,6 +424,23 @@ func TestRewriteToleratesDispatchFailure(t *testing.T) {
 	assert.ElementsMatch(t, []int64{101, 102}, c.pending())
 
 	c.dispatcher.failSegment = 0
+	assert.ElementsMatch(t, []int64{101}, c.tick().dispatched)
+}
+
+// A segment backing off after failed plans is skipped this round and stays
+// listed; no plan id 0 is ever recorded as in flight.
+func TestRewriteSkipsASegmentItsDispatcherDefers(t *testing.T) {
+	c := newRewriteCase(t, newHashRewriteMeta(t, []int64{101, 102}), newHashTask([]int64{101, 102}))
+	c.dispatcher.deferSegment = 101
+
+	res := c.tick()
+	assert.Equal(t, 1, res.skipped)
+	assert.ElementsMatch(t, []int64{102}, res.dispatched)
+	assert.NotContains(t, c.task().GetDispatchedPlanIds(), int64(0))
+	assert.Len(t, c.task().GetDispatchedPlanIds(), 1)
+	assert.ElementsMatch(t, []int64{101, 102}, c.pending())
+
+	c.dispatcher.deferSegment = 0
 	assert.ElementsMatch(t, []int64{101}, c.tick().dispatched)
 }
 
