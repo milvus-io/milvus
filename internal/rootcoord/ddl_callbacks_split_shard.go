@@ -178,7 +178,22 @@ func (c *DDLCallback) splitShardV2AckCallback(ctx context.Context, result messag
 	// table, under its lock: this callback cannot hold that lock across the
 	// datacoord call above, so the answer it computed out here could be stale
 	// by the time the write lands.
-	switch err := c.meta.ApplyShardSplitRouting(ctx, header.GetCollectionId(), postImage, delta, controlChannelResult.TimeTick); {
+	//
+	// The timetick stamped here is result.GetMaxTimeTick(), the max over every
+	// replica of this broadcast -- the same source every other collection-meta
+	// write uses (see the adoption's own routing commit,
+	// ddl_callbacks_commit_shard_split_routing.go, and
+	// MetaTable.AlterCollection), not the control channel replica's own tick.
+	// UpdateTimestamp is also the snapshot-KV write ts (MetaTable.
+	// ApplyShardSplitRouting), the cache-bypass threshold for a time-travel
+	// read (MetaTable.GetCollectionByName), the proxy's guarantee-ts floor and
+	// QueryCoord's schema barrier. The control channel's tick can be smaller
+	// than another replica's on a secondary cluster, where the two ack
+	// callbacks of the collection's concurrent broadcasts are not ordered
+	// against each other and cover different vchannel sets -- stamping the
+	// smaller tick would move UpdateTimestamp and the snapshot ts backwards
+	// against a write that already landed.
+	switch err := c.meta.ApplyShardSplitRouting(ctx, header.GetCollectionId(), postImage, delta, result.GetMaxTimeTick()); {
 	case err == nil:
 	case errors.Is(err, routing.ErrCommitAlreadyApplied):
 		logger.Info(ctx, "split shard routing already applied, only expiring caches")

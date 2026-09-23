@@ -132,7 +132,11 @@ func splitTestResultWithGenesisSchema(postImage *messagespb.AlterCollectionMessa
 			splitTestSource:  {MessageID: rmq.NewRmqID(1), TimeTick: 100, Extra: splitTestSwitchExtra(splitTestSwitchTimeTick)},
 			splitTestTarget1: {MessageID: rmq.NewRmqID(2), TimeTick: 101},
 			splitTestTarget2: {MessageID: rmq.NewRmqID(3), TimeTick: 102},
-			splitTestControl: {MessageID: rmq.NewRmqID(4), TimeTick: 103},
+			// Deliberately below the targets' ticks: the control channel replica
+			// is not the max of the broadcast, which is what makes
+			// TestSplitShardAckCallbackCommitsTheRouting catch a regression to
+			// stamping the routing commit with the control channel's own tick.
+			splitTestControl: {MessageID: rmq.NewRmqID(4), TimeTick: 95},
 		},
 	}
 }
@@ -288,8 +292,13 @@ func TestSplitShardAckCallbackCommitsTheRouting(t *testing.T) {
 	// The split's own delta, judged again under the lock: the header's source
 	// fenced, the header's two targets created, the task recorded by now.
 	require.Equal(t, routing.SplitDelta(splitTestSource, []string{splitTestTarget1, splitTestTarget2}, true), gotDelta)
-	// The control channel's tick orders the commit, not the max over replicas.
-	require.EqualValues(t, 103, gotTimetick)
+	// Every other collection-meta write stamps UpdateTimestamp/the snapshot ts
+	// with the max tick over the broadcast's replicas (see the adoption
+	// callback, ddl_callbacks_commit_shard_split_routing.go); the split's own
+	// routing commit must use the same source, not the control channel's own
+	// (possibly smaller) tick, or a secondary can persist it out of order
+	// against a straggling sibling broadcast (adv-L1-report.md AV-L1-M1).
+	require.EqualValues(t, 102, gotTimetick)
 	require.Equal(t, 1, h.broadcasts)
 	require.Equal(t, []string{"CommitShardSplit", "ApplyShardSplitRouting"}, h.calls)
 }
