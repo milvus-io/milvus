@@ -38,12 +38,26 @@ const (
 	hashSplitRetryBackoffBase = 30 * time.Second
 	// hashSplitRetryBackoffMax caps that wait.
 	hashSplitRetryBackoffMax = 30 * time.Minute
+	// hashSplitUnscheduledPlanGrace is how long a plan compaction meta records
+	// as running may go unheld by the inspector before it is taken as lost.
+	hashSplitUnscheduledPlanGrace = 5 * time.Minute
 )
 
 // compactionDispatcher is the part of the compaction inspector the rewrite
 // dispatches through.
 type compactionDispatcher interface {
 	enqueueCompaction(task *datapb.CompactionTask) error
+	// hasCompactionTask reports whether the inspector holds the plan, queued
+	// or executing.
+	hasCompactionTask(planID int64) bool
+}
+
+// hasCompactionTask reports whether the plan is executing or queued.
+func (c *compactionInspector) hasCompactionTask(planID int64) bool {
+	c.executingGuard.RLock()
+	_, executing := c.executingTasks[planID]
+	c.executingGuard.RUnlock()
+	return executing || c.getCompactionTask(planID) != nil
 }
 
 // compactionPlanReader looks up dispatched plans to judge their state. It
@@ -263,11 +277,25 @@ func (d *inspectorRewriteDispatcher) HashSplitPlanState(planID int64) (done bool
 	if !ok {
 		return false, false, nil
 	}
-	done, running = hashSplitPlanTerminalState(plan.State)
+	done, running = d.planState(plan)
 	if done || running {
 		return done, running, nil
 	}
 	return false, false, plan.InputSegments
+}
+
+// planState is hashSplitPlanTerminalState, except that a plan compaction meta
+// records as running but the inspector does not hold, past a grace period, is
+// neither: enqueueCompaction saves a plan before it queues it, and a plan the
+// queue refused would otherwise read as running until a restart revived it,
+// its segment never rewritten meanwhile. The grace covers a plan read between
+// its save and its queueing; the inspector is only asked about plans past it.
+func (d *inspectorRewriteDispatcher) planState(plan *compactionTaskDigest) (done bool, running bool) {
+	done, running = hashSplitPlanTerminalState(plan.State)
+	if !running || time.Since(time.Unix(plan.StartTime, 0)) < hashSplitUnscheduledPlanGrace {
+		return done, running
+	}
+	return false, d.inspector.hasCompactionTask(plan.PlanID)
 }
 
 // hashSplitPlanTerminalState maps a compaction task state onto the
@@ -298,7 +326,7 @@ func (d *inspectorRewriteDispatcher) livePlanFor(taskID, segmentID int64) (int64
 	failed := 0
 	var lastFailure int64
 	for _, plan := range d.plansOf(taskID).bySegment[segmentID] {
-		if done, running := hashSplitPlanTerminalState(plan.State); done || running {
+		if done, running := d.planState(plan); done || running {
 			return plan.PlanID, time.Time{}
 		}
 		// Neither done nor running for an input that is still to rewrite: the

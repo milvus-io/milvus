@@ -60,6 +60,13 @@ func (f *fakePlanReader) GetCompactionTaskDigestsByTriggerID(_ context.Context, 
 type fakeInspector struct {
 	enqueued []*datapb.CompactionTask
 	err      error
+	// unscheduled plans are in compaction meta but neither queued nor
+	// executing: saved by enqueueCompaction, then refused by the queue.
+	unscheduled map[int64]bool
+}
+
+func (f *fakeInspector) hasCompactionTask(planID int64) bool {
+	return !f.unscheduled[planID]
 }
 
 func (f *fakeInspector) enqueueCompaction(task *datapb.CompactionTask) error {
@@ -468,4 +475,66 @@ func TestScopedDispatcherSeesThePlanItJustEnqueued(t *testing.T) {
 	done, running, _ := scoped.HashSplitPlanState(first)
 	assert.False(t, done)
 	assert.True(t, running, "the enqueued plan reads as running for the rest of the round")
+}
+
+// L4-N3: enqueueCompaction saves a plan before it queues it. A plan the queue
+// then refused is left in compaction meta as pipelining, and read by state
+// alone it would look running until a restart revived it -- its segment never
+// rewritten meanwhile. A plan the inspector does not hold, older than a grace
+// period, is lost.
+func TestDispatcherTreatsAPlanNeverScheduledAsLost(t *testing.T) {
+	stale := time.Now().Add(-hashSplitUnscheduledPlanGrace).Unix() - 1
+	plan := func(planID, startTime int64) *datapb.CompactionTask {
+		return &datapb.CompactionTask{
+			PlanID: planID, TriggerID: hashTaskID, Type: datapb.CompactionType_HashSplitCompaction,
+			InputSegments: []int64{301}, State: datapb.CompactionTaskState_pipelining, StartTime: startTime,
+		}
+	}
+	setup := func(t *testing.T, p *datapb.CompactionTask, scheduled bool) (*inspectorRewriteDispatcher, *fakeInspector) {
+		d, inspector, reader, _ := newTestRewriteDispatcher(t, []int64{301})
+		reader.byTrigger[hashTaskID] = []*datapb.CompactionTask{p}
+		inspector.unscheduled = map[int64]bool{p.GetPlanID(): !scheduled}
+		return d.forTask(hashTaskID), inspector
+	}
+
+	t.Run("saved, never scheduled, past the grace: lost", func(t *testing.T) {
+		d, inspector := setup(t, plan(50, stale), false)
+		done, running, inputs := d.HashSplitPlanState(50)
+		assert.False(t, done)
+		assert.False(t, running)
+		assert.Equal(t, []int64{301}, inputs)
+
+		planID, err := d.DispatchHashSplit(newHashTask([]int64{301}), 301)
+		require.NoError(t, err)
+		assert.NotZero(t, planID)
+		assert.NotEqual(t, int64(50), planID, "the segment is dispatched again")
+		assert.Len(t, inspector.enqueued, 1)
+	})
+
+	t.Run("within the grace: still running", func(t *testing.T) {
+		d, _ := setup(t, plan(50, time.Now().Unix()), false)
+		_, running, _ := d.HashSplitPlanState(50)
+		assert.True(t, running)
+	})
+
+	t.Run("held by the inspector: running however old", func(t *testing.T) {
+		d, inspector := setup(t, plan(50, stale), true)
+		_, running, _ := d.HashSplitPlanState(50)
+		assert.True(t, running)
+		planID, err := d.DispatchHashSplit(newHashTask([]int64{301}), 301)
+		require.NoError(t, err)
+		assert.EqualValues(t, 50, planID)
+		assert.Empty(t, inspector.enqueued)
+	})
+}
+
+func TestCompactionInspectorHasCompactionTask(t *testing.T) {
+	inspector, _ := newFreezeTestInspector(t)
+	queued := newMixCompactionTask(&datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_HashSplitCompaction}, nil, nil, nil)
+	require.NoError(t, inspector.submitTask(queued))
+	inspector.executingTasks[2] = newMixCompactionTask(&datapb.CompactionTask{PlanID: 2}, nil, nil, nil)
+
+	assert.True(t, inspector.hasCompactionTask(1), "queued")
+	assert.True(t, inspector.hasCompactionTask(2), "executing")
+	assert.False(t, inspector.hasCompactionTask(3))
 }
