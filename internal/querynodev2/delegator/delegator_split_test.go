@@ -55,6 +55,12 @@ type fakeChildSpawner struct {
 	// foreignTimes likewise limits foreign.
 	errTimes     int
 	foreignTimes int
+	// done, when set, is the spawner's lifetime (the querynode's); nil never ends.
+	done chan struct{}
+}
+
+func (f *fakeChildSpawner) Done() <-chan struct{} {
+	return f.done
 }
 
 func (f *fakeChildSpawner) SpawnSplitChild(_ context.Context, params SpawnChildParams) (ShardDelegator, error) {
