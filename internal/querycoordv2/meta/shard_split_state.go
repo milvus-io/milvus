@@ -483,6 +483,18 @@ func (f *ShardSplitFreeze) CheckCollection() error {
 	return nil
 }
 
+// Known reports whether the freeze could tell the split's channels at all:
+// false when the shard states were unreadable or behind the window marks.
+func (f *ShardSplitFreeze) Known() bool {
+	return f.everything == nil
+}
+
+// InFamily reports whether the channel is one of a split's sources or targets.
+// It is false for every channel when the freeze is not Known.
+func (f *ShardSplitFreeze) InFamily(channel string) bool {
+	return f.family.Contain(channel)
+}
+
 // CheckChannel returns nil when the channel -- its delegator, or a segment
 // attributed to it -- may move, else a retriable System error naming why.
 func (f *ShardSplitFreeze) CheckChannel(channel string) error {

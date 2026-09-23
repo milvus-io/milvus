@@ -435,3 +435,70 @@ func TestChannelDiffReadsShardStatesOnlyWithAChannelToWatch(t *testing.T) {
 	assert.Empty(t, loaded)
 	assert.Empty(t, released)
 }
+
+// RR-L6-N1: when a split's channel ends up with two delegators in one replica
+// -- a re-watch on a distribution that had not reported the original yet --
+// the older one is kept: it consumed the fence and fronts the split's
+// in-process children, which the newer one never had. Any other duplicated
+// channel keeps the newer delegator, as before.
+func TestADuplicatedSplitSourceKeepsTheOlderDelegator(t *testing.T) {
+	assert.Equal(t, map[string]int64{"v0": 2, "v9": 1}, duplicatedDelegatorsReleased(t, nil),
+		"the split source keeps its older delegator on node 1; v9 keeps its newer one on node 2")
+	assert.Empty(t, duplicatedDelegatorsReleased(t, merr.WrapErrServiceUnavailable("rootcoord down")),
+		"without the shard states the split's channels cannot be told: nothing is released")
+}
+
+// duplicatedDelegatorsReleased runs findRepeatedChannels over a replica where
+// v0 (a fenced split source) and v9 (untouched) each have a delegator of
+// version 1 on node 1 and of version 2 on node 2, and reports the node of each
+// delegator it chose to release.
+func duplicatedDelegatorsReleased(t *testing.T, describeErr error) map[string]int64 {
+	nodeMgr := session.NewNodeManager()
+	for _, node := range []int64{1, 2} {
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: node, Address: "localhost", Hostname: "localhost"}))
+	}
+	catalog := catalogmocks.NewQueryCoordCatalog(t)
+	catalog.EXPECT().SaveCollection(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	m := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	ctx := context.Background()
+	require.NoError(t, m.PutCollection(ctx, utils.CreateTestCollection(1, 1)))
+	require.NoError(t, m.Put(ctx, utils.CreateTestReplica(1, 1, []int64{1, 2})))
+
+	delegator := func(name string, node, version int64) *meta.DmChannel {
+		ch := servingChannel(name, node)
+		ch.Version = version
+		ch.View.Version = version
+		return ch
+	}
+	dist := meta.NewDistributionManager(nodeMgr)
+	dist.ChannelDistManager.Update(1, delegator("v0", 1, 1), delegator("v9", 1, 1))
+	dist.ChannelDistManager.Update(2, delegator("v0", 2, 2), delegator("v9", 2, 2))
+
+	channels := map[string]*meta.DmChannel{"v0": servingChannel("v0", 1), "v9": servingChannel("v9", 1)}
+	targetMgr := meta.NewMockTargetManager(t)
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), mock.Anything).Return(channels).Maybe()
+	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), meta.NextTarget).Return(nil).Maybe()
+	broker := meta.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(1)).Return(&milvuspb.DescribeCollectionResponse{
+		VirtualChannelNames: []string{"v0", "v1", "v2", "v9"},
+		ShardInfos: []*schemapb.CollectionShardInfo{
+			{State: schemapb.ShardState_ShardSplitting},
+			{State: schemapb.ShardState_ShardCreating},
+			{State: schemapb.ShardState_ShardCreating},
+			{State: schemapb.ShardState_ShardNormal},
+		},
+	}, describeErr).Maybe()
+
+	scheduler := task.NewMockScheduler(t)
+	assign.InitGlobalAssignPolicyFactory(scheduler, nodeMgr, dist, m, targetMgr)
+	t.Cleanup(assign.ResetGlobalAssignPolicyFactoryForTest)
+	checker := NewChannelChecker(m, dist, targetMgr, nodeMgr, scheduler, meta.NewShardSplitStateCache(broker, time.Minute))
+
+	released := make(map[string]int64)
+	for _, ch := range checker.findRepeatedChannels(ctx, 1) {
+		released[ch.GetChannelName()] = ch.Node
+	}
+	return released
+}

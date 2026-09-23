@@ -422,7 +422,12 @@ func (ex *Executor) executeDmChannelAction(task *ChannelTask, step int) {
 // A watch moves the channel when another node of the task's replica already
 // serves it. A watch no node of the replica serves is recovery and is left to
 // the shard's own recovery path, since refusing it would leave the channel
-// with no delegator at all.
+// with no delegator at all -- but only once the distribution can be trusted to
+// say so: the distribution misses a live delegator until its node's first pull
+// succeeds (a pull that failed right after a QueryCoord restart, for one). So a
+// frozen channel counts as unserved only when every node of the replica still
+// in the node manager has had a distribution pull succeed; a node gone from the
+// node manager serves nothing.
 func (ex *Executor) checkShardSplitMove(ctx context.Context, task *ChannelTask, node int64, channel string, states meta.ShardStates) error {
 	servedElsewhere := false
 	for _, delegator := range ex.dist.ChannelDistManager.GetByFilter(
@@ -432,15 +437,37 @@ func (ex *Executor) checkShardSplitMove(ctx context.Context, task *ChannelTask, 
 			break
 		}
 	}
-	if !servedElsewhere {
+	notPulled := ex.nodesWithoutDistribution(task.replica)
+	if !servedElsewhere && len(notPulled) == 0 {
 		return nil
 	}
-	if err := meta.NewShardSplitFreeze(ctx, ex.targetMgr, task.CollectionID(), states).CheckChannel(channel); err != nil {
-		mlog.Warn(ctx, "refuse to move a channel a shard split freezes",
-			mlog.String("channel", channel), mlog.Err(err))
-		return err
+	err := meta.NewShardSplitFreeze(ctx, ex.targetMgr, task.CollectionID(), states).CheckChannel(channel)
+	if err == nil {
+		return nil
 	}
-	return nil
+	if !servedElsewhere {
+		err = merr.Wrapf(err, "the distribution of nodes %v has not been pulled yet, so another node may still serve it", notPulled)
+	}
+	mlog.Warn(ctx, "refuse to move a channel a shard split freezes",
+		mlog.String("channel", channel), mlog.Bool("servedElsewhere", servedElsewhere),
+		mlog.Int64s("nodesNotPulled", notPulled), mlog.Err(err))
+	return err
+}
+
+// nodesWithoutDistribution returns the replica's nodes, still in the node
+// manager, whose distribution has never been pulled successfully (a successful
+// pull is what sets a node's heartbeat).
+func (ex *Executor) nodesWithoutDistribution(replica *meta.Replica) []int64 {
+	if ex.nodeMgr == nil {
+		return nil
+	}
+	var out []int64
+	for _, nodeID := range replica.GetNodes() {
+		if info := ex.nodeMgr.Get(nodeID); info != nil && info.LastHeartbeat().UnixNano() == 0 {
+			out = append(out, nodeID)
+		}
+	}
+	return out
 }
 
 func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {

@@ -165,3 +165,51 @@ func TestShardSplitMoveCheckAllowsRecoveryAndUnrelatedMoves(t *testing.T) {
 	assert.NoError(t, ex.checkShardSplitMove(context.Background(), grow("v9"), 1, "v9", states),
 		"a shard the split does not touch moves freely")
 }
+
+// RR-L6-N1: the distribution can miss a live delegator -- a first pull after a
+// QueryCoord restart that failed, for one. A split family channel missing from
+// the replica's distribution counts as recovery only once every node of the
+// replica still in the node manager has had a distribution pull succeed; until
+// then the "missing" source may still be served, with its children, by a node
+// QueryCoord has not heard from yet.
+func TestShardSplitMoveCheckTrustsOnlyAPulledDistribution(t *testing.T) {
+	states := meta.ShardStatesOf(splitWindowDescribe())
+	targetMgr := meta.NewMockTargetManager(t)
+	targetMgr.EXPECT().GetSplitWindowTargets(mock.Anything, int64(1), meta.NextTarget).Return(nil).Maybe()
+	targetMgr.EXPECT().GetDmChannelsByCollection(mock.Anything, int64(1), mock.Anything).Return(map[string]*meta.DmChannel{
+		"v0": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v0"}},
+		"v9": {VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v9"}},
+	}).Maybe()
+	replica := meta.NewReplica(&querypb.Replica{ID: 10, CollectionID: 1, Nodes: []int64{1, 2}}, typeutil.NewUniqueSet(1, 2))
+
+	check := func(t *testing.T, channel string, node2 func(*session.NodeManager)) error {
+		nodeMgr := session.NewNodeManager()
+		node1 := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 1})
+		node1.SetLastHeartbeat(time.Now())
+		nodeMgr.Add(node1)
+		node2(nodeMgr)
+		dist := meta.NewDistributionManager(nodeMgr)
+		ex := NewExecutor(1, nil, dist, nil, targetMgr, nil, nodeMgr)
+		channelTask, err := NewChannelTask(context.Background(), time.Minute, WrapIDSource(0), 1, replica,
+			NewChannelAction(1, ActionTypeGrow, channel))
+		require.NoError(t, err)
+		defer channelTask.Cancel(nil)
+		return ex.checkShardSplitMove(context.Background(), channelTask, 1, channel, states)
+	}
+	neverPulled := func(nodeMgr *session.NodeManager) {
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2}))
+	}
+	pulled := func(nodeMgr *session.NodeManager) {
+		node := session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: 2})
+		node.SetLastHeartbeat(time.Now())
+		nodeMgr.Add(node)
+	}
+	gone := func(*session.NodeManager) {}
+
+	err := check(t, "v0", neverPulled)
+	assert.ErrorIs(t, err, merr.ErrServiceUnavailable, "node 2 may still serve the source")
+	assert.True(t, merr.IsRetryableErr(err))
+	assert.NoError(t, check(t, "v0", pulled), "every node reported: the source is truly unserved")
+	assert.NoError(t, check(t, "v0", gone), "the previous holder is gone from the node manager")
+	assert.NoError(t, check(t, "v9", neverPulled), "a shard the split does not touch is not held back")
+}
