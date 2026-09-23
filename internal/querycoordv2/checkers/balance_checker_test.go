@@ -1995,8 +1995,12 @@ func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) 
 	}
 
 	// run returns how many of one channel move and one segment move of v0 the
-	// balance checker would submit.
+	// balance checker would submit, over a normal and a stopping round.
+	var runWith func(t *testing.T, stopping bool, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) int
 	run := func(t *testing.T, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (submitted int) {
+		return runWith(t, false, current, window, describe) + runWith(t, true, current, window, describe)
+	}
+	runWith = func(t *testing.T, stopping bool, current map[string]*meta.DmChannel, window []string, describe func(*meta.MockBroker)) (submitted int) {
 		checker := createTestBalanceChecker()
 		mockChannels := mockey.Mock(mockey.GetMethod(checker.targetMgr, "GetDmChannelsByCollection")).
 			To(func(_ context.Context, _ int64, scope meta.TargetScope) map[string]*meta.DmChannel {
@@ -2019,7 +2023,7 @@ func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) 
 		describe(broker)
 		checker.splitState = meta.NewShardSplitStateCache(broker, time.Minute)
 		segmentTasks, channelTasks := balanceTasksOn(t, "v0")
-		segmentTasks, channelTasks = checker.dropShardSplitFrozen(ctx, collectionID, segmentTasks, channelTasks)
+		segmentTasks, channelTasks = checker.dropShardSplitFrozen(ctx, collectionID, segmentTasks, channelTasks, stopping)
 		return len(segmentTasks) + len(channelTasks)
 	}
 	describeAs := func(resp *milvuspb.DescribeCollectionResponse) func(*meta.MockBroker) {
@@ -2033,7 +2037,7 @@ func TestBalanceChecker_SubmitFrozenWhileADelistedSourceIsCurrent(t *testing.T) 
 			"balance must not move a delisted source still in the current target")
 	})
 	t.Run("current target flipped past the source: unfrozen", func(t *testing.T) {
-		assert.Equal(t, 2, run(t, channels("v1", "v2"), nil, describeAs(adopted)))
+		assert.Equal(t, 4, run(t, channels("v1", "v2"), nil, describeAs(adopted)))
 	})
 	t.Run("fresh fence, cached state still pre-fence, next target marks window targets: frozen", func(t *testing.T) {
 		// the TTL cache still holds a read from before the fence: v0 Normal, no
@@ -2159,4 +2163,15 @@ func TestBalanceChecker_QueueConstructionReadsNoShardStates(t *testing.T) {
 
 	assert.Equal(t, 3, checker.constructStoppingBalanceQueue(ctx).Len())
 	assert.True(t, checker.readyToCheck(ctx, 1))
+}
+
+// CZ-L6 / AV-L6-M3: a stopping node must still be drained of everything a
+// split does not involve. Stopping balance moves the untouched shard v9 and
+// its segments, and keeps only the split's source and targets in place;
+// normal balance stays frozen for the whole collection.
+func TestBalanceChecker_StoppingBalanceMovesWhatASplitDoesNotInvolve(t *testing.T) {
+	assert.ElementsMatch(t, []string{"v9", "v9"}, runSplitFreezeRound(t, true, "v0", "v1", "v9"),
+		"stopping balance moves the channel and the segment of the untouched shard only")
+	assert.Empty(t, runSplitFreezeRound(t, false, "v0", "v1", "v9"),
+		"normal balance keeps the collection frozen as a whole")
 }
