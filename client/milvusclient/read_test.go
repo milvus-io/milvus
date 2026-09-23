@@ -508,6 +508,86 @@ func (s *ReadSuite) TestHybridSearch() {
 	})
 }
 
+// TestHybridSearch_RejectsHighlighterAnyLeg exercises the client-side guard
+// that rejects hybrid search when any AnnRequest leg carries a highlighter.
+// The server-side convertHybridSearchToSearch (internal/proxy/search_util.go:1158)
+// drops the per-leg Highlighter because SubSearchRequest has no such field.
+// The expected outcome is a client-side error before any wire call.
+func (s *ReadSuite) TestHybridSearch_RejectsHighlighterAnyLeg() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	vec := func() entity.Vector {
+		return entity.FloatVector(lo.RepeatBy(128, func(_ int) float32 { return rand.Float32() }))
+	}
+
+	s.Run("single leg with highlighter", func() {
+		// No mock expectation set; the SDK must reject before touching the wire.
+		_, err := s.client.HybridSearch(ctx,
+			NewHybridSearchOption("coll", 5,
+				NewAnnRequest("vector", 10, vec()).WithHighlighter(NewLexicalHighlighter()),
+			))
+		s.Require().Error(err)
+		s.Contains(err.Error(), "hybrid search does not support highlighter")
+	})
+
+	s.Run("multi-leg with highlighter on second leg", func() {
+		// Loop checks every leg, not just the first.
+		_, err := s.client.HybridSearch(ctx,
+			NewHybridSearchOption("coll", 5,
+				NewAnnRequest("vector", 10, vec()),
+				NewAnnRequest("vector", 10, vec()).WithHighlighter(NewLexicalHighlighter()),
+			))
+		s.Require().Error(err)
+		s.Contains(err.Error(), "hybrid search does not support highlighter")
+	})
+
+	s.Run("nil highlighter on a leg does NOT trip the check", func() {
+		// WithHighlighter(nil) is a defensive reset; the check must allow it.
+		collectionName := fmt.Sprintf("coll_%s", s.randString(6))
+		s.setupCache(collectionName, s.schema)
+
+		s.mock.EXPECT().HybridSearch(mock.Anything, mock.Anything).RunAndReturn(
+			func(_ context.Context, hsr *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
+				// Capture proves a wire call happened with all three legs' Highlighter nil.
+				for _, req := range hsr.GetRequests() {
+					s.Nil(req.GetHighlighter())
+				}
+				return &milvuspb.SearchResults{
+					Status: merr.Success(),
+					Results: &schemapb.SearchResultData{
+						NumQueries: 1,
+						Topks:      []int64{2},
+						Ids: &schemapb.IDs{IdField: &schemapb.IDs_IntId{
+							IntId: &schemapb.LongArray{Data: []int64{1, 2}},
+						}},
+						Scores: []float32{0.1, 0.2},
+						FieldsData: []*schemapb.FieldData{
+							s.getInt64FieldData("ID", []int64{1, 2}),
+						},
+					},
+				}, nil
+			}).Once()
+
+		_, err := s.client.HybridSearch(ctx,
+			NewHybridSearchOption(collectionName, 5,
+				NewAnnRequest("vector", 10, vec()).WithHighlighter(nil),
+				NewAnnRequest("vector", 10, vec()),
+				NewAnnRequest("vector", 10, vec()).WithHighlighter(nil),
+			))
+		s.NoError(err)
+	})
+
+	s.Run("highlighter combined with reranker still rejected", func() {
+		// Proves the highlighter check is independent of other option plumbing.
+		_, err := s.client.HybridSearch(ctx,
+			NewHybridSearchOption("coll", 5,
+				NewAnnRequest("vector", 10, vec()).WithHighlighter(NewLexicalHighlighter()),
+			).WithReranker(NewRRFReranker()))
+		s.Require().Error(err)
+		s.Contains(err.Error(), "hybrid search does not support highlighter")
+	})
+}
+
 func (s *ReadSuite) TestQuery() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
