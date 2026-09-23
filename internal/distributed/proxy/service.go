@@ -166,24 +166,28 @@ func (s *Server) registerHTTPServer() {
 	if !proxy.Params.HTTPCfg.DebugMode.GetAsBool() {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	metricsGinHandler := gin.Default()
-	apiv1 := metricsGinHandler.Group(apiPathPrefix)
-	apiv1.Use(httpserver.RequestHandlerFunc)
-	// Add authentication middleware if authorization is enabled
-	// This ensures the metrics port follows the same security policy as the main HTTP server
-	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
-		apiv1.Use(authenticate)
-	}
-	handlers := httpserver.NewHandlers(s.proxy)
-	handlers.RegisterRoutesTo(apiv1)
-	if p, ok := s.proxy.(*proxy.Proxy); ok {
-		p.RegisterRestRouter(apiv1)
-	}
+	metricsGinHandler := newMetricsPortEngine(gin.Default(), s.proxy)
 	mhttp.Register(&mhttp.Handler{
 		Path:        mhttp.RootPath,
 		HandlerFunc: nil,
 		Handler:     metricsGinHandler.Handler(),
 	})
+}
+
+// newMetricsPortEngine registers the optional console APIs on the metrics port.
+// The non-underscore legacy REST routes are retired regardless of enableV1.
+func newMetricsPortEngine(engine *gin.Engine, proxyComponent types.ProxyComponent) *gin.Engine {
+	if !proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		return engine
+	}
+	apiv1 := engine.Group(apiPathPrefix, httpserver.RequestHandlerFunc)
+	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		apiv1.Use(authenticate)
+	}
+	if p, ok := proxyComponent.(*proxy.Proxy); ok {
+		p.RegisterRestRouter(apiv1)
+	}
+	return engine
 }
 
 func (s *Server) httpHandler(ginHandler http.Handler) http.Handler {
@@ -223,8 +227,10 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	if proxy.Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
 		ginHandler.Use(authenticate)
 	}
-	app := ginHandler.Group("/v1")
-	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	if proxy.Params.HTTPCfg.EnableV1.GetAsBool() {
+		app := ginHandler.Group("/v1")
+		httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	}
 	appV2 := ginHandler.Group("/v2/vectordb")
 	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	http2Server := &http2.Server{}

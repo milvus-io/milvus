@@ -1378,6 +1378,14 @@ func (s *mixCoordImpl) HandleAlterConfig(writer http.ResponseWriter, request *ht
 			return
 		}
 
+		// Reject even while the mode is off: an anonymous caller must not
+		// plant an etcd override that defeats a later opt-in after restart.
+		// Use the same key identity as config storage, including its aliases.
+		if pkgconfig.FormatKey(config.Key) == pkgconfig.FormatKey(paramtable.Get().CommonCfg.ManagementMetricsOnly.Key) {
+			writeJSONError(writer, "managementMetricsOnly cannot be modified through this endpoint; set it in the configuration file and restart", http.StatusBadRequest)
+			return
+		}
+
 		if config.Value != nil {
 			configsToUpdate[config.Key] = *config.Value
 		} else {
