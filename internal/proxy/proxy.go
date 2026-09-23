@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/adminauth"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -130,6 +131,13 @@ type Proxy struct {
 	slowQueries *expirable.LRU[Timestamp, *metricsinfo.SlowQuery]
 }
 
+// Compile-time assertions that *Proxy satisfies the task-model contracts the
+// extracted task packages consume through the composition root.
+var (
+	_ taskmodel.TaskNode    = (*Proxy)(nil)
+	_ taskmodel.QueryRunner = (*Proxy)(nil)
+)
+
 // NewProxy returns a Proxy struct.
 func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 	rand.Seed(time.Now().UnixNano())
@@ -180,6 +188,36 @@ func (node *Proxy) setMetaCache(cache Cache) {
 
 func (node *Proxy) GetMetaCache() Cache {
 	return node.getMetaCache()
+}
+
+// MixCoord returns the MixCoord client consumed by concrete tasks through the
+// taskmodel.TaskNode contract.
+func (node *Proxy) MixCoord() types.MixCoordClient {
+	return node.mixCoord
+}
+
+// LBPolicy returns the replica load-balance policy consumed by concrete tasks
+// through the taskmodel.TaskNode contract.
+func (node *Proxy) LBPolicy() shardclient.LBPolicy {
+	return node.lbPolicy
+}
+
+// ShardMgr returns the shard client manager consumed by concrete tasks through
+// the taskmodel.TaskNode contract.
+func (node *Proxy) ShardMgr() shardclient.ShardClientMgr {
+	return node.shardMgr
+}
+
+// ChMgr returns the channel manager consumed by concrete tasks through the
+// taskmodel.TaskNode contract.
+func (node *Proxy) ChMgr() channelmgr.ChannelsMgr {
+	return node.chMgr
+}
+
+// TsoAllocator returns the timestamp allocator consumed by concrete tasks
+// through the taskmodel.TaskNode contract.
+func (node *Proxy) TsoAllocator() taskmodel.TsoAllocator {
+	return node.tsoAllocator
 }
 
 // IsDQLQueueFull reports whether the next DQL enqueue would be rejected with

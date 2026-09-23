@@ -344,7 +344,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.SchemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return merr.WrapErrAsInputError(wrapPlanCreationError(err, "failed to create delete plan"))
+		return merr.WrapErrAsInputError(WrapPlanCreationError(err, "failed to create delete plan"))
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
@@ -373,7 +373,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = getPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = GetPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -390,7 +390,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = getPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = GetPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -607,7 +607,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	// Budget and marshal once before LB fan-out. A roaring plan can be tens of
 	// MiB; marshaling inside each concurrent shard callback would multiply that
 	// transient buffer by shard count and repeat it on retries.
-	serializedPlan, _, err := marshalPlanWithMembershipFilterSizeLimit(plan, 0)
+	serializedPlan, _, err := MarshalPlanWithMembershipFilterSizeLimit(plan, 0)
 	if err != nil {
 		return err
 	}

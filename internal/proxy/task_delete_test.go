@@ -1247,3 +1247,21 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Equal(t, int64(3), dr.result.DeleteCnt)
 	})
 }
+
+func namespaceEnabledSchema(fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+	return &schemapb.CollectionSchema{
+		Name: "test_collection",
+		Fields: append(fields, &schemapb.FieldSchema{
+			FieldID:        999,
+			Name:           common.NamespaceFieldName,
+			IsPartitionKey: true,
+			DataType:       schemapb.DataType_VarChar,
+		}),
+		EnableNamespace: true,
+	}
+}
+
+func expectedNamespacePartitionID(namespace string, partitionNames []string, partitionIDs map[string]int64) int64 {
+	idx := typeutil.HashString2Uint32(namespace) % uint32(len(partitionNames))
+	return partitionIDs[partitionNames[idx]]
+}
