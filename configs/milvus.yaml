@@ -490,10 +490,10 @@ proxy:
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
-    # Register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
-    # Restart to apply. Disabling keeps listeners, V2, probes, and metrics available.
-    # The non-underscore /api/v1/* REST API is removed regardless of this setting.
-    # WebUI data and telemetry commands require these APIs; use enableWebUI to hide the pages.
+    # Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+    # Disabling requires a restart and leaves the HTTP listeners, /v2/vectordb/*, probes, and metrics available.
+    # The non-underscore /api/v1/* REST API has been removed regardless of this setting.
+    # WebUI data and telemetry commands require these console APIs; disable proxy.http.enableWebUI too to hide the pages.
     enableV1: true
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api

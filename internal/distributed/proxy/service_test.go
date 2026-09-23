@@ -1468,6 +1468,8 @@ func TestLegacyAuthenticationChallengeCompatibility(t *testing.T) {
 	// The main port installs authenticate directly. Keep this same middleware
 	// independent of the management flag, including the legacy challenge on a
 	// successful Basic request. Drive the actual metrics router alongside it.
+	// The retired metrics-port data plane and /api/v1/health are covered by
+	// TestMetricsPortV1Registration and TestHTTPV1SwitchKeepsV2Serving.
 	mainRouter := gin.New()
 	mainRouter.Use(authenticate)
 	mainRouter.GET("/v1/test", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
@@ -1478,12 +1480,9 @@ func TestLegacyAuthenticationChallengeCompatibility(t *testing.T) {
 		for _, surface := range []struct {
 			name, method, path string
 			router             http.Handler
-			challenge          bool
 		}{
-			{"main", http.MethodGet, "/v1/test", mainRouter, true},
-			{"metrics data", http.MethodDelete, apiPathPrefix + "/collection", metricsRouter, !gateOn},
-			{"metrics health", http.MethodGet, apiPathPrefix + "/health", metricsRouter, true},
-			{"metrics console", http.MethodGet, apiPathPrefix + mhttp.ClusterConfigsPath, metricsRouter, true},
+			{"main", http.MethodGet, "/v1/test", mainRouter},
+			{"metrics console", http.MethodGet, apiPathPrefix + mhttp.ClusterConfigsPath, metricsRouter},
 		} {
 			if gateOn && surface.name == "metrics console" {
 				// The enabled console uses its separate root-only realm.
@@ -1510,14 +1509,11 @@ func TestLegacyAuthenticationChallengeCompatibility(t *testing.T) {
 						} else if credential.username != "" {
 							req.Header.Set("Authorization", "Bearer "+credential.username+":"+credential.password)
 						}
-						if surface.name == "metrics data" && gateOn {
-							req.Header.Set(mhttp.AdminRequestHeader, "true")
-						}
 						w := httptest.NewRecorder()
 						surface.router.ServeHTTP(w, req)
 						assert.Equal(t, credential.status, w.Code, w.Body.String())
 						wantChallenge := ""
-						if credential.basic && surface.challenge {
+						if credential.basic {
 							wantChallenge = `Basic realm="restricted", charset="UTF-8"`
 						}
 						// Result captures headers at the first write, so deleting a
