@@ -22,10 +22,12 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -53,9 +55,10 @@ type SpawnChildParams struct {
 
 // ChildSpawner spawns an in-process child shard delegator for one shard-split
 // target vchannel. The querynode implements it: it creates the child delegator,
-// registers it in the node's delegator map, and starts its WAL-consuming
-// pipeline at the target's recovery seek position (fetched from the channel
-// checkpoint store via GetRecoveryInfoV2, the same seek path any delegator uses).
+// registers it in the node's delegator map, loads the target's recovery view
+// (GetRecoveryInfoV2: its L0 and unflushed segments, as a watch would), forwards
+// the deletes that view holds to the source, and starts its WAL-consuming
+// pipeline at the target's checkpoint.
 //
 // The child is born non-serviceable — it owns no sealed segment and has no
 // querycoord target version — so GetDataDistribution skips it and no proxy read
@@ -786,6 +789,126 @@ func (sd *shardDelegator) RefuseReadsAsRetiredSource(ctx context.Context) {
 	if sd.retiredWithoutFamily.CompareAndSwap(false, true) {
 		sd.getLogger(ctx).Warn(ctx, "watched a shard split source its collection no longer lists; refusing every read through it")
 	}
+}
+
+// ForwardKnownDeletesToParent hands the fronting parent every delete this
+// delegator already holds: the records of its registered L0 segments and every
+// delete in its buffer. A no-op without a fronting parent.
+//
+// Live forwarding (ProcessDeleteBatches) only covers the deletes a child
+// consumes from its WAL after it is fronted. A child built from its target's
+// recovery view -- a respawn after a QueryNode restart, or a first spawn whose
+// target already synced -- starts consuming at the target's checkpoint, and
+// every delete on the target in (T_switch, checkpoint] is in the target's L0
+// segments instead; a delegator watched on its own and then fronted has also
+// consumed deletes into its buffer that it never forwarded. Without this the
+// source applies none of them to what it serves (its own sealed segments and
+// the targets' flushed segments attributed to it), so those rows reappear
+// through the source until the flip.
+//
+// Call it after SetFrontingParent: a delete processed in between is forwarded
+// twice, which is harmless (a delete applies to rows older than it, however
+// often), where one processed before the parent was set and missed here would
+// be lost. The parent buffers what it receives like any forwarded delete, so it
+// also reaches segments the parent loads later.
+func (sd *shardDelegator) ForwardKnownDeletesToParent(ctx context.Context) error {
+	parent := sd.FrontingParent()
+	if parent == nil {
+		return nil
+	}
+	batches, err := sd.knownDeleteBatches(ctx)
+	if err != nil {
+		return err
+	}
+	if len(batches) == 0 {
+		return nil
+	}
+	parent.ProcessDeleteBatches(batches)
+	sd.getLogger(ctx).Info(ctx, "forwarded the deletes a split child already held to its fronting parent",
+		mlog.Int("batches", len(batches)))
+	return nil
+}
+
+// knownDeleteBatches collects the deletes of this delegator's registered L0
+// segments and of its delete buffer as delete batches, one per L0 segment and
+// one per buffered item. An L0 batch is stamped with the newest timestamp in
+// it, so a reader of the parent's buffer asking for deletes at or after some
+// timestamp never skips one of its rows (it may get older rows of the batch
+// too, which is harmless).
+func (sd *shardDelegator) knownDeleteBatches(ctx context.Context) ([]DeleteBatch, error) {
+	sd.deleteMut.RLock()
+	items := sd.deleteBuffer.ListAfter(0)
+	l0Segments := sd.deleteBuffer.ListL0()
+	sd.deleteMut.RUnlock()
+
+	batches := make([]DeleteBatch, 0, len(items)+len(l0Segments))
+	l0Batches, err := sd.l0DeleteBatches(ctx, l0Segments)
+	if err != nil {
+		return nil, err
+	}
+	batches = append(batches, l0Batches...)
+	for _, item := range items {
+		data := make([]*DeleteData, 0, len(item.Data))
+		for _, entry := range item.Data {
+			data = append(data, &DeleteData{
+				PartitionID: entry.PartitionID,
+				PrimaryKeys: entry.DeleteData.Pks,
+				Timestamps:  entry.DeleteData.Tss,
+				RowCount:    entry.DeleteData.RowCount,
+			})
+		}
+		if len(data) > 0 {
+			batches = append(batches, DeleteBatch{Ts: item.Ts, Data: data})
+		}
+	}
+	return batches, nil
+}
+
+// l0DeleteBatches reads the delete records of the given L0 segments. Under the
+// RemoteLoad forward policy the delegator's L0 segments hold no records in
+// memory, so they are loaded here for the forward and released afterwards.
+func (sd *shardDelegator) l0DeleteBatches(ctx context.Context, l0Segments []segments.Segment) ([]DeleteBatch, error) {
+	if len(l0Segments) == 0 {
+		return nil, nil
+	}
+	if sd.l0ForwardPolicy == L0ForwardPolicyRemoteLoad {
+		infos := make([]*querypb.SegmentLoadInfo, 0, len(l0Segments))
+		for _, segment := range l0Segments {
+			infos = append(infos, segment.LoadInfo())
+		}
+		loaded, err := sd.loader.Load(ctx, sd.collectionID, segments.SegmentTypeSealed, sd.version, infos...)
+		if err != nil {
+			return nil, merr.Wrap(err, "failed to load a split child's L0 segments to forward their deletes")
+		}
+		defer func() {
+			for _, segment := range loaded {
+				segment.Release(ctx)
+			}
+		}()
+		l0Segments = loaded
+	}
+	batches := make([]DeleteBatch, 0, len(l0Segments))
+	for _, segment := range l0Segments {
+		l0, ok := segment.(*segments.L0Segment)
+		if !ok {
+			return nil, merr.WrapErrServiceInternalMsg("split child L0 segment %d is a %T, not an L0 segment", segment.ID(), segment)
+		}
+		pks, tss := l0.DeleteRecords()
+		if len(pks) == 0 {
+			continue
+		}
+		// copied: the parent buffers them past this segment's release.
+		batches = append(batches, DeleteBatch{
+			Ts: lo.Max(tss),
+			Data: []*DeleteData{{
+				PartitionID: segment.Partition(),
+				PrimaryKeys: append([]storage.PrimaryKey(nil), pks...),
+				Timestamps:  append([]uint64(nil), tss...),
+				RowCount:    int64(len(pks)),
+			}},
+		})
+	}
+	return batches, nil
 }
 
 // ProcessSplitShard reacts to the SplitShard fence message consumed on the
