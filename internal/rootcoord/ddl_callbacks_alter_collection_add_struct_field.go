@@ -90,22 +90,23 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	channels := make([]string, 0, len(coll.VirtualChannelNames)+1)
 	channels = append(channels, streaming.WAL().ControlChannel())
 	channels = append(channels, coll.VirtualChannelNames...)
+	header := &messagespb.AlterCollectionMessageHeader{
+		DbId:         coll.DBID,
+		CollectionId: coll.CollectionID,
+		UpdateMask: &fieldmaskpb.FieldMask{
+			Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
+		},
+		CacheExpirations: cacheExpirations,
+	}
 	msg := message.NewAlterCollectionMessageBuilderV2().
-		WithHeader(&messagespb.AlterCollectionMessageHeader{
-			DbId:         coll.DBID,
-			CollectionId: coll.CollectionID,
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{message.FieldMaskCollectionSchema, message.FieldMaskCollectionProperties},
-			},
-			CacheExpirations: cacheExpirations,
-		}).
+		WithHeader(header).
 		WithBody(&messagespb.AlterCollectionMessageBody{
 			Updates: &messagespb.AlterCollectionMessageUpdates{
 				Schema:     schema,
 				Properties: properties,
 			},
 		}).
-		WithBroadcast(channels).
+		WithBroadcast(channels, alterCollectionBroadcastOptions(header)...).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		return err
