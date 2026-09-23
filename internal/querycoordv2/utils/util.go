@@ -22,15 +22,18 @@ import (
 	"time"
 
 	"github.com/blang/semver/v4"
+	"github.com/samber/lo"
 	"golang.org/x/time/rate"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 func CheckNodeAvailable(nodeID int64, info *session.NodeInfo) error {
@@ -85,8 +88,23 @@ func CheckDelegatorDataReady(nodeMgr *session.NodeManager, targetMgr meta.Target
 }
 
 func CheckSegmentDataReady(ctx context.Context, collectionID int64, distManager *meta.DistributionManager, targetMgr meta.TargetManagerInterface, scope int32) error {
+	return CheckSegmentDataReadyExcluding(ctx, collectionID, distManager, targetMgr, scope, nil)
+}
+
+// CheckSegmentDataReadyExcluding is CheckSegmentDataReady over the target's
+// sealed segments except those attributed to an excluded channel -- a shard
+// split window target, which is not served through the target being checked
+// and has no delegator to load them (see TargetManager.GetSplitWindowExclusions).
+func CheckSegmentDataReadyExcluding(ctx context.Context, collectionID int64, distManager *meta.DistributionManager,
+	targetMgr meta.TargetManagerInterface, scope int32, excluded typeutil.Set[string],
+) error {
 	// Check whether segments are fully loaded
 	segmentDist := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, scope)
+	if len(excluded) > 0 {
+		segmentDist = lo.OmitBy(segmentDist, func(_ int64, segment *datapb.SegmentInfo) bool {
+			return excluded.Contain(segment.GetInsertChannel())
+		})
+	}
 	distSegments := distManager.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID))
 	distBySegmentID := make(map[int64][]*meta.Segment, len(distSegments))
 	for _, segment := range distSegments {
