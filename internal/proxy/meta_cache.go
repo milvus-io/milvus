@@ -464,11 +464,12 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	}
 
 	// An ID-only miss must populate the same database cache as name lookups.
+	// Older coordinators may omit DbName. The request database is not
+	// authoritative for an ID-only lookup, so serve that response uncached
+	// rather than putting it in a guessed database's name/invalidation bucket.
+	unknownDatabase := collectionName == "" && collectionID != 0 && collection.GetDbName() == ""
 	if database == "" && collectionName == "" && collectionID != 0 {
 		database = collection.GetDbName()
-		if database == "" {
-			database = defaultDB
-		}
 	}
 
 	partitions, err := m.showPartitions(ctx, database, collectionName, collectionID)
@@ -508,6 +509,29 @@ func (m *MetaCache) update(ctx context.Context, database, collectionName string,
 	queryMode := common.GetQueryMode(collection.Properties...)
 
 	schemaInfo := newSchemaInfo(collection.Schema)
+
+	if unknownDatabase {
+		replicateID, _ := common.GetReplicateID(collection.Properties)
+		return &collectionInfo{
+			collID:                collection.CollectionID,
+			schema:                schemaInfo,
+			partInfo:              parsePartitionsInfo(infos, schemaInfo.hasPartitionKeyField),
+			createdTimestamp:      collection.CreatedTimestamp,
+			createdUtcTimestamp:   collection.CreatedUtcTimestamp,
+			consistencyLevel:      collection.ConsistencyLevel,
+			partitionKeyIsolation: isolation,
+			queryMode:             queryMode,
+			replicateID:           replicateID,
+			updateTimestamp:       collection.UpdateTimestamp,
+			collectionTTL:         getCollectionTTL(schemaInfo.GetProperties()),
+			vChannels:             collection.VirtualChannelNames,
+			pChannels:             collection.PhysicalChannelNames,
+			numPartitions:         collection.NumPartitions,
+			shardsNum:             collection.ShardsNum,
+			aliases:               collection.Aliases,
+			properties:            collection.Properties,
+		}, nil
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()

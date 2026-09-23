@@ -23,6 +23,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -132,6 +133,58 @@ func Test_getDmlChannelsFunc_MetaCache(t *testing.T) {
 	}
 	assert.Contains(t, cache.collInfo["db"], "collection")
 	assert.NotContains(t, cache.collInfo, "")
+}
+
+func TestMetaCache_IDOnlyEmptyDBNameNotCached(t *testing.T) {
+	for _, database := range []string{"", defaultDB} {
+		t.Run("request database="+database, func(t *testing.T) {
+			ctx := context.Background()
+			rc := mocks.NewMockMixCoordClient(t)
+			cache, err := NewMetaCache(rc)
+			require.NoError(t, err)
+			// An older coordinator resolves an ID in another database but omits
+			// DbName. A defaulted request database must not become authoritative.
+			rc.EXPECT().DescribeCollection(mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+				return req.GetCollectionID() == 100 && req.GetCollectionName() == "" && req.GetDbName() == database
+			})).Return(&milvuspb.DescribeCollectionResponse{
+				Status:               &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID:         100,
+				Schema:               &schemapb.CollectionSchema{Name: "collection"},
+				VirtualChannelNames:  []string{"v0"},
+				PhysicalChannelNames: []string{"p0"},
+				RequestTime:          123,
+			}, nil).Twice()
+			rc.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
+				return req.GetCollectionID() == 100 && req.GetDbName() == database
+			})).Return(&milvuspb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Twice()
+			for i := 0; i < 2; i++ {
+				info, err := cache.GetCollectionInfo(ctx, database, "", 100)
+				require.NoError(t, err)
+				assert.Equal(t, int64(100), info.collID)
+				assert.Equal(t, []string{"v0"}, info.vChannels)
+				assert.Equal(t, []string{"p0"}, info.pChannels)
+				assert.Empty(t, cache.collInfo)
+				assert.Empty(t, cache.collectionCacheVersion)
+			}
+			// A same-name collection in the default database must resolve
+			// independently, rather than hitting the ID-only response above.
+			rc.EXPECT().DescribeCollection(mock.Anything, mock.MatchedBy(func(req *milvuspb.DescribeCollectionRequest) bool {
+				return req.GetCollectionID() == 0 && req.GetCollectionName() == "collection" && req.GetDbName() == defaultDB
+			})).Return(&milvuspb.DescribeCollectionResponse{
+				Status:       &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
+				CollectionID: 200,
+				Schema:       &schemapb.CollectionSchema{Name: "collection"},
+			}, nil).Once()
+			rc.EXPECT().ShowPartitions(mock.Anything, mock.MatchedBy(func(req *milvuspb.ShowPartitionsRequest) bool {
+				return req.GetCollectionID() == 0 && req.GetCollectionName() == "collection" && req.GetDbName() == defaultDB
+			})).Return(&milvuspb.ShowPartitionsResponse{Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}}, nil).Once()
+			for i := 0; i < 2; i++ {
+				id, err := cache.GetCollectionID(ctx, defaultDB, "collection")
+				require.NoError(t, err)
+				assert.Equal(t, int64(200), id)
+			}
+		})
+	}
 }
 
 func Test_singleTypeChannelsMgr_getAllChannels(t *testing.T) {
