@@ -195,6 +195,13 @@ func TestResourceGroupHandlerV2InvalidConfig(t *testing.T) {
 		{"empty transfer to", `{"requests":{"node_num":1},"limits":{"node_num":1},"transfer_to":[{}]}`, "ResourceGroup"},
 		{"null config", `null`, "ResourceGroups[group_a]"},
 	}
+
+	// Build the engine + global meta cache once and reuse it across all
+	// subtests. Per-subcase initHTTPServerV2 would rebuild the gin engine and
+	// re-run the bcrypt-heavy InitEmptyMetaCacheForTest 20 times.
+	mockProxy := mocks.NewMockProxy(t)
+	testServer := initHTTPServerV2(mockProxy, false)
+
 	for _, action := range []string{CreateAction, AlterAction} {
 		for _, tc := range testCases {
 			// Creating a group without a config uses the backend's default config.
@@ -202,8 +209,6 @@ func TestResourceGroupHandlerV2InvalidConfig(t *testing.T) {
 				continue
 			}
 			t.Run(action+"/"+tc.name, func(t *testing.T) {
-				mockProxy := mocks.NewMockProxy(t)
-				testServer := initHTTPServerV2(mockProxy, false)
 				body := fmt.Sprintf(`{"name":"group_a","config":%s}`, tc.config)
 				if action == AlterAction {
 					// A valid sibling must not let an invalid config bypass validation.
@@ -237,27 +242,33 @@ func TestResourceGroupHandlerV2ZeroNodeConfig(t *testing.T) {
 		`{"requests":{},"limits":{},"node_filter":{}}`,
 		`{"requests":{},"limits":{},"node_filter":{"node_labels":null}}`,
 	}
+
+	// Build the engine + global meta cache once and reuse it across all
+	// subtests. Per-subcase initHTTPServerV2 would rebuild the gin engine and
+	// re-run the bcrypt-heavy InitEmptyMetaCacheForTest 12 times, which makes
+	// the package exceed the CI timeout on constrained runners.
+	mockProxy := mocks.NewMockProxy(t)
+	mockProxy.EXPECT().CreateResourceGroup(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateResourceGroupRequest) bool {
+		cfg := req.GetConfig()
+		return cfg.GetRequests() != nil && cfg.GetLimits() != nil &&
+			cfg.GetRequests().GetNodeNum() == 0 && cfg.GetLimits().GetNodeNum() == 0
+	})).Return(merr.Success(), nil)
+	mockProxy.EXPECT().UpdateResourceGroups(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpdateResourceGroupsRequest) bool {
+		cfg := req.GetResourceGroups()["group_a"]
+		return cfg.GetRequests() != nil && cfg.GetLimits() != nil &&
+			cfg.GetRequests().GetNodeNum() == 0 && cfg.GetLimits().GetNodeNum() == 0
+	})).Return(merr.Success(), nil)
+	testServer := initHTTPServerV2(mockProxy, false)
+
 	for _, action := range []string{CreateAction, AlterAction} {
 		for _, config := range configs {
 			t.Run(action+"/"+config, func(t *testing.T) {
-				mockProxy := mocks.NewMockProxy(t)
 				body := fmt.Sprintf(`{"name":"group_a","config":%s}`, config)
-				if action == CreateAction {
-					mockProxy.EXPECT().CreateResourceGroup(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateResourceGroupRequest) bool {
-						cfg := req.GetConfig()
-						return cfg.GetRequests() != nil && cfg.GetLimits() != nil &&
-							cfg.GetRequests().GetNodeNum() == 0 && cfg.GetLimits().GetNodeNum() == 0
-					})).Return(merr.Success(), nil).Once()
-				} else {
+				if action == AlterAction {
 					body = fmt.Sprintf(`{"resource_groups":{"group_a":%s}}`, config)
-					mockProxy.EXPECT().UpdateResourceGroups(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpdateResourceGroupsRequest) bool {
-						cfg := req.GetResourceGroups()["group_a"]
-						return cfg.GetRequests() != nil && cfg.GetLimits() != nil &&
-							cfg.GetRequests().GetNodeNum() == 0 && cfg.GetLimits().GetNodeNum() == 0
-					})).Return(merr.Success(), nil).Once()
 				}
 				w := httptest.NewRecorder()
-				initHTTPServerV2(mockProxy, false).ServeHTTP(w, httptest.NewRequest(http.MethodPost,
+				testServer.ServeHTTP(w, httptest.NewRequest(http.MethodPost,
 					versionalV2(ResourceGroupCategory, action), bytes.NewBufferString(body)))
 				require.Equal(t, http.StatusOK, w.Code)
 				var response ReturnErrMsg
