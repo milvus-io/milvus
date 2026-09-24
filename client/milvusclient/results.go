@@ -19,6 +19,7 @@ package milvusclient
 import (
 	"reflect"
 	"runtime/debug"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -227,6 +228,22 @@ func (ds DataSet) Unmarshal(receiver any) (err error) {
 	return nil
 }
 
+var timeType = reflect.TypeOf(time.Time{})
+
+// receiverValue adapts a column value to the receiver field type. Timestamptz
+// columns carry RFC3339Nano strings, which are parsed when the receiver field
+// is time.Time so a row written from time.Time reads back into the same struct.
+func receiverValue(col column.Column, val any, target reflect.Type) (reflect.Value, error) {
+	if s, ok := val.(string); ok && target == timeType && col.Type() == entity.FieldTypeTimestamptz {
+		t, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			return reflect.Value{}, errors.Wrapf(err, "failed to parse timestamptz value %q of field %s", s, col.Name())
+		}
+		return reflect.ValueOf(t), nil
+	}
+	return reflect.ValueOf(val), nil
+}
+
 func (ds DataSet) fillData(data reflect.Value, dataType reflect.Type, idx int) error {
 	rc := row.GetReceiverCandidate(dataType)
 	for i := 0; i < len(ds); i++ {
@@ -254,15 +271,23 @@ func (ds DataSet) fillData(data reflect.Value, dataType reflect.Type, idx int) e
 			if err != nil {
 				return err
 			}
+			rv, err := receiverValue(ds[i], val, fieldType.Elem())
+			if err != nil {
+				return err
+			}
 			ptr := reflect.New(fieldType.Elem())
-			ptr.Elem().Set(reflect.ValueOf(val))
+			ptr.Elem().Set(rv)
 			field.Set(ptr)
 		} else {
 			val, err := ds[i].Get(idx)
 			if err != nil {
 				return err
 			}
-			field.Set(reflect.ValueOf(val))
+			rv, err := receiverValue(ds[i], val, fieldType)
+			if err != nil {
+				return err
+			}
+			field.Set(rv)
 		}
 	}
 	return nil

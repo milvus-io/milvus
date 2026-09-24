@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -521,6 +522,104 @@ func (s *RowsSuite) TestSetFieldEmbeddedName() {
 	s.Zero(input.Ignored)
 	s.NoError(SetField(input, "id", nil))
 	s.Nil(input.ID)
+}
+
+func (s *RowsSuite) TestTimestamptzAndGeometryRows() {
+	ts := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+	iso := ts.Format(time.RFC3339Nano)
+	wkt := "POINT (1 2)"
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("ts").WithDataType(entity.FieldTypeTimestamptz)).
+		WithField(entity.NewField().WithName("geo").WithDataType(entity.FieldTypeGeometry)).
+		WithField(entity.NewField().WithName("opt_ts").WithDataType(entity.FieldTypeTimestamptz).WithNullable(true)).
+		WithField(entity.NewField().WithName("opt_geo").WithDataType(entity.FieldTypeGeometry).WithNullable(true))
+
+	type Row struct {
+		ID     int64     `milvus:"name:id"`
+		TS     time.Time `milvus:"name:ts"`
+		Geo    string    `milvus:"name:geo"`
+		OptTS  *string   `milvus:"name:opt_ts"`
+		OptGeo *string   `milvus:"name:opt_geo"`
+	}
+
+	columns, err := AnyToColumns([]any{
+		&Row{ID: 1, TS: ts, Geo: wkt, OptTS: &iso, OptGeo: &wkt},
+		&Row{ID: 2, TS: ts, Geo: wkt},
+	}, false, schema)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 5)
+
+	for _, col := range columns {
+		switch col.Name() {
+		case "ts", "opt_ts":
+			s.Equal(entity.FieldTypeTimestamptz, col.Type())
+		case "geo", "opt_geo":
+			s.Equal(entity.FieldTypeGeometry, col.Type())
+		case "id":
+			continue
+		default:
+			s.Failf("unexpected column", "%s", col.Name())
+		}
+		s.Equal(2, col.Len(), col.Name())
+		s.Equal(col.Nullable(), col.Name() == "opt_ts" || col.Name() == "opt_geo", col.Name())
+		s.NoError(col.ValidateNullable(), col.Name())
+
+		first, err := col.GetAsString(0)
+		s.NoError(err)
+		switch col.Type() {
+		case entity.FieldTypeTimestamptz:
+			s.Equal(iso, first, col.Name())
+		case entity.FieldTypeGeometry:
+			s.Equal(wkt, first, col.Name())
+		}
+
+		isNull, err := col.IsNull(1)
+		s.NoError(err)
+		s.Equal(col.Nullable(), isNull, "only the omitted optional values are null: %s", col.Name())
+	}
+
+	s.Run("string_timestamptz", func() {
+		type StringRow struct {
+			ID int64  `milvus:"name:id"`
+			TS string `milvus:"name:ts"`
+		}
+		columns, err := AnyToColumns([]any{&StringRow{ID: 1, TS: iso}}, false, entity.NewSchema().
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("ts").WithDataType(entity.FieldTypeTimestamptz)))
+		s.Require().NoError(err)
+		for _, col := range columns {
+			if col.Name() == "ts" {
+				v, err := col.GetAsString(0)
+				s.NoError(err)
+				s.Equal(iso, v)
+			}
+		}
+	})
+
+	s.Run("unsupported_field_type_returns_error", func() {
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("nested").WithDataType(entity.FieldTypeStruct))
+		col, err := getColumnCreators(schema)["nested"](1)
+		s.Nil(col)
+		s.Error(err)
+
+		// AnyToColumns skips fields whose column cannot be built (pre-existing
+		// behavior shared with fields missing from the schema); it must no
+		// longer dereference a nil column while doing so.
+		type Row struct {
+			ID     int64 `milvus:"name:id"`
+			Nested int64 `milvus:"name:nested"`
+		}
+		s.NotPanics(func() {
+			columns, err := AnyToColumns([]any{&Row{ID: 1, Nested: 2}}, false, schema)
+			s.NoError(err)
+			for _, col := range columns {
+				s.NotEqual("nested", col.Name())
+			}
+		})
+	})
 }
 
 func TestRows(t *testing.T) {

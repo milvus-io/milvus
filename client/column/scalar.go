@@ -237,6 +237,11 @@ func (c *ColumnTimestamptz) Slice(start, end int) Column {
 	}
 }
 
+// AppendValue appends an ISO 8601 string or a time.Time value.
+func (c *ColumnTimestamptz) AppendValue(i interface{}) error {
+	return c.genericColumnBase.AppendValue(timestamptzValue(i))
+}
+
 var _ Column = (*ColumnTimestampTzIsoString)(nil)
 
 type ColumnTimestampTzIsoString struct {
@@ -257,6 +262,21 @@ func (c *ColumnTimestampTzIsoString) Slice(start, end int) Column {
 	return &ColumnTimestampTzIsoString{
 		genericColumnBase: c.genericColumnBase.slice(start, end),
 	}
+}
+
+// AppendValue appends an ISO 8601 string or a time.Time value.
+func (c *ColumnTimestampTzIsoString) AppendValue(i interface{}) error {
+	return c.genericColumnBase.AppendValue(timestamptzValue(i))
+}
+
+// timestamptzValue formats time.Time input the way NewColumnTimestamptz does,
+// so both column flavors accept it; any other value is passed through and
+// keeps being type-checked by the base column.
+func timestamptzValue(i interface{}) interface{} {
+	if t, ok := i.(time.Time); ok {
+		return t.Format(time.RFC3339Nano)
+	}
+	return i
 }
 
 /* Varchar */

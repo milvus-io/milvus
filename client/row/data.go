@@ -285,6 +285,17 @@ func getColumnCreators(sch *entity.Schema) map[string]columnCreator {
 					return nil, err
 				}
 				col = column.NewColumnInt8Vector(field.Name, int(dim), data)
+			case entity.FieldTypeTimestamptz:
+				// Timestamptz travels as ISO 8601 strings; the column also accepts
+				// time.Time values and formats them the same way.
+				data := make([]string, 0, rowsLen)
+				col = column.NewColumnTimestamptzIsoString(field.Name, data)
+			case entity.FieldTypeGeometry:
+				data := make([]string, 0, rowsLen)
+				col = column.NewColumnGeometryWKT(field.Name, data)
+			default:
+				// Never hand back a nil column: AnyToColumns would dereference it.
+				return nil, errors.Newf("unsupported field type %s for row-based data", field.DataType.Name())
 			}
 
 			if field.Nullable {
