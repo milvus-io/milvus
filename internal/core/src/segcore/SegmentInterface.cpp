@@ -238,8 +238,10 @@ SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
 
     auto result_rows = GetResultRowCount(retrieve_results);
     int64_t output_data_size = 0;
-    for (auto field_id : plan->field_ids_) {
-        output_data_size += get_field_avg_size(field_id) * result_rows;
+    if (result_rows > 0) {
+        for (auto field_id : plan->field_ids_) {
+            output_data_size += get_field_avg_size(field_id) * result_rows;
+        }
     }
     if (output_data_size > limit_size) {
         ThrowInfo(
