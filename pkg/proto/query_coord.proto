@@ -980,6 +980,10 @@ message ChannelTarget {
   repeated PartitionTarget partition_targets = 4;
   msg.MsgPosition seek_position = 5;
   msg.MsgPosition delete_checkpoint = 6;
+  // The split target vchannels DataCoord reported for this channel when the target was pulled
+  // (data.VchannelInfo.split_target_channels). Kept so a QueryCoord restart hands the QueryNode the
+  // same split signal the seek position was pulled with.
+  repeated string split_target_channels = 7;
 }
 
 message CollectionTarget {

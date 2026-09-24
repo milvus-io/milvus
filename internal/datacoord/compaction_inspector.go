@@ -89,6 +89,11 @@ type compactionInspector struct {
 	handler          Handler
 	scheduler        task.GlobalScheduler
 	ievm             IndexEngineVersionManager
+	// isChannelSplitting reports whether a shard split that is not Done names
+	// the channel as its source or a target; nil when no split manager is
+	// wired. Such a channel takes no compaction but the split's own
+	// (frozenBySplit).
+	isChannelSplitting func(channel string) bool
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -256,6 +261,13 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		if err != nil {
 			break // 1. no more task to schedule
 		}
+		if c.frozenBySplit(t.GetTaskProto()) {
+			// Queued before a shard split froze its channel, and missed by the
+			// preemption while this loop held it: dropped, never dispatched.
+			c.dropFrozenQueuedTask(t)
+			continue
+		}
+		selectedBefore := len(selected)
 
 		switch t.GetTaskProto().GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
@@ -290,6 +302,15 @@ func (c *compactionInspector) schedule() []CompactionTask {
 		}
 
 		c.executingGuard.Lock()
+		// Checked again under the guard preemptTasksByChannel scans the
+		// executing set with: a freeze that lands after the dequeue either finds
+		// the task executing and preempts it, or is seen here.
+		if c.frozenBySplit(t.GetTaskProto()) {
+			c.executingGuard.Unlock()
+			selected = selected[:selectedBefore]
+			c.dropFrozenQueuedTask(t)
+			continue
+		}
 		c.executingTasks[t.GetTaskProto().GetPlanID()] = t
 		c.scheduler.Enqueue(t)
 		mlog.Info(context.TODO(), "compaction task enqueued",
@@ -315,8 +336,21 @@ func (c *compactionInspector) start() {
 func (c *compactionInspector) loadMeta() {
 	triggers := c.meta.GetCompactionTasks(context.TODO())
 	var failedTasks []*datapb.CompactionTask
+	// Channels a shard split froze while this datacoord was down, or before a
+	// preempted task's cleaned state was persisted.
+	frozenChannels := typeutil.NewSet[string]()
+	defer func() {
+		// A task revived on a frozen channel is preempted like one found
+		// running there: aborted on its worker, cleaned, never committed.
+		for _, channel := range frozenChannels.Collect() {
+			c.preemptTasksByChannel(channel)
+		}
+	}()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
+			if c.frozenBySplit(task) {
+				frozenChannels.Insert(task.GetChannel())
+			}
 			if isCompactionTaskCleaned(task) {
 				mlog.Info(context.TODO(), "compactionInspector loadMeta abandon compactionTask",
 					mlog.Int64("planID", task.GetPlanID()),
@@ -595,6 +629,10 @@ func (c *compactionInspector) getCompactionTask(planID int64) CompactionTask {
 
 func (c *compactionInspector) enqueueCompaction(task *datapb.CompactionTask) error {
 	log := mlog.With(mlog.Int64("planID", task.GetPlanID()), mlog.Int64("triggerID", task.GetTriggerID()), mlog.FieldCollectionID(task.GetCollectionID()), mlog.String("type", task.GetType().String()))
+	if c.frozenBySplit(task) {
+		log.RatedInfo(context.TODO(), rate.Limit(60), "channel is splitting, reject compaction until the split is done", mlog.String("channel", task.GetChannel()))
+		return merr.WrapErrCompactionPlanConflict("channel " + task.GetChannel() + " is splitting")
+	}
 	t, err := c.createCompactTask(task)
 	if err != nil {
 		// Conflict is normal

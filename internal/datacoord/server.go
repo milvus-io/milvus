@@ -121,9 +121,16 @@ type Server struct {
 	gcOpt            GcOption
 	handler          Handler
 	importMeta       ImportMeta
-	importInspector  ImportInspector
-	importChecker    ImportChecker
-	importJobLock    *lock.KeyLock[int64]
+	// shardSplitTasks is datacoord's record of the shard splits it has been
+	// told about, recovered from the catalog at start (shard_split_task.go).
+	shardSplitTasks *shardSplitTasks
+	// shardSplitManager plans this cluster's shard splits and drives every
+	// split task the store records.
+	shardSplitManager *shardSplitManager
+
+	importInspector ImportInspector
+	importChecker   ImportChecker
+	importJobLock   *lock.KeyLock[int64]
 
 	copySegmentMeta      CopySegmentMeta
 	copySegmentInspector CopySegmentInspector
@@ -322,6 +329,16 @@ func (s *Server) initDataCoord() error {
 	if err != nil {
 		return err
 	}
+
+	// The split task records come back before anything can consult them: a
+	// restart mid-split must not report its sources drained on an empty store.
+	s.shardSplitTasks = newShardSplitTasks()
+	if err = s.shardSplitTasks.load(s.ctx, s.meta.catalog); err != nil {
+		return err
+	}
+	mlog.Info(s.ctx, "load shard split tasks done")
+	s.shardSplitManager = newShardSplitManager(s.ctx, s.meta, s.allocator, s.shardSplitTasks, s)
+
 	s.initCompaction()
 	mlog.Info(s.ctx, "init compaction done")
 
@@ -492,7 +509,7 @@ func (s *Server) newChunkManagerFactory() (storage.ChunkManager, error) {
 }
 
 func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
-	s.garbageCollector = newGarbageCollector(s.meta, s.handler, GcOption{
+	option := GcOption{
 		cli:              cli,
 		broker:           s.broker,
 		enabled:          Params.DataCoordCfg.EnableGarbageCollection.GetAsBool(),
@@ -501,7 +518,12 @@ func (s *Server) initGarbageCollection(cli storage.ChunkManager) {
 		missingTolerance: Params.DataCoordCfg.GCMissingTolerance.GetAsDuration(time.Second),
 		dropTolerance:    Params.DataCoordCfg.GCDropTolerance.GetAsDuration(time.Second),
 		dataViewGC:       s.dataViewManager,
-	})
+	}
+	if s.shardSplitManager != nil {
+		// A splitting channel keeps its dropped segments until the split is Done.
+		option.isChannelSplitting = s.shardSplitManager.IsVChannelSplitting
+	}
+	s.garbageCollector = newGarbageCollector(s.meta, s.handler, option)
 }
 
 func (s *Server) initServiceDiscovery() error {
@@ -716,6 +738,12 @@ func (s *Server) initExternalCollectionInspector(storageCli storage.ChunkManager
 
 func (s *Server) initCompaction() {
 	cph := newCompactionInspector(s.meta, s.allocator, s.handler, s.globalScheduler, s.globalScheduler, s.indexEngineVersionManager)
+	if s.shardSplitManager != nil {
+		// A split freezes compaction on its source and targets until it is Done,
+		// and preempts what is already compacting its source.
+		cph.setChannelSplittingChecker(s.shardSplitManager.IsVChannelSplitting)
+		s.shardSplitManager.setCompactionPreempter(cph)
+	}
 	cph.loadMeta()
 	s.compactionInspector = cph
 	s.compactionTriggerManager = NewCompactionTriggerManager(s.allocator, s.handler, s.compactionInspector, s.meta, s.indexEngineVersionManager)
@@ -776,6 +804,12 @@ func (s *Server) startServerLoop() {
 	// construction (bounded by s.ctx); nothing to do here.
 
 	s.garbageCollector.start()
+
+	// On every cluster, whatever the compaction switch: a split already in the
+	// WAL is carried through, and a secondary's tasks come from its callbacks.
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Start()
+	}
 
 	s.meta.statsTaskMeta.StartCleanupDeprecatedSortTasks(s.serverLoopCtx, &s.serverLoopWg)
 }
@@ -1116,6 +1150,11 @@ func (s *Server) Stop() error {
 	s.copySegmentChecker.Close()
 	mlog.Info(s.ctx, "datacoord copy segment inspector and checker stopped")
 
+	if s.shardSplitManager != nil {
+		s.shardSplitManager.Stop()
+		mlog.Info(s.ctx, "datacoord shard split manager stopped")
+	}
+
 	s.stopCompaction()
 	mlog.Info(s.ctx, "datacoord compaction stopped")
 
@@ -1191,6 +1230,14 @@ func (s *Server) registerMetricsRequest() {
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.CompactionTaskKey,
 		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
 			return s.meta.compactionTaskMeta.TaskStatsJSON(), nil
+		})
+
+	s.metricsRequest.RegisterMetricsRequest(metricsinfo.ShardSplitTaskKey,
+		func(ctx context.Context, req *milvuspb.GetMetricsRequest, jsonReq gjson.Result) (string, error) {
+			if s.shardSplitManager == nil {
+				return "[]", nil
+			}
+			return s.shardSplitManager.TaskStatsJSON(), nil
 		})
 
 	s.metricsRequest.RegisterMetricsRequest(metricsinfo.BuildIndexTaskKey,

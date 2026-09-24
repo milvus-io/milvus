@@ -42,6 +42,7 @@ const (
 	WALNameLabelName                      = "wal_name"
 	WALTxnTypeLabelName                   = "txn_type"
 	WALVChannelLabelName                  = "vchannel"
+	StreamingErrorCodeLabelName           = "streaming_code"
 	StatusLabelName                       = statusLabelName
 	StreamingNodeLabelName                = "streaming_node"
 	NodeIDLabelName                       = nodeIDLabelName
@@ -116,6 +117,24 @@ var (
 		Help: "Current rate limit state of streaming service client",
 	}, WALChannelLabelName, WALRateLimitStateLabelName)
 
+	// StreamingServiceClientReplicateGatedAppends is the number of replicated
+	// appends currently held back on this cluster waiting for another vchannel's
+	// replica of the same broadcast to land here (the shard-split append gate).
+	//
+	// A gauge, so its name carries no _total suffix: that suffix is reserved for
+	// counters, and a query written against the name as a counter (rate,
+	// increase) would silently compute nonsense.
+	//
+	// A non-zero value that does not fall is the signal: a gated append blocks
+	// its whole pchannel's replicate stream, so a stuck gate looks like stalled
+	// replication and nothing else names the vchannel it is actually waiting on.
+	// Labeled by pchannel rather than vchannel, so the cardinality is bounded by
+	// the cluster's channel count instead of its collection count.
+	StreamingServiceClientReplicateGatedAppends = newStreamingServiceClientGaugeVec(prometheus.GaugeOpts{
+		Name: "replicate_gated_appends",
+		Help: "Number of replicated appends currently waiting for the append-first replicas of their broadcast",
+	}, WALChannelLabelName)
+
 	// StreamingCoord metrics
 	StreamingCoordPChannelInfo = newStreamingCoordGaugeVec(prometheus.GaugeOpts{
 		Name: "pchannel_info",
@@ -165,6 +184,22 @@ var (
 		Help:    "Duration of ack callback handler execution duration",
 		Buckets: secondsBuckets,
 	}, WALMessageTypeLabelName)
+
+	// StreamingCoordBroadcasterAppendUnrecoverableTotal counts the replica
+	// appends a broadcast task had refused with an unrecoverable streaming code
+	// (UNRECOVERABLE, SHARD_FENCED, INVALID_ARGUMENT, ...). The broadcaster
+	// retries such an append exactly like a transient failure, with backoff,
+	// while the task keeps holding its resource keys: a persisted task that a
+	// StreamingNode will never accept -- a vchannel fenced by another split, a
+	// target that conflicts with the collection's shard on its pchannel, an
+	// unknown role -- therefore never clears by itself, and this counter is the
+	// only thing that distinguishes it from a slow one. A rate that does not
+	// return to zero is the signal. Labeled by message type and streaming code,
+	// both closed enums.
+	StreamingCoordBroadcasterAppendUnrecoverableTotal = newStreamingCoordCounterVec(prometheus.CounterOpts{
+		Name: "broadcaster_append_unrecoverable_total",
+		Help: "Number of broadcast replica appends refused with an unrecoverable streaming code; the task keeps retrying them",
+	}, WALMessageTypeLabelName, StreamingErrorCodeLabelName)
 
 	// StreamingNode Producer Server Metrics.
 	StreamingNodeProducerTotal = newStreamingNodeGaugeVec(prometheus.GaugeOpts{
@@ -528,6 +563,15 @@ var (
 		Name: "idempotency_reader_physical_dedup_drop_total",
 		Help: "Total physically duplicated non-timetick messages dropped by reader reorder buffer",
 	}, WALChannelLabelName, WALScannerModelLabelName)
+	WALRecoveryOldestSplittedVChannelAgeSeconds = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_oldest_splitted_vchannel_age_seconds",
+		Help: "Age in seconds, measured from its split time tick, of the oldest shard split source vchannel on the pchannel that is SPLITTED but not yet collected from the recovery storage; 0 when there is none. Such a vchannel's frozen flusher checkpoint pins WAL truncation until it is retired and collected",
+	}, WALChannelLabelName, WALChannelTermLabelName)
+
+	WALRecoveryTruncationLagSeconds = newWALGaugeVec(prometheus.GaugeOpts{
+		Name: "recovery_truncation_lag_seconds",
+		Help: "Seconds between now and the time tick of the pchannel's minimum flusher checkpoint, the bound WAL truncation cannot pass; absent while the pchannel has no vchannel or some vchannel has no flusher checkpoint yet",
+	}, WALChannelLabelName, WALChannelTermLabelName)
 
 	WALDelegatorEmptyTimeTickFilteredTotal = newWALCounterVec(prometheus.CounterOpts{
 		Name: "delegator_empty_time_tick_filtered_total",
@@ -642,6 +686,7 @@ func RegisterStreamingServiceClient(registry *prometheus.Registry) {
 		registry.MustRegister(StreamingServiceClientConsumerTotal)
 		registry.MustRegister(StreamingServiceClientConsumeBytes)
 		registry.MustRegister(StreamingServiceClientRateLimitState)
+		registry.MustRegister(StreamingServiceClientReplicateGatedAppends)
 	})
 }
 
@@ -656,6 +701,7 @@ func registerStreamingCoord(registry *prometheus.Registry) {
 	registry.MustRegister(StreamingCoordBroadcasterTaskBroadcastDurationSeconds)
 	registry.MustRegister(StreamingCoordBroadcasterTaskAcquireLockDurationSeconds)
 	registry.MustRegister(StreamingCoordBroadcasterTaskAckCallbackDurationSeconds)
+	registry.MustRegister(StreamingCoordBroadcasterAppendUnrecoverableTotal)
 }
 
 // RegisterStreamingNode registers streaming node metrics
@@ -739,6 +785,8 @@ func registerWAL(registry *prometheus.Registry) {
 	registry.MustRegister(WALIdempotencyDuplicateTotal)
 	registry.MustRegister(WALIdempotencyEvictionTotal)
 	registry.MustRegister(WALIdempotencyReaderDedupDropTotal)
+	registry.MustRegister(WALRecoveryOldestSplittedVChannelAgeSeconds)
+	registry.MustRegister(WALRecoveryTruncationLagSeconds)
 	registry.MustRegister(WALDelegatorEmptyTimeTickFilteredTotal)
 	registry.MustRegister(WALDelegatorTsafeTimeTickUnfilteredTotal)
 	registry.MustRegister(WALFlusherEmptyTimeTickFilteredTotal)
@@ -772,6 +820,13 @@ func newStreamingCoordHistogramVec(opts prometheus.HistogramOpts, extra ...strin
 	opts.Subsystem = typeutil.StreamingCoordRole
 	labels := mergeLabel(extra...)
 	return prometheus.NewHistogramVec(opts, labels)
+}
+
+func newStreamingCoordCounterVec(opts prometheus.CounterOpts, extra ...string) *prometheus.CounterVec {
+	opts.Namespace = milvusNamespace
+	opts.Subsystem = typeutil.StreamingCoordRole
+	labels := mergeLabel(extra...)
+	return prometheus.NewCounterVec(opts, labels)
 }
 
 func newStreamingServiceClientGaugeVec(opts prometheus.GaugeOpts, extra ...string) *prometheus.GaugeVec {

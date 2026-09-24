@@ -35,6 +35,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -1260,6 +1261,9 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.PhysicalChannelNames = collInfo.PhysicalChannelNames
 	shardsNum := collInfo.ShardsNum
 	if shardsNum == 0 {
+		// Legacy meta written before ShardsNum was persisted. Such a collection
+		// has never been split (a split commit always writes the count), so every
+		// vchannel is a live shard and counting them is exact.
 		shardsNum = int32(len(collInfo.VirtualChannelNames))
 	}
 	resp.ShardsNum = shardsNum
@@ -1276,6 +1280,23 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.DbId = collInfo.DBID
 	resp.UpdateTimestamp = collInfo.UpdateTimestamp
 	resp.UpdateTimestampStr = strconv.FormatUint(collInfo.UpdateTimestamp, 10)
+
+	// Routing facts, parallel to virtual_channel_names so consumers (the proxy
+	// router, datacoord) read the topology and the schema in one response.
+	resp.RoutingModulus = collInfo.RoutingModulus
+	resp.ShardBy = collInfo.ShardBy
+	shardInfos := make([]*schemapb.CollectionShardInfo, len(collInfo.VirtualChannelNames))
+	for i, vchannel := range collInfo.VirtualChannelNames {
+		// default a legacy/normal shard to a self-describing Normal entry so a
+		// consumer can always key by vchannel_name (a legacy collection carries no
+		// ShardInfos in meta).
+		info := &schemapb.CollectionShardInfo{VchannelName: vchannel}
+		if shard, ok := collInfo.ShardInfos[vchannel]; ok {
+			info = shard.ToPB()
+		}
+		shardInfos[i] = info
+	}
+	resp.ShardInfos = shardInfos
 	return resp
 }
 

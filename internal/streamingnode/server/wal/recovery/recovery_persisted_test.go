@@ -64,6 +64,58 @@ func TestInitRecoveryInfoFromMeta(t *testing.T) {
 	assert.True(t, rs.checkpoint.MessageID.EQ(rmq.NewRmqID(1)))
 }
 
+// TestRecoverRecoveryInfoFromMetaReseedsRetiredVChannels: a vchannel can be
+// reloaded from the catalog already SPLITTED and Retired -- the routing
+// commit that retired it was persisted before a restart. retiredVChannels
+// must be re-seeded from that reload, or the persist gate would never learn
+// about a pending retirement whose flusher checkpoint had, in the meantime,
+// already passed its fence before this streamingnode ever came back up.
+func TestRecoverRecoveryInfoFromMetaReseedsRetiredVChannels(t *testing.T) {
+	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	snCatalog.EXPECT().ListSegmentAssignment(mock.Anything, mock.Anything).Return([]*streamingpb.SegmentAssignmentMeta{}, nil)
+	snCatalog.EXPECT().ListVChannel(mock.Anything, mock.Anything).Return([]*streamingpb.VChannelMeta{
+		{
+			Vchannel:      "v0",
+			State:         streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			Retired:       true,
+			SplitTimeTick: 2000,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+		{
+			// a SPLITTED-but-not-yet-retired vchannel must not be tracked.
+			Vchannel: "v1",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_SPLITTED,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+		{
+			Vchannel: "v2",
+			State:    streamingpb.VChannelState_VCHANNEL_STATE_NORMAL,
+			CollectionInfo: &streamingpb.CollectionInfoOfVChannel{
+				CollectionId: 1,
+			},
+		},
+	}, nil)
+
+	resource.InitForTest(t, resource.OptStreamingNodeCatalog(snCatalog))
+	channel := types.PChannelInfo{Name: "test_channel"}
+
+	lastConfirmed := message.CreateTestTimeTickSyncMessage(t, 1, 1, rmq.NewRmqID(1))
+	rs := newRecoveryStorage(channel, utility.NewWALCheckpointFromProto(&streamingpb.WALCheckpoint{
+		MessageId:     rmq.NewRmqID(1).IntoProto(),
+		TimeTick:      1,
+		RecoveryMagic: utility.RecoveryMagicStreamingInitialized,
+	}))
+
+	err := rs.recoverRecoveryInfoFromMeta(context.Background(), channel, lastConfirmed.IntoImmutableMessage(rmq.NewRmqID(1)))
+	assert.NoError(t, err)
+	assert.Len(t, rs.retiredVChannels, 1)
+	assert.Contains(t, rs.retiredVChannels, "v0")
+}
+
 func TestInitRecoveryInfoFromCoord(t *testing.T) {
 	var initialedVChannels map[string]*streamingpb.VChannelMeta
 	snCatalog := mock_metastore.NewMockStreamingNodeCataLog(t)

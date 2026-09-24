@@ -72,6 +72,9 @@ const (
 	// CompactionTaskKey request for get compaction tasks from the datacoord
 	CompactionTaskKey = "compaction_tasks"
 
+	// ShardSplitTaskKey request for get shard split tasks from the datacoord
+	ShardSplitTaskKey = "shard_split_tasks"
+
 	// BuildIndexTaskKey request for get building index tasks from the datacoord
 	BuildIndexTaskKey = "build_index_tasks"
 

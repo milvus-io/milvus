@@ -395,6 +395,24 @@ type ImportTask struct {
 	CompleteTime string `json:"complete_time,omitempty"`
 }
 
+// ShardSplitTask reports one shard split task as datacoord records it.
+type ShardSplitTask struct {
+	TaskID          int64    `json:"task_id,omitempty,string"`
+	CollectionID    int64    `json:"collection_id,omitempty,string"`
+	State           string   `json:"state,omitempty"`
+	Fenced          bool     `json:"fenced,omitempty"`
+	FailReason      string   `json:"fail_reason,omitempty"`
+	StartTime       string   `json:"start_time,omitempty"`
+	EndTime         string   `json:"end_time,omitempty"`
+	SourceVChannel  string   `json:"source_vchannel,omitempty"`
+	SwitchTimeTick  uint64   `json:"switch_time_tick,omitempty,string"`
+	TargetVChannels []string `json:"target_vchannels,omitempty"`
+	RoutingModulus  uint64   `json:"routing_modulus,omitempty,string"`
+	// PendingSegments is the number of source segments whose data has not
+	// reached the targets yet, as the redistribution last recorded it.
+	PendingSegments int64 `json:"pending_segments,omitempty,string"`
+}
+
 type CompactionTask struct {
 	PlanID         int64    `json:"plan_id,omitempty,string"`
 	CollectionID   int64    `json:"collection_id,omitempty,string"`
