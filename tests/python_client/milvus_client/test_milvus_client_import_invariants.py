@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import time
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -8,12 +9,15 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import requests
 from base.client_v2_base import TestMilvusClientV2Base
 from common import common_func as cf
 from common.common_type import CaseLabel, CheckTasks
 from minio import Minio
+from minio.commonconfig import CopySource
 from pymilvus import DataType, Function, FunctionType
 from pymilvus.bulk_writer import abort_import, bulk_import, commit_import, get_import_progress
+from utils.util_log import test_log as log
 
 
 class TestMilvusClientImportInvariantsIndependent(TestMilvusClientV2Base):
@@ -77,10 +81,11 @@ class TestMilvusClientImportInvariantsIndependent(TestMilvusClientV2Base):
         for object_name in objects:
             storage_client.remove_object(minio_bucket, object_name)
 
-    def _import_and_wait(self, collection_name, files, options=None, expected_state="Completed"):
+    def _import_and_wait(self, collection_name, files, options=None, expected_state="Completed", partition_name=""):
         response = bulk_import(
             url=self._import_url(),
             collection_name=collection_name,
+            partition_name=partition_name,
             files=files,
             options=options or {},
             api_key=cf.param_info.param_token,
@@ -1068,3 +1073,196 @@ class TestMilvusClientImportInvariantsIndependent(TestMilvusClientV2Base):
             assert datetime.fromisoformat(row["event_time"]).astimezone(UTC) == expected[row["id"]], row
         null_rows = self.query(client, collection_name, filter="event_time is null", output_fields=["id"])[0]
         assert null_rows == [], null_rows
+
+    @pytest.fixture
+    def copy_import_binlogs(self, minio_host, minio_bucket):
+        storage_client = Minio(f"{minio_host}:9000", access_key="minioadmin", secret_key="minioadmin", secure=False)
+        root_path = os.getenv("MILVUS_MINIO_ROOT_PATH", "files").strip("/")
+        backup_prefix = f"bulkinsert_data/{uuid4()}/binlog_backup"
+        copied_objects = []
+
+        def copy_segments(collection_id, segments, vector_field_ids):
+            # Use the same metadata API and column-group layout as milvus-backup.
+            response = requests.post(
+                f"{self._import_url()}/v2/vectordb/segments/describe",
+                headers={"Authorization": f"Bearer {cf.param_info.param_token}"},
+                json={
+                    "dbName": "default",
+                    "collectionID": collection_id,
+                    "segmentIDs": [segment.segment_id for segment in segments],
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            assert payload["code"] == 0, payload
+            infos = payload["data"]["segmentInfos"]
+            assert {info["segmentID"] for info in infos} == {segment.segment_id for segment in segments}, payload
+            files = []
+            versions = {segment.segment_id: segment.storage_version for segment in segments}
+            for info in infos:
+                assert info["insertLogs"] and not info["deltaLogs"], info
+                source_prefix = f"{root_path}/insert_log/{collection_id}/{info['partitionID']}/{info['segmentID']}"
+                # The public import API lists segments below a partition/group prefix.
+                group_prefix = f"{backup_prefix}/{info['segmentID']}"
+                destination_prefix = f"{group_prefix}/{info['segmentID']}"
+                source_objects = {}
+                if versions[info["segmentID"]] == 3:
+                    # V3 uses manifest-managed _data objects, not fieldID/logID paths.
+                    # Export this tiny immutable segment into the packed-binlog layout
+                    # accepted by backup import, without rewriting any Parquet bytes.
+                    for obj in storage_client.list_objects(
+                        minio_bucket, prefix=f"{source_prefix}/_data/", recursive=True
+                    ):
+                        assert obj.object_name.endswith(".parquet"), obj.object_name
+                        response = storage_client.get_object(minio_bucket, obj.object_name)
+                        try:
+                            parquet = pq.ParquetFile(pa.BufferReader(response.read()))
+                        finally:
+                            response.close()
+                            response.release_conn()
+                        assert parquet.metadata.num_rows == info["numRows"], obj.object_name
+                        field_ids = {int(field.metadata[b"PARQUET:field_id"]) for field in parquet.schema_arrow}
+                        if 0 in field_ids:
+                            group_id = 0
+                        elif field_ids & vector_field_ids:
+                            assert len(field_ids) == 1, field_ids
+                            group_id = next(iter(field_ids))
+                        else:
+                            # The only non-system scalar in this fixture is label.
+                            assert field_ids == {102}, field_ids
+                            group_id = 1
+                        assert group_id not in source_objects, source_objects
+                        source_objects[group_id] = obj.object_name
+                    assert set(source_objects) == {field["fieldID"] for field in info["insertLogs"]}, info
+                for field in info["insertLogs"]:
+                    if versions[info["segmentID"]] == 3:
+                        assert len(field["logIDs"]) == 1, field
+                    for log_id in field["logIDs"]:
+                        suffix = f"{field['fieldID']}/{log_id}"
+                        destination = f"{destination_prefix}/{suffix}"
+                        copied_objects.append(destination)
+                        storage_client.copy_object(
+                            minio_bucket,
+                            destination,
+                            CopySource(minio_bucket, source_objects.get(field["fieldID"], f"{source_prefix}/{suffix}")),
+                        )
+                files.append([f"{group_prefix}/"])
+            return files, infos
+
+        yield copy_segments
+        for object_name in copied_objects:
+            storage_client.remove_object(minio_bucket, object_name)
+
+    def _wait_for_sorted_binlog_segments(self, client, collection_name, row_count, timeout=120):
+        deadline = time.monotonic() + timeout
+        segments = []
+        while time.monotonic() < deadline:
+            segments = self.list_persistent_segments(client, collection_name)[0]
+            if (
+                segments
+                and sum(segment.num_rows for segment in segments) == row_count
+                and all(segment.state_name == "Flushed" and segment.is_sorted for segment in segments)
+            ):
+                return segments
+            time.sleep(2)
+        raise AssertionError(f"Sorted binlogs for {row_count} rows are not ready: {segments}")
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize(
+        "vector_type", [DataType.FLOAT_VECTOR, DataType.SPARSE_FLOAT_VECTOR], ids=["dense", "sparse"]
+    )
+    def test_import_binlog_restores_added_nullable_vector(self, vector_type, copy_import_binlogs):
+        """
+        target: restore segments sealed before and after adding a nullable vector field
+        method: copy real binlogs and import them with backup=true into an equivalent schema
+        expected: old rows retain NULL, new mixed values remain aligned, and search excludes NULL rows
+        note: native V3 files currently fail packed metadata parsing before nullable validation
+        """
+        client = self._client()
+        source = cf.gen_unique_str("binlog_source")
+        target = cf.gen_unique_str("binlog_restored")
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=8)
+        schema.add_field("label", DataType.VARCHAR, max_length=64, nullable=True)
+        self.create_collection(client, source, schema=schema, properties={"collection.autocompaction.enabled": "false"})
+        old_rows = [{"id": i, "vector": [i / 8] * 8, "label": None if i % 3 == 0 else str(i)} for i in range(8)]
+        self.insert(client, source, old_rows)
+        self.flush(client, source)
+        old_segments = self._wait_for_sorted_binlog_segments(client, source, len(old_rows))
+        versions = {segment.storage_version for segment in old_segments}
+        assert len(versions) == 1 and versions.issubset({2, 3}), old_segments
+        storage_version = versions.pop()
+        collection_id = self.describe_collection(client, source)[0]["collection_id"]
+        source_fields = self.describe_collection(client, source)[0]["fields"]
+        base_vector_id = next(field["field_id"] for field in source_fields if field["name"] == "vector")
+        old_files, old_infos = copy_import_binlogs(collection_id, old_segments, {base_vector_id})
+
+        vector_params = {"dim": 8} if vector_type == DataType.FLOAT_VECTOR else {}
+        self.add_collection_field(client, source, "added_vector", vector_type, nullable=True, **vector_params)
+        source_fields = self.describe_collection(client, source)[0]["fields"]
+        added_field_id = next(field["field_id"] for field in source_fields if field["name"] == "added_vector")
+        # Prove the triggering condition instead of assuming that flush preceded schema propagation.
+        assert all(added_field_id not in {field["fieldID"] for field in info["insertLogs"]} for info in old_infos)
+        new_rows = [
+            {
+                "id": i,
+                "vector": [i / 8] * 8,
+                "label": "" if i % 3 == 0 else str(i),
+                "added_vector": None
+                if i % 2 == 0
+                else ([i / 8] * 8 if vector_type == DataType.FLOAT_VECTOR else {0: i / 8, i: 0.5}),
+            }
+            for i in range(8, 16)
+        ]
+        self.insert(client, source, new_rows)
+        self.flush(client, source)
+        old_ids = {segment.segment_id for segment in old_segments}
+        all_segments = self._wait_for_sorted_binlog_segments(client, source, len(old_rows) + len(new_rows))
+        assert old_ids.issubset({segment.segment_id for segment in all_segments}), all_segments
+        new_segments = [segment for segment in all_segments if segment.segment_id not in old_ids]
+        assert new_segments and sum(segment.num_rows for segment in new_segments) == len(new_rows), new_segments
+        assert all(segment.storage_version == storage_version for segment in new_segments), new_segments
+        new_files, new_infos = copy_import_binlogs(collection_id, new_segments, {base_vector_id, added_field_id})
+        assert all(added_field_id in {field["fieldID"] for field in info["insertLogs"]} for info in new_infos)
+        log.info(
+            f"Binlog restore storage_version={storage_version}, old_segments={old_infos}, new_segments={new_infos}"
+        )
+
+        schema.add_field("added_vector", vector_type, nullable=True, **vector_params)
+        indexes = self.prepare_index_params(client)[0]
+        indexes.add_index("vector", index_type="FLAT", metric_type="L2")
+        indexes.add_index(
+            "added_vector",
+            index_type="FLAT" if vector_type == DataType.FLOAT_VECTOR else "SPARSE_INVERTED_INDEX",
+            metric_type="L2" if vector_type == DataType.FLOAT_VECTOR else "IP",
+        )
+        self.create_collection(client, target, schema=schema, index_params=indexes)
+        target_fields = self.describe_collection(client, target)[0]["fields"]
+        assert {field["name"]: field["field_id"] for field in target_fields} == {
+            field["name"]: field["field_id"] for field in source_fields
+        }
+        # Removing the source proves the restore reads the copied backup objects.
+        self.drop_collection(client, source)
+        self._import_and_wait(
+            target,
+            old_files + new_files,
+            {"backup": "true", "storage_version": str(storage_version)},
+            partition_name="_default",
+        )
+        self.refresh_load(client, target)
+        expected_rows = [dict(row, added_vector=None) for row in old_rows] + new_rows
+        self._assert_import_rows(client, target, expected_rows)
+        self.release_collection(client, target)
+        self.load_collection(client, target)
+        self._assert_import_rows(client, target, expected_rows)
+        hits = self.search(
+            client,
+            target,
+            data=[new_rows[1]["added_vector"]],
+            anns_field="added_vector",
+            limit=16,
+            search_params={"metric_type": "L2" if vector_type == DataType.FLOAT_VECTOR else "IP", "params": {}},
+        )[0][0]
+        assert {hit["id"] for hit in hits} == {row["id"] for row in new_rows if row["added_vector"] is not None}
