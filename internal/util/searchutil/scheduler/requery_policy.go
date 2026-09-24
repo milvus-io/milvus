@@ -82,7 +82,7 @@ func (p *requeryPriorityPolicy) Classify(task Task) taskClass {
 		requeryLaneCapacity() > 0 {
 		return taskClassPriorityLane
 	}
-	return p.inner.Classify(task)
+	return taskClassRegular
 }
 
 func (p *requeryPriorityPolicy) Cleanup(now time.Time) []*queuedTask {
@@ -204,8 +204,7 @@ func (p *requeryPriorityPolicy) refreshPriority(now time.Time) {
 		}
 	}
 
-	maxCredit := min(requeryCreditLevel3, requeryPriorityBaseCredit())
-	p.priorityCredit = min(p.priorityCredit, maxCredit)
+	p.priorityCredit = min(p.priorityCredit, requeryPriorityBaseCredit())
 	if p.priorityCredit != oldCredit {
 		p.requeryCredit = p.burstCredit()
 		mlog.Info(context.TODO(), "requery priority level changed",
