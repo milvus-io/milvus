@@ -388,6 +388,12 @@ proxy:
   partialResultRequiredDataRatio: 1 # partial result required data ratio, default to 1 which means disable partial result, otherwise, it will be used as the minimum data ratio for partial result
   http:
     enabled: true # Whether to enable the http server
+    # Whether to register /v1/vector/* on the proxy HTTP port and /api/v1/_* on the metrics port.
+    # Restart to apply. Disabling keeps listeners, V2, probes, and metrics available.
+    # The non-underscore /api/v1/* REST API is removed regardless of this setting.
+    # WebUI data requires these console APIs; use enableWebUI to hide the pages.
+    # managementMetricsOnly takes precedence on the metrics port.
+    enableV1: true
     debug_mode: false # Whether to enable http server debug mode
     port:  # high-level restful api
     acceptTypeAllowInt64: true # high-level restful api, whether http client can deal with int64
@@ -1070,6 +1076,15 @@ common:
     lowPriorityRatio: -1 # amplification ratio for low priority tasks if disk rate limiter is enabled, value <= 0 means ratio limit is disabled
   security:
     authorizationEnabled: false
+    # Restrict the management port (default 9091) to GET/HEAD on /metrics,
+    # /metrics_default, /healthz, /livez and /management/check/ready. Probes return
+    # only their HTTP status and a generic message. All other management, WebUI,
+    # profiling, eventlog and legacy /api/v1 endpoints return 404, regardless of
+    # enableWebUI or enablePprof. Metrics and probes remain unauthenticated: restrict
+    # network access to trusted monitoring and probe clients. Independent of
+    # authorizationEnabled; does not affect the main service port. Set on every
+    # process and restart to apply. Cannot be changed through /management/config/alter.
+    managementMetricsOnly: false
     # The superusers will ignore some system check processes,
     # like the old password verification when updating the credential
     superUsers: 

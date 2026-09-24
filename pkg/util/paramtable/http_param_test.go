@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPConfig_Init(t *testing.T) {
@@ -27,10 +28,22 @@ func TestHTTPConfig_Init(t *testing.T) {
 	params.Init(NewBaseTable(SkipRemote(true)))
 	cfg := &params.HTTPCfg
 	assert.Equal(t, cfg.Enabled.GetAsBool(), true)
+	assert.Equal(t, "true", params.GetWithDefault("proxy.http.enableV1", "missing"))
 	assert.Equal(t, cfg.DebugMode.GetAsBool(), false)
 	assert.Equal(t, cfg.Port.GetValue(), "")
 	assert.Equal(t, cfg.AcceptTypeAllowInt64.GetValue(), "true")
 	assert.Equal(t, cfg.EnablePprof.GetAsBool(), true)
 	assert.Equal(t, cfg.DQLAdmissionEnabled.GetAsBool(), true)
 	assert.Equal(t, cfg.EnableWebUI.GetAsBool(), true)
+}
+
+func TestHTTPConfig_V1Override(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files([]string{}))
+	t.Cleanup(base.mgr.Close)
+	cfg := httpConfig{}
+	cfg.init(base)
+	assert.True(t, cfg.EnableV1.GetAsBool(), "missing key must keep V1 enabled")
+	require.NoError(t, base.Save(cfg.EnableV1.Key, "false"))
+	assert.False(t, cfg.EnableV1.GetAsBool())
+	assert.True(t, cfg.Enabled.GetAsBool(), "disabling V1 must preserve the listener")
 }

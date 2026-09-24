@@ -357,6 +357,7 @@ type commonConfig struct {
 	DiskWriteRateLimiterLowPriorityRatio    ParamItem `refreshable:"true"`
 
 	AuthorizationEnabled  ParamItem `refreshable:"false"`
+	ManagementMetricsOnly ParamItem `refreshable:"false"`
 	SuperUsers            ParamItem `refreshable:"true"`
 	DefaultRootPassword   ParamItem `refreshable:"false"`
 	RootShouldBindRole    ParamItem `refreshable:"true"`
@@ -978,6 +979,24 @@ For example, if the rate limit is 100KB/s, and the high priority ratio is 2, the
 		Export:       true,
 	}
 	p.AuthorizationEnabled.Init(base.mgr)
+
+	p.ManagementMetricsOnly = ParamItem{
+		Key:          "common.security.managementMetricsOnly",
+		Version:      "2.6.24",
+		DefaultValue: "false",
+		Doc: `Restrict the management port (default 9091) to GET/HEAD on /metrics,
+/metrics_default, /healthz, /livez and /management/check/ready. Probes return
+only their HTTP status and a generic message. All other management, WebUI,
+profiling, eventlog and legacy /api/v1 endpoints return 404, regardless of
+enableWebUI or enablePprof. Metrics and probes remain unauthenticated: restrict
+network access to trusted monitoring and probe clients. Independent of
+authorizationEnabled; does not affect the main service port. Set on every
+process and restart to apply. Cannot be changed through /management/config/alter.`,
+		Export: true,
+		// Do not mark Immutable: that would persist the initial default in
+		// etcd, overriding a later opt-in in the operator's configuration file.
+	}
+	p.ManagementMetricsOnly.Init(base.mgr)
 
 	p.SuperUsers = ParamItem{
 		Key:     "common.security.superUsers",
