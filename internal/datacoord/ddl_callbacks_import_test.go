@@ -230,7 +230,6 @@ func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
 }
 
 func TestBroadcastImportBoundaryFailures(t *testing.T) {
-	patchSnapshotImportWAL(t)
 	type boundaryBroker struct{ broker.Broker }
 	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "auto_id"} {
 		t.Run(stage, func(t *testing.T) {
@@ -276,7 +275,8 @@ func TestBroadcastImportBoundaryFailures(t *testing.T) {
 					for _, file := range decoded.MustBody().GetFiles() {
 						require.Nil(t, file.GetPreAllocatedAutoIds())
 					}
-					require.ElementsMatch(t, []string{"v1", funcutil.GetControlChannel("snapshot-test")}, msg.BroadcastHeader().VChannels)
+					// The broadcaster adds the control channel after this input boundary.
+					require.ElementsMatch(t, []string{"v1"}, msg.BroadcastHeader().VChannels)
 					return &types.BroadcastAppendResult{}, nil
 				}).Build()
 			defer transport.UnPatch()
