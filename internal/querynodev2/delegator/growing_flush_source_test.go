@@ -18,18 +18,29 @@ package delegator
 
 import (
 	"context"
+	"encoding/base64"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/hook"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
+	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
+	"github.com/milvus-io/milvus/internal/util/segcore"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -640,4 +651,198 @@ func requireRetainedMetricCount(t *testing.T, expected int) {
 	t.Helper()
 	require.Equal(t, expected, testutil.CollectAndCount(metrics.QueryNodeGrowingSourceRetainedBytes))
 	require.Equal(t, expected, testutil.CollectAndCount(metrics.QueryNodeGrowingSourceRetainedSegments))
+}
+
+func TestGrowingSourceCollectionReferencesBalanceAcrossSegments(t *testing.T) {
+	for _, finish := range []string{"drain", "close"} {
+		t.Run(finish, func(t *testing.T) {
+			segmentManager := segments.NewMockSegmentManager(t)
+			collectionManager := segments.NewMockCollectionManager(t)
+			provider := newDelegatorGrowingSourceProvider(&segments.Manager{Segment: segmentManager, Collection: collectionManager}, 100, nil)
+			refs := 1 // The channel owns the original collection reference.
+			collectionManager.EXPECT().Ref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
+				require.Positive(t, refs)
+				refs++
+				return true
+			}).Times(5) // Three retained segments and two writes.
+			collectionManager.EXPECT().Unref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool {
+				require.Positive(t, refs)
+				refs--
+				return refs == 0
+			}).Times(6)
+
+			retained := make([]*segments.MockSegment, 3)
+			handoff := make([]syncmgr.GrowingSourceReleaseHandoffSegment, 3)
+			for i := range retained {
+				id := int64(1001 + i)
+				segment := segments.NewMockSegment(t)
+				segment.EXPECT().MemSize().Return(int64(1024)).Maybe()
+				retained[i] = segment
+				segmentManager.EXPECT().GetGrowing(id).Return(segment).Once()
+				segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+				segment.EXPECT().InsertCount().Return(int64(10)).Once()
+				segment.EXPECT().Unpin().Once()
+				if finish == "drain" || i == 0 {
+					segmentManager.EXPECT().ReleaseDetached(mock.Anything, segment).Once()
+				}
+				handoff[i] = syncmgr.GrowingSourceReleaseHandoffSegment{SegmentID: id, TargetOffset: 10}
+			}
+			require.NoError(t, provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, handoff))
+			require.Equal(t, 4, refs)
+			require.NoError(t, provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, handoff))
+			require.Equal(t, 4, refs, "repeated prepare must reuse retained ownership")
+			collectionManager.Unref(100, 1)
+			require.Equal(t, 3, refs)
+
+			for _, writeErr := range []error{nil, merr.ErrServiceInternal} {
+				retained[0].EXPECT().FlushData(mock.Anything, int64(0), int64(10), mock.Anything).RunAndReturn(func(context.Context, int64, int64, *segments.FlushConfig) (*segments.FlushResult, error) {
+					require.Equal(t, 4, refs, "write must hold a temporary collection reference")
+					return nil, writeErr
+				}).Once()
+				source := &delegatorGrowingFlushSource{segment: retained[0], provider: provider}
+				_, err := source.FlushGrowingData(context.Background(), 0, 10, &syncmgr.GrowingFlushConfig{CollectionID: 100})
+				require.ErrorIs(t, err, writeErr)
+				require.Equal(t, 3, refs)
+			}
+			provider.MarkReleaseDetached(1001)
+			provider.releaseRetainedIfComplete(1001, 10)
+			require.Equal(t, 2, refs)
+			if finish == "drain" {
+				for _, id := range []int64{1002, 1003} {
+					provider.MarkReleaseDetached(id)
+					provider.releaseRetainedIfComplete(id, 10)
+				}
+			}
+			provider.Close()
+			require.Zero(t, refs)
+			provider.Close()
+			require.Zero(t, refs, "repeated close must not release ownership twice")
+		})
+	}
+}
+
+func TestGrowingSourceCollectionReferencesRollbackOnlyNewEntries(t *testing.T) {
+	segmentManager := segments.NewMockSegmentManager(t)
+	collectionManager := segments.NewMockCollectionManager(t)
+	provider := newDelegatorGrowingSourceProvider(&segments.Manager{Segment: segmentManager, Collection: collectionManager}, 100, nil)
+	refs := 0
+	collectionManager.EXPECT().Ref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool { refs++; return true }).Times(2)
+	collectionManager.EXPECT().Unref(int64(100), uint32(1)).RunAndReturn(func(int64, uint32) bool { refs--; return refs == 0 }).Times(2)
+	for _, id := range []int64{1001, 1002} {
+		segment := segments.NewMockSegment(t)
+		segment.EXPECT().MemSize().Return(int64(1024)).Maybe()
+		segmentManager.EXPECT().GetGrowing(id).Return(segment).Once()
+		segment.EXPECT().PinIfNotReleased().Return(nil).Once()
+		segment.EXPECT().InsertCount().Return(int64(10)).Once()
+		segment.EXPECT().Unpin().Once()
+	}
+	require.NoError(t, provider.registerRetained(1001, 5))
+	original := provider.retained[1001]
+	failing := segments.NewMockSegment(t)
+	segmentManager.EXPECT().GetGrowing(int64(1003)).Return(failing).Once()
+	failing.EXPECT().PinIfNotReleased().Return(merr.ErrServiceInternal).Once()
+	err := provider.PrepareGrowingSourceReleaseHandoff(context.Background(), 0, []syncmgr.GrowingSourceReleaseHandoffSegment{
+		{SegmentID: 1001, TargetOffset: 10}, {SegmentID: 1002, TargetOffset: 10}, {SegmentID: 1003, TargetOffset: 10},
+	})
+	require.ErrorIs(t, err, merr.ErrServiceInternal)
+	require.Equal(t, 1, refs)
+	require.Len(t, provider.retained, 1)
+	require.Same(t, original, provider.retained[1001])
+	require.EqualValues(t, 5, original.targetOffset)
+	provider.Close()
+	require.Zero(t, refs)
+}
+
+type growingFlushContextCipher struct{ hook.Cipher }
+
+func (growingFlushContextCipher) GetUnsafeKey(int64, int64) []byte {
+	return []byte("0123456789abcdef0123456789abcdef")
+}
+
+func TestGrowingFlushContextSurvivesRetainedReleaseDuringWrite(t *testing.T) {
+	paramtable.Init()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Use the real collection manager. The native boundary fixture has the same
+	// register/update and final-release semantics as the cipher context registry.
+	var registered atomic.Bool
+	var registrations, releases atomic.Int32
+	cipher := mockey.Mock(hookutil.GetCipher).Return(growingFlushContextCipher{}).Build()
+	defer cipher.UnPatch()
+	put := mockey.Mock(segcore.PutOrRefPluginContext).To(func(ez *hookutil.EZ, key string) error {
+		require.EqualValues(t, 100, ez.CollectionID)
+		require.Equal(t, base64.StdEncoding.EncodeToString(growingFlushContextCipher{}.GetUnsafeKey(17, 100)), key)
+		registered.Store(true)
+		registrations.Add(1)
+		return nil
+	}).Build()
+	defer put.UnPatch()
+	unref := mockey.Mock(segcore.UnRefPluginContext).To(func(ez *hookutil.EZ) error {
+		registered.Store(false)
+		releases.Add(1)
+		return nil
+	}).Build()
+	defer unref.UnPatch()
+	collectionManager := segments.NewCollectionManager()
+	schema := mock_segcore.GenTestCollectionSchema("flush_context", schemapb.DataType_Int64, false)
+	schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "17"}}
+	require.NoError(t, collectionManager.PutOrRef(100, schema, nil, &querypb.LoadMetaInfo{LoadType: querypb.LoadType_LoadCollection}))
+	segmentManager := segments.NewMockSegmentManager(t)
+	segment := segments.NewMockSegment(t)
+	segment.EXPECT().MemSize().Return(int64(1024)).Maybe()
+	provider := newDelegatorGrowingSourceProvider(&segments.Manager{Collection: collectionManager, Segment: segmentManager}, 100, nil)
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(segment).Once()
+	segment.EXPECT().PinIfNotReleased().Return(nil).Times(2)
+	segment.EXPECT().InsertCount().Return(int64(10)).Times(2)
+	segment.EXPECT().Unpin().Times(2)
+	require.NoError(t, provider.registerRetained(1001, 10))
+	collectionManager.Unref(100, 1) // The channel releases its original owner.
+	require.True(t, registered.Load())
+	segmentManager.EXPECT().GetGrowing(int64(1001)).Return(nil).Once()
+	source, state := provider.GetGrowingFlushSource(1001, 10, nil)
+	require.Equal(t, syncmgr.GrowingSourceUsable, state)
+	entered, finish := make(chan struct{}), make(chan struct{})
+	var finishOnce sync.Once
+	defer func() { finishOnce.Do(func() { close(finish) }); source.Release(); provider.Close() }()
+	segment.EXPECT().FlushData(mock.Anything, int64(0), int64(10), mock.Anything).
+		RunAndReturn(func(context.Context, int64, int64, *segments.FlushConfig) (*segments.FlushResult, error) {
+			close(entered)
+			select {
+			case <-finish:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			if !registered.Load() {
+				return nil, merr.ErrCollectionNotFound
+			}
+			return &segments.FlushResult{}, nil
+		}).Once()
+	done := make(chan error, 1)
+	go func() {
+		_, err := source.FlushGrowingData(ctx, 0, 10, &syncmgr.GrowingFlushConfig{CollectionID: 100, Schema: schema})
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("flush did not enter writer")
+	}
+	segmentManager.EXPECT().ReleaseDetached(mock.Anything, segment).Once()
+	provider.MarkReleaseDetached(1001)
+	provider.releaseRetainedIfComplete(1001, 10)
+	require.Empty(t, provider.retained)
+	require.NotNil(t, collectionManager.Get(100), "in-flight flush is now the last owner")
+	require.True(t, registered.Load())
+	require.Zero(t, releases.Load())
+	finishOnce.Do(func() { close(finish) })
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-ctx.Done():
+		t.Fatal("flush did not finish")
+	}
+	require.Nil(t, collectionManager.Get(100))
+	require.False(t, registered.Load())
+	require.EqualValues(t, 3, registrations.Load())
+	require.EqualValues(t, 1, releases.Load())
 }

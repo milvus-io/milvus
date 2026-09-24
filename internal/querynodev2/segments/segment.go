@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -1586,10 +1587,6 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 	if config.Schema == nil {
 		return nil, merr.WrapErrServiceInternalMsg("flush schema is nil")
 	}
-	ezID, err := growingFlushEncryptionZone(config)
-	if err != nil {
-		return nil, err
-	}
 
 	schemaBlob, err := proto.Marshal(config.Schema)
 	if err != nil {
@@ -1601,8 +1598,8 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 	// build C flush config
 	var cConfig C.CFlushConfig
-	if ezID != 0 {
-		writerProperties, err := packed.WriterEncryptionProperties(ezID, config.CollectionID)
+	if ez := hookutil.GetEzByCollProperties(config.Schema.GetProperties(), config.CollectionID); ez != nil {
+		writerProperties, err := packed.WriterEncryptionProperties(ez.EzID, ez.CollectionID)
 		if err != nil {
 			return nil, err
 		}

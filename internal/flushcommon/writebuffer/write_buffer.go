@@ -632,17 +632,6 @@ func (wb *writeBufferBase) decideGrowingFlushSource(segmentID int64, targetOffse
 		case metacache.FlushSourceWriteBuffer:
 			return growingFlushSourceDecision{sourceType: metacache.FlushSourceWriteBuffer}
 		}
-		// A committed V3 prefix is already available to the growing reader.
-		// On restart, the write buffer can replay WAL before QueryNode has
-		// registered that reader, so an unavailable resolver is temporary.
-		// Keep the replayed rows in growing-source progress until it arrives.
-		if wb.allowGrowingSourceFlush && seg.FlushedRows() > 0 && seg.ManifestPath() != "" &&
-			!wb.hasWriteBufferInsertPayload(segmentID) {
-			return growingFlushSourceDecision{
-				sourceType:  metacache.FlushSourceGrowing,
-				sourceState: wb.getGrowingSourceState(segmentID, targetOffset, endPos),
-			}
-		}
 	}
 
 	// 2. Fallback for the brief window where in-memory bookkeeping has been

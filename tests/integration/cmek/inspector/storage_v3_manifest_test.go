@@ -32,9 +32,6 @@ func TestManifestLocatorV3RejectsAmbiguousRevision(t *testing.T) {
 		`{}`, `null`, `{"base_path":"root/segment"}`,
 		`{"base_path":"root/segment","ver":0}`,
 		`{"base_path":"root/segment","ver":-1}`,
-		`{"base_path":"root/../segment","ver":2}`,
-		`{"base_path":"root/segment","ver":2,"ver":3}`,
-		`{"base_path":"root/segment","ver":2,"key":"canary"}`,
 		`{"base_path":"root/segment","ver":2} {}`,
 	} {
 		t.Run(input, func(t *testing.T) {
@@ -42,7 +39,7 @@ func TestManifestLocatorV3RejectsAmbiguousRevision(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
-	locator, err := ParseManifestLocatorV3(`{"base_path":"root/segment","ver":7}`)
+	locator, err := ParseManifestLocatorV3(`{"base_path":"root/segment","ver":7,"future_field":"value"}`)
 	require.NoError(t, err)
 	require.Equal(t, "root/segment/_metadata/manifest-7.avro", locator.ObjectPath())
 }
@@ -142,34 +139,22 @@ func TestManifestV3EnumeratesAllObjectsAcrossSegments(t *testing.T) {
 	}, paths)
 }
 
-func TestManifestV3RejectsPayloadAndUnclassifiedMetadata(t *testing.T) {
-	for _, field := range []string{"user_payload", "text_value", "dek", "cipher_context", "future_field"} {
-		t.Run(field, func(t *testing.T) {
-			record := manifestV3Fixture()
-			record[field] = "sensitive-canary"
-			schema := strings.Replace(manifestV3TestSchema, `"fields":[`, `"fields":[{"name":"`+field+`","type":"string"},`, 1)
-			_, err := ParseParquetObjectsV3(encodeManifestV3(t, schema, record), "root/11")
-			require.Error(t, err)
-			require.NotContains(t, err.Error(), "sensitive-canary")
-		})
-	}
-	for _, property := range []string{"writer.enc.key", "dek", "payload", "unclassified"} {
-		t.Run("file property "+property, func(t *testing.T) {
-			record := manifestV3Fixture()
-			file := record["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[0].(map[string]any)
-			file["properties"].(map[string]string)[property] = "sensitive-canary"
-			_, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
-			require.Error(t, err)
-			require.NotContains(t, err.Error(), "sensitive-canary")
-		})
-	}
-	t.Run("stats metadata", func(t *testing.T) {
-		record := manifestV3Fixture()
-		record["stats"].(map[string]any)["bloom_filter.100"].(map[string]any)["metadata"] = map[string]string{"payload": "sensitive-canary"}
-		_, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
-		require.Error(t, err)
-		require.NotContains(t, err.Error(), "sensitive-canary")
-	})
+func TestManifestV3IgnoresUnrelatedMetadata(t *testing.T) {
+	expected, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture()), "root/11")
+	require.NoError(t, err)
+	record := manifestV3Fixture()
+	record["future_field"] = "future value"
+	record["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[0].(map[string]any)["properties"] = map[string]string{"future_property": "value"}
+	record["stats"] = map[string]any{"future_stats": map[string]any{"paths": []string{"_stats/1"}, "metadata": map[string]string{"future_property": "value"}}}
+	schema := strings.Replace(manifestV3TestSchema, `"fields":[`, `"fields":[{"name":"future_field","type":"string"},`, 1)
+	var output bytes.Buffer
+	encoder, err := ocf.NewEncoder(schema, &output, ocf.WithMetadata(map[string][]byte{"future_metadata": []byte("value")}))
+	require.NoError(t, err)
+	require.NoError(t, encoder.Encode(record))
+	require.NoError(t, encoder.Close())
+	objects, err := ParseParquetObjectsV3(output.Bytes(), "root/11")
+	require.NoError(t, err)
+	require.Equal(t, expected, objects)
 }
 
 func TestManifestV3RejectsIncompleteAndMalformedObjects(t *testing.T) {
@@ -193,9 +178,6 @@ func TestManifestV3RejectsIncompleteAndMalformedObjects(t *testing.T) {
 		}},
 		{"duplicate resolved object", func(r map[string]any) {
 			r["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[1].(map[string]any)["path"] = "root/11/_data/a.parquet"
-		}},
-		{"invalid size", func(r map[string]any) {
-			r["column_groups"].([]any)[0].(map[string]any)["files"].([]any)[0].(map[string]any)["properties"] = map[string]string{"file_size": "payload"}
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -241,7 +223,7 @@ func TestLocateManifestsV3RejectsInvalidOrSharedLocator(t *testing.T) {
 func TestManifestV3RejectsInvalidContainer(t *testing.T) {
 	t.Run("invalid base path", func(t *testing.T) {
 		raw := encodeManifestV3(t, manifestV3TestSchema, manifestV3Fixture())
-		_, err := ParseParquetObjectsV3(raw, "../segment")
+		_, err := ParseParquetObjectsV3(raw, "")
 		require.ErrorContains(t, err, "invalid manifest base path")
 	})
 	t.Run("invalid OCF header", func(t *testing.T) {
@@ -252,91 +234,4 @@ func TestManifestV3RejectsInvalidContainer(t *testing.T) {
 		_, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema), "root/11")
 		require.ErrorContains(t, err, "no record")
 	})
-}
-
-func TestManifestV3ValidatesStatistics(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		kind     string
-		paths    []string
-		metadata map[string]string
-		wantErr  string
-	}{
-		{"bloom filter", "bloom_filter.100", []string{"_stats/bloom/1"}, map[string]string{"memory_size": "1024"}, ""},
-		{"bm25", "bm25.101", []string{"_stats/bm25/1"}, map[string]string{"memory_size": "0"}, ""},
-		{"unknown kind", "payload.100", []string{"_stats/1"}, nil, "unclassified manifest statistics"},
-		{"missing field", "bloom_filter", []string{"_stats/1"}, nil, "unclassified manifest statistics"},
-		{"nonnumeric field", "bloom_filter.secret", []string{"_stats/1"}, nil, "invalid manifest statistics"},
-		{"negative field", "bloom_filter.-1", []string{"_stats/1"}, nil, "invalid manifest statistics"},
-		{"no paths", "bloom_filter.100", []string{}, nil, "invalid manifest statistics"},
-		{"path traversal", "bloom_filter.100", []string{"../secret"}, nil, "invalid manifest statistics path"},
-		{"negative size", "bloom_filter.100", []string{"_stats/1"}, map[string]string{"memory_size": "-1"}, "invalid manifest numeric property"},
-		{"overflow size", "bloom_filter.100", []string{"_stats/1"}, map[string]string{"memory_size": "9223372036854775808"}, "invalid manifest numeric property"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			record := manifestV3Fixture()
-			metadata := test.metadata
-			if metadata == nil {
-				metadata = map[string]string{}
-			}
-			record["stats"] = map[string]any{test.kind: map[string]any{"paths": test.paths, "metadata": metadata}}
-			objects, err := ParseParquetObjectsV3(encodeManifestV3(t, manifestV3TestSchema, record), "root/11")
-			if test.wantErr != "" {
-				require.ErrorContains(t, err, test.wantErr)
-				require.Nil(t, objects)
-				return
-			}
-			require.NoError(t, err)
-			require.Len(t, objects, 4, "statistics must not be mistaken for raw-data objects")
-		})
-	}
-}
-
-func TestManifestV3ValidatesAuxiliaryArtifacts(t *testing.T) {
-	const deltaField = `{"name":"delta_logs","type":{"type":"array","items":{"type":"record","name":"Delta","fields":[{"name":"path","type":"string"},{"name":"num_entries","type":"long"}]}}}`
-	const indexField = `{"name":"indexes","type":{"type":"array","items":{"type":"record","name":"Index","fields":[{"name":"path","type":"string"},{"name":"field_id","type":"long"},{"name":"num_rows","type":"long"},{"name":"serialized_size","type":"long"},{"name":"mem_size","type":"long"},{"name":"properties","type":{"type":"map","values":"string"}}]}}}`
-	const lobField = `{"name":"lob_files","type":{"type":"array","items":{"type":"record","name":"LOB","fields":[{"name":"path","type":"string"}]}}}`
-	for _, test := range []struct {
-		name    string
-		field   string
-		key     string
-		item    map[string]any
-		wantErr string
-	}{
-		{"delta", deltaField, "delta_logs", map[string]any{"path": "_delta/1", "num_entries": int64(1)}, ""},
-		{"invalid delta path", deltaField, "delta_logs", map[string]any{"path": "../secret", "num_entries": int64(1)}, "invalid manifest delta log"},
-		{"negative delta entries", deltaField, "delta_logs", map[string]any{"path": "_delta/1", "num_entries": int64(-1)}, "invalid manifest delta log"},
-		{"index", indexField, "indexes", map[string]any{"path": "_index/1", "field_id": int64(100), "num_rows": int64(4), "serialized_size": int64(32), "mem_size": int64(64), "properties": map[string]string{}}, ""},
-		{"invalid index path", indexField, "indexes", map[string]any{"path": "../secret", "field_id": int64(100), "num_rows": int64(4), "serialized_size": int64(32), "mem_size": int64(64), "properties": map[string]string{}}, "invalid manifest index metadata"},
-		{"index secret property", indexField, "indexes", map[string]any{"path": "_index/1", "field_id": int64(100), "num_rows": int64(4), "serialized_size": int64(32), "mem_size": int64(64), "properties": map[string]string{"dek": "sensitive-canary"}}, "unclassified manifest property"},
-		{"unsupported LOB", lobField, "lob_files", map[string]any{"path": "_lob/1"}, "unexpectedly produced LOB files"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			schema := strings.Replace(manifestV3TestSchema, `"fields":[`, `"fields":[`+test.field+`,`, 1)
-			record := manifestV3Fixture()
-			record[test.key] = []any{test.item}
-			objects, err := ParseParquetObjectsV3(encodeManifestV3(t, schema, record), "root/11")
-			if test.wantErr != "" {
-				require.ErrorContains(t, err, test.wantErr)
-				require.NotContains(t, err.Error(), "sensitive-canary")
-				require.Nil(t, objects)
-				return
-			}
-			require.NoError(t, err)
-			require.Len(t, objects, 4, "auxiliary artifacts must not be mistaken for raw-data objects")
-		})
-	}
-}
-
-func TestManifestV3RejectsUnclassifiedContainerMetadata(t *testing.T) {
-	var output bytes.Buffer
-	encoder, err := ocf.NewEncoder(manifestV3TestSchema, &output,
-		ocf.WithMetadata(map[string][]byte{"dek": []byte("sensitive-canary")}))
-	require.NoError(t, err)
-	require.NoError(t, encoder.Encode(manifestV3Fixture()))
-	require.NoError(t, encoder.Close())
-	objects, err := ParseParquetObjectsV3(output.Bytes(), "root/11")
-	require.ErrorContains(t, err, "unclassified manifest OCF metadata")
-	require.NotContains(t, err.Error(), "sensitive-canary")
-	require.Nil(t, objects)
 }

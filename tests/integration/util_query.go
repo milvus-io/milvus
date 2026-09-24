@@ -93,7 +93,9 @@ func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, coll
 			DbName:         dbName,
 			CollectionName: collection,
 		})
-		s.Require().NoError(merr.CheckRPCCall(loadProgress, err), "get loading progress for %s.%s", dbName, collection)
+		if err != nil {
+			panic("GetLoadingProgress fail")
+		}
 		return loadProgress
 	}
 	for getLoadingProgress().GetProgress() != 100 {

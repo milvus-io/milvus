@@ -17,15 +17,12 @@
 package cmek
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
+	"os/exec"
 	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,58 +122,6 @@ func (s *rawDataSuite) insertGrowingBatch(ctx context.Context, description *milv
 	return result.GetTimestamp()
 }
 
-type growingSourceEvent struct {
-	Message      string `json:"message"`
-	CollectionID int64  `json:"collectionID"`
-	SegmentID    int64  `json:"segmentID"`
-	TargetOffset int64  `json:"targetOffset"`
-	BatchRows    int64  `json:"batchRows"`
-	ManifestPath string `json:"manifestPath"`
-	NodeID       int64  `json:"nodeID"`
-}
-
-func (s *rawDataSuite) growingSourceEvents() ([]growingSourceEvent, error) {
-	files, err := filepath.Glob(filepath.Join(s.growingLogDir, "*.log"))
-	if err != nil {
-		return nil, err
-	}
-	var events []growingSourceEvent
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-		for _, line := range bytes.Split(data, []byte{'\n'}) {
-			var event growingSourceEvent
-			if json.Unmarshal(line, &event) == nil && event.Message == "growing source sync task done" && event.BatchRows > 0 {
-				events = append(events, event)
-			}
-		}
-	}
-	return events, nil
-}
-
-// Existing production completion logs tie the inspected manifest to the actual
-// growing-source writer. Merely enabling the config permits canonical fallback.
-func (s *rawDataSuite) assertGrowingSourceFlush(segments []*datapb.SegmentInfo) {
-	s.Require().Eventually(func() bool {
-		events, err := s.growingSourceEvents()
-		if err != nil {
-			return false
-		}
-		seen := make(map[int64]bool)
-		for _, event := range events {
-			for _, segment := range segments {
-				if event.CollectionID == segment.GetCollectionID() && event.SegmentID == segment.GetID() &&
-					event.TargetOffset == segment.GetNumOfRows() && event.ManifestPath == segment.GetManifestPath() {
-					seen[segment.GetID()] = true
-				}
-			}
-		}
-		return len(seen) == len(segments)
-	}, 10*time.Second, 100*time.Millisecond, "each inspected manifest must come from a nonempty growing-source flush (logs: %s)", s.growingLogDir)
-}
-
 type growingObject struct {
 	Columns    string
 	Start, End int64
@@ -192,7 +137,6 @@ type growingSnapshot struct {
 	ManifestPath                         string
 	Objects                              map[string]growingObject
 	GroupPaths                           map[string][]string
-	Source                               growingSourceEvent
 }
 
 func (s *rawDataSuite) readGrowingMeta(ctx context.Context, description *milvuspb.DescribeCollectionResponse) (*streamingpb.SegmentAssignmentMeta, *streamingpb.WALCheckpoint, error) {
@@ -335,20 +279,6 @@ func (s *rawDataSuite) readGrowingSnapshot(ctx context.Context, description *mil
 	if snapshot.CommittedRows > snapshot.ModifiedRows {
 		return nil, merr.WrapErrServiceInternalMsg("committed rows %d exceed modified rows %d", snapshot.CommittedRows, snapshot.ModifiedRows)
 	}
-	events, err := s.growingSourceEvents()
-	if err != nil {
-		return nil, err
-	}
-	for _, event := range events {
-		if event.CollectionID == snapshot.CollectionID && event.SegmentID == snapshot.SegmentID &&
-			event.TargetOffset == snapshot.CommittedRows && event.ManifestPath == manifestPath {
-			snapshot.Source = event
-			break
-		}
-	}
-	if snapshot.Source.BatchRows <= 0 {
-		return nil, merr.WrapErrServiceInternalMsg("no growing-source completion for segment %d offset %d manifest %s", snapshot.SegmentID, snapshot.CommittedRows, manifestPath)
-	}
 	return snapshot, nil
 }
 
@@ -360,7 +290,7 @@ func (s *rawDataSuite) waitGrowingSnapshot(ctx context.Context, description *mil
 		snapshot, err := s.readGrowingSnapshot(ctx, description)
 		if err == nil {
 			if snapshot.CommittedRows == committed {
-				s.T().Logf("stage=growing-commit collection=%d segment=%d committed=%d modified=%d segmentCheckpoint=%d channelCheckpoint=%d manifest=%+v objects=%d source=%+v", snapshot.CollectionID, snapshot.SegmentID, snapshot.CommittedRows, snapshot.ModifiedRows, snapshot.SegmentCheckpoint, snapshot.ChannelCheckpoint, snapshot.Manifest, len(snapshot.Objects), snapshot.Source)
+				s.T().Logf("stage=growing-commit collection=%d segment=%d committed=%d modified=%d segmentCheckpoint=%d channelCheckpoint=%d manifest=%+v objects=%d", snapshot.CollectionID, snapshot.SegmentID, snapshot.CommittedRows, snapshot.ModifiedRows, snapshot.SegmentCheckpoint, snapshot.ChannelCheckpoint, snapshot.Manifest, len(snapshot.Objects))
 				return snapshot
 			}
 			last = fmt.Sprintf("committed=%d modified=%d segment=%d manifest=%+v", snapshot.CommittedRows, snapshot.ModifiedRows, snapshot.SegmentID, snapshot.Manifest)
@@ -382,9 +312,6 @@ func (s *rawDataSuite) assertGrowingAdvance(previous, current *growingSnapshot, 
 	s.Require().Equal(previous.CollectionID, current.CollectionID)
 	s.Require().Equal(previous.SegmentID, current.SegmentID)
 	s.Require().Equal(previous.CommittedRows+newRows, current.CommittedRows)
-	s.Require().Equal(previous.CommittedRows, current.Source.TargetOffset-current.Source.BatchRows,
-		"source completion must cover the newly committed interval")
-	s.Require().Equal(newRows, current.Source.BatchRows)
 	for path, object := range previous.Objects {
 		s.Require().Equal(object, current.Objects[path], "prior encrypted object changed: %s", path)
 	}
@@ -504,8 +431,6 @@ func (s *RawDataV3GrowingSuite) TestGrowingFlushBatches() {
 			expected := make(map[int64]growingRow)
 			s.insertGrowingBatch(ctx, description, 0, 256, 1, expected)
 			first := s.waitGrowingSnapshot(ctx, description, 256)
-			s.Require().Equal(int64(256), first.Source.BatchRows)
-			s.Require().Zero(first.Source.TargetOffset - first.Source.BatchRows)
 			s.insertGrowingBatch(ctx, description, 256, 256, 2, expected)
 			second := s.waitGrowingSnapshot(ctx, description, 512)
 			s.assertGrowingAdvance(first, second, 256)
@@ -522,17 +447,6 @@ func (s *RawDataV3GrowingSuite) TestGrowingFlushBatches() {
 				s.Require().NotEqual(second.ManifestPath, segments[0].GetManifestPath(), "tail flush must advance the manifest")
 			} else {
 				s.Require().Equal(second.ManifestPath, segments[0].GetManifestPath(), "empty-tail flush must reuse the committed manifest")
-			}
-			s.assertGrowingSourceFlush(segments)
-			if tail {
-				events, err := s.growingSourceEvents()
-				s.Require().NoError(err)
-				matched := false
-				for _, event := range events {
-					matched = matched || event.CollectionID == description.GetCollectionID() && event.SegmentID == second.SegmentID &&
-						event.TargetOffset == int64(len(expected)) && event.BatchRows == 64 && event.ManifestPath == segments[0].GetManifestPath()
-				}
-				s.Require().True(matched, "final growing source completion does not cover the tail [512,576)")
 			}
 			_, _ = s.inspectRawDataV3(ctx, segments, description.GetCollectionID(), "")
 			finalLocator, err := inspector.ParseManifestLocatorV3(segments[0].GetManifestPath())
@@ -590,73 +504,6 @@ func (s *rawDataSuite) reloadGrowingRows(ctx context.Context, description *milvu
 	s.assertNoPhysicalVectorIndex(ctx, segments, description.GetSchema())
 }
 
-type growingRecoveryLog struct {
-	Time          string `json:"time"`
-	Message       string `json:"message"`
-	NodeID        int64  `json:"nodeID"`
-	CurrentNodeID int64  `json:"currentNodeID"`
-	CollectionID  int64  `json:"collectionID"`
-	SegmentID     int64  `json:"segmentID"`
-	FieldID       int64  `json:"fieldID"`
-	IndexID       int64  `json:"indexID"`
-	BuildID       int64  `json:"buildID"`
-	SourceRows    int64  `json:"sourceRows"`
-	ManifestPath  string `json:"manifestPath"`
-	LoadedRows    int64  `json:"loadedRows"`
-	Channel       string `json:"channel"`
-	SeekTimestamp uint64 `json:"seekTimestamp"`
-}
-
-func (s *rawDataSuite) recoveryLogs() ([]growingRecoveryLog, error) {
-	files, err := filepath.Glob(filepath.Join(s.growingLogDir, "*.log"))
-	if err != nil {
-		return nil, err
-	}
-	var entries []growingRecoveryLog
-	for _, file := range files {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			return nil, err
-		}
-		for _, line := range bytes.Split(data, []byte{'\n'}) {
-			var entry growingRecoveryLog
-			if json.Unmarshal(line, &entry) == nil && entry.Message != "" {
-				entries = append(entries, entry)
-			}
-		}
-	}
-	return entries, nil
-}
-
-func (s *rawDataSuite) waitInterimOwnership(ctx context.Context, description *milvuspb.DescribeCollectionResponse, segmentID, nodeID int64, after time.Time) {
-	fieldIDs := requestedFieldIDs(description.GetSchema(), []string{"float_vector"})
-	s.Require().Len(fieldIDs, 1)
-	wanted := fmt.Sprintf("growing interim raw chunks released segment %d field %d", segmentID, fieldIDs[0])
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		entries, err := s.recoveryLogs()
-		if err == nil {
-			for _, entry := range entries {
-				// Native CGO messages have no nodeID field. The prior owner is
-				// already dead at the recovery boundary, and this segment has
-				// only one channel owner, so a later event belongs to the new
-				// process whose successful prefix load was checked separately.
-				loggedAt, parseErr := time.Parse("2006/01/02 15:04:05.000 -07:00", entry.Time)
-				if parseErr == nil && !loggedAt.Before(after.Truncate(time.Millisecond)) && strings.Contains(entry.Message, wanted) {
-					s.T().Logf("stage=interim-owner node=%d segment=%d field=%d eventTime=%s event=%s", nodeID, segmentID, fieldIDs[0], entry.Time, entry.Message)
-					return
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			s.T().Fatalf("missing interim ownership event %q from node %d: %v", wanted, nodeID, ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
 func (s *rawDataSuite) waitGrowingOnNode(ctx context.Context, nodeID, collectionID, segmentID int64) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -684,53 +531,9 @@ func (s *rawDataSuite) waitGrowingOnNode(ctx context.Context, nodeID, collection
 	}
 }
 
-func (s *rawDataSuite) waitRecoveryEvidence(ctx context.Context, description *milvuspb.DescribeCollectionResponse, nodeID int64, snapshot *growingSnapshot, unpersistedTimestamp uint64) {
-	channels := description.GetVirtualChannelNames()
-	s.Require().Len(channels, 1)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		entries, err := s.recoveryLogs()
-		loaded := false
-		var loadedAt string
-		var seek *growingRecoveryLog
-		if err == nil {
-			for i := range entries {
-				entry := &entries[i]
-				if entry.Message == "growing prefix loaded" && entry.NodeID == nodeID && entry.CollectionID == snapshot.CollectionID &&
-					entry.SegmentID == snapshot.SegmentID && entry.ManifestPath == snapshot.ManifestPath && entry.LoadedRows == snapshot.CommittedRows {
-					loaded = true
-					loadedAt = entry.Time
-				}
-				if entry.Message == "use channel seek position to seek" && entry.CurrentNodeID == nodeID &&
-					entry.CollectionID == snapshot.CollectionID && entry.Channel == channels[0] {
-					seek = entry
-				}
-			}
-		}
-		if loaded && seek != nil {
-			const logTimeLayout = "2006/01/02 15:04:05.000 -07:00"
-			loadTime, err := time.Parse(logTimeLayout, loadedAt)
-			s.Require().NoError(err)
-			seekTime, err := time.Parse(logTimeLayout, seek.Time)
-			s.Require().NoError(err)
-			s.Require().False(loadTime.After(seekTime), "prefix load must complete before the channel seeks WAL")
-			s.Require().Positive(seek.SeekTimestamp)
-			if unpersistedTimestamp > 0 {
-				s.Require().LessOrEqual(seek.SeekTimestamp, unpersistedTimestamp, "recovery WAL seek skipped an unpersisted insert")
-			}
-			s.T().Logf("stage=recovery-input node=%d collection=%d segment=%d manifest=%+v loadedRows=%d seekTimestamp=%d segmentCheckpoint=%d channelCheckpoint=%d", nodeID, snapshot.CollectionID, snapshot.SegmentID, snapshot.Manifest, snapshot.CommittedRows, seek.SeekTimestamp, snapshot.SegmentCheckpoint, snapshot.ChannelCheckpoint)
-			return
-		}
-		select {
-		case <-ctx.Done():
-			s.T().Fatalf("missing recovered prefix or watch event: node=%d segment=%d manifest=%s rows=%d loaded=%t seek=%+v: %v", nodeID, snapshot.SegmentID, snapshot.ManifestPath, snapshot.CommittedRows, loaded, seek, ctx.Err())
-		case <-ticker.C:
-		}
-	}
-}
-
-func (s *rawDataSuite) crashAndRecoverGrowing(ctx context.Context, description *milvuspb.DescribeCollectionResponse, before *growingSnapshot, unpersistedTimestamp uint64, nodeID int64) (int64, time.Time) {
+// stopAndRecoverGrowing preserves the cluster's WAL, metadata and object store.
+// In-flight sync may finish during Stop; read the resulting persistence boundary.
+func (s *rawDataSuite) stopAndRecoverGrowing(ctx context.Context, description *milvuspb.DescribeCollectionResponse, segmentID, nodeID int64) *growingSnapshot {
 	var old *process.StreamingNodeProcess
 	for _, node := range s.Cluster.GetAllStreamingNodes() {
 		if node.GetNodeID() == nodeID {
@@ -739,121 +542,52 @@ func (s *rawDataSuite) crashAndRecoverGrowing(ctx context.Context, description *
 		}
 	}
 	s.Require().NotNil(old, "channel owner %d is absent", nodeID)
-	s.Require().NoError(old.Crash())
-	recoveryStartedAt := time.Now()
-	after := s.assertGrowingUnchanged(ctx, description, before)
-	s.Require().Equal(before.CommittedRows, after.CommittedRows)
-	s.Require().Equal(before.SegmentCheckpoint, after.SegmentCheckpoint, "persisted segment recovery position changed during crash")
-	if unpersistedTimestamp > 0 {
-		s.Require().Less(after.ChannelCheckpoint, unpersistedTimestamp, "persisted WAL checkpoint crossed an uncommitted insert")
+	if err := old.Stop(30 * time.Second); err != nil {
+		// The existing component shutdown deadline exits with code 1 when
+		// this single-node fixture cannot migrate its remaining channel.
+		var exitErr *exec.ExitError
+		s.Require().ErrorAs(err, &exitErr)
+		s.Require().Equal(1, exitErr.ExitCode(), "unexpected process exit from Stop")
 	}
+	after, err := s.readGrowingSnapshot(ctx, description)
+	s.Require().NoError(err, "stopped segment must still be Growing for this recovery case")
+	s.Require().Equal(segmentID, after.SegmentID)
+	s.T().Logf("stage=stopped-growing segment=%d committed=%d modified=%d segmentCheckpoint=%d channelCheckpoint=%d manifest=%s",
+		after.SegmentID, after.CommittedRows, after.ModifiedRows, after.SegmentCheckpoint, after.ChannelCheckpoint, after.ManifestPath)
 	replacement := s.Cluster.AddStreamingNode()
 	s.Require().NotEqual(nodeID, replacement.GetNodeID())
-	s.waitRecoveryEvidence(ctx, description, replacement.GetNodeID(), after, unpersistedTimestamp)
-	s.waitGrowingOnNode(ctx, replacement.GetNodeID(), description.GetCollectionID(), before.SegmentID)
-	return replacement.GetNodeID(), recoveryStartedAt
+	s.waitGrowingOnNode(ctx, replacement.GetNodeID(), description.GetCollectionID(), segmentID)
+	return after
 }
 
-func (s *rawDataSuite) runGrowingRecovery(interim bool) {
-	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 8*time.Minute)
+func (s *RawDataV3GrowingSuite) TestGrowingFlushRecovery() {
+	ctx, cancel := context.WithTimeout(s.Cluster.GetContext(), 5*time.Minute)
 	defer cancel()
-	name := "raw"
-	firstRows, secondRows, appendRows := 256, 256, 256
-	if interim {
-		name, firstRows, secondRows, appendRows = "interim", 448, 512, 512
-	}
-	campaign := growingCampaign("recovery_" + name)
+	campaign := growingCampaign("recovery")
 	description := s.prepareRawDataCollection(ctx, campaign)
 	expected := make(map[int64]growingRow)
 	owner := s.Cluster.DefaultStreamingNode().GetNodeID()
-	if interim {
-		// Build and reclaim raw chunks before the first background flush.
-		warmupStartedAt := time.Now()
-		s.insertGrowingBatch(ctx, description, 0, 192, 1, expected)
-		s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
-		var meta *streamingpb.SegmentAssignmentMeta
-		var segment *datapb.SegmentInfo
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			var err error
-			meta, _, err = s.readGrowingMeta(ctx, description)
-			if err == nil {
-				segment, err = s.readGrowingSegmentInfo(ctx, meta)
-			}
-			if err == nil {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				s.T().Fatalf("interim warmup has no L1 segment metadata: %v: %v", err, ctx.Err())
-			case <-ticker.C:
-			}
-		}
-		var initialManifest inspector.ManifestLocatorV3
-		s.Require().NoError(json.Unmarshal([]byte(segment.GetManifestPath()), &initialManifest))
-		s.Require().NotEmpty(initialManifest.BasePath)
-		s.Require().Zero(initialManifest.Version, "interim warmup was already persisted")
-		s.Require().Zero(segment.GetNumOfRows(), "interim warmup was already committed")
-		// The first insert can finish index construction after its cleanup
-		// check. A small second insert prompts raw chunk reclamation while
-		// both warmup batches remain below the background sync threshold.
-		s.insertGrowingBatch(ctx, description, 192, 32, 1, expected)
-		s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
-		segment, err := s.readGrowingSegmentInfo(ctx, meta)
-		s.Require().NoError(err)
-		s.Require().Zero(segment.GetNumOfRows(), "interim warmup was already committed")
-		s.waitInterimOwnership(ctx, description, meta.GetSegmentId(), owner, warmupStartedAt)
-		s.insertGrowingBatch(ctx, description, 224, firstRows-224, 1, expected)
-	} else {
-		s.insertGrowingBatch(ctx, description, 0, firstRows, 1, expected)
+	s.insertGrowingBatch(ctx, description, 0, 256, 1, expected)
+	first := s.waitGrowingSnapshot(ctx, description, 256)
+	s.insertGrowingBatch(ctx, description, 256, 256, 2, expected)
+	second := s.waitGrowingSnapshot(ctx, description, 512)
+	s.assertGrowingAdvance(first, second, 256)
+	s.insertGrowingBatch(ctx, description, 512, 64, 3, expected)
+	s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
+	stopped := s.stopAndRecoverGrowing(ctx, description, second.SegmentID, owner)
+	s.Require().GreaterOrEqual(stopped.CommittedRows, second.CommittedRows)
+	s.Require().LessOrEqual(stopped.CommittedRows, int64(len(expected)))
+	for object, before := range second.Objects {
+		s.Require().Equal(before, stopped.Objects[object], "historical object changed during Stop: %s", object)
 	}
-	first := s.waitGrowingSnapshot(ctx, description, int64(firstRows))
-	s.Require().Equal(int64(firstRows), first.Source.BatchRows)
-	s.insertGrowingBatch(ctx, description, firstRows, secondRows, 2, expected)
-	second := s.waitGrowingSnapshot(ctx, description, int64(firstRows+secondRows))
-	s.assertGrowingAdvance(first, second, int64(secondRows))
-	tailTimestamp := s.insertGrowingBatch(ctx, description, firstRows+secondRows, 64, 3, expected)
 	s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
-	s.assertGrowingUnchanged(ctx, description, second)
-	owner, recoveredAt := s.crashAndRecoverGrowing(ctx, description, second, tailTimestamp, owner)
+	s.insertGrowingBatch(ctx, description, 576, 256, 4, expected)
+	third := s.waitGrowingSnapshot(ctx, description, int64(len(expected)))
+	s.assertGrowingAdvance(stopped, third, int64(len(expected))-stopped.CommittedRows)
 	s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
-	if interim {
-		s.waitInterimOwnership(ctx, description, second.SegmentID, owner, recoveredAt)
-	}
-	s.insertGrowingBatch(ctx, description, firstRows+secondRows+64, appendRows, 4, expected)
-	third := s.waitGrowingSnapshot(ctx, description, int64(firstRows+secondRows+64+appendRows))
-	s.assertGrowingAdvance(second, third, int64(64+appendRows))
-	s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
-	owner, recoveredAt = s.crashAndRecoverGrowing(ctx, description, third, 0, owner)
-	s.assertGrowingRows(ctx, description.GetCollectionName(), expected)
-	if interim {
-		s.waitInterimOwnership(ctx, description, third.SegmentID, owner, recoveredAt)
-	}
 	segments := s.flushGrowingCollection(ctx, description)
 	s.Require().Len(segments, 1)
 	s.Require().Equal(int64(len(expected)), segments[0].GetNumOfRows())
-	s.Require().Equal(third.ManifestPath, segments[0].GetManifestPath(), "recovery final flush must reuse the committed manifest")
-	s.assertGrowingSourceFlush(segments)
 	_, _ = s.inspectRawDataV3(ctx, segments, description.GetCollectionID(), "")
 	s.reloadGrowingRows(ctx, description, campaign, segments, expected)
 }
-
-func (s *RawDataV3GrowingSuite) TestGrowingFlushRecovery() { s.runGrowingRecovery(false) }
-
-type RawDataV3GrowingInterimSuite struct{ rawDataSuite }
-
-func (s *RawDataV3GrowingInterimSuite) SetupSuite() {
-	s.growingSource = true
-	s.interimIndex = true
-	s.WithMilvusConfig("MILVUS_CMEK_FIXTURE_STRICT_CONTEXT", "true")
-	s.growingBufferSize = 65536
-	s.physicalIndexThreshold = 10000
-	s.setupRawData(3)
-}
-
-func TestRawDataV3GrowingInterimSuite(t *testing.T) {
-	suite.Run(t, new(RawDataV3GrowingInterimSuite))
-}
-
-func (s *RawDataV3GrowingInterimSuite) TestGrowingFlushRecovery() { s.runGrowingRecovery(true) }

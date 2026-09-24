@@ -81,27 +81,6 @@ func (s *WriteBufferSuite) SetupTest() {
 	s.Require().NoError(err)
 }
 
-func (s *WriteBufferSuite) TestRecoveredV3ManifestWaitsForGrowingSource() {
-	segmentID := int64(1001)
-	segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-		ID:             segmentID,
-		StorageVersion: storage.StorageV3,
-		State:          commonpb.SegmentState_Growing,
-		NumOfRows:      512,
-		ManifestPath:   `{"ver":2,"base_path":"insert_log/recovered"}`,
-	}, nil, nil, nil)
-	s.metacache.EXPECT().GetSegmentByID(segmentID).Return(segment, true).Once()
-	s.wb.allowGrowingSourceFlush = true
-	s.wb.growingSourceResolver = func(int64, int64, *msgpb.MsgPosition) (syncmgr.GrowingFlushSource, syncmgr.GrowingSourceState) {
-		return nil, syncmgr.GrowingSourceUnavailable
-	}
-
-	decision := s.wb.decideGrowingFlushSource(segmentID, 576, &msgpb.MsgPosition{Timestamp: 200})
-	s.Equal(metacache.FlushSourceGrowing, decision.sourceType)
-	s.Equal(syncmgr.GrowingSourceUnavailable, decision.sourceState)
-	s.False(s.wb.hasWriteBufferInsertPayload(segmentID))
-}
-
 func (s *WriteBufferSuite) TestHasSegment() {
 	segmentID := int64(1001)
 

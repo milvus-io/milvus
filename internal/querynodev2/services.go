@@ -339,8 +339,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	//   after data (including deletes) is flushed, so L0 segments should cover up to seekPosition
 	// - Using seekPosition avoids redundant message consumption when seekPosition > deleteCheckpoint
 	log.Info(ctx, "use channel seek position to seek",
-		mlog.Uint64("seekTimestamp", channel.GetSeekPosition().GetTimestamp()),
-		mlog.Binary("seekMsgID", channel.GetSeekPosition().GetMsgID()),
 		mlog.Time("seekPosition", tsoutil.PhysicalTime(channel.GetSeekPosition().GetTimestamp())),
 		mlog.Time("deleteCheckpoint", tsoutil.PhysicalTime(channel.GetDeleteCheckpoint().GetTimestamp())),
 	)

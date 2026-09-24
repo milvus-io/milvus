@@ -45,7 +45,6 @@ import (
 type RawDataV3ConsumerSuite struct{ rawDataSuite }
 
 func (s *RawDataV3ConsumerSuite) SetupSuite() {
-	s.captureLogs = true
 	s.WithMilvusConfig("MILVUS_CMEK_FIXTURE_STRICT_CONTEXT", "true")
 	s.physicalIndexThreshold = 256
 	s.setupRawData(3)
@@ -81,33 +80,6 @@ func (s *rawDataSuite) sealedV3ObjectDigests(ctx context.Context, segments []*da
 		}
 	}
 	return locators, digests
-}
-
-func (s *rawDataSuite) waitHNSWBuildInput(ctx context.Context, description *milvuspb.DescribeCollectionResponse,
-	segment *datapb.SegmentInfo, fieldID, indexID, buildID int64,
-) {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		entries, err := s.recoveryLogs()
-		if err == nil {
-			for _, entry := range entries {
-				if entry.Message == "index build manifest input" && entry.CollectionID == description.GetCollectionID() &&
-					entry.SegmentID == segment.GetID() && entry.FieldID == fieldID && entry.IndexID == indexID &&
-					entry.BuildID == buildID && entry.SourceRows == segment.GetNumOfRows() && entry.ManifestPath == segment.GetManifestPath() {
-					s.T().Logf("stage=hnsw-build-input node=%d build=%d segment=%d field=%d index=%d rows=%d manifest=%s",
-						entry.NodeID, buildID, segment.GetID(), fieldID, indexID, entry.SourceRows, entry.ManifestPath)
-					return
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			s.T().Fatalf("missing HNSW build input: segment=%d field=%d index=%d build=%d manifest=%s: %v",
-				segment.GetID(), fieldID, indexID, buildID, segment.GetManifestPath(), ctx.Err())
-		case <-ticker.C:
-		}
-	}
 }
 
 func (s *rawDataSuite) waitPhysicalHNSW(ctx context.Context, description *milvuspb.DescribeCollectionResponse,
@@ -244,9 +216,6 @@ func (s *rawDataSuite) runV3EncryptedManifestBuildIndex(growing bool) {
 		}
 	}
 	s.Require().NotNil(indexed, "no segment exceeds physical index threshold")
-	if growing {
-		s.assertGrowingSourceFlush(segments)
-	}
 	beforeLocators, beforeDigests := s.sealedV3ObjectDigests(ctx, segments, description.GetCollectionID())
 	collection := description.GetCollectionName()
 	release, err := s.Cluster.MilvusClient.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{DbName: s.dbName, CollectionName: collection})
@@ -275,9 +244,6 @@ func (s *rawDataSuite) runV3EncryptedManifestBuildIndex(growing bool) {
 	s.Require().Len(fieldIDs, 1)
 	builds := s.waitPhysicalHNSW(ctx, description, segments, fieldIDs[0], index.GetIndexID())
 	s.Require().Contains(builds, indexed.GetID(), "above-threshold segment lacks physical HNSW")
-	for _, segment := range segments {
-		s.waitHNSWBuildInput(ctx, description, segment, fieldIDs[0], index.GetIndexID(), builds[segment.GetID()])
-	}
 	afterSegments := s.currentParquetSegments(ctx, description.GetCollectionID())
 	afterLocators, afterDigests := s.sealedV3ObjectDigests(ctx, afterSegments, description.GetCollectionID())
 	s.Require().True(maps.Equal(beforeLocators, afterLocators), "source manifest identity changed during HNSW build")

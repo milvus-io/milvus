@@ -45,10 +45,6 @@ type rawDataSuite struct {
 	dbName                 string
 	ezID                   int64
 	growingSource          bool
-	captureLogs            bool
-	growingLogDir          string
-	interimIndex           bool
-	growingBufferSize      int
 	physicalIndexThreshold int
 }
 
@@ -63,28 +59,18 @@ func (s *rawDataSuite) setupRawData(storageVersion int64) {
 		indexThreshold = 1024
 	}
 	s.WithMilvusConfig("indexCoord.segment.minSegmentNumRowsToEnableIndex", strconv.Itoa(indexThreshold))
-	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", strconv.FormatBool(s.interimIndex))
+	s.WithMilvusConfig("queryNode.segcore.interimIndex.enableIndex", "false")
 	if s.growingSource {
-		bufferSize := s.growingBufferSize
-		if bufferSize == 0 {
-			bufferSize = 32768
-		}
-		s.WithMilvusConfig("dataNode.segment.insertBufSize", strconv.Itoa(bufferSize))
-		if s.interimIndex {
-			s.WithMilvusConfig("queryNode.segcore.interimIndex.nlist", "4")
-			s.WithMilvusConfig("queryNode.segcore.interimIndex.indexBuildRatio", "0")
-		}
+		// This fixture has one StreamingNode, so shutdown cannot migrate its channel.
+		s.WithMilvusConfig("queryNode.gracefulStopTimeout", "5")
+		// One 256-row batch also fills the WriteBuffer fallback used during recovery.
+		s.WithMilvusConfig("dataNode.segment.insertBufSize", "16384")
 		s.WithMilvusConfig("dataNode.segment.syncPeriod", "3600")
 		s.WithMilvusConfig("dataCoord.segment.maxIdleTime", "3600")
 		s.WithMilvusConfig("dataNode.memory.forceSyncEnable", "false")
 	}
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.scalarField", "sync")
 	s.WithMilvusConfig("queryNode.segcore.tieredStorage.warmup.vectorField", "sync")
-	if s.growingSource || s.captureLogs {
-		s.growingLogDir = s.T().TempDir()
-		s.WithMilvusConfig("log.file.rootPath", s.growingLogDir)
-		s.WithMilvusConfig("log.format", "json")
-	}
 	s.SetupSuite()
 
 	ctx := s.Cluster.GetContext()
@@ -138,10 +124,6 @@ func (s *rawDataSuite) createRawVectorIndexes(ctx context.Context, collection st
 			metricType = metric.IP
 		case schemapb.DataType_Int8Vector:
 			indexType = integration.IndexHNSW
-		}
-		if s.interimIndex && field.GetDataType() == schemapb.DataType_FloatVector {
-			// Growing interim indexes skip FLAT logical indexes.
-			indexType = integration.IndexFaissIvfFlat
 		}
 		status, err := s.Cluster.MilvusClient.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 			DbName: s.dbName, CollectionName: collection, FieldName: fieldName, IndexName: "raw_" + field.GetName(),

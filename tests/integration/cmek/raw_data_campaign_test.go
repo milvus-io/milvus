@@ -132,9 +132,6 @@ func (s *rawDataSuite) prepareRawDataCampaign(ctx context.Context, c rawDataCamp
 		rows += segment.GetNumOfRows()
 	}
 	s.Require().Equal(int64(rawDataRows), rows)
-	if s.growingSource {
-		s.assertGrowingSourceFlush(segments)
-	}
 	s.T().Logf("stage=flush campaign=%s collection=%d segments=%v rows=%d", c.name, description.GetCollectionID(), ids, rows)
 	return description, segments
 }

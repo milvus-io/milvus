@@ -344,17 +344,6 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			if err = loader.LoadSegment(ctx, segment, loadInfo); err != nil {
 				return merr.Wrap(err, "At LoadSegment")
 			}
-
-			if segmentType == SegmentTypeGrowing && loadInfo.GetManifestPath() != "" {
-				// This records the exact persisted prefix read before WAL tail
-				// consumption resumes on the recovered channel.
-				mlog.Info(ctx, "growing prefix loaded",
-					mlog.FieldNodeID(paramtable.GetNodeID()),
-					mlog.FieldCollectionID(loadInfo.GetCollectionID()),
-					mlog.FieldSegmentID(loadInfo.GetSegmentID()),
-					mlog.String("manifestPath", loadInfo.GetManifestPath()),
-					mlog.Int64("loadedRows", segment.RowNum()))
-			}
 		}
 		if err = loader.loadDeltalogs(ctx, segment, loadInfo); err != nil {
 			return merr.Wrap(err, "At LoadDeltaLogs")

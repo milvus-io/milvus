@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -24,6 +25,8 @@
 #include <vector>
 
 #include <arrow/util/base64.h>
+#include <parquet/file_reader.h>
+#include <parquet/encryption/encryption.h>
 #include <folly/ScopeGuard.h>
 
 #include "common/IndexMeta.h"
@@ -134,6 +137,45 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         }
 
         return field_datas;
+    }
+
+    void
+    AssertEncryptedParquetObjects(const std::string& segment_path,
+                                  int64_t version) {
+        auto fs = GetDefaultArrowFileSystem();
+        auto opened = milvus_storage::api::transaction::Transaction::Open(
+            fs, segment_path, version);
+        ASSERT_TRUE(opened.ok()) << opened.status().ToString();
+        auto manifest_result = opened.ValueOrDie()->GetManifest();
+        ASSERT_TRUE(manifest_result.ok())
+            << manifest_result.status().ToString();
+        const auto& groups = manifest_result.ValueOrDie()->columnGroups();
+        ASSERT_FALSE(groups.empty());
+        for (const auto& group : groups) {
+            ASSERT_FALSE(group->files.empty());
+            for (const auto& file : group->files) {
+                auto opened_file = fs->OpenInputFile(file.path);
+                ASSERT_TRUE(opened_file.ok())
+                    << opened_file.status().ToString();
+                auto input = opened_file.ValueOrDie();
+                auto magic = input->ReadAt(0, 4);
+                ASSERT_TRUE(magic.ok());
+                ASSERT_EQ(magic.ValueOrDie()->ToString(), "PARE");
+                // The same physical object must require the correct key.
+                EXPECT_THROW(::parquet::ParquetFileReader::Open(input),
+                             ::parquet::ParquetException);
+                ::parquet::ReaderProperties wrong_key;
+                wrong_key.file_decryption_properties(
+                    ::parquet::FileDecryptionProperties::Builder()
+                        .footer_key(std::string(32, 'x'))
+                        ->build());
+                auto wrong_key_input = fs->OpenInputFile(file.path);
+                ASSERT_TRUE(wrong_key_input.ok());
+                EXPECT_THROW(::parquet::ParquetFileReader::Open(
+                                 wrong_key_input.ValueOrDie(), wrong_key),
+                             ::parquet::ParquetException);
+            }
+        }
     }
 
     void
@@ -1805,6 +1847,7 @@ TEST_F(FlushGrowingSegmentTest, EncryptedManifestFeedsGrowingAndSharedReaders) {
         FlushGrowingSegmentData(segment.get(), 0, rows, &flush_config, &result);
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
     ASSERT_EQ(result.num_rows, rows);
+    AssertEncryptedParquetObjects(segment_path, result.committed_version);
 
     // The shared manifest reader is used by physical index builds.
     auto field_datas = ReadFlushedFieldData(
@@ -1834,6 +1877,16 @@ TEST_F(FlushGrowingSegmentTest, EncryptedManifestFeedsGrowingAndSharedReaders) {
     ASSERT_NO_THROW(reloaded->Load(trace_ctx, nullptr));
     EXPECT_EQ(reloaded->get_row_count(), rows);
     EXPECT_TRUE(reloaded->HasFieldData(vec_fid));
+    std::vector<int64_t> offsets(rows);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto reloaded_vectors =
+        reloaded->bulk_subscript(nullptr, vec_fid, offsets.data(), rows);
+    const auto& reloaded_values =
+        reloaded_vectors->vectors().float_vector().data();
+    ASSERT_EQ(reloaded_values.size(), source_vectors.size());
+    for (int64_t i = 0; i < reloaded_values.size(); ++i) {
+        EXPECT_FLOAT_EQ(reloaded_values[i], source_vectors[i]);
+    }
     FreeFlushResult(&result);
 }
 
@@ -1930,6 +1983,10 @@ TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
             segment.get(), start, end, &flush_config, &result);
         ASSERT_EQ(status.error_code, Success) << status.error_msg;
         ASSERT_EQ(result.num_rows, end - start);
+        if (encrypted) {
+            AssertEncryptedParquetObjects(segment_path,
+                                          result.committed_version);
+        }
 
         auto field_datas = ReadFlushedFieldData(
             segment_path, result, vec_fid, DataType::VECTOR_FLOAT, false, dim);

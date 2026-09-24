@@ -374,18 +374,6 @@ func (it *indexBuildTask) Execute(ctx context.Context) error {
 	}
 	log.Info(ctx, "create index", mlog.Any("buildIndexParams", redactBuildIndexParamsForLog(buildIndexParams)))
 
-	if buildIndexParams.StorageVersion == storage.StorageV3 && buildIndexParams.Manifest != "" {
-		// Bind the manifest actually handed to native index building to this
-		// build ID before the task can report an output.
-		log.Info(ctx, "index build manifest input",
-			mlog.FieldNodeID(paramtable.GetNodeID()),
-			mlog.FieldCollectionID(it.req.GetCollectionID()),
-			mlog.FieldFieldID(it.req.GetFieldID()),
-			mlog.FieldIndexID(it.req.GetIndexID()),
-			mlog.Int64("sourceRows", it.req.GetNumRows()),
-			mlog.String("manifestPath", buildIndexParams.Manifest))
-	}
-
 	// set plugin context after logging the indexParams to avoid logging sensitive data
 	if it.pluginContext != nil {
 		buildIndexParams.StoragePluginContext = it.pluginContext
