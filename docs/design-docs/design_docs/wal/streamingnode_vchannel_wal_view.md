@@ -162,9 +162,10 @@ There is no second recovery checkpoint tied to this lifecycle classification.
 Later QueryViews on this VChannel reuse the runtime, without repeating initial
 TransformLog replay. They repeat the same commit check and applied-event barrier;
 an initialized runtime alone does not certify a new view's readiness. Their
-explicit DataVersions request asynchronous IDF
-refresh; readiness does not wait for a separate per-version BM25 aggregate.
-The first runtime initialization does wait for its BM25 resources. Once
+explicit DataVersions prepare the single shared IDF aggregate before readiness.
+Eager initialization loads BM25 resources; optional lazy initialization defers sealed
+resource discovery and materialization until the first BM25 query. Once materialized,
+later preparation applies the target version before reporting Ready. Once
 bootstrap finishes, Insert/Delete/Txn and lifecycle events arrive through the
 VChannel event path, not a second continuous TransformLog subscription.
 

@@ -28,11 +28,9 @@ func newTestOracle(t *testing.T) (*oracleRuntime, func(int64, ...float32) *datap
 	t.Helper()
 	paramtable.Init()
 	cm := storage.NewLocalChunkManager()
-	scheduler := nodescheduler.New(1)
-	t.Cleanup(scheduler.Close)
-	provider := NewProvider(nil, WithChunkManager(cm), WithNodeScheduler(scheduler))
+	provider := NewProvider(nil, WithChunkManager(cm))
 	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "text", DataType: schemapb.DataType_VarChar}, {FieldID: 102, Name: "sparse", DataType: schemapb.DataType_SparseFloatVector}}, Functions: []*schemapb.FunctionSchema{{Type: schemapb.FunctionType_BM25, InputFieldIds: []int64{101}, OutputFieldIds: []int64{102}}}}
-	r, err := newOracleRuntime(context.Background(), provider, walview.VChannelWALView{Schema: schema, CollectionID: 1, VChannel: "v1", SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, nil)
+	r, err := newOracleRuntime(context.Background(), provider, walview.VChannelWALView{Schema: schema, CollectionID: 1, VChannel: "v1", SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, nil, false)
 	require.NoError(t, err)
 	t.Cleanup(r.Close)
 	return r, func(id int64, values ...float32) *datapb.StreamingNodeBM25Resource {
@@ -65,37 +63,35 @@ func TestOracleSharedAggregateAndSealedEvictionReadsOldObject(t *testing.T) {
 	resources := []*datapb.StreamingNodeBM25Resource{first}
 	mockViewResources(t, r, &version, &resources)
 	ctx := context.Background()
-	require.NoError(t, r.refresh(ctx, version))
+	require.NoError(t, r.PrepareDataVersion(ctx, version))
 	query := &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}}
 	old := qviews.DataVersion{StreamingVersion: 10}
 	check := func(avg float64) {
 		for _, v := range []qviews.DataVersion{old, version} {
-			vectors, actual, err := r.BuildIDF(v, 102, query)
+			vectors, actual, err := r.BuildIDF(ctx, v, 102, query)
 			require.NoError(t, err)
 			require.Len(t, vectors, 1)
 			require.Equal(t, avg, actual)
 		}
 	}
 	check(2)
-	// A failed old-object read prevents publication, proving no sealed cache is used.
+	// Failed removal reads preserve the published version and aggregate.
 	oldPath := first.Bm25Binlogs[0].Binlogs[0].LogPath
 	data, err := r.provider.chunkManager.Read(ctx, oldPath)
 	require.NoError(t, err)
 	require.NoError(t, r.provider.chunkManager.Remove(ctx, oldPath))
-	// A newer view can replace the resource without changing its segment ID.
 	version.CompactVersion++
 	resources = []*datapb.StreamingNodeBM25Resource{next}
-	require.Error(t, r.refresh(ctx, version))
-	require.Equal(t, int64(11), r.currentVersion.StreamingVersion)
+	require.Error(t, r.PrepareDataVersion(ctx, version))
 	check(2)
 	require.NoError(t, r.provider.chunkManager.Write(ctx, oldPath, data))
-	require.NoError(t, r.refresh(ctx, version))
+	require.NoError(t, r.PrepareDataVersion(ctx, version))
 	check(6)
 	// Unchanged descriptors never read the objects again.
 	require.NoError(t, r.provider.chunkManager.Remove(ctx, next.Bm25Binlogs[0].Binlogs[0].LogPath))
 	for i := 0; i < 100; i++ {
 		version.StreamingVersion++
-		require.NoError(t, r.refresh(ctx, version))
+		require.NoError(t, r.PrepareDataVersion(ctx, version))
 	}
 	check(6)
 	require.Len(t, r.currentSealed, 1)
@@ -110,7 +106,7 @@ func TestOracleConcurrentInsertDoesNotInvalidateRefresh(t *testing.T) {
 		r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 21, 6)})
 		return nil
 	}
-	require.NoError(t, r.refresh(context.Background(), version))
+	require.NoError(t, r.PrepareDataVersion(context.Background(), version))
 	require.Equal(t, int64(2), r.currentStats[102].NumRow())
 	require.Equal(t, float64(4), r.currentStats[102].GetAvgdl())
 	require.Len(t, r.growingStore.segments, 1)
@@ -124,16 +120,16 @@ func TestOracleWaitsForSealBeforeCompactionHandoff(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 11, CompactVersion: 1}
 	resources := []*datapb.StreamingNodeBM25Resource{resource(30, 2)}
 	mockViewResources(t, r, &version, &resources)
-	require.ErrorIs(t, r.refresh(ctx, version), nodescheduler.ErrDelay)
+	require.ErrorIs(t, r.PrepareDataVersion(ctx, version), nodescheduler.ErrDelay)
 	require.Equal(t, int64(1), r.currentStats[102].NumRow())
 	r.growingStore.markSealed(20, qviews.DataVersion{StreamingVersion: 11})
-	require.NoError(t, r.BeforeRelease(ctx, version))
+	require.NoError(t, r.PrepareDataVersion(ctx, version))
 	require.Empty(t, r.growingStore.segments)
 	require.Equal(t, int64(1), r.currentStats[102].NumRow())
 	resources = nil
 	version.CompactVersion++
-	require.NoError(t, r.refresh(ctx, version))
-	results, err := r.BuildIDFBatch([]queryresource.IDFRequest{{FieldID: 102}})
+	require.NoError(t, r.PrepareDataVersion(ctx, version))
+	results, err := r.BuildIDFBatch(ctx, []queryresource.IDFRequest{{FieldID: 102}})
 	require.NoError(t, err)
 	require.Equal(t, float64(1), results[0].Avgdl)
 	require.Zero(t, r.currentStats[102].NumRow())
@@ -148,10 +144,12 @@ func TestOracleCloseCancelsActiveRead(t *testing.T) {
 		return nil, ctx.Err()
 	}).Build()
 	defer patch.UnPatch()
-	r.Advance(qviews.DataVersion{StreamingVersion: 11})
+	done := make(chan error, 1)
+	go func() { done <- r.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}) }()
 	<-started
 	r.Close()
-	require.NoError(t, r.BeforeRelease(context.Background(), qviews.DataVersion{StreamingVersion: 12}))
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.ErrorIs(t, r.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 12}), context.Canceled)
 }
 
 // Coordinator progress and seal notifications do not select a resource version.
@@ -171,18 +169,17 @@ func TestOracleRefreshOnlyFetchesRequestedView(t *testing.T) {
 	defer patch.UnPatch()
 	defer r.Close()
 	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 20, SealedAtDataVersion: qviews.DataVersion{StreamingVersion: 12}}})
-	require.False(t, r.advanceScheduled)
 	require.Equal(t, int32(0), calls.Load())
-	require.NoError(t, r.RequestRefresh(ctx, target))
+	require.ErrorIs(t, r.PrepareDataVersion(ctx, target), context.DeadlineExceeded)
+	require.NoError(t, r.PrepareDataVersion(ctx, target))
 	require.Eventually(t, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.currentVersion.EQ(target) && !r.advanceScheduled
+		return r.currentVersion.EQ(target)
 	}, 3*time.Second, time.Millisecond)
 	// Old/current views reuse the aggregate without issuing another resource RPC.
-	require.NoError(t, r.RequestRefresh(ctx, qviews.DataVersion{StreamingVersion: 10}))
-	require.NoError(t, r.RequestRefresh(ctx, target))
-	require.False(t, r.advanceScheduled)
+	require.NoError(t, r.PrepareDataVersion(ctx, qviews.DataVersion{StreamingVersion: 10}))
+	require.NoError(t, r.PrepareDataVersion(ctx, target))
 	require.Equal(t, int32(2), calls.Load())
 }
 
@@ -192,37 +189,37 @@ func TestOracleOnlyLoadsRequestedBM25Fields(t *testing.T) {
 	view.Schema.Functions = append(view.Schema.Functions, &schemapb.FunctionSchema{Type: schemapb.FunctionType_BM25, OutputFieldIds: []int64{103}})
 	res := resource(20, 2)
 	res.Bm25Binlogs = append(res.Bm25Binlogs, &datapb.FieldBinlog{FieldID: 103, Binlogs: []*datapb.Binlog{{LogPath: "must-not-read"}}})
-	oracle, err := newOracleRuntime(context.Background(), r.provider, view, []*datapb.StreamingNodeBM25Resource{res})
+	oracle, err := newOracleRuntime(context.Background(), r.provider, view, []*datapb.StreamingNodeBM25Resource{res}, false)
 	require.NoError(t, err)
 	defer oracle.Close()
 	require.Len(t, oracle.currentStats, 1)
-	_, _, err = oracle.BuildIDF(qviews.DataVersion{}, 103, nil)
+	_, _, err = oracle.BuildIDF(context.Background(), qviews.DataVersion{}, 103, nil)
 	require.Error(t, err)
 }
 
-func TestRuntimeRefreshUsesSingleOracleAndCoalescesHints(t *testing.T) {
+func TestRuntimePreparesOneSharedOracle(t *testing.T) {
 	r, _ := newTestOracle(t)
 	version := qviews.DataVersion{StreamingVersion: 12}
 	resources := []*datapb.StreamingNodeBM25Resource{}
 	mockViewResources(t, r, &version, &resources)
 	module := &Runtime{oracle: r}
-	require.NoError(t, module.RequestRefresh(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
-	require.NoError(t, module.RequestRefresh(context.Background(), version))
+	require.NoError(t, module.PrepareDataVersion(context.Background(), qviews.DataVersion{StreamingVersion: 11}))
+	require.NoError(t, module.PrepareDataVersion(context.Background(), version))
 	require.Eventually(t, func() bool {
 		r.mu.RLock()
 		defer r.mu.RUnlock()
-		return r.currentVersion.EQ(version) && !r.advanceScheduled
+		return r.currentVersion.EQ(version)
 	}, time.Second, time.Millisecond)
 	require.NoError(t, module.BeforeRelease(context.Background(), version))
-	results, err := module.BuildIDFBatch([]queryresource.IDFRequest{{FieldID: 102}, {FieldID: 102}})
+	results, err := module.BuildIDFBatch(context.Background(), []queryresource.IDFRequest{{FieldID: 102}, {FieldID: 102}})
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	module.Advance(version)
 	module.Close()
-	require.Error(t, r.RequestRefresh(context.Background(), version))
-	_, err = r.BuildIDFBatch(nil)
+	require.Error(t, r.PrepareDataVersion(context.Background(), version))
+	_, err = r.BuildIDFBatch(context.Background(), nil)
 	require.Error(t, err)
-	_, err = module.BuildIDFBatch(nil)
+	_, err = module.BuildIDFBatch(context.Background(), nil)
 	require.Error(t, err)
 	require.NoError(t, module.BeforeRelease(context.Background(), version))
 	module.Advance(version)
@@ -234,24 +231,21 @@ func TestOracleRefreshRejectsPartialDeltaAndCancelledBarrier(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 11}
 	resources := []*datapb.StreamingNodeBM25Resource{resource(20, 2)}
 	mockViewResources(t, r, &version, &resources)
-	require.NoError(t, r.refresh(ctx, qviews.DataVersion{StreamingVersion: 9}))
-	r.ioMu.Lock()
-	require.ErrorIs(t, r.refresh(ctx, version), nodescheduler.ErrDelay)
-	r.ioMu.Unlock()
+	require.NoError(t, r.PrepareDataVersion(ctx, qviews.DataVersion{StreamingVersion: 9}))
 	r.barrier = func(context.Context) error { return context.Canceled }
-	require.ErrorIs(t, r.refresh(ctx, version), context.Canceled)
+	require.ErrorIs(t, r.PrepareDataVersion(ctx, version), context.Canceled)
 	require.Empty(t, r.currentSealed)
 	r.barrier = nil
-	require.NoError(t, r.refresh(ctx, version))
+	require.NoError(t, r.PrepareDataVersion(ctx, version))
 	// A corrupt removal must not publish a new membership/version.
 	r.currentStats[102] = storage.NewBM25Stats()
 	version.StreamingVersion++
 	resources = nil
-	require.Error(t, r.refresh(ctx, version))
+	require.Error(t, r.PrepareDataVersion(ctx, version))
 	require.Len(t, r.currentSealed, 1)
 	require.Equal(t, int64(11), r.currentVersion.StreamingVersion)
 	r.Close()
-	require.NoError(t, r.refresh(ctx, version))
+	require.ErrorIs(t, r.PrepareDataVersion(ctx, version), context.Canceled)
 }
 
 func TestOracleManualFlushWaitsForFinalCommit(t *testing.T) {
@@ -268,9 +262,9 @@ func TestOracleManualFlushWaitsForFinalCommit(t *testing.T) {
 	version := qviews.DataVersion{StreamingVersion: 11}
 	resources := []*datapb.StreamingNodeBM25Resource{resource(30, 2)}
 	mockViewResources(t, r, &version, &resources)
-	require.ErrorIs(t, r.refresh(ctx, version), nodescheduler.ErrDelay)
+	require.ErrorIs(t, r.PrepareDataVersion(ctx, version), nodescheduler.ErrDelay)
 	r.growingStore.markSealed(20, version)
-	require.NoError(t, r.refresh(ctx, version))
+	require.NoError(t, r.PrepareDataVersion(ctx, version))
 	require.NotContains(t, r.growingStore.segments, int64(20))
 	require.Contains(t, r.growingStore.segments, int64(21))
 	require.Equal(t, int64(1), r.currentStats[102].NumRow())
@@ -281,7 +275,7 @@ func TestOraclePreservesResolvedEmptyPartitionScope(t *testing.T) {
 	excluded := resource(20, 2)
 	excluded.PartitionId = 10
 	for _, partitions := range [][]int64{{}, {10}, {30}} {
-		r, err := newOracleRuntime(context.Background(), base.provider, walview.VChannelWALView{Schema: base.schema, CollectionID: 1, VChannel: "v1", PartitionIDs: partitions, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, []*datapb.StreamingNodeBM25Resource{excluded})
+		r, err := newOracleRuntime(context.Background(), base.provider, walview.VChannelWALView{Schema: base.schema, CollectionID: 1, VChannel: "v1", PartitionIDs: partitions, SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: qviews.DataVersion{StreamingVersion: 10}}}, []*datapb.StreamingNodeBM25Resource{excluded}, false)
 		require.NoError(t, err)
 		expected := int64(0)
 		if r.includesPartition(10) {
@@ -294,9 +288,35 @@ func TestOraclePreservesResolvedEmptyPartitionScope(t *testing.T) {
 		version := qviews.DataVersion{StreamingVersion: 11}
 		resources := []*datapb.StreamingNodeBM25Resource{excluded}
 		patch := mockey.Mock((*Provider).fetchResources).Return(&datapb.GetStreamingNodeQueryViewResourcesResponse{DataVersion: version.IntoProto(), Bm25Resources: resources}, nil).Build()
-		require.NoError(t, r.refresh(context.Background(), version))
+		require.NoError(t, r.PrepareDataVersion(context.Background(), version))
 		patch.UnPatch()
 		require.Equal(t, expected*2, r.currentStats[102].NumRow())
 		r.Close()
 	}
+}
+
+func TestLazyOracleWaitsForCompactedGrowingFinalCommit(t *testing.T) {
+	base, resource := newTestOracle(t)
+	ctx := context.Background()
+	version := qviews.DataVersion{StreamingVersion: 11, CompactVersion: 1}
+	r, err := newOracleRuntime(ctx, base.provider, walview.VChannelWALView{
+		Schema: base.schema, CollectionID: 1, VChannel: "v1",
+		SegmentSnapshot: walview.VisibleSegmentSnapshot{DataVersion: version},
+	}, nil, true)
+	require.NoError(t, err)
+	defer r.Close()
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: bm25Insert(t, 20, 2)})
+	r.growingStore.markFlushed(20)
+	resources := []*datapb.StreamingNodeBM25Resource{resource(30, 2)}
+	mockViewResources(t, r, &version, &resources)
+	_, _, err = r.BuildIDF(ctx, version, 102, nil)
+	require.Error(t, err)
+	require.Nil(t, r.currentStats)
+	r.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{
+		SegmentID: 20, SealedAtDataVersion: qviews.DataVersion{StreamingVersion: 11},
+	}})
+	_, avg, err := r.BuildIDF(ctx, version, 102, nil)
+	require.NoError(t, err)
+	require.Equal(t, float64(2), avg)
+	require.Equal(t, int64(1), r.currentStats[102].NumRow())
 }

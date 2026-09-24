@@ -22,7 +22,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -73,11 +72,9 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 		return resp, nil
 	}).Build()
 	defer patch.UnPatch()
-	scheduler := nodescheduler.New(1)
-	defer scheduler.Close()
 	future := syncutil.NewFuture[types.MixCoordClient]()
 	future.Set(client)
-	provider := NewFutureProvider(future, WithChunkManager(cm), WithNodeScheduler(scheduler))
+	provider := NewFutureProvider(future, WithChunkManager(cm))
 	module, err := provider.NewRuntime()
 	require.NoError(t, err)
 	runtime := module.(*Runtime)
@@ -89,7 +86,7 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	require.NoError(t, runtime.Prepare(ctx, snapshot))
 	query := &schemapb.SparseFloatArray{Contents: [][]byte{typeutil.CreateAndSortSparseFloatRow(map[uint32]float32{7: 1})}}
 	check := func(version qviews.DataVersion, avg float64) {
-		ids, actual, err := runtime.BuildIDF(version, 102, query)
+		ids, actual, err := runtime.BuildIDF(ctx, version, 102, query)
 		require.NoError(t, err)
 		require.Len(t, ids, 1)
 		require.Equal(t, avg, actual)
@@ -100,7 +97,7 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	flush := message.NewFlushMessageBuilderV2().WithVChannel("v1").WithHeader(&message.FlushMessageHeader{CollectionId: 1, PartitionId: 10, SegmentId: 20}).WithBody(&message.FlushMessageBody{}).MustBuildMutable().WithTimeTick(11).WithLastConfirmedUseMessageID().IntoImmutableMessage(rmq.NewRmqID(11))
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{Message: flush})
 	runtime.ApplyLiveEvent(ctx, walview.VChannelResourceEvent{SegmentSealed: &walview.SegmentSealedEvent{SegmentID: 20, SealedAtDataVersion: next}})
-	require.Eventually(t, func() bool { return runtime.oracle.BeforeRelease(ctx, next) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return runtime.oracle.PrepareDataVersion(ctx, next) == nil }, time.Second, time.Millisecond)
 	check(next, 4)
 	check(current, 4)
 	// A segment created after both versions were prepared belongs to both.
@@ -113,11 +110,11 @@ func TestRuntimeRecoversAndAdvancesBM25(t *testing.T) {
 	check(current, 5)
 	require.NotContains(t, runtime.oracle.growingStore.segments, int64(20))
 	target := qviews.DataVersion{StreamingVersion: 12}
-	require.Eventually(t, func() bool { return runtime.oracle.BeforeRelease(ctx, target) == nil }, time.Second, time.Millisecond)
+	require.Eventually(t, func() bool { return runtime.oracle.PrepareDataVersion(ctx, target) == nil }, time.Second, time.Millisecond)
 	check(current, 5)
 	check(target, 5)
 	runtime.Close()
 	runtime.Close()
 	require.ErrorIs(t, runtime.Prepare(ctx, snapshot), context.Canceled)
-	require.Error(t, runtime.RequestRefresh(ctx, target))
+	require.Error(t, runtime.PrepareDataVersion(ctx, target))
 }

@@ -1654,6 +1654,9 @@ streamingNode:
 
 # Any configuration related to query views.
 queryView:
+  idfOracle:
+    lazyLoadSealedStats: false # Defer initial sealed BM25 resources until the first BM25 query. Applies to newly created runtimes.
+    sealedStatsLoadConcurrencyRatio: 4 # Process-wide sealed BM25 load concurrency as a ratio of CPU cores.
   # Renewable SN Up-view retention after query access; delays normal Down. Not refreshable.
   # Non-positive durations disable timed retention, preserving active query references.
   leaseDuration: 60s

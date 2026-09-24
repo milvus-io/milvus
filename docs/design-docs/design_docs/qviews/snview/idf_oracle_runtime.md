@@ -22,7 +22,8 @@ implement a missing-object/GC full-rebuild fallback.
 - One mutable BM25Stats per contributing growing segment, with flush/seal metadata.
 - Sealed resource descriptors (segment, partition, exact stats paths/manifest),
   without per-segment sealed statistics, memory cache or local disk cache.
-- Current DataVersion, monotonic requested target and one scheduled refresh.
+- Current DataVersion, serialized preparation and at most one shared lazy materialization.
+- Growing contribution membership (segment IDs only), without duplicate statistics.
 
 There is no DataVersion-to-statistics map or duplicate growing contribution map.
 Same-ID resource changes replace the old descriptor and contribution. Zero
@@ -32,8 +33,10 @@ shrinkage.
 ## Initialization
 
 QueryRuntime initialization resolves load metadata and prepares its modules from
-the no-gap WALView snapshot. IDF reads sealed statistics into the aggregate one
-resource at a time, discarding parsed segment statistics after merging. Growing
+the no-gap WALView snapshot. IDF loads sealed resources concurrently under one process-wide limit and merges
+each completed result immediately, discarding parsed segment statistics afterward.
+A worker holds its permit through both decoding and merging, preventing an
+unbounded queue of decoded segment statistics. Growing
 statistics come from persisted stats and snapshot inserts and remain in memory.
 RecoveryStorage may capture WAL inserts before its asynchronous pack writer has
 materialized BM25 outputs. Both the growing search segment and IDF recovery fill
@@ -43,17 +46,37 @@ fallback, with managed runners when available.
 Only loaded BM25 output fields contribute. Live events buffered during build are
 applied before readiness. Partial initialization is never published.
 
+The default eager mode materializes the aggregate during initialization. With
+`queryView.idfOracle.lazyLoadSealedStats=true`, initialization prepares growing
+stats only. The first BM25 query discovers sealed resources for the runtime's
+recorded target DataVersion and materializes the shared aggregate. Concurrent
+queries share one load. Canceling a query only cancels its wait; runtime close or
+a newer target cancels the shared load. Waiters retry against a changed target.
+The same applied-event barrier and final-commit checks protect first publication.
+Changing the lazy setting affects subsequently created runtimes.
+
+`queryView.idfOracle.sealedStatsLoadConcurrencyRatio` defaults to 4 times CPU cores
+and dynamically resizes the shared limit. Both new configuration keys are version
+3.1.0. Reads reuse `queryNode.idfOracle.readBufferSize` and the existing storage
+open/read retry configuration.
+
 ## Refresh and handoff
 
-A received QueryView requests refresh to its explicit DataVersion. Pending
-requests coalesce to the greatest requested version. Initialization and refresh
-both use the existing exact-version resource RPC and validate that the response
-matches the request. Equal or older targets reuse the aggregate without a fetch.
-There is no latest-version RPC mode, periodic discovery, or additional config.
-Coordinator-only progress (including compaction/import) is observed when the
-corresponding QueryView arrives. Seal notifications record handoff metadata;
-they do not request a different DataVersion. A failed refresh retries its known
-target, while queries continue using the last complete local aggregate.
+A received QueryView prepares its explicit DataVersion before reporting Ready.
+Preparation first passes the owner final-commit check and applied-event barrier,
+then advances the single materialized aggregate. The old aggregate remains usable
+while I/O proceeds. An unmaterialized lazy runtime only updates its target; it
+performs no sealed I/O until the first BM25 query. Once materialized, all later
+preparation is synchronous. There is no independent background advancement task
+or per-version prepared-resource map.
+
+Initialization and refresh use the exact-version resource RPC and validate its
+response. Equal or older targets reuse the aggregate without a fetch. Coordinator
+progress alone does not select a different version; seal notifications supply
+handoff metadata only. Retryable preparation failures remain Preparing and retry
+through NodeScheduler. Permanent failures invoke OnUnrecoverable. An in-progress
+preparation returns the scheduler delay sentinel to another preparation instead
+of blocking a scheduler worker behind it.
 
 Compare resource descriptors, not only segment IDs. Read removed sealed resources
 from their recorded old S3 locations into the negative delta; read added resources
@@ -86,7 +109,8 @@ queued task on the same scheduler.
 
 ## Query behavior
 
-BuildIDF does not select statistics by request DataVersion. Query text is tokenized
+BuildIDF/BuildIDFBatch accept a query context for lazy initialization and do not
+select statistics by request DataVersion. Query text is tokenized
 before reading the aggregate; a batch of field/token requests is evaluated under
 one read lock without copying the global vocabulary. Phase 2 uses the resulting
 plan parameters, without another Oracle read.
@@ -101,8 +125,11 @@ incorrectly suppressing old-view candidates.
 
 With global vocabulary U, growing statistics G and sealed metadata M, steady
 memory is O(U + G + M), independent of concurrent DataVersion count. Refresh
-adds temporary delta/decoding memory; large compactions may approach corpus size.
-Metadata comparison remains O(M); stats I/O follows changed resources. Query IDF
+adds positive/negative delta memory plus at most C decoded segment statistics and
+C read buffers, where C is the process-wide concurrency limit. Large compactions
+may approach corpus size. The read limit bounds task count, not bytes; a very large
+single segment can still require substantial decoding memory.
+Metadata comparison remains O(M); stats I/O follows changed resources. After first materialization, query IDF
 work is O(query nonzeros) with no object-store requests. There is no local IDF
 file cache. Eviction trades an additional old-stats S3 read for lower memory.
 
@@ -114,3 +141,14 @@ versions. Use real BM25 RPC validation as well as deterministic tests.
 
 Key packages: wal/vchannel/idf, wal/vchannel/queryresource,
 wal/adaptor/query_plan.go, datacoord/services_sn_query.go, storage/stats.go.
+
+## Merge decisions for BM25 loading optimization
+
+The disk-backed cache from 6f0e1991 is intentionally excluded. Its benefit is fewer
+S3 reads when removing sealed contributions; its cost is disk occupancy proportional
+to retained resources, local-file references/cleanup, and additional preparation
+state. DataView lifetime already protects the source objects. This implementation
+keeps the established no-cache resource contract and adopts lazy loading, bounded
+parallel reads, immediate aggregation, retryable streaming reads, and chunked
+decoding independently. It also preserves loaded partition/field scope, StorageV3
+manifest recovery, batched hybrid-search scoring and atomic delta validation.
