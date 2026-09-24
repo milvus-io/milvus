@@ -117,6 +117,13 @@ class SegmentReadSnapshot {
 
     virtual int64_t
     get_row_count() const = 0;
+
+    // Returns the immutable field column from the frozen snapshot state, or
+    // nullptr when the field is not present. Reads (including validity data)
+    // served from this column come from the same generation as the chunk
+    // boundaries above.
+    virtual std::shared_ptr<ChunkedColumnInterface>
+    GetDataScanResources(FieldId field_id) const = 0;
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
