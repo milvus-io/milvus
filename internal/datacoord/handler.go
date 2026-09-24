@@ -174,7 +174,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		}
 		committed, err := hasCommittedManifest(s)
 		if err != nil {
-			mlog.RatedWarn(h.s.ctx, 1.0, "skip segment with invalid manifest during query recovery",
+			mlog.Warn(h.s.ctx, "skip segment with invalid manifest during query recovery",
 				mlog.FieldSegmentID(s.GetID()), mlog.Err(err))
 			continue
 		}
