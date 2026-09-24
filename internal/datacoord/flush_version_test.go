@@ -79,9 +79,12 @@ func (s *ServerSuite) TestFlushVersionSurvivesRetryRecoveryAndDataViewGC() {
 	// the first RPC response was lost and other segments advanced the view.
 	segments, err := catalog.ListSegments(ctx, 100)
 	require.NoError(s.T(), err)
+	// Background compaction still reads segment indexes during this simulated restart.
+	s.testServer.meta.segMu.Lock()
 	for _, segment := range segments {
 		s.testServer.meta.segments.SetSegment(segment.GetID(), NewSegmentInfo(segment))
 	}
+	s.testServer.meta.segMu.Unlock()
 	recovered, err := dataview.RecoverManager(ctx, catalog, func(context.Context, int64) (bool, error) {
 		return true, nil
 	}, nil, nil, nil)
