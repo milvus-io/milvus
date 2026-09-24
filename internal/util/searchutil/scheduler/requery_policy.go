@@ -9,6 +9,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -207,6 +208,28 @@ func (p *requeryPriorityPolicy) refreshPriority(now time.Time) {
 	p.priorityCredit = min(p.priorityCredit, maxCredit)
 	if p.priorityCredit != oldCredit {
 		p.requeryCredit = p.burstCredit()
+		mlog.Info(context.TODO(), "requery priority level changed",
+			mlog.String("change", requeryPriorityChange(oldCredit, p.priorityCredit)),
+			mlog.Int("previousCredit", oldCredit),
+			mlog.Int("credit", p.priorityCredit),
+			mlog.Float64("timeoutRate", timeoutRate),
+			mlog.Uint64("timeouts", timeouts),
+			mlog.Uint64("successes", successes),
+			mlog.Int("laneLength", p.lane.len()),
+		)
+	}
+}
+
+func requeryPriorityChange(oldCredit, newCredit int) string {
+	switch {
+	case oldCredit == 0:
+		return "activate"
+	case newCredit == 0:
+		return "deactivate"
+	case newCredit > oldCredit:
+		return "upgrade"
+	default:
+		return "downgrade"
 	}
 }
 
