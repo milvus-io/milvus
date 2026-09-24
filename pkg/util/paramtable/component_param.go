@@ -2165,10 +2165,9 @@ Faster the logging writes can be seen by the underlying file system.`,
 		Key:          "log.asyncWrite.droppedTimeout",
 		DefaultValue: "100ms",
 		Version:      "2.6.7",
-		Doc: `The timeout to drop the write operation if the buffer is full.
-Once the underlying buffered writer is blocked or too slow and
-the pending length is larger than the pending length threshold,
-the new incoming write operation will be dropped if it exceeds the timeout.`,
+		Doc: `The maximum time a log below nonDroppableLevel waits for queue space.
+If the underlying buffered writer is blocked or too slow and the pending queue
+remains full when this timeout expires, the incoming log is dropped.`,
 		Export: false,
 	}
 	l.AsyncWriteDroppedTimeout.Init(base.mgr)
@@ -2177,9 +2176,10 @@ the new incoming write operation will be dropped if it exceeds the timeout.`,
 		Key:          "log.asyncWrite.nonDroppableLevel",
 		DefaultValue: "error",
 		Version:      "2.6.7",
-		Doc: `The level that will not be dropped when the buffer is full.
-Once the level is greater or equal to the non-droppable level, 
-the write operation will not be dropped because the buffer is full`,
+		Doc: `The level at which a log uses a best-effort extended wait for queue space.
+At or above this level, a log waits at most max(droppedTimeout, stopTimeout).
+The name is retained for compatibility; it does not guarantee delivery, and these
+logs are dropped if the queue remains full when that timeout expires.`,
 		Export: false,
 	}
 	l.AsyncWriteNonDroppableLevel.Init(base.mgr)
@@ -2188,10 +2188,11 @@ the write operation will not be dropped because the buffer is full`,
 		Key:          "log.asyncWrite.stopTimeout",
 		DefaultValue: "1s",
 		Version:      "2.6.7",
-		Doc: `The timeout to stop the async write.
-When the milvus is on shutdown, 
-the async writer of logger will try to flush all the pending write operations 
-to the underlying file system until reaching the timeout.`,
+		Doc: `The maximum time to wait for async logging to stop. It also contributes to
+the maximum enqueue wait for logs at or above nonDroppableLevel: their limit is
+max(droppedTimeout, stopTimeout).
+When Milvus shuts down, the async logger tries to flush pending writes to the
+underlying file system until this timeout expires.`,
 		Export: false,
 	}
 	l.AsyncWriteStopTimeout.Init(base.mgr)
