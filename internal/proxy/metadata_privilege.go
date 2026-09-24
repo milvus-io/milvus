@@ -18,8 +18,8 @@ package proxy
 
 import (
 	"context"
-	"errors"
 
+	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
