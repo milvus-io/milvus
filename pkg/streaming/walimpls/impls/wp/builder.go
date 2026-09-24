@@ -118,8 +118,25 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 	wpConfig.Etcd.RootPath = paramtable.Get().EtcdCfg.RootPath.GetValue()
 	// logClient
 	wpConfig.Woodpecker.Client.Auditor.MaxInterval = config.NewDurationSecondsFromInt(int(cfg.AuditorMaxInterval.GetAsDurationByParse().Seconds()))
-	wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout = config.NewDurationSecondsFromInt(int(cfg.AuditorCompactionAttemptTimeout.GetAsDurationByParse().Seconds()))
-	wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget = config.NewDurationSecondsFromInt(int(cfg.AuditorCompactionPassBudget.GetAsDurationByParse().Seconds()))
+	// Both are rejected below 1s by Woodpecker's Validate(), which runs before these overrides
+	// land. For a deadline, being dropped is the dangerous direction rather than the safe one:
+	// at <= 0 the auditor skips context.WithTimeout entirely, and its own context carries no
+	// deadline, so SegmentCompact runs against an unresponsive node with no bound at all. The
+	// pass budget does not rescue it either -- that is checked between segments and lets an
+	// in-flight one run to completion, so a hung attempt blocks the whole walk for that log,
+	// stalling truncation, snapshot publication and the orphan sweep with it.
+	if v := int(cfg.AuditorCompactionAttemptTimeout.GetAsDurationByParse().Seconds()); v > 0 {
+		wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout = config.NewDurationSecondsFromInt(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker auditor compactionAttemptTimeout, keeping woodpecker built-in default",
+			mlog.String("value", cfg.AuditorCompactionAttemptTimeout.GetValue()))
+	}
+	if v := int(cfg.AuditorCompactionPassBudget.GetAsDurationByParse().Seconds()); v > 0 {
+		wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget = config.NewDurationSecondsFromInt(v)
+	} else {
+		mlog.Warn(context.TODO(), "invalid woodpecker auditor compactionPassBudget, keeping woodpecker built-in default",
+			mlog.String("value", cfg.AuditorCompactionPassBudget.GetValue()))
+	}
 	wpConfig.Woodpecker.Client.SegmentAppend.MaxRetries = cfg.AppendMaxRetries.GetAsInt()
 	wpConfig.Woodpecker.Client.SegmentAppend.QueueSize = cfg.AppendQueueSize.GetAsInt()
 	// GetAsInt/GetAsSize return 0 on a parse failure (e.g. a typo like "1,000"),
@@ -214,8 +231,8 @@ func setCustomWpConfig(wpConfig *config.Configuration, cfg *paramtable.Woodpecke
 		mlog.Warn(context.TODO(), "invalid woodpecker segmentCompactionPolicy memoryHighWatermark, keeping woodpecker built-in default",
 			mlog.String("value", cfg.CompactionMemoryHighWatermark.GetValue()))
 	}
-	// Non-positive is safe for the rest of this range: NewSyncScheduler falls back to its
-	// own default, and the two auditor deadlines set above are skipped entirely when <= 0.
+	// maxWorkers is the one value in this range that is safe unguarded: NewSyncScheduler
+	// falls back to its own default when handed a non-positive count.
 	wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers = cfg.SyncSchedulerMaxWorkers.GetAsInt()
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxBatchSize = config.NewByteSize(cfg.ReaderMaxBatchSize.GetAsSize())
 	wpConfig.Woodpecker.Logstore.SegmentReadPolicy.MaxFetchThreads = cfg.ReaderMaxFetchThreads.GetAsInt()
