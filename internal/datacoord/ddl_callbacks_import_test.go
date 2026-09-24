@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -2083,29 +2084,31 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 	assert.Contains(t, err.Error(), "backup")
 }
 
-// TestImportAckCallback_DropsControlChannelFromJobChannels pins the filter in
-// importV1AckCallback: the broadcaster stamps the control channel into every
-// broadcast, so the ack result carries a control-channel entry that must not
-// become one of the job's data vchannels, while its time tick still counts
-// toward DataTimestamp.
+// TestImportAckCallback_DropsControlChannelFromJobChannels exercises the real
+// ACK-to-job path: the broadcaster's control-channel entry must not become a
+// ready data vchannel, while its time tick still contributes to DataTs.
 func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
-	defer mockey.UnPatchAll()
-
-	// The request is read inside the hook: its memory is not valid after the call returns.
-	var channelNames []string
-	var dataTimestamp uint64
-	var rlsPrincipal string
-	var skipRLS bool
-	var options map[string]string
-	mockey.Mock((*Server).createImportJobFromAck).To(
-		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
-			channelNames = append([]string{}, in.GetChannelNames()...)
-			dataTimestamp = in.GetDataTimestamp()
-			rlsPrincipal = in.GetRlsPrincipal()
-			skipRLS = in.GetSkipRls()
-			options = funcutil.KeyValuePair2Map(in.GetOptions())
-			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
-		}).Build()
+	paramtable.Init()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	type ackMeta struct{ ImportMeta }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	getCollection := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+	defer getCollection.UnPatch()
+	var saved ImportJob
+	saveJob := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
+		saved = job
+		return nil
+	}).Build()
+	defer saveJob.UnPatch()
+	var captured *internalpb.ImportRequestInternal
+	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
+		captured = in
+		return nil, nil
+	}).Build()
+	defer resolve.UnPatch()
 
 	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
 	broadcastMsg := message.NewImportMessageBuilderV1().
@@ -2131,50 +2134,57 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		},
 	}
 
-	callbacks := &DDLCallbacks{Server: &Server{}}
-	assert.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
-	assert.Equal(t, []string{"vchannel1"}, channelNames)
-	assert.Equal(t, uint64(200), dataTimestamp)
-	assert.Equal(t, "alice", rlsPrincipal)
-	assert.True(t, skipRLS)
-	assert.NotContains(t, options, importutilv2.RLSPrincipal)
-	assert.NotContains(t, options, importutilv2.SkipRLS)
+	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	callbacks := &DDLCallbacks{Server: server}
+	require.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
+	require.NotNil(t, saved)
+	assert.Equal(t, int64(1), saved.GetJobID())
+	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
+	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
+	assert.Equal(t, uint64(200), saved.GetDataTs())
+	require.NotNil(t, captured)
+	assert.Equal(t, "alice", captured.GetRlsPrincipal())
+	assert.True(t, captured.GetSkipRls())
+	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.RLSPrincipal)
+	assert.NotContains(t, funcutil.KeyValuePair2Map(saved.GetOptions()), importutilv2.SkipRLS)
 }
 
 func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {
-	defer mockey.UnPatchAll()
-
-	patch := mockey.Mock((*Server).createImportJobFromAck).To(
-		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
-			assert.Empty(t, in.GetRlsPrincipal())
-			assert.False(t, in.GetSkipRls())
-			options := funcutil.KeyValuePair2Map(in.GetOptions())
-			assert.NotContains(t, options, importutilv2.RLSPrincipal)
-			assert.NotContains(t, options, importutilv2.SkipRLS)
-			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
-		}).Build()
-
-	callbacks := &DDLCallbacks{Server: &Server{}}
+	paramtable.Init()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	type ackMeta struct{ ImportMeta }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	get := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+	defer get.UnPatch()
+	save := mockey.Mock((*ackMeta).AddJob).Return(nil).Build()
+	defer save.UnPatch()
+	resolve := mockey.Mock((*Server).resolveImportRLSPredicate).To(func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
+		assert.Empty(t, in.GetRlsPrincipal())
+		assert.False(t, in.GetSkipRls())
+		options := funcutil.KeyValuePair2Map(in.GetOptions())
+		assert.NotContains(t, options, importutilv2.RLSPrincipal)
+		assert.NotContains(t, options, importutilv2.SkipRLS)
+		return nil, nil
+	}).Build()
+	defer resolve.UnPatch()
+	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	callbacks := &DDLCallbacks{Server: server}
 	for _, skipRLS := range []string{"true", "not-a-bool"} {
-		broadcastMsg := message.NewImportMessageBuilderV1().
+		wal := message.NewImportMessageBuilderV1().
 			WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
 			WithBody(&msgpb.ImportMsg{
-				CollectionID: 100,
-				JobID:        1,
-				Options: map[string]string{
-					importutilv2.RLSPrincipal: "legacy",
-					importutilv2.SkipRLS:      skipRLS,
-				},
-			}).
-			WithBroadcast([]string{"vchannel1"}).
-			MustBuildBroadcast().
-			OverwriteBroadcastHeader(1)
-
-		err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
-			Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+				CollectionID: 100, JobID: 1,
+				Options: map[string]string{importutilv2.RLSPrincipal: "legacy", importutilv2.SkipRLS: skipRLS},
+			}).WithBroadcast([]string{"vchannel1"}).MustBuildBroadcast().OverwriteBroadcastHeader(1)
+		require.NoError(t, callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+			Message: message.MustAsBroadcastImportMessageV1(wal),
 			Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
-		})
-		require.NoError(t, err)
+		}))
 	}
-	require.Equal(t, 2, patch.Times())
+	require.Equal(t, 2, resolve.Times())
 }
