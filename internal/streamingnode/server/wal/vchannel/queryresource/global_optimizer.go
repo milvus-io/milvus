@@ -19,7 +19,7 @@ import (
 )
 
 type idfOracle interface {
-	BuildIDF(dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
+	BuildIDF(ctx context.Context, dataVersion qviews.DataVersion, fieldID int64, tfs *schemapb.SparseFloatArray) ([][]byte, float64, error)
 }
 
 type globalOptimizer struct {
@@ -138,7 +138,7 @@ func (o globalOptimizer) buildBM25IDF(ctx context.Context, req *internalpb.Searc
 	if err != nil {
 		return false, err
 	}
-	idfSparseVector, avgdl, err := o.idf.BuildIDF(o.dataVersion, req.GetFieldId(), tfArray)
+	idfSparseVector, avgdl, err := o.idf.BuildIDF(ctx, o.dataVersion, req.GetFieldId(), tfArray)
 	if err != nil {
 		return false, merr.Wrap(err, "build BM25 IDF")
 	}

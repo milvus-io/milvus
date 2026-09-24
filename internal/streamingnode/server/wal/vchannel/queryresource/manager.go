@@ -5,12 +5,15 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 )
 
@@ -39,8 +42,9 @@ type Manager struct {
 }
 
 type queryViewRef struct {
-	meta    *viewpb.QueryViewMeta
-	onReady func()
+	meta            *viewpb.QueryViewMeta
+	onReady         func()
+	onUnrecoverable func()
 }
 
 func NewManager(config Config) *Manager {
@@ -71,8 +75,9 @@ func (m *Manager) AcquireLocked(req snview.AcquireResource, build ViewBuilder) {
 			m.refs = make(map[qviews.QueryViewKey]queryViewRef)
 		}
 		m.refs[req.Key] = queryViewRef{
-			meta:    proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
-			onReady: req.OnReady,
+			meta:            proto.Clone(req.Meta).(*viewpb.QueryViewMeta),
+			onReady:         req.OnReady,
+			onUnrecoverable: req.OnUnrecoverable,
 		}
 		if m.runtime == nil && m.task == nil {
 			m.startBuildLocked(m.oldestQueryViewMetaLocked(), build)
@@ -337,6 +342,16 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return err
 		}
+		if !retryablePreparationError(err) {
+			m.mu.Lock()
+			ref, ok := m.refs[key]
+			current := ok && m.runtime == runtime && m.task == nil && m.err == nil
+			m.mu.Unlock()
+			if current && ref.onUnrecoverable != nil {
+				ref.onUnrecoverable()
+			}
+			return nil
+		}
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	m.mu.Lock()
@@ -349,6 +364,17 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	}
 	onReady()
 	return nil
+}
+
+func retryablePreparationError(err error) bool {
+	if merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	}
+	return false
 }
 
 func (m *Manager) submitCallback(callback func()) {

@@ -212,6 +212,6 @@ func (m fakeIDFModule) ApplyLiveEvent(context.Context, walview.VChannelResourceE
 }
 func (m fakeIDFModule) Advance(qviews.DataVersion) {}
 func (m fakeIDFModule) Close()                     {}
-func (m fakeIDFModule) BuildIDF(qviews.DataVersion, int64, *schemapb.SparseFloatArray) ([][]byte, float64, error) {
+func (m fakeIDFModule) BuildIDF(context.Context, qviews.DataVersion, int64, *schemapb.SparseFloatArray) ([][]byte, float64, error) {
 	return m.vectors, m.avgdl, nil
 }

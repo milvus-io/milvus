@@ -19,7 +19,9 @@ package storage
 import (
 	"bytes"
 	"encoding/binary"
+	"io"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 
@@ -294,6 +296,27 @@ func TestBM25Stats_MemSize(t *testing.T) {
 	assert.Equal(t, int64(120)+100*bytesPerEntry, stats.MemSize())
 }
 
+func TestBM25Stats_MinusRemovesZeroEntries(t *testing.T) {
+	stats := NewBM25Stats()
+	stats.Append(
+		map[uint32]float32{1: 1, 2: 1},
+		map[uint32]float32{2: 1},
+	)
+	removed := NewBM25Stats()
+	removed.Append(map[uint32]float32{1: 1})
+
+	stats.Minus(removed)
+
+	assert.NotContains(t, stats.rowsWithToken, uint32(1))
+	assert.Equal(t, int32(2), stats.rowsWithToken[2])
+	assert.Equal(t, int64(1), stats.NumRow())
+
+	missing := NewBM25Stats()
+	missing.Append(map[uint32]float32{3: 1})
+	stats.Minus(missing)
+	assert.Equal(t, int32(-1), stats.rowsWithToken[3])
+}
+
 func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 	t.Run("roundtrip", func(t *testing.T) {
 		original := NewBM25Stats()
@@ -309,6 +332,35 @@ func TestBM25Stats_DeserializeFromReader(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, original.NumRow(), restored.NumRow())
 		assert.Equal(t, original.GetAvgdl(), restored.GetAvgdl())
+	})
+
+	t.Run("short_reads_across_chunks", func(t *testing.T) {
+		original := NewBM25Stats()
+		for token := uint32(0); token < 520; token++ {
+			original.Append(map[uint32]float32{token: 1})
+		}
+		data, err := original.Serialize()
+		assert.NoError(t, err)
+
+		restored := NewBM25Stats()
+		assert.NoError(t, restored.DeserializeFromReader(iotest.OneByteReader(bytes.NewReader(data))))
+		assert.Equal(t, original.rowsWithToken, restored.rowsWithToken)
+		assert.Equal(t, original.NumRow(), restored.NumRow())
+		assert.Equal(t, original.NumToken(), restored.NumToken())
+		fromBytes, err := NewBM25StatsWithBytes(data)
+		assert.NoError(t, err)
+		assert.Equal(t, original.rowsWithToken, fromBytes.rowsWithToken)
+	})
+
+	t.Run("reader_error", func(t *testing.T) {
+		original := NewBM25Stats()
+		original.Append(map[uint32]float32{1: 1, 2: 1, 3: 1, 4: 1})
+		data, err := original.Serialize()
+		assert.NoError(t, err)
+
+		reader := io.MultiReader(bytes.NewReader(data[:28]), iotest.ErrReader(merr.ErrIoTooManyRequests))
+		restored := NewBM25Stats()
+		assert.ErrorIs(t, restored.DeserializeFromReader(reader), merr.ErrIoTooManyRequests)
 	})
 
 	t.Run("accumulate_multiple", func(t *testing.T) {

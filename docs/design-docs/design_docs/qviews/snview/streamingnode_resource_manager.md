@@ -58,7 +58,7 @@ QueryViewStateMachine.Acquire(qv)
        create QueryRuntime
        submit build task to the shared scheduler
   -> wait for runtime build
-  -> advance QueryRuntime to the oldest referenced DataVersion
+  -> prepare the QueryView DataVersion in QueryRuntime
   -> invoke OnReady asynchronously
 ```
 
@@ -122,8 +122,8 @@ Rules:
 1. `Acquire(QueryView)` creates a QueryView reference.
 2. The first successful `Acquire` creates the VChannel singleton `QueryRuntime`
    if one does not already exist.
-3. Later `Acquire` calls add references and advance the runtime to the oldest
-   referenced DataVersion.
+3. Later `Acquire` calls add references and prepare the target DataVersion
+   before reporting the QueryView ready.
 4. `Release(QueryView)` removes the corresponding reference.
 5. Query resources can be closed only after all QueryView references are gone.
 6. WAL handoff close drains QueryView references through

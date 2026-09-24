@@ -214,13 +214,6 @@ func (mr *MilvusRoles) runMixCoord(ctx context.Context, localMsg bool) *conc.Fut
 }
 
 func (mr *MilvusRoles) runQueryNode(ctx context.Context, localMsg bool) *conc.Future[component] {
-	// clear local storage
-	queryDataLocalPath := pathutil.GetPath(pathutil.RootCachePath, 0)
-	if !paramtable.Get().CommonCfg.EnablePosixMode.GetAsBool() {
-		// under non-posix mode, we need to clean local storage when starting query node
-		// under posix mode, this clean task will be done by mixcoord
-		cleanLocalDir(queryDataLocalPath)
-	}
 	return runComponent(ctx, localMsg, components.NewQueryNode, metrics.RegisterQueryNode)
 }
 
@@ -528,6 +521,10 @@ func (mr *MilvusRoles) Run() {
 	effectiveFileResourceMode := mr.resolveFileResourceMode()
 	fileresource.SetLocalMode(effectiveFileResourceMode)
 	mlog.Info(ctx, "resolved process file resource mode", mlog.String("mode", effectiveFileResourceMode.String()))
+
+	if (mr.EnableQueryNode || mr.EnableStreamingNode) && !paramtable.Get().CommonCfg.EnablePosixMode.GetAsBool() {
+		cleanLocalDir(pathutil.GetPath(pathutil.RootCachePath, 0))
+	}
 
 	local := mr.Local
 	componentFutureMap := make(map[string]*conc.Future[component])

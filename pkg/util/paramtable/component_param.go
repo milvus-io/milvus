@@ -4424,9 +4424,11 @@ type queryNodeConfig struct {
 	EnabledGrowingSegmentJSONKeyStats ParamItem `refreshable:"false"`
 
 	// Idf Oracle
-	IDFPreload             ParamItem `refreshable:"true"`
-	IDFReadBufferSize      ParamItem `refreshable:"true"`
-	BM25StatsBytesPerEntry ParamItem `refreshable:"true"`
+	IDFPreload                         ParamItem `refreshable:"true"`
+	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
+	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
+	IDFReadBufferSize                  ParamItem `refreshable:"true"`
+	BM25StatsBytesPerEntry             ParamItem `refreshable:"true"`
 	// partial search
 	PartialResultRequiredDataRatio ParamItem `refreshable:"true"`
 
@@ -4478,6 +4480,30 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "Whether to parse and merge BM25 stats into current during load before first target. When false, stats are only written to disk and loaded on first SyncDistribution.",
 	}
 	p.IDFPreload.Init(base.mgr)
+
+	p.IDFLazyLoadSealedStats = ParamItem{
+		Key:          "queryNode.idfOracle.lazyLoadSealedStats",
+		Version:      "3.0.0",
+		Export:       true,
+		DefaultValue: "false",
+		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
+	}
+	p.IDFLazyLoadSealedStats.Init(base.mgr)
+
+	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
+		Key:          "queryNode.idfOracle.sealedStatsLoadConcurrencyRatio",
+		Version:      "3.0.0",
+		Export:       true,
+		DefaultValue: "4",
+		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
+		Formatter: func(v string) string {
+			if getAsFloat(v) <= 0 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
 
 	p.IDFReadBufferSize = ParamItem{
 		Key:          "queryNode.idfOracle.readBufferSize",

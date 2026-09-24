@@ -186,8 +186,11 @@ across all nodes via the query view).
 | BM25 IDF | Compute avgdl + IDF vectors from global segment stats, transform query vectors and plan |
 | Search Param Tuning | Adjust topk/search params based on global segment count (QueryHook) |
 
-SN loads BM25 statistics during the view lifecycle (Preparing→Ready). Both optimizers
-are initially placeholder interfaces.
+SN normally materializes its initial BM25 statistics while the QueryRuntime is
+initialized. Optional lazy initial loading defers sealed-resource discovery and
+materialization until the first BM25 query. Once materialized, QueryViews with
+a newer DataVersion prefetch sealed BM25 files before readiness; the single
+rolling aggregate advances separately.
 
 ### 3.2 Local Optimizer
 

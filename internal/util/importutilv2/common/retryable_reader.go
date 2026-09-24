@@ -106,6 +106,13 @@ func newRetryableReader(ctx context.Context, path string, reader storage.FileRea
 	}
 }
 
+func (r *retryableReader) Close() error {
+	if r.FileReader == nil {
+		return nil
+	}
+	return r.FileReader.Close()
+}
+
 func (r *retryableReader) objectSize() (int64, bool) {
 	if r.size > 0 {
 		return r.size, true

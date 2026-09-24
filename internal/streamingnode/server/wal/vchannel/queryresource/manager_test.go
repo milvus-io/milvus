@@ -2,6 +2,7 @@ package queryresource
 
 import (
 	"context"
+	"io"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -211,6 +212,48 @@ func TestManagerRetriesDataVersionPreparationBeforeReady(t *testing.T) {
 		}
 	}, time.Second, time.Millisecond)
 	require.GreaterOrEqual(t, attempts.Load(), int32(2))
+}
+
+func TestManagerReportsPermanentDataVersionPreparationFailure(t *testing.T) {
+	scheduler := nodescheduler.New(1)
+	defer scheduler.Close()
+	dispatcher := NewDispatcher(1)
+	defer dispatcher.Close()
+
+	var attempts atomic.Int32
+	manager := NewManager(Config{
+		Scheduler:  scheduler,
+		Dispatcher: dispatcher,
+		Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{
+			prepare: func(context.Context, qviews.DataVersion) error {
+				attempts.Add(1)
+				return merr.WrapErrSerializationFailed(io.ErrUnexpectedEOF, "corrupt BM25 stats")
+			},
+		}},
+	})
+	defer manager.Close()
+
+	ready := make(chan struct{})
+	unrecoverable := make(chan struct{})
+	meta, key := testManagerQueryViewMetaAndKey(1)
+	manager.AcquireLocked(snview.AcquireResource{
+		Key:             key,
+		Meta:            meta,
+		OnReady:         func() { close(ready) },
+		OnUnrecoverable: func() { close(unrecoverable) },
+	}, testManagerViewBuilder)
+
+	select {
+	case <-unrecoverable:
+	case <-time.After(time.Second):
+		t.Fatal("permanent BM25 preparation failure was not reported")
+	}
+	select {
+	case <-ready:
+		t.Fatal("query view became ready with corrupt BM25 stats")
+	default:
+	}
+	require.Equal(t, int32(1), attempts.Load())
 }
 
 func TestManagerReleasesDataVersionPreparedAfterViewWasDropped(t *testing.T) {

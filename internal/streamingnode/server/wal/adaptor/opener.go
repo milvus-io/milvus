@@ -82,9 +82,7 @@ type openerAdaptorImpl struct {
 	interceptorBuilders []interceptors.InterceptorBuilder
 }
 
-var (
-	walSwitchFlushCheckInterval = time.Second
-)
+var walSwitchFlushCheckInterval = time.Second
 
 // Open opens a wal instance for the channel.
 func (o *openerAdaptorImpl) Open(ctx context.Context, opt *wal.OpenOption) (wal.WAL, error) {
@@ -221,7 +219,6 @@ func (o *openerAdaptorImpl) openRWWAL(ctx context.Context, l walimpls.WALImpls, 
 		idf.NewFutureProvider(
 			resource.Resource().MixCoordClient(),
 			idf.WithChunkManager(resource.Resource().ChunkManager()),
-			idf.WithNodeScheduler(nodescheduler.Get()),
 		),
 	}
 	rs, snapshot, err := recovery.RecoverRecoveryStorage(
