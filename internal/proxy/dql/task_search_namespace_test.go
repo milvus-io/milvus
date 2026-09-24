@@ -28,7 +28,7 @@ func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		cache := newTestCache()
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
-		mockTest(t, isPartitionKeyMode, false, nil)
+		mockTest(t, IsPartitionKeyMode, false, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
 		// Schema with namespace enabled and a vector field

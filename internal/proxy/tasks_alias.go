@@ -17,12 +17,13 @@
 package proxy
 
 import (
+	"github.com/milvus-io/milvus/internal/proxy/dml"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 )
 
-// Aliases to the extracted dql package, kept so the composition root can keep
-// using the original (unexported) type names. This is the only place in the
-// root package allowed to reference the dql package.
+// Aliases to the extracted dql/dml packages, kept so the composition root can
+// keep using the original (unexported) type names. This is the only place in
+// the root package allowed to reference the dql/dml packages.
 
 type (
 	searchTask                  = dql.SearchTask
@@ -30,6 +31,12 @@ type (
 	getStatisticsTask           = dql.GetStatisticsTask
 	getCollectionStatisticsTask = dql.GetCollectionStatisticsTask
 	getPartitionStatisticsTask  = dql.GetPartitionStatisticsTask
+
+	insertTask              = dml.InsertTask
+	upsertTask              = dml.UpsertTask
+	deleteTask              = dml.DeleteTask
+	deleteRunner            = dml.DeleteRunner
+	batchUpdateManifestTask = dml.BatchUpdateManifestTask
 )
 
 // Constants re-exported from the dql package so external consumers of the root
@@ -82,4 +89,9 @@ var (
 	GetPartitionIDs                          = dql.GetPartitionIDs
 	MarshalPlanWithMembershipFilterSizeLimit = dql.MarshalPlanWithMembershipFilterSizeLimit
 	NormalizeFP32ToFP16BF16VectorFieldData   = dql.NormalizeFP32ToFP16BF16VectorFieldData
+	NewInsertTask                            = dml.NewInsertTask
+	NewDeleteRunner                          = dml.NewDeleteRunner
+	NewUpsertTask                            = dml.NewUpsertTask
+	NewBatchUpdateManifestTask               = dml.NewBatchUpdateManifestTask
+	ValidateInsertIdempotencyProperty        = dml.ValidateInsertIdempotencyProperty
 )

@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package proxy
+package dml
 
 import (
 	"context"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
@@ -29,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-type batchUpdateManifestTask struct {
+type BatchUpdateManifestTask struct {
 	baseTask
 	Condition
 	req      *milvuspb.BatchUpdateManifestRequest
@@ -40,39 +41,55 @@ type batchUpdateManifestTask struct {
 	collectionID UniqueID
 }
 
-func (bt *batchUpdateManifestTask) TraceCtx() context.Context {
+// NewBatchUpdateManifestTask constructs a batch-update-manifest task.
+func NewBatchUpdateManifestTask(ctx context.Context, node taskmodel.TaskNode, req *milvuspb.BatchUpdateManifestRequest) *BatchUpdateManifestTask {
+	return &BatchUpdateManifestTask{
+		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       req,
+		mixCoord:  node.MixCoord(),
+	}
+}
+
+// Result returns the status after execution.
+func (bt *BatchUpdateManifestTask) Result() *commonpb.Status {
+	return bt.result
+}
+
+func (bt *BatchUpdateManifestTask) TraceCtx() context.Context {
 	return bt.ctx
 }
 
-func (bt *batchUpdateManifestTask) ID() UniqueID {
+func (bt *BatchUpdateManifestTask) ID() UniqueID {
 	return bt.req.GetBase().GetMsgID()
 }
 
-func (bt *batchUpdateManifestTask) SetID(uid UniqueID) {
+func (bt *BatchUpdateManifestTask) SetID(uid UniqueID) {
 	bt.req.GetBase().MsgID = uid
 }
 
-func (bt *batchUpdateManifestTask) Name() string {
+func (bt *BatchUpdateManifestTask) Name() string {
 	return "BatchUpdateManifestTask"
 }
 
-func (bt *batchUpdateManifestTask) Type() commonpb.MsgType {
+func (bt *BatchUpdateManifestTask) Type() commonpb.MsgType {
 	return bt.req.GetBase().GetMsgType()
 }
 
-func (bt *batchUpdateManifestTask) BeginTs() Timestamp {
+func (bt *BatchUpdateManifestTask) BeginTs() Timestamp {
 	return bt.req.GetBase().GetTimestamp()
 }
 
-func (bt *batchUpdateManifestTask) EndTs() Timestamp {
+func (bt *BatchUpdateManifestTask) EndTs() Timestamp {
 	return bt.req.GetBase().GetTimestamp()
 }
 
-func (bt *batchUpdateManifestTask) SetTs(ts Timestamp) {
+func (bt *BatchUpdateManifestTask) SetTs(ts Timestamp) {
 	bt.req.Base.Timestamp = ts
 }
 
-func (bt *batchUpdateManifestTask) OnEnqueue() error {
+func (bt *BatchUpdateManifestTask) OnEnqueue() error {
 	if bt.req.Base == nil {
 		bt.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -80,7 +97,7 @@ func (bt *batchUpdateManifestTask) OnEnqueue() error {
 	return nil
 }
 
-func (bt *batchUpdateManifestTask) PreExecute(ctx context.Context) error {
+func (bt *BatchUpdateManifestTask) PreExecute(ctx context.Context) error {
 	req := bt.req
 	if req.GetCollectionName() == "" {
 		return merr.WrapErrParameterInvalidMsg("collection name is empty")
@@ -98,7 +115,7 @@ func (bt *batchUpdateManifestTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (bt *batchUpdateManifestTask) Execute(ctx context.Context) error {
+func (bt *BatchUpdateManifestTask) Execute(ctx context.Context) error {
 	mlog.Info(ctx, "proxy batch update manifest",
 		mlog.FieldCollectionName(bt.req.GetCollectionName()),
 		mlog.FieldCollectionID(bt.collectionID),
@@ -125,6 +142,6 @@ func (bt *batchUpdateManifestTask) Execute(ctx context.Context) error {
 	return nil
 }
 
-func (bt *batchUpdateManifestTask) PostExecute(ctx context.Context) error {
+func (bt *BatchUpdateManifestTask) PostExecute(ctx context.Context) error {
 	return nil
 }

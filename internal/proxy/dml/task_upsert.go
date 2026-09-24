@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package proxy
+package dml
 
 import (
 	"context"
@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -47,7 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type upsertTask struct {
+type UpsertTask struct {
 	baseTask
 	Condition
 
@@ -93,49 +94,96 @@ type upsertTask struct {
 	storageCost segcore.StorageCost
 }
 
-// TraceCtx returns upsertTask context
-func (it *upsertTask) TraceCtx() context.Context {
+// NewUpsertTask constructs an upsert task. It takes the host node and the
+// request plus the allocator input, deriving the rest from the taskmodel.TaskNode
+// contract.
+func NewUpsertTask(ctx context.Context, node taskmodel.TaskNode, request *milvuspb.UpsertRequest, idAllocator *allocator.IDAllocator) *UpsertTask {
+	return &UpsertTask{
+		baseTask: baseTask{
+			MetaCache: node.GetMetaCache(),
+		},
+		baseMsg: msgstream.BaseMsg{
+			HashValues: request.HashKeys,
+		},
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		req:       request,
+		result: &milvuspb.MutationResult{
+			Status: merr.Success(),
+			IDs: &schemapb.IDs{
+				IdField: nil,
+			},
+		},
+		idAllocator:     idAllocator,
+		chMgr:           node.ChMgr(),
+		schemaTimestamp: request.SchemaTimestamp,
+		node:            node,
+	}
+}
+
+// Result returns the mutation result after execution.
+func (ut *UpsertTask) Result() *milvuspb.MutationResult {
+	return ut.result
+}
+
+// Request returns the original upsert request.
+func (ut *UpsertTask) Request() *milvuspb.UpsertRequest {
+	return ut.req
+}
+
+// UpsertMsg returns the underlying upsert message.
+func (ut *UpsertTask) UpsertMsg() *msgstream.UpsertMsg {
+	return ut.upsertMsg
+}
+
+// StorageCost returns the storage cost reported by the last execution.
+func (ut *UpsertTask) StorageCost() segcore.StorageCost {
+	return ut.storageCost
+}
+
+// TraceCtx returns UpsertTask context
+func (it *UpsertTask) TraceCtx() context.Context {
 	return it.ctx
 }
 
-func (it *upsertTask) ID() UniqueID {
+func (it *UpsertTask) ID() UniqueID {
 	return it.req.Base.MsgID
 }
 
-func (it *upsertTask) SetID(uid UniqueID) {
+func (it *UpsertTask) SetID(uid UniqueID) {
 	it.req.Base.MsgID = uid
 }
 
-func (it *upsertTask) Name() string {
-	return UpsertTaskName
+func (it *UpsertTask) Name() string {
+	return taskmodel.UpsertTaskName
 }
 
-func (it *upsertTask) Type() commonpb.MsgType {
+func (it *UpsertTask) Type() commonpb.MsgType {
 	return it.req.Base.MsgType
 }
 
-func (it *upsertTask) BeginTs() Timestamp {
+func (it *UpsertTask) BeginTs() Timestamp {
 	return it.baseMsg.BeginTimestamp
 }
 
-func (it *upsertTask) SetTs(ts Timestamp) {
+func (it *UpsertTask) SetTs(ts Timestamp) {
 	it.baseMsg.BeginTimestamp = ts
 	it.baseMsg.EndTimestamp = ts
 }
 
-func (it *upsertTask) EndTs() Timestamp {
+func (it *UpsertTask) EndTs() Timestamp {
 	return it.baseMsg.EndTimestamp
 }
 
 // refreshMutationResultCounts synchronizes the response with the prepared
 // insert/delete payload for the current Upsert attempt.
-func (it *upsertTask) refreshMutationResultCounts() {
+func (it *UpsertTask) refreshMutationResultCounts() {
 	it.result.DeleteCnt = it.upsertMsg.DeleteMsg.NumRows
 	it.result.InsertCnt = int64(it.upsertMsg.InsertMsg.NumRows)
 	it.result.UpsertCnt = it.result.InsertCnt
 }
 
-func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
+func (it *UpsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	ret := make(map[pChan]pChanStatistics)
 
 	channels := it.GetChannels()
@@ -152,7 +200,7 @@ func (it *upsertTask) getPChanStats() (map[pChan]pChanStatistics, error) {
 	return ret, nil
 }
 
-func (it *upsertTask) SetChannels() error {
+func (it *UpsertTask) SetChannels() error {
 	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.req.GetDbName(), it.req.CollectionName)
 	if err != nil {
 		return err
@@ -165,11 +213,11 @@ func (it *upsertTask) SetChannels() error {
 	return nil
 }
 
-func (it *upsertTask) GetChannels() []pChan {
+func (it *UpsertTask) GetChannels() []pChan {
 	return it.pChannels
 }
 
-func (it *upsertTask) OnEnqueue() error {
+func (it *UpsertTask) OnEnqueue() error {
 	if it.req.Base == nil {
 		it.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -178,7 +226,7 @@ func (it *upsertTask) OnEnqueue() error {
 	return nil
 }
 
-func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	log := mlog.With(mlog.String("collectionName", t.req.GetCollectionName()))
 	// Both modes use normal Strong queries; only Partial Upsert needs the
 	// executed channel snapshots for its CAS proof.
@@ -214,7 +262,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	} else {
 		// partition name could be defaultPartitionName or name specified by sdk
 		partName := t.upsertMsg.DeleteMsg.PartitionName
-		if err := validatePartitionTag(partName, true); err != nil {
+		if err := dql.ValidatePartitionTag(partName, true); err != nil {
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return nil, segcore.StorageCost{}, err
 		}
@@ -228,8 +276,8 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	}
 
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
-	plan.Namespace = namespaceForPlan(t.schema.CollectionSchema, t.req.Namespace)
-	qt := NewQueryTask(t.ctx, t.node, queryReq, plan, &internalpb.RetrieveRequest{
+	plan.Namespace = dql.NamespaceForPlan(t.schema.CollectionSchema, t.req.Namespace)
+	qt := dql.NewQueryTask(t.ctx, t.node, queryReq, plan, &internalpb.RetrieveRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_Retrieve),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
@@ -264,7 +312,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 // prepareUpsert prepares function outputs and shares read-based preparation
 // between Full AutoID and Partial Upsert. Only Partial restores retry state,
 // merges old fields, and prepares CAS proofs.
-func (it *upsertTask) prepareUpsert(ctx context.Context) error {
+func (it *UpsertTask) prepareUpsert(ctx context.Context) error {
 	partialUpdate := it.req.GetPartialUpdate()
 	if partialUpdate {
 		if it.partialUpdateOriginalFields == nil {
@@ -323,7 +371,7 @@ func (it *upsertTask) prepareUpsert(ctx context.Context) error {
 // AutoID and Partial Upsert. Full returns after classification; Partial also
 // allocates missing AutoIDs and merges old fields here.
 // Returned missing-row offsets refer to request order before any merge.
-func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
+func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	log := mlog.With(mlog.String("collectionName", it.req.CollectionName))
 	partialUpdate := it.req.GetPartialUpdate()
 
@@ -872,7 +920,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 // allocateMissingAutoIDs applies a batch of business PKs before internal RowIDs
 // are allocated. Only Partial saves the mapping so re-reads and CAS retries keep
 // the same destination IDs, even after another vchannel has committed.
-func (it *upsertTask) allocateMissingAutoIDs(missingRows []int) (*schemapb.IDs, error) {
+func (it *UpsertTask) allocateMissingAutoIDs(missingRows []int) (*schemapb.IDs, error) {
 	partialUpdate := it.req.GetPartialUpdate()
 	missing := make([]int, 0, len(missingRows))
 	for _, row := range missingRows {
@@ -893,7 +941,7 @@ func (it *upsertTask) allocateMissingAutoIDs(missingRows []int) (*schemapb.IDs, 
 	if _, err := checkUpsertPrimaryFieldData(it.schema, fields, it.upsertMsg.InsertMsg.NRows(), nil); err != nil {
 		return nil, err
 	}
-	begin, _, err := common.AllocAutoID(it.idAllocator.Alloc, uint32(len(missing)), Params.CommonCfg.ClusterID.GetAsUint64())
+	begin, _, err := common.AllocAutoID(it.idAllocator.Alloc, uint32(len(missing)), paramtable.Get().CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return nil, err
 	}
@@ -1609,12 +1657,12 @@ func structSubFieldPayloadRowsForPartialUpdate(fieldData *schemapb.FieldData) (i
 	}
 }
 
-func (it *upsertTask) insertPreExecute(ctx context.Context) error {
+func (it *UpsertTask) insertPreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-insertPreExecute")
 	defer sp.End()
 	collectionName := it.upsertMsg.InsertMsg.CollectionName
 	log := mlog.With(mlog.String("collectionName", collectionName))
-	if err := validateCollectionName(collectionName); err != nil {
+	if err := dql.ValidateCollectionName(collectionName); err != nil {
 		log.Error(ctx, "valid collection name failed", mlog.String("collectionName", collectionName), mlog.Err(err))
 		return err
 	}
@@ -1637,9 +1685,9 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	rowNums := uint32(it.upsertMsg.InsertMsg.NRows())
-	// set upsertTask.insertRequest.rowIDs
+	// set UpsertTask.insertRequest.rowIDs
 	tr := timerecord.NewTimeRecorder("applyPK")
-	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	clusterID := paramtable.Get().CommonCfg.ClusterID.GetAsUint64()
 	rowIDBegin, rowIDEnd, allocateErr := common.AllocAutoID(it.idAllocator.Alloc, rowNums, clusterID)
 	metrics.ProxyApplyPrimaryKeyLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(float64(tr.ElapseSpan().Microseconds()) / 1000.0)
 	if allocateErr != nil {
@@ -1658,7 +1706,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		it.upsertMsg.InsertMsg.RowIDs[offset] = i
 		it.rowIDs[offset] = i
 	}
-	// set upsertTask.insertRequest.timeStamps
+	// set UpsertTask.insertRequest.timeStamps
 	rowNum := it.upsertMsg.InsertMsg.NRows()
 	it.upsertMsg.InsertMsg.Timestamps = make([]uint64, rowNum)
 	it.timestamps = make([]uint64, rowNum)
@@ -1735,7 +1783,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		log.Warn(ctx, "fill field properties failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
 	}
-	err = NormalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
+	err = dql.NormalizeFP32ToFP16BF16VectorFieldData(it.upsertMsg.InsertMsg.GetFieldsData(), it.schema)
 	if err != nil {
 		log.Warn(ctx, "normalize fp32 to fp16/bf16 vector field data failed when upsert", mlog.Err(err))
 		return merr.WrapErrAsInputErrorWhen(err, merr.ErrParameterInvalid)
@@ -1752,7 +1800,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		}
 	} else {
 		partitionTag := it.upsertMsg.InsertMsg.PartitionName
-		if err = validatePartitionTag(partitionTag, true); err != nil {
+		if err = dql.ValidatePartitionTag(partitionTag, true); err != nil {
 			log.Warn(ctx, "valid partition name failed", mlog.String("partition name", partitionTag), mlog.Err(err))
 			return err
 		}
@@ -1775,7 +1823,7 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *upsertTask) deletePreExecute(ctx context.Context) error {
+func (it *UpsertTask) deletePreExecute(ctx context.Context) error {
 	collName := it.upsertMsg.DeleteMsg.CollectionName
 	log := mlog.With(
 		mlog.String("collectionName", collName))
@@ -1790,7 +1838,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		return nil
 	}
 
-	if err := validateCollectionName(collName); err != nil {
+	if err := dql.ValidateCollectionName(collName); err != nil {
 		log.Info(ctx, "Invalid collectionName", mlog.Err(err))
 		return err
 	}
@@ -1803,7 +1851,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	} else {
 		// partition name could be defaultPartitionName or name specified by sdk
 		partName := it.upsertMsg.DeleteMsg.PartitionName
-		if err := validatePartitionTag(partName, true); err != nil {
+		if err := dql.ValidatePartitionTag(partName, true); err != nil {
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return err
 		}
@@ -1823,7 +1871,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *upsertTask) PreExecute(ctx context.Context) error {
+func (it *UpsertTask) PreExecute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-PreExecute")
 	defer sp.End()
 
@@ -1875,7 +1923,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	}
 	it.schema = schema
 	it.schemaVersion = schema.Version
-	if err := validateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
+	if err := dql.ValidateTextStorageV3Enabled(schema.CollectionSchema); err != nil {
 		return err
 	}
 	// Validate any FieldPartialUpdateOp directives attached to FieldData.
@@ -1900,7 +1948,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 		it.req.PartitionName = partitionName
 	}
 
-	it.partitionKeyMode, err = isPartitionKeyMode(ctx, it.GetMetaCache(), it.req.GetDbName(), collectionName)
+	it.partitionKeyMode, err = dql.IsPartitionKeyMode(ctx, it.GetMetaCache(), it.req.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn(ctx, "check partition key mode failed",
 			mlog.String("collectionName", collectionName),
@@ -2006,7 +2054,7 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 	return nil
 }
 
-func (it *upsertTask) PostExecute(ctx context.Context) error {
+func (it *UpsertTask) PostExecute(ctx context.Context) error {
 	if it.partialUpdateResultIDs != nil {
 		// Packing uses merge order; publish request order only after it finishes.
 		it.result.IDs = it.partialUpdateResultIDs

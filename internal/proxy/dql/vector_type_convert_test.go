@@ -368,7 +368,7 @@ func TestNormalizeFp32ToFp16Bf16VectorFieldData(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			floatData := append([]float32(nil), tt.fieldData.GetVectors().GetFloatVector().GetData()...)
 			schema := newTestSchema(tt.dataType)
-			err := fillFieldPropertiesOnly([]*schemapb.FieldData{tt.fieldData}, schema)
+			err := FillFieldPropertiesOnly([]*schemapb.FieldData{tt.fieldData}, schema)
 			assert.NoError(t, err)
 
 			err = NormalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{tt.fieldData}, schema)
@@ -386,7 +386,7 @@ func TestNormalizeFp32ToFp16Bf16VectorFieldData(t *testing.T) {
 	t.Run("skip non fp16 bf16 schema field", func(t *testing.T) {
 		fieldData := testFloatVectorFieldData("vector", []float32{0.1, 0.2}, 2)
 		schema := newTestSchema(schemapb.DataType_FloatVector)
-		err := fillFieldPropertiesOnly([]*schemapb.FieldData{fieldData}, schema)
+		err := FillFieldPropertiesOnly([]*schemapb.FieldData{fieldData}, schema)
 		assert.NoError(t, err)
 		err = NormalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{fieldData}, schema)
 		assert.NoError(t, err)
@@ -409,7 +409,7 @@ func TestNormalizeFp32ToFp16Bf16VectorFieldData(t *testing.T) {
 	t.Run("invalid fp32 value", func(t *testing.T) {
 		fieldData := testFloatVectorFieldData("vector", []float32{float32(math.Inf(1)), 0.2}, 2)
 		schema := newTestSchema(schemapb.DataType_Float16Vector)
-		err := fillFieldPropertiesOnly([]*schemapb.FieldData{fieldData}, schema)
+		err := FillFieldPropertiesOnly([]*schemapb.FieldData{fieldData}, schema)
 		assert.NoError(t, err)
 		err = NormalizeFP32ToFP16BF16VectorFieldData([]*schemapb.FieldData{fieldData}, schema)
 		assert.Error(t, err)

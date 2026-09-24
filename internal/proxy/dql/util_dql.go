@@ -74,7 +74,7 @@ func validateLimit(limit int64, largeTopKEnabled bool) error {
 // validatePartitionTag validates a partition tag string. It is duplicated here
 // because the DDL and DML task groups also need it and each sub-package keeps
 // its own copy of small shared helpers (see DEPENDENCIES.md).
-func validatePartitionTag(partitionTag string, strictCheck bool) error {
+func ValidatePartitionTag(partitionTag string, strictCheck bool) error {
 	partitionTag = strings.TrimSpace(partitionTag)
 
 	invalidMsg := "Invalid partition name: " + partitionTag + ". "
@@ -109,8 +109,8 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 
 // namespaceForPlan returns nil when partition-mode namespacing is enabled so
 // plan building skips the namespace field, else passes it through.
-func namespaceForPlan(schema *schemapb.CollectionSchema, namespace *string) *string {
-	if namespacePartitionModeEnabled(schema) {
+func NamespaceForPlan(schema *schemapb.CollectionSchema, namespace *string) *string {
+	if NamespacePartitionModeEnabled(schema) {
 		return nil
 	}
 	return namespace
@@ -118,7 +118,7 @@ func namespaceForPlan(schema *schemapb.CollectionSchema, namespace *string) *str
 
 // namespacePartitionModeEnabled reports whether the collection runs in
 // partition-mode namespacing, which renders the plan namespace redundant.
-func namespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
+func NamespacePartitionModeEnabled(schema *schemapb.CollectionSchema) bool {
 	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartition(schema.GetProperties()...)
 }
 
@@ -141,7 +141,7 @@ func validateMaxQueryResultWindow(offset int64, limit int64, largeTopKEnabled bo
 	return nil
 }
 
-func validateCollectionNameOrAlias(entity, entityType string) error {
+func ValidateCollectionNameOrAlias(entity, entityType string) error {
 	if entity == "" {
 		return merr.WrapErrParameterInvalidMsg("collection %s should not be empty", entityType)
 	}
@@ -166,8 +166,8 @@ func validateCollectionNameOrAlias(entity, entityType string) error {
 	return nil
 }
 
-func validateCollectionName(collName string) error {
-	return validateCollectionNameOrAlias(collName, "name")
+func ValidateCollectionName(collName string) error {
+	return ValidateCollectionNameOrAlias(collName, "name")
 }
 
 // return value.
@@ -319,7 +319,7 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	return resultFieldNames, userOutputFields, userDynamicFields, aggregates, userRequestedPkFieldExplicitly, nil
 }
 
-func isPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, colName string) (bool, error) {
+func IsPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, colName string) (bool, error) {
 	colSchema, err := metaCache.GetCollectionSchema(ctx, dbName, colName)
 	if err != nil {
 		return false, err
@@ -334,34 +334,34 @@ func isPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, col
 	return false, nil
 }
 
-func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, namespace *string) ([]string, error) {
+func AssignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
 	}
 
-	return assignPartitionKeys(ctx, metaCache, dbName, collName, []*planpb.GenericValue{
+	return AssignPartitionKeys(ctx, metaCache, dbName, collName, []*planpb.GenericValue{
 		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
 	})
 }
 
-func namespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
+func NamespacePartitionKeyMode(schema *schemapb.CollectionSchema) bool {
 	return schema != nil && schema.GetEnableNamespace() && common.IsNamespaceModePartitionKey(schema.GetProperties()...)
 }
 
-func namespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
-	return namespaceShardingEnabled(schema) && namespacePartitionKeyMode(schema)
+func NamespacePartitionKeyModeEnabled(schema *schemapb.CollectionSchema) bool {
+	return namespaceShardingEnabled(schema) && NamespacePartitionKeyMode(schema)
 }
 
 func resolveNamespacePartitionNames(schema *schemapb.CollectionSchema, namespace *string, partitionNames []string) ([]string, bool, error) {
 	if err := common.CheckNamespace(schema, namespace); err != nil {
 		return nil, false, err
 	}
-	if !namespacePartitionModeEnabled(schema) {
+	if !NamespacePartitionModeEnabled(schema) {
 		return partitionNames, false, nil
 	}
 
 	namespacePartitionName := *namespace
-	if err := validatePartitionTag(namespacePartitionName, true); err != nil {
+	if err := ValidatePartitionTag(namespacePartitionName, true); err != nil {
 		return nil, true, err
 	}
 	if len(partitionNames) == 0 {
@@ -384,19 +384,19 @@ func resolveTimezone(ctx context.Context, params []*commonpb.KeyValuePair, colIn
 		mlog.Debug(ctx, "determine timezone from request", mlog.String("user defined timezone", timezone))
 		return timezone, nil
 	}
-	timezone = getColTimezone(colInfo)
+	timezone = GetColTimezone(colInfo)
 	mlog.Debug(ctx, "determine timezone from collection", mlog.String("collection timezone", timezone))
 	return timezone, nil
 }
 
-func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
+func ValidateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 	if err := typeutil.ValidateTextRequiresStorageV3(schema, paramtable.Get().CommonCfg.UseLoonFFI.GetAsBool()); err != nil {
 		return merr.WrapErrParameterInvalidMsg("%s", err.Error())
 	}
 	return nil
 }
 
-func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+func AssignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
 	partitionNames, err := metaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
@@ -420,7 +420,7 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	return contextutil.GetCurUserFromContext(ctx)
 }
 
-func parseGuaranteeTsFromConsistency(ts, tMax typeutil.Timestamp, consistency commonpb.ConsistencyLevel) typeutil.Timestamp {
+func ParseGuaranteeTsFromConsistency(ts, tMax typeutil.Timestamp, consistency commonpb.ConsistencyLevel) typeutil.Timestamp {
 	switch consistency {
 	case commonpb.ConsistencyLevel_Strong:
 		ts = tMax
@@ -444,8 +444,8 @@ func parseGuaranteeTs(ts, tMax typeutil.Timestamp) typeutil.Timestamp {
 	return ts
 }
 
-func namespaceShardingChannel(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (string, bool, error) {
-	channelID, ok, err := namespaceShardingChannelID(schema, namespace, channelNames)
+func NamespaceShardingChannel(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (string, bool, error) {
+	channelID, ok, err := NamespaceShardingChannelID(schema, namespace, channelNames)
 	if !ok || err != nil {
 		return "", ok, err
 	}
@@ -718,7 +718,7 @@ func namespaceShardingEnabled(schema *schemapb.CollectionSchema) bool {
 	return err == nil && enabled
 }
 
-func getColTimezone(colInfo *collectionInfo) string {
+func GetColTimezone(colInfo *collectionInfo) string {
 	timezone, _ := funcutil.TryGetAttrByKeyFromRepeatedKV(common.TimezoneKey, colInfo.Properties)
 	if timezone == "" {
 		timezone = common.DefaultTimezone
@@ -726,8 +726,8 @@ func getColTimezone(colInfo *collectionInfo) string {
 	return timezone
 }
 
-func namespaceShardingChannelID(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (uint32, bool, error) {
-	if namespace == nil || !namespacePartitionKeyModeEnabled(schema) {
+func NamespaceShardingChannelID(schema *schemapb.CollectionSchema, namespace *string, channelNames []string) (uint32, bool, error) {
+	if namespace == nil || !NamespacePartitionKeyModeEnabled(schema) {
 		return 0, false, nil
 	}
 	if len(channelNames) == 0 {

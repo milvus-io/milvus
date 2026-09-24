@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -23,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -33,7 +35,7 @@ func collectionInsertIdempotencyEnabled(properties []*commonpb.KeyValuePair) boo
 	}
 	enabled, err := strconv.ParseBool(value)
 	if err != nil {
-		// Defense in depth: validateInsertIdempotencyProperty rejects an
+		// Defense in depth: ValidateInsertIdempotencyProperty rejects an
 		// unparseable value at DDL time, so reaching here means the property
 		// entered the collection meta by some other path. Log it rather than
 		// disable the durability guarantee the operator believes is on without
@@ -46,10 +48,10 @@ func collectionInsertIdempotencyEnabled(properties []*commonpb.KeyValuePair) boo
 	return enabled
 }
 
-// validateInsertIdempotencyProperty rejects an unparseable
+// ValidateInsertIdempotencyProperty rejects an unparseable
 // collection.insert.idempotency.enabled value at DDL time, so a typo cannot
 // silently disable the durability feature the operator believes is on.
-func validateInsertIdempotencyProperty(props []*commonpb.KeyValuePair) error {
+func ValidateInsertIdempotencyProperty(props []*commonpb.KeyValuePair) error {
 	value, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CollectionInsertIdempotencyEnabledKey, props)
 	if !ok {
 		return nil
@@ -60,8 +62,8 @@ func validateInsertIdempotencyProperty(props []*commonpb.KeyValuePair) error {
 	return nil
 }
 
-func (it *insertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, collectionProperties []*commonpb.KeyValuePair, excludeAutoIDPrimary bool) error {
-	globalIdempotencyEnabled := Params.StreamingCfg.IdempotencyEnabled.GetAsBool()
+func (it *InsertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, collectionProperties []*commonpb.KeyValuePair, excludeAutoIDPrimary bool) error {
+	globalIdempotencyEnabled := paramtable.Get().StreamingCfg.IdempotencyEnabled.GetAsBool()
 	collectionIdempotencyEnabled := collectionInsertIdempotencyEnabled(collectionProperties)
 	// An encrypted collection cannot have both. The duplicate answer is the
 	// first attempt's primary keys, and it is carried in the message HEADER,
@@ -102,19 +104,19 @@ func (it *insertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, co
 	// Validate the effective key length (client-supplied or auto-generated) after it
 	// is resolved, so an over-limit auto key is rejected here at the proxy instead of
 	// slipping through and getting a confusing rejection from the streaming node.
-	if limit := Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(); limit > 0 && len(it.idempotencyKey) > limit {
+	if limit := paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(); limit > 0 && len(it.idempotencyKey) > limit {
 		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(it.idempotencyKey), limit)
 	}
 	return nil
 }
 
-func (it *insertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, excludeAutoIDPrimary bool, primaryFieldSchema *schemapb.FieldSchema) error {
+func (it *InsertTask) reassignAutoIDForIdempotencyIfNeeded(ctx context.Context, excludeAutoIDPrimary bool, primaryFieldSchema *schemapb.FieldSchema) error {
 	if !it.idempotencyEnabled || !excludeAutoIDPrimary {
 		return nil
 	}
 	// Namespace partition-key mode routes the WAL shard by namespace, not by the
 	// generated primary key, so PK-hash-stable auto IDs buy nothing here.
-	if namespacePartitionKeyModeEnabled(it.schema) && it.insertMsg.Namespace != nil {
+	if dql.NamespacePartitionKeyModeEnabled(it.schema) && it.insertMsg.Namespace != nil {
 		return nil
 	}
 
@@ -152,7 +154,7 @@ type insertIdempotencyDecoration struct {
 // idempotentInsertDecoration returns the idempotency decoration for this insert,
 // or nil when idempotency is disabled for it. The transaction commit message,
 // synthesized later in the producer, gets the key applied there.
-func (it *insertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
+func (it *InsertTask) idempotentInsertDecoration() *insertIdempotencyDecoration {
 	if !it.idempotencyEnabled {
 		return nil
 	}

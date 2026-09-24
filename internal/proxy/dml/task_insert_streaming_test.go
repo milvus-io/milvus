@@ -13,7 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package proxy
+package dml
 
 import (
 	"context"
@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	streamingmessage "github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // newInt64VarCharInsertMsgForRepackTest builds a column-based source request
@@ -100,8 +101,8 @@ func newInt64VarCharInsertMsgForRepackTest(collectionID int64, rows ...string) *
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceSelectsRows(t *testing.T) {
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a", "bb", "ccc", "dddd")
 	selection := []int{1, 3}
 
@@ -151,8 +152,8 @@ func TestRepackInsertDataByPartitionForStreamingServiceSelectsRows(t *testing.T)
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceCarriesPartialUpdateCASInBody(t *testing.T) {
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a", "bb")
 	sourceBefore := proto.Clone(source.InsertRequest).(*msgpb.InsertRequest)
 	meta := &messagespb.PartialUpdateCAS{
@@ -196,8 +197,8 @@ func TestRepackInsertDataByPartitionForStreamingServiceCarriesPartialUpdateCASIn
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceSelectsCompactNullableVector(t *testing.T) {
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a", "b", "c", "d")
 	source.FieldsData = []*schemapb.FieldData{
 		{
@@ -236,8 +237,8 @@ func TestRepackInsertDataByPartitionForStreamingServiceSelectsCompactNullableVec
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceRejectsInvalidSelection(t *testing.T) {
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a", "b", "c", "d")
 
 	for name, selection := range map[string][]int{
@@ -258,8 +259,8 @@ func TestRepackInsertDataByPartitionForStreamingServiceRejectsInvalidSelection(t
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceEmptySelection(t *testing.T) {
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
-	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, "a")
 
 	msgs, err := repackInsertDataByPartitionForStreamingService(
@@ -279,12 +280,12 @@ func TestRepackInsertDataByPartitionForStreamingServiceEmptySelection(t *testing
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *testing.T) {
-	oldMaxMessageSize := Params.PulsarCfg.MaxMessageSize.SwapTempValue("512")
-	t.Cleanup(func() { Params.PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
+	oldMaxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue("512")
+	t.Cleanup(func() { paramtable.Get().PulsarCfg.MaxMessageSize.SwapTempValue(oldMaxMessageSize) })
 	source := newInt64VarCharInsertMsgForRepackTest(100, strings.Repeat("a", 300), strings.Repeat("b", 300))
 
-	oldSplitChunkProxy := Params.ProxyCfg.SplitChunkProxy.SwapTempValue("true")
-	t.Cleanup(func() { Params.ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
+	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("true")
+	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	msgs, err := repackInsertDataByPartitionForStreamingService(
 		context.Background(), 200, "target-partition", []int{0, 1}, "vchannel-1", source, nil, 7, nil,
 		nil,
@@ -292,7 +293,7 @@ func TestRepackInsertDataByPartitionForStreamingServiceSwitchesChunkOwner(t *tes
 	require.NoError(t, err)
 	require.Len(t, msgs, 2)
 
-	Params.ProxyCfg.SplitChunkProxy.SwapTempValue("false")
+	paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	msgs, err = repackInsertDataByPartitionForStreamingService(
 		context.Background(), 200, "target-partition", []int{0, 1}, "vchannel-1", source, nil, 7, nil,
 		nil,

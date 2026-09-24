@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -21,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -31,7 +33,7 @@ import (
 // This can cause a deadlock when the gate waits for inserts at the new schema version that
 // will never arrive. The companion PR https://github.com/milvus-io/milvus/pull/48139
 // resolves this by propagating SchemaVersion through the insert path.
-func (it *insertTask) Execute(ctx context.Context) error {
+func (it *InsertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
 
@@ -190,7 +192,7 @@ func repackInsertDataWithPartitionKeyForStreamingService(
 
 	var channel2RowOffsets map[string][]int
 	var err error
-	if namespacePartitionKeyModeEnabled(schema) && insertMsg.Namespace != nil {
+	if dql.NamespacePartitionKeyModeEnabled(schema) && insertMsg.Namespace != nil {
 		channel2RowOffsets, err = assignChannelsByNamespace(*insertMsg.Namespace, channelNames, insertMsg)
 	} else {
 		channel2RowOffsets, err = assignChannelsByPK(result.IDs, channelNames, insertMsg)
@@ -293,7 +295,7 @@ func repackInsertDataByPartitionForStreamingService(
 	partialUpdateCAS *messagespb.PartialUpdateCAS,
 	idempotency *insertIdempotencyDecoration,
 ) ([]message.MutableMessage, error) {
-	if Params.ProxyCfg.SplitChunkProxy.GetAsBool() {
+	if paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool() {
 		return repackInsertDataAtProxyForStreamingService(
 			ctx,
 			partitionID,
@@ -427,7 +429,7 @@ func repackInsertDataAtProxyForStreamingService(
 		insertMsg  *msgstream.InsertMsg
 	}
 
-	maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	maxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
 	messages := make([]message.MutableMessage, 0)
 	pending := []pendingInsertPack{{rowOffsets: rowOffsets}}
 	for len(pending) > 0 {

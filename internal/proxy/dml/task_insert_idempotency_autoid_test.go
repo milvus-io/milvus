@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -184,7 +184,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 		IsPrimaryKey: true,
 		AutoID:       true,
 	}
-	task := insertTask{
+	task := InsertTask{
 		ctx:            ctx,
 		idAllocator:    idAllocator,
 		idempotencyKey: "stable-key",
@@ -221,7 +221,7 @@ func TestInsertTaskReassignAutoIDForStableIdempotency(t *testing.T) {
 func TestInsertTaskReassignAutoIDForStableIdempotencyKeepsVChannelOrder(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
 
 	ctx := context.Background()
 
@@ -276,7 +276,7 @@ func TestInsertTaskReassignAutoIDForIdempotencySkipsNamespacePartitionKeyRouting
 		AutoID:       true,
 	}
 	chMgr := channelmgr.NewMockChannelsMgr(t)
-	task := insertTask{
+	task := InsertTask{
 		idempotencyEnabled: true,
 		idempotencyKey:     "stable-key",
 		chMgr:              chMgr,
@@ -319,7 +319,7 @@ func TestInsertTaskReassignAutoIDForIdempotencyKeepsPKRoutingWhenNamespaceUnset(
 	}
 	chMgr := channelmgr.NewMockChannelsMgr(t)
 	chMgr.EXPECT().GetVChannels(UniqueID(100)).Return(slices.Clone(channels), nil)
-	task := insertTask{
+	task := InsertTask{
 		ctx:                ctx,
 		collectionID:       100,
 		idAllocator:        idAllocator,
@@ -370,7 +370,7 @@ func requireInsertRoutesMatchDeleteRoutes(t *testing.T, ids *schemapb.IDs, vChan
 
 func TestInsertTaskReassignAutoIDForStableIdempotencyErrors(t *testing.T) {
 	primary := &schemapb.FieldSchema{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, AutoID: true}
-	task := insertTask{
+	task := InsertTask{
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
 				NumRows: 2,

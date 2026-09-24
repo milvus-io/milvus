@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 
 // Execute is a function to delete task by streaming service
 // we only overwrite the Execute function
-func (dt *deleteTask) Execute(ctx context.Context) (err error) {
+func (dt *DeleteTask) Execute(ctx context.Context) (err error) {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Delete-Execute")
 	defer sp.End()
 
