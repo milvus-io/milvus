@@ -286,7 +286,6 @@ SearchOnSealedColumn(const Schema& schema,
 
     const bool use_vector_iterator =
         milvus::exec::UseVectorIterator(search_info);
-    auto num_chunk = column->num_chunks();
 
     SubSearchResult final_qr(num_queries,
                              search_info.topk_,
@@ -295,6 +294,7 @@ SearchOnSealedColumn(const Schema& schema,
 
     int64_t offset = 0;
     auto vector_chunks = column->GetAllChunks(op_context);
+    auto num_chunk = column->num_chunks();
     for (int i = 0; i < num_chunk; ++i) {
         const auto& pw = vector_chunks[i];
         auto vec_data = pw.get()->Data();

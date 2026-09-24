@@ -317,6 +317,7 @@ class Op(Enum):
     restore_snapshot = "restore_snapshot"
     entity_ttl = "entity_ttl"
     external_table = "external_table"
+    external_table_load = "external_table_load"
     unknown = "unknown"
 
 
@@ -1301,6 +1302,46 @@ class ExternalTableChecker(Checker):
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP)
+
+
+class ExternalTableLoadChecker(ExternalTableChecker):
+    """Reload a fixed external table to check DataCoord recovery targets."""
+
+    def _reload_and_check(self):
+        # A refresh here would rebuild in-memory binlogs and hide missing recovery targets.
+        self._reset_milvus_client()
+        self.milvus_client.release_collection(collection_name=self.c_name, timeout=timeout)
+        self.milvus_client.load_collection(collection_name=self.c_name, timeout=timeout)
+        return self._wait_external_table_row_count()
+
+    @trace()
+    def external_table_load(self):
+        try:
+            return self._reload_and_check()
+        except Exception as e:
+            self._try_reset_milvus_client("external table reload failed")
+            log.info(f"external table reload failed: {e}")
+            return str(e), False
+
+    @exception_handler()
+    def run_task(self):
+        return self.external_table_load()
+
+    def verify_consistency(self, submit_retry_timeout=None):
+        """Check the persisted external snapshot without submitting another refresh."""
+        deadline = time.time() + (submit_retry_timeout or self.refresh_timeout)
+        last_error = None
+        while time.time() < deadline:
+            try:
+                return self._reload_and_check()
+            except Exception as e:
+                self._try_reset_milvus_client("external table recovery check failed")
+                last_error = str(e)
+                sleep(5)
+        return f"external table reload did not recover in time, last error: {last_error}", False
+
+    def keep_running(self):
+        _run_checker_with_interval(self, 30)
 
 
 class CollectionLoadChecker(Checker):

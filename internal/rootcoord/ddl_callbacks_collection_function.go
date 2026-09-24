@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/util/function/validator"
@@ -75,13 +74,10 @@ func callAlterCollection(ctx context.Context, c *Core, broadcaster broadcaster.B
 		return err
 	}
 
-	channels := make([]string, 0, len(newColl.VirtualChannelNames)+1)
-	channels = append(channels, streaming.WAL().ControlChannel())
-	channels = append(channels, newColl.VirtualChannelNames...)
 	msg := message.NewAlterCollectionMessageBuilderV2().
 		WithHeader(header).
 		WithBody(body).
-		WithBroadcast(channels).
+		WithBroadcast(newColl.VirtualChannelNames).
 		MustBuildBroadcast()
 	if _, err := broadcaster.Broadcast(ctx, msg); err != nil {
 		rollbackAlterCollectionAnalyzerFileResourceReservation(ctx, c.meta, newColl.CollectionID, addedFileResourceIds, err)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.opentelemetry.io/otel"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -15,6 +16,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/util"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/externalspec"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -271,6 +274,10 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
 	var c *collectionInfo
+	// Shared metadata lookups use the intra-cluster identity. A caller's stale
+	// outgoing authorization must not make cache misses depend on another user.
+	// Keep the original context for the per-request visibility check below.
+	metadataCtx := describeCollectionMetadataContext(ctx)
 
 	resolvedNameByID := collectionName == "" && collectionID > 0
 	if resolvedNameByID {
@@ -278,7 +285,7 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		// discarded the returned collectionInfo and forced a second describe on a
 		// rolling-upgrade old RootCoord response that omitted DbName (such entries
 		// are deliberately returned uncached because their database is unknown).
-		c, err = node.GetMetaCache().GetCollectionInfo(ctx, request.DbName, "", collectionID)
+		c, err = node.GetMetaCache().GetCollectionInfo(metadataCtx, request.DbName, "", collectionID)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
@@ -295,16 +302,20 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 	// Resolve the id and complete entry from the name only when the caller did
 	// not provide an id. The id-only path already has the complete entry above.
 	if !resolvedNameByID {
-		collectionID, err = node.GetMetaCache().GetCollectionID(ctx, request.DbName, collectionName)
+		collectionID, err = node.GetMetaCache().GetCollectionID(metadataCtx, request.DbName, collectionName)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
-		c, err = node.GetMetaCache().GetCollectionInfo(ctx, request.DbName, collectionName, collectionID)
+		c, err = node.GetMetaCache().GetCollectionInfo(metadataCtx, request.DbName, collectionName, collectionID)
 		if err != nil {
 			resp.Status = describeCollectionErrorStatus(err, request.DbName, collectionName)
 			return resp, nil
 		}
+	}
+
+	if err := node.checkCollectionVisibility(ctx, c); err != nil {
+		return nil, err
 	}
 
 	// The base logger was built from the raw request, whose name is empty for
@@ -349,6 +360,65 @@ func (node *CachedProxyServiceProvider) DescribeCollection(ctx context.Context,
 		mlog.Int("schemaVersion", int(resp.GetSchema().GetVersion())),
 	)
 	return resp, nil
+}
+
+// checkCollectionVisibility keeps authorization out of the shared metadata
+// cache. DescribeCollection is granted to public, but the coordinator also
+// enforces object visibility. Check every response against that contract,
+// including hot cache hits and IDs resolved into another database.
+func (node *CachedProxyServiceProvider) checkCollectionVisibility(ctx context.Context, collection *collectionInfo) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	if err := checkDescribeCollectionUser(ctx); err != nil {
+		return err
+	}
+	if collection.DBName == "" {
+		// Older coordinators may not return the database for an ID-only lookup.
+		// The caller's database is not evidence of the resolved object's owner.
+		return merr.WrapErrServiceUnavailable("collection database is unavailable for visibility check")
+	}
+
+	// Replace an existing outgoing identity rather than appending to it: the
+	// first authorization value is what RootCoord consumes. Only the incoming
+	// identity already authenticated at the public API may select the user.
+	visible, err := node.mixCoord.DescribeCollection(describeCollectionRPCContext(ctx), &milvuspb.DescribeCollectionRequest{
+		Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection)),
+		DbName:         collection.DBName,
+		CollectionName: collection.Schema.GetName(),
+		CollectionID:   collection.CollID,
+	})
+	if err := merr.CheckRPCCall(visible, err); err != nil {
+		return err
+	}
+	if visible.GetCollectionID() == collection.CollID {
+		return nil
+	}
+	// A rename or drop/recreate can race the cached lookup. Deny the stale
+	// response without blaming the caller for inconsistent metadata.
+	return merr.WrapErrServiceUnavailable("collection changed during visibility check")
+}
+
+func describeCollectionMetadataContext(ctx context.Context) context.Context {
+	md, _ := metadata.FromOutgoingContext(ctx)
+	md = md.Copy()
+	md.Delete(util.HeaderAuthorize)
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+func describeCollectionRPCContext(ctx context.Context) context.Context {
+	return AppendUserInfoForRPC(describeCollectionMetadataContext(ctx))
+}
+
+func checkDescribeCollectionUser(ctx context.Context) error {
+	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		return nil
+	}
+	user, err := GetCurUserFromContext(ctx)
+	if err != nil || user == "" {
+		return merr.WrapErrPrivilegeNotPermitted("describe collection requires an authenticated user")
+	}
+	return nil
 }
 
 type RemoteProxyServiceProvider struct {

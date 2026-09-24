@@ -1647,7 +1647,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 		DbName:               t.GetDbName(),
 	}
 
-	ctx = AppendUserInfoForRPC(ctx)
+	ctx = describeCollectionRPCContext(ctx)
 	result, err := t.mixCoord.DescribeCollection(ctx, t.DescribeCollectionRequest)
 	if err != nil {
 		return err

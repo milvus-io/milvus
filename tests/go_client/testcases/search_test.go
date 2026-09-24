@@ -1475,7 +1475,9 @@ func TestSearchInvalidSparseVector(t *testing.T) {
 		}
 		vector, _ := entity.NewSliceSparseEmbedding(positions, values)
 		_, errSearch2 := mc.Search(ctx, client.NewSearchOption(schema.CollectionName, common.DefaultLimit, []entity.Vector{vector}).WithConsistencyLevel(entity.ClStrong))
-		common.CheckErr(t, errSearch2, false, "Invalid sparse row: id should be strict ascending")
+		// Proxy validates sparse placeholders before forwarding them to segcore,
+		// so search reports the same Proxy error as insert does for duplicate indices.
+		common.CheckErr(t, errSearch2, false, "unsorted or same indices in sparse float vector")
 	}
 }
 

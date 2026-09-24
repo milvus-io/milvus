@@ -377,17 +377,18 @@ inline knowhere::sparse::SparseRow<SparseValueType>
 CopyAndWrapSparseRow(const void* data,
                      size_t size,
                      const bool validate = false) {
+    // Length is a memory-safety requirement even when value validation is off.
+    // Check before allocating a whole number of cells and copying all bytes.
+    if (size % knowhere::sparse::SparseRow<SparseValueType>::element_size() !=
+        0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "Invalid size for sparse row data");
+    }
     size_t num_elements =
         size / knowhere::sparse::SparseRow<SparseValueType>::element_size();
     knowhere::sparse::SparseRow<SparseValueType> row(num_elements);
     milvus::fastmem::FastMemcpy(row.data(), data, size);
     if (validate) {
-        if (!(size % knowhere::sparse::SparseRow<
-                         SparseValueType>::element_size() ==
-              0)) {
-            ThrowInfo(ErrorCode::DataFormatBroken,
-                      "Invalid size for sparse row data");
-        }
         for (size_t i = 0; i < num_elements; ++i) {
             auto element = row[i];
             if (!(std::isfinite(element.val))) {
