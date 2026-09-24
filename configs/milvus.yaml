@@ -1719,15 +1719,15 @@ knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
   AISAQ:
     build:
-      max_degree: 56 # Maximum degree of the Vamana graph
-      pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
-      search_list_size: 100 # Size of the candidate list during building graph
       disk_pq_code_budget_gb_ratio: 0.25 # Controls the size of the PQ codes of the high precision vectors stored in the index (used for re-ranking), compared to the size of the uncompressed data
-      search_cache_budget_gb_ratio: 0.0 # Controls the amount of DRAM to be used for caching frequently accessed index nodes
       inline_pq: -1 # Enable compressed vectors to be stored in-line within the node, the number of in-line vectors is limited by max degree
-      pq_cache_size: 0 # Compressed vectors cache DRAM size in bytes, default 0
-      rearrange: true # Enable compressed vectors reordering search optimization, default false
+      max_degree: 56 # Maximum degree of the Vamana graph
       num_entry_points: 100 # Number of entry points valid only with aisaq option
+      pq_cache_size: 0 # Compressed vectors cache DRAM size in bytes, default 0
+      pq_code_budget_gb_ratio: 0.125 # Size limit on the PQ code (compared with raw data)
+      rearrange: true # Enable compressed vectors reordering search optimization, default false
+      search_cache_budget_gb_ratio: 0 # Controls the amount of DRAM to be used for caching frequently accessed index nodes
+      search_list_size: 100 # Size of the candidate list during building graph
     search:
       beam_width_ratio: 4 # Ratio between the maximum number of IO requests per search iteration and CPU number
       pq_read_page_cache_size: 0 # Enable compressed vectors read-page cache DRAM size per thread, default 0
