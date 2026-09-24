@@ -321,11 +321,13 @@ func (s *scheduler) exec() {
 		// Skip this task if task is canceled.
 		if err := t.Context().Err(); err != nil {
 			mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(err))
+			s.onTaskFinished(t, err)
 			t.Done(err)
 			continue
 		}
 		if err := t.PreExecute(); err != nil {
 			mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
+			s.onTaskFinished(t, err)
 			t.Done(err)
 			continue
 		}
@@ -347,6 +349,7 @@ func (s *scheduler) exec() {
 			collector.Counter.Dec(metricsinfo.ExecuteQueueType)
 
 			// Notify task done.
+			s.onTaskFinished(t, err)
 			t.Done(err)
 			return nil, err
 		})
@@ -391,6 +394,14 @@ func (s *scheduler) onTaskServed(task *queuedTask) {
 	}
 }
 
+// onTaskFinished forwards terminal outcomes without imposing adaptation logic
+// on the generic scheduler. Worker-path callbacks may be concurrent.
+func (s *scheduler) onTaskFinished(task Task, err error) {
+	if observer, ok := s.policy.(taskFinishedObserver); ok {
+		observer.onTaskFinished(task, err)
+	}
+}
+
 // setupExecListener setup the execChan and next task to run.
 func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time) (*queuedTask, int64, chan Task) {
 	var execChan chan Task
@@ -405,6 +416,7 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			if err := lastWaitingTask.Context().Err(); err != nil {
 				s.onTaskDequeued(lastWaitingTask, lastWaitingTask.NQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
+				s.onTaskFinished(lastWaitingTask.Task, err)
 				lastWaitingTask.Done(err)
 				lastWaitingTask = nil
 				continue
@@ -427,9 +439,11 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 	cleanupTime := now.Add(deadlineAdvance)
 	tasks := s.policy.Cleanup(cleanupTime)
 	for _, task := range tasks {
+		err := cleanupTaskError(task)
 		s.onTaskDequeued(task, task.NQ())
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
-		task.Done(cleanupTaskError(task))
+		s.onTaskFinished(task.Task, err)
+		task.Done(err)
 	}
 }
 
