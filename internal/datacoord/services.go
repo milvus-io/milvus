@@ -2059,10 +2059,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		Status: merr.Success(),
 	}
 
-	mlog.Info(context.TODO(), "receive import request from proxy",
+	mlog.Info(ctx, "receive import request from proxy",
 		mlog.Int("fileNum", len(in.GetFiles())),
 		mlog.Any("files", in.GetFiles()),
-		mlog.Any("options", in.GetOptions()))
+		mlog.Any("options", importutilv2.RedactOptions(in.GetOptions())))
 
 	// Validate timeout before allocating resources
 	// Full validation will happen during broadcast
@@ -2154,7 +2154,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 // on job-not-found). Instead the job is created directly in Failed state — a
 // terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
 // and the failure stays visible via GetImportProgress.
-func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+func (s *Server) createImportJobFromAck(ctx context.Context, result message.BroadcastResultImportMessageV1) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
 			Status: merr.Status(err),
@@ -2165,27 +2165,55 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		Status: merr.Success(),
 	}
 
-	mlog.Info(context.TODO(), "creating import job from ack callback",
-		mlog.Int("fileNum", len(in.GetFiles())),
-		mlog.Any("files", in.GetFiles()),
-		mlog.Any("options", in.GetOptions()))
+	body := result.Message.MustBody()
+	options := funcutil.Map2KeyValuePair(body.GetOptions())
+	// Keep binding and validation together: only the WAL header can reveal a
+	// descriptor/file mismatch. Preserve that cause and persist a Failed job
+	// below; returning it would retry the same malformed durable ACK forever.
+	files, sourceErr := bindSnapshotImportSources(body.GetFiles(), result.Message.Header().GetSnapshotSources())
+	if body.Schema != nil {
+		body.Schema.DbName = body.DbName
+	}
+	// The control channel orders the broadcast but is not a data vchannel.
+	// DataTs still uses the maximum tick across all broadcast results.
+	vchannels := make([]string, 0, len(result.Results))
+	for vchannel := range result.Results {
+		if !funcutil.IsControlChannel(vchannel) {
+			vchannels = append(vchannels, vchannel)
+		}
+	}
 
-	timeoutTs, err := importutilv2.GetTimeoutTs(in.GetOptions())
+	mlog.Info(ctx, "creating import job from ack callback",
+		mlog.Int("fileNum", len(files)),
+		mlog.Any("files", files),
+		mlog.Any("options", importutilv2.RedactOptions(options)))
+
+	if sourceErr == nil {
+		sourceErr = importutilv2.ValidateSnapshotImportPlan(files, options, nil)
+	}
+	timeoutTs, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
-		resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
-		return resp, nil
+		if sourceErr == nil && !importutilv2.IsSnapshotSource(options) {
+			resp.Status = merr.Status(merr.WrapErrImportFailed(err.Error()))
+			return resp, nil
+		}
+		// A corrupt snapshot ACK is already durable. Even malformed options
+		// must reach the terminal-job path rather than retry forever.
+		if sourceErr == nil {
+			sourceErr = err
+		}
+		timeoutTs = math.MaxUint64
 	}
 
 	// See the function comment: an L0 import reaching this callback while the
 	// gate is disabled (replicated from a cluster where it is enabled, or a
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
-	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
+	l0ImportDisabled := importutilv2.IsL0Import(options) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
 
-	files := in.GetFiles()
-	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled {
-		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
+	isBackup := importutilv2.IsBackup(options)
+	if isBackup && !importutilv2.IsSnapshotSource(options) && !l0ImportDisabled && sourceErr == nil {
+		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, options)
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
@@ -2202,9 +2230,9 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		importFile.Id = idStart + int64(i) + 1
 		return importFile
 	})
-	importCollectionInfo, err := s.handler.GetCollection(ctx, in.GetCollectionID())
+	importCollectionInfo, err := s.handler.GetCollection(ctx, body.GetCollectionID())
 	if errors.Is(err, merr.ErrCollectionNotFound) {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(in.GetCollectionID()))
+		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(body.GetCollectionID()))
 		return resp, nil
 	}
 	if err != nil {
@@ -2212,11 +2240,11 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		return resp, nil
 	}
 	if importCollectionInfo == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(in.GetCollectionID()))
+		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(body.GetCollectionID()))
 		return resp, nil
 	}
 
-	jobID := in.GetJobID()
+	jobID := body.GetJobID()
 	if jobID == 0 {
 		jobID = idStart
 	}
@@ -2224,30 +2252,36 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:          jobID,
-			CollectionID:   in.GetCollectionID(),
-			CollectionName: in.GetCollectionName(),
-			PartitionIDs:   in.GetPartitionIDs(),
+			CollectionID:   body.GetCollectionID(),
+			CollectionName: body.GetCollectionName(),
+			PartitionIDs:   body.GetPartitionIDs(),
 			Vchannels:      importCollectionInfo.VChannelNames,
-			Schema:         in.GetSchema(),
+			Schema:         body.GetSchema(),
 			TimeoutTs:      timeoutTs,
 			CleanupTs:      math.MaxUint64,
 			State:          internalpb.ImportJobState_Pending,
 			Files:          files,
-			Options:        in.GetOptions(),
+			Options:        options,
 			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels: in.GetChannelNames(),
-			DataTs:         in.GetDataTimestamp(),
-			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+			ReadyVchannels: vchannels,
+			DataTs:         result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
+			AutoCommit:     importutilv2.IsAutoCommit(options),
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
 	if l0ImportDisabled {
 		mlog.Warn(ctx, "l0 import is disabled, creating the job in Failed state",
-			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()))
+			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", body.GetCollectionID()))
 		UpdateJobState(internalpb.ImportJobState_Failed)(job)
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
+	}
+	if sourceErr != nil {
+		// ACK callbacks retry indefinitely. Persist malformed/lost source
+		// context as a terminal job instead of retrying or omitting deletes.
+		UpdateJobState(internalpb.ImportJobState_Failed)(job)
+		UpdateJobReason(sourceErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {
@@ -2260,7 +2294,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		mlog.Int64("jobID", job.GetJobID()),
 		mlog.Int("fileNum", len(files)),
 		mlog.Any("files", files),
-		mlog.Strings("readyChannels", in.GetChannelNames()),
+		mlog.Strings("readyChannels", vchannels),
 	)
 	return resp, nil
 }

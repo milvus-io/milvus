@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -40,12 +41,16 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
 	mock_streaming "github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
+	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
@@ -61,6 +66,308 @@ import (
 // ================================
 // Import Callbacks Test Suite
 // ================================
+
+func patchSnapshotImportWAL(t *testing.T) {
+	t.Helper()
+	type snapshotWAL struct{ streaming.WALAccesser }
+	control := mockey.Mock((*snapshotWAL).ControlChannel).Return(funcutil.GetControlChannel("snapshot-test")).Build()
+	t.Cleanup(func() { control.UnPatch() })
+	wal := mockey.Mock(streaming.WAL).Return(&snapshotWAL{}).Build()
+	t.Cleanup(func() { wal.UnPatch() })
+}
+
+func TestSnapshotPartitionTargetsValidation(t *testing.T) {
+	ctx := context.Background()
+	type mappingBroker struct{ broker.Broker }
+	s := &Server{broker: &mappingBroker{}}
+	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
+	require.NoError(t, s.validateSnapshotPartitionTargets(ctx, 1, nil, snapshotImportTestOptions()))
+	for _, tc := range []struct {
+		name      string
+		names     []string
+		ids, want []int64
+		readErr   error
+		wantErr   error
+	}{
+		{"valid", []string{"Y", "X"}, []int64{100, 200}, []int64{200, 100}, nil, nil},
+		{"recreated", []string{"Y", "X"}, []int64{100, 201}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
+		{"dropped", []string{"Y"}, []int64{100}, []int64{200, 100}, nil, merr.ErrServiceUnavailable},
+		{"bad_metadata", []string{"Y"}, nil, []int64{200, 100}, nil, merr.ErrServiceInternal},
+		{"bad_count", []string{"Y", "X"}, []int64{100, 200}, []int64{200}, nil, merr.ErrServiceInternal},
+		{"metadata_error", nil, nil, nil, merr.ErrServiceNotReady, merr.ErrServiceNotReady},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			show := mockey.Mock((*mappingBroker).ShowPartitions).Return(&milvuspb.ShowPartitionsResponse{PartitionNames: tc.names, PartitionIDs: tc.ids}, tc.readErr).Build()
+			defer show.UnPatch()
+			err := s.validateSnapshotPartitionTargets(ctx, 1, tc.want, opts)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
+	patchSnapshotImportWAL(t)
+	patchSnapshotImportInstance(t)
+	ctx := context.Background()
+	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+	snapshot.Collection.Partitions = map[string]int64{"A": 10, "B": 20}
+	snapshot.Segments[0].PartitionId = 20
+	for _, segment := range snapshot.Segments {
+		segment.ChannelName = "source"
+	}
+	snapshot.Segments = append(snapshot.Segments, &datapb.SegmentDescription{
+		ChannelName: "source", PartitionId: common.AllPartitionsID, SegmentLevel: datapb.SegmentLevel_L0, StorageVersion: storage.StorageV1,
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "root/files/delete"}}}},
+	})
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
+		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
+		Collection: snapshot.Collection, Layout: snapshot.Layout,
+	}, nil).Build()
+	defer read.UnPatch()
+	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+	defer fileValidation.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	locked := false
+	start := mockey.Mock((*Server).startBroadcastWithCollectionID).To(func(_ *Server, _ context.Context, _ int64) (broadcaster.BroadcastAPI, error) {
+		locked = true
+		return api, nil
+	}).Build()
+	defer start.UnPatch()
+	type mappingBroker struct{ broker.Broker }
+	fake := &mappingBroker{}
+	describe := mockey.Mock((*mappingBroker).DescribeCollectionInternal).Return(&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+	defer describe.UnPatch()
+	show := mockey.Mock((*mappingBroker).ShowPartitions).To(func(_ *mappingBroker, _ context.Context, _ int64) (*milvuspb.ShowPartitionsResponse, error) {
+		require.True(t, locked, "target IDs must be revalidated under the broadcast lock")
+		return &milvuspb.ShowPartitionsResponse{PartitionNames: []string{"X", "Y"}, PartitionIDs: []int64{200, 100}}, nil
+	}).Build()
+	defer show.UnPatch()
+	called := false
+	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+		called = true
+		decoded := message.MustAsBroadcastImportMessageV1(msg)
+		require.Equal(t, []int64{200, 100}, decoded.MustBody().GetPartitionIDs())
+		var options importutilv2.Options
+		for key, value := range decoded.MustBody().GetOptions() {
+			options = append(options, &commonpb.KeyValuePair{Key: key, Value: value})
+		}
+		files, err := bindSnapshotImportSources(decoded.MustBody().GetFiles(), decoded.Header().GetSnapshotSources())
+		require.NoError(t, err)
+		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
+		require.True(t, importutilv2.IsSnapshotPreparation(files))
+		captured := &datapb.SnapshotMetadata{}
+		require.NoError(t, proto.Unmarshal(files[0].SnapshotSource.SnapshotMetadata, captured))
+		require.Equal(t, snapshot.Collection.Partitions, captured.Collection.Partitions)
+		return &types.BroadcastAppendResult{}, nil
+	}).Build()
+	defer transport.UnPatch()
+	s := &Server{broker: fake, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y"}`})
+	_, _, err := s.broadcastImport(ctx, "target", 100, []int64{200, 100},
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}, opts, snapshotImportTestSchema(), 1000, []string{"target_v1"}, "")
+	require.NoError(t, err)
+	require.True(t, called)
+	require.True(t, api.closeCalled.Load())
+}
+
+func TestBroadcastSnapshotImportMultipleTargetPartitions(t *testing.T) {
+	patchSnapshotImportWAL(t)
+	ctx := context.Background()
+	// Exercise the real broadcast path while replacing external validation,
+	// metadata I/O, and WAL transport. Source expansion does not select targets.
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	expansion := mockey.Mock(prepareSnapshotImportFiles).Return(
+		[]*internalpb.ImportFile{{Paths: []string{"root/data/manifest"}}}, snapshotImportTestOptions(), nil).Build()
+	defer expansion.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+	defer start.UnPatch()
+	type testBroker struct{ broker.Broker }
+	fakeBroker := &testBroker{}
+	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+	defer describe.UnPatch()
+	var received []int64
+	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+		func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+			decoded, err := message.AsBroadcastImportMessageV1(msg)
+			require.NoError(t, err)
+			received = decoded.MustBody().GetPartitionIDs()
+			return &types.BroadcastAppendResult{}, nil
+		}).Build()
+	defer transport.UnPatch()
+	server := &Server{broker: fakeBroker}
+	partitionIDs := []int64{20, 10}
+	_, duplicated, err := server.broadcastImport(ctx, "target", 100, partitionIDs,
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+		snapshotImportTestOptions(), &schemapb.CollectionSchema{}, 1000, []string{"target_v1"}, "")
+	require.NoError(t, err)
+	require.False(t, duplicated)
+	require.Equal(t, partitionIDs, received)
+	require.True(t, api.closeCalled.Load())
+	expansion.UnPatch()
+	invalidExpansion := mockey.Mock(prepareSnapshotImportFiles).Return([]*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
+		Version: 5, ManifestPath: packed.MarshalManifestPath("root/data", 1), SourceChannel: "source", SourcePartitionId: 10,
+	}}}, snapshotImportTestOptions(), nil).Build()
+	defer invalidExpansion.UnPatch()
+	received = nil
+	_, _, err = server.broadcastImport(ctx, "target", 100, partitionIDs,
+		[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+		snapshotImportTestOptions(), &schemapb.CollectionSchema{}, 1000, []string{"target_v1"}, "")
+	require.ErrorContains(t, err, "lost its shared L0 inventory")
+	require.Nil(t, received, "invalid source plans must fail before broadcast")
+}
+
+func TestBroadcastImportBoundaryFailures(t *testing.T) {
+	type boundaryBroker struct{ broker.Broker }
+	for _, stage := range []string{"public_options", "prepare", "replication", "partition_targets", "message_size", "auto_id"} {
+		t.Run(stage, func(t *testing.T) {
+			cause := merr.ErrServiceNotReady
+			errFor := func(name string) error {
+				if stage == name {
+					return cause
+				}
+				return nil
+			}
+			opts := snapshotImportTestOptions()
+			files := []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
+				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1),
+			}}}
+			schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			}}
+			if stage == "auto_id" {
+				opts = nil
+				files = []*internalpb.ImportFile{{Paths: []string{"rows.json"}}}
+				schema.Fields[0].AutoID = true
+			}
+			validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+			defer validation.UnPatch()
+			expansion := mockey.Mock(prepareSnapshotImportFiles).Return(files, opts, errFor("prepare")).Build()
+			defer expansion.UnPatch()
+			replication := mockey.Mock((*Server).validateImportReplication).Return(errFor("replication")).Build()
+			defer replication.UnPatch()
+			partitions := mockey.Mock((*Server).validateSnapshotPartitionTargets).Return(errFor("partition_targets")).Build()
+			defer partitions.UnPatch()
+			size := mockey.Mock(validateSnapshotImportMessageSize).Return(errFor("message_size")).Build()
+			defer size.UnPatch()
+			api := newMockBroadcastAPIImpl()
+			start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+			defer start.UnPatch()
+			describe := mockey.Mock((*boundaryBroker).DescribeCollectionInternal).Return(
+				&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+			defer describe.UnPatch()
+			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+					decoded := message.MustAsBroadcastImportMessageV1(msg)
+					// ID allocation follows preimport, not the initial broadcast.
+					for _, file := range decoded.MustBody().GetFiles() {
+						require.Nil(t, file.GetPreAllocatedAutoIds())
+					}
+					// The broadcaster adds the control channel after this input boundary.
+					require.ElementsMatch(t, []string{"v1"}, msg.BroadcastHeader().VChannels)
+					return &types.BroadcastAppendResult{}, nil
+				}).Build()
+			defer transport.UnPatch()
+			if stage == "public_options" {
+				opts = append(opts, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/metadata"})
+			}
+			type boundaryAllocator struct{ allocator.Allocator }
+			s := &Server{meta: &meta{}, broker: &boundaryBroker{}, allocator: &boundaryAllocator{}}
+			_, _, err := s.broadcastImport(context.Background(), "target", 100, []int64{10}, files,
+				opts, schema, 1, []string{"v1"}, "")
+			if stage == "auto_id" {
+				require.NoError(t, err)
+				require.Equal(t, 1, transport.Times())
+			} else {
+				if stage == "public_options" {
+					require.ErrorIs(t, err, merr.ErrImportFailed)
+				} else {
+					require.ErrorIs(t, err, cause)
+				}
+				require.Zero(t, transport.Times(), "rejected requests must not reach the WAL")
+			}
+		})
+	}
+}
+
+func TestBroadcastSnapshotImportNormalizesEZK(t *testing.T) {
+	patchSnapshotImportWAL(t)
+	patchSnapshotImportInstance(t)
+	ctx := context.Background()
+	validation := mockey.Mock((*Server).validateImportRequest).Return(nil).Build()
+	defer validation.UnPatch()
+	replication := mockey.Mock((*Server).validateImportReplication).Return(nil).Build()
+	defer replication.UnPatch()
+	fileValidation := mockey.Mock(snapshotstorage.ValidateExternalSnapshotDataFiles).Return(nil).Build()
+	defer fileValidation.UnPatch()
+	api := newMockBroadcastAPIImpl()
+	start := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(api, nil).Build()
+	defer start.UnPatch()
+	type testBroker struct{ broker.Broker }
+	fakeBroker := &testBroker{}
+	describe := mockey.Mock((*testBroker).DescribeCollectionInternal).Return(
+		&milvuspb.DescribeCollectionResponse{Status: merr.Success(), DbName: "default"}, nil).Build()
+	defer describe.UnPatch()
+	server := &Server{broker: fakeBroker, meta: &meta{chunkManager: storage.NewLocalChunkManager()}}
+	for _, encrypted := range []bool{false, true} {
+		name, suppliedEZK := "plaintext", "not-base64"
+		if encrypted {
+			name, suppliedEZK = "encrypted", snapshotImportTestEZK(10)
+		}
+		t.Run(name, func(t *testing.T) {
+			snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
+			if encrypted {
+				snapshot.Collection.Schema.Properties = []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "10"}}
+			}
+			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(&datapb.SnapshotMetadata{
+				FormatVersion: int32(snapshotstorage.SnapshotFormatVersion), SnapshotInfo: snapshot.SnapshotInfo,
+				Collection: snapshot.Collection, Layout: snapshot.Layout,
+			}, nil).Build()
+			defer read.UnPatch()
+			var received map[string]string
+			transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(
+				func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
+					decoded, err := message.AsBroadcastImportMessageV1(msg)
+					require.NoError(t, err)
+					// Decode the wire body used by ACK/replay, not the original
+					// request slice, to verify the durable options boundary.
+					restored := &msgpb.ImportMsg{}
+					require.NoError(t, proto.Unmarshal(decoded.Payload(), restored))
+					received = restored.GetOptions()
+					return &types.BroadcastAppendResult{}, nil
+				}).Build()
+			defer transport.UnPatch()
+			options := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.EZK, Value: suppliedEZK},
+				&commonpb.KeyValuePair{Key: importutilv2.AutoCommitKey, Value: "false"})
+			_, _, err := server.broadcastImport(ctx, "target", 100, []int64{10},
+				[]*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}},
+				options, snapshotImportTestSchema(), 1000, []string{"target_v1"}, "")
+			require.NoError(t, err)
+			require.Equal(t, "false", received[importutilv2.AutoCommitKey])
+			require.Equal(t, importutilv2.SourceTypeSnapshot, received[importutilv2.SourceType])
+			if encrypted {
+				require.Equal(t, suppliedEZK, received[importutilv2.EZK])
+			} else {
+				require.NotContains(t, received, importutilv2.EZK)
+			}
+			ezk, err := importutilv2.GetEZK(options)
+			require.NoError(t, err)
+			require.Equal(t, suppliedEZK, ezk, "the original request must not be mutated")
+		})
+	}
+}
 
 type ImportCallbacksSuite struct {
 	suite.Suite
@@ -1733,23 +2040,25 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 	assert.Contains(t, err.Error(), "backup")
 }
 
-// TestImportAckCallback_DropsControlChannelFromJobChannels pins the filter in
-// importV1AckCallback: the broadcaster stamps the control channel into every
-// broadcast, so the ack result carries a control-channel entry that must not
-// become one of the job's data vchannels, while its time tick still counts
-// toward DataTimestamp.
+// TestImportAckCallback_DropsControlChannelFromJobChannels exercises the real
+// ACK-to-job path: the broadcaster's control-channel entry must not become a
+// ready data vchannel, while its time tick still contributes to DataTs.
 func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
-	defer mockey.UnPatchAll()
-
-	// The request is read inside the hook: its memory is not valid after the call returns.
-	var channelNames []string
-	var dataTimestamp uint64
-	mockey.Mock((*Server).createImportJobFromAck).To(
-		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
-			channelNames = append([]string{}, in.GetChannelNames()...)
-			dataTimestamp = in.GetDataTimestamp()
-			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
-		}).Build()
+	paramtable.Init()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	type ackMeta struct{ ImportMeta }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	getCollection := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+	defer getCollection.UnPatch()
+	var saved ImportJob
+	saveJob := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
+		saved = job
+		return nil
+	}).Build()
+	defer saveJob.UnPatch()
 
 	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
 	broadcastMsg := message.NewImportMessageBuilderV1().
@@ -1767,8 +2076,13 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		},
 	}
 
-	callbacks := &DDLCallbacks{Server: &Server{}}
-	assert.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
-	assert.Equal(t, []string{"vchannel1"}, channelNames)
-	assert.Equal(t, uint64(200), dataTimestamp)
+	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	callbacks := &DDLCallbacks{Server: server}
+	require.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
+	require.NotNil(t, saved)
+	assert.Equal(t, int64(1), saved.GetJobID())
+	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
+	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
+	assert.Equal(t, uint64(200), saved.GetDataTs())
 }

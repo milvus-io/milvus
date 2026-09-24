@@ -31,6 +31,20 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/hardware"
 )
 
+func TestDataNodeConcurrencyAndImportMemoryFallbacks(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true)))
+	cfg := &params.DataNodeCfg
+	for _, invalid := range []string{"0", "-1"} {
+		params.Save(cfg.MaxParallelSyncMgrTasksPerCPUCore.Key, invalid)
+		require.Equal(t, 16, cfg.MaxParallelSyncMgrTasksPerCPUCore.GetAsInt())
+	}
+	for _, invalid := range []string{"0", "-1", "101"} {
+		params.Save(cfg.ImportMemoryLimitPercentage.Key, invalid)
+		require.Equal(t, float64(10), cfg.ImportMemoryLimitPercentage.GetAsFloat())
+	}
+}
+
 func TestQueryNodeStrictGroupSettings(t *testing.T) {
 	params := &ComponentParam{}
 	params.Init(NewBaseTable(SkipRemote(true)))
@@ -1260,7 +1274,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 4, Params.ImportConcurrencyPerCPUCore.GetAsInt())
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		assert.Equal(t, 16*1024*1024, Params.ImportBaseBufferSize.GetAsInt())
+		assert.Equal(t, 128*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
+		params.Save(Params.ImportDeleteBufferSize.Key, "16")
 		assert.Equal(t, 16*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
+		params.Reset(Params.ImportDeleteBufferSize.Key)
+		assert.Equal(t, 128*1024*1024, Params.ImportDeleteBufferSize.GetAsInt())
 		assert.Equal(t, 10.0, Params.ImportMemoryLimitPercentage.GetAsFloat())
 		assert.Equal(t, 0, Params.ImportMaxWriteRetryAttempts.GetAsInt())
 		assert.Equal(t, 1, Params.ImportWriteRetryInitialInterval.GetAsInt())

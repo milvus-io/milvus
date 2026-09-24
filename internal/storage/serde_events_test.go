@@ -584,6 +584,17 @@ func TestManifestReaderExternalContext(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, arrow.BinaryTypes.String, capturedSchema.Field(0).Type)
 	require.Equal(t, []string{"text_col", "101"}, reader.neededColumns)
+
+	virtualSchema := &schemapb.CollectionSchema{
+		ExternalSource: "s3://bucket/source", ExternalSpec: `{"format":"milvus-table"}`,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "value", DataType: schemapb.DataType_Int64},
+			{FieldID: 101, Name: common.VirtualPKFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		},
+	}
+	reader, err = NewManifestReader("manifest-json", virtualSchema, 4096, storageConfig, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"100"}, reader.neededColumns, "virtual PK has no stored manifest column")
 }
 
 func TestDeltalogReaderExternalContext(t *testing.T) {
@@ -636,6 +647,32 @@ func TestDeltalogReaderExternalContext(t *testing.T) {
 	require.Same(t, storageConfig, capturedStorageConfig)
 	require.Nil(t, capturedPluginContext)
 	require.Equal(t, externalReader, capturedExternalReader)
+}
+
+func TestManifestReaderSnapshotErrorPaths(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "text", DataType: schemapb.DataType_Text},
+	}}
+	cfg := &indexpb.StorageConfig{RootPath: "root"}
+	_, err := NewManifestReader("invalid", schema, 1024, cfg, &indexcgopb.StoragePluginContext{}, WithResolveTextLob())
+	require.ErrorIs(t, err, merr.ErrOperationNotSupported)
+	_, err = NewManifestReader("invalid", schema, 1024, cfg, nil, WithResolveTextLob())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "parse manifest path")
+
+	open := mockey.Mock(packed.NewFFISegmentReader).Return(nil, merr.ErrIoKeyNotFound).Build()
+	defer open.UnPatch()
+	_, err = NewManifestReader(packed.MarshalManifestPath("root/segment", 1), schema, 1024, cfg, nil, WithResolveTextLob())
+	require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+
+	// An unprojected TEXT field must not select the logical LOB reader.
+	packedOpen := mockey.Mock(packed.NewFFIPackedReader).Return(nil, merr.ErrIoKeyNotFound).Build()
+	defer packedOpen.UnPatch()
+	r := &ManifestReader{manifest: packed.MarshalManifestPath("root/segment", 1), schema: schema, resolveTextLob: true}
+	require.ErrorIs(t, r.init(), merr.ErrIoKeyNotFound)
+	require.Empty(t, r.textColumnConfigs)
+	require.Equal(t, 1, open.Times())
+	require.NoError(t, r.Close())
 }
 
 func TestManifestReaderExternalContextErrors(t *testing.T) {
@@ -743,6 +780,29 @@ func (fakeUnsafeKeyCipher) GetUnsafeKey(ezID, collectionID int64) []byte {
 	return []byte("unsafe-key")
 }
 
+func TestNewManifestRecordReaderDependencyErrors(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64}}}
+	for _, stage := range []string{"field_ids", "open"} {
+		t.Run(stage, func(t *testing.T) {
+			var metadataErr error
+			if stage == "field_ids" {
+				metadataErr = merr.ErrIoKeyNotFound
+			}
+			fields := mockey.Mock(packed.GetManifestFieldIDs).Return(map[int64]struct{}{100: {}}, metadataErr).Build()
+			defer fields.UnPatch()
+			open := mockey.Mock(NewRecordReaderFromManifest).Return(nil, merr.ErrIoKeyNotFound).Build()
+			defer open.UnPatch()
+			r, err := NewManifestRecordReader(context.Background(), "manifest", schema,
+				WithVersion(StorageV3), WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}))
+			require.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+			require.Nil(t, r)
+			if stage == "field_ids" {
+				require.Zero(t, open.Times())
+			}
+		})
+	}
+}
+
 func TestNewManifestRecordReaderBranches(t *testing.T) {
 	schema := &schemapb.CollectionSchema{
 		Name: "external_collection",
@@ -809,6 +869,34 @@ func TestNewManifestRecordReaderBranches(t *testing.T) {
 	// the plugin context contract carries the key base64-encoded, matching
 	// NewBinlogRecordReader/NewBinlogRecordWriter and hookutil.GetCPluginContext
 	require.Equal(t, base64.StdEncoding.EncodeToString([]byte("unsafe-key")), capturedPluginContext.GetEncryptionKey())
+
+	// Snapshot Import resolves the source context from the request. An explicit
+	// nil means the source is plaintext, even if neededSchema belongs to an
+	// encrypted target collection; target properties must not become a read key.
+	capturedPluginContext = pluginContext
+	reader, err = NewManifestRecordReader(context.Background(), "manifest-json", schemaWithEZ,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithCollectionID(2),
+		WithPluginContext(nil),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.Nil(t, capturedPluginContext)
+
+	// WithResolveTextLob is used by backup import, where schemaWithEZ is the
+	// destination schema. The destination key must not be passed to the source
+	// reader or a plaintext backup would be mistaken for a CMEK source.
+	capturedPluginContext = pluginContext
+	reader, err = NewManifestRecordReader(context.Background(), "manifest-json", schemaWithEZ,
+		WithVersion(StorageV3),
+		WithStorageConfig(&indexpb.StorageConfig{RootPath: "root"}),
+		WithCollectionID(2),
+		WithResolveTextLob(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	require.Nil(t, capturedPluginContext)
 }
 
 // TestNewManifestRecordReaderPresentFieldsSkipManifestRead pins the P5 perf path:
