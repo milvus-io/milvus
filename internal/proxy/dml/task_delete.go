@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -17,8 +17,10 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
@@ -38,7 +40,7 @@ import (
 
 type BaseDeleteTask = msgstream.DeleteMsg
 
-type deleteTask struct {
+type DeleteTask struct {
 	baseTask
 	Condition
 	ctx context.Context
@@ -71,39 +73,39 @@ type deleteTask struct {
 	sessionTS Timestamp
 }
 
-func (dt *deleteTask) TraceCtx() context.Context {
+func (dt *DeleteTask) TraceCtx() context.Context {
 	return dt.ctx
 }
 
-func (dt *deleteTask) ID() UniqueID {
+func (dt *DeleteTask) ID() UniqueID {
 	return dt.msgID
 }
 
-func (dt *deleteTask) SetID(uid UniqueID) {
+func (dt *DeleteTask) SetID(uid UniqueID) {
 	dt.msgID = uid
 }
 
-func (dt *deleteTask) Type() commonpb.MsgType {
+func (dt *DeleteTask) Type() commonpb.MsgType {
 	return commonpb.MsgType_Delete
 }
 
-func (dt *deleteTask) Name() string {
-	return DeleteTaskName
+func (dt *DeleteTask) Name() string {
+	return taskmodel.DeleteTaskName
 }
 
-func (dt *deleteTask) BeginTs() Timestamp {
+func (dt *DeleteTask) BeginTs() Timestamp {
 	return dt.ts
 }
 
-func (dt *deleteTask) EndTs() Timestamp {
+func (dt *DeleteTask) EndTs() Timestamp {
 	return dt.ts
 }
 
-func (dt *deleteTask) SetTs(ts Timestamp) {
+func (dt *DeleteTask) SetTs(ts Timestamp) {
 	dt.ts = ts
 }
 
-func (dt *deleteTask) OnEnqueue() error {
+func (dt *DeleteTask) OnEnqueue() error {
 	if dt.req.Base == nil {
 		dt.req.Base = commonpbutil.NewMsgBase()
 	}
@@ -112,7 +114,7 @@ func (dt *deleteTask) OnEnqueue() error {
 	return nil
 }
 
-func (dt *deleteTask) SetChannels() error {
+func (dt *DeleteTask) SetChannels() error {
 	collID, err := dt.GetMetaCache().GetCollectionID(dt.ctx, dt.req.GetDbName(), dt.req.GetCollectionName())
 	if err != nil {
 		return err
@@ -125,11 +127,11 @@ func (dt *deleteTask) SetChannels() error {
 	return nil
 }
 
-func (dt *deleteTask) GetChannels() []pChan {
+func (dt *DeleteTask) GetChannels() []pChan {
 	return dt.pChannels
 }
 
-func (dt *deleteTask) PreExecute(ctx context.Context) error {
+func (dt *DeleteTask) PreExecute(ctx context.Context) error {
 	if dt.req.Namespace == nil {
 		return nil
 	}
@@ -140,7 +142,7 @@ func (dt *deleteTask) PreExecute(ctx context.Context) error {
 	return common.CheckNamespace(schema.CollectionSchema, dt.req.Namespace)
 }
 
-func (dt *deleteTask) PostExecute(ctx context.Context) error {
+func (dt *DeleteTask) PostExecute(ctx context.Context) error {
 	metrics.ProxyDeleteVectors.WithLabelValues(
 		paramtable.GetStringNodeID(),
 		dt.req.GetDbName(),
@@ -152,7 +154,7 @@ func (dt *deleteTask) PostExecute(ctx context.Context) error {
 // checkMaxDeleteSize rejects a materialized per-vchannel delete message whose
 // protobuf body exceeds quotaAndLimits.limits.maxDeleteSize.
 func checkMaxDeleteSize(ctx context.Context, size int) error {
-	maxDeleteSize := Params.QuotaConfig.MaxDeleteSize.GetAsInt()
+	maxDeleteSize := paramtable.Get().QuotaConfig.MaxDeleteSize.GetAsInt()
 	if maxDeleteSize == -1 || size <= maxDeleteSize {
 		return nil
 	}
@@ -177,13 +179,13 @@ func repackDeleteMsgByHash(
 	namespace *string,
 	schema *schemapb.CollectionSchema,
 ) (map[uint32][]*msgstream.DeleteMsg, int64, error) {
-	splitChunkProxy := Params.ProxyCfg.SplitChunkProxy.GetAsBool()
-	maxWALMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+	splitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool()
+	maxWALMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
 	var hashValues []uint32
 	// Delete tombstones are PK+timestamp based. Namespace can narrow routing,
 	// but it is not part of the tombstone identity; PKs must stay unique across
 	// namespaces in the same collection.
-	channelID, ok, err := namespaceShardingChannelID(schema, namespace, vChannels)
+	channelID, ok, err := dql.NamespaceShardingChannelID(schema, namespace, vChannels)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -285,7 +287,7 @@ func repackDeleteMsgByHash(
 	return result, numRows, nil
 }
 
-type deleteRunner struct {
+type DeleteRunner struct {
 	req       *milvuspb.DeleteRequest
 	result    *milvuspb.MutationResult
 	metaCache Cache
@@ -321,11 +323,52 @@ type deleteRunner struct {
 	scannedTotalBytes  atomic.Int64
 }
 
-func (dr *deleteRunner) GetMetaCache() Cache {
+// NewDeleteRunner constructs a delete runner. Its dependencies are passed in
+// explicitly because most of them (queue, limiter, allocators) are not part of
+// the taskmodel.TaskNode contract.
+func NewDeleteRunner(request *milvuspb.DeleteRequest, metaCache Cache, idAllocator allocator.Interface, tsoAllocatorIns tsoAllocator, chMgr channelmgr.ChannelsMgr, queue *scheduler.DmTaskQueue, lb shardclient.LBPolicy, limiter types.Limiter) *DeleteRunner {
+	return &DeleteRunner{
+		req:             request,
+		metaCache:       metaCache,
+		idAllocator:     idAllocator,
+		tsoAllocatorIns: tsoAllocatorIns,
+		chMgr:           chMgr,
+		queue:           queue,
+		lb:              lb,
+		limiter:         limiter,
+	}
+}
+
+// Result returns the mutation result after execution.
+func (dr *DeleteRunner) Result() *milvuspb.MutationResult {
+	return dr.result
+}
+
+// AllQueryCnt returns the total number of queries counted across shards.
+func (dr *DeleteRunner) AllQueryCnt() int64 {
+	return dr.allQueryCnt.Load()
+}
+
+// ScannedRemoteBytes returns the scanned remote bytes across shards.
+func (dr *DeleteRunner) ScannedRemoteBytes() int64 {
+	return dr.scannedRemoteBytes.Load()
+}
+
+// ScannedTotalBytes returns the scanned total bytes across shards.
+func (dr *DeleteRunner) ScannedTotalBytes() int64 {
+	return dr.scannedTotalBytes.Load()
+}
+
+// Request returns the delete request.
+func (dr *DeleteRunner) Request() *milvuspb.DeleteRequest {
+	return dr.req
+}
+
+func (dr *DeleteRunner) GetMetaCache() Cache {
 	return dr.metaCache
 }
 
-func (dr *deleteRunner) Init(ctx context.Context) error {
+func (dr *DeleteRunner) Init(ctx context.Context) error {
 	var err error
 
 	collName := dr.req.GetCollectionName()
@@ -333,7 +376,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		mlog.FieldDbName(dr.req.GetDbName()),
 		mlog.FieldCollectionName(collName),
 	)
-	if err := validateCollectionName(collName); err != nil {
+	if err := dql.ValidateCollectionName(collName); err != nil {
 		return ErrWithLog(log, "Invalid collection name", err)
 	}
 
@@ -352,7 +395,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection schema", err)
 	}
-	if err := validateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
+	if err := dql.ValidateTextStorageV3Enabled(dr.schema.CollectionSchema); err != nil {
 		return ErrWithLog(log, "TEXT field requires StorageV3", err)
 	}
 	partitionName, namespaceAsPartition, err := resolveNamespacePartitionName(dr.schema.CollectionSchema, dr.req.Namespace, dr.req.GetPartitionName())
@@ -367,14 +410,14 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection info", err)
 	}
-	colTimezone := getColTimezone(colInfo)
+	colTimezone := dql.GetColTimezone(colInfo)
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: colTimezone}
 
 	start := time.Now()
 	dr.plan, err = planparserv2.CreateRetrievePlanArgs(dr.schema.SchemaHelper, dr.req.GetExpr(), dr.req.GetExprTemplateValues(), visitorArgs)
 	if err != nil {
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
-		return merr.WrapErrAsInputError(WrapPlanCreationError(err, "failed to create delete plan"))
+		return merr.WrapErrAsInputError(dql.WrapPlanCreationError(err, "failed to create delete plan"))
 	}
 	metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), "delete", metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 
@@ -392,18 +435,18 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			"membership_match with an approximate bloom filter blob cannot be used in delete expressions"))
 	}
 
-	dr.plan.Namespace = namespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
+	dr.plan.Namespace = dql.NamespaceForPlan(dr.schema.CollectionSchema, dr.req.Namespace)
 	// Set partitionIDs, could be empty if no partition name specified and no partition key
 	partName := dr.req.GetPartitionName()
-	if namespacePartitionKeyMode(dr.schema.CollectionSchema) && dr.req.Namespace != nil {
+	if dql.NamespacePartitionKeyMode(dr.schema.CollectionSchema) && dr.req.Namespace != nil {
 		if len(partName) > 0 {
 			return merr.WrapErrParameterInvalidMsg("not support manually specifying the partition names if namespace is used")
 		}
-		hashedPartitionNames, err := assignNamespacePartitionKey(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
+		hashedPartitionNames, err := dql.AssignNamespacePartitionKey(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), dr.req.Namespace)
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = GetPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = dql.GetPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
@@ -416,17 +459,17 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 		partitionKeys := exprutil.ParseKeys(expr, exprutil.PartitionKey)
-		hashedPartitionNames, err := assignPartitionKeys(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
+		hashedPartitionNames, err := dql.AssignPartitionKeys(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), partitionKeys)
 		if err != nil {
 			return err
 		}
-		dr.partitionIDs, err = GetPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
+		dr.partitionIDs, err = dql.GetPartitionIDs(ctx, dr.GetMetaCache(), dr.req.GetDbName(), dr.req.GetCollectionName(), hashedPartitionNames)
 		if err != nil {
 			return err
 		}
 	} else if len(partName) > 0 {
 		// static validation
-		if err := validatePartitionTag(partName, true); err != nil {
+		if err := dql.ValidatePartitionTag(partName, true); err != nil {
 			return ErrWithLog(log, "Invalid partition name", err)
 		}
 
@@ -454,7 +497,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	return nil
 }
 
-func (dr *deleteRunner) Run(ctx context.Context) error {
+func (dr *DeleteRunner) Run(ctx context.Context) error {
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, dr.plan)
 	if isSimple {
 		// if could get delete.primaryKeys from delete expr
@@ -474,8 +517,8 @@ func (dr *deleteRunner) Run(ctx context.Context) error {
 	return nil
 }
 
-func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*deleteTask, error) {
-	dt := &deleteTask{
+func (dr *DeleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, partitionID UniqueID) (*DeleteTask, error) {
+	dt := &DeleteTask{
 		baseTask:     baseTask{MetaCache: dr.GetMetaCache()},
 		ctx:          ctx,
 		Condition:    NewTaskCondition(ctx),
@@ -499,7 +542,7 @@ func (dr *deleteRunner) produce(ctx context.Context, primaryKeys *schemapb.IDs, 
 // getStreamingQueryAndDelteFunc returns the query function used by LBPolicy.
 // serializedPlan and outputFieldIDs are prepared once before fan-out and are
 // immutable for every shard callback and retry.
-func (dr *deleteRunner) getStreamingQueryAndDelteFunc(
+func (dr *DeleteRunner) getStreamingQueryAndDelteFunc(
 	serializedPlan []byte,
 	outputFieldIDs []int64,
 ) shardclient.ExecuteFunc {
@@ -525,7 +568,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(
 				PartitionIDs:       dr.partitionIDs,
 				SerializedExprPlan: serializedPlan,
 				OutputFieldsId:     outputFieldIDs,
-				GuaranteeTimestamp: parseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
+				GuaranteeTimestamp: dql.ParseGuaranteeTsFromConsistency(dr.ts, dr.ts, dr.req.GetConsistencyLevel()),
 				QueryLabel:         metrics.DeleteQueryLabel,
 			},
 			DmlChannels: []string{channel},
@@ -541,7 +584,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(
 			return err
 		}
 
-		taskCh := make(chan *deleteTask, 256)
+		taskCh := make(chan *DeleteTask, 256)
 		var receiveErr error
 		go func() {
 			receiveErr = dr.receiveQueryResult(ctx, client, taskCh)
@@ -578,7 +621,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask) error {
+func (dr *DeleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *DeleteTask) error {
 	// If a complex delete tries to delete multiple partitions in the filter, use AllPartitionID
 	// otherwise use the target partitionID, which can come from partition name(UDF) or a partition key expression
 	// TODO: Get partitionID from Query results
@@ -626,7 +669,7 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 	}
 }
 
-func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
+func (dr *DeleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode) error {
 	rc := timerecord.NewTimeRecorder("QueryStreamDelete")
 	var err error
 
@@ -637,7 +680,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	// Budget and marshal once before LB fan-out. A roaring plan can be tens of
 	// MiB; marshaling inside each concurrent shard callback would multiply that
 	// transient buffer by shard count and repeat it on retries.
-	serializedPlan, _, err := MarshalPlanWithMembershipFilterSizeLimit(plan, 0)
+	serializedPlan, _, err := dql.MarshalPlanWithMembershipFilterSizeLimit(plan, 0)
 	if err != nil {
 		return err
 	}
@@ -653,7 +696,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 		return err
 	}
 
-	channelName, useNamespaceChannel, err := namespaceShardingChannel(dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
+	channelName, useNamespaceChannel, err := dql.NamespaceShardingChannel(dr.schema.CollectionSchema, dr.req.Namespace, dr.vChannels)
 	if err != nil {
 		return err
 	}
@@ -685,7 +728,7 @@ func (dr *deleteRunner) complexDelete(ctx context.Context, plan *planpb.PlanNode
 	return nil
 }
 
-func (dr *deleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
+func (dr *DeleteRunner) simpleDelete(ctx context.Context, pk *schemapb.IDs, numRow int64) error {
 	partitionID := common.AllPartitionsID
 	if len(dr.partitionIDs) == 1 {
 		partitionID = dr.partitionIDs[0]

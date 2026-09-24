@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -88,7 +88,7 @@ func TestRepackInsertDataForStreamingServicePreservesExplicitZeroSchemaVersion(t
 
 	// Idempotency enabled: the proxy decoration single-sources both the idempotency
 	// key (message property) and the per-write-unit insert result (insert header).
-	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
+	it := &InsertTask{idempotencyEnabled: true, idempotencyKey: "key-1", result: result}
 	msgs, err = repackInsertDataForStreamingService(context.Background(), mockMetaCache, []string{"ch"}, insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration())
 	assert.NoError(t, err)
 	assert.Len(t, msgs, 1)
@@ -107,10 +107,10 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 	// The packer's single-row limit is per WAL backend: rocksmq declares none,
 	// so the size-driven split under test only exists on a bounded backend.
 	paramtable.SetRole(typeutil.StandaloneRole)
-	require.NoError(t, Params.Save(Params.MQCfg.Type.Key, "pulsar"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().MQCfg.Type.Key, "pulsar"))
 	t.Cleanup(func() {
 		paramtable.SetRole("")
-		Params.Reset(Params.MQCfg.Type.Key)
+		paramtable.Get().Reset(paramtable.Get().MQCfg.Type.Key)
 	})
 
 	cache := NewMockCache(t)
@@ -125,10 +125,10 @@ func TestRepackInsertDataForStreamingServiceSplitIdempotentMessagesShareKey(t *t
 	fieldIdxs := idxComputer.Compute(0)
 	rowSize, err := typeutil.EstimateEntitySize(insertMsg.GetFieldsData(), 0, fieldIdxs...)
 	require.NoError(t, err)
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(rowSize*2)))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(rowSize*2)))
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key) })
 
-	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
+	it := &InsertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
 
 	msgs, err := repackInsertDataForStreamingService(
 		context.Background(),
@@ -158,13 +158,13 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 	// The packer's single-row limit is per WAL backend: rocksmq declares none,
 	// so the size-driven split under test only exists on a bounded backend.
 	paramtable.SetRole(typeutil.StandaloneRole)
-	require.NoError(t, Params.Save(Params.MQCfg.Type.Key, "pulsar"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().MQCfg.Type.Key, "pulsar"))
 	t.Cleanup(func() {
 		paramtable.SetRole("")
-		Params.Reset(Params.MQCfg.Type.Key)
+		paramtable.Get().Reset(paramtable.Get().MQCfg.Type.Key)
 	})
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key) })
 
 	cache := NewMockCache(t)
 	cache.EXPECT().GetPartitionID(mock.Anything, "db", "coll", "_default").Return(int64(200), nil)
@@ -173,7 +173,7 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 	// formatter floors at minWALMessageSize, so the row has to clear that floor
 	// on its own or the limit this test sets would be raised out from under it.
 	insertMsg, result := newIdempotentRepackInsertMsgWithPayload(1, strings.Repeat("a", 512*1024))
-	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+	it := &InsertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
 
 	bodyOnly, err := repackInsertDataForStreamingService(
 		context.Background(),
@@ -205,7 +205,7 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 	require.Greater(t, withIdempotency[0].EstimateSize(), bodyOnly[0].EstimateSize())
 	require.Greater(t, withIdempotency[0].EstimateSize()-1, bodyOnly[0].EstimateSize())
 
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
 
 	// The non-idempotent path must stay under the same limit: the final
 	// streaming-message size guard exists specifically for the extra idempotency
@@ -223,7 +223,7 @@ func TestRepackInsertDataForStreamingServiceSplitsOversizedIdempotentMessage(t *
 	)
 	require.NoError(t, err)
 	require.Len(t, withoutIdempotency, 1)
-	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+	require.Greater(t, withoutIdempotency[0].EstimateSize(), paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt())
 
 	// A single row cannot be split further, so this one still fails -- but with an
 	// error that names the real constraint.
@@ -258,9 +258,9 @@ func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing
 	for i := range payloads {
 		payloads[i] = strings.Repeat("x", 128*1024)
 	}
-	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
+	it := &InsertTask{idempotencyEnabled: true, idempotencyKey: "key-split", result: result}
 
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "104857600"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "104857600"))
 	whole, err := repackInsertDataForStreamingService(
 		context.Background(), cache, []string{"ch"},
 		insertMsg, result, nil, 0, nil, it.idempotentInsertDecoration(),
@@ -270,8 +270,8 @@ func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing
 
 	// Force the built envelope over the limit; the rows must be redistributed
 	// across several messages rather than the insert failing.
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(whole[0].EstimateSize()/2)))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(whole[0].EstimateSize()/2)))
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key) })
 
 	split, err := repackInsertDataForStreamingService(
 		context.Background(), cache, []string{"ch"},
@@ -280,20 +280,20 @@ func TestRepackInsertDataForStreamingServiceSplitsRatherThanRejecting(t *testing
 	require.NoError(t, err)
 	require.Greater(t, len(split), 1)
 	for _, msg := range split {
-		require.LessOrEqual(t, msg.EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+		require.LessOrEqual(t, msg.EstimateSize(), paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt())
 	}
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempotentHeaders(t *testing.T) {
 	paramtable.Init()
 	paramtable.SetRole(typeutil.StandaloneRole)
-	require.NoError(t, Params.Save(Params.MQCfg.Type.Key, "pulsar"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().MQCfg.Type.Key, "pulsar"))
 	t.Cleanup(func() {
 		paramtable.SetRole("")
-		Params.Reset(Params.MQCfg.Type.Key)
+		paramtable.Get().Reset(paramtable.Get().MQCfg.Type.Key)
 	})
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, "1048576"))
-	t.Cleanup(func() { Params.Reset(Params.PulsarCfg.MaxMessageSize.Key) })
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, "1048576"))
+	t.Cleanup(func() { paramtable.Get().Reset(paramtable.Get().PulsarCfg.MaxMessageSize.Key) })
 
 	cache := NewMockCache(t)
 	cache.On("GetPartitions", mock.Anything, "db", "coll").Return(map[string]int64{
@@ -332,7 +332,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 	require.NoError(t, err)
 	require.Len(t, bodyOnly, 1)
 
-	require.NoError(t, Params.Save(Params.PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().PulsarCfg.MaxMessageSize.Key, strconv.Itoa(bodyOnly[0].EstimateSize()-1)))
 
 	withoutIdempotency, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
@@ -349,9 +349,9 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceValidatesOnlyIdempot
 	)
 	require.NoError(t, err)
 	require.Len(t, withoutIdempotency, 1)
-	require.Greater(t, withoutIdempotency[0].EstimateSize(), Params.PulsarCfg.MaxMessageSize.GetAsInt())
+	require.Greater(t, withoutIdempotency[0].EstimateSize(), paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt())
 
-	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
+	it := &InsertTask{idempotencyEnabled: true, idempotencyKey: "key-too-large", result: result}
 	_, err = repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
 		cache,
@@ -395,7 +395,7 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceSameVChannelMessages
 			{FieldID: 3, Name: "payload", DataType: schemapb.DataType_VarChar},
 		},
 	}
-	it := &insertTask{idempotencyEnabled: true, idempotencyKey: "key-partition", result: result}
+	it := &InsertTask{idempotencyEnabled: true, idempotencyKey: "key-partition", result: result}
 
 	msgs, err := repackInsertDataWithPartitionKeyForStreamingService(
 		context.Background(),
@@ -520,7 +520,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
 	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{}, nil)
 	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
-	task := &insertTask{
+	task := &InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
@@ -543,7 +543,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	var err error
 
 	// passed NumRows is less than 0
-	case1 := insertTask{
+	case1 := InsertTask{
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
@@ -574,7 +574,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 
 	numRows := 20
 	dim := 128
-	case2 := insertTask{
+	case2 := InsertTask{
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
 				Base: &commonpb.MsgBase{
@@ -798,7 +798,7 @@ func TestInsertTask(t *testing.T) {
 		).Return(collectionID, nil)
 		chMgr := channelmgr.NewMockChannelsMgr(t)
 		chMgr.EXPECT().GetChannels(mock.Anything).Return(channels, nil)
-		it := insertTask{
+		it := InsertTask{
 			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
@@ -886,7 +886,7 @@ func TestMaxInsertSize(t *testing.T) {
 		cache.On("GetCollectionID", mock.Anything, dbName, collectionName).Return(UniqueID(100), nil)
 		cache.On("GetCollectionInfo", mock.Anything, dbName, collectionName, UniqueID(100)).Return(&collectionInfo{Schema: schema}, nil)
 		cache.On("GetCollectionSchema", mock.Anything, dbName, collectionName).Return(schema, nil)
-		it := insertTask{
+		it := InsertTask{
 			baseTask: baseTask{MetaCache: cache},
 			ctx:      context.Background(),
 			insertMsg: &msgstream.InsertMsg{
@@ -894,7 +894,7 @@ func TestMaxInsertSize(t *testing.T) {
 					Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Insert)),
 					DbName:         dbName,
 					CollectionName: collectionName,
-					PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+					PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 					FieldsData:     []*schemapb.FieldData{newPrimaryFieldData(), newValueFieldData()},
 					NumRows:        1,
 					Version:        msgpb.InsertDataVersion_ColumnBased,
@@ -904,8 +904,8 @@ func TestMaxInsertSize(t *testing.T) {
 		}
 		require.NoError(t, validateAndNormalizeFieldDataValidData(it.insertMsg.GetFieldsData()))
 		incomingSize := it.insertMsg.Size()
-		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, strconv.Itoa(incomingSize))
-		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+		paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxInsertSize.Key, strconv.Itoa(incomingSize))
+		defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.MaxInsertSize.Key)
 
 		err := it.PreExecute(context.Background())
 		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
@@ -914,7 +914,7 @@ func TestMaxInsertSize(t *testing.T) {
 
 	t.Run("upsert checks the materialized insert message", func(t *testing.T) {
 		paramtable.Init()
-		ut := upsertTask{
+		ut := UpsertTask{
 			ctx:         context.Background(),
 			idAllocator: newIDAllocator(t),
 			schema:      schema,
@@ -932,7 +932,7 @@ func TestMaxInsertSize(t *testing.T) {
 						Base:           commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_Insert)),
 						DbName:         dbName,
 						CollectionName: collectionName,
-						PartitionName:  Params.CommonCfg.DefaultPartitionName.GetValue(),
+						PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 						// queryPreExecute has already reconstructed the complete row
 						// before insertPreExecute is called.
 						FieldsData: []*schemapb.FieldData{newPrimaryFieldData(), newValueFieldData()},
@@ -944,8 +944,8 @@ func TestMaxInsertSize(t *testing.T) {
 		}
 		materializationInputSize := ut.upsertMsg.InsertMsg.Size()
 		require.Less(t, proto.Size(ut.req), materializationInputSize)
-		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, strconv.Itoa(materializationInputSize))
-		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+		paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxInsertSize.Key, strconv.Itoa(materializationInputSize))
+		defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.MaxInsertSize.Key)
 
 		err := ut.insertPreExecute(context.Background())
 		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
@@ -954,8 +954,8 @@ func TestMaxInsertSize(t *testing.T) {
 
 	t.Run("-1 still disables the limit", func(t *testing.T) {
 		paramtable.Init()
-		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, "-1")
-		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+		paramtable.Get().Save(paramtable.Get().QuotaConfig.MaxInsertSize.Key, "-1")
+		defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.MaxInsertSize.Key)
 		assert.NoError(t, checkMaxInsertSize(context.Background(), "insert", 1<<30))
 	})
 }
@@ -963,8 +963,8 @@ func TestMaxInsertSize(t *testing.T) {
 func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 	paramtable.Init()
 	// run auto-id path with field count check; allow user to pass PK
-	Params.Save(Params.ProxyCfg.SkipAutoIDCheck.Key, "false")
-	defer Params.Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
+	paramtable.Get().Save(paramtable.Get().ProxyCfg.SkipAutoIDCheck.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.SkipAutoIDCheck.Key)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1008,7 +1008,7 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		},
 	}
 
-	task := insertTask{
+	task := InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
@@ -1146,7 +1146,7 @@ func TestInsertTask_Function(t *testing.T) {
 	idAllocator.Start()
 	defer idAllocator.Close()
 	assert.NoError(t, err)
-	task := insertTask{
+	task := InsertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
 			InsertRequest: &msgpb.InsertRequest{
@@ -1210,7 +1210,7 @@ func TestInsertTaskForSchemaMismatch(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("schema ts mismatch", func(t *testing.T) {
-		it := insertTask{
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -1291,7 +1291,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
 		namespace := "test"
-		it := insertTask{
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -1310,7 +1310,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 		assert.Equal(t, int64(101), it.insertMsg.FieldsData[0].FieldId)
 
 		// namespace data is not set
-		it = insertTask{
+		it = InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -1339,7 +1339,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 			CreatedTimestamp:    10001,
 			CreatedUtcTimestamp: 10002,
 		}, nil).Maybe()
-		it := insertTask{
+		it := InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{
@@ -1357,7 +1357,7 @@ func TestInsertTask_Namespace(t *testing.T) {
 
 		// namespace data is set
 		namespace := "test"
-		it = insertTask{
+		it = InsertTask{
 			ctx: context.Background(),
 			insertMsg: &msgstream.InsertMsg{
 				InsertRequest: &msgpb.InsertRequest{

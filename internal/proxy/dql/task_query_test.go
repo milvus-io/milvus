@@ -71,7 +71,7 @@ func TestQueryTaskPreExecuteSnapshotFences(t *testing.T) {
 			patch((*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 			patch((*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 300}, nil)
 			patch((*metacache.MetaCache).GetCollectionSchema, schema, nil)
-			patch(isPartitionKeyMode, false, nil)
+			patch(IsPartitionKeyMode, false, nil)
 			patch(GetPartitionIDs, []int64{1}, nil)
 			ctx := context.Background()
 			task := &QueryTask{

@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
+	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -17,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -27,7 +29,7 @@ const (
 	partialUpdateCASRetryBackoff     = 10 * time.Millisecond
 )
 
-func (ut *upsertTask) Execute(ctx context.Context) error {
+func (ut *UpsertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-Execute")
 	defer sp.End()
 
@@ -42,7 +44,7 @@ func (ut *upsertTask) Execute(ctx context.Context) error {
 	return ut.appendUpsertAttempt(ctx, ez)
 }
 
-func (ut *upsertTask) executePartialUpdateWithCASRetry(ctx context.Context, ez *message.CipherConfig) error {
+func (ut *UpsertTask) executePartialUpdateWithCASRetry(ctx context.Context, ez *message.CipherConfig) error {
 	// A request-level retry can reapply relative operations on vchannels that
 	// already committed before another vchannel rejected the CAS.
 	if !ut.canRetryPartialUpdateCASConflict() {
@@ -87,7 +89,7 @@ func projectPartialUpdateCASError(err error, allowConflictRetry bool) error {
 
 // preparePartialUpdateRetryAttempt restores the original payload and rebuilds
 // terms, Strong query snapshots, and DML state for one retry.
-func (ut *upsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
+func (ut *UpsertTask) preparePartialUpdateRetryAttempt(ctx context.Context) error {
 	if err := ut.prepareUpsert(ctx); err != nil {
 		return err
 	}
@@ -115,7 +117,7 @@ func cloneFieldDataList(fields []*schemapb.FieldData) []*schemapb.FieldData {
 	return cloned
 }
 
-func (ut *upsertTask) appendUpsertAttempt(ctx context.Context, ez *message.CipherConfig) error {
+func (ut *UpsertTask) appendUpsertAttempt(ctx context.Context, ez *message.CipherConfig) error {
 	logger := mlog.With(mlog.FieldCollectionName(ut.req.CollectionName))
 
 	insertMsgs, err := ut.packInsertMessage(ctx, ez)
@@ -171,7 +173,7 @@ func unwrapPartialUpdateAppendError(resp streaming.AppendResponses) error {
 	return casErr
 }
 
-func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
+func (ut *UpsertTask) packInsertMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
@@ -219,7 +221,7 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	return msgs, nil
 }
 
-func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
+func (ut *UpsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
 	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
 		// Fall back only when no delete subset was prepared; an empty subset
 		// means no lookup IDs should be deleted.
@@ -283,7 +285,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 	return msgs, nil
 }
 
-func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) error {
+func (ut *UpsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) error {
 	groups := ut.partialUpdateCASGroups
 	if len(groups) == 0 {
 		return merr.WrapErrServiceInternalMsg("partial update CAS metadata snapshot is empty")
@@ -302,8 +304,8 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 		if !message.HasPartialUpdateCAS(msg) {
 			return merr.WrapErrServiceInternalMsg("partial update insert is missing CAS metadata for vchannel %s", vchannel)
 		}
-		if Params.ProxyCfg.SplitChunkProxy.GetAsBool() {
-			maxMessageSize := Params.PulsarCfg.MaxMessageSize.GetAsInt()
+		if paramtable.Get().ProxyCfg.SplitChunkProxy.GetAsBool() {
+			maxMessageSize := paramtable.Get().PulsarCfg.MaxMessageSize.GetAsInt()
 			messageSize := msg.EstimateSize()
 			if messageSize > maxMessageSize {
 				return merr.WrapErrServiceInternalMsg(
@@ -326,7 +328,7 @@ func (ut *upsertTask) attachPartialUpdateCAS(messages []message.MutableMessage) 
 
 // preparePartialUpdateCASGroups resolves all possible write PChannel terms before
 // reading. Strong reads bind their actual snapshots after the query succeeds.
-func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
+func (ut *UpsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 	ut.partialUpdateCASGroups = nil
 	groups, err := ut.buildPartialUpdateCASGroups()
 	if err != nil {
@@ -343,7 +345,7 @@ func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, fixedChannel, err := namespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
+		_, fixedChannel, err := dql.NamespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
 		if err != nil {
 			return err
 		}
@@ -379,7 +381,7 @@ func (ut *upsertTask) preparePartialUpdateCASGroups(ctx context.Context) error {
 
 // bindPartialUpdateReadTimestamps publishes proofs only after every candidate write
 // channel has a snapshot from this successful read attempt.
-func (ut *upsertTask) bindPartialUpdateReadTimestamps(channelReadTs *typeutil.ConcurrentMap[string, uint64]) error {
+func (ut *UpsertTask) bindPartialUpdateReadTimestamps(channelReadTs *typeutil.ConcurrentMap[string, uint64]) error {
 	if len(ut.partialUpdateCASGroups) == 0 {
 		return merr.WrapErrServiceInternalMsg("partial update: query succeeded but CAS candidate write channel groups are empty")
 	}
@@ -398,7 +400,7 @@ func (ut *upsertTask) bindPartialUpdateReadTimestamps(channelReadTs *typeutil.Co
 	return nil
 }
 
-func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.PartialUpdateCAS, error) {
+func (ut *UpsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.PartialUpdateCAS, error) {
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(ut.schema.CollectionSchema)
 	if err != nil {
 		return nil, err
@@ -441,8 +443,8 @@ func (ut *upsertTask) buildPartialUpdateCASGroups() (map[string]*messagespb.Part
 
 // partialUpdateCASChannelIndexes mirrors normal upsert routing so CAS proof
 // and the corresponding DML transaction target the same vchannel.
-func (ut *upsertTask) partialUpdateCASChannelIndexes(ids *schemapb.IDs, vchannels []string) ([]uint32, error) {
-	channelID, ok, err := namespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
+func (ut *UpsertTask) partialUpdateCASChannelIndexes(ids *schemapb.IDs, vchannels []string) ([]uint32, error) {
+	channelID, ok, err := dql.NamespaceShardingChannelID(ut.schema.CollectionSchema, ut.req.Namespace, vchannels)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +461,7 @@ func (ut *upsertTask) partialUpdateCASChannelIndexes(ids *schemapb.IDs, vchannel
 
 // canRetryPartialUpdateCASConflict reports whether rebuilding the whole request
 // after a deterministic CAS conflict preserves the requested operation semantics.
-func (ut *upsertTask) canRetryPartialUpdateCASConflict() bool {
+func (ut *UpsertTask) canRetryPartialUpdateCASConflict() bool {
 	for _, op := range ut.req.GetFieldOps() {
 		if op.GetOp() != schemapb.FieldPartialUpdateOp_REPLACE {
 			return false

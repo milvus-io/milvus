@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"context"
@@ -36,8 +36,8 @@ func TestCollectionInsertIdempotencyEnabled(t *testing.T) {
 func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "1024"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.Key, "1024"))
 
 	ctx := context.Background()
 
@@ -108,7 +108,7 @@ func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 func TestPrepareAutoIdempotencyKeyUsesFieldsBeforeMutation(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
 
 	schema := &schemapb.CollectionSchema{
 		Name: "coll",
@@ -138,11 +138,11 @@ func TestPrepareAutoIdempotencyKeyUsesFieldsBeforeMutation(t *testing.T) {
 func TestPrepareAutoIdempotencyKeyValidatesGeneratedKeyLength(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
 	// A limit below the 64-char SHA256 hex auto key: the client supplied no key, so
 	// the proxy must reject its own over-limit auto key here rather than letting it
 	// reach the streaming node and fail there with a confusing error.
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "16"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.Key, "16"))
 
 	schema := &schemapb.CollectionSchema{
 		Name: "coll",
@@ -165,7 +165,7 @@ func TestPrepareAutoIdempotencyKeyValidatesGeneratedKeyLength(t *testing.T) {
 func TestInsertTaskIdempotencyAutoIDStableShardAssignment(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
 
 	ctx := context.Background()
 
@@ -237,7 +237,7 @@ func TestInsertTaskIdempotencyGlobalConfig(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("global disabled without key clears idempotency fields", func(t *testing.T) {
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "false"))
+		require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "false"))
 		cache := newInsertTaskIdempotencyMockCache(t, schema, true)
 		idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 
@@ -248,7 +248,7 @@ func TestInsertTaskIdempotencyGlobalConfig(t *testing.T) {
 	})
 
 	t.Run("global disabled explicit key rejects", func(t *testing.T) {
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "false"))
+		require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "false"))
 		cache := newInsertTaskIdempotencyMockCache(t, schema, true)
 		idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 
@@ -259,8 +259,8 @@ func TestInsertTaskIdempotencyGlobalConfig(t *testing.T) {
 	})
 
 	t.Run("explicit key length limit", func(t *testing.T) {
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
-		require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "4"))
+		require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
+		require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.Key, "4"))
 		cache := newInsertTaskIdempotencyMockCache(t, schema, true)
 		idAllocator := newInsertTaskIdempotencyIDAllocator(t, ctx)
 
@@ -445,7 +445,7 @@ func TestCanonicalInsertPayloadKeySeparatesDestinations(t *testing.T) {
 func TestPrepareAutoIdempotencyKeySeparatesPartitions(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyEnabled.Key, "true"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyEnabled.Key, "true"))
 
 	schema := &schemapb.CollectionSchema{
 		Name: "coll",
@@ -495,14 +495,14 @@ func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, enabled
 func resetProxyIdempotencyParams(t *testing.T) {
 	t.Helper()
 	keys := []string{
-		Params.StreamingCfg.IdempotencyEnabled.Key,
-		Params.StreamingCfg.IdempotencyMaxKeyLength.Key,
+		paramtable.Get().StreamingCfg.IdempotencyEnabled.Key,
+		paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.Key,
 	}
 	for _, key := range keys {
 		key := key
-		require.NoError(t, Params.Reset(key))
+		require.NoError(t, paramtable.Get().Reset(key))
 		t.Cleanup(func() {
-			_ = Params.Reset(key)
+			_ = paramtable.Get().Reset(key)
 		})
 	}
 }
@@ -524,8 +524,8 @@ func newInsertTaskIdempotencyIDAllocator(t *testing.T, ctx context.Context) *all
 	return idAllocator
 }
 
-func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAllocator, key string) insertTask {
-	return insertTask{
+func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAllocator, key string) InsertTask {
+	return InsertTask{
 		baseTask: baseTask{MetaCache: cache},
 		ctx:      context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -550,8 +550,8 @@ func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAlloc
 	}
 }
 
-func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.IDAllocator, chMgr channelmgr.ChannelsMgr) insertTask {
-	return insertTask{
+func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.IDAllocator, chMgr channelmgr.ChannelsMgr) InsertTask {
+	return InsertTask{
 		baseTask: baseTask{MetaCache: cache},
 		ctx:      context.Background(),
 		insertMsg: &BaseInsertTask{

@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/federpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
-	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/http"
@@ -61,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -2514,35 +2512,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		SetDatabaseName(request.GetDbName()).
 		SetCollectionName(request.GetCollectionName())
 
-	it := &insertTask{
-		baseTask: baseTask{
-			MetaCache: node.GetMetaCache(),
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		insertMsg: &msgstream.InsertMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: request.HashKeys,
-			},
-			InsertRequest: &msgpb.InsertRequest{
-				Base: commonpbutil.NewMsgBase(
-					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
-					commonpbutil.WithSourceID(paramtable.GetNodeID()),
-				),
-				DbName:         request.GetDbName(),
-				CollectionName: request.CollectionName,
-				PartitionName:  request.PartitionName,
-				FieldsData:     request.FieldsData,
-				NumRows:        uint64(request.NumRows),
-				Version:        msgpb.InsertDataVersion_ColumnBased,
-				Namespace:      request.Namespace,
-			},
-		},
-		idAllocator:     node.rowIDAllocator,
-		chMgr:           node.chMgr,
-		schemaTimestamp: request.SchemaTimestamp,
-		idempotencyKey:  GetIdempotencyKeyFromContext(ctx),
-	}
+	it := NewInsertTask(ctx, node, request, node.rowIDAllocator, GetIdempotencyKeyFromContext(ctx))
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
 		numRows := request.NumRows
@@ -2571,26 +2541,26 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		return constructFailedResponse(err), nil
 	}
 
-	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
 			for i := uint32(0); i < numRows; i++ {
 				errIndex[i] = i
 			}
-			it.result.ErrIndex = errIndex
+			it.Result().ErrIndex = errIndex
 		}
 
 		setErrorIndex()
-		mlog.Warn(context.TODO(), "fail to insert data", mlog.Uint32s("err_index", it.result.ErrIndex))
+		mlog.Warn(context.TODO(), "fail to insert data", mlog.Uint32s("err_index", it.Result().ErrIndex))
 	}
 
 	// InsertCnt always equals to the number of entities in the request
-	it.result.InsertCnt = int64(request.NumRows)
+	it.Result().InsertCnt = int64(request.NumRows)
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.insertMsg.Size()))
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.InsertMsg().Size()))
 
-	successCnt := it.result.InsertCnt - int64(len(it.result.ErrIndex))
+	successCnt := it.Result().InsertCnt - int64(len(it.Result().ErrIndex))
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
 	dbName := request.DbName
@@ -2602,10 +2572,10 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		hookutil.UsernameKey:        username,
 		hookutil.RequestDataSizeKey: proto.Size(request),
 		hookutil.SuccessCntKey:      successCnt,
-		hookutil.FailCntKey:         len(it.result.ErrIndex),
+		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
-	SetReportValue(it.result.GetStatus(), v)
-	if merr.Ok(it.result.GetStatus()) {
+	SetReportValue(it.Result().GetStatus(), v)
+	if merr.Ok(it.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeInsert, request.DbName, username).Add(float64(v))
 	}
 	metrics.ProxyInsertVectors.
@@ -2617,7 +2587,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.ProxyCollectionMutationLatency.
 		WithLabelValues(nodeID, metrics.InsertLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return it.result, nil
+	return it.Result(), nil
 }
 
 // Delete delete records from collection, then these records cannot be searched.
@@ -2654,16 +2624,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		limiter, _ = node.GetRateLimiter()
 	}
 
-	dr := &deleteRunner{
-		req:             request,
-		metaCache:       node.GetMetaCache(),
-		idAllocator:     node.rowIDAllocator,
-		tsoAllocatorIns: node.tsoAllocator,
-		chMgr:           node.chMgr,
-		queue:           node.sched.DmQueue,
-		lb:              node.lbPolicy,
-		limiter:         limiter,
-	}
+	dr := NewDeleteRunner(request, node.GetMetaCache(), node.rowIDAllocator, node.tsoAllocator, node.chMgr, node.sched.DmQueue, node.lbPolicy, limiter)
 
 	mlog.Debug(context.TODO(), "init delete runner in Proxy")
 	if err := dr.Init(ctx); err != nil {
@@ -2684,10 +2645,10 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	receiveSize := proto.Size(dr.req)
+	receiveSize := proto.Size(dr.Request())
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
-	successCnt := dr.result.GetDeleteCnt()
+	successCnt := dr.Result().GetDeleteCnt()
 
 	dbName := request.DbName
 	nodeID := paramtable.GetStringNodeID()
@@ -2699,21 +2660,21 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		hookutil.DatabaseKey:   dbName,
 		hookutil.UsernameKey:   username,
 		hookutil.SuccessCntKey: successCnt,
-		hookutil.RelatedCntKey: dr.allQueryCnt.Load(),
+		hookutil.RelatedCntKey: dr.AllQueryCnt(),
 	})
-	SetReportValue(dr.result.GetStatus(), v)
+	SetReportValue(dr.Result().GetStatus(), v)
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedRemoteBytes.Load()) / 1024 / 1024)
-		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.scannedTotalBytes.Load()) / 1024 / 1024)
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedRemoteBytes()) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Add(float64(dr.ScannedTotalBytes()) / 1024 / 1024)
 	}
 
-	SetStorageCost(dr.result.GetStatus(), segcore.StorageCost{
-		ScannedRemoteBytes: dr.scannedRemoteBytes.Load(),
-		ScannedTotalBytes:  dr.scannedTotalBytes.Load(),
+	SetStorageCost(dr.Result().GetStatus(), segcore.StorageCost{
+		ScannedRemoteBytes: dr.ScannedRemoteBytes(),
+		ScannedTotalBytes:  dr.ScannedTotalBytes(),
 	})
 
-	if merr.Ok(dr.result.GetStatus()) {
+	if merr.Ok(dr.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeDelete, dbName, username).Add(float64(v))
 	}
 
@@ -2721,7 +2682,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.DeleteLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return dr.result, nil
+	return dr.Result(), nil
 }
 
 // Upsert upsert records into collection.
@@ -2758,28 +2719,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		commonpbutil.WithSourceID(paramtable.GetNodeID()),
 	)
 
-	it := &upsertTask{
-		baseTask: baseTask{
-			MetaCache: node.GetMetaCache(),
-		},
-		baseMsg: msgstream.BaseMsg{
-			HashValues: request.HashKeys,
-		},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       request,
-		result: &milvuspb.MutationResult{
-			Status: merr.Success(),
-			IDs: &schemapb.IDs{
-				IdField: nil,
-			},
-		},
-
-		idAllocator:     node.rowIDAllocator,
-		chMgr:           node.chMgr,
-		schemaTimestamp: request.SchemaTimestamp,
-		node:            node,
-	}
+	it := NewUpsertTask(ctx, node, request, node.rowIDAllocator)
 
 	mlog.Debug(context.TODO(), "Enqueue upsert request in Proxy",
 		mlog.Int("len(FieldsData)", len(request.FieldsData)),
@@ -2802,8 +2742,8 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 			mlog.Err(err))
 		// Not every error case changes the status internally
 		// change status there to handle it
-		if it.result.GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
-			it.result.Status = merr.Status(err)
+		if it.Result().GetStatus().GetErrorCode() == commonpb.ErrorCode_Success {
+			it.Result().Status = merr.Status(err)
 		}
 
 		numRows := request.NumRows
@@ -2817,20 +2757,20 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		}, nil
 	}
 
-	if it.result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+	if it.Result().GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		setErrorIndex := func() {
 			numRows := request.NumRows
 			errIndex := make([]uint32, numRows)
 			for i := uint32(0); i < numRows; i++ {
 				errIndex[i] = i
 			}
-			it.result.ErrIndex = errIndex
+			it.Result().ErrIndex = errIndex
 		}
 		setErrorIndex()
 	}
 
 	// UpsertCnt always equals to the number of entities in the request
-	it.result.UpsertCnt = int64(request.NumRows)
+	it.Result().UpsertCnt = int64(request.NumRows)
 
 	username := GetCurUserFromContextOrDefault(ctx)
 	nodeID := paramtable.GetStringNodeID()
@@ -2840,25 +2780,25 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(it.req),
-		hookutil.SuccessCntKey:      it.result.UpsertCnt,
-		hookutil.FailCntKey:         len(it.result.ErrIndex),
+		hookutil.RequestDataSizeKey: proto.Size(it.Request()),
+		hookutil.SuccessCntKey:      it.Result().UpsertCnt,
+		hookutil.FailCntKey:         len(it.Result().ErrIndex),
 	})
-	SetReportValue(it.result.GetStatus(), v)
-	SetStorageCost(it.result.GetStatus(), it.storageCost)
+	SetReportValue(it.Result().GetStatus(), v)
+	SetStorageCost(it.Result().GetStatus(), it.StorageCost())
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
-		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedRemoteBytes) / 1024 / 1024)
-		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.storageCost.ScannedTotalBytes) / 1024 / 1024)
+		metrics.ProxyScannedRemoteMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedRemoteBytes) / 1024 / 1024)
+		metrics.ProxyScannedTotalMB.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Add(float64(it.StorageCost().ScannedTotalBytes) / 1024 / 1024)
 	}
-	if merr.Ok(it.result.GetStatus()) {
+	if merr.Ok(it.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
 
-	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.upsertMsg.InsertMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
-	if merr.Ok(it.result.GetStatus()) {
+	rateCol.Add(internalpb.RateType_DMLInsert.String(), float64(it.UpsertMsg().InsertMsg.Size()+it.UpsertMsg().DeleteMsg.Size()))
+	if merr.Ok(it.Result().GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
-	successCnt := it.result.UpsertCnt - int64(len(it.result.ErrIndex))
+	successCnt := it.Result().UpsertCnt - int64(len(it.Result().ErrIndex))
 	metrics.ProxyUpsertVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
 		Add(float64(successCnt))
@@ -2868,7 +2808,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(nodeID, metrics.UpsertLabel, dbName, collectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	mlog.Debug(context.TODO(), "Finish processing upsert request in Proxy")
-	return it.result, nil
+	return it.Result(), nil
 }
 
 func GetCollectionRateSubLabel(req any) string {
@@ -7542,13 +7482,7 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	mlog.Info(ctx, rpcReceived(method))
 	nodeID := fmt.Sprint(paramtable.GetNodeID())
 
-	bt := &batchUpdateManifestTask{
-		baseTask:  baseTask{MetaCache: node.GetMetaCache()},
-		ctx:       ctx,
-		Condition: NewTaskCondition(ctx),
-		req:       req,
-		mixCoord:  node.mixCoord,
-	}
+	bt := NewBatchUpdateManifestTask(ctx, node, req)
 
 	if err := node.sched.DdQueue.Enqueue(bt); err != nil {
 		mlog.Warn(ctx, rpcFailedToEnqueue(method), mlog.Err(err))
@@ -7570,7 +7504,7 @@ func (node *Proxy) BatchUpdateManifest(ctx context.Context, req *milvuspb.BatchU
 	}
 
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
-	return bt.result, nil
+	return bt.Result(), nil
 }
 
 // RefreshExternalCollection manually triggers a refresh job for an external collection

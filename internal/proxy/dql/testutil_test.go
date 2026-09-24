@@ -300,8 +300,8 @@ func ConstructCollectionSchemaWithPartitionKey(collectionName string, fieldName2
 	return schema
 }
 
-// fillFieldPropertiesOnly fills FieldId/Type from the schema for each column.
-func fillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
+// FillFieldPropertiesOnly fills FieldId/Type from the schema for each column.
+func FillFieldPropertiesOnly(columns []*schemapb.FieldData, schema *schemaInfo) error {
 	for _, fieldData := range columns {
 		fieldSchema, err := schema.SchemaHelper.GetFieldFromNameDefaultJSON(fieldData.FieldName)
 		if err != nil {

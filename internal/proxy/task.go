@@ -355,7 +355,7 @@ func validateTTLField(props []*commonpb.KeyValuePair, fields []*schemapb.FieldSc
 }
 
 func (t *createCollectionTask) validateTTL() error {
-	if err := validateInsertIdempotencyProperty(t.GetProperties()); err != nil {
+	if err := ValidateInsertIdempotencyProperty(t.GetProperties()); err != nil {
 		return err
 	}
 	hasCollectionTTL, err := validateCollectionTTL(t.GetProperties())
@@ -2147,7 +2147,7 @@ func (t *alterCollectionTask) PreExecute(ctx context.Context) error {
 			return merr.WrapErrParameterInvalidMsg("unknown or invalid IANA Time Zone ID: %s", userDefinedTimezone)
 		}
 
-		if err := validateInsertIdempotencyProperty(t.GetProperties()); err != nil {
+		if err := ValidateInsertIdempotencyProperty(t.GetProperties()); err != nil {
 			return err
 		}
 		hasTTL, err := validateCollectionTTL(t.GetProperties())

@@ -57,8 +57,8 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		cache := newTestCache()
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
-		mockTest(t, isPartitionKeyMode, false, nil)
-		mockTest(t, validatePartitionTag, nil)
+		mockTest(t, IsPartitionKeyMode, false, nil)
+		mockTest(t, ValidatePartitionTag, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
 		// Schema with namespace enabled
@@ -131,7 +131,7 @@ func TestQueryTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitionsIndex, partitionNames, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitions, partitionIDs, nil)
-		mockTest(t, validatePartitionTag, nil)
+		mockTest(t, ValidatePartitionTag, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
 		mockTestTo(t, (*QueryTask).createPlanArgs, func(q *QueryTask, ctx context.Context, visitorArgs *planparserv2.ParserVisitorArgs) error {
