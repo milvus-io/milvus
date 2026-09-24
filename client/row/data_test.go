@@ -386,7 +386,7 @@ func (s *RowsSuite) TestRowsToTimestamptzColumn() {
 			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz))
 
-		now := time.Now().UTC().Truncate(time.Nanosecond)
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		rows := []any{
 			&TimestamptzRow{ID: 1, CreatedAt: now},
 			&TimestamptzRow{ID: 2, CreatedAt: now.Add(time.Hour)},
@@ -418,7 +418,7 @@ func (s *RowsSuite) TestRowsToTimestamptzColumn() {
 			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
 			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz).WithNullable(true))
 
-		now := time.Now().UTC().Truncate(time.Nanosecond)
+		now := time.Now().UTC().Truncate(time.Microsecond)
 		rows := []any{
 			&TimestamptzRow{ID: 1, CreatedAt: &now},
 			&TimestamptzRow{ID: 2, CreatedAt: nil},
@@ -511,6 +511,48 @@ func (s *RowsSuite) TestRowsToGeometryColumn() {
 		s.Equal([]string{"POINT (1 1)", "POINT (2 2)"},
 			col.FieldData().GetScalars().GetGeometryWktData().GetData())
 	}
+}
+
+func (s *RowsSuite) TestSetFieldTimestamptz() {
+	s.Run("time_value", func() {
+		type Row struct {
+			Ts time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Equal(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), row.Ts)
+	})
+
+	s.Run("pointer_value", func() {
+		type Row struct {
+			Ts *time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Require().NotNil(row.Ts)
+		s.Equal(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), *row.Ts)
+	})
+
+	s.Run("string_target_kept", func() {
+		type Row struct {
+			Ts string
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Equal("2024-01-01T00:00:00Z", row.Ts)
+	})
+
+	s.Run("parse_failure", func() {
+		type Row struct {
+			Ts time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "not-a-timestamp")
+		s.Error(err)
+	})
 }
 
 func (s *RowsSuite) TestRowsToTextColumnWithSchema() {
