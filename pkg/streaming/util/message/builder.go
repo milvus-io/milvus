@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -81,6 +82,9 @@ func NewReplicateMessage(clustrID string, im *commonpb.ImmutableMessage) (Replic
 	m.properties.Delete(messageTimeTick)
 	m.properties.Delete(messageLastConfirmed)
 	m.properties.Delete(messageWALTerm)
+	// The append extra is what the SOURCE cluster's WAL answered; this cluster's
+	// WAL answers for itself, so the source's value must never travel as ours.
+	m.properties.Delete(messageAppendExtra)
 	m.WithReplicateHeader(&ReplicateHeader{
 		ClusterID:              clustrID,
 		MessageID:              msg.MessageID(),
@@ -200,7 +204,33 @@ type OptBuildBroadcast func(*messagespb.BroadcastHeader)
 // only for truncate api now.
 func OptBuildBroadcastAckSyncUp() OptBuildBroadcast {
 	return func(bh *messagespb.BroadcastHeader) {
+		if len(bh.AppendFirstVchannels) > 0 {
+			panic("ack sync up cannot be set on a broadcast that already has append-first vchannels: the append-first mechanism has no user with ack sync up")
+		}
 		bh.AckSyncUp = true
+	}
+}
+
+// OptBuildBroadcastAppendFirst names the vchannel the broadcaster appends and
+// persists before any other replica of the broadcast. It must be one of the
+// broadcast's vchannels; the control channel is never appended first.
+//
+// Exactly one vchannel: the only user is a shard split, which fences exactly one
+// source. The header field stays a list for wire shape, but the broadcaster
+// persists the group as a single append, so a builder that could name several
+// would reintroduce the partial-group persistence it no longer has.
+func OptBuildBroadcastAppendFirst(vchannel string) OptBuildBroadcast {
+	return func(bh *messagespb.BroadcastHeader) {
+		if bh.AckSyncUp {
+			panic("append-first cannot be set on a broadcast that is already ack sync up: the append-first mechanism has no user with ack sync up")
+		}
+		if funcutil.IsControlChannel(vchannel) {
+			panic("the control channel cannot be appended first")
+		}
+		if !slices.Contains(bh.Vchannels, vchannel) {
+			panic("append-first vchannel " + vchannel + " is not a broadcast target")
+		}
+		bh.AppendFirstVchannels = []string{vchannel}
 	}
 }
 

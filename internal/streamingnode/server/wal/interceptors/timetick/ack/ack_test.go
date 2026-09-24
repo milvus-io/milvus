@@ -13,6 +13,7 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/grpc"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
@@ -225,4 +226,98 @@ func TestAckManager(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestAllocateFreshHitsRootcoordOnce(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+
+	ctx := context.Background()
+
+	counter := atomic.NewUint64(1)
+	rpcCount := atomic.NewInt32(0)
+	rc := mocks.NewMockMixCoordClient(t)
+	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
+			rpcCount.Inc()
+			if atr.Count > 1000 {
+				panic(fmt.Sprintf("count %d is too large", atr.Count))
+			}
+			c := counter.Add(uint64(atr.Count))
+			return &rootcoordpb.AllocTimestampResponse{
+				Status:    merr.Success(),
+				Timestamp: c - uint64(atr.Count),
+				Count:     atr.Count,
+			}, nil
+		},
+	)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(rc)
+	resource.InitForTest(t, resource.OptMixCoordClient(fMixcoord))
+
+	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0), metricsutil.NewTimeTickMetrics("test"))
+
+	first, err := ackManager.Allocate(ctx)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 1, rpcCount.Load())
+	// batch is 1000 wide; the discarded batch's end is first+999.
+	firstBatchEnd := first.Timestamp() + 1000 - 1
+
+	fresh, err := ackManager.AllocateFresh(ctx)
+	assert.NoError(t, err)
+	assert.EqualValues(t, 2, rpcCount.Load(), "AllocateFresh must make exactly one more RPC")
+	assert.Greater(t, fresh.Timestamp(), firstBatchEnd)
+
+	// the acker is on the heap: acking it (after the one ahead of it in the
+	// heap is also acked) lets SyncAndGetAcknowledged return it.
+	first.Ack(OptSync())
+	fresh.Ack(OptSync())
+
+	details, err := ackManager.SyncAndGetAcknowledged(ctx)
+	assert.NoError(t, err)
+	found := false
+	for _, d := range details {
+		if d.BeginTimestamp == fresh.Timestamp() {
+			found = true
+		}
+	}
+	assert.True(t, found, "fresh acker's detail should have been returned once acknowledged")
+}
+
+func TestAllocateFreshPropagatesAllocatorError(t *testing.T) {
+	paramtable.Init()
+	paramtable.SetNodeID(1)
+
+	ctx := context.Background()
+
+	rpcCount := atomic.NewInt32(0)
+	rc := mocks.NewMockMixCoordClient(t)
+	rc.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, atr *rootcoordpb.AllocTimestampRequest, co ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
+			if rpcCount.Inc() == 1 {
+				// the first batch, drawn by Allocate, succeeds.
+				return &rootcoordpb.AllocTimestampResponse{
+					Status:    merr.Success(),
+					Timestamp: 1,
+					Count:     atr.Count,
+				}, nil
+			}
+			// the fresh batch's fetch fails.
+			return &rootcoordpb.AllocTimestampResponse{
+				Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_ForceDeny},
+			}, nil
+		},
+	)
+	fMixcoord := syncutil.NewFuture[internaltypes.MixCoordClient]()
+	fMixcoord.Set(rc)
+	resource.InitForTest(t, resource.OptMixCoordClient(fMixcoord))
+
+	ackManager := NewAckManager(0, walimplstest.NewTestMessageID(0), metricsutil.NewTimeTickMetrics("test"))
+
+	_, err := ackManager.Allocate(ctx)
+	assert.NoError(t, err)
+
+	fresh, err := ackManager.AllocateFresh(ctx)
+	assert.Error(t, err)
+	assert.Nil(t, fresh)
 }

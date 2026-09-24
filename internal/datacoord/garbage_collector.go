@@ -63,6 +63,12 @@ type GcOption struct {
 	broker           broker.Broker
 	removeObjectPool *conc.Pool[struct{}]
 	dataViewGC       DataViewGarbageCollector
+
+	// isChannelSplitting reports whether a shard split that is not Done names
+	// the channel. The dropped segments of such a channel are kept until the
+	// split is Done: the split's source and targets are read through a segment
+	// set that must stay stable for the whole window. Nil disables the check.
+	isChannelSplitting func(channel string) bool
 }
 
 type DataViewGarbageCollector interface {
@@ -997,6 +1003,10 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context, signal <
 
 		log := mlog.With(mlog.Int64("segmentID", segmentID))
 		segInsertChannel := segment.GetInsertChannel()
+		if gc.option.isChannelSplitting != nil && gc.option.isChannelSplitting(segInsertChannel) {
+			log.Info(ctx, "skip GC segment since its channel is splitting", mlog.String("channel", segInsertChannel))
+			continue
+		}
 		if loadedSegments.Contain(segmentID) {
 			log.Info(ctx, "skip GC segment since it is loaded", mlog.Int64("segmentID", segmentID))
 			continue

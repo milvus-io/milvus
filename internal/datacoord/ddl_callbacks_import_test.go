@@ -638,6 +638,86 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.NoError(err)
 }
 
+// An import naming a shard a split is moving -- its source or a target, from a
+// proxy whose meta predates the split -- or a shard the collection no longer
+// lists is refused under the collection's keys, before anything is broadcast.
+// The refusal is retriable: the proxy's meta is refreshed by the split's own
+// broadcasts, and the retry is then judged on the current shards. Without it,
+// rows of an import landing on a split source after its drain held would keep
+// the source from draining again, and an adoption already broadcast would hold
+// the collection's keys -- the import's own and every other DDL's -- forever.
+func (s *ImportCallbacksSuite) TestBroadcastImport_RefusesShardsASplitIsMoving() {
+	ctx := context.Background()
+
+	mockCount := mockey.Mock((*importMeta).CountJobBy).To(func(_ *importMeta, _ context.Context, _ ...ImportJobFilter) int {
+		return 1
+	}).Build()
+	defer mockCount.UnPatch()
+	mockBalancer := &mockBalancerImpl{}
+	mockBalance := mockey.Mock(balance.GetWithContext).To(func(ctx context.Context) (balancer.Balancer, error) {
+		return mockBalancer, nil
+	}).Build()
+	defer mockBalance.UnPatch()
+	mockAssignment := mockey.Mock((*mockBalancerImpl).GetLatestChannelAssignment).To(
+		func(_ *mockBalancerImpl) (*channel.WatchChannelAssignmentsCallbackParam, error) {
+			return &channel.WatchChannelAssignmentsCallbackParam{}, nil
+		}).Build()
+	defer mockAssignment.UnPatch()
+
+	store := newShardSplitTasks()
+	store.cache(&datapb.SplitShardTask{
+		TaskId: 1, CollectionId: 100, State: datapb.SplitShardTaskState_SplitShardTaskAdopting,
+		Sources: []*datapb.SplitShardTaskSource{{Vchannel: "v0"}},
+		Targets: []*datapb.SplitShardTaskTarget{{Vchannel: "v2"}, {Vchannel: "v3"}},
+	})
+
+	for _, tc := range []struct {
+		name      string
+		vchannels []string
+		refused   bool
+	}{
+		{"a split source", []string{"v0", "v1"}, true},
+		{"a split target", []string{"v1", "v2"}, true},
+		{"a shard the collection no longer lists", []string{"v1", "v9"}, true},
+		{"the collection's current shards", []string{"v1", "v4"}, false},
+	} {
+		s.Run(tc.name, func() {
+			mockBroadcastAPI := newMockBroadcastAPIImpl()
+			mockBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+				func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+					return mockBroadcastAPI, nil
+				}).Build()
+			defer mockBroadcast.UnPatch()
+			mockBroker := broker.NewMockBroker(s.T())
+			mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
+				DbName:              "test_db",
+				CollectionName:      "test_collection",
+				VirtualChannelNames: []string{"v0", "v1", "v2", "v3", "v4"},
+			}, nil).Times(2)
+			server := &Server{
+				importMeta:        &importMeta{},
+				broker:            mockBroker,
+				meta:              newTestMetaWithChunkManager(s.T()),
+				shardSplitTasks:   store,
+				shardSplitManager: &shardSplitManager{store: store},
+			}
+
+			_, _, err := server.broadcastImport(ctx, "test_collection", 100, []int64{1},
+				[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
+				[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+				&schemapb.CollectionSchema{Name: "test_collection"}, 1000, tc.vchannels, "")
+			if !tc.refused {
+				s.NoError(err)
+				s.NotNil(mockBroadcastAPI.capturedMsg)
+				return
+			}
+			s.ErrorIs(err, merr.ErrServiceUnavailable)
+			s.True(merr.IsRetryableErr(err), "the proxy retries after its meta is refreshed")
+			s.Nil(mockBroadcastAPI.capturedMsg, "nothing is broadcast")
+		})
+	}
+}
+
 // --------------------------------
 // RegisterDDLCallbacks Import Tests
 // --------------------------------

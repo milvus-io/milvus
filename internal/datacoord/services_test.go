@@ -1311,6 +1311,53 @@ func TestBroadcastAlteredCollection(t *testing.T) {
 		assert.True(t, ok)
 		assert.NotNil(t, coll.Properties)
 	})
+
+	// A shard split and its adoption change the collection's vchannel list while
+	// it lives, and rootcoord announces the new list only through this broadcast.
+	// A cache hit that kept the old list would hide the split's targets from
+	// every datacoord reader until a restart reloaded the cache.
+	t.Run("a cache hit takes the altered vchannel list", func(t *testing.T) {
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(1, &collectionInfo{
+			ID:            1,
+			Partitions:    []int64{10},
+			VChannelNames: []string{"by-dev-rootcoord-dml_0_1v0"},
+		})
+		s := &Server{meta: &meta{collections: collections}}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		grown := []string{"by-dev-rootcoord-dml_0_1v0", "by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"}
+		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID: 1,
+			PartitionIDs: []int64{10},
+			VChannels:    grown,
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		coll := s.meta.GetCollection(1)
+		require.NotNil(t, coll)
+		assert.Equal(t, grown, coll.VChannelNames)
+
+		// An adoption retires the source: the list shrinks as well as grows.
+		adopted := []string{"by-dev-rootcoord-dml_1_1v1", "by-dev-rootcoord-dml_2_1v2"}
+		resp, err = s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{
+			CollectionID: 1,
+			VChannels:    adopted,
+		})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.Equal(t, adopted, s.meta.GetCollection(1).VChannelNames)
+		// The request's slice is not aliased by the cache.
+		adopted[0] = "mutated"
+		assert.Equal(t, "by-dev-rootcoord-dml_1_1v1", s.meta.GetCollection(1).VChannelNames[0])
+	})
+
+	t.Run("a cache hit without a vchannel list keeps the cached one", func(t *testing.T) {
+		collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
+		collections.Insert(1, &collectionInfo{ID: 1, VChannelNames: []string{"by-dev-rootcoord-dml_0_1v0"}})
+		s := &Server{meta: &meta{collections: collections}}
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		resp, err := s.BroadcastAlteredCollection(context.Background(), &datapb.AlterCollectionRequest{CollectionID: 1})
+		require.NoError(t, merr.CheckRPCCall(resp, err))
+		assert.Equal(t, []string{"by-dev-rootcoord-dml_0_1v0"}, s.meta.GetCollection(1).VChannelNames)
+	})
 }
 
 func TestServer_GcConfirm(t *testing.T) {
@@ -4146,6 +4193,121 @@ func TestServer_CreateSnapshot_AdditionalCases(t *testing.T) {
 		assert.Contains(t, resp.GetReason(), "rootcoord unavailable")
 		assert.False(t, broadcastCalled, "CreateSnapshot must not broadcast if the lock-held collection recheck fails")
 	})
+}
+
+// TestServer_CreateSnapshot_ShardSplitCollection covers the refusal of a
+// snapshot of a shard split collection, checked under the collection lock
+// before anything is broadcast, and that a never split collection still
+// reaches the broadcast.
+func TestServer_CreateSnapshot_ShardSplitCollection(t *testing.T) {
+	const collectionID = int64(100)
+
+	run := func(t *testing.T, desc *milvuspb.DescribeCollectionResponse, descErr error) (*commonpb.Status, bool) {
+		ctx := context.Background()
+
+		mockGet := mockey.Mock((*snapshotManager).GetSnapshot).Return(
+			nil, merr.WrapErrSnapshotNotFound("snap", "not found"),
+		).Build()
+		defer mockGet.UnPatch()
+
+		fakeHandler := &embeddedHandler{}
+		mockGetColl := mockey.Mock((*embeddedHandler).GetCollection).Return(
+			&collectionInfo{
+				ID:           collectionID,
+				DatabaseName: "default",
+				Schema:       &schemapb.CollectionSchema{Name: "test_collection"},
+			}, nil,
+		).Build()
+		defer mockGetColl.UnPatch()
+
+		broadcastCalled := false
+		mockBroadcaster := &embeddedBroadcastAPI{}
+		mockClose := mockey.Mock((*embeddedBroadcastAPI).Close).Return().Build()
+		defer mockClose.UnPatch()
+		mockDoBroadcast := mockey.Mock((*embeddedBroadcastAPI).Broadcast).To(
+			func(_ *embeddedBroadcastAPI, _ context.Context, _ message.BroadcastMutableMessage) (*types2.BroadcastAppendResult, error) {
+				broadcastCalled = true
+				return &types2.BroadcastAppendResult{}, nil
+			}).Build()
+		defer mockDoBroadcast.UnPatch()
+		mockStartBroadcast := mockey.Mock(broadcast.StartBroadcastWithResourceKeys).To(
+			func(ctx context.Context, keys ...message.ResourceKey) (broadcaster.BroadcastAPI, error) {
+				return mockBroadcaster, nil
+			}).Build()
+		defer mockStartBroadcast.UnPatch()
+
+		fakeBroker := &embeddedBroker{}
+		mockHasCollection := mockey.Mock((*embeddedBroker).HasCollection).Return(true, nil).Build()
+		defer mockHasCollection.UnPatch()
+		mockDescribe := mockey.Mock((*embeddedBroker).DescribeCollectionInternal).Return(desc, descErr).Build()
+		defer mockDescribe.UnPatch()
+
+		wal := mock_streaming.NewMockWALAccesser(t)
+		wal.EXPECT().ControlChannel().Return("by-dev-rootcoord-dml_0").Maybe()
+		streaming.SetWALForTest(wal)
+
+		server := &Server{
+			snapshotManager: NewSnapshotManager(nil, nil, nil, nil, nil, nil, nil, nil),
+			handler:         fakeHandler,
+			broker:          fakeBroker,
+		}
+		server.stateCode.Store(commonpb.StateCode_Healthy)
+
+		resp, err := server.CreateSnapshot(ctx, &datapb.CreateSnapshotRequest{
+			Name:         "snap",
+			CollectionId: collectionID,
+		})
+		assert.NoError(t, err)
+		return resp, broadcastCalled
+	}
+
+	t.Run("split_collection_refused", func(t *testing.T) {
+		resp, broadcastCalled := run(t, &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			CollectionID:        collectionID,
+			CollectionName:      "test_collection",
+			RoutingModulus:      4,
+			VirtualChannelNames: []string{"v0", "v1", "v2"},
+			ShardsNum:           2,
+		}, nil)
+
+		err := merr.Error(resp)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrOperationNotSupported))
+		assert.NotEqual(t, merr.InputError, merr.GetErrorType(err))
+		assert.False(t, resp.GetRetriable())
+		assert.Contains(t, resp.GetReason(), "shard split")
+		assert.False(t, broadcastCalled, "a snapshot of a split collection must be refused before the broadcast")
+	})
+
+	t.Run("never_split_collection_broadcasts", func(t *testing.T) {
+		resp, broadcastCalled := run(t, &milvuspb.DescribeCollectionResponse{
+			Status:              merr.Success(),
+			CollectionID:        collectionID,
+			CollectionName:      "test_collection",
+			VirtualChannelNames: []string{"v0", "v1"},
+			ShardsNum:           2,
+		}, nil)
+
+		assert.NoError(t, merr.Error(resp))
+		assert.True(t, broadcastCalled, "a never split collection must still be snapshotted")
+	})
+
+	t.Run("describe_error_after_lock", func(t *testing.T) {
+		resp, broadcastCalled := run(t, nil, merr.WrapErrServiceNotReady("rootcoord", 1, "not ready"))
+
+		err := merr.Error(resp)
+		assert.Error(t, err)
+		assert.True(t, errors.Is(err, merr.ErrServiceNotReady), "the describe error must surface with its own code")
+		assert.False(t, broadcastCalled)
+	})
+}
+
+func TestCheckSnapshotSupported(t *testing.T) {
+	assert.NoError(t, checkSnapshotSupported(nil))
+	assert.NoError(t, checkSnapshotSupported(&milvuspb.DescribeCollectionResponse{}))
+	err := checkSnapshotSupported(&milvuspb.DescribeCollectionResponse{CollectionID: 7, CollectionName: "c", RoutingModulus: 2})
+	assert.True(t, errors.Is(err, merr.ErrOperationNotSupported))
 }
 
 // --- Test PinSnapshotData ---

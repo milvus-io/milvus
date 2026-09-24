@@ -110,13 +110,38 @@ func (m *delegatorMsgstreamAdaptor) Seek(ctx context.Context, msgPositions []*ms
 		DeliverFilters: []options.DeliverFilter{
 			// only consume messages with timestamp >= position timestamp
 			options.DeliverFilterTimeTickGTE(position.GetTimestamp()),
-			// only consume insert, delete, schema change, and manual flush messages
-			options.DeliverFilterMessageType(message.MessageTypeInsert, message.MessageTypeDelete, message.MessageTypeSchemaChange, message.MessageTypeAlterCollection, message.MessageTypeManualFlush),
+			options.DeliverFilterMessageType(delegatorMessageTypes...),
 		},
 		MessageHandler: handler,
 	})
 	m.ch = handler.Chan()
 	return nil
+}
+
+// delegatorMessageTypes is the whole set of WAL message types a query
+// delegator's msgstream is allowed to see. It is a whitelist: anything absent
+// is dropped at the WAL scanner, before the dispatcher, before the flow graph,
+// and without a trace in any log.
+//
+// SplitShard is in it because that fence is how a delegator will learn its
+// vchannel was split. Filtered out here, the message cannot reach a delegator
+// at all, so the read path could never be taught to react to it: the source
+// delegator would never spawn the in-process children that answer for the new
+// shards until querycoord adopts them, and every row written after the fence
+// would be served by nothing for the length of the split — while the source
+// kept answering from its own pre-fence data with a fully advanced tsafe, so
+// the loss would look like nothing at all.
+//
+// Opening the whitelist is necessary, not sufficient: the querynode filter node
+// still drops SplitShard through its default branch. The delegator-side
+// handling lands with the read path, in a later PR.
+var delegatorMessageTypes = []message.MessageType{
+	message.MessageTypeInsert,
+	message.MessageTypeDelete,
+	message.MessageTypeSchemaChange,
+	message.MessageTypeAlterCollection,
+	message.MessageTypeManualFlush,
+	message.MessageTypeSplitShard,
 }
 
 func (m *delegatorMsgstreamAdaptor) GetLatestMsgID(channel string) (msgstream.MessageID, error) {
