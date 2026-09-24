@@ -3678,9 +3678,6 @@ func TestServer_GetExportSnapshotState(t *testing.T) {
 
 func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 	ctx := context.Background()
-	oldWAL := streaming.WAL()
-	streaming.SetupNoopWALForTest()
-	defer streaming.SetWALForTest(oldWAL)
 	patch := mockey.Mock((*snapshotManager).GetSnapshot).
 		Return(nil, merr.WrapErrSnapshotNotFound("snap", "not found")).Build()
 	defer patch.UnPatch()
@@ -3701,7 +3698,8 @@ func TestServer_CreateSnapshotFlushBroadcast(t *testing.T) {
 			called = true
 			require.Equal(t, message.MessageTypeCreateSnapshot, msg.MessageType())
 			require.True(t, msg.BroadcastHeader().AckSyncUp)
-			require.ElementsMatch(t, []string{streaming.WAL().ControlChannel(), "p1_100v0", "p2_100v1"}, msg.BroadcastHeader().VChannels)
+			// Broadcaster adds CChannel after receiving the caller's data channels.
+			require.ElementsMatch(t, []string{"p1_100v0", "p2_100v1"}, msg.BroadcastHeader().VChannels)
 			return &types2.BroadcastAppendResult{}, nil
 		}).Build()
 	defer patchBroadcast.UnPatch()

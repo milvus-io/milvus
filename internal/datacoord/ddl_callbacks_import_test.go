@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	mock_streaming "github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -51,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -558,10 +556,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
@@ -624,10 +618,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
@@ -642,7 +632,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	)
 
 	s.NoError(err)
-	s.ElementsMatch([]string{"v1", streaming.WAL().ControlChannel()}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
+	// The caller supplies data channels; Broadcaster adds the control channel.
+	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
 }
 
 // --------------------------------
@@ -1768,7 +1759,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	var channelNames []string
 	var dataTimestamp uint64
 	mockey.Mock((*Server).createImportJobFromAck).To(
-		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
 			channelNames = append([]string{}, in.GetChannelNames()...)
 			dataTimestamp = in.GetDataTimestamp()
 			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
