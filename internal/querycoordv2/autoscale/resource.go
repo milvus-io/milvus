@@ -66,7 +66,7 @@ func DefaultEstimateOptions() EstimateOptions {
 	}
 }
 
-func EstimateSegmentsLoadResource(schema *schemapb.CollectionSchema, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, options EstimateOptions) (ResourceUsage, error) {
+func EstimateSegmentsLoadResource(ctx context.Context, schema *schemapb.CollectionSchema, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, options EstimateOptions) (ResourceUsage, error) {
 	options = options.normalized()
 	if schema == nil {
 		return ResourceUsage{}, merr.WrapErrServiceInternalMsg("collection schema is nil")
@@ -74,9 +74,12 @@ func EstimateSegmentsLoadResource(schema *schemapb.CollectionSchema, segments []
 
 	usage := ResourceUsage{}
 	for _, segment := range segments {
+		if err := ctx.Err(); err != nil {
+			return ResourceUsage{}, err
+		}
 		segmentIndexes := indexes[segment.GetID()]
 		finalUsage, err := loadresource.EstimateSegmentFinalResource(
-			context.Background(),
+			ctx,
 			schema,
 			segmentLoadInfo(segment, segmentIndexes),
 			options.segmentFinalEstimateOptions(),
@@ -90,11 +93,15 @@ func EstimateSegmentsLoadResource(schema *schemapb.CollectionSchema, segments []
 			DiskBytes:   uint64ToInt64(finalUsage.DiskBytes),
 		})
 	}
+	if err := ctx.Err(); err != nil {
+		return ResourceUsage{}, err
+	}
 	return usage, nil
 }
 
-func EstimateSegmentsLoadResourceForLoadConfig(schema *schemapb.CollectionSchema, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, loadFields []int64, options EstimateOptions) (ResourceUsage, error) {
+func EstimateSegmentsLoadResourceForLoadConfig(ctx context.Context, schema *schemapb.CollectionSchema, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, loadFields []int64, options EstimateOptions) (ResourceUsage, error) {
 	return EstimateSegmentsLoadResource(
+		ctx,
 		schema,
 		FilterSegmentsByLoadFields(segments, loadFields),
 		FilterIndexesByLoadFields(indexes, loadFields),

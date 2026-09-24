@@ -17,6 +17,7 @@
 package autoscale
 
 import (
+	"context"
 	"testing"
 
 	"github.com/samber/lo"
@@ -33,9 +34,19 @@ import (
 )
 
 func TestEstimateSegmentsLoadResourceReturnsErrorWithoutSchema(t *testing.T) {
-	usage, err := EstimateSegmentsLoadResource(nil, nil, nil, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), nil, nil, nil, EstimateOptions{})
 
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
+	assert.Zero(t, usage)
+}
+
+func TestEstimateSegmentsLoadResourceStopsOnCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	usage, err := EstimateSegmentsLoadResource(ctx, testSchema(), []*datapb.SegmentInfo{{ID: 1}}, nil, EstimateOptions{})
+
+	require.ErrorIs(t, err, context.Canceled)
 	assert.Zero(t, usage)
 }
 
@@ -52,7 +63,7 @@ func TestEstimateSegmentsLoadResourceUsesSchemaAndMmap(t *testing.T) {
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		MmapVectorField: true,
 	})
 
@@ -71,7 +82,7 @@ func TestEstimateSegmentsLoadResourceDoesNotRequireRows(t *testing.T) {
 			},
 		},
 	}
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(100), usage.MemoryBytes)
@@ -85,7 +96,7 @@ func TestEstimateSegmentsLoadResourceSkipsRawVectorWhenIndexHasRawData(t *testin
 		1: {testVectorIndex("HNSW", 10000)},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, indexes, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(18000), usage.MemoryBytes)
@@ -99,7 +110,7 @@ func TestEstimateSegmentsLoadResourceKeepsRawVectorWhenPreferFieldData(t *testin
 		1: {testVectorIndex("HNSW", 10000)},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, indexes, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{
 		PreferFieldDataWhenIndexHasRawData: true,
 	})
 
@@ -127,7 +138,7 @@ func TestEstimateSegmentsLoadResourceEstimatesHNSWIndexWhenSizeMissing(t *testin
 		}},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, indexes, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(8000), usage.MemoryBytes)
@@ -141,7 +152,7 @@ func TestEstimateSegmentsLoadResourceUsesCIndexEstimate(t *testing.T) {
 		1: {testVectorIndex("HNSW", 10000)},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, indexes, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(18000), usage.MemoryBytes)
@@ -159,7 +170,7 @@ func TestEstimateSegmentsLoadResourceReturnsErrorWhenIndexTypeMissing(t *testing
 		}},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, indexes, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{})
 
 	assert.ErrorIs(t, err, merr.ErrServiceInternal)
 	assert.Zero(t, usage)
@@ -177,7 +188,7 @@ func TestEstimateSegmentsLoadResourceKeepsFlatRawFieldWhenIndexSizeMissing(t *te
 		}},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, indexes, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{
 		MmapVectorField: true,
 	})
 
@@ -198,7 +209,7 @@ func TestEstimateSegmentsLoadResourceIncludesJSONKeyStats(t *testing.T) {
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		JSONKeyStatsExpansionFactor: 1.5,
 	})
 
@@ -206,7 +217,7 @@ func TestEstimateSegmentsLoadResourceIncludesJSONKeyStats(t *testing.T) {
 	assert.Equal(t, int64(1500), usage.MemoryBytes)
 	assert.Zero(t, usage.DiskBytes)
 
-	usage, err = EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err = EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		MmapJSONStats:               true,
 		JSONKeyStatsExpansionFactor: 1.5,
 	})
@@ -228,7 +239,7 @@ func TestEstimateSegmentsLoadResourceIncludesTextStats(t *testing.T) {
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		TextIndexExpansionFactor: 1.25,
 	})
 
@@ -237,7 +248,7 @@ func TestEstimateSegmentsLoadResourceIncludesTextStats(t *testing.T) {
 	assert.Equal(t, int64(2628), usage.MemoryBytes)
 	assert.Zero(t, usage.DiskBytes)
 
-	usage, err = EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err = EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		MmapScalarField:          true,
 		TextIndexExpansionFactor: 1.25,
 	})
@@ -267,7 +278,7 @@ func TestEstimateSegmentsLoadResourceUsesStorageV3Descriptor(t *testing.T) {
 		},
 	}}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{})
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{})
 
 	require.NoError(t, err)
 	assert.Equal(t, int64(4096), usage.MemoryBytes)
@@ -289,7 +300,7 @@ func TestEstimateSegmentsLoadResourceAppliesTieredRatioToStats(t *testing.T) {
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		MmapScalarField:        true,
 		TieredEvictionEnabled:  true,
 		TieredMemoryCacheRatio: 0.3,
@@ -340,7 +351,7 @@ func TestEstimateSegmentsLoadResourceAllowsZeroTieredRatio(t *testing.T) {
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(schema, segments, nil, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
 		MmapVectorField:        true,
 		TieredEvictionEnabled:  true,
 		TieredMemoryCacheRatio: 0,
@@ -437,7 +448,7 @@ func TestEstimateSegmentsLoadResourceForLoadConfigKeepsFullSchemaForChildFields(
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResourceForLoadConfig(schema, segments, nil, []int64{100}, EstimateOptions{
+	usage, err := EstimateSegmentsLoadResourceForLoadConfig(context.Background(), schema, segments, nil, []int64{100}, EstimateOptions{
 		MmapScalarField: true,
 	})
 
