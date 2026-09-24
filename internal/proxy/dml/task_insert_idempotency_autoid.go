@@ -1,4 +1,4 @@
-package proxy
+package dml
 
 import (
 	"math"
@@ -8,9 +8,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan) error {
+func (it *InsertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *schemapb.FieldSchema, channelNames []vChan) error {
 	if len(channelNames) <= 1 || len(it.insertMsg.GetRowIDs()) == 0 {
 		return nil
 	}
@@ -27,7 +28,7 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 	// that same unpermuted list. Reordering it here would map a PK to a different
 	// vchannel than delete later picks for the very same PK.
 	it.vChannels = channelNames
-	clusterID := Params.CommonCfg.ClusterID.GetAsUint64()
+	clusterID := paramtable.Get().CommonCfg.ClusterID.GetAsUint64()
 	if err := reassignAutoIDByOffsetChannels(
 		it.insertMsg.RowIDs,
 		primaryFieldSchema.GetDataType(),
@@ -53,7 +54,7 @@ func (it *insertTask) reassignAutoIDForStableIdempotency(primaryFieldSchema *sch
 	return nil
 }
 
-func replacePrimaryFieldData(it *insertTask, primaryFieldSchema *schemapb.FieldSchema, primaryFieldData *schemapb.FieldData) {
+func replacePrimaryFieldData(it *InsertTask, primaryFieldSchema *schemapb.FieldSchema, primaryFieldData *schemapb.FieldData) {
 	for idx, fieldData := range it.insertMsg.GetFieldsData() {
 		if fieldData.GetFieldId() == primaryFieldSchema.GetFieldID() || fieldData.GetFieldName() == primaryFieldSchema.GetName() {
 			it.insertMsg.FieldsData[idx] = primaryFieldData

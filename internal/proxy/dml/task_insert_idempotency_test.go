@@ -1,10 +1,11 @@
-package proxy
+package dml
 
 import (
 	"context"
 	"testing"
 
 	"github.com/bytedance/mockey"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -13,10 +14,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -26,9 +29,9 @@ func TestInsertTaskIdempotencyBehavior(t *testing.T) {
 	paramtable.Init()
 	resetProxyIdempotencyParams(t)
 	// Retired settings, even when present in an old deployment, cannot gate IK.
-	require.NoError(t, Params.Save("streaming.idempotency.enabled", "false"))
-	t.Cleanup(func() { _ = Params.Reset("streaming.idempotency.enabled") })
-	require.NoError(t, Params.Save(Params.StreamingCfg.IdempotencyMaxKeyLength.Key, "8"))
+	require.NoError(t, paramtable.Get().Save("streaming.idempotency.enabled", "false"))
+	t.Cleanup(func() { _ = paramtable.Get().Reset("streaming.idempotency.enabled") })
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.Key, "8"))
 	schema, err := newSchemaInfo(&schemapb.CollectionSchema{
 		Name: "coll",
 		Fields: []*schemapb.FieldSchema{
@@ -98,10 +101,10 @@ func TestPrepareIdempotencyKeyEncryptedCollection(t *testing.T) {
 	patch := mockey.Mock(hookutil.IsClusterEncryptionEnabled).Return(true).Build()
 	defer patch.UnPatch()
 	properties := []*commonpb.KeyValuePair{{Key: common.EncryptionEzIDKey, Value: "1"}}
-	keyless := &insertTask{}
+	keyless := &InsertTask{}
 	require.NoError(t, keyless.prepareIdempotencyKey(properties))
 	require.False(t, keyless.idempotencyEnabled)
-	keyed := &insertTask{idempotencyKey: "key"}
+	keyed := &InsertTask{idempotencyKey: "key"}
 	require.ErrorIs(t, keyed.prepareIdempotencyKey(properties), merr.ErrParameterInvalid)
 }
 
@@ -234,46 +237,54 @@ func TestMergeDuplicateInsertResultsAcrossVChannels(t *testing.T) {
 	require.Equal(t, []int64{200, 101, 102, 203, 104, 105}, result.GetIDs().GetIntId().GetData())
 }
 
-func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair) *MetaCache {
+func newInsertTaskIdempotencyMockCache(t *testing.T, schema *schemaInfo, properties []*commonpb.KeyValuePair) Cache {
 	t.Helper()
-	cache := &MetaCache{}
-	id := mockey.Mock((*MetaCache).GetCollectionID).Return(UniqueID(100), nil).Build()
-	info := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
-		CollID: 100, DBName: "db", Schema: schema, Properties: properties,
-	}, nil).Build()
-	t.Cleanup(func() { id.UnPatch() })
-	t.Cleanup(func() { info.UnPatch() })
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(UniqueID(100), nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		CollID:     100,
+		DBName:     "db",
+		Schema:     schema,
+		Properties: properties,
+	}, nil)
+	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil) (enhance: extract proxy DML tasks into dml package):internal/proxy/dml/task_insert_idempotency_test.go
 	return cache
 }
 
 func resetProxyIdempotencyParams(t *testing.T) {
 	t.Helper()
 	keys := []string{
-		Params.StreamingCfg.IdempotencyMaxKeyLength.Key,
+		paramtable.Get().StreamingCfg.IdempotencyMaxKeyLength.Key,
 	}
 	for _, key := range keys {
 		key := key
-		require.NoError(t, Params.Reset(key))
+		require.NoError(t, paramtable.Get().Reset(key))
 		t.Cleanup(func() {
-			_ = Params.Reset(key)
+			_ = paramtable.Get().Reset(key)
 		})
 	}
 }
 
-func newInsertTaskIdempotencyIDAllocator(t *testing.T, _ context.Context) *allocator.IDAllocator {
+func newInsertTaskIdempotencyIDAllocator(t *testing.T, ctx context.Context) *allocator.IDAllocator {
 	t.Helper()
-	nextID := int64(1000)
-	patch := mockey.Mock((*allocator.IDAllocator).Alloc).To(func(_ *allocator.IDAllocator, count uint32) (int64, int64, error) {
-		begin := nextID
-		nextID += int64(count)
-		return begin, nextID, nil
-	}).Build()
-	t.Cleanup(func() { patch.UnPatch() })
-	return &allocator.IDAllocator{}
+
+	rc := mocks.NewMockRootCoordClient(t)
+	rc.EXPECT().AllocID(mock.Anything, mock.Anything).Return(&rootcoordpb.AllocIDResponse{
+		Status: merr.Success(),
+		ID:     1000,
+		Count:  100,
+	}, nil).Maybe()
+
+	idAllocator, err := allocator.NewIDAllocator(ctx, rc, 0)
+	require.NoError(t, err)
+	require.NoError(t, idAllocator.Start())
+	t.Cleanup(idAllocator.Close)
+	return idAllocator
 }
 
-func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAllocator, key string) insertTask {
-	return insertTask{
+func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAllocator, key string) InsertTask {
+	return InsertTask{
 		baseTask: baseTask{MetaCache: cache},
 		ctx:      context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -298,8 +309,8 @@ func newInsertTaskForIdempotencyTest(cache Cache, idAllocator *allocator.IDAlloc
 	}
 }
 
-func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.IDAllocator, chMgr channelmgr.ChannelsMgr) insertTask {
-	return insertTask{
+func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.IDAllocator, chMgr channelmgr.ChannelsMgr) InsertTask {
+	return InsertTask{
 		baseTask: baseTask{MetaCache: cache},
 		ctx:      context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -318,8 +329,8 @@ func newInsertTaskForIdempotencyAutoIDTest(cache Cache, idAllocator *allocator.I
 			},
 		},
 		idAllocator:     idAllocator,
-		idempotencyKey:  "autoid-request",
 		chMgr:           chMgr,
+		idempotencyKey:  "autoid-request",
 		schemaTimestamp: 0,
 	}
 }
