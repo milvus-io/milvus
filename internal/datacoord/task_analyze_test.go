@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/internal/metacache"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -36,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type analyzeTaskSuite struct {
@@ -97,10 +97,10 @@ func (s *analyzeTaskSuite) SetupSuite() {
 		},
 	}
 
-	collections := typeutil.NewConcurrentMap[int64, *collectionInfo]()
-	collections.Insert(s.collID, &collectionInfo{Schema: schema})
+	ms := metacache.NewMetaStore(nil)
+	ms.PutCollection(&collectionInfo{ID: s.collID, Schema: schema})
 
-	segments := NewSegmentsInfo()
+	segments := NewSegmentsInfo(ms)
 	segments.SetSegment(101, &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{
 			ID:           101,
@@ -128,8 +128,8 @@ func (s *analyzeTaskSuite) SetupSuite() {
 
 	s.mt = &meta{
 		analyzeMeta: analyzeMt,
-		collections: collections,
 		segments:    segments,
+		metaStore:   ms,
 	}
 }
 
@@ -259,11 +259,15 @@ func (s *analyzeTaskSuite) TestCreateTaskOnWorker_DimExtractionError() {
 			},
 		},
 	}
-	origCollections := s.mt.collections
-	collections := typeutil.NewConcurrentMap[int64, *collectionInfo]()
-	collections.Insert(s.collID, &collectionInfo{Schema: badSchema})
-	s.mt.collections = collections
-	defer func() { s.mt.collections = origCollections }()
+	origColl := s.mt.GetCollection(s.collID)
+	s.mt.AddCollection(&collectionInfo{ID: s.collID, Schema: badSchema})
+	defer func() {
+		if origColl != nil {
+			s.mt.AddCollection(origColl)
+		} else {
+			s.mt.DropCollection(s.collID)
+		}
+	}()
 
 	// Must create task AFTER swapping collections so schema is the bad one
 	at := s.newTask()

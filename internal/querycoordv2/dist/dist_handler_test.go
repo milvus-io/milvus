@@ -31,6 +31,7 @@ import (
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type DistHandlerSuite struct {
@@ -80,7 +82,8 @@ func (suite *DistHandlerSuite) TestBasic() {
 		suite.dispatchMockCall = nil
 	}
 
-	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{})
+	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet())
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -129,6 +132,7 @@ func (suite *DistHandlerSuite) TestGetDistributionFailed() {
 		suite.dispatchMockCall = nil
 	}
 	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet()).Maybe()
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -239,6 +243,7 @@ func (suite *DistHandlerSuite) TestHandlerWithSyncDelegatorChanges() {
 	}
 
 	suite.target.EXPECT().GetSealedSegmentsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+	suite.target.EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(typeutil.NewUniqueSet()).Maybe()
 	suite.dispatchMockCall = suite.scheduler.EXPECT().Dispatch(mock.Anything).Maybe()
 	suite.nodeManager.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -338,7 +343,7 @@ func TestHeartbeatMetricsRecording(t *testing.T) {
 		nodeID:      nodeID,
 		nodeManager: nodeManager,
 		dist:        meta.NewDistributionManager(nodeManager),
-		target:      meta.NewTargetManager(nil, nil),
+		target:      meta.NewTargetManager(nil, nil, metacache.NewMetaStore(nil)),
 		scheduler:   task.NewScheduler(ctx, nil, nil, nil, nil, nil, nil),
 	}
 

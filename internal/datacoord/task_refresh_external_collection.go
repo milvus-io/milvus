@@ -434,7 +434,7 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 				continue
 			}
 			segment := modPack.Get(segmentID)
-			updateSegStateAndPrepareMetrics(segment, commonpb.SegmentState_Dropped, modPack.metricMutation)
+			updateSegState(segment, commonpb.SegmentState_Dropped)
 			segment.DroppedAt = uint64(time.Now().UnixNano())
 			modPack.segments[segmentID] = segment
 			mlog.Info(ctx, "marking segment as dropped",
@@ -472,15 +472,6 @@ func applyExternalCollectionSegmentUpdateForBaseline(
 			modPack.increments[incoming.GetID()] = metastore.BinlogsIncrement{
 				Segment: incoming,
 			}
-
-			modPack.metricMutation.addNewSeg(
-				commonpb.SegmentState_Flushed,
-				incoming.GetLevel(),
-				incoming.GetIsSorted(),
-				incoming.GetStorageVersion(),
-				segmentMetricFormatLabel(segInfo),
-				incoming.GetNumOfRows(),
-			)
 
 			mlog.Info(ctx, "adding new segment",
 				mlog.FieldSegmentID(incoming.GetID()),

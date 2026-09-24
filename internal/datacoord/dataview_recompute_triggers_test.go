@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
@@ -36,11 +37,11 @@ import (
 // so they must trigger the recompute themselves.
 func TestMixCompactionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 	recomputeManager := &recordingDataViewManager{}
-	m := &meta{segments: NewSegmentsInfo(), dataViewManager: recomputeManager}
+	m := &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil)), dataViewManager: recomputeManager}
 
 	mockComplete := mockey.Mock((*meta).CompleteCompactionMutation).To(
-		func(_ *meta, _ context.Context, _ *datapb.CompactionTask, _ *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-			return []*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{ID: 100}}}, &segMetricMutation{}, nil
+		func(_ *meta, _ context.Context, _ *datapb.CompactionTask, _ *datapb.CompactionPlanResult) ([]*SegmentInfo, error) {
+			return []*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{ID: 100}}}, nil
 		}).Build()
 	defer mockComplete.UnPatch()
 	mockSave := mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
@@ -69,11 +70,11 @@ func TestMixCompactionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 // asynchronous DataView reconciliation.
 func TestBumpSchemaVersionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 	recomputeManager := &recordingDataViewManager{}
-	m := &meta{segments: NewSegmentsInfo(), dataViewManager: recomputeManager}
+	m := &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil)), dataViewManager: recomputeManager}
 
 	mockComplete := mockey.Mock((*meta).CompleteCompactionMutation).To(
-		func(_ *meta, _ context.Context, _ *datapb.CompactionTask, _ *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
-			return []*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{ID: 100}}}, &segMetricMutation{}, nil
+		func(_ *meta, _ context.Context, _ *datapb.CompactionTask, _ *datapb.CompactionPlanResult) ([]*SegmentInfo, error) {
+			return []*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{ID: 100}}}, nil
 		}).Build()
 	defer mockComplete.UnPatch()
 	mockSave := mockey.Mock((*meta).SaveCompactionTask).Return(nil).Build()
@@ -104,7 +105,7 @@ func TestBumpSchemaVersionSaveSegmentMetaRecomputesDataView(t *testing.T) {
 func TestStatsTaskSetJobInfoManifestRecomputesDataView(t *testing.T) {
 	ctx := context.Background()
 	recomputeManager := &recordingDataViewManager{}
-	m := &meta{segments: NewSegmentsInfo(), dataViewManager: recomputeManager}
+	m := &meta{segments: NewSegmentsInfo(metacache.NewMetaStore(nil)), dataViewManager: recomputeManager}
 
 	mockUpdate := mockey.Mock((*meta).UpdateSegmentsInfo).To(
 		func(_ *meta, _ context.Context, _ ...UpdateOperator) error { return nil }).Build()

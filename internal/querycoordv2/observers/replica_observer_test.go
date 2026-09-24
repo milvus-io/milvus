@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/mocks/streamingcoord/server/mock_balancer"
@@ -156,7 +157,7 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
 	suite.nodeMgr = session.NewNodeManager()
-	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr, metacache.NewMetaStore(nil))
 
 	suite.distMgr = meta.NewDistributionManager(suite.nodeMgr)
 	suite.collectionID = int64(1000)
@@ -463,7 +464,7 @@ func TestCheckStreamingQueryNodesBatchesRecoveryByReplicaCountAndContinuesAfterE
 	ctx := context.Background()
 	catalog := &saveReplicaRecordingCatalog{}
 	nodeMgr := session.NewNodeManager()
-	metadata := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	metadata := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 
 	for collectionID, replicaNumber := range map[int64]int32{100: 2, 200: 1, 300: 2} {
 		require.NoError(t, metadata.PutCollectionWithoutSave(ctx, utils.CreateTestCollection(collectionID, replicaNumber)))
@@ -517,7 +518,7 @@ func TestCheckStreamingQueryNodesContinuesCleanupAfterBatchError(t *testing.T) {
 	ctx := context.Background()
 	catalog := &saveReplicaRecordingCatalog{}
 	nodeMgr := session.NewNodeManager()
-	metadata := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr)
+	metadata := meta.NewMeta(RandomIncrementIDAllocator(), catalog, nodeMgr, metacache.NewMetaStore(nil))
 	require.NoError(t, metadata.PutCollectionWithoutSave(ctx, utils.CreateTestCollection(100, 2)))
 
 	replicas := []*meta.Replica{

@@ -1616,7 +1616,7 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 	}
 	for _, channelName := range req.GetChannelNames() {
 		// TODO: redundant channel mark by now, remove it in future.
-		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
+		if err := s.meta.metaStore.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			mlog.Error(context.TODO(), "failed to mark channel added", mlog.Err(err))
 			resp.Status = merr.Status(err)
@@ -1919,17 +1919,14 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 		return merr.Status(err), nil
 	}
 
-	// get collection info from cache
-	clonedColl := s.meta.GetClonedCollectionInfo(req.CollectionID)
-
 	properties := make(map[string]string)
 	for _, pair := range req.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
 	}
 
-	// cache miss and update cache
-	if clonedColl == nil {
-		collInfo := &collectionInfo{
+	existing := s.meta.GetCollection(req.CollectionID)
+	if existing == nil {
+		s.meta.AddCollection(&collectionInfo{
 			ID:             req.GetCollectionID(),
 			Schema:         req.GetSchema(),
 			Partitions:     req.GetPartitionIDs(),
@@ -1938,15 +1935,20 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			DatabaseID:     req.GetDbID(),
 			DatabaseName:   req.GetSchema().GetDbName(),
 			VChannelNames:  req.GetVChannels(),
-		}
-		s.meta.AddCollection(collInfo)
-		return merr.Success(), nil
+		})
+	} else {
+		s.meta.AddCollection(&collectionInfo{
+			ID:             existing.ID,
+			Schema:         req.GetSchema(),
+			Partitions:     existing.Partitions,
+			StartPositions: existing.StartPositions,
+			Properties:     properties,
+			DatabaseName:   existing.DatabaseName,
+			DatabaseID:     existing.DatabaseID,
+			VChannelNames:  existing.VChannelNames,
+			CreatedAt:      existing.CreatedAt,
+		})
 	}
-
-	clonedColl.Properties = properties
-	// add field will change the schema
-	clonedColl.Schema = req.GetSchema()
-	s.meta.AddCollection(clonedColl)
 	return merr.Success(), nil
 }
 

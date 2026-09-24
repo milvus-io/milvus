@@ -112,12 +112,16 @@ func TestReplicaLoadPercentageUsesTheSuppliedSnapshots(t *testing.T) {
 		}},
 	}
 
-	assert.EqualValues(t, 100, replicaLoadPercentage(replica, channelTargets, segmentTargets, delegators))
+	assert.EqualValues(t, 100, replicaLoadPercentage(replica, channelTargets, segmentTargets, len(segmentTargets), delegators))
 
 	// Same replica, same targets, empty delegator snapshot: 0. The function
 	// cannot reach past what it was handed.
-	assert.EqualValues(t, 0, replicaLoadPercentage(replica, channelTargets, segmentTargets,
+	assert.EqualValues(t, 0, replicaLoadPercentage(replica, channelTargets, segmentTargets, len(segmentTargets),
 		map[string][]*meta.DmChannel{}))
+
+	// A segment the shared store can no longer resolve still counts toward the
+	// target, so the percentage must fall rather than stay at 100: 2 of 3.
+	assert.EqualValues(t, 66, replicaLoadPercentage(replica, channelTargets, segmentTargets, len(segmentTargets)+1, delegators))
 }
 
 // TestMinReplicaLoadPercentageIsTheLaggard pins the fold from per-replica

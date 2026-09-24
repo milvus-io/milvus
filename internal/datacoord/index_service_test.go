@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	catalogmocks "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
@@ -160,8 +161,8 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, &collectionInfo{
+	metaStore := metacache.NewMetaStore(catalog)
+	metaStore.PutCollection(&collectionInfo{
 		ID:             collID,
 		Partitions:     nil,
 		StartPositions: nil,
@@ -172,9 +173,8 @@ func TestServer_CreateIndex(t *testing.T) {
 	indexMeta := newSegmentIndexMeta(catalog)
 	s := &Server{
 		meta: &meta{
-			catalog:     catalog,
-			collections: collections,
-			indexMeta:   indexMeta,
+			metaStore: metaStore,
+			indexMeta: indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -376,8 +376,9 @@ func TestServer_CreateIndex(t *testing.T) {
 			return nil
 		}).Maybe()
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
-		s.meta.catalog = &datacoord.Catalog{MetaKv: metakv}
-		s.meta.indexMeta.catalog = s.meta.catalog
+		failCatalog := &datacoord.Catalog{MetaKv: metakv}
+		s.meta.catalog = failCatalog
+		s.meta.indexMeta.catalog = failCatalog
 		req.IndexParams = []*commonpb.KeyValuePair{
 			{
 				Key:   common.IndexTypeKey,
@@ -800,58 +801,55 @@ func TestServer_AlterIndex(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog:   catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 			indexMeta: indexMeta,
-			segments: &SegmentsInfo{
-				compactionTo: make(map[int64][]int64),
-				segments: map[UniqueID]*SegmentInfo{
-					invalidSegID: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             invalidSegID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Flushed,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								// timesamp > index start time, will be filtered out
-								Timestamp: createTS + 1,
-							},
-						},
-					},
-					segID: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             segID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Flushed,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								Timestamp: createTS,
-							},
-							CreatedByCompaction: true,
-							CompactionFrom:      []int64{segID - 1},
-						},
-					},
-					segID - 1: {
-						SegmentInfo: &datapb.SegmentInfo{
-							ID:             segID,
-							CollectionID:   collID,
-							PartitionID:    partID,
-							NumOfRows:      10000,
-							State:          commonpb.SegmentState_Dropped,
-							MaxRowNum:      65536,
-							LastExpireTime: createTS,
-							StartPosition: &msgpb.MsgPosition{
-								Timestamp: createTS,
-							},
+			segments: newSegmentsInfoWithSegments(map[int64]*SegmentInfo{
+				invalidSegID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             invalidSegID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							// timesamp > index start time, will be filtered out
+							Timestamp: createTS + 1,
 						},
 					},
 				},
-			},
+				segID: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Flushed,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS,
+						},
+						CreatedByCompaction: true,
+						CompactionFrom:      []int64{segID - 1},
+					},
+				},
+				segID - 1: {
+					SegmentInfo: &datapb.SegmentInfo{
+						ID:             segID,
+						CollectionID:   collID,
+						PartitionID:    partID,
+						NumOfRows:      10000,
+						State:          commonpb.SegmentState_Dropped,
+						MaxRowNum:      65536,
+						LastExpireTime: createTS,
+						StartPosition: &msgpb.MsgPosition{
+							Timestamp: createTS,
+						},
+					},
+				},
+			}),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -973,7 +971,7 @@ func TestServer_GetIndexState(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 	s := &Server{
 		meta: &meta{
-			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+			metaStore: metacache.NewMetaStore(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
 			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
 		},
 		allocator:       mock0Allocator,
@@ -1015,8 +1013,9 @@ func TestServer_GetIndexState(t *testing.T) {
 			lastWrittenTime: time.Time{},
 		},
 	}
+	stateStore1 := metacache.NewMetaStore(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 	s.meta = &meta{
-		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+		metaStore: stateStore1,
 		indexMeta: &indexMeta{
 			catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -1039,7 +1038,7 @@ func TestServer_GetIndexState(t *testing.T) {
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
 
-		segments: NewSegmentsInfo(),
+		segments: NewSegmentsInfo(stateStore1),
 	}
 	for id, segment := range segments {
 		s.meta.segments.SetSegment(id, segment)
@@ -1073,8 +1072,9 @@ func TestServer_GetIndexState(t *testing.T) {
 			lastWrittenTime: time.Time{},
 		},
 	}
+	stateStore2 := metacache.NewMetaStore(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 	s.meta = &meta{
-		catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+		metaStore: stateStore2,
 		indexMeta: &indexMeta{
 			indexes: map[UniqueID]map[UniqueID]*model.Index{
 				collID: {
@@ -1095,7 +1095,7 @@ func TestServer_GetIndexState(t *testing.T) {
 			},
 			segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 		},
-		segments: NewSegmentsInfo(),
+		segments: NewSegmentsInfo(stateStore2),
 	}
 	segIdx := typeutil.NewConcurrentMap[UniqueID, *model.SegmentIndex]()
 	segIdx.Insert(indexID, &model.SegmentIndex{
@@ -1178,11 +1178,12 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 	mock0Allocator := newMockAllocator(t)
 	indexMeta := newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
 
+	idxStore := metacache.NewMetaStore(indexMeta.catalog)
 	s := &Server{
 		meta: &meta{
-			catalog:   indexMeta.catalog,
+			metaStore: idxStore,
 			indexMeta: indexMeta,
-			segments:  NewSegmentsInfo(),
+			segments:  NewSegmentsInfo(idxStore),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1307,11 +1308,13 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 
 	mock0Allocator := newMockAllocator(t)
 
+	catalogInst := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	bldStore := metacache.NewMetaStore(catalogInst)
 	s := &Server{
 		meta: &meta{
-			catalog:   &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
-			indexMeta: newSegmentIndexMeta(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
-			segments:  NewSegmentsInfo(),
+			metaStore: bldStore,
+			indexMeta: newSegmentIndexMeta(catalogInst),
+			segments:  NewSegmentsInfo(bldStore),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -1346,7 +1349,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 				UserIndexParams: nil,
 			},
 		}
-		s.meta.segments = NewSegmentsInfo()
+		s.meta.segments = NewSegmentsInfo(metacache.NewMetaStore(nil))
 		s.meta.segments.SetSegment(segID, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             segID,
@@ -1392,7 +1395,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 			IndexSerializedSize: 0,
 			WriteHandoff:        false,
 		})
-		s.meta.segments = NewSegmentsInfo()
+		s.meta.segments = NewSegmentsInfo(metacache.NewMetaStore(nil))
 		s.meta.segments.SetSegment(segID, &SegmentInfo{
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             segID,
@@ -1552,7 +1555,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 	}, nil)
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 			indexMeta: &indexMeta{
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -1646,7 +1649,7 @@ func TestServer_DescribeIndex(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		},
 		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
@@ -1899,7 +1902,7 @@ func TestServer_ListIndexes(t *testing.T) {
 	catalog := catalogmocks.NewDataCoordCatalog(t)
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 			indexMeta: &indexMeta{
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -1993,7 +1996,7 @@ func TestServer_ListIndexes(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),
@@ -2095,7 +2098,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 	}, nil)
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 			indexMeta: &indexMeta{
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -2189,7 +2192,7 @@ func TestServer_GetIndexStatistics(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		},
 		mixCoord:        mocks.NewMixCoord(t),
 		allocator:       mock0Allocator,
@@ -2370,7 +2373,7 @@ func TestServer_DropIndex(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
+			metaStore: metacache.NewMetaStore(catalog),
 			indexMeta: &indexMeta{
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -2450,7 +2453,7 @@ func TestServer_DropIndex(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		},
 		broker:          b,
 		allocator:       mock0Allocator,
@@ -2573,9 +2576,11 @@ func TestServer_DropIndex_DroppedField(t *testing.T) {
 		},
 	}, nil)
 
+	metaStore := metacache.NewMetaStore(nil)
 	s := &Server{
 		meta: &meta{
-			catalog: catalog,
+			catalog:   catalog,
+			metaStore: metaStore,
 			indexMeta: &indexMeta{
 				catalog: catalog,
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -2598,7 +2603,7 @@ func TestServer_DropIndex_DroppedField(t *testing.T) {
 				},
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
-			segments: NewSegmentsInfo(),
+			segments: NewSegmentsInfo(metaStore),
 		},
 		broker:          b,
 		allocator:       newMockAllocator(t),
@@ -2663,7 +2668,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 
 	s := &Server{
 		meta: &meta{
-			catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
+			metaStore: metacache.NewMetaStore(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}),
 			indexMeta: &indexMeta{
 				catalog: &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)},
 				indexes: map[UniqueID]map[UniqueID]*model.Index{
@@ -2687,7 +2692,7 @@ func TestServer_GetIndexInfos(t *testing.T) {
 				segmentIndexes: typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
 			},
 
-			segments:     NewSegmentsInfo(),
+			segments:     NewSegmentsInfo(metacache.NewMetaStore(nil)),
 			chunkManager: cli,
 		},
 		allocator:       mock0Allocator,
@@ -2782,7 +2787,7 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		},
 	}
 	m := &meta{
-		segments: NewSegmentsInfo(),
+		segments: NewSegmentsInfo(metacache.NewMetaStore(nil)),
 		indexMeta: &indexMeta{
 			segmentBuildInfo: newSegmentIndexBuildInfo(),
 			segmentIndexes:   typeutil.NewConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]](),
@@ -2904,16 +2909,15 @@ func TestJsonIndex(t *testing.T) {
 		},
 	}, nil)
 
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(collID, &collectionInfo{
+	metaStore := metacache.NewMetaStore(nil)
+	metaStore.PutCollection(&collectionInfo{
 		ID: collID,
 	})
 
 	s := &Server{
 		meta: &meta{
-			catalog:     catalog,
-			collections: collections,
-			indexMeta:   indexMeta,
+			metaStore: metaStore,
+			indexMeta: indexMeta,
 		},
 		allocator:       mock0Allocator,
 		notifyIndexChan: make(chan UniqueID, 1),

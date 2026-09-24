@@ -346,8 +346,11 @@ func (ob *CollectionObserver) observeChannelStatus(ctx context.Context, collecti
 
 func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, partition *meta.Partition, replicaNum int32, channelTargetNum, subChannelCount int) bool {
 	segmentTargets := ob.targetMgr.GetSealedSegmentsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
+	// The denominator is the target's own segment count. Sizing it by what the
+	// shared store resolves would let load progress reach 100% by shrinking.
+	segmentTargetIDs := ob.targetMgr.GetSealedSegmentIDsByPartition(ctx, partition.GetCollectionID(), partition.GetPartitionID(), meta.NextTarget)
 
-	targetNum := len(segmentTargets) + channelTargetNum
+	targetNum := len(segmentTargetIDs) + channelTargetNum
 	if targetNum == 0 {
 		mlog.Info(ctx, "segments and channels in target are both empty, waiting for new target content")
 		return false

@@ -5,6 +5,7 @@ package datacoord
 import (
 	context "context"
 
+	metacache "github.com/milvus-io/milvus/internal/metacache"
 	storage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	datapb "github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	mock "github.com/stretchr/testify/mock"
@@ -176,23 +177,23 @@ func (_c *NMockHandler_GenSnapshot_Call) RunAndReturn(run func(context.Context, 
 }
 
 // GetCollection provides a mock function with given fields: ctx, collectionID
-func (_m *NMockHandler) GetCollection(ctx context.Context, collectionID int64) (*collectionInfo, error) {
+func (_m *NMockHandler) GetCollection(ctx context.Context, collectionID int64) (*metacache.CollectionInfo, error) {
 	ret := _m.Called(ctx, collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollection")
 	}
 
-	var r0 *collectionInfo
+	var r0 *metacache.CollectionInfo
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64) (*collectionInfo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*metacache.CollectionInfo, error)); ok {
 		return rf(ctx, collectionID)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64) *collectionInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *metacache.CollectionInfo); ok {
 		r0 = rf(ctx, collectionID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*collectionInfo)
+			r0 = ret.Get(0).(*metacache.CollectionInfo)
 		}
 	}
 
@@ -224,12 +225,12 @@ func (_c *NMockHandler_GetCollection_Call) Run(run func(ctx context.Context, col
 	return _c
 }
 
-func (_c *NMockHandler_GetCollection_Call) Return(_a0 *collectionInfo, _a1 error) *NMockHandler_GetCollection_Call {
+func (_c *NMockHandler_GetCollection_Call) Return(_a0 *metacache.CollectionInfo, _a1 error) *NMockHandler_GetCollection_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *NMockHandler_GetCollection_Call) RunAndReturn(run func(context.Context, int64) (*collectionInfo, error)) *NMockHandler_GetCollection_Call {
+func (_c *NMockHandler_GetCollection_Call) RunAndReturn(run func(context.Context, int64) (*metacache.CollectionInfo, error)) *NMockHandler_GetCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

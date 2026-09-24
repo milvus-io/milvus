@@ -374,6 +374,10 @@ func ReplicaLoadPercentagesByResourceGroup(
 	// this deliberately does not.
 	channelTargets := targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.NextTargetFirst)
 	segmentTargets := targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTargetFirst)
+	// Size the target by its own segment count: a segment the shared store can
+	// no longer resolve is still owed by the target, so counting only the
+	// resolvable ones would report a resource group as more loaded than it is.
+	segmentTargetNum := len(targetMgr.GetSealedSegmentIDsByCollection(ctx, collectionID, meta.NextTargetFirst))
 
 	// One distribution lookup per CHANNEL, shared by every replica and by the
 	// segment walk. ChannelDistManager.GetByFilter with no node filter walks
@@ -386,7 +390,7 @@ func ReplicaLoadPercentagesByResourceGroup(
 
 	figures := make(map[int64]int32, len(replicas))
 	for _, replica := range replicas {
-		figures[replica.GetID()] = replicaLoadPercentage(replica, channelTargets, segmentTargets, delegators)
+		figures[replica.GetID()] = replicaLoadPercentage(replica, channelTargets, segmentTargets, segmentTargetNum, delegators)
 	}
 	return figures, nil
 }
@@ -431,9 +435,10 @@ func replicaLoadPercentage(
 	replica *meta.Replica,
 	channelTargets map[string]*meta.DmChannel,
 	segmentTargets map[int64]*datapb.SegmentInfo,
+	segmentTargetNum int,
 	delegators map[string][]*meta.DmChannel,
 ) int32 {
-	targetNum := len(channelTargets) + len(segmentTargets)
+	targetNum := len(channelTargets) + segmentTargetNum
 	if targetNum == 0 {
 		return 0
 	}

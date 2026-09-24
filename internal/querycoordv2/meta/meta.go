@@ -17,6 +17,7 @@
 package meta
 
 import (
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 )
@@ -31,9 +32,10 @@ func NewMeta(
 	idAllocator func() (int64, error),
 	catalog metastore.QueryCoordCatalog,
 	nodeMgr *session.NodeManager,
+	metaView metacache.MetaView,
 ) *Meta {
 	return &Meta{
-		NewCollectionManager(catalog),
+		NewCollectionManager(catalog, metaView),
 		NewReplicaManager(idAllocator, catalog),
 		NewResourceManager(catalog, nodeMgr),
 	}

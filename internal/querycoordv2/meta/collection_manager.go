@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/eventlog"
@@ -109,14 +110,19 @@ type CollectionManager struct {
 
 	collectionPartitions map[typeutil.UniqueID]typeutil.Set[typeutil.UniqueID]
 	catalog              metastore.QueryCoordCatalog
+
+	// metaView is the shared MetaStore view used to read collection schema
+	// without a broker round-trip.
+	metaView metacache.MetaView
 }
 
-func NewCollectionManager(catalog metastore.QueryCoordCatalog) *CollectionManager {
+func NewCollectionManager(catalog metastore.QueryCoordCatalog, metaView metacache.MetaView) *CollectionManager {
 	return &CollectionManager{
 		collections:          make(map[int64]*Collection),
 		partitions:           make(map[int64]*Partition),
 		collectionPartitions: make(map[int64]typeutil.Set[typeutil.UniqueID]),
 		catalog:              catalog,
+		metaView:             metaView,
 	}
 }
 
@@ -272,6 +278,9 @@ func (m *CollectionManager) GetCollection(ctx context.Context, collectionID type
 }
 
 func (m *CollectionManager) GetCollectionSchema(ctx context.Context, collectionID typeutil.UniqueID) *schemapb.CollectionSchema {
+	if info, ok := m.metaView.GetCollection(collectionID); ok {
+		return proto.Clone(info.Schema).(*schemapb.CollectionSchema)
+	}
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 	collection, ok := m.collections[collectionID]

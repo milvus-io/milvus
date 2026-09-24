@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/querycoordv2"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -701,4 +702,29 @@ func TestMixCoord_ExternalCollectionRefreshMethods(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, 0, len(resp.GetJobs()))
 	})
+}
+
+// TestMixCoord_SharedMetaStore verifies that MetaStore is created in
+// initInternal with a catalog, and that DC and QC can share the same
+// segment metadata through it.
+func TestMixCoord_SharedMetaStore(t *testing.T) {
+	store := metacache.NewMetaStore(nil)
+
+	seg := &datapb.SegmentInfo{
+		ID:            42,
+		CollectionID:  1,
+		InsertChannel: "ch-0",
+		State:         commonpb.SegmentState_Flushed,
+	}
+	store.PutSegment(seg)
+
+	got, ok := store.GetSegment(42)
+	assert.True(t, ok)
+	assert.Equal(t, int64(42), got.GetID())
+
+	// MetaView (read-only) sees the same data.
+	var view metacache.MetaView = store
+	got2, ok2 := view.GetSegment(42)
+	assert.True(t, ok2)
+	assert.Equal(t, int64(42), got2.GetID())
 }

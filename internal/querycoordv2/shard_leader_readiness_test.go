@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -60,7 +61,7 @@ func newShardLeaderReadinessFixture(t *testing.T) *shardLeaderReadinessFixture {
 
 	nodeMgr := session.NewNodeManager()
 	m := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(catalog),
+		CollectionManager: meta.NewCollectionManager(catalog, metacache.NewMetaStore(nil)),
 		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
 		// See rgLoadPercentageFixture: the surfaces validate rgName against
 		// the ResourceManager first, so every group a test names must exist.
@@ -70,7 +71,7 @@ func newShardLeaderReadinessFixture(t *testing.T) *shardLeaderReadinessFixture {
 
 	return &shardLeaderReadinessFixture{
 		meta:      m,
-		targetMgr: meta.NewTargetManager(broker, m),
+		targetMgr: meta.NewTargetManager(broker, m, metacache.NewMetaStore(nil)),
 		dist:      meta.NewDistributionManager(nodeMgr),
 		nodeMgr:   nodeMgr,
 		broker:    broker,

@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/metacache"
 	coordMocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/dist"
@@ -741,7 +742,7 @@ func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status quer
 func (suite *ServerSuite) hackServer() {
 	suite.broker = meta.NewMockBroker(suite.T())
 	suite.server.broker = suite.broker
-	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta)
+	suite.server.targetMgr = meta.NewTargetManager(suite.broker, suite.server.meta, metacache.NewMetaStore(nil))
 	suite.server.taskScheduler = task.NewScheduler(
 		suite.server.ctx,
 		suite.server.meta,
@@ -1106,7 +1107,7 @@ func TestGetLeakedResourcesByCollection(t *testing.T) {
 	}
 	newServer := func() *Server {
 		return &Server{
-			meta: meta.NewMeta(idAllocator(), nil, session.NewNodeManager()),
+			meta: meta.NewMeta(idAllocator(), nil, session.NewNodeManager(), metacache.NewMetaStore(nil)),
 			dist: meta.NewDistributionManager(session.NewNodeManager()),
 		}
 	}
@@ -1199,7 +1200,7 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		nodeMgr := session.NewNodeManager()
 		targetMgr := meta.NewMockTargetManager(t)
 		return &Server{
-			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr),
+			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr, metacache.NewMetaStore(nil)),
 			dist:      meta.NewDistributionManager(nodeMgr),
 			nodeMgr:   nodeMgr,
 			targetMgr: targetMgr,
@@ -1248,7 +1249,8 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		// Segment exists in target but not in leader's view -> CheckDelegatorDataReady fails
 		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
 			42: {ID: 42, CollectionID: collectionID},
-		})
+		}).Maybe()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(typeutil.NewUniqueSet(42))
 
 		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
@@ -1275,7 +1277,8 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		})
 		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
 			42: {ID: 42, CollectionID: collectionID},
-		})
+		}).Maybe()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(typeutil.NewUniqueSet(42))
 
 		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
@@ -1302,7 +1305,8 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		})
 		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{
 			42: {ID: 42, CollectionID: collectionID},
-		})
+		}).Maybe()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(typeutil.NewUniqueSet(42))
 
 		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
@@ -1326,7 +1330,8 @@ func TestCheckAllReplicasServiceable(t *testing.T) {
 		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
 			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
 		})
-		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(typeutil.NewUniqueSet())
 
 		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
@@ -1364,7 +1369,7 @@ func TestGetLeakedResourcesByCollectionPerRG(t *testing.T) {
 	newServer := func() *Server {
 		nodeMgr := session.NewNodeManager()
 		return &Server{
-			meta:    meta.NewMeta(idAllocator(), nil, nodeMgr),
+			meta:    meta.NewMeta(idAllocator(), nil, nodeMgr, metacache.NewMetaStore(nil)),
 			dist:    meta.NewDistributionManager(nodeMgr),
 			nodeMgr: nodeMgr,
 		}
@@ -1461,7 +1466,7 @@ func TestCheckReplicasServiceable(t *testing.T) {
 		nodeMgr := session.NewNodeManager()
 		targetMgr := meta.NewMockTargetManager(t)
 		return &Server{
-			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr),
+			meta:      meta.NewMeta(idAllocator(), nil, nodeMgr, metacache.NewMetaStore(nil)),
 			dist:      meta.NewDistributionManager(nodeMgr),
 			nodeMgr:   nodeMgr,
 			targetMgr: targetMgr,
@@ -1506,7 +1511,8 @@ func TestCheckReplicasServiceable(t *testing.T) {
 		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetDmChannelsByCollection(mock.Anything, collectionID, meta.CurrentTarget).Return(map[string]*meta.DmChannel{
 			channelName: {VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName}},
 		})
-		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{})
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(map[int64]*datapb.SegmentInfo{}).Maybe()
+		s.targetMgr.(*meta.MockTargetManager).EXPECT().GetSealedSegmentIDsByChannel(mock.Anything, collectionID, channelName, meta.CurrentTarget).Return(typeutil.NewUniqueSet())
 		s.dist.ChannelDistManager.Update(10, &meta.DmChannel{
 			VchannelInfo: &datapb.VchannelInfo{CollectionID: collectionID, ChannelName: channelName},
 			Node:         10,

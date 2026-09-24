@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/rgpb"
 	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
+	"github.com/milvus-io/milvus/internal/metacache"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -61,7 +62,7 @@ func newAdmissionFixture(t *testing.T) *admissionFixture {
 
 	nodeMgr := session.NewNodeManager()
 	m := &meta.Meta{
-		CollectionManager: meta.NewCollectionManager(catalog),
+		CollectionManager: meta.NewCollectionManager(catalog, metacache.NewMetaStore(nil)),
 		ReplicaManager:    meta.NewReplicaManager(params.RandomIncrementIDAllocator(), catalog),
 		ResourceManager:   meta.NewResourceManager(catalog, nodeMgr),
 	}

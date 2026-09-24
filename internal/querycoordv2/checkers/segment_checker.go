@@ -370,7 +370,12 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	nextTargetExist := c.targetMgr.IsNextTargetExist(ctx, collectionID)
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.NextTarget)
 	currentTargetExist := c.targetMgr.IsCurrentTargetExist(ctx, collectionID, common.AllPartitionsID)
-	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(ctx, collectionID, meta.CurrentTarget)
+	// Membership comes from the ID sets, not from the resolved protos: a
+	// segment DataCoord has dropped is still part of the target until the
+	// target itself changes, and releasing on its disappearance would drop a
+	// loaded segment before its replacement is served.
+	nextTargetIDs := c.targetMgr.GetSealedSegmentIDsByCollection(ctx, collectionID, meta.NextTarget)
+	currentTargetIDs := c.targetMgr.GetSealedSegmentIDsByCollection(ctx, collectionID, meta.CurrentTarget)
 
 	// Hoisted out of the loop below, where it was resolved once per segment on
 	// the refresh/import path and each call read-locks the collection manager's
@@ -383,7 +388,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	for _, segment := range nextTargetMap {
 		if isSegmentLack(segment) {
 			if currentTargetExist {
-				_, existOnCurrent := currentTargetMap[segment.GetID()]
+				existOnCurrent := currentTargetIDs.Contain(segment.GetID())
 				if existOnCurrent {
 					// Segment exists in current target but missing in dist -> Recovery scenario (HIGH priority)
 					loadPriorities = append(loadPriorities, commonpb.LoadPriority_HIGH)
@@ -410,8 +415,8 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// get segment which exist on dist, but not on current target and next target
 	for _, segment := range dist {
-		_, existOnCurrent := currentTargetMap[segment.GetID()]
-		_, existOnNext := nextTargetMap[segment.GetID()]
+		existOnCurrent := currentTargetIDs.Contain(segment.GetID())
+		existOnNext := nextTargetIDs.Contain(segment.GetID())
 
 		// l0 segment should be release with channel together
 		if !existOnNext && nextTargetExist && !existOnCurrent {

@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
@@ -628,9 +627,16 @@ func (ob *TargetObserver) genSyncAction(ctx context.Context, leaderView *meta.Le
 	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	channel := ob.targetMgr.GetDmChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTargetFirst)
-	sealedSegmentRowCount := lo.MapValues(sealedSegments, func(segment *datapb.SegmentInfo, _ int64) int64 {
-		return segment.GetNumOfRows()
-	})
+	// What the delegator may serve is the target's membership, so it comes from
+	// the ID set: a segment the shared store cannot resolve right now is still
+	// in the target, and readiness (CheckDelegatorDataReady) still demands it.
+	// Its row count is best-effort, which only costs accuracy in the partial
+	// search ratio until the next target update.
+	sealedSegmentIDs := ob.targetMgr.GetSealedSegmentIDsByChannel(ctx, leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
+	sealedSegmentRowCount := make(map[int64]int64, len(sealedSegmentIDs))
+	for id := range sealedSegmentIDs {
+		sealedSegmentRowCount[id] = sealedSegments[id].GetNumOfRows()
+	}
 
 	action := &querypb.SyncAction{
 		Type:                  querypb.SyncType_UpdateVersion,

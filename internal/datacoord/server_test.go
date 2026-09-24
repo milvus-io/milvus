@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
+	"github.com/milvus-io/milvus/internal/metacache"
 	mocks2 "github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
@@ -1899,8 +1900,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("target size zero routes to ordinary manual compaction", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
+		store := metacache.NewMetaStore(nil)
+		svr.meta = &meta{metaStore: store}
+		svr.meta.AddCollection(&collectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
@@ -1929,8 +1931,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual l0 compaction successfully", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
+		store := metacache.NewMetaStore(nil)
+		svr.meta = &meta{metaStore: store}
+		svr.meta.AddCollection(&collectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
@@ -2052,8 +2055,9 @@ func TestManualCompaction(t *testing.T) {
 	t.Run("test manual compaction failure", func(t *testing.T) {
 		svr := &Server{allocator: allocator.NewMockAllocator(t)}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()}
-		svr.meta.collections.Insert(1, &collectionInfo{
+		store := metacache.NewMetaStore(nil)
+		svr.meta = &meta{metaStore: store}
+		svr.meta.AddCollection(&collectionInfo{
 			ID:     1,
 			Schema: &schemapb.CollectionSchema{},
 		})
@@ -2818,12 +2822,14 @@ func TestServer_initServiceDiscovery_BindIndexNodeDoesNotAffectQueryNodePathVers
 }
 
 func Test_CheckHealth(t *testing.T) {
-	collections := typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()
-	collections.Insert(449684528748778322, &collectionInfo{
-		ID:            449684528748778322,
-		VChannelNames: []string{"ch1", "ch2"},
-	})
-	collections.Insert(2, nil)
+	newHealthStore := func() metacache.MetaStore {
+		store := metacache.NewMetaStore(nil)
+		store.PutCollection(&collectionInfo{
+			ID:            449684528748778322,
+			VChannelNames: []string{"ch1", "ch2"},
+		})
+		return store
+	}
 
 	t.Run("not healthy", func(t *testing.T) {
 		ctx := context.Background()
@@ -2838,17 +2844,14 @@ func Test_CheckHealth(t *testing.T) {
 	t.Run("check checkpoint fail", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{
-			collections: collections,
-			channelCPs: &channelCPs{
-				checkpoints: map[string]*msgpb.MsgPosition{
-					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-				},
+		store := newHealthStore()
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now().Add(-1000 * time.Hour)),
+				MsgID:     []byte{1, 2, 3, 4},
 			},
-		}
+		})
+		svr.meta = &meta{metaStore: store}
 
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -2860,25 +2863,22 @@ func Test_CheckHealth(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		svr := &Server{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-		svr.meta = &meta{
-			collections: collections,
-			channelCPs: &channelCPs{
-				checkpoints: map[string]*msgpb.MsgPosition{
-					"cluster-id-rootcoord-dm_3_449684528748778322v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-					"cluster-id-rootcoord-dm_3_449684528748778323v0": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-					"invalid-vchannel-name": {
-						Timestamp: tsoutil.ComposeTSByTime(time.Now()),
-						MsgID:     []byte{1, 2, 3, 4},
-					},
-				},
+		store := newHealthStore()
+		store.LoadChannelCheckpoints(map[string]*msgpb.MsgPosition{
+			"cluster-id-rootcoord-dm_3_449684528748778322v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
 			},
-		}
+			"cluster-id-rootcoord-dm_3_449684528748778323v0": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+			"invalid-vchannel-name": {
+				Timestamp: tsoutil.ComposeTSByTime(time.Now()),
+				MsgID:     []byte{1, 2, 3, 4},
+			},
+		})
+		svr.meta = &meta{metaStore: store}
 		ctx := context.Background()
 		resp, err := svr.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -2939,7 +2939,7 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	broker := broker.NewMockBroker(t)
 	s := &Server{
 		broker: broker,
-		meta:   &meta{collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo]()},
+		meta:   newEmptyTestMeta(),
 	}
 
 	t.Run("has collection fail with error", func(t *testing.T) {
@@ -2980,9 +2980,9 @@ func TestLoadCollectionFromRootCoord(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		err := s.loadCollectionFromRootCoord(context.TODO(), 0)
 		assert.NoError(t, err)
-		assert.Equal(t, 1, s.meta.collections.Len())
-		_, ok := s.meta.collections.Get(1)
-		assert.True(t, ok)
+		assert.Equal(t, 1, len(s.meta.ListCollections()))
+		coll := s.meta.GetCollection(1)
+		assert.NotNil(t, coll)
 	})
 }
 
@@ -3059,12 +3059,14 @@ func TestServer_InitMessageCallback(t *testing.T) {
 	snmanager.ResetStreamingNodeManager()
 	balance.Register(mb)
 
+	ms := metacache.NewMetaStore(nil)
 	server := &Server{
 		ctx: ctx,
 		meta: &meta{
 			catalog:      mockCatalog,
 			chunkManager: mockChunkManager,
-			segments:     NewSegmentsInfo(),
+			metaStore:    ms,
+			segments:     NewSegmentsInfo(ms),
 		},
 		importMeta:     &importMeta{},
 		segmentManager: mockManager,
