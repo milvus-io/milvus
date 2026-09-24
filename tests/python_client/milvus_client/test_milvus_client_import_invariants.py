@@ -1016,3 +1016,55 @@ class TestMilvusClientImportInvariantsIndependent(TestMilvusClientV2Base):
             client, collection_name, filter="event_time == ISO '2025-06-01T00:00:00.123456Z'", output_fields=["id"]
         )[0]
         assert {row["id"] for row in matches} == {0, 1, 2}, matches
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("file_format", ["json", "csv", "parquet"])
+    def test_import_nullable_timestamps_apply_defaults(self, file_format, upload_import_file, tmp_path):
+        """
+        target: nullable Timestamptz defaults for explicit nulls and missing columns
+        method: import mixed timestamps/nulls and a second file without the timestamp column
+        expected: nulls and missing values receive the default while explicit timestamps remain unchanged
+        """
+        client = self._client()
+        collection_name = cf.gen_unique_str("import_timestamp_default")
+        default_timestamp = "2023-11-14T22:13:20Z"
+        schema = self.create_schema(client, auto_id=False, enable_dynamic_field=False)[0]
+        schema.add_field("id", DataType.INT64, is_primary=True)
+        schema.add_field("vector", DataType.FLOAT_VECTOR, dim=8)
+        schema.add_field("event_time", DataType.TIMESTAMPTZ, nullable=True, default_value=default_timestamp)
+        self._create_data_collection(client, collection_name, schema)
+        timestamps = [
+            "2024-01-01T00:00:00Z",
+            None,
+            "2024-01-02T08:00:00.123456+08:00",
+            None,
+            "1970-01-01T00:00:00Z",
+            None,
+            "2024-01-03T00:00:00Z",
+        ]
+        rows = [{"id": i, "vector": [float(i)] * 8, "event_time": value} for i, value in enumerate(timestamps)]
+        missing_rows = [{"id": i, "vector": [float(i)] * 8} for i in range(len(rows), len(rows) + 2)]
+        arrow_fields = [("id", pa.int64()), ("vector", pa.list_(pa.float32()))]
+        mixed_path = tmp_path / f"mixed.{file_format}"
+        missing_path = tmp_path / f"missing.{file_format}"
+        self._write_rows(mixed_path, rows, pa.schema(arrow_fields + [("event_time", pa.string())]))
+        self._write_rows(missing_path, missing_rows, pa.schema(arrow_fields))
+        self._import_and_wait(
+            collection_name,
+            [[upload_import_file(mixed_path)], [upload_import_file(missing_path)]],
+            {"sep": "|", "nullkey": "__NULL__"} if file_format == "csv" else {},
+        )
+        self.refresh_load(client, collection_name)
+        expected = {
+            row["id"]: datetime.fromisoformat(row.get("event_time") or default_timestamp).astimezone(UTC)
+            for row in rows + missing_rows
+        }
+        results = self.query(
+            client, collection_name, filter="id >= 0", output_fields=["id", "event_time"], limit=len(expected) + 1
+        )[0]
+        assert len(results) == len(expected) and {row["id"] for row in results} == set(expected)
+        for row in results:
+            assert row["event_time"] is not None, row
+            assert datetime.fromisoformat(row["event_time"]).astimezone(UTC) == expected[row["id"]], row
+        null_rows = self.query(client, collection_name, filter="event_time is null", output_fields=["id"])[0]
+        assert null_rows == [], null_rows
