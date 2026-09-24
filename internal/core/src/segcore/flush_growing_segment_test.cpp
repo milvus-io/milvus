@@ -15,10 +15,19 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <optional>
+#include <numeric>
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+
+#include <arrow/util/base64.h>
+#include <parquet/file_reader.h>
+#include <parquet/encryption/encryption.h>
+#include <folly/ScopeGuard.h>
 
 #include "common/IndexMeta.h"
 #include "segcore/default_fs.h"
@@ -28,11 +37,14 @@
 #include "test_utils/DataGen.h"
 #include "test_utils/SegcoreConfigUtils.h"
 #include "test_utils/TmpPath.h"
+#include "test_utils/PlannerCipherPlugin.h"
 #include "storage/Util.h"
+#include "storage/PluginLoader.h"
 #include "storage/loon_ffi/property_singleton.h"
 #include "knowhere/index/index_factory.h"
 #include "milvus-storage/common/config.h"
 #include "milvus-storage/filesystem/fs.h"
+#include "milvus-storage/ffi_c.h"
 #include "milvus-storage/transaction/transaction.h"
 
 using namespace milvus;
@@ -106,10 +118,64 @@ class FlushGrowingSegmentTest : public ::testing::Test {
             for (int64_t r = 0; r < streamed[i]->get_num_rows(); ++r) {
                 EXPECT_EQ(streamed[i]->is_valid(r),
                           field_datas[i]->is_valid(r));
+                if (data_type == DataType::VECTOR_FLOAT &&
+                    streamed[i]->is_valid(r)) {
+                    const auto* actual =
+                        static_cast<const float*>(streamed[i]->RawValue(r));
+                    const auto* expected =
+                        static_cast<const float*>(field_datas[i]->RawValue(r));
+                    EXPECT_NE(actual, nullptr);
+                    EXPECT_NE(expected, nullptr);
+                    if (actual == nullptr || expected == nullptr) {
+                        continue;
+                    }
+                    for (int64_t d = 0; d < dim; ++d) {
+                        EXPECT_FLOAT_EQ(actual[d], expected[d]);
+                    }
+                }
             }
         }
 
         return field_datas;
+    }
+
+    void
+    AssertEncryptedParquetObjects(const std::string& segment_path,
+                                  int64_t version) {
+        auto fs = GetDefaultArrowFileSystem();
+        auto opened = milvus_storage::api::transaction::Transaction::Open(
+            fs, segment_path, version);
+        ASSERT_TRUE(opened.ok()) << opened.status().ToString();
+        auto manifest_result = opened.ValueOrDie()->GetManifest();
+        ASSERT_TRUE(manifest_result.ok())
+            << manifest_result.status().ToString();
+        const auto& groups = manifest_result.ValueOrDie()->columnGroups();
+        ASSERT_FALSE(groups.empty());
+        for (const auto& group : groups) {
+            ASSERT_FALSE(group->files.empty());
+            for (const auto& file : group->files) {
+                auto opened_file = fs->OpenInputFile(file.path);
+                ASSERT_TRUE(opened_file.ok())
+                    << opened_file.status().ToString();
+                auto input = opened_file.ValueOrDie();
+                auto magic = input->ReadAt(0, 4);
+                ASSERT_TRUE(magic.ok());
+                ASSERT_EQ(magic.ValueOrDie()->ToString(), "PARE");
+                // The same physical object must require the correct key.
+                EXPECT_THROW(::parquet::ParquetFileReader::Open(input),
+                             ::parquet::ParquetException);
+                ::parquet::ReaderProperties wrong_key;
+                wrong_key.file_decryption_properties(
+                    ::parquet::FileDecryptionProperties::Builder()
+                        .footer_key(std::string(32, 'x'))
+                        ->build());
+                auto wrong_key_input = fs->OpenInputFile(file.path);
+                ASSERT_TRUE(wrong_key_input.ok());
+                EXPECT_THROW(::parquet::ParquetFileReader::Open(
+                                 wrong_key_input.ValueOrDie(), wrong_key),
+                             ::parquet::ParquetException);
+            }
+        }
     }
 
     void
@@ -344,6 +410,27 @@ class FlushGrowingSegmentTest : public ::testing::Test {
         std::map<FieldId, FieldIndexMeta> field_map = {
             {vec_fid, field_index_meta}};
         return std::make_shared<CollectionIndexMeta>(100, std::move(field_map));
+    }
+};
+
+class ParquetTestDecryptor : public milvus::test::PlannerIdentityDecryptor {
+ public:
+    std::string
+    GetKey() const override {
+        return std::string(32, 'k');
+    }
+};
+
+class ParquetTestCipherPlugin : public milvus::test::PlannerCipherPlugin {
+ public:
+    std::shared_ptr<storage::plugin::IDecryptor>
+    GetDecryptor(int64_t ez_id,
+                 int64_t collection_id,
+                 const std::string& edek) const override {
+        if (ez_id != 17 || collection_id != 23 || edek != "fixture-edek") {
+            throw std::runtime_error("unexpected encrypted Parquet context");
+        }
+        return std::make_shared<ParquetTestDecryptor>();
     }
 };
 
@@ -1712,82 +1799,211 @@ TEST_F(FlushGrowingSegmentTest, FlushRejectsEndOffsetBeyondRowCount) {
     FreeFlushResult(&result);
 }
 
-TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
-    constexpr int64_t dim = 4;
-    constexpr int64_t row_count = 100;
-    constexpr int64_t start = 13;
-    constexpr int64_t end = 87;
-
-    auto& config = SegcoreConfig::default_config();
-    ScopedSegcoreConfigRestore config_restore(config);
-    InterimIndexConfigForTest interim_config;
-    interim_config.chunk_rows = 16;
-    interim_config.nlist = 1;
-    interim_config.nprobe = 1;
-    interim_config.dense_vector_interim_index_type =
-        knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
-    interim_config.sub_dim = dim;
-    interim_config.refine_ratio = 1.0F;
-    interim_config.refine_quant_type = "NONE";
-    interim_config.refine_with_quant_flag = false;
-    ApplyInterimIndexConfigForTest(interim_config, config);
-    config.set_storage_v3_enabled(true);
-    config.set_enable_growing_source_flush(true);
+TEST_F(FlushGrowingSegmentTest, EncryptedManifestFeedsGrowingAndSharedReaders) {
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.registerPluginForTest(
+        std::make_shared<ParquetTestCipherPlugin>());
+    auto plugin_guard = folly::makeGuard(
+        [&] { plugin_loader.unregisterPluginForTest("CipherPlugin"); });
 
     auto schema = std::make_shared<Schema>();
     auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
     auto vec_fid = schema->AddDebugField(
-        "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        "vec", DataType::VECTOR_FLOAT, 4, knowhere::metric::L2);
     schema->set_primary_field_id(pk_fid);
-
-    auto index_meta =
-        MakeVectorIndexMeta(vec_fid,
-                            dim,
-                            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
-                            knowhere::metric::L2);
-    auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
-    auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
-    ASSERT_NE(segment_impl, nullptr);
-
-    auto dataset = DataGen(schema, row_count);
-    auto offset = segment->PreInsert(row_count);
-    segment->Insert(offset,
-                    row_count,
+    auto segment = CreateGrowingSegment(schema, empty_index_meta);
+    constexpr int64_t rows = 8;
+    auto dataset = DataGen(schema, rows);
+    segment->PreInsert(rows);
+    segment->Insert(0,
+                    rows,
                     dataset.row_ids_.data(),
                     dataset.timestamps_.data(),
                     dataset.raw_);
-    auto vec_base = segment_impl->get_insert_record().get_data_base(vec_fid);
-    ASSERT_NE(vec_base, nullptr);
-    ASSERT_EQ(vec_base->num_chunk(), 0);
-    ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_fid));
+
+    const auto encoded_key = arrow::util::base64_encode(std::string(32, 'k'));
+    const char* keys[] = {loon_properties_writer_enc_enable,
+                          loon_properties_writer_enc_key,
+                          loon_properties_writer_enc_meta,
+                          loon_properties_writer_enc_algorithm};
+    const char* values[] = {
+        "true", encoded_key.c_str(), "17_23_fixture-edek", "AES_GCM_V1"};
+    LoonProperties properties{};
+    auto property_result = loon_properties_create(keys, values, 4, &properties);
+    ASSERT_EQ(property_result.err_code, 0)
+        << (property_result.message ? property_result.message : "");
+    loon_ffi_free_result(&property_result);
+    auto properties_guard =
+        folly::makeGuard([&] { loon_properties_free(&properties); });
 
     C_FLUSH_CONFIG_WITH_SCHEMA(flush_config, schema);
-    std::string segment_path = test_dir_ + "/segment_index_fallback_float";
+    std::string segment_path = test_dir_ + "/encrypted_manifest_readers";
     flush_config.segment_path = segment_path.c_str();
+    flush_config.writer_properties = &properties;
     flush_config.read_version = -1;
     flush_config.retry_limit = 3;
-
     CFlushResult result{};
-    auto status = FlushGrowingSegmentData(
-        segment.get(), start, end, &flush_config, &result);
+    auto status =
+        FlushGrowingSegmentData(segment.get(), 0, rows, &flush_config, &result);
     ASSERT_EQ(status.error_code, Success) << status.error_msg;
-    ASSERT_EQ(result.num_rows, end - start);
+    ASSERT_EQ(result.num_rows, rows);
+    AssertEncryptedParquetObjects(segment_path, result.committed_version);
 
+    // The shared manifest reader is used by physical index builds.
     auto field_datas = ReadFlushedFieldData(
-        segment_path, result, vec_fid, DataType::VECTOR_FLOAT, false, dim);
+        segment_path, result, vec_fid, DataType::VECTOR_FLOAT, false, 4);
     ASSERT_EQ(field_datas.size(), 1);
-    auto field_data = field_datas[0];
-    ASSERT_EQ(field_data->get_num_rows(), end - start);
-    auto source_vectors = dataset.get_col<float>(vec_fid);
-    for (int64_t i = 0; i < end - start; i++) {
-        auto row = static_cast<const float*>(field_data->RawValue(i));
-        ASSERT_NE(row, nullptr);
-        for (int64_t d = 0; d < dim; d++) {
-            EXPECT_FLOAT_EQ(row[d], source_vectors[(start + i) * dim + d]);
+    ASSERT_EQ(field_datas[0]->get_num_rows(), rows);
+    const auto source_vectors = dataset.get_col<float>(vec_fid);
+    for (int64_t row = 0; row < rows; ++row) {
+        auto actual = static_cast<const float*>(field_datas[0]->RawValue(row));
+        ASSERT_NE(actual, nullptr);
+        for (int64_t dim = 0; dim < 4; ++dim) {
+            EXPECT_FLOAT_EQ(actual[dim], source_vectors[row * 4 + dim]);
         }
     }
 
+    // Channel recovery loads a persisted prefix while the segment is Growing.
+    std::string manifest_json =
+        "{\"base_path\":\"" + segment_path +
+        "\",\"ver\":" + std::to_string(result.committed_version) + "}";
+    auto reloaded = CreateGrowingSegment(schema, empty_index_meta);
+    milvus::proto::segcore::SegmentLoadInfo load_info;
+    load_info.set_segmentid(1);
+    load_info.set_num_of_rows(rows);
+    load_info.set_manifest_path(manifest_json);
+    reloaded->SetLoadInfo(load_info);
+    milvus::tracer::TraceContext trace_ctx;
+    ASSERT_NO_THROW(reloaded->Load(trace_ctx, nullptr));
+    EXPECT_EQ(reloaded->get_row_count(), rows);
+    EXPECT_TRUE(reloaded->HasFieldData(vec_fid));
+    std::vector<int64_t> offsets(rows);
+    std::iota(offsets.begin(), offsets.end(), 0);
+    auto reloaded_vectors =
+        reloaded->bulk_subscript(nullptr, vec_fid, offsets.data(), rows);
+    const auto& reloaded_values =
+        reloaded_vectors->vectors().float_vector().data();
+    ASSERT_EQ(reloaded_values.size(), source_vectors.size());
+    for (int64_t i = 0; i < reloaded_values.size(); ++i) {
+        EXPECT_FLOAT_EQ(reloaded_values[i], source_vectors[i]);
+    }
     FreeFlushResult(&result);
+}
+
+TEST_F(FlushGrowingSegmentTest, FlushFloatVectorFromIndexAfterChunksCleared) {
+    auto& plugin_loader = storage::PluginLoader::GetInstance();
+    plugin_loader.registerPluginForTest(
+        std::make_shared<ParquetTestCipherPlugin>());
+    auto plugin_guard = folly::makeGuard(
+        [&] { plugin_loader.unregisterPluginForTest("CipherPlugin"); });
+    for (bool encrypted : {false, true}) {
+        constexpr int64_t dim = 4;
+        constexpr int64_t row_count = 100;
+        constexpr int64_t start = 13;
+        constexpr int64_t end = 87;
+
+        auto& config = SegcoreConfig::default_config();
+        ScopedSegcoreConfigRestore config_restore(config);
+        InterimIndexConfigForTest interim_config;
+        interim_config.chunk_rows = 16;
+        interim_config.nlist = 1;
+        interim_config.nprobe = 1;
+        interim_config.dense_vector_interim_index_type =
+            knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+        interim_config.sub_dim = dim;
+        interim_config.refine_ratio = 1.0F;
+        interim_config.refine_quant_type = "NONE";
+        interim_config.refine_with_quant_flag = false;
+        ApplyInterimIndexConfigForTest(interim_config, config);
+        config.set_storage_v3_enabled(true);
+        config.set_enable_growing_source_flush(true);
+
+        auto schema = std::make_shared<Schema>();
+        auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+        auto vec_fid = schema->AddDebugField(
+            "vec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
+        schema->set_primary_field_id(pk_fid);
+
+        auto index_meta =
+            MakeVectorIndexMeta(vec_fid,
+                                dim,
+                                knowhere::IndexEnum::INDEX_FAISS_IVFFLAT,
+                                knowhere::metric::L2);
+        auto segment = CreateGrowingSegment(schema, index_meta, 1, config);
+        auto* segment_impl = dynamic_cast<SegmentGrowingImpl*>(segment.get());
+        ASSERT_NE(segment_impl, nullptr);
+
+        auto dataset = DataGen(schema, row_count);
+        auto offset = segment->PreInsert(row_count);
+        segment->Insert(offset,
+                        row_count,
+                        dataset.row_ids_.data(),
+                        dataset.timestamps_.data(),
+                        dataset.raw_);
+        auto vec_base =
+            segment_impl->get_insert_record().get_data_base(vec_fid);
+        ASSERT_NE(vec_base, nullptr);
+        ASSERT_EQ(vec_base->num_chunk(), 0);
+        ASSERT_TRUE(segment_impl->CanReadRawVectorFromIndex(vec_fid));
+
+        C_FLUSH_CONFIG_WITH_SCHEMA(flush_config, schema);
+        std::string segment_path =
+            test_dir_ + (encrypted ? "/segment_index_fallback_float_encrypted"
+                                   : "/segment_index_fallback_float_plain");
+        flush_config.segment_path = segment_path.c_str();
+        LoonProperties properties{};
+        std::string encoded_key;
+        auto properties_guard = folly::makeGuard([&] {
+            if (encrypted) {
+                loon_properties_free(&properties);
+            }
+        });
+        if (encrypted) {
+            encoded_key = arrow::util::base64_encode(std::string(32, 'k'));
+            const char* keys[] = {loon_properties_writer_enc_enable,
+                                  loon_properties_writer_enc_key,
+                                  loon_properties_writer_enc_meta,
+                                  loon_properties_writer_enc_algorithm};
+            const char* values[] = {"true",
+                                    encoded_key.c_str(),
+                                    "17_23_fixture-edek",
+                                    "AES_GCM_V1"};
+            auto property_result =
+                loon_properties_create(keys, values, 4, &properties);
+            ASSERT_EQ(property_result.err_code, 0)
+                << (property_result.message ? property_result.message : "");
+            loon_ffi_free_result(&property_result);
+            flush_config.writer_properties = &properties;
+        }
+        flush_config.read_version = -1;
+        flush_config.retry_limit = 3;
+
+        CFlushResult result{};
+        auto status = FlushGrowingSegmentData(
+            segment.get(), start, end, &flush_config, &result);
+        ASSERT_EQ(status.error_code, Success) << status.error_msg;
+        ASSERT_EQ(result.num_rows, end - start);
+        if (encrypted) {
+            AssertEncryptedParquetObjects(segment_path,
+                                          result.committed_version);
+        }
+
+        auto field_datas = ReadFlushedFieldData(
+            segment_path, result, vec_fid, DataType::VECTOR_FLOAT, false, dim);
+        ASSERT_EQ(field_datas.size(), 1);
+        auto field_data = field_datas[0];
+        ASSERT_EQ(field_data->get_num_rows(), end - start);
+        auto source_vectors = dataset.get_col<float>(vec_fid);
+        for (int64_t i = 0; i < end - start; i++) {
+            auto row = static_cast<const float*>(field_data->RawValue(i));
+            ASSERT_NE(row, nullptr);
+            for (int64_t d = 0; d < dim; d++) {
+                EXPECT_FLOAT_EQ(row[d], source_vectors[(start + i) * dim + d]);
+            }
+        }
+
+        FreeFlushResult(&result);
+    }
 }
 
 TEST_F(FlushGrowingSegmentTest,

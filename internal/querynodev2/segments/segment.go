@@ -24,6 +24,7 @@ package segments
 #include "segcore/plan_c.h"
 #include "segcore/segment_c.h"
 #include "common/init_c.h"
+#include "milvus-storage/ffi_c.h"
 */
 import "C"
 
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
@@ -1596,6 +1598,18 @@ func (s *LocalSegment) FlushData(ctx context.Context, startOffset, endOffset int
 
 	// build C flush config
 	var cConfig C.CFlushConfig
+	if ez := hookutil.GetEzByCollProperties(config.Schema.GetProperties(), config.CollectionID); ez != nil {
+		writerProperties, err := packed.WriterEncryptionProperties(ez.EzID, ez.CollectionID)
+		if err != nil {
+			return nil, err
+		}
+		cWriterProperties, cleanup, err := packed.MakeOwnedProperties(writerProperties)
+		if err != nil {
+			return nil, err
+		}
+		defer cleanup()
+		cConfig.writer_properties = (*C.struct_LoonProperties)(unsafe.Pointer(cWriterProperties))
+	}
 	cSegmentPath := C.CString(config.SegmentBasePath)
 	defer C.free(unsafe.Pointer(cSegmentPath))
 	cConfig.segment_path = cSegmentPath

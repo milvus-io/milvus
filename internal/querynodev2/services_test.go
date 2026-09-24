@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
+	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler"
@@ -53,6 +54,8 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -3100,4 +3103,118 @@ func TestQueryNodeService(t *testing.T) {
 	defer streaming.RecoverWALForTest()
 
 	suite.Run(t, new(ServiceSuite))
+}
+
+func (suite *ServiceSuite) TestWatchDmChannelsLoadsGrowingBeforeConsuming() {
+	suite.checkGrowingLoadBeforeConsume(nil)
+}
+
+func (suite *ServiceSuite) TestWatchDmChannelsDoesNotConsumeOnGrowingLoadFailure() {
+	suite.checkGrowingLoadBeforeConsume(merr.ErrServiceInternal)
+}
+
+func (suite *ServiceSuite) checkGrowingLoadBeforeConsume(loadErr error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
+	const segmentID int64 = 10001
+	seek := &msgpb.MsgPosition{ChannelName: suite.vchannel, MsgID: []byte{1, 2, 3}, Timestamp: 12345}
+	req := &querypb.WatchDmChannelsRequest{
+		Base:         &commonpb.MsgBase{TargetID: suite.node.session.ServerID},
+		CollectionID: suite.collectionID, PartitionIDs: suite.partitionIDs, Schema: schema,
+		Infos: []*datapb.VchannelInfo{{
+			CollectionID: suite.collectionID, ChannelName: suite.vchannel,
+			SeekPosition: seek, UnflushedSegmentIds: []int64{segmentID},
+		}},
+		SegmentInfos: map[int64]*datapb.SegmentInfo{segmentID: {
+			ID: segmentID, CollectionID: suite.collectionID, PartitionID: suite.partitionIDs[0],
+			InsertChannel: suite.vchannel, NumOfRows: 10, StorageVersion: storage.StorageV3,
+			ManifestPath: `{"base_path":"files/insert_log/test","ver":1}`, DmlPosition: seek,
+		}},
+		LoadMeta: &querypb.LoadMetaInfo{
+			LoadType:     querypb.LoadType_LoadCollection,
+			CollectionID: suite.collectionID, PartitionIDs: suite.partitionIDs,
+		},
+		IndexInfoList: mock_segcore.GenTestIndexInfoList(suite.collectionID, schema),
+	}
+	loader := segments.NewMockLoader(suite.T())
+	loader.EXPECT().Load(mock.Anything, suite.collectionID, segments.SegmentTypeSealed, int64(0)).Return(nil, nil).Once()
+	dispatcher := msgdispatcher.NewMockClient(suite.T())
+	originalLoader, originalPipelines := suite.node.loader, suite.node.pipelineManager
+	pipelines := pipeline.NewManager(suite.node.manager, dispatcher, suite.node.delegators)
+	suite.node.loader, suite.node.pipelineManager = loader, pipelines
+	defer func() {
+		pipelines.Close()
+		suite.node.loader, suite.node.pipelineManager = originalLoader, originalPipelines
+	}()
+	entered, completeLoad := make(chan struct{}), make(chan struct{})
+	loadFinished := make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(completeLoad) })
+	loader.EXPECT().Load(mock.Anything, suite.collectionID, segments.SegmentTypeGrowing, int64(0), mock.Anything).
+		RunAndReturn(func(_ context.Context, _ int64, _ segments.SegmentType, _ int64, infos ...*querypb.SegmentLoadInfo) ([]segments.Segment, error) {
+			suite.Equal(segmentID, infos[0].GetSegmentID())
+			suite.Equal(req.SegmentInfos[segmentID].GetManifestPath(), infos[0].GetManifestPath())
+			close(entered)
+			select {
+			case <-completeLoad:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			close(loadFinished)
+			return nil, loadErr
+		}).Once()
+	registered := make(chan *msgdispatcher.StreamConfig, 1)
+	if loadErr == nil {
+		dispatcher.EXPECT().Register(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, config *msgdispatcher.StreamConfig) (<-chan *msgstream.MsgPack, error) {
+				select {
+				case <-loadFinished:
+				default:
+					suite.T().Error("dispatcher registered before growing load completed")
+				}
+				registered <- config
+				return make(chan *msgstream.MsgPack), nil
+			}).Once()
+		dispatcher.EXPECT().Deregister(suite.vchannel).Once()
+	} else {
+		dispatcher.EXPECT().Deregister(suite.vchannel).Maybe()
+	}
+	result := make(chan *commonpb.Status, 1)
+	go func() {
+		status, err := suite.node.WatchDmChannels(ctx, req)
+		if err != nil {
+			status = merr.Status(err)
+		}
+		result <- status
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		suite.T().Fatal("growing loader was not called")
+	}
+	select {
+	case <-registered:
+		suite.T().Fatal("started consuming before growing load completed")
+	default:
+	}
+	once.Do(func() { close(completeLoad) })
+	select {
+	case status := <-result:
+		if loadErr != nil {
+			suite.Error(merr.Error(status))
+			dispatcher.AssertNotCalled(suite.T(), "Register", mock.Anything, mock.Anything)
+			return
+		}
+		suite.Require().NoError(merr.Error(status))
+	case <-ctx.Done():
+		suite.T().Fatal("watch did not complete")
+	}
+	select {
+	case config := <-registered:
+		suite.True(proto.Equal(seek, config.Pos))
+		suite.Equal(suite.vchannel, config.VChannel)
+	case <-ctx.Done():
+		suite.T().Fatal("watch succeeded without registering consumption")
+	}
 }

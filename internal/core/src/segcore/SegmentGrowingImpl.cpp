@@ -81,6 +81,7 @@
 #include "segcore/Utils.h"
 #include "segcore/memory_planner.h"
 #include "storage/KeyRetriever.h"
+#include "storage/PluginLoader.h"
 #include "storage/ThreadPool.h"
 #include "storage/ThreadPools.h"
 #include "storage/Types.h"
@@ -3204,6 +3205,11 @@ SegmentGrowingImpl::LoadColumnsGroups(std::string manifest_path) {
         schema->ConvertToLoonArrowSchema(/*text_lob_as_binary=*/true);
     reader_ = milvus_storage::api::Reader::create(
         column_groups, arrow_schema, nullptr, *properties);
+    if (storage::PluginLoader::GetInstance().getCipherPlugin()) {
+        reader_->set_keyretriever([](const std::string& key_metadata) {
+            return storage::KeyRetriever().GetKey(key_metadata);
+        });
+    }
 
     // A column group whose fields were all dropped from the segment schema
     // has an empty read projection; opening it violates the reader contract

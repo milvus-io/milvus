@@ -73,7 +73,7 @@ var (
 
 	// CMEK (Customer Managed Encryption Keys) writer properties
 	PropertyWriterEncEnable = C.GoString(C.loon_properties_writer_enc_enable)    // Enable encryption for written data
-	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Encryption key for data encryption
+	PropertyWriterEncKey    = C.GoString(C.loon_properties_writer_enc_key)       // Base64-encoded encryption key for the FFI writer
 	PropertyWriterEncMeta   = C.GoString(C.loon_properties_writer_enc_meta)      // Encoded metadata containing zone ID, collection ID, and key version
 	PropertyWriterEncAlgo   = C.GoString(C.loon_properties_writer_enc_algorithm) // Encryption algorithm (e.g., "AES_GCM_V1")
 )
@@ -223,6 +223,32 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 		}
 	}
 
+	return makeProperties(keys, values)
+}
+
+// MakeOwnedProperties creates properties whose outer struct and contents live
+// in C memory, so they can be referenced by another C struct passed through cgo.
+// It adds no filesystem defaults. Call cleanup after the native caller finishes.
+func MakeOwnedProperties(kvs map[string]string) (*C.LoonProperties, func(), error) {
+	keys := make([]string, 0, len(kvs))
+	values := make([]string, 0, len(kvs))
+	for key, value := range kvs {
+		keys = append(keys, key)
+		values = append(values, value)
+	}
+	properties, err := makeProperties(keys, values)
+	if err != nil {
+		return nil, nil, err
+	}
+	owned := (*C.LoonProperties)(C.malloc(C.sizeof_LoonProperties))
+	*owned = *properties
+	return owned, func() {
+		FreeProperties(owned)
+		C.free(unsafe.Pointer(owned))
+	}, nil
+}
+
+func makeProperties(keys, values []string) (*C.LoonProperties, error) {
 	// Convert to C arrays
 	cKeys := make([]*C.char, len(keys))
 	cValues := make([]*C.char, len(values))
@@ -261,7 +287,7 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	return properties, nil
 }
 
-// FreeProperties releases a C-allocated LoonProperties object.
+// FreeProperties releases the contents of a LoonProperties object, not its outer struct.
 func FreeProperties(props *C.LoonProperties) {
 	if props != nil {
 		C.loon_properties_free(props)
