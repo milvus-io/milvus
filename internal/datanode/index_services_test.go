@@ -709,10 +709,10 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 				TaskIDs:   []int64{taskID},
 				JobType:   indexpb.JobType_JobTypeAnalyzeJob,
 			})
-			s.NoError(err)
+			s.Require().NoError(err)
 			err = merr.Error(resp.GetStatus())
-			s.NoError(err)
-			s.Equal(1, len(resp.GetAnalyzeJobResults().GetResults()))
+			s.Require().NoError(err)
+			s.Require().Len(resp.GetAnalyzeJobResults().GetResults(), 1)
 			result := resp.GetAnalyzeJobResults().GetResults()[0]
 			if result.GetState() == indexpb.JobState_JobStateFinished {
 				centroidsFile := result.GetCentroidsFile()
@@ -720,7 +720,8 @@ func (s *IndexServiceSuite) Test_CreateAnalyzeTask() {
 				s.Contains(centroidsFile, "/"+common.Centroids)
 				break
 			}
-			s.Equal(indexpb.JobState_JobStateInProgress, result.GetState())
+			s.Require().Equal(indexpb.JobState_JobStateInProgress, result.GetState(),
+				"analyze task left in-progress state: %s", result.GetFailReason())
 			time.Sleep(time.Second)
 		}
 
