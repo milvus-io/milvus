@@ -327,6 +327,15 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                                  exec::SegmentExpr* segment) {
     tracer::AutoSpan span(
         "NgramInvertedIndex::ExecuteQuery", tracer::GetRootSpan(), true);
+    // On 2.6 the tantivy string FFI is C-string based on both sides: rows
+    // are indexed truncated at their first NUL and a literal handed to
+    // ngram_match_query is truncated the same way. A literal with an
+    // interior NUL therefore cannot be answered by the index (the C++ gate
+    // and the rust check would not even agree on its length); leave it to
+    // the brute-force path, which reads the raw data with explicit lengths.
+    if (literal.find('\0') != std::string::npos) {
+        return std::nullopt;
+    }
     if (Utf8LiteralLength(literal) < min_gram_) {
         return std::nullopt;
     }
@@ -340,7 +349,12 @@ NgramInvertedIndex::ExecuteQuery(const std::string& literal,
                               static_cast<int>(literal.length()));
             span.SetAttribute("min_gram", min_gram_);
             span.SetAttribute("max_gram", max_gram_);
-            bool need_post_filter = literal.length() > max_gram_;
+            // A literal of at most max_gram chars is itself an indexed gram
+            // and rust answers it with an exact term query, so no post-filter
+            // is needed. Count chars, as rust does; byte length would send
+            // every short multi-byte (e.g. CJK) literal through a redundant
+            // full post-filter.
+            bool need_post_filter = Utf8LiteralLength(literal) > max_gram_;
 
             if (schema_.data_type() == proto::schema::DataType::JSON) {
                 auto predicate = [&literal, this](const milvus::Json& data) {
