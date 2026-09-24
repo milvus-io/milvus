@@ -4512,6 +4512,69 @@ func TestSearchTask_SearchShardRecordsNodeHint(t *testing.T) {
 	assert.Equal(t, nodeID, recordedNodeID)
 }
 
+func TestSearchTask_SearchShardInvalidatesCacheOnCollectionNotLoaded(t *testing.T) {
+	ctx := context.Background()
+	const channel = "by-dev-rootcoord-dml_0_100v0"
+	const nodeID int64 = 101
+	const collectionID int64 = 100
+
+	newTask := func(manager shardclient.ShardClientMgr) *searchTask {
+		return &searchTask{
+			ctx: ctx,
+			SearchRequest: &internalpb.SearchRequest{
+				Base: &commonpb.MsgBase{
+					MsgType:  commonpb.MsgType_Search,
+					SourceID: paramtable.GetNodeID(),
+				},
+				CollectionID: collectionID,
+			},
+			request: &milvuspb.SearchRequest{
+				DbName:         "default",
+				CollectionName: "test_search_shard_invalidate_on_not_loaded",
+			},
+			Condition:         NewTaskCondition(ctx),
+			shardClientMgr:    manager,
+			resultBuf:         typeutil.NewConcurrentSet[*internalpb.SearchResults](),
+			queryChannelsNode: typeutil.NewConcurrentMap[string, int64](),
+		}
+	}
+
+	t.Run("collection_not_loaded_invalidates_cache", func(t *testing.T) {
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+			Status: merr.Status(merr.WrapErrCollectionNotLoaded(collectionID)),
+		}, nil)
+		manager := shardclient.NewMockShardClientManager(t)
+		manager.EXPECT().InvalidateShardLeaderCache([]int64{collectionID}).Return()
+
+		err := newTask(manager).searchShard(ctx, nodeID, qn, channel)
+		require.Error(t, err)
+	})
+
+	t.Run("not_shard_leader_invalidates_cache", func(t *testing.T) {
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+			Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_NotShardLeader},
+		}, nil)
+		manager := shardclient.NewMockShardClientManager(t)
+		manager.EXPECT().InvalidateShardLeaderCache([]int64{collectionID}).Return()
+
+		err := newTask(manager).searchShard(ctx, nodeID, qn, channel)
+		require.Error(t, err)
+	})
+
+	t.Run("other_system_error_keeps_cache", func(t *testing.T) {
+		qn := mocks.NewMockQueryNodeClient(t)
+		qn.EXPECT().Search(mock.Anything, mock.Anything).Return(&internalpb.SearchResults{
+			Status: merr.Status(merr.WrapErrServiceInternal("boom")),
+		}, nil)
+		manager := shardclient.NewMockShardClientManager(t)
+
+		err := newTask(manager).searchShard(ctx, nodeID, qn, channel)
+		require.Error(t, err)
+	})
+}
+
 type GetPartitionIDsSuite struct {
 	suite.Suite
 
