@@ -78,7 +78,9 @@ Principal names and string tag values are bound as template values rather than
 interpolated into expression text, so they do not require an ASCII-only
 whitelist. Tag keys cannot contain a single quote because the
 `$current_principal_tags['key']` syntax does not define key escaping. Names and
-keys must otherwise be non-blank and satisfy their configured byte limits.
+keys must otherwise be non-blank. Configured byte limits apply to tag-binding
+writes; existing identifiers remain addressable for reads and deletes after
+those limits are lowered.
 
 If a policy references a missing tag, that policy predicate evaluates to
 false.
@@ -167,7 +169,8 @@ RLS accepts a deliberately restricted expression subset:
   template value;
 - `in` with literal value lists;
 - `array_contains`, `array_contains_all`, and `array_contains_any` on primitive
-  array fields;
+  array fields. `using_expr` excludes element-nullable arrays, and integer-array
+  `array_contains_all` and `array_contains_any` accept only integer literals;
 - `$current_principal` as a string template value;
 - `$current_principal_tags['key']` as a string, int64, or double template value.
 
@@ -188,27 +191,28 @@ functions such as `now()`.
 RootCoord owns policies and principal tag bindings. Records use globally unique
 collection IDs as identity; database and collection names are descriptive.
 RootCoord keeps complete policies in a name-keyed collection map, including
-their internal IDs.
+their internal IDs. Principal tag bindings remain in the catalog and are read
+by `(collectionID, principalName)` instead of being loaded during recovery.
 
 The initial design assumes policy and tag mutations are low-frequency
 control-plane operations. Each mutation uses a CChannel broadcast with the same
 `SharedDBName + ExclusiveCollectionName` resources as collection DDL. The
 message carries a complete post-image or stable drop identity. Its ACK callback
-persists metadata, updates RootCoord state, and invalidates the relevant Proxy
-cache; callback failures are retried. This orders mutations with collection
-drop and schema changes.
+persists metadata, updates the RootCoord policy map when applicable, and
+invalidates the relevant Proxy cache; callback failures are retried. This
+orders mutations with collection drop and schema changes.
 
 CChannel load is determined by policy and tag update rate, not by the number of
 principals used in data requests. Applications should not use tag APIs as a
-per-request data path. Supporting high-frequency tag churn and scaling
-RootCoord storage or recovery for very large numbers of tag bindings remain
-separate work.
+per-request data path. Bulk principal APIs materialize their result on demand;
+pagination and high-frequency tag churn remain follow-up work.
 
 Proxy caches policies per collection and tags per
 `(collectionID, principalName)`. It does not preload Proxy RLS state. An
 RLS-enforced request loads missing state through `GetRLSMetadata`; refresh
-failure denies the request. Policy freshness is checked on use. Principal tag
-entries expire through a periodic scanner and reload on their next use.
+failure denies the request. Policy and principal-tag freshness are checked on
+use, and expired principal entries reload immediately. A periodic scanner
+reclaims expired entries that are not accessed again.
 
 RLS messages are eligible for generic CDC replication and replay the same
 idempotent ACK callbacks on a secondary. Dedicated RLS CDC compatibility and
@@ -219,7 +223,6 @@ recovery validation remains follow-up work.
 | Config | Meaning |
 | --- | --- |
 | `proxy.rls.maxPoliciesPerCollection` | Maximum policies on one collection. |
-| `proxy.rls.maxPrincipalsPerCollection` | Maximum principal identifiers with stored tags on one collection. |
 | `proxy.rls.maxTagsPerPrincipal` | Maximum stored tags for one collection-scoped principal identifier. |
 | `proxy.rls.maxExpressionLength` | Maximum bytes in one policy expression. |
 | `proxy.rls.maxCombinedExpressionLength` | Maximum bytes in one combined expression. |
@@ -229,6 +232,8 @@ recovery validation remains follow-up work.
 | `proxy.rls.maxTagKeyLength` | Maximum tag-key length in bytes. |
 | `proxy.rls.maxTagValueLength` | Maximum string tag-value length in bytes. |
 | `proxy.rls.maxArrayLiteralElements` | Maximum literal elements in supported array expressions. |
+| `proxy.rls.maxPrincipalCacheEntries` | Maximum cached principal entries per collection. |
+| `proxy.rls.maxPrincipalCacheBytes` | Maximum total cached principal-name and tag payload bytes per collection. |
 | `proxy.rls.metaRefreshInterval` | Policy freshness interval and principal-tag cache lifetime. |
 
 ## Compatibility And Rollout
@@ -257,4 +262,4 @@ lazy principal-tag loading rather than collection-wide Proxy snapshots, and
 the existing broadcast/ACK path rather than direct catalog mutation.
 
 Follow-ups include an atomic tag patch API, high-frequency tag mutation,
-RootCoord tag-storage and lookup scaling, and dedicated CDC validation.
+pagination for bulk principal APIs, and dedicated CDC validation.

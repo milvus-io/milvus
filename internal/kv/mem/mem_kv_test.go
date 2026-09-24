@@ -122,6 +122,14 @@ func TestMemoryKV_LoadBytesWithPrefix(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestMemoryKV_WalkWithPrefixHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := NewMemoryKV().WalkWithPrefix(ctx, "missing", 1, func(_, _ []byte) error { return nil })
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
 func TestMemoryKV_MultiSaveBytes(t *testing.T) {
 	saveAndLoadBytesTests := map[string][]byte{
 		"test1":   []byte("value1"),

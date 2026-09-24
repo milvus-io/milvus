@@ -163,9 +163,8 @@ type RLSPrincipal struct {
 	Tags          map[string]rlsutil.TagValue
 }
 
-// RLSMetadata is a point-in-time view of the RLS metadata cached for a
-// collection. Callers must receive cloned policies and principals so they
-// cannot mutate the MetaTable cache through this model.
+// RLSMetadata is a collection's RLS metadata view. Policies are detached from
+// MetaTable state, and principals are caller-owned records decoded by Catalog.
 type RLSMetadata struct {
 	CollectionID int64
 	Policies     []*RLSPolicy
@@ -214,17 +213,6 @@ func CloneRLSPrincipal(principal *RLSPrincipal) *RLSPrincipal {
 		PrincipalName: principal.PrincipalName,
 		Tags:          cloneRLSTags(principal.Tags),
 	}
-}
-
-func CloneRLSPrincipals(principals []*RLSPrincipal) []*RLSPrincipal {
-	if principals == nil {
-		return nil
-	}
-	cloned := make([]*RLSPrincipal, len(principals))
-	for i, principal := range principals {
-		cloned[i] = CloneRLSPrincipal(principal)
-	}
-	return cloned
 }
 
 func cloneRowPolicyActions(actions []rlsutil.PolicyAction) []rlsutil.PolicyAction {

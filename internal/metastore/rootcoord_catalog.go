@@ -101,6 +101,8 @@ type RootCoordCatalog interface {
 	DropRLSPolicy(ctx context.Context, collectionID int64, policyID int64) error
 	ListRLSPolicies(ctx context.Context, collectionID int64) ([]*model.RLSPolicy, error)
 	SaveRLSPrincipal(ctx context.Context, principal *model.RLSPrincipal) error
+	// GetRLSPrincipal and ListRLSPrincipals return caller-owned results,
+	// including nested tag maps.
 	GetRLSPrincipal(ctx context.Context, collectionID int64, principalName string) (*model.RLSPrincipal, error)
 	DropRLSPrincipal(ctx context.Context, collectionID int64, principalName string) error
 	ListRLSPrincipals(ctx context.Context, collectionID int64) ([]*model.RLSPrincipal, error)
