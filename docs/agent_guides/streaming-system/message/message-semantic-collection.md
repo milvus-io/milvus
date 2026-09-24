@@ -55,8 +55,9 @@ All broadcast messages implicitly carry **SharedCluster** via the Broadcaster.
 RLS cache invalidation does not fetch metadata in the ACK callback. Policy
 metadata remains collection-scoped. Principal tags are cached by
 `(collectionID, principal)` and loaded lazily only when that principal sends an
-RLS-enforced request. There is no background RLS reconciliation loop and no
-negative principal cache.
+RLS-enforced request. A successful lookup for a missing principal is cached as
+an empty, TTL-bound entry; principal create, update, and drop notifications
+evict it. There is no background RLS reconciliation loop.
 
 ## Replication Compatibility
 
