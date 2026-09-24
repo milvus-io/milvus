@@ -204,7 +204,7 @@ func TestMinioObjectStorageCopyObjectCrossBucketMultipartRequests(t *testing.T) 
 						fmt.Fprint(w, `<Error><Code>AccessDenied</Code><Message>part copy denied</Message></Error>`)
 						return
 					}
-					fmt.Fprintf(w, `<CopyPartResult><LastModified>2026-09-23T00:00:00Z</LastModified><ETag>"part-%s"</ETag></CopyPartResult>`, query.Get("partNumber"))
+					fmt.Fprintf(w, `<CopyPartResult><LastModified>2026-09-23T00:00:00Z</LastModified><ETag>"part-%d"</ETag></CopyPartResult>`, len(ranges))
 				case r.Method == http.MethodPost && query.Get("uploadId") == "copy-upload":
 					assert.NoError(t, xml.NewDecoder(r.Body).Decode(&completed))
 					finished = true
