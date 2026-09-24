@@ -17,6 +17,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -29,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/json"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -38,6 +40,26 @@ import (
 
 // this file contains proxy management restful API handler
 var mgrRouteRegisterOnce sync.Once
+
+func writeJSONResp(ctx context.Context, w http.ResponseWriter, status int, payload any) {
+	bs, err := json.Marshal(payload)
+	if err != nil {
+		mlog.Warn(ctx, "failed to marshal JSON response", mlog.Err(err))
+		status = http.StatusInternalServerError
+		bs, _ = json.Marshal(map[string]string{
+			"msg": fmt.Sprintf("failed to marshal response, %s", err.Error()),
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(bs); err != nil {
+		mlog.Warn(ctx, "failed to write JSON response", mlog.Err(err))
+	}
+}
+
+func writeJSONWithMsg(ctx context.Context, w http.ResponseWriter, status int, msg string) {
+	writeJSONResp(ctx, w, status, map[string]string{"msg": msg})
+}
 
 func RegisterMgrRoute(proxy *Proxy) {
 	mgrRouteRegisterOnce.Do(func() {
@@ -125,17 +147,16 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		Params:  params,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to pause garbage collection, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to pause garbage collection, %s", err.Error()))
 		return
 	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to pause garbage collection, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to pause garbage collection, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"msg": "OK", "ticket": "%s"}`, ticket)
+	writeJSONResp(req.Context(), w, http.StatusOK, map[string]string{"msg": "OK", "ticket": ticket})
 }
 
 type commitBackfillSegmentStatusJSON struct {
@@ -167,17 +188,10 @@ func toCommitBackfillSegmentStatusesJSON(statuses []*datapb.CommitBackfillResult
 // path to DataCoord.CommitBackfillResult and returns the aggregated
 // per-segment commit status as JSON.
 func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request) {
-	writeJSON := func(status int, payload map[string]interface{}) {
-		w.WriteHeader(status)
-		bs, _ := json.Marshal(payload)
-		w.Write(bs)
-	}
-
 	resultPath := req.URL.Query().Get("result_path")
 	if resultPath == "" {
-		writeJSON(http.StatusBadRequest, map[string]interface{}{
-			"msg": "result_path query parameter is required",
-		})
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			"result_path query parameter is required")
 		return
 	}
 
@@ -188,15 +202,14 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 	if err != nil {
 		// Use json.Marshal so an err.Error() containing quotes or control
 		// characters can't break the JSON response envelope.
-		writeJSON(http.StatusInternalServerError, map[string]interface{}{
-			"msg": fmt.Sprintf("failed to commit backfill result, %s", err.Error()),
-		})
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to commit backfill result, %s", err.Error()))
 		return
 	}
 	if !merr.Ok(resp.GetStatus()) {
 		// Even on failure we include the per-segment diagnostics so callers can
 		// see which segments tripped pre-validation.
-		writeJSON(http.StatusInternalServerError, map[string]interface{}{
+		writeJSONResp(req.Context(), w, http.StatusInternalServerError, map[string]interface{}{
 			"msg":                fmt.Sprintf("failed to commit backfill result, %s", resp.GetStatus().GetReason()),
 			"total_segments":     resp.GetTotalSegments(),
 			"committed_segments": resp.GetCommittedSegments(),
@@ -205,7 +218,7 @@ func (node *Proxy) CommitBackfillResult(w http.ResponseWriter, req *http.Request
 		})
 		return
 	}
-	writeJSON(http.StatusOK, map[string]interface{}{
+	writeJSONResp(req.Context(), w, http.StatusOK, map[string]interface{}{
 		"msg":                "OK",
 		"total_segments":     resp.GetTotalSegments(),
 		"committed_segments": resp.GetCommittedSegments(),
@@ -222,8 +235,8 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	if ticket != "" {
 		_, collectionID, err = DecodeTicket(ticket)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to decode ticket, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+			writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+				fmt.Sprintf("failed to decode ticket, %s", err.Error()))
 			return
 		}
 	}
@@ -245,17 +258,16 @@ func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
 		Params:  params,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume garbage collection, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume garbage collection, %s", err.Error()))
 		return
 	}
 	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume garbage collection, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume garbage collection, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) ListQueryNode(w http.ResponseWriter, req *http.Request) {
@@ -263,41 +275,34 @@ func (node *Proxy) ListQueryNode(w http.ResponseWriter, req *http.Request) {
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to list query node, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, resp.GetStatus().GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to list query node, %s", resp.GetStatus().GetReason()))
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
 	// skip marshal status to output
 	resp.Status = nil
-	bytes, err := json.Marshal(resp)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to list query node, %s"}`, err.Error())
-		return
-	}
-	w.Write(bytes)
+	writeJSONResp(req.Context(), w, http.StatusOK, resp)
 }
 
 func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to get query node distribution, %s", err.Error()))
 		return
 	}
 
@@ -306,18 +311,16 @@ func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Req
 		NodeID: nodeID,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to get query node distribution, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, resp.GetStatus().GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to get query node distribution, %s", resp.GetStatus().GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-
 	// Use string array for SealedSegmentIDs to prevent precision loss in JSON parsers.
 	// Large integers (int64) may be incorrectly rounded when parsed as double.
 	type distribution struct {
@@ -332,13 +335,7 @@ func (node *Proxy) GetQueryNodeDistribution(w http.ResponseWriter, req *http.Req
 		}),
 	}
 
-	bytes, err := json.Marshal(dist)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to get query node distribution, %s"}`, err.Error())
-		return
-	}
-	w.Write(bytes)
+	writeJSONResp(req.Context(), w, http.StatusOK, dist)
 }
 
 func (node *Proxy) SuspendQueryCoordBalance(w http.ResponseWriter, req *http.Request) {
@@ -346,18 +343,17 @@ func (node *Proxy) SuspendQueryCoordBalance(w http.ResponseWriter, req *http.Req
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend balance, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend balance, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend balance, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend balance, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Request) {
@@ -365,18 +361,17 @@ func (node *Proxy) ResumeQueryCoordBalance(w http.ResponseWriter, req *http.Requ
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume balance, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume balance, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume balance, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume balance, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http.Request) {
@@ -384,22 +379,21 @@ func (node *Proxy) CheckQueryCoordBalanceStatus(w http.ResponseWriter, req *http
 		Base: commonpbutil.NewMsgBase(),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check balance status, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check balance status, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check balance status, %s"}`, resp.GetStatus().GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check balance status, %s", resp.GetStatus().GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
 	balanceStatus := "suspended"
 	if resp.IsActive {
 		balanceStatus = "active"
 	}
-	fmt.Fprintf(w, `{"msg": "OK", "status": "%v"}`, balanceStatus)
+	writeJSONResp(req.Context(), w, http.StatusOK, map[string]string{"msg": "OK", "status": balanceStatus})
 }
 
 func (node *Proxy) ClearReadTaskQueueManagement(w http.ResponseWriter, req *http.Request) {
@@ -409,33 +403,29 @@ func (node *Proxy) ClearReadTaskQueueManagement(w http.ResponseWriter, req *http
 		Reason:   req.URL.Query().Get("reason"),
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to clear read task queue, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to clear read task queue, %s", err.Error()))
 		return
 	}
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		bs, _ := json.Marshal(resp)
-		w.Write(bs)
+		writeJSONResp(req.Context(), w, http.StatusInternalServerError, resp)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	bs, _ := json.Marshal(resp)
-	w.Write(bs)
+	writeJSONResp(req.Context(), w, http.StatusOK, resp)
 }
 
 func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to suspend node, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to suspend node, %s", err.Error()))
 		return
 	}
 	resp, err := node.mixCoord.SuspendNode(req.Context(), &querypb.SuspendNodeRequest{
@@ -443,32 +433,31 @@ func (node *Proxy) SuspendQueryNode(w http.ResponseWriter, req *http.Request) {
 		NodeID: nodeID,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend node, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend node, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to suspend node, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to suspend node, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	nodeID, err := strconv.ParseInt(req.FormValue("node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to resume node, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to resume node, %s", err.Error()))
 		return
 	}
 	resp, err := node.mixCoord.ResumeNode(req.Context(), &querypb.ResumeNodeRequest{
@@ -476,25 +465,24 @@ func (node *Proxy) ResumeQueryNode(w http.ResponseWriter, req *http.Request) {
 		NodeID: nodeID,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume node, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume node, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to resume node, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to resume node, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
@@ -504,8 +492,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to transfer segment", %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 	request.SourceNodeID = source
@@ -516,8 +504,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+			writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 			return
 		}
 		request.TargetNodeID = value
@@ -529,8 +517,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(segmentID, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+			writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 			return
 		}
 		request.SegmentID = value
@@ -542,8 +530,8 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+			writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 			return
 		}
 		request.CopyMode = value
@@ -551,25 +539,24 @@ func (node *Proxy) TransferSegment(w http.ResponseWriter, req *http.Request) {
 
 	resp, err := node.mixCoord.TransferSegment(req.Context(), request)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer segment, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer segment, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer segment, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 		return
 	}
 
@@ -579,8 +566,8 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to transfer channel", %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 		return
 	}
 	request.SourceNodeID = source
@@ -591,8 +578,8 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseInt(target, 10, 64)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
+			writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 			return
 		}
 		request.TargetNodeID = value
@@ -611,8 +598,8 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 	} else {
 		value, err := strconv.ParseBool(copyMode)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+			writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+				fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 			return
 		}
 		request.CopyMode = value
@@ -620,39 +607,38 @@ func (node *Proxy) TransferChannel(w http.ResponseWriter, req *http.Request) {
 
 	resp, err := node.mixCoord.TransferChannel(req.Context(), request)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer channel, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to transfer channel, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to transfer channel, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.Request) {
 	err := req.ParseForm() //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error()) //nolint:gosec // internal admin endpoint
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 
 	source, err := strconv.ParseInt(req.FormValue("source_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": failed to check whether query node has same distribution", %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 
 	target, err := strconv.ParseInt(req.FormValue("target_node_id"), 10, 64) //nolint:gosec // internal admin endpoint
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 	resp, err := node.mixCoord.CheckQueryNodeDistribution(req.Context(), &querypb.CheckQueryNodeDistributionRequest{
@@ -661,25 +647,23 @@ func (node *Proxy) CheckQueryNodeDistribution(w http.ResponseWriter, req *http.R
 		TargetNodeID: target,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to check whether query node has same distribution, %s"}`, resp.GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to check whether query node has same distribution, %s", resp.GetReason()))
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"msg": "OK"}`))
+	writeJSONWithMsg(req.Context(), w, http.StatusOK, "OK")
 }
 
 func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
 	dbName := req.URL.Query().Get("db_name")
 	if dbName == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"msg": "db_name parameter is required"}`))
+		writeJSONWithMsg(req.Context(), w, http.StatusBadRequest, "db_name parameter is required")
 		return
 	}
 
@@ -688,17 +672,16 @@ func (node *Proxy) BackupEZ(w http.ResponseWriter, req *http.Request) {
 		DbName: dbName,
 	})
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to backup EZK, %s"}`, err.Error())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to backup EZK, %s", err.Error()))
 		return
 	}
 
 	if !merr.Ok(resp.GetStatus()) {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, `{"msg": "failed to backup EZK, %s"}`, resp.GetStatus().GetReason())
+		writeJSONWithMsg(req.Context(), w, http.StatusInternalServerError,
+			fmt.Sprintf("failed to backup EZK, %s", resp.GetStatus().GetReason()))
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"msg": "OK", "ezk": "%s"}`, resp.Ezk)
+	writeJSONResp(req.Context(), w, http.StatusOK, map[string]string{"msg": "OK", "ezk": resp.Ezk})
 }
