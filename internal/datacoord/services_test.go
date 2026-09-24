@@ -577,6 +577,53 @@ func (s *ServerSuite) TestSaveBinlogPath_TextRequiresStorageV3Manifest() {
 	s.True(merr.Ok(resp))
 }
 
+func (s *ServerSuite) TestSaveBinlogPath_EmptyTextSegmentRetirement() {
+	ctx := context.Background()
+	s.testServer.meta.AddCollection(&collectionInfo{
+		ID: 100,
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, DataType: schemapb.DataType_Text},
+		}},
+	})
+	s.Require().NoError(s.testServer.meta.AddSegment(ctx, NewSegmentInfo(&datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "ch1",
+		State: commonpb.SegmentState_Growing, Level: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3,
+	})))
+	manager := dataview.NewManager(datacoordkv.NewCatalog(NewMetaMemoryKV(), "", ""), nil)
+	_, err := manager.OnCreateCollection(ctx, dataview.CreateCollectionDataViewEvent{
+		CollectionID: 100, VChannels: []string{"ch1"},
+	})
+	s.Require().NoError(err)
+	s.testServer.dataViewManager = manager
+	before, err := manager.Latest(ctx, 100)
+	s.Require().NoError(err)
+	defer before.Deref()
+	req := &datapb.SaveBinlogPathsRequest{
+		Base: &commonpb.MsgBase{}, SegmentID: 10, CollectionID: 100, PartitionID: 1, Channel: "ch1",
+		SegLevel: datapb.SegmentLevel_L1, StorageVersion: storage.StorageV3,
+		Flushed: true, Dropped: true, WithFullBinlogs: true,
+	}
+	for range 2 {
+		// Replaying a lost response must return the same explicit retirement.
+		resp, err := s.testServer.SaveBinlogPaths(ctx, req)
+		s.Require().NoError(err)
+		s.Require().NoError(merr.Error(resp))
+		version, err := dataview.ParseFlushResult(resp)
+		s.Require().NoError(err)
+		s.Nil(version)
+	}
+	retired := s.testServer.meta.GetSegment(ctx, 10)
+	s.Equal(commonpb.SegmentState_Dropped, retired.GetState())
+	s.Empty(retired.GetManifestPath())
+	s.Empty(retired.GetBinlogs())
+	s.Nil(retired.GetSealedAtDataVersion())
+	after, err := manager.Latest(ctx, 100)
+	s.Require().NoError(err)
+	defer after.Deref()
+	s.Equal(before.DataView(), after.DataView(), "empty retirement must not publish DataView")
+}
+
 func (s *ServerSuite) TestSaveBinlogPath_L0Segment() {
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 

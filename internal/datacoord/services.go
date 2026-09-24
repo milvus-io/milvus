@@ -783,7 +783,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// current invisible-while-published window is an acknowledged
 	// contradiction that StreamingNode-side sorting of flushed segments will
 	// eliminate in the future.
-	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+	if s.dataViewManager != nil && req.GetFlushed() && !req.GetDropped() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// Skip zero-row segments: the same txn marks them Dropped via
 		// UpdateAsDroppedIfEmptyWhenFlushing, so publishing them here would
@@ -923,7 +923,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	// notify building index and compaction for "flushing/flushed" level one segment
-	if req.GetFlushed() {
+	if req.GetFlushed() && !req.GetDropped() {
 		// notify building index
 		s.flushCh <- req.SegmentID
 

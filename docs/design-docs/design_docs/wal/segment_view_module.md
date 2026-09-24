@@ -159,6 +159,14 @@ without inventing a version. Other already-dropped targets follow the same
 terminal path when they have no original publication version. Tombstones are
 installed only after coordinator confirmation and do not require another commit
 on recovery. No independent L1-committed boolean is persisted.
+An empty final commit (zero cumulative Insert rows, not merely an empty current
+buffer) writes no data files or manifest. It calls SaveBinlogPaths with both
+`Flushed=true` and `Dropped=true`: DataCoord persists Dropped without publishing
+DataView or scheduling index/compaction work, then returns the explicit retired
+result. Only after this confirmation does SegmentView install TOMBSTONED with
+no DataVersion and the final checkpoint. The ordinary snapshot and checkpoint
+GC rules apply; a crash before the tombstone is persisted safely repeats the
+idempotent retirement request.
 Final commit, including a recovered retry, omits StartPositions and CheckPoints:
 all data packs were already registered, so sealing preserves DataCoord's complete
 data positions and cumulative row count. It must not replace a usable physical

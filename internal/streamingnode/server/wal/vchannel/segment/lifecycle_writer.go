@@ -59,7 +59,12 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 	// All data packs have already published their positions. Preserve them on
 	// final commit, including retries recovered from SN metadata.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
-	resp, err := w.coord.SaveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
+	req := buildCommitL1SegmentRequest(w.serverID, meta)
+	// An empty segment has no data or manifest to publish. Retire it explicitly
+	// and wait for DataCoord's confirmation before installing the SN tombstone.
+	// Use cumulative rows: an empty buffer may have already persisted data.
+	req.Dropped = meta.GetStat().GetModifiedRows() == 0
+	resp, err := w.coord.SaveBinlogPaths(ctx, req)
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 			// A retired segment/channel does not need a fabricated publication version.
