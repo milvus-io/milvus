@@ -1926,8 +1926,7 @@ TEST_F(SegmentLoadInfoTest, ConvertJsonKeyStatsToLoadJsonKeyIndexInfo) {
     json_stats.set_buildid(5001);
     json_stats.set_log_size(4096);
     json_stats.set_memory_size(8192);
-    json_stats.set_json_key_stats_data_format(
-        std::stoll(JSON_STATS_DATA_FORMAT_VERSION));
+    json_stats.set_json_key_stats_data_format(JSON_STATS_DATA_FORMAT_V4);
     json_stats.set_base_path("/path/to/json_stats");
     json_stats.add_files("meta.json");
     json_stats.add_files("shared_key_index/file1");
@@ -1948,6 +1947,7 @@ TEST_F(SegmentLoadInfoTest, ConvertJsonKeyStatsToLoadJsonKeyIndexInfo) {
     EXPECT_EQ(load_info->collectionid(), 200);
     EXPECT_EQ(load_info->partitionid(), 300);
     EXPECT_EQ(load_info->load_priority(), proto::common::LoadPriority::HIGH);
+    EXPECT_EQ(load_info->json_stats_data_format(), JSON_STATS_DATA_FORMAT_V4);
     EXPECT_TRUE(load_info->has_schema());
 }
 
@@ -2017,7 +2017,7 @@ TEST_F(SegmentLoadInfoTest, GetLoadDiffJsonStatsFromStats) {
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
-    const auto current_format = std::stoll(JSON_STATS_DATA_FORMAT_VERSION);
+    const auto current_format = JSON_STATS_DATA_FORMAT_V3;
 
     proto::segcore::SegmentLoadInfo current_proto;
     current_proto.set_segmentid(100);
@@ -2048,7 +2048,7 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
     new_stats.set_buildid(5002);
     new_stats.set_log_size(1024);
     new_stats.set_memory_size(2048);
-    new_stats.set_json_key_stats_data_format(current_format);
+    new_stats.set_json_key_stats_data_format(JSON_STATS_DATA_FORMAT_V4);
     new_stats.set_base_path("/path/to/new_json_stats");
     new_stats.add_files("meta.json");
     SegmentLoadInfo new_info(new_proto, schema_);
@@ -2062,6 +2062,16 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
     EXPECT_EQ(replace_diff.json_stats_to_replace.size(), 1);
     EXPECT_TRUE(replace_diff.json_stats_to_replace.count(FieldId(102)) > 0);
 
+    proto::segcore::SegmentLoadInfo format_upgrade_proto = current_proto;
+    (*format_upgrade_proto.mutable_jsonkeystatslogs())[102]
+        .set_json_key_stats_data_format(JSON_STATS_DATA_FORMAT_V4);
+    SegmentLoadInfo format_upgrade_info(format_upgrade_proto, schema_);
+    auto format_upgrade_diff = current_info.ComputeDiff(format_upgrade_info);
+    EXPECT_EQ(format_upgrade_diff.json_stats_to_replace.size(), 1);
+    auto upgraded = format_upgrade_diff.json_stats_to_replace.at(FieldId(102));
+    ASSERT_NE(upgraded, nullptr);
+    EXPECT_EQ(upgraded->json_stats_data_format(), JSON_STATS_DATA_FORMAT_V4);
+
     proto::segcore::SegmentLoadInfo drop_proto;
     drop_proto.set_segmentid(100);
     drop_proto.set_collectionid(200);
@@ -2072,20 +2082,23 @@ TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsNewSameReplaceDropAndSkip) {
     EXPECT_EQ(drop_diff.json_stats_to_drop.size(), 1);
     EXPECT_TRUE(drop_diff.json_stats_to_drop.count(FieldId(102)) > 0);
 
-    proto::segcore::SegmentLoadInfo invalid_proto;
-    invalid_proto.set_segmentid(100);
-    invalid_proto.set_collectionid(200);
-    invalid_proto.set_partitionid(300);
-    invalid_proto.set_num_of_rows(1000);
-    auto& invalid_stats = (*invalid_proto.mutable_jsonkeystatslogs())[102];
-    invalid_stats.CopyFrom(current_stats);
-    invalid_stats.set_json_key_stats_data_format(current_format - 1);
-    SegmentLoadInfo invalid_info(invalid_proto, schema_);
-    auto invalid_diff = current_info.ComputeDiff(invalid_info);
-    EXPECT_TRUE(invalid_diff.json_stats_to_load.empty());
-    EXPECT_TRUE(invalid_diff.json_stats_to_replace.empty());
-    EXPECT_EQ(invalid_diff.json_stats_to_drop.size(), 1);
-    EXPECT_TRUE(invalid_diff.json_stats_to_drop.count(FieldId(102)) > 0);
+    for (const auto invalid_format :
+         {JSON_STATS_DATA_FORMAT_V3 - 1, JSON_STATS_DATA_FORMAT_V4 + 1}) {
+        proto::segcore::SegmentLoadInfo invalid_proto;
+        invalid_proto.set_segmentid(100);
+        invalid_proto.set_collectionid(200);
+        invalid_proto.set_partitionid(300);
+        invalid_proto.set_num_of_rows(1000);
+        auto& invalid_stats = (*invalid_proto.mutable_jsonkeystatslogs())[102];
+        invalid_stats.CopyFrom(current_stats);
+        invalid_stats.set_json_key_stats_data_format(invalid_format);
+        SegmentLoadInfo invalid_info(invalid_proto, schema_);
+        auto invalid_diff = current_info.ComputeDiff(invalid_info);
+        EXPECT_TRUE(invalid_diff.json_stats_to_load.empty());
+        EXPECT_TRUE(invalid_diff.json_stats_to_replace.empty());
+        EXPECT_EQ(invalid_diff.json_stats_to_drop.size(), 1);
+        EXPECT_TRUE(invalid_diff.json_stats_to_drop.count(FieldId(102)) > 0);
+    }
 }
 
 TEST_F(SegmentLoadInfoTest, ComputeDiffJsonStatsDisabled) {

@@ -430,7 +430,6 @@ func (st *statsTask) Execute(ctx context.Context) error {
 			st.req.GetTargetSegmentID(),
 			st.req.GetTaskVersion(),
 			st.req.GetTaskID(),
-			st.req.GetJsonKeyStatsDataFormat(),
 			insertLogs,
 			st.req.GetJsonStatsMaxShreddingColumns(),
 			st.req.GetJsonStatsShreddingRatioThreshold(),
@@ -656,7 +655,7 @@ func (st *statsTask) createTextIndex(ctx context.Context,
 	// full object keys either way; the loon transaction stores the manifest-relative
 	// representation at commit time.
 	if (!st.req.GetEnableManifestDelta() || st.req.GetSubJobType() == indexpb.StatsSubJob_Sort) && st.manifestPath != "" && len(textIndexLogs) > 0 {
-		statEntries := packed.TextIndexStatEntries(textIndexLogs, st.req.GetCurrentScalarIndexVersion())
+		statEntries := packed.TextIndexStatEntries(textIndexLogs)
 		newManifest, err := packed.AddStatsToManifest(
 			st.manifestPath, st.req.GetStorageConfig(), statEntries)
 		if err != nil {
@@ -692,12 +691,14 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 	segmentID int64,
 	version int64,
 	taskID int64,
-	jsonKeyStatsDataFormat int64,
 	insertBinlogs []*datapb.FieldBinlog,
 	jsonStatsMaxShreddingColumns int64,
 	jsonStatsShreddingRatioThreshold float64,
 	jsonStatsWriteBatchSize int64,
 ) error {
+	// The request is created from the persisted StatsTask format and remains the
+	// single source of truth for the storage path, C++ artifact, and metadata.
+	jsonKeyStatsDataFormat := st.req.GetJsonKeyStatsDataFormat()
 	log := mlog.With(
 		mlog.String("clusterID", st.req.GetClusterID()),
 		mlog.FieldTaskID(st.req.GetTaskID()),
@@ -712,10 +713,13 @@ func (st *statsTask) createJSONKeyStats(ctx context.Context,
 		mlog.Int64("jsonStatsWriteBatchSize", jsonStatsWriteBatchSize),
 	)
 
-	if jsonKeyStatsDataFormat != common.JSONStatsDataFormatVersion {
-		log.Warn(ctx, "create json key index failed dataformat invalid", mlog.Int64("dataformat version", jsonKeyStatsDataFormat),
-			mlog.Int64("code version", common.JSONStatsDataFormatVersion))
-		return nil
+	if !common.IsSupportedJSONStatsDataFormat(jsonKeyStatsDataFormat) {
+		log.Warn(ctx, "create json key index failed dataformat invalid",
+			mlog.Int64("dataformat version", jsonKeyStatsDataFormat))
+		return merr.Wrapf(merr.ErrServiceUnimplemented,
+			"json stats data format %d is not supported by this DataNode",
+			jsonKeyStatsDataFormat,
+		)
 	}
 
 	fieldBinlogs := lo.GroupBy(insertBinlogs, func(binlog *datapb.FieldBinlog) int64 {
@@ -891,7 +895,7 @@ func computeStatsBasePath(req *workerpb.CreateStatsRequest, manifestPath string,
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
 	case "json_stats":
-		return metautil.BuildJSONKeyStatsPrefix(rootPath, common.JSONStatsDataFormatVersion,
+		return metautil.BuildJSONKeyStatsPrefix(rootPath, req.GetJsonKeyStatsDataFormat(),
 			req.GetTaskID(), req.GetTaskVersion(),
 			req.GetCollectionID(), req.GetPartitionID(), req.GetTargetSegmentID(), fieldID), nil
 	}
@@ -926,6 +930,7 @@ func buildIndexParams(
 		JsonStatsMaxShreddingColumns:     options.JSONStatsMaxShreddingColumns,
 		JsonStatsShreddingRatioThreshold: options.JSONStatsShreddingRatio,
 		JsonStatsWriteBatchSize:          options.JSONStatsWriteBatchSize,
+		JsonStatsDataFormat:              req.GetJsonKeyStatsDataFormat(),
 		Manifest:                         req.GetManifestPath(),
 		StatsBasePath:                    statsBasePath,
 	}

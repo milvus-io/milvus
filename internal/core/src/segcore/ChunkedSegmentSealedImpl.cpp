@@ -83,11 +83,13 @@
 #include "common/VectorArray.h"
 #include "common/resource_c.h"
 #include "common/type_c.h"
+#include "exec/expression/ExprCache.h"
 #include "folly/Synchronized.h"
 #include "geos_c.h"
 #include "glog/logging.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
+#include "index/JsonIndexBuilder.h"
 #include "index/Meta.h"
 #include "index/NgramInvertedIndex.h"
 #include "index/json_stats/JsonKeyStats.h"
@@ -184,6 +186,15 @@ struct ManifestLoadTask {
 };
 
 namespace {
+
+// Both pointers are encoded JSON Pointers. A string prefix must also end at
+// a path-component boundary: /a covers /a/b, but not /ab or /a~1b.
+bool
+IsJsonPathPrefix(std::string_view index_path, std::string_view query_path) {
+    return query_path.starts_with(index_path) &&
+           (index_path.empty() || query_path.size() == index_path.size() ||
+            query_path[index_path.size()] == '/');
+}
 
 // Formats field identifiers for manifest-load diagnostics.
 [[nodiscard]] std::string
@@ -590,7 +601,8 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                                        bool is_array) const {
     auto runtime = CaptureRuntimeResourceState();
     int path_len_diff = std::numeric_limits<int>::max();
-    index::CacheIndexBasePtr best_match = nullptr;
+    index::CacheIndexBasePtr best_flat_match = nullptr;
+    index::CacheIndexBasePtr typed_path_match = nullptr;
     std::string_view path_view = path;
     for (const auto& index : runtime->json_indices) {
         if (index.field_id != field_id) {
@@ -598,16 +610,12 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
         }
         switch (index.cast_type.data_type()) {
             case JsonCastType::DataType::JSON:
-                if (path_view.length() < index.nested_path.length()) {
-                    continue;
-                }
-                if (path_view.substr(0, index.nested_path.length()) ==
-                    index.nested_path) {
+                if (IsJsonPathPrefix(index.nested_path, path_view)) {
                     int current_len_diff =
                         path_view.length() - index.nested_path.length();
                     if (current_len_diff < path_len_diff) {
                         path_len_diff = current_len_diff;
-                        best_match = index.index;
+                        best_flat_match = index.index;
                     }
                     if (path_len_diff == 0) {
                         break;
@@ -620,11 +628,13 @@ ChunkedSegmentSealedImpl::PinJsonIndex(milvus::OpContext* op_ctx,
                 }
                 if (any_type || milvus::index::json::IsDataTypeSupported(
                                     index.cast_type, data_type, is_array)) {
-                    best_match = index.index;
+                    typed_path_match = index.index;
                 }
                 break;
         }
     }
+    auto best_match =
+        typed_path_match != nullptr ? typed_path_match : best_flat_match;
     if (best_match == nullptr) {
         return {};
     }
@@ -643,9 +653,7 @@ ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
     for (const auto& index : runtime->json_indices) {
         if (index.field_id != field_id ||
             index.cast_type.data_type() != JsonCastType::DataType::JSON ||
-            query_path.length() < index.nested_path.length() ||
-            query_path.substr(0, index.nested_path.length()) !=
-                index.nested_path) {
+            !IsJsonPathPrefix(index.nested_path, query_path)) {
             continue;
         }
         int current_len_diff = query_path.length() - index.nested_path.length();
@@ -658,6 +666,27 @@ ChunkedSegmentSealedImpl::GetJsonFlatIndexNestedPath(
         }
     }
     return best_path;
+}
+
+bool
+ChunkedSegmentSealedImpl::HasTypedJsonPathIndexForOperandType(
+    FieldId field_id,
+    std::string_view path,
+    DataType data_type,
+    bool any_type,
+    bool is_array) const {
+    auto runtime = CaptureRuntimeResourceState();
+    for (const auto& index : runtime->json_indices) {
+        if (index.field_id != field_id || index.nested_path != path ||
+            index.cast_type.data_type() == JsonCastType::DataType::JSON) {
+            continue;
+        }
+        if (any_type || milvus::index::json::IsDataTypeSupported(
+                            index.cast_type, data_type, is_array)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool
@@ -2227,6 +2256,11 @@ ChunkedSegmentSealedImpl::PublishState(
         return;
     }
     AssertInfo(publish_lease.valid(), "online publication requires a lease");
+    // Readers have drained and new requests cannot enter until the lease is
+    // released. Invalidate before publishing so old results cannot survive a
+    // schema/index replacement under the same segment ID and row count.
+    // Do this even when caching is temporarily disabled: entries can remain.
+    exec::ExprResCacheManager::Instance().EraseSegment(id_);
     std::atomic_store(&published_state_, state);
     publish_lease.MarkPublished();
 }
@@ -6219,6 +6253,11 @@ ChunkedSegmentSealedImpl::BuildJsonKeyStatsIndex(
             info_proto->version());
         return nullptr;
     }
+
+    AssertInfo(
+        IsSupportedJsonStatsDataFormat(info_proto->json_stats_data_format()),
+        "unsupported JSON stats data format {}",
+        info_proto->json_stats_data_format());
 
     LOG_INFO(
         "start register json key stats, segment:{}, field:{}, build:{}, "

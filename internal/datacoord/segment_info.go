@@ -186,6 +186,15 @@ func (s *SegmentsInfo) getCandidates(criterion *segmentCriterion) map[UniqueID]*
 }
 
 func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*SegmentInfo {
+	return s.GetSegmentsBySelectorWithLimit(-1, filters...)
+}
+
+// GetSegmentsBySelectorWithLimit stops after limit matches. A negative limit
+// selects all matches; zero skips selection entirely.
+func (s *SegmentsInfo) GetSegmentsBySelectorWithLimit(limit int, filters ...SegmentFilter) []*SegmentInfo {
+	if limit == 0 {
+		return nil
+	}
 	criterion := &segmentCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
@@ -193,10 +202,17 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 
 	// apply criterion
 	candidates := s.getCandidates(criterion)
-	result := make([]*SegmentInfo, 0, len(candidates))
+	capacity := len(candidates)
+	if limit > 0 {
+		capacity = min(capacity, limit)
+	}
+	result := make([]*SegmentInfo, 0, capacity)
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
 			result = append(result, segment)
+			if limit > 0 && len(result) == limit {
+				break
+			}
 		}
 	}
 	return result

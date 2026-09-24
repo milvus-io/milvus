@@ -121,7 +121,7 @@ Data flow after changes:
              ▼                     ▼
 ┌────────────────────────┐  ┌───────────────────────────┐
 │  Build New Index        │  │  Compaction Trigger        │
-│  (prepareJobRequest)    │  │  (ShouldRebuildSegIndex)   │
+│  (prepareJobRequest)    │  │  (MigrationChecker)       │
 │                         │  │                            │
 │  Vec: ResolveVec()      │  │  Path 1: autoUpgrade       │
 │  Scalar: ResolveScalar()│  │    vec+scalar, version <   │
@@ -182,6 +182,15 @@ func (m *versionManagerImpl) ResolveScalarIndexVersion() int32 {
 
 The compaction trigger's force-rebuild paths also use the resolved (clamped) target to compare against, ensuring that when target > cluster maximum, the trigger converges after a single rebuild (since the built index version matches the resolved target).
 
+The current implementation consolidates these three triggers into Compaction
+V2's `MigrationCompactionChecker`, together with JSON Path/stats migration.
+It compares each segment independently and submits a one-input compaction for
+any matching reason; V1 no longer triggers index-version rebuilds. Generic
+rebuilds retain the collection/global auto-compaction setting and share the
+migration quota and reader/writer safety checks. See the
+[current migration contract](../../agent_guides/json-filtering/cross-path-semantics.md#default-json-stats-format-and-rolling-upgrades)
+for force-downgrade scope and JSON-specific gates.
+
 ### DataNode Scalar Version Clamp
 
 The DataNode's `getCurrentScalarIndexVersion` is fixed to clamp against `MaximumScalarIndexEngineVersion` instead of `CurrentScalarIndexEngineVersion`, aligning with how the vector side clamps against `C.GetMaximumIndexVersion()`.
@@ -210,4 +219,3 @@ New config parameters (`TargetScalarIndexVersion` default -1, `ForceRebuildScala
 - Integration test: set `targetScalarIndexVersion` and verify scalar indexes are built with correct version
 - Integration test: set `forceRebuildScalarSegmentIndex=true` and verify all scalar indexes are rebuilt
 - Verify rolling upgrade compatibility: old QN (no MaximumIndexVersion) + new DataCoord works correctly
-

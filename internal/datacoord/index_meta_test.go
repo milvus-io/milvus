@@ -46,6 +46,76 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestSegmentIndexRebuildInfo(t *testing.T) {
+	m := newSegmentIndexMeta(nil)
+	require.Empty(t, m.getSegmentIndexRebuildInfo(1))
+	index := &model.SegmentIndex{
+		CollectionID:              100,
+		SegmentID:                 1,
+		IndexID:                   10,
+		BuildID:                   1000,
+		IndexState:                commonpb.IndexState_Finished,
+		IndexFileKeys:             make([]string, 8192),
+		CurrentIndexVersion:       8,
+		CurrentScalarIndexVersion: 5,
+	}
+	m.updateSegmentIndex(index)
+	before := m.getSegmentIndexRebuildInfo(1)
+	require.Equal(t, []segmentIndexRebuildInfo{{
+		CollectionID:              100,
+		IndexID:                   10,
+		IndexState:                commonpb.IndexState_Finished,
+		HasFiles:                  true,
+		CurrentIndexVersion:       8,
+		CurrentScalarIndexVersion: 5,
+	}}, before)
+
+	// A published update replaces the record; previously captured values must
+	// continue describing the earlier state without retaining its file list.
+	updated := model.CloneSegmentIndex(index)
+	updated.IndexState = commonpb.IndexState_InProgress
+	updated.IndexFileKeys = nil
+	updated.CurrentIndexVersion = 10
+	updated.CurrentScalarIndexVersion = 6
+	m.updateSegmentIndex(updated)
+	after := m.getSegmentIndexRebuildInfo(1)
+	require.Len(t, after, 1)
+	require.Equal(t, commonpb.IndexState_InProgress, after[0].IndexState)
+	require.False(t, after[0].HasFiles)
+	require.Equal(t, int32(10), after[0].CurrentIndexVersion)
+	require.Equal(t, int32(6), after[0].CurrentScalarIndexVersion)
+	require.Equal(t, commonpb.IndexState_Finished, before[0].IndexState)
+	require.True(t, before[0].HasFiles)
+	require.Equal(t, int32(8), before[0].CurrentIndexVersion)
+	require.Equal(t, int32(5), before[0].CurrentScalarIndexVersion)
+}
+
+func BenchmarkSegmentIndexMigrationSnapshot(b *testing.B) {
+	for _, files := range []int{16, 16384} {
+		m := newSegmentIndexMeta(nil)
+		m.updateSegmentIndex(&model.SegmentIndex{
+			SegmentID: 1, IndexID: 10, BuildID: 1000,
+			IndexState: commonpb.IndexState_Finished, IndexFileKeys: make([]string, files),
+		})
+		b.Run(fmt.Sprintf("full_clone/%d_files", files), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if len(m.GetAllSegmentIndexes(1)) != 1 {
+					b.Fatal("missing index snapshot")
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("migration_values/%d_files", files), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if len(m.getSegmentIndexRebuildInfo(1)) != 1 {
+					b.Fatal("missing index snapshot")
+				}
+			}
+		})
+	}
+}
+
 func TestReloadFromKV(t *testing.T) {
 	t.Run("ListIndexes_fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
@@ -1534,13 +1604,17 @@ func TestMeta_FinishTask(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		err := m.FinishTask(&workerpb.IndexTaskInfo{
-			BuildID:        buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  []string{"file1", "file2"},
-			SerializedSize: 1024,
-			FailReason:     "",
+			BuildID:                   buildID,
+			State:                     commonpb.IndexState_Finished,
+			IndexFileKeys:             []string{"file1", "file2"},
+			SerializedSize:            1024,
+			FailReason:                "",
+			CurrentScalarIndexVersion: common.MinScalarIndexVersionForJsonPathPresence,
 		})
 		assert.NoError(t, err)
+		segIdx, ok := m.GetIndexJob(buildID)
+		assert.True(t, ok)
+		assert.Equal(t, common.MinScalarIndexVersionForJsonPathPresence, segIdx.CurrentScalarIndexVersion)
 	})
 
 	t.Run("fail", func(t *testing.T) {

@@ -51,6 +51,19 @@
 
 namespace milvus::segcore {
 
+bool
+SegmentInternalInterface::HasTypedJsonPathIndexForOperandType(
+    FieldId field_id,
+    std::string_view path,
+    DataType data_type,
+    bool any_type,
+    bool is_array) const {
+    auto sealed = dynamic_cast<const ChunkedSegmentSealedImpl*>(this);
+    return sealed != nullptr &&
+           sealed->HasTypedJsonPathIndexForOperandType(
+               field_id, path, data_type, any_type, is_array);
+}
+
 std::shared_ptr<milvus::exec::SimpleGeometryCache>
 SegmentInternalInterface::GetGeometryCache(FieldId field_id) const {
     return milvus::exec::SimpleGeometryCacheManager::Instance().GetCache(

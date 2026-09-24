@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -90,9 +92,9 @@ etcd.ssl.tlsMinVersion: %q
 					assert.ErrorIs(t, err, os.ErrNotExist)
 				}
 
-				base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipEnv(true), Interval(0))
+				base := NewBaseTable(Files([]string{"milvus.yaml"}), SkipRemote(true), SkipEnv(true), Interval(0))
 				t.Cleanup(base.Manager().Close)
-				assert.Nil(t, base.etcdClient, "retain local configuration when the remote client cannot initialize")
+				require.PanicsWithValue(t, "init with etcd client failed", base.initConfigsFromRemote)
 				assert.Equal(t, value, base.Get("etcd.ssl."+key), "runtime configuration stays raw")
 				assert.Equal(t, config.RedactedValue, base.Manager().ProjectConfigs()[strings.ToLower("etcd.ssl."+key)])
 				output := sink.String()
@@ -106,5 +108,48 @@ etcd.ssl.tlsMinVersion: %q
 				}
 			})
 		}
+	}
+}
+
+func TestBaseTableRemoteUnavailablePanics(t *testing.T) {
+	base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil), Interval(0))
+	t.Cleanup(base.Manager().Close)
+	require.NoError(t, base.Save("etcd.endpoints", fmt.Sprintf("127.0.0.1:%d", freePort(t))))
+	require.NoError(t, base.Save("etcd.dialTimeout", "20"))
+
+	sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+	require.PanicsWithValue(t, "init with etcd client failed", base.initConfigsFromRemote)
+	assert.Nil(t, base.etcdClient)
+	assert.Contains(t, sink.String(), config.RedactedValue)
+}
+
+func TestBaseTableRemoteSourceFailuresPanic(t *testing.T) {
+	cli, port := setupEmbedEtcd(t)
+	t.Cleanup(func() { _ = cli.Close() })
+	for _, sourceCreationFails := range []bool{true, false} {
+		t.Run(fmt.Sprintf("sourceCreationFails=%t", sourceCreationFails), func(t *testing.T) {
+			base := NewBaseTable(SkipRemote(true), SkipEnv(true), Files(nil), Interval(0))
+			t.Cleanup(func() {
+				base.Manager().Close()
+				if base.etcdClient != nil {
+					_ = base.etcdClient.Close()
+				}
+			})
+			require.NoError(t, base.Save("etcd.endpoints", fmt.Sprintf("127.0.0.1:%d", port)))
+			const canary = "etcd-config-read-secret-canary"
+			wantPanic := "load initial etcd configuration failed"
+			if sourceCreationFails {
+				patch := mockey.Mock(config.NewEtcdSource).Return(nil, errors.New(canary)).Build()
+				t.Cleanup(func() { patch.UnPatch() })
+				wantPanic = "init with etcd source failed"
+			} else {
+				patch := mockey.Mock((*config.EtcdSource).GetConfigurations).Return(nil, errors.New(canary)).Build()
+				t.Cleanup(func() { patch.UnPatch() })
+			}
+			sink := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "debug"})
+			require.PanicsWithValue(t, wantPanic, base.initConfigsFromRemote)
+			assert.Contains(t, sink.String(), config.RedactedValue)
+			assert.NotContains(t, sink.String(), canary)
+		})
 	}
 }

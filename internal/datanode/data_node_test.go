@@ -27,9 +27,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
 	util2 "github.com/milvus-io/milvus/internal/flushcommon/util"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/util/etcd"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -58,6 +60,27 @@ func NewIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNod
 	node.syncMgr = syncMgr
 
 	return node
+}
+
+func TestDataNodeSessionPublishesIndexEngineVersions(t *testing.T) {
+	originalNodeID := paramtable.GetNodeID()
+	paramtable.SetNodeID(100)
+	t.Cleanup(func() { paramtable.SetNodeID(originalNodeID) })
+
+	node := &DataNode{ctx: context.Background(), address: "localhost:21124"}
+	assert.NoError(t, node.initSession())
+	t.Cleanup(node.session.Stop)
+
+	version := node.GetSession().ScalarIndexEngineVersion
+	assert.Equal(t, common.MinimalScalarIndexEngineVersion, version.MinimalIndexVersion)
+	assert.Equal(t, common.CurrentScalarIndexEngineVersion, version.CurrentIndexVersion)
+	assert.Equal(t, common.MaximumScalarIndexEngineVersion, version.MaximumIndexVersion)
+
+	minimal, current, maximum := index.GetIndexEngineVersion()
+	vectorVersion := node.GetSession().IndexEngineVersion
+	assert.Equal(t, minimal, vectorVersion.MinimalIndexVersion)
+	assert.Equal(t, current, vectorVersion.CurrentIndexVersion)
+	assert.Equal(t, maximum, vectorVersion.MaximumIndexVersion)
 }
 
 func TestDataNode(t *testing.T) {
