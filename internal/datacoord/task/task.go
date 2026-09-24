@@ -29,6 +29,17 @@ type Task interface {
 	GetTaskType() taskcommon.Type
 	GetTaskState() taskcommon.State
 	GetTaskSlot() int64
+	// GetTaskResource is the coordinator-side cpu/memory estimate the scheduler
+	// places on and the request ships. Never zero, and always placeable: a
+	// family whose inputs are still resolving answers with an upper bound on
+	// itself, and one whose inputs are gone for good answers with the configured
+	// floor, which is enough to reach the code that retires it.
+	//
+	// The bool reports whether the answer is exact. It governs caching only:
+	// an inexact answer is recomputed next round so the exact one can replace
+	// it. It must not gate placement -- an input that is gone never becomes
+	// exact, and a task the scheduler refuses to place is never retired.
+	GetTaskResource() (taskcommon.Resource, bool)
 	SetTaskTime(timeType taskcommon.TimeType, time time.Time)
 	GetTaskTime(timeType taskcommon.TimeType) time.Time
 	GetTaskVersion() int64

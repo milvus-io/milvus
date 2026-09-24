@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/workerpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type indexTaskSuite struct {
@@ -69,6 +70,8 @@ func (s *indexTaskSuite) SetupSuite() {
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mt = &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -218,7 +221,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		s.mt.indexMeta.catalog = catalogMock
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(fmt.Errorf("mock error"))
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.CreateTaskOnWorker(1, cluster)
@@ -232,7 +235,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		s.mt.indexMeta.catalog = catalogMock
 
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		cluster.EXPECT().DropIndex(mock.Anything, mock.Anything).Return(nil)
 
 		it.CreateTaskOnWorker(1, cluster)
@@ -244,10 +247,17 @@ func (s *indexTaskSuite) TestCreateTaskOnWorker() {
 		catalogMock.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 		s.mt.indexMeta.catalog = catalogMock
 
+		var placed taskcommon.Resource
 		cluster := session.NewMockCluster(s.T())
-		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *workerpb.CreateJobRequest, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
 
 		it.CreateTaskOnWorker(1, cluster)
+		// The dispatch ships exactly what the scheduler placed the task on.
+		s.Equal(taskPrice(it.GetTaskResource()), placed)
 		s.Equal(indexpb.JobState_JobStateInProgress, indexpb.JobState(it.IndexState))
 	})
 }
@@ -323,6 +333,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 			catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 			mt := &meta{
+				// A real meta always has a collection cache; task pricing reads it.
+				collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 				segments: &SegmentsInfo{
 					segments: map[int64]*SegmentInfo{
 						s.segID: {
@@ -383,7 +395,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMaxSimRequiresEnoughVe
 			it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
 			cluster := session.NewMockCluster(s.T())
 			if tc.expectCreateIndex {
-				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			}
 
 			it.CreateTaskOnWorker(1, cluster)
@@ -402,6 +414,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayEstimateFailureMarksFa
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -466,6 +480,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayMissingBinlogOnStaleSc
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -531,6 +547,8 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds
 	catalog.EXPECT().AlterSegmentIndexes(mock.Anything, mock.Anything).Return(nil)
 
 	mt := &meta{
+		// A real meta always has a collection cache; task pricing reads it.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
 				s.segID: {
@@ -585,7 +603,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerVectorArrayManifestBackedProceeds
 	cm.EXPECT().RootPath().Return("root").Maybe()
 
 	cluster := session.NewMockCluster(s.T())
-	cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+	cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	it := newIndexBuildTask(segIndex, 1, mt, handler, cm, newIndexEngineVersionManager())
 	it.CreateTaskOnWorker(1, cluster)
@@ -663,7 +681,10 @@ func (s *indexTaskSuite) TestPrepareJobRequestUsesNullableStructArrayParentForSu
 
 	catalog := catalogmocks.NewDataCoordCatalog(s.T())
 	mt := &meta{
-		indexMeta: createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
+		// A real meta always has a segment and collection cache; task pricing reads both.
+		collections: typeutil.NewConcurrentMap[UniqueID, *collectionInfo](),
+		segments:    NewSegmentsInfo(),
+		indexMeta:   createIndexMetaWithSegment(catalog, s.collID, s.partID, s.segID, s.indexID, s.fieldID, s.taskID),
 	}
 	segIndex, ok := mt.indexMeta.segmentBuildInfo.Get(s.taskID)
 	s.True(ok)
@@ -1073,7 +1094,7 @@ func (s *indexTaskSuite) TestCreateTaskOnWorkerNullableVectorEffectiveRows() {
 
 			cluster := session.NewMockCluster(s.T())
 			if tc.wantBuild {
-				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil)
+				cluster.EXPECT().CreateIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 			}
 			// No CreateIndex expectation for skip cases:
 			// mockery will fail the test if it is called unexpectedly.

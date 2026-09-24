@@ -215,7 +215,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
+		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock err"))
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_Pending, task.GetState())
 	})
@@ -260,7 +260,7 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		assert.NoError(t, err)
 
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		catalog = mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(errors.New("mock err"))
@@ -309,10 +309,17 @@ func TestImportTask_CreateTaskOnWorker(t *testing.T) {
 		err = im.AddTask(context.TODO(), task)
 		assert.NoError(t, err)
 
+		var placed taskcommon.Resource
 		cluster := session.NewMockCluster(t)
-		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		cluster.EXPECT().CreateImport(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(_ int64, _ *datapb.ImportRequest, _ int64, resource taskcommon.Resource) error {
+				placed = resource
+				return nil
+			})
 		task.CreateTaskOnWorker(1, cluster)
 		assert.Equal(t, datapb.ImportTaskStateV2_InProgress, task.GetState())
+		// The dispatch ships exactly what the scheduler placed the task on.
+		assert.Equal(t, taskPrice(task.GetTaskResource()), placed)
 	})
 }
 

@@ -92,6 +92,13 @@ func (p *preImportTask) GetTaskSlot() int64 {
 	return int64(CalculateTaskSlot(p, p.importMeta))
 }
 
+// GetTaskResource prices a pre-import by one base read buffer per file,
+// mirroring what the worker allocates (preImportTaskResource). Not cached, for
+// the same reason as importTask.GetTaskResource.
+func (p *preImportTask) GetTaskResource() (taskcommon.Resource, bool) {
+	return preImportTaskResource(importBufferedBytes(p.GetFileStats(), Params.DataNodeCfg.ImportBaseBufferSize.GetAsInt64())), true
+}
+
 func (p *preImportTask) SetTaskTime(timeType taskcommon.TimeType, time time.Time) {
 	p.times.SetTaskTime(timeType, time)
 }
@@ -109,7 +116,8 @@ func (p *preImportTask) CreateTaskOnWorker(nodeID int64, cluster session.Cluster
 	job := p.importMeta.GetJob(context.TODO(), p.GetJobID())
 	req := AssemblePreImportRequest(p, job)
 
-	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot())
+	resource, _ := p.GetTaskResource()
+	err := cluster.CreatePreImport(nodeID, req, p.GetTaskSlot(), resource)
 	if err != nil {
 		mlog.Warn(context.TODO(), "preimport failed", WrapTaskLog(p, mlog.Err(err))...)
 		p.retryTimes++
