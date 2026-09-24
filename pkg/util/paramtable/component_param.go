@@ -43,7 +43,12 @@ import (
 
 const (
 	// DefaultIndexSliceSize defines the default slice size of index file when serializing.
-	DefaultIndexSliceSize                      = 16
+	DefaultIndexSliceSize = 16
+	// defaultSortReadConcurrencyCap caps dataNode.compaction.sortReadConcurrency
+	// when it is derived from the CPU count: each chunk read at once keeps one
+	// read round of raw bytes resident, and 8 chunks already keep far more
+	// requests queued than arrow's IO pool serves at a time.
+	defaultSortReadConcurrencyCap              = 8
 	DefaultLoadTransientBudgetBytes            = 0
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
@@ -7603,6 +7608,8 @@ type dataNodeConfig struct {
 	UseMergeSort             ParamItem `refreshable:"true"`
 	MaxSegmentMergeSort      ParamItem `refreshable:"true"`
 	MaxCompactionConcurrency ParamItem `refreshable:"true"`
+	SortReadConcurrency      ParamItem `refreshable:"true"`
+	SortReadBufferSize       ParamItem `refreshable:"true"`
 	LOBHoleRatioThreshold    ParamItem `refreshable:"true"`
 
 	// TEXT column compaction configurations
@@ -8103,6 +8110,53 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 		Export:       false,
 	}
 	p.MaxCompactionConcurrency.Init(base.mgr)
+
+	p.SortReadConcurrency = ParamItem{
+		Key:     "dataNode.compaction.sortReadConcurrency",
+		Version: "3.0.2",
+		Doc: "How much of its input a sort compaction reads at the same time. The value drives two levels at once. " +
+			"Across chunks (one chunk is the set of binlog files written by one sync): that many chunks are opened, read to " +
+			"their end and closed on their own, so neither opening a chunk nor any of its reads waits for the chunks before it; " +
+			"records are still delivered in order. A chunk being read also fetches all byte ranges of its current round at once " +
+			"rather than one at a time; how far adjacent ranges are coalesced is left as configured (common.arrow.reader.*), so " +
+			"a sort issues the requests every other reader issues, only together. The requests actually in flight are capped by " +
+			"arrow's IO thread pool (common.arrow.ioThreadPoolCoefficient, 8 threads by default). " +
+			"Memory: a sort holds its whole decoded input regardless, so decoding chunks ahead adds nothing to its peak. Each " +
+			"chunk being read additionally holds the raw bytes of its current round, released when the round is replaced or the " +
+			"chunk is closed, so the read phase of one sort task adds up to this value times " +
+			"dataNode.compaction.sortReadBufferSize, and never more than the raw size of its input. A DataNode runs several " +
+			"sort tasks at once, as many as its slots admit, so the figure for a node is that amount times the number of " +
+			"concurrent sort tasks. " +
+			"1 reads the chunks strictly one after another, exactly as before this option existed, and is the way to switch it off. " +
+			"Values <= 0 mean the number of CPU cores, capped at 8 so that the default does not grow with the machine. " +
+			"Only binlog-based StorageV2/V3 segments are read this way; segments read through a manifest are not.",
+		DefaultValue: "0",
+		Formatter: func(v string) string {
+			n, err := strconv.Atoi(v)
+			if err != nil || n <= 0 {
+				return strconv.Itoa(min(hardware.GetCPUNum(), defaultSortReadConcurrencyCap))
+			}
+			return v
+		},
+		Export: false,
+	}
+	p.SortReadConcurrency.Init(base.mgr)
+
+	p.SortReadBufferSize = ParamItem{
+		Key:     "dataNode.compaction.sortReadBufferSize",
+		Version: "3.0.2",
+		Doc: "Size of one read round of a chunk when a sort compaction reads with sortReadConcurrency > 1; it has no effect " +
+			"otherwise. A chunk larger than this is read in several rounds, one after another, each waiting for its slowest " +
+			"request, so the default is above the chunks a flush or an import usually writes and a chunk is normally read in " +
+			"one round. It also bounds what a chunk being read holds besides the decoded input the sort keeps anyway: one " +
+			"round of raw bytes, never more than the chunk itself, released when the chunk is closed. A sort task therefore " +
+			"adds at most sortReadConcurrency * min(this value, chunk size). Lower it to bound that memory more tightly. " +
+			"Values that are not positive mean 32m, because the packed reader reads such a value as no limit. " +
+			"Accepts a byte count or a size such as 512m.",
+		DefaultValue: "512m",
+		Export:       false,
+	}
+	p.SortReadBufferSize.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataNode.gracefulStopTimeout",
