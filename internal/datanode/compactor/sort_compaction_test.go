@@ -287,7 +287,6 @@ func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsDefault() {
 	s.Equal([]storage.ParallelChunkRead{{
 		Concurrency: min(hardware.GetCPUNum(), 8),
 		BufferSize:  512 * 1024 * 1024,
-		RangeSize:   8 * 1024 * 1024,
 	}}, s.parallelChunkReadSeen(), "the input reader must be opened once, with the default read options")
 }
 
@@ -297,14 +296,21 @@ func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsFollowConfig() {
 	defer paramtable.Get().Reset(cfg.SortReadConcurrency.Key)
 	paramtable.Get().Save(cfg.SortReadBufferSize.Key, "16m")
 	defer paramtable.Get().Reset(cfg.SortReadBufferSize.Key)
-	paramtable.Get().Save(cfg.SortReadRangeSize.Key, "0")
-	defer paramtable.Get().Reset(cfg.SortReadRangeSize.Key)
 
 	s.Equal([]storage.ParallelChunkRead{{
 		Concurrency: 3,
 		BufferSize:  16 * 1024 * 1024,
-		RangeSize:   0,
-	}}, s.parallelChunkReadSeen())
+	}}, s.parallelChunkReadSeen(), "both settings must reach the reader")
+}
+
+func (s *SortCompactionTaskSuite) TestSortCompactionReadOptionsSerialWhenSwitchedOff() {
+	cfg := &paramtable.Get().DataNodeCfg
+	paramtable.Get().Save(cfg.SortReadConcurrency.Key, "1")
+	defer paramtable.Get().Reset(cfg.SortReadConcurrency.Key)
+
+	seen := s.parallelChunkReadSeen()
+	s.Len(seen, 1)
+	s.Equal(1, seen[0].Concurrency, "1 is the way to get the serial reader back")
 }
 
 func (s *SortCompactionTaskSuite) TestSortCompactionBasic() {

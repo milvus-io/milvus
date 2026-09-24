@@ -221,7 +221,7 @@ func newPackedChunksRecordReader(
 	}
 	return newParallelChunkRecordReader(ctx, len(paths), parallel.Concurrency, func(chunk int) (RecordReader, error) {
 		reader, err := newPackedRecordReader(paths[chunk], schema, bufferSize, options.storageConfig,
-			storagePluginContext, options.externalReader, packed.WithEagerRangeSize(parallel.RangeSize))
+			storagePluginContext, options.externalReader, packed.WithEagerPrebuffer())
 		if err != nil {
 			return nil, err
 		}

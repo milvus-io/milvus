@@ -27,7 +27,7 @@ CStatus NewPackedReaderWithProperties(char** paths,
                                       int64_t num_paths,
                                       struct ArrowSchema* schema,
                                       const int64_t buffer_size,
-                                      const int64_t eager_range_size_bytes,
+                                      const bool eager_prebuffer,
                                       const LoonProperties* c_properties,
                                       const char* filesystem_path,
                                       CPackedReader* c_packed_reader,
@@ -51,21 +51,20 @@ import (
 type ReaderOption func(*readerOptions)
 
 type readerOptions struct {
-	eagerRangeSize int64
+	eagerPrebuffer bool
 }
 
-// WithEagerRangeSize makes every read round fetch all of its byte ranges at
-// once instead of one coalesced range at a time. rangeSize bounds how far
-// adjacent ranges are coalesced into one request; a single range larger than
-// rangeSize, such as one big column chunk, is still one request. The
-// raw bytes of a round stay cached until the next round either way (arrow's
-// read cache never evicts within a round), so for a given buffer size this
-// changes how many requests are in flight, not how much a round holds. The
-// buffer size is what bounds that memory. rangeSize <= 0 keeps the default lazy
-// reads.
-func WithEagerRangeSize(rangeSize int64) ReaderOption {
+// WithEagerPrebuffer makes every read round fetch all of its byte ranges at
+// once instead of one coalesced range at a time. How far adjacent ranges are
+// coalesced is left as configured (common.arrow.reader.*), so the requests are
+// the ones every other reader issues, only together rather than one after
+// another. The raw bytes of a round stay cached until the next round either
+// way (arrow's read cache never evicts within a round), so for a given buffer
+// size this changes how many requests are in flight, not how much a round
+// holds; the buffer size is what bounds that memory.
+func WithEagerPrebuffer() ReaderOption {
 	return func(o *readerOptions) {
-		o.eagerRangeSize = rangeSize
+		o.eagerPrebuffer = true
 	}
 }
 
@@ -136,7 +135,7 @@ func NewPackedReaderWithExtfs(
 	defer cdata.ReleaseCArrowSchema(&cas)
 
 	cBufferSize := C.int64_t(bufferSize)
-	cEagerRangeSize := C.int64_t(options.eagerRangeSize)
+	cEagerPrebuffer := C.bool(options.eagerPrebuffer)
 
 	var cPackedReader C.CPackedReader
 	var status C.CStatus
@@ -153,7 +152,7 @@ func NewPackedReaderWithExtfs(
 	}
 
 	if cProperties != nil {
-		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerRangeSize, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReaderWithProperties(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cProperties, cFilesystemPath, &cPackedReader, pluginContextPtr)
 	} else if storageConfig != nil {
 		cStorageConfig := C.CStorageConfig{
 			address:                C.CString(storageConfig.GetAddress()),
@@ -191,9 +190,9 @@ func NewPackedReaderWithExtfs(
 		defer C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		defer C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
 
-		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerRangeSize, cStorageConfig, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReaderWithStorageConfig(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, cStorageConfig, &cPackedReader, pluginContextPtr)
 	} else {
-		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerRangeSize, &cPackedReader, pluginContextPtr)
+		status = C.NewPackedReader(cFilePathsArray, cNumPaths, cSchema, cBufferSize, cEagerPrebuffer, &cPackedReader, pluginContextPtr)
 	}
 	if err := ConsumeCStatusIntoError(&status); err != nil {
 		return nil, err

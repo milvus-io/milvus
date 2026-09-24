@@ -35,7 +35,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
-                                 const int64_t eager_range_size_bytes,
+                                 const bool eager_prebuffer,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context);
@@ -45,7 +45,7 @@ NewPackedReaderWithProperties(char** paths,
                               int64_t num_paths,
                               struct ArrowSchema* schema,
                               const int64_t buffer_size,
-                              const int64_t eager_range_size_bytes,
+                              const bool eager_prebuffer,
                               const LoonProperties* c_properties,
                               const char* filesystem_path,
                               CPackedReader* c_packed_reader,
@@ -57,11 +57,11 @@ NewPackedReaderWithProperties(char** paths,
  * @param path The root path of the packed files to read.
  * @param schema The original schema of data.
  * @param buffer_size The max buffer size of the packed reader.
- * @param eager_range_size_bytes When > 0, all byte ranges of a read are fetched
- *        concurrently instead of one at a time, and this value bounds how far
- *        adjacent ranges are coalesced into one request. A single range larger
- *        than it is still one request. <= 0 keeps the configured lazy reads.
- *        Same meaning for every NewPackedReader* constructor.
+ * @param eager_prebuffer When true, all byte ranges of a read are fetched
+ *        concurrently instead of one at a time. How far adjacent ranges are
+ *        coalesced is left as configured, so the requests are the ones every
+ *        other reader issues, only together. False keeps the configured lazy
+ *        reads. Same meaning for every NewPackedReader* constructor.
  * @param c_packed_reader The output pointer of the packed reader.
  */
 CStatus
@@ -69,7 +69,7 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
-                const int64_t eager_range_size_bytes,
+                const bool eager_prebuffer,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context);
 

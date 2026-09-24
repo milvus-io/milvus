@@ -148,12 +148,6 @@ type ParallelChunkRead struct {
 	// reader treats a non-positive size as unlimited, which would make one
 	// round the whole chunk.
 	BufferSize int64
-	// RangeSize, when > 0, makes a read round fetch all of its byte ranges at
-	// once, and bounds how far adjacent ranges are coalesced into one request.
-	// A single range larger than this, such as one big column chunk, is still
-	// one request. <= 0 fetches one coalesced range at a time. It changes the
-	// request pattern only, not the memory described below.
-	RangeSize int64
 }
 
 // WithParallelChunkRead makes a StorageV2/V3 binlog reader read up to

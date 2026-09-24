@@ -186,11 +186,10 @@ WriteInt64File(const std::string& file_path,
 
 }  // namespace
 
-// The eager range mode must return the same rows, in the same order, as the
-// lazy mode. The eager range size is far below the file size, so a read has
-// several ranges in flight, and the last mode uses a read buffer smaller than
-// the data, so the reader may take the file in more than one round.
-TEST(CPackedTest, PackedReaderEagerRanges) {
+// The eager mode must return the same rows, in the same order, as the lazy
+// mode. The last mode uses a read buffer smaller than the data, so the reader
+// takes the file in more than one round.
+TEST(CPackedTest, PackedReaderEagerPrebuffer) {
     // 8 bytes per row: about 3MB of values.
     const int64_t num_rows = 400 * 1000;
     const std::string file_path = TestLocalPath + "eager_ranges_0";
@@ -199,17 +198,17 @@ TEST(CPackedTest, PackedReaderEagerRanges) {
 
     struct ReadMode {
         int64_t buffer_size;
-        int64_t eager_range_size;
+        bool eager_prebuffer;
     };
     const ReadMode modes[] = {
-        {10 * 1024 * 1024, 0},                  // lazy, one round
-        {10 * 1024 * 1024, 64 * 1024},          // eager, one round
-        {1024 * 1024 + 512 * 1024, 64 * 1024},  // eager, several rounds
+        {10 * 1024 * 1024, false},         // lazy, one round
+        {10 * 1024 * 1024, true},          // eager, one round
+        {1024 * 1024 + 512 * 1024, true},  // eager, several rounds
     };
     for (const auto& mode : modes) {
         SCOPED_TRACE(
             "buffer_size=" + std::to_string(mode.buffer_size) +
-            " eager_range_size=" + std::to_string(mode.eager_range_size));
+            " eager_prebuffer=" + std::to_string(mode.eager_prebuffer));
         struct ArrowSchema c_read_schema;
         ASSERT_TRUE(arrow::ExportSchema(*schema, &c_read_schema).ok());
         char* paths[] = {const_cast<char*>(file_path.c_str())};
@@ -218,7 +217,7 @@ TEST(CPackedTest, PackedReaderEagerRanges) {
                                       1,
                                       &c_read_schema,
                                       mode.buffer_size,
-                                      mode.eager_range_size,
+                                      mode.eager_prebuffer,
                                       &reader,
                                       nullptr);
         ASSERT_EQ(status.error_code, 0);

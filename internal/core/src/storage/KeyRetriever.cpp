@@ -57,19 +57,16 @@ GetArrowReaderProperties() {
 }
 
 parquet::ArrowReaderProperties
-GetArrowReaderProperties(int64_t eager_range_size_bytes) {
+GetArrowReaderProperties(bool eager_prebuffer) {
     auto properties = GetArrowReaderProperties();
-    if (eager_range_size_bytes <= 0) {
+    if (!eager_prebuffer) {
         return properties;
     }
+    // Only when the ranges are fetched changes. The coalescing limits stay as
+    // configured, so an eager reader issues the same requests as a lazy one.
     auto cache_options = properties.cache_options();
     cache_options.lazy = false;
     cache_options.prefetch_limit = 0;
-    cache_options.range_size_limit = eager_range_size_bytes;
-    // arrow requires range_size_limit > hole_size_limit when coalescing.
-    if (cache_options.hole_size_limit >= cache_options.range_size_limit) {
-        cache_options.hole_size_limit = cache_options.range_size_limit - 1;
-    }
     properties.set_pre_buffer(true);
     properties.set_cache_options(cache_options);
     return properties;

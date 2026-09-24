@@ -305,12 +305,12 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		srw.Close()
 		return nil, err
 	}
+	sortReadConcurrency := paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt()
 	parallelRead := storage.ParallelChunkRead{
-		Concurrency: paramtable.Get().DataNodeCfg.SortReadConcurrency.GetAsInt(),
+		Concurrency: sortReadConcurrency,
 		BufferSize:  paramtable.Get().DataNodeCfg.SortReadBufferSize.GetAsSize(),
-		RangeSize:   paramtable.Get().DataNodeCfg.SortReadRangeSize.GetAsSize(),
 	}
-	logIfParallelReadIgnored(ctx, log, t.segmentID, t.segmentStorageVersion, t.manifest, parallelRead.Concurrency,
+	logIfParallelReadIgnored(ctx, log, t.segmentID, t.segmentStorageVersion, t.manifest, sortReadConcurrency,
 		paramtable.Get().DataNodeCfg.SortReadConcurrency.IsSetByUser())
 	rr, existingFields, err := newTextDecodedCompactionSegmentRecordReader(ctx, t.plan.GetSegmentBinlogs()[0], t.plan.Schema, t.compactionParams.StorageConfig, textDecodeConfigs,
 		storage.WithVersion(t.segmentStorageVersion),
@@ -320,7 +320,8 @@ func (t *sortCompactionTask) sortSegment(ctx context.Context) (*datapb.Compactio
 		// The sort below keeps every decoded input record until it has written
 		// its output, so decoding chunks ahead of it adds nothing to the peak;
 		// readers that stream their input must not do this. What reading ahead
-		// does add is the raw bytes of the rounds in flight, bounded by
+		// does add is the raw bytes of the rounds in flight: one round per
+		// chunk being read, each never larger than its chunk, so at most
 		// sortReadConcurrency * sortReadBufferSize.
 		storage.WithParallelChunkRead(parallelRead),
 	)

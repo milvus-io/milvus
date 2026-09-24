@@ -44,43 +44,37 @@ class ArrowReaderPropertiesTest : public ::testing::Test {
     }
 };
 
-TEST_F(ArrowReaderPropertiesTest, NonPositiveEagerRangeKeepsConfigured) {
+TEST_F(ArrowReaderPropertiesTest, WithoutEagerPrebufferKeepsConfigured) {
     auto configured = GetArrowReaderProperties().cache_options();
-    for (int64_t eager_range_size : {int64_t{0}, int64_t{-1}}) {
-        auto options =
-            GetArrowReaderProperties(eager_range_size).cache_options();
-        EXPECT_EQ(options.lazy, configured.lazy);
-        EXPECT_EQ(options.hole_size_limit, kHoleSize);
-        EXPECT_EQ(options.range_size_limit, kRangeSize);
-    }
+    auto options = GetArrowReaderProperties(false).cache_options();
+
+    EXPECT_EQ(options.lazy, configured.lazy);
+    EXPECT_EQ(options.hole_size_limit, kHoleSize);
+    EXPECT_EQ(options.range_size_limit, kRangeSize);
 }
 
-TEST_F(ArrowReaderPropertiesTest, EagerRangeReadsAllRangesAtOnce) {
-    constexpr int64_t kEagerRangeSize = 8 * 1024 * 1024;
-    auto properties = GetArrowReaderProperties(kEagerRangeSize);
+TEST_F(ArrowReaderPropertiesTest, EagerPrebufferReadsAllRangesAtOnce) {
+    auto properties = GetArrowReaderProperties(true);
     auto options = properties.cache_options();
 
     EXPECT_TRUE(properties.pre_buffer());
     EXPECT_FALSE(options.lazy);
     EXPECT_EQ(options.prefetch_limit, 0);
-    EXPECT_EQ(options.range_size_limit, kEagerRangeSize);
-    // The configured hole size already fits below the range size.
+}
+
+TEST_F(ArrowReaderPropertiesTest, EagerPrebufferKeepsTheConfiguredCoalescing) {
+    // Only the timing of the requests changes: an eager reader must coalesce
+    // exactly like every other one, or it would issue a different number of
+    // object-storage requests than the operator configured for.
+    auto options = GetArrowReaderProperties(true).cache_options();
+
     EXPECT_EQ(options.hole_size_limit, kHoleSize);
+    EXPECT_EQ(options.range_size_limit, kRangeSize);
 }
 
-TEST_F(ArrowReaderPropertiesTest, EagerRangeBelowHoleSizeShrinksHoleSize) {
-    // arrow requires range_size_limit > hole_size_limit when it coalesces.
-    constexpr int64_t kEagerRangeSize = 4096;
-    auto options = GetArrowReaderProperties(kEagerRangeSize).cache_options();
-
-    EXPECT_EQ(options.range_size_limit, kEagerRangeSize);
-    EXPECT_LT(options.hole_size_limit, options.range_size_limit);
-    EXPECT_GE(options.hole_size_limit, 0);
-}
-
-TEST_F(ArrowReaderPropertiesTest, EagerRangeDoesNotChangeConfigured) {
+TEST_F(ArrowReaderPropertiesTest, EagerPrebufferDoesNotChangeConfigured) {
     auto before = GetArrowReaderProperties().cache_options();
-    (void)GetArrowReaderProperties(8 * 1024 * 1024);
+    (void)GetArrowReaderProperties(true);
     auto after = GetArrowReaderProperties().cache_options();
 
     EXPECT_EQ(after.lazy, before.lazy);

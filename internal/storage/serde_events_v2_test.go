@@ -140,16 +140,14 @@ func TestPackedChunksParallelRead(t *testing.T) {
 
 	for _, tc := range []struct {
 		name       string
-		rangeSize  int64
 		bufferSize int64
 	}{
-		{name: "eager ranges", rangeSize: 16 * 1024, bufferSize: 10 * 1024 * 1024},
-		{name: "lazy ranges", rangeSize: 0, bufferSize: 10 * 1024 * 1024},
-		{name: "eager ranges with a small read buffer", rangeSize: 16 * 1024, bufferSize: 64 * 1024},
+		{name: "one round per chunk", bufferSize: 10 * 1024 * 1024},
+		{name: "several rounds per chunk", bufferSize: 64 * 1024},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
-				parallelChunkRead: ParallelChunkRead{Concurrency: 3, BufferSize: tc.bufferSize, RangeSize: tc.rangeSize},
+				parallelChunkRead: ParallelChunkRead{Concurrency: 3, BufferSize: tc.bufferSize},
 			}, nil)
 			_, parallel := reader.(*parallelChunkRecordReader)
 			require.True(t, parallel, "concurrency > 1 must select the parallel reader")
@@ -223,14 +221,14 @@ func TestPackedChunksRecordReaderSelection(t *testing.T) {
 		require.IsType(t, &IterativeRecordReader{}, reader)
 		for _, call := range drainAll(t, reader) {
 			assert.EqualValues(t, 7, call.bufferSize)
-			assert.Zero(t, call.numOpts, "the serial reader must not switch on eager ranges")
+			assert.Zero(t, call.numOpts, "the serial reader must not switch on eager prebuffering")
 		}
 	})
 
 	t.Run("concurrency 1 keeps the serial reader and ignores the parallel buffer size", func(t *testing.T) {
 		reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
 			bufferSize:        7,
-			parallelChunkRead: ParallelChunkRead{Concurrency: 1, BufferSize: 99, RangeSize: 11},
+			parallelChunkRead: ParallelChunkRead{Concurrency: 1, BufferSize: 99},
 		}, nil)
 		require.IsType(t, &IterativeRecordReader{}, reader)
 		for _, call := range drainAll(t, reader) {
@@ -242,7 +240,7 @@ func TestPackedChunksRecordReaderSelection(t *testing.T) {
 	t.Run("parallel reader opens every chunk with the parallel buffer size", func(t *testing.T) {
 		reader := newPackedChunksRecordReader(context.Background(), paths, schema, &rwOptions{
 			bufferSize:        7,
-			parallelChunkRead: ParallelChunkRead{Concurrency: 2, BufferSize: 99, RangeSize: 11},
+			parallelChunkRead: ParallelChunkRead{Concurrency: 2, BufferSize: 99},
 		}, nil)
 		require.IsType(t, &parallelChunkRecordReader{}, reader)
 		got := drainAll(t, reader)
@@ -250,7 +248,7 @@ func TestPackedChunksRecordReaderSelection(t *testing.T) {
 		for i, call := range got {
 			assert.Equal(t, paths[i], call.paths)
 			assert.EqualValues(t, 99, call.bufferSize)
-			assert.Equal(t, 1, call.numOpts, "the eager range option must reach the packed reader")
+			assert.Equal(t, 1, call.numOpts, "the eager prebuffer option must reach the packed reader")
 		}
 	})
 
