@@ -162,4 +162,15 @@ type DataCoordCatalog interface {
 	// List/Drop provide recovery scanning and collection-drop cleanup.
 	ListSegmentChangeGroups(ctx context.Context) ([]*model.SegmentChangeGroup, error)
 	DropSegmentChangeGroups(ctx context.Context, collectionID int64) error
+
+	// Import V3 control-plane records.
+	SaveReshardTask(ctx context.Context, task *datapb.ReshardTask) error
+	ListReshardTasks(ctx context.Context) ([]*datapb.ReshardTask, error)
+	DropReshardTask(ctx context.Context, taskID int64) error
+	SaveImportTaskV3(ctx context.Context, task *datapb.ImportTaskV3) error
+	ListImportTasksV3(ctx context.Context) ([]*datapb.ImportTaskV3, error)
+	DropImportTaskV3(ctx context.Context, taskID int64) error
+	SavePreImportV2Task(ctx context.Context, task *datapb.PreImportV2Task) error
+	ListPreImportV2Tasks(ctx context.Context) ([]*datapb.PreImportV2Task, error)
+	DropPreImportV2Task(ctx context.Context, taskID int64) error
 }

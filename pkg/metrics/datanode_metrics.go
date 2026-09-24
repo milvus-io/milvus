@@ -360,6 +360,77 @@ var (
 			Name:      "slot",
 			Help:      "number of available and used slot",
 		}, []string{nodeIDLabelName, "type"})
+
+	// DataNodeImportV3Tasks is the per-kind state distribution of the importv3
+	// task manager (reshard, import, preimport), the node-level counterpart of
+	// the V2 import task stats.
+	DataNodeImportV3Tasks = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "import_v3_tasks",
+			Help:      "number of import v3 tasks by kind and state",
+		}, []string{nodeIDLabelName, "kind", "state"})
+
+	// DataNodeImportV3TaskLatency splits a task's lifetime into the queue phase
+	// (waiting for a free slot, the same shape as index_task_latency_in_queue)
+	// and the run phase (Execute wall time).
+	DataNodeImportV3TaskLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "import_v3_task_latency",
+			Help:      "latency of import v3 tasks by kind and phase (queue/run)",
+			Buckets:   indexBucket,
+		}, []string{nodeIDLabelName, "kind", "phase"})
+
+	// DataNodeImportV3SchedulerQueue reports the ImportV3Scheduler's backlog:
+	// tasks waiting for a free slot and the slots they reserve. Queued slots
+	// count toward used slots in QuerySlot, giving DataCoord backpressure.
+	DataNodeImportV3SchedulerQueue = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "import_v3_scheduler_queue",
+			Help:      "import v3 slot scheduler queue depth (tasks) and queued slots",
+		}, []string{nodeIDLabelName, "type"})
+
+	// DataNodeImportV3ReshardBytes counts the bytes one reshard run produces and
+	// spills. type splits the logical (normalized decoded) input, the packed
+	// writer's uncompressed output and the local spill volume, so write
+	// amplification and spill pressure are readable from rate().
+	DataNodeImportV3ReshardBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "import_v3_reshard_bytes_count",
+			Help:      "import v3 reshard bytes by kind (logical/written/spill)",
+		}, []string{nodeIDLabelName, "type"})
+
+	// DataNodeImportV3ReshardRows counts the rows one reshard run hashes, so
+	// reshard throughput in rows is readable from rate(). It is node-level only:
+	// a per-task or per-file label would be unbounded.
+	DataNodeImportV3ReshardRows = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "import_v3_reshard_rows_count",
+			Help:      "import v3 reshard rows hashed",
+		}, []string{nodeIDLabelName})
+
+	// DataNodeImportV3ReshardStageLatency splits a reshard run into its phases:
+	// the routing side (read wait, routing cost, flush slot block), the detached
+	// write side, the prepare stages and the per-fragment sort. The phases
+	// overlap, so they are distributions to read individually, not a wall-clock
+	// breakdown.
+	DataNodeImportV3ReshardStageLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataNodeRole,
+			Name:      "import_v3_reshard_stage_latency",
+			Help:      "latency of import v3 reshard phases",
+			Buckets:   indexBucket,
+		}, []string{nodeIDLabelName, "stage"})
 )
 
 // DataNode pool metric descriptors (used by dataNodePoolMetricsCollector).
@@ -470,6 +541,12 @@ func registerDataNodeOnce(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeBuildIndexLatency)
 	registry.MustRegister(DataNodeBuildJSONStatsLatency)
 	registry.MustRegister(DataNodeSlot)
+	registry.MustRegister(DataNodeImportV3Tasks)
+	registry.MustRegister(DataNodeImportV3TaskLatency)
+	registry.MustRegister(DataNodeImportV3SchedulerQueue)
+	registry.MustRegister(DataNodeImportV3ReshardBytes)
+	registry.MustRegister(DataNodeImportV3ReshardRows)
+	registry.MustRegister(DataNodeImportV3ReshardStageLatency)
 	registry.MustRegister(&dataNodePoolMetricsCollector{})
 	// DataNode runs the C++ core (index build / analyze via cgo), so it produces
 	// segcore errors too; register the cgo metrics here so UnmappedSegcoreCodeTotal

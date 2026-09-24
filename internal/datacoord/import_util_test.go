@@ -129,6 +129,8 @@ func TestImportUtil_NewImportTasks(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -206,6 +208,8 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -271,6 +275,8 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -351,6 +357,8 @@ func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -446,6 +454,8 @@ func TestImportUtil_L0ImportUsesStorageV2WhenLoonFFIEnabled(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -520,9 +530,12 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportV2Tasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SavePreImportTask(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -615,8 +628,11 @@ func TestImportUtil_DropImportTask(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportV2Tasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
 
@@ -713,8 +729,11 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportV2Tasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -1023,6 +1042,92 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.Equal(t, int64(100), progress)
 	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)
+}
+
+// TestImportUtil_GetV3ImportProgress pins the Import V3 progress bands:
+// 10 Pending, 5 PreImporting/AssigningIDRange, 30 Resharding, 5 Planning,
+// 10 Importing, 30 IndexBuilding, 10 Completed. An empty job drives every
+// per-stage helper to its completed fraction, so each state lands on a band
+// boundary.
+func TestImportUtil_GetV3ImportProgress(t *testing.T) {
+	ctx := context.Background()
+
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportV2Tasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSegmentIndexes(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListCompactionTargets(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListPartitionStatsInfos(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListStatsTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListSnapshots(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshJobs(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListExternalCollectionRefreshTasks(mock.Anything).Return(nil, nil)
+
+	importMeta, err := NewImportMeta(context.TODO(), catalog, nil, nil)
+	assert.NoError(t, err)
+
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().ShowCollectionIDs(mock.Anything).Return(nil, nil)
+	meta, err := newMeta(context.TODO(), catalog, nil, broker)
+	assert.NoError(t, err)
+
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		Version: datapb.ImportJobVersion_ImportJobVersionV3,
+	}}
+	assert.NoError(t, importMeta.AddJob(ctx, job))
+
+	for _, tc := range []struct {
+		state     internalpb.ImportJobState
+		progress  int64
+		userState internalpb.ImportJobState
+	}{
+		{internalpb.ImportJobState_Pending, 10, internalpb.ImportJobState_Pending},
+		{internalpb.ImportJobState_PreImporting, 10 + 5, internalpb.ImportJobState_Importing},
+		{internalpb.ImportJobState_AssigningIDRange, 10 + 5, internalpb.ImportJobState_Importing},
+		{internalpb.ImportJobState_Resharding, 10 + 5 + 30, internalpb.ImportJobState_Importing},
+		{internalpb.ImportJobState_Planning, 10 + 5 + 30, internalpb.ImportJobState_Importing},
+		{internalpb.ImportJobState_Importing, 10 + 5 + 30 + 5 + 10, internalpb.ImportJobState_Importing},
+		{internalpb.ImportJobState_IndexBuilding, 10 + 5 + 30 + 5 + 10 + 30, internalpb.ImportJobState_Importing},
+	} {
+		t.Run(tc.state.String(), func(t *testing.T) {
+			assert.NoError(t, importMeta.UpdateJob(ctx, job.GetJobID(), UpdateJobState(tc.state)))
+			progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+			assert.Equal(t, tc.progress, progress)
+			assert.Equal(t, tc.userState, state)
+			assert.Equal(t, "", reason)
+		})
+	}
+
+	// Terminal states. UpdateJob refuses to leave Completed/Failed, so drive
+	// each on its own job.
+	assert.NoError(t, importMeta.UpdateJob(ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed)))
+	progress, state, _, _, reason := GetJobProgress(ctx, job.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(100), progress)
+	assert.Equal(t, internalpb.ImportJobState_Completed, state)
+	assert.Equal(t, "", reason)
+
+	failed := &importJob{ImportJob: &datapb.ImportJob{
+		JobID:   1,
+		Version: datapb.ImportJobVersion_ImportJobVersionV3,
+	}}
+	assert.NoError(t, importMeta.AddJob(ctx, failed))
+	assert.NoError(t, importMeta.UpdateJob(ctx, failed.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason("boom")))
+	progress, state, _, _, reason = GetJobProgress(ctx, failed.GetJobID(), importMeta, meta)
+	assert.Equal(t, int64(0), progress)
+	assert.Equal(t, internalpb.ImportJobState_Failed, state)
+	assert.Equal(t, "boom", reason)
 }
 
 func TestPreImportTask_MarshalJSON(t *testing.T) {
@@ -1875,4 +1980,63 @@ func TestValidateImportFilePaths_ChecksEveryPathOfEveryFile(t *testing.T) {
 
 	err := ValidateImportFilePaths(cm, files, nil)
 	assert.ErrorIs(t, err, merr.ErrImportFailed)
+}
+
+// TestGetV3TaskProgressesFromReshardHashedRows pins the V3 per-file projection:
+// one entry per source file of every reshard task, imported rows taken from the
+// worker's per-source hashed rows, denominator from the count-only preimport
+// stats.
+func TestGetV3TaskProgressesFromReshardHashedRows(t *testing.T) {
+	ctx := context.Background()
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{{FieldID: 100, DataType: schemapb.DataType_Int64, IsPrimaryKey: true}}}
+	file1 := &internalpb.ImportFile{Id: 1, Paths: []string{"a.parquet"}}
+	file2 := &internalpb.ImportFile{Id: 2, Paths: []string{"b.parquet"}}
+	job := &importJob{ImportJob: &datapb.ImportJob{
+		JobID: 1, CollectionID: 2, Version: datapb.ImportJobVersion_ImportJobVersionV3,
+		Files: []*internalpb.ImportFile{file1, file2}, Schema: schema,
+	}}
+
+	importMeta := NewMockImportMeta(t)
+	preimport := newPreImportV2Task(&datapb.PreImportV2Task{
+		JobID: 1, TaskID: 10, State: datapb.ImportTaskStateV2_Completed,
+		FileStats: []*datapb.ImportFileStats{
+			{ImportFile: file1, TotalRows: 100, FileSize: 1000},
+			{ImportFile: file2, TotalRows: 200, FileSize: 2000},
+		},
+	}, importMeta)
+	reshard1 := newReshardTask(&datapb.ReshardTask{
+		JobId: 1, TaskId: 11, State: datapb.ImportTaskStateV2_InProgress, SourceIds: []int64{1},
+	}, importMeta, nil, nil)
+	reshard1.setSourceProgress([]*datapb.ReshardSourceProgress{{FileId: 1, HashedRows: 50}})
+	reshard2 := newReshardTask(&datapb.ReshardTask{
+		JobId: 1, TaskId: 12, State: datapb.ImportTaskStateV2_Completed, SourceIds: []int64{2},
+	}, importMeta, nil, nil)
+	reshard2.setSourceProgress([]*datapb.ReshardSourceProgress{{FileId: 2, HashedRows: 200}})
+
+	reshardProbe := newReshardTask(&datapb.ReshardTask{}, importMeta, nil, nil)
+	preimportProbe := newPreImportV2Task(&datapb.PreImportV2Task{}, importMeta)
+	importMeta.EXPECT().GetJob(mock.Anything, int64(1)).Return(job).Once()
+	importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1), mock.Anything).RunAndReturn(
+		func(_ context.Context, _ int64, filters ...ImportTaskFilter) []ImportTask {
+			if len(filters) == 1 && filters[0](reshardProbe) {
+				return []ImportTask{reshard1, reshard2}
+			}
+			if len(filters) == 1 && filters[0](preimportProbe) {
+				return []ImportTask{preimport}
+			}
+			return nil
+		}).Twice()
+
+	progresses := GetTaskProgresses(ctx, 1, importMeta, nil)
+	require.Len(t, progresses, 2)
+	byName := make(map[string]*internalpb.ImportTaskProgress)
+	for _, p := range progresses {
+		byName[p.GetFileName()] = p
+	}
+	assert.Equal(t, int64(50), byName["[a.parquet]"].GetImportedRows())
+	assert.Equal(t, int64(100), byName["[a.parquet]"].GetTotalRows())
+	assert.Equal(t, int64(50), byName["[a.parquet]"].GetProgress())
+	assert.Equal(t, int64(200), byName["[b.parquet]"].GetImportedRows())
+	assert.Equal(t, int64(200), byName["[b.parquet]"].GetTotalRows())
+	assert.Equal(t, int64(100), byName["[b.parquet]"].GetProgress())
 }

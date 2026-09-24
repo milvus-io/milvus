@@ -131,6 +131,9 @@ func (c *importChecker) runStateMachineLoop() {
 		case <-ticker.C:
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
+				if job.GetVersion() == datapb.ImportJobVersion_ImportJobVersionV3 {
+					continue
+				}
 				if !funcutil.SliceSetEqual[string](job.GetVchannels(), job.GetReadyVchannels()) {
 					// wait for all channels to send signals
 					mlog.Info(c.ctx, "waiting for all channels to send signals",
@@ -175,10 +178,15 @@ func (c *importChecker) runGCLoop() {
 		case <-ticker.C:
 			jobs := c.importMeta.GetJobBy(c.ctx)
 			for _, job := range jobs {
+				if job.GetVersion() == datapb.ImportJobVersion_ImportJobVersionV3 {
+					continue
+				}
 				c.tryTimeoutJob(job)
 				c.checkGC(job)
 			}
-			jobsByColl := lo.GroupBy(jobs, func(job ImportJob) int64 {
+			jobsByColl := lo.GroupBy(lo.Filter(jobs, func(job ImportJob, _ int) bool {
+				return job.GetVersion() != datapb.ImportJobVersion_ImportJobVersionV3
+			}), func(job ImportJob) int64 {
 				return job.GetCollectionID()
 			})
 			for collID, collJobs := range jobsByColl {
@@ -197,17 +205,21 @@ func (c *importChecker) Close() {
 }
 
 func (c *importChecker) LogJobStats(jobs []ImportJob) {
-	byState := lo.GroupBy(jobs, func(job ImportJob) string {
-		return job.GetState().String()
-	})
 	stateNum := make(map[string]int)
-	for state := range internalpb.ImportJobState_value {
-		if state == internalpb.ImportJobState_None.String() {
-			continue
+	for _, version := range []datapb.ImportJobVersion{
+		datapb.ImportJobVersion_ImportJobVersionV1,
+		datapb.ImportJobVersion_ImportJobVersionV3,
+	} {
+		versionJobs := lo.Filter(jobs, func(job ImportJob, _ int) bool { return job.GetVersion() == version })
+		byState := lo.GroupBy(versionJobs, func(job ImportJob) string { return job.GetState().String() })
+		for state := range internalpb.ImportJobState_value {
+			if state == internalpb.ImportJobState_None.String() {
+				continue
+			}
+			num := len(byState[state])
+			stateNum[state] += num
+			metrics.ImportJobs.WithLabelValues(state, version.String()).Set(float64(num))
 		}
-		num := len(byState[state])
-		stateNum[state] = num
-		metrics.ImportJobs.WithLabelValues(state).Set(float64(num))
 	}
 	mlog.Info(c.ctx, "import job stats", mlog.Any("stateNum", stateNum))
 }
@@ -293,7 +305,7 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 		return
 	}
 	pendingDuration := job.GetTR().RecordSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePending).Observe(float64(pendingDuration.Milliseconds()))
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePending, job.GetVersion().String()).Observe(float64(pendingDuration.Milliseconds()))
 	log.Info(c.ctx, "import job start to execute", mlog.Duration("jobTimeCost/pending", pendingDuration))
 }
 
@@ -305,7 +317,6 @@ func (c *importChecker) checkPendingJob(job ImportJob) {
 // preimport completed" and "ranges applied" does not matter.
 func (c *importChecker) checkPreImportingJob(job ImportJob) {
 	log := mlog.With(mlog.FieldJobID(job.GetJobID()))
-
 	preimports := c.importMeta.GetTaskByJob(c.ctx, job.GetJobID(), WithType(PreImportTaskType))
 	if !lo.EveryBy(preimports, func(t ImportTask) bool {
 		// Preimport tasks are not fully completed, thus generating imports should not be triggered.
@@ -322,7 +333,7 @@ func (c *importChecker) checkPreImportingJob(job ImportJob) {
 			return
 		}
 		preImportDuration := job.GetTR().RecordSpan()
-		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport).Observe(float64(preImportDuration.Milliseconds()))
+		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStagePreImport, job.GetVersion().String()).Observe(float64(preImportDuration.Milliseconds()))
 		log.Info(c.ctx, "import job preimport done", mlog.String("state", state.String()), mlog.Duration("jobTimeCost/preimport", preImportDuration))
 	}
 
@@ -478,7 +489,18 @@ func (c *importChecker) createImportTasks(job ImportJob, preimports []ImportTask
 // A package function, not a checker method: the ImportIDRange ack callback needs the same
 // condition to reject a range message for a job that carries none.
 func needsIDRanges(job ImportJob) bool {
-	return idRangeMsgEnabled() && importid.NeedsFileIDRanges(job.GetSchema(), job.GetOptions())
+	// A V3 job always needs (and always allocates) exact ranges: enableImportV3
+	// already guarantees the cluster understands the ImportIDRange message, and V3
+	// has no local-allocator fallback. The V2 path keeps the version gate.
+	switch job.GetVersion() {
+	case datapb.ImportJobVersion_ImportJobVersionV1:
+		return idRangeMsgEnabled() && importid.NeedsFileIDRanges(job.GetSchema(), job.GetOptions())
+	case datapb.ImportJobVersion_ImportJobVersionV3:
+		return importid.NeedsFileIDRanges(job.GetSchema(), job.GetOptions())
+	default:
+		mlog.Error(context.TODO(), "unknown import job version", mlog.Int32("version", int32(job.GetVersion())))
+		return importid.NeedsFileIDRanges(job.GetSchema(), job.GetOptions())
+	}
 }
 
 // idRangeMsgEnabled reports whether the two-phase per-file ID range path is active. It is
@@ -645,7 +667,7 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		return
 	}
 	importDuration := job.GetTR().RecordSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageImport).Observe(float64(importDuration.Milliseconds()))
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageImport, job.GetVersion().String()).Observe(float64(importDuration.Milliseconds()))
 	log.Info(c.ctx, "import job import done", mlog.Duration("jobTimeCost/import", importDuration))
 }
 
@@ -658,7 +680,7 @@ func (c *importChecker) checkSortingJob(job ImportJob) {
 			return
 		}
 		statsDuration := job.GetTR().RecordSpan()
-		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageStats).Observe(float64(statsDuration.Milliseconds()))
+		metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageStats, job.GetVersion().String()).Observe(float64(statsDuration.Milliseconds()))
 		log.Info(c.ctx, "import job stats done", mlog.String("state", state.String()), mlog.Duration("jobTimeCost/stats", statsDuration))
 	}
 
@@ -750,7 +772,7 @@ func (c *importChecker) checkIndexBuildingJob(job ImportJob) {
 		return
 	}
 	buildIndexDuration := job.GetTR().RecordSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex).Observe(float64(buildIndexDuration.Milliseconds()))
+	metrics.ImportJobLatency.WithLabelValues(metrics.ImportStageBuildIndex, job.GetVersion().String()).Observe(float64(buildIndexDuration.Milliseconds()))
 	log.Info(c.ctx, "import job build index done", mlog.Duration("jobTimeCost/buildIndex", buildIndexDuration))
 
 	// 2PC: hand off to Uncommitted regardless of auto_commit. Segment visibility
@@ -808,7 +830,7 @@ func (c *importChecker) checkCommittingJob(job ImportJob) {
 		return
 	}
 	totalDuration := job.GetTR().ElapseSpan()
-	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel).Observe(float64(totalDuration.Milliseconds()))
+	metrics.ImportJobLatency.WithLabelValues(metrics.TotalLabel, job.GetVersion().String()).Observe(float64(totalDuration.Milliseconds()))
 	log.Info(c.ctx, "import job Committing done, all vchannels committed",
 		mlog.Duration("jobTimeCost/total", totalDuration))
 }
@@ -869,7 +891,9 @@ func (c *importChecker) checkCollection(collectionID int64, jobs []ImportJob) {
 	}
 	if !has {
 		jobs = lo.Filter(jobs, func(job ImportJob, _ int) bool {
-			return job.GetState() != internalpb.ImportJobState_Failed && job.GetState() != internalpb.ImportJobState_Completed
+			return job.GetState() != internalpb.ImportJobState_Failed &&
+				job.GetState() != internalpb.ImportJobState_Completed &&
+				job.GetState() != internalpb.ImportJobState_Committing
 		})
 		for _, job := range jobs {
 			err = c.importMeta.UpdateJob(c.ctx, job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),

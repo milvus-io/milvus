@@ -170,12 +170,18 @@ func NewPkStatsCollector(
 	collectionID UniqueID,
 	schema *schemapb.CollectionSchema,
 	maxRowNum int64,
+	config *PkStatsConfig,
 ) (*PkStatsCollector, error) {
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
-	stats, err := NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxRowNum)
+	var stats *PrimaryKeyStats
+	if config != nil {
+		stats, err = NewPrimaryKeyStatsWithConfig(pkField.GetFieldID(), int64(pkField.GetDataType()), *config)
+	} else {
+		stats, err = NewPrimaryKeyStats(pkField.GetFieldID(), int64(pkField.GetDataType()), maxRowNum)
+	}
 	if err != nil {
 		return nil, err
 	}
