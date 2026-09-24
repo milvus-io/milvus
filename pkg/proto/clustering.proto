@@ -50,6 +50,9 @@ message AnalyzeInfo {
   // segmentID -> manifest path. A non-empty entry marks a StorageV3 segment
   // read through the manifest; V1 segments use insert_files instead.
   map<int64, string> manifest_paths = 17;
+  string cluster_type = 18;
+  // Opaque knowhere.cluster.analyze.* parameters, with the prefix removed.
+  map<string, string> cluster_params = 19;
 }
 
 message ClusteringCentroidsStats {
@@ -59,4 +62,5 @@ message ClusteringCentroidsStats {
 message ClusteringCentroidIdMappingStats {
   repeated uint32 centroid_id_mapping = 1;
   repeated int64 num_in_centroid = 2;
+  repeated float distance_to_centroid = 3;
 }

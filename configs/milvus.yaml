@@ -911,11 +911,13 @@ dataCoord:
       preferSegmentSizeRatio: 0.8
       maxSegmentSizeRatio: 1
       maxTrainSizeRatio: 0.8 # max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit
-      maxCentroidsNum: 10240 # maximum centroids number in Kmeans train
+      maxCentroidsNum: 1000000 # maximum centroids number in Kmeans train
       minCentroidsNum: 16 # minimum centroids number in Kmeans train
       minClusterSizeRatio: 0.01 # minimum cluster size / avg size in Kmeans train
       maxClusterSizeRatio: 10 # maximum cluster size / avg size in Kmeans train
       maxClusterSize: 5g # maximum cluster size in Kmeans train
+      layout:
+        chunkSizePerCentroid: 8MB # target vector bytes represented by one centroid
   syncSegmentsInterval: 300 # The time interval for regularly syncing segments
   index:
     memSizeEstimateMultiplier: 2 # When the memory size is not setup by index procedure, multiplier to estimate the memory size of index data
@@ -1717,6 +1719,9 @@ streaming:
 # Any configuration related to the knowhere vector search engine
 knowhere:
   enable: true # When enable this configuration, the index parameters defined following will be automatically populated as index parameters, without requiring user input.
+  cluster:
+    type: KMEANS # Clustering implementation registered in Knowhere. The value is passed through without normalization.
+    analyze: # Parameters under this prefix are passed through to the clustering implementation.
   AISAQ:
     build:
       max_degree: 56 # Maximum degree of the Vamana graph
