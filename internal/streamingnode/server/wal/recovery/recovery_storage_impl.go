@@ -265,7 +265,7 @@ func (r *recoveryStorageImpl) initRecoveryModules(
 	manager, err := vchannel.NewPChannelRecoveryManager(vchannel.PChannelManagerConfig{
 		QueryRuntimeModuleBuilders: []queryresource.QueryRuntimeModuleBuilder{
 			queryresource.NewGrowingRuntimeModuleBuilder(nil),
-			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager()), idf.WithNodeScheduler(r.nodeScheduler)),
+			idf.NewFutureProvider(resource.Resource().MixCoordClient(), idf.WithChunkManager(resource.Resource().ChunkManager())),
 		},
 		QueryViewLoadInfoProvider: queryresource.NewFutureLoadInfoProvider(resource.Resource().MixCoordClient()),
 		PChannel:                  r.channel.Name,

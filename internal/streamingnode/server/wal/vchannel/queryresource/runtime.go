@@ -173,7 +173,7 @@ func (r *QueryRuntime) Advance(oldestDataVersion qviews.DataVersion) {
 	}
 }
 
-// PrepareQueryView fences sealed handoffs before requesting an asynchronous BM25 refresh.
+// PrepareQueryView fences sealed handoffs and prepares the shared BM25 aggregate before readiness.
 func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.DataVersion) error {
 	if r == nil {
 		return nil
@@ -190,11 +190,11 @@ func (r *QueryRuntime) PrepareQueryView(ctx context.Context, dataVersion qviews.
 		return err
 	}
 	for _, module := range modules {
-		versioned, ok := module.(QueryRuntimeRefreshModule)
+		versioned, ok := module.(QueryRuntimePrepareModule)
 		if !ok {
 			continue
 		}
-		if err := versioned.RequestRefresh(ctx, dataVersion); err != nil {
+		if err := versioned.PrepareDataVersion(ctx, dataVersion); err != nil {
 			return err
 		}
 	}

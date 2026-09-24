@@ -20,10 +20,10 @@ type QueryRuntimeModule interface {
 	Close()
 }
 
-// QueryRuntimeRefreshModule requests a shared resource refresh when a new
-// QueryView becomes ready. It does not prepare a separate versioned resource.
-type QueryRuntimeRefreshModule interface {
-	RequestRefresh(context.Context, qviews.DataVersion) error
+// QueryRuntimePrepareModule prepares shared resources before a QueryView is ready.
+// It does not retain a separate aggregate per version.
+type QueryRuntimePrepareModule interface {
+	PrepareDataVersion(context.Context, qviews.DataVersion) error
 }
 
 // QueryRuntimeModuleBuilder creates an unprepared module owned by QueryRuntime.

@@ -213,7 +213,7 @@ func (m fakeIDFModule) ApplyLiveEvent(context.Context, walview.VChannelResourceE
 }
 func (m fakeIDFModule) Advance(qviews.DataVersion) {}
 func (m fakeIDFModule) Close()                     {}
-func (m fakeIDFModule) BuildIDFBatch(requests []IDFRequest) ([]IDFResult, error) {
+func (m fakeIDFModule) BuildIDFBatch(_ context.Context, requests []IDFRequest) ([]IDFResult, error) {
 	results := make([]IDFResult, len(requests))
 	for i := range results {
 		results[i] = IDFResult{Vectors: m.vectors, Avgdl: m.avgdl}
@@ -230,7 +230,7 @@ func TestGlobalOptimizerBatchesHybridIDFRead(t *testing.T) {
 	sub := &internalpb.SubSearchRequest{FieldId: 102, MetricType: metric.BM25, PlaceholderGroup: req.PlaceholderGroup, SerializedExprPlan: req.SerializedExprPlan}
 	hybrid := &internalpb.SearchRequest{CollectionID: collection, IsAdvanced: true, SubReqs: []*internalpb.SubSearchRequest{sub, proto.Clone(sub).(*internalpb.SubSearchRequest)}}
 	calls := 0
-	patch := mockey.Mock(fakeIDFModule.BuildIDFBatch).To(func(_ fakeIDFModule, requests []IDFRequest) ([]IDFResult, error) {
+	patch := mockey.Mock(fakeIDFModule.BuildIDFBatch).To(func(_ fakeIDFModule, _ context.Context, requests []IDFRequest) ([]IDFResult, error) {
 		calls++
 		require.Len(t, requests, 2, "all hybrid tokenization must precede the single aggregate read")
 		for _, request := range requests {

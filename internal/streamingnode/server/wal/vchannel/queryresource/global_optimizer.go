@@ -18,7 +18,7 @@ import (
 )
 
 type idfOracle interface {
-	BuildIDFBatch([]IDFRequest) ([]IDFResult, error)
+	BuildIDFBatch(context.Context, []IDFRequest) ([]IDFResult, error)
 }
 
 type globalOptimizer struct {
@@ -139,7 +139,7 @@ func (o globalOptimizer) optimizeRequests(ctx context.Context, requests []*inter
 	if o.idf == nil {
 		return merr.WrapErrServiceInternalMsg("BM25 IDF oracle is not initialized")
 	}
-	results, err := o.idf.BuildIDFBatch(inputs)
+	results, err := o.idf.BuildIDFBatch(ctx, inputs)
 	if err != nil {
 		return merr.Wrap(err, "build BM25 IDF")
 	}
