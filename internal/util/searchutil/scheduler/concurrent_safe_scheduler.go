@@ -247,14 +247,17 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 	}
 	if !available {
 		recordReadTaskReject(class)
+		var err error
 		if class == taskClassPriorityLane {
-			req.err <- requeryLaneCapacityError(capacity)
+			err = requeryLaneCapacityError(capacity)
 		} else {
-			req.err <- merr.WrapErrTooManyRequests(
+			err = merr.WrapErrTooManyRequests(
 				int32(capacity),
 				fmt.Sprintf("limit by %s", paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.Key),
 			)
 		}
+		s.onTaskFinished(req.task, err)
+		req.err <- err
 		// Yield to execChan handoff; unread requests remain pending.
 		return false
 	}
@@ -270,6 +273,7 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 	req.err <- err
 	if errors.Is(err, merr.ErrServiceTooManyRequests) {
 		recordReadTaskReject(class)
+		s.onTaskFinished(req.task, err)
 	}
 	// Continue processing only while the regular queue still has room.
 	return maxWaitTaskNum <= 0 || s.getRegularWaitingTaskTotal() < maxWaitTaskNum
@@ -394,8 +398,8 @@ func (s *scheduler) onTaskServed(task *queuedTask) {
 	}
 }
 
-// onTaskFinished forwards terminal outcomes without imposing adaptation logic
-// on the generic scheduler. Worker-path callbacks may be concurrent.
+// onTaskFinished forwards terminal execution and admission outcomes without
+// imposing adaptation logic on the generic scheduler. Calls may be concurrent.
 func (s *scheduler) onTaskFinished(task Task, err error) {
 	if observer, ok := s.policy.(taskFinishedObserver); ok {
 		observer.onTaskFinished(task, err)

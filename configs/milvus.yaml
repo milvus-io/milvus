@@ -717,8 +717,8 @@ queryNode:
     maxDiskUsagePercentageForMmapAlloc: 50 # disk percentage used in mmap chunk manager
   indexOffsetCacheEnabled: false # enable index offset cache for some scalar indexes, now is just for bitmap index, enable this param can improve performance for retrieving raw data from index
   scheduler:
-    unsolvedQueueSize: 1024 # Maximum number of regular read tasks waiting in the scheduler. When the dedicated requery lane is enabled under fifo, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.
-    requeryUnsolvedQueueSize: 1024 # Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane when scheduleReadPolicy is fifo, including a task staged for execution handoff. It defaults to an independent capacity of 1024, so the default total waiting-task capacity is 1024 regular tasks plus 1024 requery tasks. A value >= 1024 sets the lane capacity, a value <= 0 disables the lane, and any other value emits a warning and falls back to 1024. The lane is disabled when scheduleReadPolicy is user-task-polling.
+    unsolvedQueueSize: 1024 # Maximum number of regular read tasks waiting in the scheduler. Under adaptive-requery-priority, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.
+    requeryUnsolvedQueueSize: 1024 # Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane under adaptive-requery-priority, including a task staged for execution handoff. This setup-time value requires a QueryNode restart to take effect. It defaults to an independent capacity of 1024, so the default total waiting-task capacity is 1024 regular tasks plus 1024 requery tasks. Values below 1024 are invalid and fall back to 1024. This setting has no effect under fifo or user-task-polling.
     # maxReadConcurrentRatio is the concurrency ratio of read task (search task and query task).
     # Max read concurrency would be the value of hardware.GetCPUNum * maxReadConcurrentRatio.
     # It defaults to 2.0, which means max read concurrency would be the value of hardware.GetCPUNum * 2.
@@ -729,6 +729,7 @@ queryNode:
     maxTimestampLag: 86400
     scheduleReadPolicy:
       # fifo: A FIFO queue support the schedule.
+      # adaptive-requery-priority: A FIFO queue with an adaptive priority lane for requery tasks.
       # user-task-polling:
       # 	The user's tasks will be polled one by one and scheduled.
       # 	Scheduling is fair on task granularity.

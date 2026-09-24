@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	schedulePolicyNameFIFO            = "fifo"
-	schedulePolicyNameUserTaskPolling = "user-task-polling"
+	schedulePolicyNameFIFO                    = "fifo"
+	schedulePolicyNameAdaptiveRequeryPriority = "adaptive-requery-priority"
+	schedulePolicyNameUserTaskPolling         = "user-task-polling"
 )
 
 // NewScheduler create a scheduler by policyName.
@@ -19,9 +20,9 @@ func NewScheduler(policyName string) Scheduler {
 	case "":
 		fallthrough
 	case schedulePolicyNameFIFO:
-		return newScheduler(
-			newRequeryPriorityPolicy(newFIFOPolicy()),
-		)
+		return newScheduler(newFIFOPolicy())
+	case schedulePolicyNameAdaptiveRequeryPriority:
+		return newScheduler(newRequeryPriorityPolicy(newFIFOPolicy()))
 	case schedulePolicyNameUserTaskPolling:
 		mlog.Info(context.TODO(), "requery priority lane disabled under user-task-polling")
 		return newScheduler(

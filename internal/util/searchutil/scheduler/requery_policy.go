@@ -22,14 +22,15 @@ type taskServedObserver interface {
 	onTaskServed(task *queuedTask)
 }
 
-// taskFinishedObserver is probed by the scheduler for terminal task results.
-// Implementations must be safe for concurrent calls from execution workers.
+// taskFinishedObserver is probed by the scheduler for terminal execution and
+// admission outcomes. Implementations must be safe for concurrent calls.
 type taskFinishedObserver interface {
 	onTaskFinished(task Task, err error)
 }
 
 const (
-	requeryFailureWindow = 10 * time.Second
+	requeryFailureWindow    = 10 * time.Second
+	requeryMinWindowSamples = 20
 
 	requeryCreditLevel1 = 1
 	requeryCreditLevel2 = 2
@@ -60,6 +61,7 @@ type requeryPriorityPolicy struct {
 	windowStart    time.Time
 	requerySuccess atomic.Uint64
 	requeryTimeout atomic.Uint64
+	requeryReject  atomic.Uint64
 	priorityCredit int
 
 	// requeryCredit is the number of lane tasks that may be selected before
@@ -77,9 +79,12 @@ func newRequeryPriorityPolicy(inner schedulePolicy) *requeryPriorityPolicy {
 }
 
 func (p *requeryPriorityPolicy) Classify(task Task) taskClass {
+	if !isRequeryTask(task) {
+		return taskClassRegular
+	}
+
 	p.refreshPriority(time.Now())
-	if p.priorityCredit > 0 && isRequeryTask(task) &&
-		requeryLaneCapacity() > 0 {
+	if p.priorityCredit > 0 {
 		return taskClassPriorityLane
 	}
 	return taskClassRegular
@@ -148,14 +153,18 @@ func (p *requeryPriorityPolicy) onTaskServed(task *queuedTask) {
 	p.requeryCredit = p.burstCredit()
 }
 
-// onTaskFinished records only outcomes useful to priority adaptation. Explicit
-// cancellation and non-timeout errors are excluded from both numerator and
-// denominator because reordering cannot reliably improve them.
+// onTaskFinished records only outcomes useful to priority adaptation. Local
+// overload rejection is actionable; explicit cancellation and other errors
+// are excluded because reordering cannot reliably improve them.
 func (p *requeryPriorityPolicy) onTaskFinished(task Task, err error) {
 	if !isRequeryTask(task) {
 		return
 	}
 	ctxErr := task.Context().Err()
+	if errors.Is(err, merr.ErrServiceTooManyRequests) {
+		p.requeryReject.Inc()
+		return
+	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctxErr, context.DeadlineExceeded) {
 		p.requeryTimeout.Inc()
 		return
@@ -165,8 +174,9 @@ func (p *requeryPriorityPolicy) onTaskFinished(task Task, err error) {
 	}
 }
 
-// refreshPriority maps the last complete observation window to one adaptive
-// credit step. Separate promotion and demotion thresholds provide hysteresis.
+// refreshPriority maps a sufficiently sampled observation window to one
+// adaptive credit step. Separate promotion and demotion thresholds provide
+// hysteresis.
 func (p *requeryPriorityPolicy) refreshPriority(now time.Time) {
 	if now.Sub(p.windowStart) < requeryFailureWindow {
 		return
@@ -174,32 +184,34 @@ func (p *requeryPriorityPolicy) refreshPriority(now time.Time) {
 
 	timeouts := p.requeryTimeout.Swap(0)
 	successes := p.requerySuccess.Swap(0)
+	rejections := p.requeryReject.Swap(0)
 	p.windowStart = now
-	if timeouts+successes == 0 {
+	samples := timeouts + successes + rejections
+	if samples < requeryMinWindowSamples {
 		return
 	}
 
-	timeoutRate := float64(timeouts) / float64(timeouts+successes)
+	failureRate := float64(timeouts+rejections) / float64(samples)
 	oldCredit := p.priorityCredit
 	switch p.priorityCredit {
 	case 0:
-		if timeoutRate >= requeryPromoteLevel1 {
+		if failureRate >= requeryPromoteLevel1 {
 			p.priorityCredit = requeryCreditLevel1
 		}
 	case requeryCreditLevel1:
-		if timeoutRate >= requeryPromoteLevel2 {
+		if failureRate >= requeryPromoteLevel2 {
 			p.priorityCredit = requeryCreditLevel2
-		} else if timeoutRate < requeryDemoteLevel0 {
+		} else if failureRate < requeryDemoteLevel0 {
 			p.priorityCredit = 0
 		}
 	case requeryCreditLevel2:
-		if timeoutRate >= requeryPromoteLevel3 {
+		if failureRate >= requeryPromoteLevel3 {
 			p.priorityCredit = requeryCreditLevel3
-		} else if timeoutRate < requeryDemoteLevel1 {
+		} else if failureRate < requeryDemoteLevel1 {
 			p.priorityCredit = requeryCreditLevel1
 		}
 	case requeryCreditLevel3:
-		if timeoutRate < requeryDemoteLevel2 {
+		if failureRate < requeryDemoteLevel2 {
 			p.priorityCredit = requeryCreditLevel2
 		}
 	}
@@ -211,8 +223,9 @@ func (p *requeryPriorityPolicy) refreshPriority(now time.Time) {
 			mlog.String("change", requeryPriorityChange(oldCredit, p.priorityCredit)),
 			mlog.Int("previousCredit", oldCredit),
 			mlog.Int("credit", p.priorityCredit),
-			mlog.Float64("timeoutRate", timeoutRate),
+			mlog.Float64("failureRate", failureRate),
 			mlog.Uint64("timeouts", timeouts),
+			mlog.Uint64("rejections", rejections),
 			mlog.Uint64("successes", successes),
 			mlog.Int("laneLength", p.lane.len()),
 		)

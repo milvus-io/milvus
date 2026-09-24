@@ -4359,7 +4359,7 @@ type queryNodeConfig struct {
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
-	RequeryUnsolvedQueueSize     ParamItem `refreshable:"true"`
+	RequeryUnsolvedQueueSize     ParamItem `refreshable:"false"`
 	RequeryPriorityBaseCredit    ParamItem `refreshable:"true"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
@@ -5383,7 +5383,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.0.0",
 		DefaultValue: "1024",
 		Doc: "Maximum number of regular read tasks waiting in the scheduler. " +
-			"When the dedicated requery lane is enabled under fifo, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.",
+			"Under adaptive-requery-priority, this is an independent regular-task budget and the effective total capacity is the sum of the regular and requery capacities.",
 		Export: true,
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
@@ -5395,7 +5395,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		DefaultValue: defaultRequeryUnsolvedQueueSize,
 		Formatter: func(v string) string {
 			capacity, err := strconv.ParseInt(v, 10, 64)
-			if err == nil && (capacity <= 0 || capacity >= 1024) {
+			if err == nil && capacity >= 1024 {
 				return v
 			}
 			mlog.RatedWarn(context.TODO(), rate.Limit(1.0/60.0),
@@ -5405,10 +5405,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				mlog.Int64("fallbackCapacity", 1024))
 			return defaultRequeryUnsolvedQueueSize
 		},
-		Doc: "Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane when scheduleReadPolicy is fifo, including a task staged for execution handoff. " +
+		Doc: "Maximum number of scheduler-owned requery tasks waiting in the dedicated priority lane under adaptive-requery-priority, including a task staged for execution handoff. This setup-time value requires a QueryNode restart to take effect. " +
 			"It defaults to an independent capacity of 1024, so the default total waiting-task capacity is 1024 regular tasks plus 1024 requery tasks. " +
-			"A value >= 1024 sets the lane capacity, a value <= 0 disables the lane, and any other value emits a warning and falls back to 1024. " +
-			"The lane is disabled when scheduleReadPolicy is user-task-polling.",
+			"Values below 1024 are invalid and fall back to 1024. This setting has no effect under fifo or user-task-polling.",
 		Export: true,
 	}
 	p.RequeryUnsolvedQueueSize.Init(base.mgr)
@@ -5430,10 +5429,10 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				mlog.Int("fallbackCredit", 3))
 			return defaultRequeryPriorityBaseCredit
 		},
-		Doc: "Base number of requery tasks that may be selected before a waiting regular task under the fifo requery priority policy. " +
+		Doc: "Base number of requery tasks that may be selected before a waiting regular task under adaptive-requery-priority. " +
 			"A served regular task refreshes the credit to this configured value. " +
 			"Positive values take effect dynamically at the next credit refresh; invalid or non-positive values fall back to 3. " +
-			"This setting has no effect under user-task-polling.",
+			"This setting has no effect under fifo or user-task-polling.",
 		Export: false,
 	}
 	p.RequeryPriorityBaseCredit.Init(base.mgr)
@@ -5707,6 +5706,8 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.3.0",
 		DefaultValue: "fifo",
 		Doc: `fifo: A FIFO queue support the schedule.
+adaptive-requery-priority:
+	A FIFO queue with an adaptive priority lane for requery tasks.
 user-task-polling:
 	The user's tasks will be polled one by one and scheduled.
 	Scheduling is fair on task granularity.
