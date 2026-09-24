@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -17,6 +18,8 @@ type ViewScopedPhysicalSegmentManager struct {
 	estimator     SegmentResourceEstimator
 	stream        SegmentLoadInfoStream
 
+	// Allocated under mu; never reset when a SegmentID is removed or recreated.
+	nextLoadGeneration  uint64
 	mu                  sync.Mutex
 	views               map[qviews.QueryViewKey]*viewRef
 	dropping            map[qviews.QueryViewKey]*viewRef
@@ -38,6 +41,7 @@ type physicalSegmentState struct {
 	segment         TransformSegment
 	collectionID    int64
 	loading         bool
+	loadGeneration  uint64
 	updating        bool
 	updateHandle    nodescheduler.TaskHandle
 	updateEpoch     uint64
@@ -58,11 +62,12 @@ type segmentLoadInfoSubscriptionRequest struct {
 }
 
 type segmentLoadSubmission struct {
-	segmentID int64
-	ctx       context.Context
-	request   segmentLoadRequest
-	snapshot  SegmentLoadInfoSnapshot
-	done      func()
+	generation uint64
+	segmentID  int64
+	ctx        context.Context
+	request    segmentLoadRequest
+	snapshot   SegmentLoadInfoSnapshot
+	done       func()
 }
 
 type segmentUpdateSubmission struct {
@@ -173,14 +178,17 @@ func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegment
 				loadCtx, loadCancel := context.WithCancel(context.Background())
 				ref.pendingLoads++
 				loadDone := onceLoadDone(func() { m.completeLoadAttempts([]qviews.QueryViewKey{req.Key}) })
+				m.nextLoadGeneration++
+				state.loadGeneration = m.nextLoadGeneration
 				state.loading = true
 				state.loadCancel = loadCancel
 				state.loadDone = loadDone
 				toLoad = append(toLoad, segmentLoadSubmission{
-					segmentID: segmentID,
-					ctx:       loadCtx,
-					request:   newSegmentLoadRequest(req),
-					done:      chainLoadDone(loadDone, loadCancel),
+					generation: state.loadGeneration,
+					segmentID:  segmentID,
+					ctx:        loadCtx,
+					request:    newSegmentLoadRequest(req),
+					done:       chainLoadDone(loadDone, loadCancel),
 				})
 			} else {
 				toSubscribe = append(toSubscribe, segmentLoadInfoSubscriptionRequest{
@@ -195,14 +203,17 @@ func (m *ViewScopedPhysicalSegmentManager) recordView(req AcquirePhysicalSegment
 			loadCtx, loadCancel := context.WithCancel(context.Background())
 			ref.pendingLoads++
 			loadDone := onceLoadDone(func() { m.completeLoadAttempts([]qviews.QueryViewKey{req.Key}) })
+			m.nextLoadGeneration++
+			state.loadGeneration = m.nextLoadGeneration
 			state.loading = true
 			state.loadCancel = loadCancel
 			state.loadDone = loadDone
 			toLoad = append(toLoad, segmentLoadSubmission{
-				segmentID: segmentID,
-				ctx:       loadCtx,
-				request:   newSegmentLoadRequest(req),
-				done:      chainLoadDone(loadDone, loadCancel),
+				generation: state.loadGeneration,
+				segmentID:  segmentID,
+				ctx:        loadCtx,
+				request:    newSegmentLoadRequest(req),
+				done:       chainLoadDone(loadDone, loadCancel),
 			})
 		}
 		state.refs[req.Key] = struct{}{}
@@ -250,7 +261,7 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		OnLoaded: func(segment TransformSegment) {
 			defer done()
 			if segment == nil {
-				notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, submission.snapshot, nil)
+				notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission, nil)
 				m.submitSegmentLoadSubmissions(retries)
 				m.closeSubscriptions(subscriptions)
 				for _, notify := range notifications {
@@ -258,7 +269,7 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 				}
 				return
 			}
-			notifications, retries, kept := m.completePhysicalSegmentLoad(segment, submission.snapshot.Revision)
+			notifications, retries, kept := m.completePhysicalSegmentLoad(submission, segment)
 			m.submitSegmentLoadSubmissions(retries)
 			if !kept {
 				_ = segment.Release(context.Background())
@@ -271,7 +282,7 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 		},
 		OnUnrecoverable: func(err error) {
 			defer done()
-			notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission.segmentID, submission.snapshot, err)
+			notifications, retries, subscriptions := m.failPhysicalSegmentLoad(submission, err)
 			m.submitSegmentLoadSubmissions(retries)
 			m.closeSubscriptions(subscriptions)
 			for _, notify := range notifications {
@@ -282,11 +293,11 @@ func (m *ViewScopedPhysicalSegmentManager) submitSegmentLoad(submission segmentL
 	m.nodeScheduler.Submit(task)
 }
 
-func (m *ViewScopedPhysicalSegmentManager) completePhysicalSegmentLoad(segment TransformSegment, revision SegmentLoadInfoRevision) ([]func(), []segmentLoadSubmission, bool) {
+func (m *ViewScopedPhysicalSegmentManager) completePhysicalSegmentLoad(submission segmentLoadSubmission, segment TransformSegment) ([]func(), []segmentLoadSubmission, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	state := m.segments[segment.ID()]
-	if state == nil {
+	state := m.segments[submission.segmentID]
+	if state == nil || !state.loading || state.loadGeneration != submission.generation {
 		return nil, nil, false
 	}
 	state.segment = segment
@@ -294,8 +305,8 @@ func (m *ViewScopedPhysicalSegmentManager) completePhysicalSegmentLoad(segment T
 	delete(m.pendingLoadSegments, segment.ID())
 	state.loadCancel = nil
 	state.loadDone = nil
-	if !revision.Empty() {
-		state.revision = revision
+	if !submission.snapshot.Revision.Empty() {
+		state.revision = submission.snapshot.Revision
 	}
 	if len(state.refs) == 0 {
 		delete(m.segments, segment.ID())
@@ -341,15 +352,18 @@ func (m *ViewScopedPhysicalSegmentManager) recordSegmentSnapshot(ctx context.Con
 		loadDone := onceLoadDone(m.trackPendingLoadAttemptLocked(state))
 		delete(m.pendingLoadSegments, snapshot.SegmentID)
 		state.pendingSnapshot = nil
+		m.nextLoadGeneration++
+		state.loadGeneration = m.nextLoadGeneration
 		state.loading = true
 		state.loadCancel = loadCancel
 		state.loadDone = loadDone
 		return segmentLoadSubmission{
-			segmentID: snapshot.SegmentID,
-			ctx:       loadCtx,
-			request:   request,
-			snapshot:  snapshot,
-			done:      chainLoadDone(loadDone, loadCancel),
+			generation: state.loadGeneration,
+			segmentID:  snapshot.SegmentID,
+			ctx:        loadCtx,
+			request:    request,
+			snapshot:   snapshot,
+			done:       chainLoadDone(loadDone, loadCancel),
 		}, segmentUpdateSubmission{}, true
 	}
 	task, ok := m.recordSegmentUpdateLocked(ctx, snapshot, state)
@@ -478,12 +492,13 @@ func (m *ViewScopedPhysicalSegmentManager) cancelSegmentUpdateLocked(state *phys
 	}
 }
 
-func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(segmentID int64, snapshot SegmentLoadInfoSnapshot, err error) ([]func(), []segmentLoadSubmission, []SegmentLoadInfoSubscription) {
+func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(submission segmentLoadSubmission, err error) ([]func(), []segmentLoadSubmission, []SegmentLoadInfoSubscription) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	segmentID := submission.segmentID
 	state := m.segments[segmentID]
-	if state == nil {
+	if state == nil || !state.loading || state.loadGeneration != submission.generation {
 		return nil, nil, nil
 	}
 	state.loading = false
@@ -497,7 +512,7 @@ func (m *ViewScopedPhysicalSegmentManager) failPhysicalSegmentLoad(segmentID int
 	if isSegmentResourceInsufficient(err) && m.hasOtherLoadingSegmentLocked(segmentID) {
 		m.pendingLoadSegments[segmentID] = struct{}{}
 		if state.pendingSnapshot == nil {
-			snapshotCopy := snapshot
+			snapshotCopy := submission.snapshot
 			state.pendingSnapshot = &snapshotCopy
 		}
 		return nil, nil, nil
@@ -661,17 +676,20 @@ func (m *ViewScopedPhysicalSegmentManager) collectPendingLoadSubmissionsLocked()
 		loadCtx, loadCancel := context.WithCancel(context.Background())
 		loadDone := onceLoadDone(m.trackPendingLoadAttemptLocked(state))
 		delete(m.pendingLoadSegments, segmentID)
+		m.nextLoadGeneration++
+		state.loadGeneration = m.nextLoadGeneration
 		state.loading = true
 		snapshot := *state.pendingSnapshot
 		state.pendingSnapshot = nil
 		state.loadCancel = loadCancel
 		state.loadDone = loadDone
 		submissions = append(submissions, segmentLoadSubmission{
-			segmentID: segmentID,
-			ctx:       loadCtx,
-			request:   request,
-			snapshot:  snapshot,
-			done:      chainLoadDone(loadDone, loadCancel),
+			generation: state.loadGeneration,
+			segmentID:  segmentID,
+			ctx:        loadCtx,
+			request:    request,
+			snapshot:   snapshot,
+			done:       chainLoadDone(loadDone, loadCancel),
 		})
 	}
 	return submissions

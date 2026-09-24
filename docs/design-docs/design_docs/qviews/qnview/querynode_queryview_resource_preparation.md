@@ -247,9 +247,18 @@ even when its revision equals the currently applied revision. The in-flight
 task may first move the physical segment to a different revision, after which
 the retained snapshot must move it back to the latest metadata state.
 
-On physical load completion, the physical manager validates that the segment is
-still referenced before keeping it. If no QueryView still references the
-segment, the late result is released and ignored.
+Every physical load attempt captures a manager-wide monotonically increasing
+load generation. A retry receives a new generation, and removing/recreating a
+SegmentID never resets the counter. This generation is independent of the
+metadata content-hash revision.
+
+On physical load completion or failure, the physical manager validates both
+that the current state is still loading and that its generation matches the
+submission. A stale successful result releases only its own Segment; a stale
+failure does not change current refs, subscriptions, revisions, or callbacks.
+Both paths still complete their original load-attempt cleanup so an old view's
+pending release can finish. A current result is retained only while at least
+one QueryView still references it.
 
 ## 8. Transform Registration and Catch-Up Stage
 
