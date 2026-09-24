@@ -1482,7 +1482,7 @@ TEST_F(SealedMatchExprTest,
         auto* array_data = sub_field->mutable_scalars()->mutable_array_data();
         array_data->set_element_type(proto::schema::DataType::Int32);
         for (auto is_valid : valid) {
-            sub_field->mutable_scalars()->add_valid_data(is_valid);
+            sub_field->add_valid_data(is_valid);
         }
         for (const auto& row : rows) {
             auto* data_row = array_data->add_data();
