@@ -224,7 +224,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 			return nil, err
 		}
 		importEz, _ := GetEZK(options)
-		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz)
+		return binlog.NewReader(ctx, cm, schema, storageConfig, storageVersion, paths, tsStart, tsEnd, bufferSize, importEz, nil)
 	}
 
 	fileType, err := GetFileType(importFile)
@@ -232,15 +232,15 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		return nil, err
 	}
 	switch fileType {
-	case JSON:
+	case FileTypeJSON:
 		return json.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
-	case JSONLines:
+	case FileTypeJSONLines:
 		return json.NewLinesReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
-	case Numpy:
+	case FileTypeNumpy:
 		return numpy.NewReader(ctx, cm, schema, importFile.GetPaths(), bufferSize)
-	case Parquet:
+	case FileTypeParquet:
 		return parquet.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
-	case CSV:
+	case FileTypeCsv:
 		sep, err := GetCSVSep(options)
 		if err != nil {
 			return nil, err

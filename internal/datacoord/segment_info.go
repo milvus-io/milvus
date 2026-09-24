@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"slices"
 	"time"
 
 	"github.com/samber/lo"
@@ -535,6 +536,20 @@ func (s *SegmentInfo) getFieldBinlogSize(fieldID int64) int64 {
 						size += l.GetMemorySize()
 					}
 				}
+			}
+		}
+	}
+	// StorageV3 manifest segments persist no FieldBinlog arrays (the manifest
+	// is the source of truth), so the loop above sums nothing for them and
+	// the whole-segment fallback below would overcount the field by every
+	// non-indexed field's bytes (e.g. index task slots sized by segment size
+	// instead of vector size). Their per-column-group sizes ship inside
+	// Stats.LoadResource instead; mirror the array matching rules (GroupId or
+	// member FieldIds) so both storage versions size the same field the same.
+	if size <= 0 {
+		for _, group := range s.EnsureStats().GetLoadResource().GetColumnGroups() {
+			if group.GetGroupId() == fieldID || slices.Contains(group.GetFieldIds(), fieldID) {
+				size += group.GetMemorySize()
 			}
 		}
 	}

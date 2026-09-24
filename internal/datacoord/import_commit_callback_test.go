@@ -288,3 +288,48 @@ func TestCoordinatorImportIgnoresLegacyCompletion(t *testing.T) {
 		require.Equal(t, state, restored.GetJob(ctx, 1).GetState())
 	}
 }
+
+// TestImportCommitCallbackV3JobPublishesVisibility pins the commit path for an
+// Import V3 job: the segment ownership is resolved through the completed
+// ImportTaskV3 records, and the same visibility fence (per-channel commit
+// timestamp + is_importing clear) and Completed transition apply.
+func TestImportCommitCallbackV3JobPublishesVisibility(t *testing.T) {
+	ctx := context.Background()
+	catalog := &datacoordkv.Catalog{MetaKv: NewMetaMemoryKV()}
+	imports, err := NewImportMeta(ctx, catalog, nil, nil)
+	require.NoError(t, err)
+	require.NoError(t, imports.AddJob(ctx, &importJob{
+		ImportJob: &datapb.ImportJob{
+			JobID: 1, CollectionID: 100, Vchannels: []string{"v1"},
+			State: internalpb.ImportJobState_Uncommitted, CommitByCoordinator: true,
+			Version: internalpb.ImportVersion_ImportVersionV3,
+		},
+		tr: timerecord.NewTimeRecorder("import-commit"),
+	}))
+	segments := NewSegmentsInfo()
+	segments.SetSegment(10, &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 10, CollectionID: 100, PartitionID: 1, InsertChannel: "v1",
+		State: commonpb.SegmentState_Flushed, IsImporting: true, NumOfRows: 10,
+		Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{{LogID: 10, TimestampTo: 100}}}},
+	}})
+	// The V3 segment is owned by a Completed ImportTaskV3; the commit callback
+	// resolves it through getImportSegmentIDsByVchannel's V3 branch.
+	v3task := newImportTaskV3(&datapb.ImportTaskV3{
+		JobId: 1, TaskId: 41, CollectionId: 100, State: datapb.ImportTaskStateV2_Completed,
+		SegmentId: 10, Vchannel: "v1",
+	}, imports, nil, nil)
+	require.NoError(t, imports.AddTask(ctx, v3task))
+
+	callbacks := &DDLCallbacks{Server: &Server{importMeta: imports, meta: &meta{catalog: catalog, segments: segments}}}
+	result := buildCommitImportBroadcastResult(1)
+	result.Results = map[string]*message.AppendResult{"v1": {TimeTick: 200}}
+
+	require.NoError(t, callbacks.commitImportV2AckCallback(ctx, result))
+
+	seg := callbacks.meta.GetSegment(ctx, 10)
+	require.False(t, seg.GetIsImporting(), "the commit fence must clear is_importing")
+	require.Equal(t, uint64(200), seg.GetCommitTimestamp(), "the visibility fence must stamp the channel's timetick")
+	job := imports.GetJob(ctx, 1)
+	require.Equal(t, internalpb.ImportJobState_Completed, job.GetState())
+	require.NotEmpty(t, job.GetCompleteTime())
+}
