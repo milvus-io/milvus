@@ -5,6 +5,8 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
@@ -407,6 +409,16 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
 			return err
 		}
+		if !retryablePreparationError(err) {
+			m.mu.Lock()
+			ref, ok := m.refs[key]
+			current := ok && m.runtime == runtime && m.task == nil && m.err == nil
+			m.mu.Unlock()
+			if current && ref.onUnrecoverable != nil {
+				ref.onUnrecoverable()
+			}
+			return nil
+		}
 		return errors.Mark(err, nodescheduler.ErrDelay)
 	}
 	m.mu.Lock()
@@ -418,6 +430,17 @@ func (m *Manager) prepareReady(ctx context.Context, key qviews.QueryViewKey, onR
 	}
 	onReady()
 	return nil
+}
+
+func retryablePreparationError(err error) bool {
+	if errors.Is(err, nodescheduler.ErrDelay) || merr.IsRetryableErr(err) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	switch status.Code(err) {
+	case codes.Unavailable, codes.DeadlineExceeded, codes.ResourceExhausted:
+		return true
+	}
+	return false
 }
 
 func (m *Manager) submitCallback(callback func()) {

@@ -389,6 +389,40 @@ func TestComponentParam_LazyColumnGroupEnabled(t *testing.T) {
 	assert.False(t, item.GetAsBool())
 }
 
+func TestComponentParam_IDFLazyLoadSealedStats(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryViewCfg.IDFLazyLoadSealedStats
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryView.idfOracle.lazyLoadSealedStats", item.Key)
+	assert.Equal(t, "false", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.False(t, item.GetAsBool())
+
+	assert.NoError(t, params.Save(item.Key, "true"))
+	assert.True(t, item.GetAsBool())
+	assert.NoError(t, params.Save(item.Key, "false"))
+	assert.False(t, item.GetAsBool())
+}
+
+func TestComponentParam_IDFSealedStatsLoadConcurrencyRatio(t *testing.T) {
+	Init()
+	params := Get()
+	item := &params.QueryViewCfg.IDFSealedStatsLoadConcurrencyRatio
+	t.Cleanup(func() { params.Reset(item.Key) })
+
+	assert.Equal(t, "queryView.idfOracle.sealedStatsLoadConcurrencyRatio", item.Key)
+	assert.Equal(t, "4", item.DefaultValue)
+	assert.True(t, item.Export)
+	assert.Equal(t, 4.0, item.GetAsFloat())
+
+	assert.NoError(t, params.Save(item.Key, "2.5"))
+	assert.Equal(t, 2.5, item.GetAsFloat())
+	assert.NoError(t, params.Save(item.Key, "0"))
+	assert.Equal(t, 1.0, item.GetAsFloat())
+}
+
 func TestComponentParam(t *testing.T) {
 	Init()
 	params := Get()

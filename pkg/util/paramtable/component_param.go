@@ -8976,10 +8976,36 @@ writeRetryInitialInterval, otherwise the effective cap is raised to twice the in
 }
 
 type queryViewConfig struct {
-	LeaseDuration ParamItem `refreshable:"false"`
+	IDFLazyLoadSealedStats             ParamItem `refreshable:"true"`
+	IDFSealedStatsLoadConcurrencyRatio ParamItem `refreshable:"true"`
+	LeaseDuration                      ParamItem `refreshable:"false"`
 }
 
 func (p *queryViewConfig) init(base *BaseTable) {
+	p.IDFLazyLoadSealedStats = ParamItem{
+		Key:          "queryView.idfOracle.lazyLoadSealedStats",
+		Version:      "3.1.0",
+		Export:       true,
+		DefaultValue: "false",
+		Doc:          "Whether QueryView IDF runtimes defer sealed BM25 resource discovery and stats materialization until the first BM25 search.",
+	}
+	p.IDFLazyLoadSealedStats.Init(base.mgr)
+
+	p.IDFSealedStatsLoadConcurrencyRatio = ParamItem{
+		Key:          "queryView.idfOracle.sealedStatsLoadConcurrencyRatio",
+		Version:      "3.1.0",
+		Export:       true,
+		DefaultValue: "4",
+		Doc:          "Maximum process-wide concurrency for loading sealed BM25 stats, expressed as a ratio of CPU cores.",
+		Formatter: func(v string) string {
+			if getAsFloat(v) <= 0 {
+				return "1"
+			}
+			return v
+		},
+	}
+	p.IDFSealedStatsLoadConcurrencyRatio.Init(base.mgr)
+
 	p.LeaseDuration = ParamItem{
 		Key:          "queryView.leaseDuration",
 		Version:      "3.1.0",
