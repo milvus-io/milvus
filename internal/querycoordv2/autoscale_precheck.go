@@ -308,6 +308,7 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 	}
 
 	expectedUsage, err := estimateLoadResourceForLoadConfig(
+		ctx,
 		req.CollectionInfo.GetSchema(),
 		req.CollectionInfo.GetProperties(),
 		segments,
@@ -328,6 +329,7 @@ func (s *Server) requiredLoadResourceByRG(ctx context.Context, req *job.AlterLoa
 		currentSegments := filterSegmentsByPartitionIDs(segments, currentPartitionSet)
 		if len(currentSegments) > 0 {
 			currentUsage, err = estimateLoadResourceForLoadConfig(
+				ctx,
 				currentSchema(req),
 				req.CollectionInfo.GetProperties(),
 				currentSegments,
@@ -351,11 +353,11 @@ func currentSchema(req *job.AlterLoadConfigRequest) *schemapb.CollectionSchema {
 	return req.CollectionInfo.GetSchema()
 }
 
-func estimateLoadResourceForLoadConfig(schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, loadFields []int64) (autoscaleResourceUsage, error) {
+func estimateLoadResourceForLoadConfig(ctx context.Context, schema *schemapb.CollectionSchema, collectionProperties []*commonpb.KeyValuePair, segments []*datapb.SegmentInfo, indexes map[int64][]*querypb.FieldIndexInfo, loadFields []int64) (autoscaleResourceUsage, error) {
 	if schema != nil {
 		schema = task.ApplyCollectionMmapSetting(typeutil.Clone(schema), collectionProperties)
 	}
-	usage, err := autoscale.EstimateSegmentsLoadResourceForLoadConfig(schema, segments, indexes, loadFields, autoscale.DefaultEstimateOptions())
+	usage, err := autoscale.EstimateSegmentsLoadResourceForLoadConfig(ctx, schema, segments, indexes, loadFields, autoscale.DefaultEstimateOptions())
 	if err != nil {
 		return autoscaleResourceUsage{}, err
 	}
