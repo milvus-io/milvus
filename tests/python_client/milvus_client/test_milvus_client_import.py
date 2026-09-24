@@ -20,7 +20,7 @@ from pymilvus.bulk_writer import abort_import, bulk_import, commit_import, get_i
 from utils.util_log import test_log as log
 
 
-class TestMilvusClientImportInvariantsIndependent(TestMilvusClientV2Base):
+class TestMilvusClientImportIndependent(TestMilvusClientV2Base):
     @staticmethod
     def _import_url():
         return cf.param_info.param_uri or f"http://{cf.param_info.param_host}:{cf.param_info.param_port}"
