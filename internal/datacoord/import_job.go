@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
@@ -49,6 +50,12 @@ func WithJobStates(states ...internalpb.ImportJobState) ImportJobFilter {
 			}
 		}
 		return false
+	}
+}
+
+func WithJobVersions(versions ...internalpb.ImportVersion) ImportJobFilter {
+	return func(job ImportJob) bool {
+		return lo.Contains(versions, job.GetVersion())
 	}
 }
 
@@ -159,6 +166,7 @@ type ImportJob interface {
 	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
+	GetVersion() internalpb.ImportVersion
 	Clone() ImportJob
 }
 

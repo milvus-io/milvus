@@ -210,7 +210,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 	options := []*commonpb.KeyValuePair{}
 
 	switch s.fileType {
-	case importutilv2.JSON:
+	case importutilv2.FileTypeJSON:
 		rowBasedFile := GenerateJSONFile(s.T(), c, schema, rowCount)
 		files = []*internalpb.ImportFile{
 			{
@@ -219,7 +219,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 				},
 			},
 		}
-	case importutilv2.Parquet:
+	case importutilv2.FileTypeParquet:
 		filePath, err := GenerateParquetFile(s.Cluster, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{
@@ -229,7 +229,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 				},
 			},
 		}
-	case importutilv2.CSV:
+	case importutilv2.FileTypeCsv:
 		filePath, sep := GenerateCSVFile(s.T(), s.Cluster, schema, rowCount)
 		options = []*commonpb.KeyValuePair{{Key: "sep", Value: string(sep)}}
 		s.NoError(err)
@@ -300,7 +300,7 @@ func (s *BulkInsertSuite) runForStructArray() {
 }
 
 func (s *BulkInsertSuite) TestImportWithVectorArray() {
-	fileTypeArr := []importutilv2.FileType{importutilv2.CSV, importutilv2.JSON, importutilv2.Parquet}
+	fileTypeArr := []importutilv2.FileType{importutilv2.FileTypeCsv, importutilv2.FileTypeJSON, importutilv2.FileTypeParquet}
 
 	vectorTypeConfigs := []struct {
 		vecType    schemapb.DataType

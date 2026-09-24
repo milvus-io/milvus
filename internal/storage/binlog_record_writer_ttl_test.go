@@ -143,7 +143,7 @@ func TestPackedRecordWriters_TTLExpirQuantiles(t *testing.T) {
 			w, err := newPackedBinlogRecordWriter(1, 2, 3, schema,
 				ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 				allocator.NewLocalAllocator(1000, 1<<20),
-				1024, 1024, 0, nil, cfg, nil, "")
+				1024, 1024, 0, nil, cfg, nil, "", nil)
 			require.NoError(t, err)
 			return w
 		},
@@ -151,7 +151,7 @@ func TestPackedRecordWriters_TTLExpirQuantiles(t *testing.T) {
 			w, err := newPackedManifestRecordWriter(1, 2, 3, schema,
 				ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 				allocator.NewLocalAllocator(1000, 1<<20),
-				1024, 1024, 0, nil, cfg, nil, false, "")
+				1024, 1024, 0, nil, cfg, nil, false, "", nil)
 			require.NoError(t, err)
 			return w
 		},
@@ -159,7 +159,7 @@ func TestPackedRecordWriters_TTLExpirQuantiles(t *testing.T) {
 			w, err := NewPackedTextManifestRecordWriter(1, 2, 3, schema,
 				ChunkedBlobsWriter(func(_ []*Blob) error { return nil }),
 				allocator.NewLocalAllocator(1000, 1<<20),
-				1024, 1024, 0, nil, cfg, nil, "")
+				1024, 1024, 0, nil, cfg, nil, nil, "", nil)
 			require.NoError(t, err)
 			return w
 		},

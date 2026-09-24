@@ -21,7 +21,10 @@ type Type = string
 const (
 	TypeNone                  Type = "None"
 	PreImport                 Type = "PreImport"
+	PreImportV3               Type = "PreImportV3"
 	Import                    Type = "Import"
+	Reshard                   Type = "Reshard"
+	ImportV3                  Type = "ImportV3"
 	Compaction                Type = "Compaction"
 	Index                     Type = "Index"
 	Stats                     Type = "Stats"
@@ -35,7 +38,10 @@ const (
 
 var TypeList = []Type{
 	PreImport,
+	PreImportV3,
 	Import,
+	Reshard,
+	ImportV3,
 	Compaction,
 	Index,
 	Stats,

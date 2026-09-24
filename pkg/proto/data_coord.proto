@@ -12,6 +12,7 @@ import "msg.proto";
 import "index_coord.proto";
 import "plan.proto";
 import "view.proto";
+import "import_v3.proto";
 
 // TODO: import google/protobuf/empty.proto
 message Empty {}
@@ -1504,6 +1505,7 @@ message ImportJob {
   bool            auto_commit         = 20;
   bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
   plan.Expr rls_check_predicate = 22;
+  internal.ImportVersion version = 23;
 }
 
 enum ImportTaskStateV2 {
@@ -1532,6 +1534,50 @@ message PreImportTask {
   string complete_time = 12;
 }
 
+// ImportV3FileStats is the Import V3 count-only preimport per-file stat. Unlike
+// ImportFileStats it carries no ImportFile and no hashed bucket stats: V3 only
+// needs the file ID and the exact counts the primary sizes ID ranges from.
+message ImportV3FileStats {
+  int64 file_id = 1;
+  int64 file_size = 2;
+  int64 total_rows = 3;
+  // total_memory_size is a packing hint for the reshard BFD balance, NOT a
+  // memory size: the parquet/numpy metadata path fills an encoded size estimate
+  // (dictionary/RLE under-count), the JSON/CSV scan path a real decoded size.
+  // Only preImportV3LogicalBytes reads it, and it must not be used for quota or
+  // memory budgets.
+  int64 total_memory_size = 4;
+}
+
+// PreImportTaskV3 is the Import V3 count-only preimport control record. It is
+// a distinct type rather than a copy of PreImportTask, so the fields it
+// actually reads are the only ones it can carry. The records are isolated by
+// their own catalog prefix.
+message PreImportTaskV3 {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  int64 node_id = 4;
+  ImportTaskStateV2 state = 5;
+  string reason = 6;
+  repeated ImportV3FileStats file_stats = 7;
+  string created_time = 8;
+  string complete_time = 9;
+}
+
+message QueryPreImportV3Request {
+  string cluster_id = 1;
+  int64 job_id = 2;
+  int64 task_id = 3;
+}
+
+message QueryPreImportV3Response {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated ImportV3FileStats file_stats = 4;
+}
+
 message ImportTaskV2 {
   int64 jobID = 1;
   int64 taskID = 2;
@@ -1545,6 +1591,136 @@ message ImportTaskV2 {
   repeated int64 sorted_segmentIDs = 10;
   string created_time = 11;
   ImportTaskSourceV2 source = 12;
+}
+
+// V3 tasks intentionally keep run_id on the task rather than introducing a
+// separate attempt/run catalog level. State names are deliberately simple so
+// V2 and V3 recovery can share the same scheduler vocabulary.
+message ReshardTask {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 run_id = 6;
+  int64 node_id = 7;
+  // The ImportFile IDs this task covers. Source ownership is the only
+  // planning fact Pending recovery needs; every other execution input is
+  // re-derived from the ImportJob when the task is dispatched.
+  repeated int64 file_ids = 9;
+  // When the task record was created, formatted like ImportJob and
+  // ImportTaskV2 created_time. Recovery starts the task latency recorder from
+  // it so a restart does not reset the stage latency to zero.
+  string created_time = 10;
+  // When the reshard task reached Completed, formatted like ImportJob and
+  // ImportTaskV2 complete_time. Mirrors V2's per-task complete_time so
+  // GetImportProgress can fill each source file's detail.
+  string complete_time = 11;
+}
+
+// ImportTaskV3 persists only the per-segment ownership that Planning recovery
+// cannot re-derive: the fragment set this task covers plus its bucket. Every
+// other execution input is re-derived from the ImportJob and current config
+// when the task is dispatched, and travels inside ImportTaskV3Request.
+message ImportTaskV3 {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 collection_id = 3;
+  ImportTaskStateV2 state = 4;
+  string reason = 5;
+  int64 run_id = 6;
+  int64 node_id = 7;
+  int64 segment_id = 8;
+  IDRange log_range = 9;
+  int64 rows = 11;
+  repeated importv3.FragmentRef fragments = 12;
+  string vchannel = 13;
+  int64 partition_id = 14;
+  // When the task record was created, formatted like ImportJob and
+  // ImportTaskV2 created_time. Recovery starts the task latency recorder from
+  // it so a restart does not reset the stage latency to zero.
+  string created_time = 15;
+  // Segments this task used to own and no longer references (the superseded
+  // segment of a retried run). The next dispatch drops them and clears the list.
+  repeated int64 old_segment_ids = 16;
+}
+
+message ReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  int64 slot = 4;
+  index.StorageConfig storage_config = 5;
+  repeated common.KeyValuePair plugin_context = 6;
+  importv3.ReshardTaskPlan plan = 7;
+}
+
+message ImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+  int64 segment_id = 4;
+  IDRange log_range = 5;
+  int64 slot = 6;
+  index.StorageConfig storage_config = 7;
+  repeated common.KeyValuePair plugin_context = 8;
+  importv3.ImportTaskPlan plan = 9;
+}
+
+// ImportTaskV3Result is the result of one ImportTaskV3 run: the single segment
+// it produced and the metas acceptance needs. Named like the rest of the
+// ImportTaskV3 family rather than a generic segment type.
+message ImportTaskV3Result {
+  int64 rows = 1;
+  repeated FieldBinlog insert_logs = 2;
+  FieldBinlog pk_log = 3;
+  repeated FieldBinlog bm25_logs = 4;
+  string manifest_path = 5;
+  Statistics statistics = 6;
+  repeated int64 expiration_quantiles = 7;
+}
+
+message QueryReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message ReshardSourceProgress {
+  int64 file_id = 1;
+  int64 hashed_rows = 2;
+}
+
+message QueryReshardTaskResponse {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated ReshardSourceProgress source_progresses = 4;
+}
+
+message DropReshardTaskRequest {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
+}
+
+message QueryImportTaskV3Response {
+  common.Status status = 1;
+  ImportTaskStateV2 state = 2;
+  string reason = 3;
+  repeated ImportTaskV3Result segments = 4;
+}
+
+message DropImportTaskV3Request {
+  int64 job_id = 1;
+  int64 task_id = 2;
+  int64 run_id = 3;
 }
 
 enum GcCommand {
