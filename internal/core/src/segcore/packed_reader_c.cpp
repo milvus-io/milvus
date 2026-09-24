@@ -72,6 +72,7 @@ NewPackedReaderWithStorageConfig(char** paths,
                                  int64_t num_paths,
                                  struct ArrowSchema* schema,
                                  const int64_t buffer_size,
+                                 const bool eager_prebuffer,
                                  CStorageConfig c_storage_config,
                                  CPackedReader* c_packed_reader,
                                  CPluginContext* c_plugin_context) {
@@ -119,7 +120,7 @@ NewPackedReaderWithStorageConfig(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -132,6 +133,7 @@ NewPackedReaderWithProperties(char** paths,
                               int64_t num_paths,
                               struct ArrowSchema* schema,
                               const int64_t buffer_size,
+                              const bool eager_prebuffer,
                               const LoonProperties* c_properties,
                               const char* filesystem_path,
                               CPackedReader* c_packed_reader,
@@ -163,7 +165,7 @@ NewPackedReaderWithProperties(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -176,6 +178,7 @@ NewPackedReader(char** paths,
                 int64_t num_paths,
                 struct ArrowSchema* schema,
                 const int64_t buffer_size,
+                const bool eager_prebuffer,
                 CPackedReader* c_packed_reader,
                 CPluginContext* c_plugin_context) {
     SCOPE_CGO_CALL_METRIC();
@@ -198,7 +201,7 @@ NewPackedReader(char** paths,
             trueSchema,
             buffer_size,
             milvus::storage::GetReaderProperties(),
-            milvus::storage::GetArrowReaderProperties());
+            milvus::storage::GetArrowReaderProperties(eager_prebuffer));
         *c_packed_reader = reader.release();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {

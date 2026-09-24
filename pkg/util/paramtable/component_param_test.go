@@ -1019,6 +1019,22 @@ func TestComponentParam(t *testing.T) {
 
 		// compaction
 		assert.Equal(t, 10, Params.MaxCompactionConcurrency.GetAsInt())
+		defaultSortReadConcurrency := min(hardware.GetCPUNum(), 8)
+		assert.Equal(t, defaultSortReadConcurrency, Params.SortReadConcurrency.GetAsInt(),
+			"sort read concurrency defaults to the number of CPU cores, capped at 8")
+		params.Save(Params.SortReadConcurrency.Key, "64")
+		assert.Equal(t, 64, Params.SortReadConcurrency.GetAsInt(), "an explicit value is not capped")
+		params.Save(Params.SortReadConcurrency.Key, "1")
+		assert.Equal(t, 1, Params.SortReadConcurrency.GetAsInt(), "1 keeps the serial reader")
+		params.Save(Params.SortReadConcurrency.Key, "-2")
+		assert.Equal(t, defaultSortReadConcurrency, Params.SortReadConcurrency.GetAsInt(), "non-positive falls back to the default")
+		params.Save(Params.SortReadConcurrency.Key, "abc")
+		assert.Equal(t, defaultSortReadConcurrency, Params.SortReadConcurrency.GetAsInt(), "garbage falls back to the default")
+		params.Reset(Params.SortReadConcurrency.Key)
+		assert.Equal(t, int64(512*1024*1024), Params.SortReadBufferSize.GetAsSize())
+		params.Save(Params.SortReadBufferSize.Key, "128m")
+		assert.Equal(t, int64(128*1024*1024), Params.SortReadBufferSize.GetAsSize())
+		params.Reset(Params.SortReadBufferSize.Key)
 
 		assert.Equal(t, 4, Params.MaxVecIndexBuildConcurrency.GetAsInt())
 
