@@ -2431,7 +2431,6 @@ type proxyConfig struct {
 	EnableCachedServiceProvider       ParamItem `refreshable:"true"`
 	MaxSearchAggregationResultEntries ParamItem `refreshable:"true"`
 	RLSMaxPoliciesPerCollection       ParamItem `refreshable:"true"`
-	RLSMaxPrincipalsPerCollection     ParamItem `refreshable:"true"`
 	RLSMaxTagsPerPrincipal            ParamItem `refreshable:"true"`
 	RLSMaxExpressionLength            ParamItem `refreshable:"true"`
 	RLSMaxCombinedExpressionLength    ParamItem `refreshable:"true"`
@@ -2441,6 +2440,8 @@ type proxyConfig struct {
 	RLSMaxTagKeyLength                ParamItem `refreshable:"true"`
 	RLSMaxTagValueLength              ParamItem `refreshable:"true"`
 	RLSMaxArrayLiteralElements        ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheEntries       ParamItem `refreshable:"true"`
+	RLSMaxPrincipalCacheBytes         ParamItem `refreshable:"true"`
 	RLSMetaRefreshInterval            ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
@@ -3061,17 +3062,6 @@ Disabled if the value is less or equal to 0.`,
 	}
 	p.RLSMaxPoliciesPerCollection.Init(base.mgr)
 
-	p.RLSMaxPrincipalsPerCollection = ParamItem{
-		Key:          "proxy.rls.maxPrincipalsPerCollection",
-		Version:      "3.0.0",
-		DefaultValue: "1000",
-		PanicIfEmpty: true,
-		Doc:          "Maximum number of RLS principals allowed on one collection.",
-		Export:       true,
-		Formatter:    positiveProxyLimitFormatter("1000"),
-	}
-	p.RLSMaxPrincipalsPerCollection.Init(base.mgr)
-
 	p.RLSMaxTagsPerPrincipal = ParamItem{
 		Key:          "proxy.rls.maxTagsPerPrincipal",
 		Version:      "3.0.0",
@@ -3170,6 +3160,28 @@ Disabled if the value is less or equal to 0.`,
 		Formatter:    positiveProxyLimitFormatter("1024"),
 	}
 	p.RLSMaxArrayLiteralElements.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheEntries = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheEntries",
+		Version:      "3.0.0",
+		DefaultValue: "65536",
+		PanicIfEmpty: true,
+		Doc:          "Maximum number of principal-tag entries cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("65536"),
+	}
+	p.RLSMaxPrincipalCacheEntries.Init(base.mgr)
+
+	p.RLSMaxPrincipalCacheBytes = ParamItem{
+		Key:          "proxy.rls.maxPrincipalCacheBytes",
+		Version:      "3.0.0",
+		DefaultValue: "67108864",
+		PanicIfEmpty: true,
+		Doc:          "Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.",
+		Export:       true,
+		Formatter:    positiveProxyLimitFormatter("67108864"),
+	}
+	p.RLSMaxPrincipalCacheBytes.Init(base.mgr)
 
 	p.RLSMetaRefreshInterval = ParamItem{
 		Key:          "proxy.rls.metaRefreshInterval",

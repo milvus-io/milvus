@@ -1395,6 +1395,12 @@ func withMockMultiSaveAndRemove(err error) mockSnapshotOpt {
 	}
 }
 
+func withMockRemoveWithPrefix(err error) mockSnapshotOpt {
+	return func(ss *mocks.TxnKV) {
+		ss.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(err)
+	}
+}
+
 func TestCatalog_CreateCollection(t *testing.T) {
 	t.Run("collection not creating", func(t *testing.T) {
 		kc := NewCatalog(nil)
@@ -1513,7 +1519,10 @@ func TestCatalog_CreateCollection(t *testing.T) {
 
 func TestCatalog_DropCollection(t *testing.T) {
 	t.Run("failed to remove", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")))
+		mockSnapshot := newMockSnapshot(t,
+			withMockRemoveWithPrefix(nil),
+			withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")),
+		)
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1528,10 +1537,17 @@ func TestCatalog_DropCollection(t *testing.T) {
 
 	t.Run("succeed to remove first, but failed to remove twice", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t)
+		prefixRemoved := false
 		removeOtherCalled := false
 		removeCollectionCalled := false
+		mockSnapshot.EXPECT().RemoveWithPrefix(mock.Anything, BuildRLSPrincipalPrefix(1)).RunAndReturn(
+			func(context.Context, string) error {
+				prefixRemoved = true
+				return nil
+			}).Once()
 		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, _ map[string]string, _ []string, _ ...predicates.Predicate) error {
+				assert.True(t, prefixRemoved)
 				removeOtherCalled = true
 				return nil
 			}).Once()
@@ -1543,6 +1559,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
+			CollectionID: 1,
 			Partitions: []*model.Partition{
 				{PartitionName: "test"},
 			},
@@ -1554,8 +1571,16 @@ func TestCatalog_DropCollection(t *testing.T) {
 		assert.True(t, removeCollectionCalled)
 	})
 
+	t.Run("principal prefix removal failure keeps collection metadata", func(t *testing.T) {
+		targetErr := errors.New("remove principal prefix")
+		mockSnapshot := newMockSnapshot(t, withMockRemoveWithPrefix(targetErr))
+		kc := NewCatalog(mockSnapshot)
+		err := kc.DropCollection(context.Background(), &model.Collection{CollectionID: 1}, 100)
+		require.ErrorIs(t, err, targetErr)
+	})
+
 	t.Run("normal case", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
+		mockSnapshot := newMockSnapshot(t, withMockRemoveWithPrefix(nil), withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1571,6 +1596,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 	t.Run("drop collection with RLS metadata", func(t *testing.T) {
 		mockSnapshot := newMockSnapshot(t)
 		var removeOtherKeys []string
+		mockSnapshot.EXPECT().RemoveWithPrefix(mock.Anything, BuildRLSPrincipalPrefix(20)).Return(nil).Once()
 		mockSnapshot.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, _ map[string]string, keys []string, _ ...predicates.Predicate) error {
 				removeOtherKeys = append(removeOtherKeys, keys...)
@@ -1585,19 +1611,16 @@ func TestCatalog_DropCollection(t *testing.T) {
 			RLSPolicies: map[string]*model.RLSPolicy{
 				"dept_read": {PolicyID: 30, PolicyName: "dept_read"},
 			},
-			RLSPrincipals: []*model.RLSPrincipal{
-				{PrincipalName: "team/a user"},
-			},
 			State: pb.CollectionState_CollectionDropping,
 		}
 		err := kc.DropCollection(ctx, coll, 100)
 		require.NoError(t, err)
 		require.Contains(t, removeOtherKeys, BuildRLSPolicyKey(20, 30))
-		require.Contains(t, removeOtherKeys, buildRLSPrincipalKey(20, "team/a user"))
+		require.NotContains(t, removeOtherKeys, buildRLSPrincipalKey(20, "team/a user"))
 	})
 
 	t.Run("drop collection with function", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
+		mockSnapshot := newMockSnapshot(t, withMockRemoveWithPrefix(nil), withMockMultiSaveAndRemove(nil))
 		kc := NewCatalog(mockSnapshot)
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1733,9 +1756,62 @@ func TestCatalog_RLSMetadata(t *testing.T) {
 	require.Len(t, principals, 1)
 	assert.Equal(t, principal.PrincipalName, principals[0].PrincipalName)
 
+	loadedPrincipal.Tags["dept"] = rlsutil.NewStringTagValue("engineering")
+	principals[0].Tags["level"] = rlsutil.NewInt64TagValue(4)
+	loadedPrincipal, err = catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
+	require.NoError(t, err)
+	assert.Equal(t, principal.Tags, loadedPrincipal.Tags)
+	principals, err = catalog.ListRLSPrincipals(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, principals, 1)
+	assert.Equal(t, principal.Tags, principals[0].Tags)
+
 	require.NoError(t, catalog.DropRLSPrincipal(ctx, 20, principal.PrincipalName))
 	_, err = catalog.GetRLSPrincipal(ctx, 20, principal.PrincipalName)
 	assert.ErrorIs(t, err, merr.ErrIoKeyNotFound)
+}
+
+func TestCatalog_ListRLSPrincipalsLimits(t *testing.T) {
+	ctx := context.Background()
+	kv := memkv.NewMemoryKV()
+	catalog := NewCatalog(kv).(*Catalog)
+	principals := []*model.RLSPrincipal{
+		{CollectionID: 20, PrincipalName: "alice", Tags: map[string]rlsutil.TagValue{"dept": rlsutil.NewStringTagValue("sales")}},
+		{CollectionID: 20, PrincipalName: "bob", Tags: map[string]rlsutil.TagValue{"level": rlsutil.NewInt64TagValue(3)}},
+	}
+	for _, principal := range principals {
+		require.NoError(t, catalog.SaveRLSPrincipal(ctx, principal))
+	}
+
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "2"))
+	firstBytes, err := rlsutil.PrincipalTagsSize(principals[0].PrincipalName, principals[0].Tags)
+	require.NoError(t, err)
+	secondBytes, err := rlsutil.PrincipalTagsSize(principals[1].PrincipalName, principals[1].Tags)
+	require.NoError(t, err)
+	totalBytes := firstBytes + secondBytes
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, fmt.Sprint(totalBytes)))
+	t.Cleanup(func() {
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key))
+		require.NoError(t, params.Reset(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+	})
+
+	loaded, err := catalog.ListRLSPrincipals(ctx, 20)
+	require.NoError(t, err)
+	require.Len(t, loaded, 2)
+
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "1"))
+	_, err = catalog.ListRLSPrincipals(ctx, 20)
+	require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheEntries.Key, "2"))
+	require.NoError(t, params.Save(params.ProxyCfg.RLSMaxPrincipalCacheBytes.Key, fmt.Sprint(totalBytes-1)))
+	_, err = catalog.ListRLSPrincipals(ctx, 20)
+	require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+
+	nonWalkingCatalog := NewCatalog(mocks.NewTxnKV(t))
+	_, err = nonWalkingCatalog.ListRLSPrincipals(ctx, 20)
+	require.ErrorIs(t, err, merr.ErrServiceUnimplemented)
 }
 
 func TestCatalog_DropRLSPolicyUsesLogicalKey(t *testing.T) {
