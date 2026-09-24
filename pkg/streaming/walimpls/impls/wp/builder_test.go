@@ -333,48 +333,79 @@ func TestSetCustomWpConfigCompactionParams(t *testing.T) {
 	// the only way Timeout reaches 0 is a value that parses and then truncates, which is what
 	// SubSecondTimeout covers.
 	const (
+		sentinelAttempt   = 111
+		sentinelBudget    = 222
 		sentinelTimeout   = 123
 		sentinelMemory    = int64(777)
 		sentinelWatermark = 0.42
 	)
 	for _, tc := range []struct {
 		name            string
+		attempt         string
+		budget          string
 		timeout         string
 		memory          string
 		watermark       string
+		expectAttempt   int
+		expectBudget    int
 		expectTimeout   int
 		expectMemory    int64
 		expectWatermark float64
 	}{
 		{
-			name: "MalformedValues", timeout: "bad-duration", memory: "bad-size", watermark: "bad-float",
+			name: "MalformedValues", attempt: "90s", budget: "45s", expectAttempt: 90, expectBudget: 45, timeout: "bad-duration", memory: "bad-size", watermark: "bad-float",
 			// A malformed duration falls back to this item's 300s default, which is valid.
 			expectTimeout: 300, expectMemory: sentinelMemory, expectWatermark: sentinelWatermark,
 		},
 		{
-			name: "ZeroValues", timeout: "0s", memory: "0", watermark: "0",
+			name: "ZeroValues", attempt: "90s", budget: "45s", expectAttempt: 90, expectBudget: 45, timeout: "0s", memory: "0", watermark: "0",
 			expectTimeout: sentinelTimeout, expectMemory: sentinelMemory, expectWatermark: sentinelWatermark,
 		},
 		{
-			name: "NegativeValues", timeout: "-1s", memory: "-1M", watermark: "-0.5",
+			name: "NegativeValues", attempt: "90s", budget: "45s", expectAttempt: 90, expectBudget: 45, timeout: "-1s", memory: "-1M", watermark: "-0.5",
 			expectTimeout: sentinelTimeout, expectMemory: sentinelMemory, expectWatermark: sentinelWatermark,
 		},
 		{
 			// Parses cleanly, then int(0.5) truncates to 0 -- every compaction would expire at once.
-			name: "SubSecondTimeout", timeout: "500ms", memory: "1G", watermark: "0.7",
+			name: "SubSecondTimeout", attempt: "90s", budget: "45s", expectAttempt: 90, expectBudget: 45, timeout: "500ms", memory: "1G", watermark: "0.7",
 			expectTimeout: sentinelTimeout, expectMemory: 1024 * 1024 * 1024, expectWatermark: 0.7,
 		},
 		{
 			// The key is a fraction, but its name invites a percentage; 70 would put the
 			// pressure gate 70x above the node's limit, so it could never fire.
-			name: "WatermarkAsPercentage", timeout: "300s", memory: "1G", watermark: "70",
+			name: "WatermarkAsPercentage", attempt: "90s", budget: "45s", expectAttempt: 90, expectBudget: 45, timeout: "300s", memory: "1G", watermark: "70",
 			expectTimeout: 300, expectMemory: 1024 * 1024 * 1024, expectWatermark: sentinelWatermark,
+		},
+		{
+			// A dropped attempt deadline is the dangerous direction, not the safe one: at <= 0 the
+			// auditor adds no deadline, and its own context carries none, so a compaction against a
+			// node that stopped answering never returns. The pass budget cannot rescue it -- that
+			// is checked between segments and lets an in-flight one finish.
+			name: "ZeroAuditorDeadlines", attempt: "0s", budget: "0s",
+			expectAttempt: sentinelAttempt, expectBudget: sentinelBudget,
+			timeout: "300s", memory: "1G", watermark: "0.7",
+			expectTimeout: 300, expectMemory: 1024 * 1024 * 1024, expectWatermark: 0.7,
+		},
+		{
+			// Parses cleanly, then truncates -- the same shape as SubSecondTimeout above.
+			name: "SubSecondAuditorDeadlines", attempt: "500ms", budget: "500ms",
+			expectAttempt: sentinelAttempt, expectBudget: sentinelBudget,
+			timeout: "300s", memory: "1G", watermark: "0.7",
+			expectTimeout: 300, expectMemory: 1024 * 1024 * 1024, expectWatermark: 0.7,
+		},
+		{
+			name: "NegativeAuditorDeadlines", attempt: "-1s", budget: "-1s",
+			expectAttempt: sentinelAttempt, expectBudget: sentinelBudget,
+			timeout: "300s", memory: "1G", watermark: "0.7",
+			expectTimeout: 300, expectMemory: 1024 * 1024 * 1024, expectWatermark: 0.7,
 		},
 	} {
 		t.Run(tc.name+"KeepValidatedValues", func(t *testing.T) {
-			wpConfig := setup(t, "90s", "45s", tc.timeout, tc.memory, tc.watermark, "12")
+			wpConfig := setup(t, tc.attempt, tc.budget, tc.timeout, tc.memory, tc.watermark, "12")
 			// Sentinels distinct from both the Milvus and the Woodpecker defaults, so a value
 			// that survives proves the override was skipped rather than coincidentally equal.
+			wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout = config.NewDurationSecondsFromInt(sentinelAttempt)
+			wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget = config.NewDurationSecondsFromInt(sentinelBudget)
 			wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.Timeout = config.NewDurationSecondsFromInt(sentinelTimeout)
 			wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MaxInflightMemory = config.NewByteSize(sentinelMemory)
 			wpConfig.Woodpecker.Logstore.SegmentCompactionPolicy.MemoryHighWatermark = sentinelWatermark
@@ -384,9 +415,9 @@ func TestSetCustomWpConfigCompactionParams(t *testing.T) {
 			assert.Equal(t, tc.expectTimeout, policy.Timeout.Seconds())
 			assert.Equal(t, tc.expectMemory, policy.MaxInflightMemory.Int64())
 			assert.InDelta(t, tc.expectWatermark, policy.MemoryHighWatermark, 1e-9)
-			// The unguarded three are unaffected by a neighbour's bad value.
-			assert.Equal(t, 90, wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout.Seconds())
-			assert.Equal(t, 45, wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget.Seconds())
+			assert.Equal(t, tc.expectAttempt, wpConfig.Woodpecker.Client.Auditor.CompactionAttemptTimeout.Seconds())
+			assert.Equal(t, tc.expectBudget, wpConfig.Woodpecker.Client.Auditor.CompactionPassBudget.Seconds())
+			// maxWorkers needs no guard, so a neighbour's bad value must not disturb it.
 			assert.Equal(t, 12, wpConfig.Woodpecker.Logstore.SyncScheduler.MaxWorkers)
 		})
 	}
