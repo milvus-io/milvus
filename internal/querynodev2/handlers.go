@@ -232,10 +232,17 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	// The delegator fixed this snapshot before querying any segments. Reading
 	// tSafe again here could report a newer snapshot than the returned data.
 	resp.MvccTimestamp = req.GetReq().GetMvccTimestamp()
-	// Collect all workers' costs: a streaming delegator without growing
-	// segments may produce no local cost metrics.
-	requestCosts := lo.Map(results, func(result *internalpb.RetrieveResults, _ int) *internalpb.CostAggregation {
-		return result.GetCostAggregation()
+	// aggregate cost
+	requestCosts := lo.FilterMap(results, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
+		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
+			return result.GetCostAggregation(), true
+		}
+
+		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
+			return result.GetCostAggregation(), true
+		}
+
+		return nil, false
 	})
 	resp.CostAggregation = segmentutil.MergeRequestCost(requestCosts)
 	if resp.CostAggregation == nil {

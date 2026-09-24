@@ -1072,6 +1072,8 @@ func TestComponentParam(t *testing.T) {
 		gracefulStopTimeout := &Params.GracefulStopTimeout
 		assert.Equal(t, int64(100), gracefulStopTimeout.GetAsInt64())
 
+		assert.Equal(t, false, Params.EnableWorkerSQCostMetrics.GetAsBool())
+
 		params.Save("querynode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 

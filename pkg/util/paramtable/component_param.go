@@ -4430,6 +4430,8 @@ type queryNodeConfig struct {
 	// by one Storage V3 async window.
 	StorageV2AsyncLoadReadWindowSizeBytes ParamItem `refreshable:"true"`
 
+	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
+
 	ExprEvalBatchSize ParamItem `refreshable:"false"`
 
 	// delete snapshot dump batch size
@@ -5854,6 +5856,14 @@ user-task-polling:
 		},
 	}
 	p.StorageV2AsyncLoadReadWindowSizeBytes.Init(base.mgr)
+
+	p.EnableWorkerSQCostMetrics = ParamItem{
+		Key:          "queryNode.enableWorkerSQCostMetrics",
+		Version:      "2.3.0",
+		DefaultValue: "false",
+		Doc:          "whether use worker's cost to measure delegator's workload",
+	}
+	p.EnableWorkerSQCostMetrics.Init(base.mgr)
 
 	p.ExprEvalBatchSize = ParamItem{
 		Key:          "queryNode.segcore.exprEvalBatchSize",
