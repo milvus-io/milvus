@@ -184,7 +184,7 @@ func TestRequeryPriorityPolicyCanceledRegularDoesNotRefreshCredit(t *testing.T) 
 	assert.Equal(t, laneTaskValues[3], popServed(policy, now).Task)
 }
 
-func TestRequeryPriorityPolicyUsesMergedRequestCountAsCredit(t *testing.T) {
+func TestRequeryPriorityPolicyUsesConfiguredBaseCredit(t *testing.T) {
 	paramtable.Init()
 
 	policy := newRequeryPriorityPolicy(newFIFOPolicy())
@@ -207,7 +207,6 @@ func TestRequeryPriorityPolicyUsesMergedRequestCountAsCredit(t *testing.T) {
 	require.NoError(t, err)
 
 	innerQueue := policy.inner.(*fifoPolicy).queue
-	assert.Equal(t, 5, innerQueue.front().originalRequestCount)
 	assert.Equal(t, 2, innerQueue.len())
 
 	laneTasks := make([]*queuedTask, 9)
@@ -224,11 +223,13 @@ func TestRequeryPriorityPolicyUsesMergedRequestCountAsCredit(t *testing.T) {
 		assert.Equal(t, laneTaskValues[i], popServed(policy, now).Task)
 	}
 	assert.Equal(t, mergedRegularTask, popServed(policy, now).Task)
-	for i := 3; i < 8; i++ {
+	for i := 3; i < 6; i++ {
 		assert.Equal(t, laneTaskValues[i], popServed(policy, now).Task)
 	}
 	assert.Equal(t, nextRegularTask, popServed(policy, now).Task)
-	assert.Equal(t, laneTaskValues[8], popServed(policy, now).Task)
+	for i := 6; i < 9; i++ {
+		assert.Equal(t, laneTaskValues[i], popServed(policy, now).Task)
+	}
 }
 
 func TestRequeryPriorityPolicyCreditGrantedAtServeNotPop(t *testing.T) {
@@ -320,7 +321,6 @@ func TestRequeryPriorityPolicyPreservesInnerMergeAndKeepsLaneSeparate(t *testing
 	require.NoError(t, err)
 	assert.Equal(t, 0, added)
 	assert.Equal(t, 1, policy.inner.Len())
-	assert.Equal(t, 2, policy.inner.(*fifoPolicy).queue.front().originalRequestCount)
 
 	lane1 := newQueuedTask(newMockTask(mockTaskConfig{mergeAble: true, nq: 1}), now)
 	lane2 := newQueuedTask(newMockTask(mockTaskConfig{mergeAble: true, nq: 1}), now)

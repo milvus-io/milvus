@@ -107,19 +107,14 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
-	// originalRequestCount is the number of pre-merge scheduler tasks represented
-	// by this queue entry. It starts at 1 and is accumulated only after a
-	// successful MergeWith.
-	originalRequestCount int
 	// class is immutable after admission.
 	class taskClass
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {
 	return &queuedTask{
-		Task:                 task,
-		enqueueTime:          enqueueTime,
-		originalRequestCount: 1,
+		Task:        task,
+		enqueueTime: enqueueTime,
 	}
 }
 

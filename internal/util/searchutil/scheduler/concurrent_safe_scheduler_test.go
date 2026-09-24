@@ -274,7 +274,6 @@ func (s *SchedulerSuite) TestHandleAddTaskRequestRechecksCancellationAfterCleanu
 	s.ErrorIs(expiredBase.Wait(), context.DeadlineExceeded)
 	remaining := scheduler.policy.Pop(now)
 	s.Equal(int64(1), remaining.NQ())
-	s.Equal(1, remaining.originalRequestCount)
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotal())
 	s.Equal(int64(1), scheduler.GetWaitingTaskTotalNQ())
 }

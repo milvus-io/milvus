@@ -29,7 +29,7 @@ type requeryPriorityPolicy struct {
 	lane  *mergeTaskQueue
 	// requeryCredit is the number of lane tasks that may be selected before
 	// another live regular task is required. A successful regular execChan
-	// handoff refreshes it to max(base credit, task.originalRequestCount).
+	// handoff refreshes it to the configured base credit.
 	requeryCredit int
 }
 
@@ -104,15 +104,13 @@ func (p *requeryPriorityPolicy) Len() int {
 }
 
 // onTaskServed refreshes the requery credit window only when a regular task is
-// actually handed to execution. Credit is a backlog-aware weighted burst, not a
-// reservation for a specific parent request; a served regular task refreshes
-// the current window to max(base credit, its merged original request count).
+// actually handed to execution. The fixed configured burst prevents a merged
+// regular task from granting proportionally more priority-lane work.
 func (p *requeryPriorityPolicy) onTaskServed(task *queuedTask) {
 	if task.class == taskClassPriorityLane {
 		return
 	}
-	baseCredit := requeryPriorityBaseCredit()
-	p.requeryCredit = max(baseCredit, task.originalRequestCount)
+	p.requeryCredit = requeryPriorityBaseCredit()
 }
 
 func requeryPriorityBaseCredit() int {

@@ -5429,7 +5429,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 			return defaultRequeryPriorityBaseCredit
 		},
 		Doc: "Base number of requery tasks that may be selected before a waiting regular task under the fifo requery priority policy. " +
-			"A served regular task refreshes the credit to the maximum of this value and its merged original request count. " +
+			"A served regular task refreshes the credit to this configured value. " +
 			"Positive values take effect dynamically at the next credit refresh; invalid or non-positive values fall back to 3. " +
 			"This setting has no effect under user-task-polling.",
 		Export: false,
