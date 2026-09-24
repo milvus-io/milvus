@@ -466,21 +466,6 @@ func (c *DDLCallbacks) commitImportV2AckCallback(ctx context.Context, result mes
 	return nil
 }
 
-func importBroadcastChannels(vchannels []string) []string {
-	controlChannel := streaming.WAL().ControlChannel()
-	channels := make([]string, 0, len(vchannels)+1)
-	for _, vchannel := range vchannels {
-		channels = append(channels, vchannel)
-		if vchannel == controlChannel {
-			controlChannel = ""
-		}
-	}
-	if controlChannel != "" {
-		channels = append(channels, controlChannel)
-	}
-	return channels
-}
-
 // rollbackImportV2AckCallback handles the ack callback for RollbackImport WAL message.
 // It transitions the import job to Failed state and records that the failure
 // was user-initiated so AbortImport retries can be idempotent.

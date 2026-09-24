@@ -104,8 +104,8 @@ and may repeat already durable output safely.
 
 Collection Flush calls DataCoord's Flush RPC. DataCoord acquires the shared
 DB and exclusive collection-name broadcast resource keys, then broadcasts a
-ManualFlush with AckSyncUp to every collection VChannel. CChannel is omitted:
-ManualFlush has no coordinator metadata callback requiring CChannel ordering.
+ManualFlush with AckSyncUp to every collection VChannel. The broadcaster also
+adds CChannel; its copy has no L1 or L0 data to flush.
 The RPC waits for every split message's L1 final commits and L0 output/registration,
 independently of unrelated VChannels holding the global recovery checkpoint.
 

@@ -81,8 +81,8 @@ REPLICATED → TOMBSTONE → DONE (removed from catalog)
 ## Collection Flush Completion
 
 DataCoord Flush broadcasts ManualFlush with AckSyncUp to the collection's business
-VChannels under shared DB and exclusive collection-name locks. It omits CChannel
-because no coordinator metadata callback needs ordering. The consuming-side Ack
+VChannels under shared DB and exclusive collection-name locks. The broadcaster
+automatically includes CChannel; its copy has no data to flush. The business-channel Ack
 waits for both L1 and L0 completion, without waiting for global recovery checkpoint
 publication. Flush returns an empty pending segment list and preserves the existing
 flushed-segment listing. See [Flush API completion](../../../design-docs/design_docs/wal/broadcast_ack_module.md#flush-api-completion).

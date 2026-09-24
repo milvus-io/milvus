@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
-	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	datacoordkv "github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -174,17 +173,6 @@ func TestImportCommitCallbackRejectsTimestampBeforeRows(t *testing.T) {
 		require.True(t, segment.GetIsImporting())
 		require.Zero(t, segment.GetCommitTimestamp())
 	}
-}
-
-func TestImportBroadcastChannelsIncludesControlOnce(t *testing.T) {
-	previous := streaming.WAL()
-	streaming.SetupNoopWALForTest()
-	defer streaming.SetWALForTest(previous)
-	control := streaming.WAL().ControlChannel()
-	input := []string{"v1", "v2"}
-	require.Equal(t, []string{"v1", "v2", control}, importBroadcastChannels(input))
-	require.Equal(t, []string{"v1", "v2"}, input)
-	require.Equal(t, []string{"v1", control, "v2"}, importBroadcastChannels([]string{"v1", control, "v2"}))
 }
 
 func TestImportCommitCallbackRetriesCommitPhasePersistence(t *testing.T) {
