@@ -614,7 +614,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 	}
 }
 
-func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
+func vector2Placeholder(vectors [][]float32, dataType schemapb.DataType) *commonpb.PlaceholderValue {
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
 		Values: make([][]byte, 0, len(vectors)),
@@ -623,40 +623,85 @@ func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
 		return ph
 	}
 
-	ph.Type = commonpb.PlaceholderType_FloatVector
 	for _, vector := range vectors {
-		ph.Values = append(ph.Values, clustering.SerializeFloatVector(vector))
+		switch dataType {
+		case schemapb.DataType_FloatVector:
+			ph.Type = commonpb.PlaceholderType_FloatVector
+			ph.Values = append(ph.Values, clustering.SerializeFloatVector(vector))
+		case schemapb.DataType_Float16Vector:
+			ph.Type = commonpb.PlaceholderType_Float16Vector
+			ph.Values = append(ph.Values, typeutil.Float32ArrayToFloat16Bytes(vector))
+		case schemapb.DataType_BFloat16Vector:
+			ph.Type = commonpb.PlaceholderType_BFloat16Vector
+			ph.Values = append(ph.Values, typeutil.Float32ArrayToBFloat16Bytes(vector))
+		}
 	}
 	return ph
+}
+
+func (sps *SegmentPrunerSuite) setVectorClusteringType(dataType schemapb.DataType) {
+	for _, field := range sps.schema.GetFields() {
+		if field.GetName() == "vec" {
+			field.DataType = dataType
+		}
+	}
+	for segmentID, segmentStats := range sps.partitionStats[sps.targetPartition].SegmentStats {
+		for i := range segmentStats.FieldStats {
+			fieldStats := &segmentStats.FieldStats[i]
+			fieldStats.Type = dataType
+			for j, centroid := range fieldStats.Centroids {
+				values := centroid.GetValue().([]float32)
+				switch dataType {
+				case schemapb.DataType_Float16Vector:
+					fieldStats.Centroids[j] = storage.NewFloat16VectorFieldValue(
+						typeutil.Float32ArrayToFloat16Bytes(values))
+				case schemapb.DataType_BFloat16Vector:
+					fieldStats.Centroids[j] = storage.NewBFloat16VectorFieldValue(
+						typeutil.Float32ArrayToBFloat16Bytes(values))
+				}
+			}
+		}
+		sps.partitionStats[sps.targetPartition].SegmentStats[segmentID] = segmentStats
+	}
 }
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 	paramtable.Init()
 	paramtable.Get().Save(paramtable.Get().CommonCfg.EnableVectorClusteringKey.Key, "true")
-	sps.SetupForClustering("vec")
 	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
 	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
 	vectors := [][]float32{vector1, vector2}
 
-	phg := &commonpb.PlaceholderGroup{
-		Placeholders: []*commonpb.PlaceholderValue{
-			vector2Placeholder(vectors),
-		},
-	}
-	bs, _ := proto.Marshal(phg)
-	// test for L2 metrics
-	req := &internalpb.SearchRequest{
-		MetricType:       "L2",
-		PlaceholderGroup: bs,
-		PartitionIDs:     []UniqueID{sps.targetPartition},
-		Topk:             100,
-	}
+	for _, dataType := range []schemapb.DataType{
+		schemapb.DataType_FloatVector,
+		schemapb.DataType_Float16Vector,
+		schemapb.DataType_BFloat16Vector,
+	} {
+		sps.Run(dataType.String(), func() {
+			sps.SetupForClustering("vec")
+			if dataType != schemapb.DataType_FloatVector {
+				sps.setVectorClusteringType(dataType)
+			}
+			phg := &commonpb.PlaceholderGroup{
+				Placeholders: []*commonpb.PlaceholderValue{
+					vector2Placeholder(vectors, dataType),
+				},
+			}
+			bs, _ := proto.Marshal(phg)
+			req := &internalpb.SearchRequest{
+				MetricType:       "L2",
+				PlaceholderGroup: bs,
+				PartitionIDs:     []UniqueID{sps.targetPartition},
+				Topk:             100,
+			}
 
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{1})
-	sps.Equal(1, len(sps.sealedSegments[0].Segments))
-	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
-	sps.Equal(1, len(sps.sealedSegments[1].Segments))
-	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
+			PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{1})
+			sps.Equal(1, len(sps.sealedSegments[0].Segments))
+			sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
+			sps.Equal(1, len(sps.sealedSegments[1].Segments))
+			sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
+		})
+	}
 }
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsVariousIntTypes() {

@@ -11,23 +11,35 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func CalcVectorDistance(dim int64, dataType schemapb.DataType, left []byte, right []float32, metric string) ([]float32, error) {
+func CalcVectorDistance(dim int64, dataType schemapb.DataType, left []byte, right interface{}, metric string) ([]float32, error) {
+	var leftVector []float32
+	var rightVector []float32
 	switch dataType {
 	case schemapb.DataType_FloatVector:
-		distance, err := distance.CalcFloatDistance(dim, DeserializeFloatVector(left), right, metric)
-		if err != nil {
-			return nil, err
+		value, ok := right.([]float32)
+		if !ok || int64(len(left)) != dim*4 || int64(len(value)) != dim {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid FloatVector operands for distance calculation")
 		}
-		return distance, nil
-	// todo support other vector type
-	case schemapb.DataType_BinaryVector:
+		leftVector = DeserializeFloatVector(left)
+		rightVector = value
 	case schemapb.DataType_Float16Vector:
+		value, ok := right.([]byte)
+		if !ok || int64(len(left)) != dim*2 || int64(len(value)) != dim*2 {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid Float16Vector operands for distance calculation")
+		}
+		leftVector = typeutil.Float16BytesToFloat32Vector(left)
+		rightVector = typeutil.Float16BytesToFloat32Vector(value)
 	case schemapb.DataType_BFloat16Vector:
-	case schemapb.DataType_Int8Vector:
+		value, ok := right.([]byte)
+		if !ok || int64(len(left)) != dim*2 || int64(len(value)) != dim*2 {
+			return nil, merr.WrapErrParameterInvalidMsg("invalid BFloat16Vector operands for distance calculation")
+		}
+		leftVector = typeutil.BFloat16BytesToFloat32Vector(left)
+		rightVector = typeutil.BFloat16BytesToFloat32Vector(value)
 	default:
-		return nil, merr.ErrParameterInvalid
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported vector type %s for distance calculation", dataType.String())
 	}
-	return nil, nil
+	return distance.CalcFloatDistance(dim, leftVector, rightVector, metric)
 }
 
 func DeserializeFloatVector(data []byte) []float32 {
@@ -63,9 +75,7 @@ func GetClusteringKeyField(collectionSchema *schemapb.CollectionSchema) *schemap
 		if field.IsPartitionKey {
 			partitionKeyField = field
 		}
-		// todo support other vector type
-		// if typeutil.IsVectorType(field.GetDataType()) {
-		if field.DataType == schemapb.DataType_FloatVector {
+		if typeutil.IsDenseFloatVectorType(field.GetDataType()) {
 			vectorFields = append(vectorFields, field)
 		}
 	}

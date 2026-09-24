@@ -485,6 +485,8 @@ message SegmentInfo {
   // verifying the final revision is empty. Recovery normalizes old sticky true
   // values once. False proves emptiness independently of the write-mode switch.
   bool manifest_has_index = 40;
+  // Row-aligned cluster layout sidecar; independent of primary-key is_sorted.
+  ClusterStats cluster_stats = 41;
 }
 
 // Statistics carries aggregate metrics for a segment so DataCoord can make
@@ -764,6 +766,7 @@ enum CompactionType {
   PartitionKeySortCompaction = 10;
   ClusteringPartitionKeySortCompaction = 11;
   BumpSchemaVersionCompaction = 12;
+  ClusterSortCompaction = 13;
 }
 
 message CompactionStateRequest {
@@ -817,6 +820,7 @@ message CompactionSegmentBinlogs {
   // expiry during compaction: isEntityExpired uses max(row_ts, commit_ts)
   // so stale row timestamps never cause rows to be silently dropped.
   uint64 commit_timestamp = 14;
+  ClusterStats cluster_stats = 15;
 }
 
 message CompactionPlan {
@@ -891,6 +895,24 @@ message SegmentManifestDelta {
   repeated ManifestStatEntry stats = 2;
 }
 
+// Files are ordered key blocks aligned with physical insert-row order.
+// A reference is published only after both data and all sidecar objects exist.
+// StorageV3 also attaches these objects under cluster_stats.<field_id>.
+message ClusterStats {
+  int32 version = 1;
+  int64 clustering_task_id = 2;
+  int64 field_id = 3;
+  int64 group_id = 4;
+  int64 num_rows = 5;
+  bool sorted = 6;
+  repeated string files = 7;
+  // Compact centroid/range summary; absent for unsorted staging segments.
+  string ranges_path = 8;
+  // Staging: order matches the group's partition FieldStats centroids.
+  // Sorted output: only centroids actually present after filtering.
+  repeated uint32 centroid_ids = 9;
+}
+
 message CompactionSegment {
   int64 planID = 1; // deprecated after 2.3.4
   int64 segmentID = 2;
@@ -938,6 +960,7 @@ message CompactionSegment {
   // (ManifestMutationCommitUpdates), rebasing the column-group / stats adds
   // onto the segment's current manifest instead of a datanode-pinned base.
   SegmentManifestDelta manifest_delta = 17;
+  ClusterStats cluster_stats = 18;
 }
 
 message CompactionPlanResult {
@@ -1635,6 +1658,13 @@ message CompactionTask{
   IDRange pre_allocated_segmentIDs = 28;
   repeated schema.FunctionSchema diff_functions = 29;
   uint64 create_ts = 30;
+  // Durable receipt for ClusterSortCompaction, including an empty result.
+  bool cluster_sort_completed = 31;
+  // ClusterSortCompaction uses triggerID as its parent clustering plan ID.
+  int64 cluster_sort_group_id = 32;
+  // Persist the worker result before adopting any output. This allows replay
+  // after a partial catalog transaction, without rerunning or mixing attempts.
+  CompactionPlanResult cluster_sort_pending_result = 33;
 }
 
 message PartitionStatsInfo {

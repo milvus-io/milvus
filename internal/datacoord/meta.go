@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -2818,6 +2819,7 @@ func (m *meta) completeClusterCompactionMutation(t *datapb.CompactionTask, resul
 		// are populated correctly there (the compactor sees the stats
 		// blob size); the receiver does not recompute.
 		segmentInfo.Stats = seg.GetStats()
+		segmentInfo.ClusterStats = seg.GetClusterStats()
 		segment := NewSegmentInfo(segmentInfo)
 		compactToSegInfos = append(compactToSegInfos, segment)
 		metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetIsSorted(), segment.GetStorageVersion(), segmentMetricFormatLabel(segment), segment.GetNumOfRows())
@@ -2860,7 +2862,7 @@ func (m *meta) completeMixCompactionMutation(
 
 		// Re-validate segment health to prevent race condition with drop collection
 		// between ValidateSegmentStateBeforeCompleteCompactionMutation and here
-		if !isSegmentHealthy(segment) {
+		if !isSegmentHealthy(segment) && !clusterSortReplayInput(t, segment) {
 			mlog.Warn(m.ctx, "input segment was dropped during compaction mutation",
 				mlog.Int64("planID", t.GetPlanID()),
 				mlog.Int64("segmentID", segmentID),
@@ -2927,7 +2929,23 @@ func (m *meta) completeMixCompactionMutation(
 		// CompactionSegment. V3 outputs whose stats live in the manifest
 		// are populated correctly there; the receiver does not recompute.
 		compactToProto.Stats = compactToSegment.GetStats()
+		if t.GetType() == datapb.CompactionType_ClusterSortCompaction {
+			compactToProto.ClusterStats = compactToSegment.GetClusterStats()
+			compactToProto.IsInvisible = true
+			compactToProto.Level = datapb.SegmentLevel_L2
+		}
 		compactToSegmentInfo := NewSegmentInfo(compactToProto)
+		if t.GetType() == datapb.CompactionType_ClusterSortCompaction {
+			if existing := m.segments.GetSegment(compactToSegmentInfo.GetID()); existing != nil {
+				// Keep index/manifest updates made after the first adoption and
+				// don't count the segment twice when replaying the receipt.
+				if !isSegmentHealthy(existing) || !proto.Equal(existing.GetClusterStats(), compactToSegment.GetClusterStats()) {
+					return nil, nil, merr.WrapErrIllegalCompactionPlan("cluster sort output conflicts with existing segment")
+				}
+				compactToSegments = append(compactToSegments, existing)
+				continue
+			}
+		}
 
 		if compactToSegmentInfo.GetNumOfRows() == 0 {
 			compactToSegmentInfo.State = commonpb.SegmentState_Dropped
@@ -3121,6 +3139,32 @@ func (m *meta) CompleteCompactionMutation(ctx context.Context, t *datapb.Compact
 	} else {
 		switch t.GetType() {
 		case datapb.CompactionType_MixCompaction:
+			newSegments, metricMutation, retErr = m.completeMixCompactionMutation(t, result)
+		case datapb.CompactionType_ClusterSortCompaction:
+			parent := m.compactionTaskMeta.GetCompactionTask(t.GetTriggerID())
+			if parent == nil || parent.GetState() != datapb.CompactionTaskState_statistic {
+				return nil, nil, merr.WrapErrIllegalCompactionPlan("cluster sort parent is no longer accepting results")
+			}
+			if m.isCollectionCompactionBlocked(t.CollectionID) {
+				return nil, nil, merr.WrapErrCompactionBlocked("cluster sort collection is snapshot protected")
+			}
+			if len(t.InputSegments) != 1 || !slices.Contains(parent.GetTmpSegments(), t.InputSegments[0]) || t.CollectionID != parent.CollectionID || t.PartitionID != parent.PartitionID {
+				return nil, nil, merr.WrapErrIllegalCompactionPlan("cluster sort must own exactly one committed staging segment")
+			}
+			inputID := t.InputSegments[0]
+			input := m.segments.GetSegment(inputID)
+			if input == nil {
+				return nil, nil, merr.WrapErrSegmentNotFound(inputID)
+			}
+			if input.GetClusterStats().GetFieldId() != parent.GetClusteringKeyField().GetFieldID() {
+				return nil, nil, merr.WrapErrIllegalCompactionPlan("cluster sort staging field changed")
+			}
+			if m.isSegmentCompactionProtected(inputID) {
+				return nil, nil, merr.WrapErrCompactionBlocked("cluster sort staging segment is snapshot protected")
+			}
+			if err := validateClusterSortResult(t, result, m.segments); err != nil {
+				return nil, nil, err
+			}
 			newSegments, metricMutation, retErr = m.completeMixCompactionMutation(t, result)
 		case datapb.CompactionType_ClusteringCompaction:
 			newSegments, metricMutation, retErr = m.completeClusterCompactionMutation(t, result)

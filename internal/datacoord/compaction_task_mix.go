@@ -3,6 +3,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -35,7 +36,8 @@ type mixCompactionTask struct {
 
 	times *taskcommon.Times
 
-	slotUsage atomic.Int64
+	slotUsage       atomic.Int64
+	clusterCommitMu sync.Mutex
 }
 
 func (t *mixCompactionTask) GetTaskID() int64 {
@@ -119,6 +121,9 @@ func (t *mixCompactionTask) CreateTaskOnWorker(nodeID int64, cluster session.Clu
 
 func (t *mixCompactionTask) QueryTaskOnWorker(cluster session.Cluster) {
 	task := t.GetTaskProto()
+	if task.GetClusterSortPendingResult() != nil || task.GetClusterSortCompleted() {
+		return // Process resumes the durable metadata transaction locally.
+	}
 	result, err := cluster.QueryCompaction(task.GetNodeID(), &datapb.CompactionStateRequest{
 		PlanID: task.GetPlanID(),
 	})
@@ -235,6 +240,20 @@ func (t *mixCompactionTask) SaveTaskMeta() error {
 }
 
 func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult) error {
+	if t.GetTaskProto().GetType() == datapb.CompactionType_ClusterSortCompaction {
+		t.clusterCommitMu.Lock()
+		defer t.clusterCommitMu.Unlock()
+		if t.GetTaskProto().GetClusterSortCompleted() {
+			return nil
+		}
+		if pending := t.GetTaskProto().GetClusterSortPendingResult(); pending != nil {
+			result = proto.Clone(pending).(*datapb.CompactionPlanResult)
+		} else if err := t.updateAndSaveTaskMeta(func(task *datapb.CompactionTask) {
+			task.ClusterSortPendingResult = proto.Clone(result).(*datapb.CompactionPlanResult)
+		}); err != nil {
+			return err
+		}
+	}
 	if err := binlog.CompressCompactionBinlogs(result.GetSegments()); err != nil {
 		return err
 	}
@@ -262,7 +281,12 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 		meta.recomputeDataView(context.TODO(), t.GetTaskProto().GetCollectionID())
 	}
 
-	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs))
+	err = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_meta_saved), setResultSegments(newSegmentIDs), func(task *datapb.CompactionTask) {
+		if task.GetType() == datapb.CompactionType_ClusterSortCompaction {
+			task.ClusterSortCompleted = true
+			task.ClusterSortPendingResult = nil
+		}
+	})
 	if err != nil {
 		mlog.Warn(context.TODO(), "mixCompaction failed to setState meta saved", mlog.Err(err))
 		return err
@@ -274,6 +298,15 @@ func (t *mixCompactionTask) saveSegmentMeta(result *datapb.CompactionPlanResult)
 // Note: return True means exit this state machine.
 // ONLY return True for Completed, Failed or Timeout
 func (t *mixCompactionTask) Process() bool {
+	if pending := t.GetTaskProto().GetClusterSortPendingResult(); pending != nil && !clusterSortTerminal(t.GetTaskProto()) {
+		if err := t.saveSegmentMeta(pending); err != nil {
+			mlog.Warn(context.TODO(), "cluster sort result adoption will be retried", mlog.Err(err))
+			if errors.Is(err, merr.ErrIllegalCompactionPlan) || errors.Is(err, merr.ErrSegmentNotFound) {
+				_ = t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_failed), setFailReason(err.Error()))
+			}
+			return false
+		}
+	}
 	lastState := t.GetTaskProto().GetState().String()
 	processResult := false
 	switch t.GetTaskProto().GetState() {
@@ -298,6 +331,9 @@ func (t *mixCompactionTask) GetLabel() string {
 }
 
 func (t *mixCompactionTask) NeedReAssignNodeID() bool {
+	if t.GetTaskProto().GetClusterSortPendingResult() != nil {
+		return false
+	}
 	return t.GetTaskProto().GetState() == datapb.CompactionTaskState_pipelining && (t.GetTaskProto().GetNodeID() == 0 || t.GetTaskProto().GetNodeID() == NullNodeID)
 }
 
@@ -429,6 +465,7 @@ func (t *mixCompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, er
 			StorageVersion:      segInfo.GetStorageVersion(),
 			Manifest:            segInfo.GetManifestPath(),
 			CommitTimestamp:     segInfo.GetCommitTimestamp(),
+			ClusterStats:        segInfo.GetClusterStats(),
 		})
 		segIDMap[segID] = segInfo.GetDeltalogs()
 		segments = append(segments, segInfo)

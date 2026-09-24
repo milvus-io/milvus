@@ -1069,6 +1069,7 @@ func isFlush(segment *SegmentInfo) bool {
 
 func canTriggerSortCompaction(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Flushed &&
+		segment.GetClusterStats() == nil && // cluster layout has its own mandatory sort stage
 		segment.GetLevel() != datapb.SegmentLevel_L0 &&
 		(!segment.GetIsSorted() && !segment.GetIsSortedByNamespace()) &&
 		!segment.GetIsImporting() &&

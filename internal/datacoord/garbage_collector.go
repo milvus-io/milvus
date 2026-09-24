@@ -618,6 +618,18 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	}
 	scanTasks := []scanTask{
 		{
+			prefix: path.Join(gc.option.cli.RootPath(), common.ClusterStats),
+			checker: func(info *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
+				if segment == nil {
+					return false
+				}
+				_, ok := getLogs(segment)[info.FilePath]
+				return ok
+			},
+			segmentIDFromPath: parseClusterStatsSegmentID,
+			label:             metrics.StatFileLabel,
+		},
+		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentInsertLogPath),
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
 				return segment != nil
@@ -718,6 +730,7 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles(ctx context.Context) {
 	for _, task := range scanTasks {
 		gc.recycleUnusedBinLogWithChecker(ctx, task.prefix, task.label, task.segmentIDFromPath, task.checker)
 	}
+	gc.recycleClusterSortRuns(ctx)
 	metrics.GarbageCollectorRunCount.WithLabelValues(paramtable.GetStringNodeID()).Add(1)
 }
 
@@ -795,6 +808,10 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		}
 
 		segment := gc.meta.GetSegment(ctx, segmentID)
+		if segment == nil && gc.clusterOutputInFlight(segmentID) {
+			valid++
+			return true
+		}
 
 		// Skip V3 segments — orphan files managed by loon
 		if segment != nil && segment.GetStorageVersion() == storage.StorageV3 {
@@ -893,6 +910,12 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	cpTimestamp Timestamp,
 ) bool {
 	log := mlog.With(mlog.Int64("segmentID", segment.ID))
+	if ref := segment.GetClusterStats(); ref != nil && !ref.Sorted {
+		parent := gc.meta.GetCompactionTaskMeta().GetCompactionTask(ref.ClusteringTaskId)
+		if parent != nil && !isCompactionTaskFinished(parent) {
+			return false
+		}
+	}
 
 	if !gc.isExpire(segment.GetDroppedAt()) {
 		return false
@@ -1460,6 +1483,12 @@ func parseSegmentIDFromJSONIndexPath(rootPath, filePath string) (int64, error) {
 
 func getLogs(sinfo *SegmentInfo) map[string]struct{} {
 	logs := make(map[string]struct{})
+	for _, file := range sinfo.GetClusterStats().GetFiles() {
+		logs[file] = struct{}{}
+	}
+	if file := sinfo.GetClusterStats().GetRangesPath(); file != "" {
+		logs[file] = struct{}{}
+	}
 	for _, flog := range sinfo.GetBinlogs() {
 		for _, l := range flog.GetBinlogs() {
 			logs[l.GetLogPath()] = struct{}{}

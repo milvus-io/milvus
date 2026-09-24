@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -36,10 +37,10 @@ type ManifestStat struct {
 	Metadata map[string]string
 }
 
-// StatsBinlogSizeFromManifest returns a StorageV3 segment's bloom-filter + BM25
+// StatsBinlogSizeFromManifest returns a StorageV3 segment's bloom-filter, BM25 and cluster
 // blob footprint recorded in the manifest — the StatsBinlogSize aggregate for a
 // segment whose stats live in the manifest rather than statslog KV arrays.
-// Text/JSON index stats are excluded: they are not part of the bloom+BM25
+// Text/JSON index stats are excluded: they are not part of the segment
 // stats-binlog footprint (mirrors the writer's per-sync statsBlobSize).
 func StatsBinlogSizeFromManifest(manifestPath string, storageConfig *indexpb.StorageConfig) (int64, error) {
 	stats, err := GetManifestStats(manifestPath, storageConfig)
@@ -49,7 +50,7 @@ func StatsBinlogSizeFromManifest(manifestPath string, storageConfig *indexpb.Sto
 	var total int64
 	for key, stat := range stats {
 		prefix, _, ok := ParseStatKey(key)
-		if !ok || (prefix != "bloom_filter" && prefix != "bm25") {
+		if !ok || (prefix != "bloom_filter" && prefix != "bm25" && prefix != common.ClusterStats) {
 			continue
 		}
 		memStr, ok := stat.Metadata["memory_size"]
