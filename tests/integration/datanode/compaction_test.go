@@ -206,10 +206,10 @@ func (s *CompactionSuite) generateSegment(collection string, segmentCount int) [
 			CollectionNames: []string{collection},
 		})
 		s.NoError(err)
-		segmentLongArr, has := flushResp.GetCollSegIDs()[collection]
+		segmentLongArr, has := flushResp.GetFlushCollSegIDs()[collection]
 		s.Require().True(has)
 		segmentIDs := segmentLongArr.GetData()
-		s.Require().NotEmpty(segmentLongArr)
+		s.Require().NotEmpty(segmentIDs)
 		s.Require().True(has)
 
 		flushTs, has := flushResp.GetCollFlushTs()[collection]

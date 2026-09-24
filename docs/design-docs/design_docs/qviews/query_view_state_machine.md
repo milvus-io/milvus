@@ -132,11 +132,10 @@ scheduling policy is not implemented by the current DataView-only PR.
 1. Persist Down to ETCD (if transitioning from Up).
 2. Push Down to SN.
 
-> Query lease ownership: Coord does not wait for a lease period before entering
-> Down and always keeps at most one Up view. After receiving Down, StreamingNode
-> stops generating new query plans from the old view, but query leases/query
-> references keep its resources alive for already-generated queries. Resource
-> release completes only after those references are released.
+> Query lease ownership: Coord can enter Down immediately, but SN defers its
+> local Up → Down transition while its renewable serving lease or active query
+> references remain. QNs stay Ready until SN confirms Down and Coord advances
+> to Dropping. See [Serving Lease](query_view_lease.md).
 
 **Transitions:**
 
@@ -256,6 +255,16 @@ the crash-recovery path.
 2. Transition growing segments to queryable state.
 3. Check whether retained growing data can satisfy the QueryView's composite
    DataVersion, using the per-Segment Flush `streaming_version` handoff metadata.
+4. Before reporting Ready, require no pending segment final commits and wait
+   until the query runtime has applied the completed sealed notifications. This
+   check also applies when reusing a runtime; it is independent of asynchronous
+   BM25 refresh. See [WAL input view readiness](../wal/streamingnode_vchannel_wal_view.md#9-queryview-readiness-and-version-ordering).
+
+New acquisitions must not regress below the shared VChannel resource manager's
+highest accepted DataVersion, including across replicas. Such acquisitions report
+Unrecoverable so Coord can replace them with a newer DataView. Equal DataVersions
+and already retained older views are allowed; this policy does not invalidate
+their existing Up leases.
 
 **Transitions:**
 
@@ -304,11 +313,11 @@ the crash-recovery path.
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Down | Received Down push from Coord | Delete persisted recovery info; stop generating query plans from this view (but can still serve query execution requests) |
+| Down | Received Down push and serving lease expired with no active query references | Delete persisted recovery info; stop accepting new query plans or execution tasks; tasks that already acquired segment handles may finish |
 
 **Possible Coord States (and this node's reaction):**
 - Coord in Up / Down → SN does nothing; normal.
-- Coord pushes Down → SN transitions to Down.
+- Coord pushes Down → SN records the intent and waits for the serving lease and active query references before transitioning to Down.
 - Other signals → SN ignores.
 
 ### 2.4 UpRecovering (StreamingNode-Only Proto State)
@@ -327,6 +336,8 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 2. Do NOT serve queries (data is incomplete).
 3. Multiple UpRecovering versions may coexist. After recovery, query planning
    selects the highest available Up version.
+4. Resource preparation uses the same final-commit and applied-sealed-event
+   readiness check before completing UpRecovering.
 
 **Transitions:**
 
@@ -347,11 +358,11 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 ### 2.5 Down
 
 **Entry Conditions:**
-- Received Down push from Coord.
+- Received Down push from Coord; the serving lease has expired and active query references are zero.
 
 **Automatic Behavior:**
 1. Delete persisted recovery info.
-2. Stop generating query plans from this view (but can still serve query execution requests under plans already generated).
+2. Stop accepting new query plans or execution tasks. A Phase 2 request arriving after the actual Down transition must replan; tasks that already hold handles may finish. Before that transition, pending Down views remain Up and successful access renews the lease.
 3. Report Down to Coord.
 
 **Transitions:**

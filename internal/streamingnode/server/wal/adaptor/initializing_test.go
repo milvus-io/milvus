@@ -115,5 +115,6 @@ func TestSendFirstTimeTickReturnsMessageOnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, msg)
 	assert.True(t, msg.MessageID().EQ(rmq.NewRmqID(1)))
+	assert.Equal(t, message.MessageTypeRecoveryBarrier, msg.MessageType())
 	assert.Equal(t, int32(1), walImpls.appendCount.Load())
 }

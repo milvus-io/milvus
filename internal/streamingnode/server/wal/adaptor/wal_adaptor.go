@@ -10,13 +10,14 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	"github.com/milvus-io/milvus/internal/streamingnode/server/flusher/flusherimpl"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/adaptor/rate"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/interceptors"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/metricsutil"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -67,7 +68,6 @@ func adaptImplsToRWWAL(
 	roWAL *roWALAdaptorImpl,
 	builders []interceptors.InterceptorBuilder,
 	interceptorParam *interceptors.InterceptorBuildParam,
-	flusher *flusherimpl.WALFlusherImpl,
 ) *walAdaptorImpl {
 	if roWAL.Channel().AccessMode != types.AccessModeRW {
 		panic("wal should be read-write")
@@ -79,8 +79,7 @@ func adaptImplsToRWWAL(
 		// TODO: remove the pool, use a queue instead.
 		appendExecutionPool:    conc.NewPool[struct{}](0),
 		param:                  interceptorParam,
-		interceptorBuildResult: buildInterceptor(builders, interceptorParam),
-		flusher:                flusher,
+		interceptorBuildResult: buildInterceptorsAndReleaseInitialSnapshot(builders, interceptorParam),
 		writeMetrics:           metricsutil.NewWriteMetrics(roWAL.Channel(), roWAL.WALName()),
 		isFenced:               atomic.NewBool(false),
 		appendRateCounter:      utility.NewAverageRateCounter(10 * time.Second), // 10 second sliding window
@@ -94,13 +93,14 @@ func adaptImplsToRWWAL(
 
 // walAdaptorImpl is a wrapper of WALImpls to extend it into a WAL interface.
 type walAdaptorImpl struct {
+	queryViewHandler    *snview.SNQueryViewHandler
+	viewResourceManager *vchannel.PChannelRecoveryManager
 	*roWALAdaptorImpl
 
 	rwWALImpls             walimpls.WALImpls
 	appendExecutionPool    *conc.Pool[struct{}]
 	param                  *interceptors.InterceptorBuildParam
 	interceptorBuildResult interceptorBuildResult
-	flusher                *flusherimpl.WALFlusherImpl
 	writeMetrics           *metricsutil.WriteMetrics
 	isFenced               *atomic.Bool
 	appendRateCounter      *utility.AverageRateCounter // tracks append rate (bytes/sec)
@@ -111,11 +111,14 @@ type walAdaptorImpl struct {
 // Metrics returns the metrics of the wal.
 func (w *walAdaptorImpl) Metrics() types.WALMetrics {
 	currentMVCC := w.param.MVCCManager.GetMVCCOfVChannel(w.Channel().Name)
-	recoveryMetrics := w.flusher.Metrics()
+	recoveryTimeTick := uint64(0)
+	if w.param.RecoveryStorage != nil {
+		recoveryTimeTick = w.param.RecoveryStorage.Metrics().RecoveryTimeTick
+	}
 	return types.RWWALMetrics{
 		ChannelInfo:      w.Channel(),
 		MVCCTimeTick:     currentMVCC.Timetick,
-		RecoveryTimeTick: recoveryMetrics.RecoveryTimeTick,
+		RecoveryTimeTick: recoveryTimeTick,
 	}
 }
 
@@ -442,12 +445,14 @@ func (w *walAdaptorImpl) Close() {
 	w.lifetime.SetState(typeutil.LifetimeStateStopped)
 	w.forceCancelAfterGracefulTimeout()
 	w.lifetime.Wait()
+	if w.queryViewHandler != nil {
+		w.queryViewHandler.CloseForHandoff()
+	}
 
-	// close the flusher.
-	w.Logger().Info(context.TODO(), "wal begin to close flusher...")
-	if w.flusher != nil {
-		// only in test, the flusher is nil.
-		w.flusher.Close()
+	// close the recovery-owned persistence path.
+	w.Logger().Info(context.TODO(), "wal begin to close recovery storage...")
+	if w.param.RecoveryStorage != nil {
+		w.param.RecoveryStorage.Close()
 	}
 
 	w.Logger().Info(context.TODO(), "wal begin to close scanners...")
@@ -513,4 +518,13 @@ func buildInterceptor(builders []interceptors.InterceptorBuilder, param *interce
 			}
 		},
 	}
+}
+
+func buildInterceptorsAndReleaseInitialSnapshot(
+	builders []interceptors.InterceptorBuilder,
+	param *interceptors.InterceptorBuildParam,
+) interceptorBuildResult {
+	result := buildInterceptor(builders, param)
+	param.InitialRecoverSnapshot = nil
+	return result
 }

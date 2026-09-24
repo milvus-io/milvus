@@ -7,8 +7,11 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/client/handler/registry"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/queryplan"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/service"
+	snviewquery "github.com/milvus-io/milvus/internal/streamingnode/server/viewquery"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/walmanager"
 	"github.com/milvus-io/milvus/internal/util/analyzer"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
@@ -16,9 +19,11 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/kafka"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/pulsar"
 	_ "github.com/milvus-io/milvus/pkg/v3/streaming/walimpls/impls/rmq"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 // Server is the streamingnode server.
@@ -93,4 +98,10 @@ func (s *Server) initService() {
 func (s *Server) registerGRPCService(grpcServer *grpc.Server) {
 	streamingpb.RegisterStreamingNodeHandlerServiceServer(grpcServer, s.handlerService)
 	streamingpb.RegisterStreamingNodeManagerServiceServer(grpcServer, s.managerService)
+	viewpb.RegisterViewSyncServiceServer(grpcServer, snview.NewPChannelViewSyncServer(s.walManager))
+	viewpb.RegisterViewQueryServiceServer(grpcServer, snview.NewPChannelViewQueryServer(
+		s.walManager,
+		snviewquery.NewScheduler(snviewquery.NewDirectSegmentTaskExecutor(paramtable.GetNodeID())),
+	))
+	viewpb.RegisterQueryPlanServiceServer(grpcServer, queryplan.NewServer(s.walManager))
 }

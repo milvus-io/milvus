@@ -30,11 +30,8 @@ type ReOrderByTimeTickBuffer struct {
 	messageIDs typeutil.Set[string]
 	// seenTimeTicks deduplicates a non-TimeTick message that repeats across the
 	// write-ahead-buffer / WAL-scanner stream switch with a *different* message ID,
-	// which the messageIDs set above cannot catch. It is nil when physical
-	// dedup is disabled (streaming.idempotency.enabled=false): the drop rule
-	// only exists for the idempotency feature, and gating it there makes the
-	// feature flag a real kill switch that restores the pre-idempotency scanner
-	// behavior.
+	// which the messageIDs set above cannot catch. Physical deduplication is
+	// always active, independently of request-level idempotency keys.
 	//
 	// INVARIANT: the timetick interceptor assigns a unique timetick to every
 	// message IT appends, so two genuinely distinct non-TimeTick messages never
@@ -63,18 +60,13 @@ type ReOrderByTimeTickBuffer struct {
 	bytes           int
 }
 
-// NewReOrderBuffer creates a new ReOrderBuffer. physicalDedup enables the
-// timetick-based duplicate drop; pass the idempotency feature flag so the drop
-// rule never applies on deployments that run without the feature.
-func NewReOrderBuffer(physicalDedup bool) *ReOrderByTimeTickBuffer {
-	buffer := &ReOrderByTimeTickBuffer{
-		messageIDs:  typeutil.NewSet[string](),
-		messageHeap: typeutil.NewHeap[message.ImmutableMessage](&immutableMessageHeap{}),
+// NewReOrderBuffer creates a buffer with message-ID and TimeTick deduplication.
+func NewReOrderBuffer() *ReOrderByTimeTickBuffer {
+	return &ReOrderByTimeTickBuffer{
+		messageIDs:    typeutil.NewSet[string](),
+		seenTimeTicks: typeutil.NewSet[uint64](),
+		messageHeap:   typeutil.NewHeap[message.ImmutableMessage](&immutableMessageHeap{}),
 	}
-	if physicalDedup {
-		buffer.seenTimeTicks = typeutil.NewSet[uint64]()
-	}
-	return buffer
 }
 
 // Push pushes a message into the buffer.
@@ -88,7 +80,7 @@ func (r *ReOrderByTimeTickBuffer) Push(msg message.ImmutableMessage) (ReOrderByT
 	if r.messageIDs.Contain(msgID) {
 		return ReOrderByTimeTickBufferPushResult{}, status.NewInner("message is duplicated: %s", msgID)
 	}
-	if r.seenTimeTicks != nil && msg.MessageType() != message.MessageTypeTimeTick && msg.Version() != message.VersionOld {
+	if msg.MessageType() != message.MessageTypeTimeTick && msg.Version() != message.VersionOld {
 		timetick := msg.TimeTick()
 		if r.seenTimeTicks.Contain(timetick) {
 			return ReOrderByTimeTickBufferPushResult{
@@ -112,10 +104,8 @@ func (r *ReOrderByTimeTickBuffer) PopUtilTimeTick(timetick uint64) []message.Imm
 		msg := r.messageHeap.Pop()
 		r.bytes -= msg.EstimateSize()
 		r.messageIDs.Remove(msg.MessageID().Marshal())
-		// Mirror the push side exactly: only what was inserted is removed. The
-		// nil check comes first so a buffer with dedup disabled touches neither
-		// the set nor the message.
-		if r.seenTimeTicks != nil && msg.MessageType() != message.MessageTypeTimeTick && msg.Version() != message.VersionOld {
+		// Mirror the push side exactly: only what was inserted is removed.
+		if msg.MessageType() != message.MessageTypeTimeTick && msg.Version() != message.VersionOld {
 			r.seenTimeTicks.Remove(msg.TimeTick())
 		}
 		res = append(res, msg)

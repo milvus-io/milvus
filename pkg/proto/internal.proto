@@ -130,6 +130,7 @@ message SubSearchRequest {
   bool ignore_growing = 13;
   string analyzer_name = 14;
   SearchType search_type = 15;
+  bool skip = 16; // Set when QueryView proves the sub-search is empty.
 }
 
 message SearchRequest {

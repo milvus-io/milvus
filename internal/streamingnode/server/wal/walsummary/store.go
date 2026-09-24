@@ -20,16 +20,9 @@
 // today, others later) can recover their durable state without re-reading the
 // whole WAL.
 //
-// Three artifacts:
-//   - PChannelSummaryManifest (object storage): the chunk index, the pending GC
-//     work queue and the DDL invalidation map.
-//   - chunk objects (object storage): one per generation, holding per-vchannel
-//     per-consumer sections.
-//
-// The chunk is the only boundary between "already summarized" and "still in the
-// WAL": a message handle is released only after the chunk covering it is
-// durable and the dirty summary state is installed, so the global WAL
-// checkpoint never advances past a fact that is not in a chunk.
+// Manifests describe the retained chunk index and covered WAL position;
+// immutable chunks hold per-vchannel consumer sections. LastAcked reports the
+// continuous recoverable prefix independently of source message lifetimes.
 package walsummary
 
 import (
@@ -50,7 +43,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/common"
-	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -134,6 +126,9 @@ func (s *Store) ManifestKeyOfTerm(term int64) string {
 	return buildManifestKey(s.chunkManager, s.pchannel, term)
 }
 
+// TimeTickRange is complete WAL coverage [Start, End], including payload-free messages.
+type TimeTickRange struct{ Start, End uint64 }
+
 // WriteChunk writes one chunk object. It never overwrites a differing chunk at
 // the same key: an object with identical content is a retry (idempotent
 // no-op), and one with different content is corruption. The key is term-scoped,
@@ -142,25 +137,26 @@ func (s *Store) WriteChunk(
 	ctx context.Context,
 	generation uint64,
 	sectionsByVChannel map[string]*ChunkSections,
+	coverage TimeTickRange,
 ) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
-	payload, footer, err := marshalChunk(s.pchannel, generation, s.term, sectionsByVChannel)
+	payload, footer, err := marshalChunk(s.pchannel, generation, s.term, sectionsByVChannel, coverage)
 	if err != nil {
 		return nil, 0, err
 	}
 	key := s.ChunkKey(generation)
 	exists, err := s.chunkManager.Exist(ctx, key)
 	if err != nil {
-		return nil, 0, errors.Wrapf(err, "failed to probe summary chunk %s", key)
+		return nil, 0, merr.Wrapf(err, "failed to probe summary chunk %s", key)
 	}
 	if !exists {
 		if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-			return nil, 0, errors.Wrapf(err, "failed to write summary chunk %s", key)
+			return nil, 0, merr.Wrapf(err, "failed to write summary chunk %s", key)
 		}
 		return footer, uint64(len(payload)), nil
 	}
 	existingPayload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, 0, errors.Wrapf(err, "failed to read existing summary chunk %s", key)
+		return nil, 0, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
 	}
 	if bytes.Equal(existingPayload, payload) {
 		return footer, uint64(len(payload)), nil
@@ -177,6 +173,8 @@ func (s *Store) WriteChunk(
 		if existingFooter.GetPchannel() == footer.GetPchannel() &&
 			existingFooter.GetGeneration() == footer.GetGeneration() &&
 			existingFooter.GetTerm() == footer.GetTerm() &&
+			existingFooter.GetStartTimeTick() == footer.GetStartTimeTick() &&
+			existingFooter.GetEndTimetick() == footer.GetEndTimetick() &&
 			chunkSectionsByVChannelEqual(existingRecords, sectionsByVChannel) {
 			// The STORED footer and size, not the ones just built. The records
 			// match but the encodings do not, and the manifest carries the
@@ -202,7 +200,7 @@ func (s *Store) ReadChunk(
 	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
 	payload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, nil, errors.Wrapf(err, "failed to read summary chunk %s", key)
+		return nil, nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
 	}
 	return unmarshalChunk(payload)
 }
@@ -249,7 +247,7 @@ func (s *Store) ReadIdempotencySectionsOfChunk(
 	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
 	payload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, errors.Wrapf(err, "failed to read summary chunk %s", key)
+		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
 	}
 	_, footerStart, err := unmarshalChunkTail(payload)
 	if err != nil {
@@ -273,7 +271,7 @@ func (s *Store) ReadIdempotencySectionsOfChunk(
 func (s *Store) DeleteChunk(ctx context.Context, generation uint64, term int64) error {
 	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
 	if err := s.chunkManager.Remove(ctx, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return errors.Wrapf(err, "failed to delete summary chunk %s", key)
+		return merr.Wrapf(err, "failed to delete summary chunk %s", key)
 	}
 	return nil
 }
@@ -303,7 +301,7 @@ func (s *Store) ListManifestTerms(ctx context.Context, upTo int64) ([]int64, err
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, errors.Wrapf(err, "failed to list summary manifests under %s", prefix)
+		return nil, merr.Wrapf(err, "failed to list summary manifests under %s", prefix)
 	}
 	terms := make([]int64, 0, len(keys))
 	for _, key := range keys {
@@ -326,14 +324,14 @@ func (s *Store) ReadManifestOfTerm(ctx context.Context, term int64) (*streamingp
 	key := s.ManifestKeyOfTerm(term)
 	exists, err := s.chunkManager.Exist(ctx, key)
 	if err != nil {
-		return nil, false, errors.Wrapf(err, "failed to probe summary manifest %s", key)
+		return nil, false, merr.Wrapf(err, "failed to probe summary manifest %s", key)
 	}
 	if !exists {
 		return nil, false, nil
 	}
 	payload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, false, errors.Wrapf(err, "failed to read summary manifest %s", key)
+		return nil, false, merr.Wrapf(err, "failed to read summary manifest %s", key)
 	}
 	manifest, err := unmarshalManifest(payload)
 	if err != nil {
@@ -343,7 +341,7 @@ func (s *Store) ReadManifestOfTerm(ctx context.Context, term int64) (*streamingp
 }
 
 // WriteManifest publishes the manifest. The manifest is always written as the
-// previous manifest plus amendments (see inheritManifest): recovery reads the
+// previous manifest plus amendments: recovery reads the
 // prior term's manifest on a term handoff and seals the inherited index into
 // the new term's manifest, so the chain never grows beyond one hop.
 func (s *Store) WriteManifest(ctx context.Context, manifest *streamingpb.PChannelSummaryManifest) error {
@@ -353,7 +351,7 @@ func (s *Store) WriteManifest(ctx context.Context, manifest *streamingpb.PChanne
 	}
 	key := s.ManifestKey()
 	if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-		return errors.Wrapf(err, "failed to write summary manifest %s", key)
+		return merr.Wrapf(err, "failed to write summary manifest %s", key)
 	}
 	return nil
 }
@@ -370,47 +368,53 @@ func (s *Store) ProbeChunkForward(ctx context.Context, fromGeneration uint64) ([
 // after fromGeneration. A term handoff probes the previous owner's chunks the
 // same way this term's own tail is probed (see Recover).
 func (s *Store) ProbeChunkForwardOfTerm(ctx context.Context, term int64, fromGeneration uint64) ([]*streamingpb.PChannelSummaryChunkIndexEntry, error) {
-	prefix := buildChunkPrefix(s.chunkManager, s.pchannel)
-	keys, _, err := storage.ListAllChunkWithPrefix(ctx, s.chunkManager, prefix, false)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, errors.Wrapf(err, "failed to list summary chunks under %s", prefix)
-	}
-	type candidate struct {
-		generation uint64
-		key        string
-	}
-	candidates := make([]candidate, 0, len(keys))
-	for _, key := range keys {
-		generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(key, prefix))
-		if !ok || keyTerm != term || generation < fromGeneration {
-			continue
+	root := buildChunkPrefix(s.chunkManager, s.pchannel)
+	expected := fromGeneration
+	var entries []*streamingpb.PChannelSummaryChunkIndexEntry
+	for {
+		// Prefix covers exactly 100 generation values; the LIST page size is
+		// unchanged and the walker follows all pages, including other terms.
+		prefix := root + fmt.Sprintf("%020d", expected)[:18]
+		keys, _, err := storage.ListAllChunkWithPrefix(ctx, s.chunkManager, prefix, false)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, merr.Wrapf(err, "failed to list summary prefix %s", prefix)
 		}
-		candidates = append(candidates, candidate{generation: generation, key: key})
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].generation < candidates[j].generation
-	})
-
-	// An object found here sits ABOVE the last published manifest, so nothing
-	// yet depends on it: the persist that wrote it had to publish the manifest
-	// next, and failing that fails the whole checkpoint persist, which leaves
-	// its records replayable from the WAL. One that cannot be read or decoded
-	// therefore ends the probe rather than the WAL open -- this term adopts the
-	// contiguous run below it and replay rebuilds the rest. Corruption of a
-	// chunk the manifest DOES name stays fatal; that one has no second copy.
-	entries := make([]*streamingpb.PChannelSummaryChunkIndexEntry, 0, len(candidates))
-	for _, c := range candidates {
-		payload, err := s.chunkManager.Read(ctx, c.key)
-		if err != nil {
-			break
+		candidates := make(map[uint64]string)
+		for _, key := range keys {
+			generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(key, root))
+			if ok && keyTerm == term && generation >= expected {
+				candidates[generation] = key
+			}
 		}
-		_, footer, err := unmarshalChunk(payload)
-		if err != nil {
-			break
+		for {
+			key, ok := candidates[expected]
+			if !ok {
+				return entries, nil
+			}
+			payload, err := s.chunkManager.Read(ctx, key)
+			if err != nil {
+				if errors.Is(err, fs.ErrNotExist) || errors.Is(err, merr.ErrIoKeyNotFound) {
+					return entries, nil
+				}
+				return nil, merr.Wrapf(err, "failed to read summary tail %s", key)
+			}
+			_, footer, err := unmarshalChunk(payload)
+			if err != nil {
+				return nil, err
+			}
+			if footer.GetPchannel() != s.pchannel || footer.GetGeneration() != expected || footer.GetTerm() != term {
+				return nil, storeCorruptedf("summary tail identity mismatch: %s", key)
+			}
+			entries = append(entries, chunkIndexEntryFromFooter(footer, uint64(len(payload))))
+			if expected == math.MaxUint64 {
+				return entries, nil
+			}
+			expected++
+			if expected%100 == 0 {
+				break
+			}
 		}
-		entries = append(entries, chunkIndexEntryFromFooter(footer, uint64(len(payload))))
 	}
-	return entries, nil
 }
 
 // ChunkRef identifies one chunk object.
@@ -419,52 +423,8 @@ type ChunkRef struct {
 	Term       int64
 }
 
-// SweepUnreferencedChunksBelowTerm deletes chunk objects of terms strictly
-// below belowTerm that referenced does not name, up to budget objects.
-//
-// It reports how many it deleted and whether it reached the end of the prefix.
-// A caller that used its whole budget has not finished and should call again;
-// there is no cursor, because the deletions are the progress: the next walk
-// simply sees fewer objects.
-//
-// The walk streams rather than materializing the key list, so the memory cost
-// is the caller's referenced set and nothing else.
-func (s *Store) SweepUnreferencedChunksBelowTerm(
-	ctx context.Context,
-	belowTerm int64,
-	referenced map[ChunkRef]struct{},
-	budget int,
-) (deleted int, finished bool, err error) {
-	prefix := buildChunkPrefix(s.chunkManager, s.pchannel)
-	finished = true
-	var walkErr error
-	if err := s.chunkManager.WalkWithPrefix(ctx, prefix, false, func(info *storage.ChunkObjectInfo) bool {
-		generation, term, ok := parseChunkKey(strings.TrimPrefix(info.FilePath, prefix))
-		if !ok || term >= belowTerm {
-			return true
-		}
-		if _, ok := referenced[ChunkRef{Generation: generation, Term: term}]; ok {
-			return true
-		}
-		if err := s.chunkManager.Remove(ctx, info.FilePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			walkErr = errors.Wrapf(err, "failed to delete orphan summary chunk %s", info.FilePath)
-			finished = false
-			return false
-		}
-		deleted++
-		if deleted >= budget {
-			finished = false
-			return false
-		}
-		return true
-	}); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return deleted, false, errors.Wrapf(err, "failed to walk summary chunks under %s", prefix)
-	}
-	return deleted, finished, walkErr
-}
-
 // DeleteManifestsBelowTerm deletes the manifest objects of terms strictly below
-// belowTerm. Recovery adopts the highest term with content, so once a manifest
+// belowTerm. Recovery adopts the highest term, even when empty, so once a manifest
 // at or above belowTerm holds the whole retained set, no recovery can reach an
 // older one.
 func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64) error {
@@ -475,7 +435,7 @@ func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64) e
 	for _, term := range terms {
 		key := buildManifestKey(s.chunkManager, s.pchannel, term)
 		if err := s.chunkManager.Remove(ctx, key); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return errors.Wrapf(err, "failed to delete superseded summary manifest %s", key)
+			return merr.Wrapf(err, "failed to delete superseded summary manifest %s", key)
 		}
 	}
 	return nil
@@ -487,7 +447,7 @@ func (s *Store) DeleteManifestsBelowTerm(ctx context.Context, belowTerm int64) e
 // under the prefix must not break recovery or gc.
 func parseChunkKey(base string) (generation uint64, term int64, ok bool) {
 	sep := strings.IndexByte(base, '_')
-	if sep < 0 {
+	if len(base) != 41 || sep != 20 {
 		return 0, 0, false
 	}
 	generation, err := strconv.ParseUint(base[:sep], 10, 64)
@@ -495,7 +455,7 @@ func parseChunkKey(base string) (generation uint64, term int64, ok bool) {
 		return 0, 0, false
 	}
 	term, err = strconv.ParseInt(base[sep+1:], 10, 64)
-	if err != nil {
+	if err != nil || term < 0 {
 		return 0, 0, false
 	}
 	return generation, term, true
@@ -509,7 +469,7 @@ func parseChunkKey(base string) (generation uint64, term int64, ok bool) {
 func (s *Store) RemoveAllObjects(ctx context.Context) error {
 	prefix := buildStorePrefix(s.chunkManager, s.pchannel)
 	if err := s.chunkManager.RemoveWithPrefix(ctx, prefix); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return errors.Wrapf(err, "failed to remove summary store with prefix %s", prefix)
+		return merr.Wrapf(err, "failed to remove summary store with prefix %s", prefix)
 	}
 	return nil
 }
@@ -546,12 +506,7 @@ func buildManifestPrefix(cm storage.ChunkManager, pchannel string) string {
 }
 
 func buildManifestKey(cm storage.ChunkManager, pchannel string, term int64) string {
-	return path.Join(
-		cm.RootPath(),
-		walsummaryObjectDir,
-		sanitizePathPart(pchannel),
-		manifestObjectDir,
-	) + "/" + fmt.Sprintf("%020d", term)
+	return buildManifestPrefix(cm, pchannel) + fmt.Sprintf("%020d", term)
 }
 
 func buildStorePrefix(cm storage.ChunkManager, pchannel string) string {
@@ -581,6 +536,7 @@ func sanitizePathPart(value string) string {
 // on read by position, which holds because a record without a key still takes
 // its slot in the idempotency section.
 type ChunkSections struct {
+	Transform []*streamingpb.VChannelSummaryTransformRecord
 	// Idempotency and Inserts are the two halves of the idempotency consumer's
 	// view, stored in separate sections and paired by position: Idempotency[i]
 	// is the client key of the write Inserts[i] describes.
@@ -598,7 +554,7 @@ type ChunkSections struct {
 // empty reports whether the vchannel contributes nothing to the chunk, in which
 // case it gets no footer entry at all.
 func (c *ChunkSections) empty() bool {
-	return c == nil || len(c.Inserts) == 0
+	return c == nil || (len(c.Inserts) == 0 && len(c.Transform) == 0)
 }
 
 // validateIdempotencyAlignment rejects a pairing that cannot be stored, before
@@ -634,6 +590,7 @@ func marshalChunk(
 	generation uint64,
 	term int64,
 	sectionsByVChannel map[string]*ChunkSections,
+	coverage TimeTickRange,
 ) ([]byte, *streamingpb.PChannelSummaryChunkFooter, error) {
 	buf := bytes.NewBuffer(make([]byte, 0))
 	buf.Write(newChunkHeader())
@@ -667,17 +624,38 @@ func marshalChunk(
 				return nil, nil, err
 			}
 			insertStart, insertEnd := insertRecordTimetickRange(ordered.Inserts)
-			start, end = minUint64(start, insertStart), maxUint64(end, insertEnd)
+			start, end = min(start, insertStart), max(end, insertEnd)
 		}
 
+		if len(sections.Transform) > 0 {
+			records := sortedTransformRecords(sections.Transform)
+			section := &streamingpb.VChannelSummaryTransformSection{Records: records}
+			ref, err := appendSection(buf, section, len(records))
+			if err != nil {
+				return nil, nil, err
+			}
+			var totalSize uint64
+			for _, record := range records {
+				_, size := transformEntrySize(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}})
+				totalSize += size
+			}
+			transformStart, transformEnd := transformRecordTimetickRange(records)
+			index.Transform = &streamingpb.VChannelSummaryTransformIndex{
+				Ref: ref, StartTimeTick: transformStart, EndTimeTick: transformEnd, TotalSize: totalSize,
+			}
+			start, end = min(start, transformStart), max(end, transformEnd)
+		}
 		index.StartTimetick, index.EndTimetick = start, end
-		extendFooterRange(footer, index.StartTimetick, index.EndTimetick)
 		footer.Chunks = append(footer.Chunks, index)
 	}
 
+	footer.StartTimeTick, footer.EndTimetick = coverage.Start, coverage.End
+	if err := validateChunkIndex(chunkIndexEntryFromFooter(footer, 0)); err != nil {
+		return nil, nil, err
+	}
 	footerPayload, err := marshalOptions.Marshal(footer)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "failed to marshal summary chunk footer")
+		return nil, nil, merr.Wrap(err, "failed to marshal summary chunk footer")
 	}
 	// bytes.Buffer.Write never returns an error, so the trailer writes are
 	// unchecked.
@@ -770,6 +748,13 @@ func unmarshalChunk(
 				return nil, nil, err
 			}
 			sections.Idempotency, sections.Inserts = idempotency.Idempotency, idempotency.Inserts
+		}
+		if index.GetTransform() != nil {
+			records, err := unmarshalTransformSection(payload, footerStart, index)
+			if err != nil {
+				return nil, nil, err
+			}
+			sections.Transform = records
 		}
 		sectionsByVChannel[index.GetVchannel()] = sections
 	}
@@ -886,23 +871,9 @@ func unmarshalChunkTail(payload []byte) (*streamingpb.PChannelSummaryChunkFooter
 	}
 	footer := &streamingpb.PChannelSummaryChunkFooter{}
 	if err := proto.Unmarshal(footerPayload, footer); err != nil {
-		return nil, 0, markStoreCorrupted(errors.Wrap(err, "failed to decode summary chunk footer"))
+		return nil, 0, markStoreCorrupted(merr.Wrap(err, "failed to decode summary chunk footer"))
 	}
 	return footer, uint64(footerStart), nil
-}
-
-func minUint64(a, b uint64) uint64 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func maxUint64(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // sortedByInsertTimetick orders a vchannel's idempotency halves by the WAL
@@ -939,8 +910,8 @@ func insertRecordTimetickRange(records []*streamingpb.VChannelSummaryInsertRecor
 	}
 	start, end := records[0].GetSourceTimetick(), records[0].GetSourceTimetick()
 	for _, record := range records[1:] {
-		start = minUint64(start, record.GetSourceTimetick())
-		end = maxUint64(end, record.GetSourceTimetick())
+		start = min(start, record.GetSourceTimetick())
+		end = max(end, record.GetSourceTimetick())
 	}
 	return start, end
 }
@@ -952,15 +923,6 @@ func newChunkHeader() []byte {
 	binary.BigEndian.PutUint16(header[10:12], 0)
 	binary.BigEndian.PutUint32(header[12:16], chunkHeaderSize)
 	return header
-}
-
-func extendFooterRange(footer *streamingpb.PChannelSummaryChunkFooter, start, end uint64) {
-	if start > 0 && (footer.GetStartTimetick() == 0 || start < footer.GetStartTimetick()) {
-		footer.StartTimetick = start
-	}
-	if end > footer.GetEndTimetick() {
-		footer.EndTimetick = end
-	}
 }
 
 // chunkSectionsByVChannelEqual compares what two chunks actually contain, every
@@ -975,6 +937,16 @@ func chunkSectionsByVChannelEqual(left, right map[string]*ChunkSections) bool {
 		rightSections, ok := right[vchannel]
 		if !ok {
 			return false
+		}
+		leftTransforms := sortedTransformRecords(leftSections.Transform)
+		rightTransforms := sortedTransformRecords(rightSections.Transform)
+		if len(leftTransforms) != len(rightTransforms) {
+			return false
+		}
+		for i := range leftTransforms {
+			if !proto.Equal(leftTransforms[i], rightTransforms[i]) {
+				return false
+			}
 		}
 		if !idempotencySectionsEqual(leftSections, rightSections) {
 			return false
@@ -1008,7 +980,7 @@ func idempotencySectionsEqual(left, right *ChunkSections) bool {
 func marshalManifest(manifest *streamingpb.PChannelSummaryManifest) ([]byte, error) {
 	payload, err := marshalOptions.Marshal(manifest)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to marshal summary manifest")
+		return nil, merr.Wrap(err, "failed to marshal summary manifest")
 	}
 	buf := make([]byte, 0, manifestHeader+len(payload)+sha256.Size)
 	header := make([]byte, manifestHeader)
@@ -1042,25 +1014,9 @@ func unmarshalManifest(payload []byte) (*streamingpb.PChannelSummaryManifest, er
 	}
 	manifest := &streamingpb.PChannelSummaryManifest{}
 	if err := proto.Unmarshal(body, manifest); err != nil {
-		return nil, markStoreCorrupted(errors.Wrap(err, "failed to decode summary manifest"))
+		return nil, markStoreCorrupted(merr.Wrap(err, "failed to decode summary manifest"))
 	}
 	return manifest, nil
-}
-
-// inheritManifest produces the manifest a new owner publishes: everything the
-// previous one knew, plus what this recovery just learned.
-func inheritManifest(
-	previous *streamingpb.PChannelSummaryManifest,
-	discovered []*streamingpb.PChannelSummaryChunkIndexEntry,
-) *streamingpb.PChannelSummaryManifest {
-	manifest := &streamingpb.PChannelSummaryManifest{}
-	if previous != nil {
-		manifest = proto.Clone(previous).(*streamingpb.PChannelSummaryManifest)
-	}
-	for _, entry := range discovered {
-		recordChunk(manifest, entry)
-	}
-	return manifest
 }
 
 // recordChunk adds a chunk to the set recovery reads, keeping the entries in
@@ -1076,9 +1032,17 @@ func recordChunk(manifest *streamingpb.PChannelSummaryManifest, entry *streaming
 		}
 	}
 	manifest.Chunks = append(manifest.Chunks, entry)
-	sort.Slice(manifest.Chunks, func(i, j int) bool {
-		return manifest.Chunks[i].GetGeneration() < manifest.Chunks[j].GetGeneration()
-	})
+	sort.Slice(manifest.Chunks, func(i, j int) bool { return manifest.Chunks[i].GetGeneration() < manifest.Chunks[j].GetGeneration() })
+	if manifest.Coverage == nil {
+		manifest.Coverage = &streamingpb.SummaryCoverage{
+			StartTimeTick: entry.GetStartTimeTick(), Generation: entry.GetGeneration(),
+			Term: entry.GetTerm(), EndTimeTick: entry.GetEndTimetick(),
+		}
+	} else if entry.GetGeneration() > manifest.Coverage.GetGeneration() {
+		manifest.Coverage.Generation = entry.GetGeneration()
+		manifest.Coverage.Term = entry.GetTerm()
+		manifest.Coverage.EndTimeTick = entry.GetEndTimetick()
+	}
 }
 
 // chunkIndexEntryFromFooter mirrors a written chunk's footer into a manifest
@@ -1091,18 +1055,120 @@ func chunkIndexEntryFromFooter(footer *streamingpb.PChannelSummaryChunkFooter, o
 		Generation:    footer.GetGeneration(),
 		Term:          footer.GetTerm(),
 		ObjectSize:    objectSize,
-		StartTimetick: footer.GetStartTimetick(),
+		StartTimeTick: footer.GetStartTimeTick(),
 		EndTimetick:   footer.GetEndTimetick(),
 		Vchannels:     footer.GetChunks(),
 	}
 }
 
-// LogStoreState logs the store identity for diagnostics.
-func (s *Store) LogStoreState(logger *mlog.Logger) {
-	if logger == nil {
-		return
+// ReadTransformSection decodes one vchannel's transform records from a chunk.
+func (s *Store) ReadTransformSection(
+	ctx context.Context,
+	generation uint64,
+	term int64,
+	vchannel string,
+	index *streamingpb.VChannelSummaryChunkIndex,
+) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
+	key := buildChunkKey(s.chunkManager, s.pchannel, generation, term)
+	payload, err := s.chunkManager.Read(ctx, key)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
 	}
-	logger.Info(context.TODO(), "walsummary store",
-		mlog.String("pchannel", s.pchannel),
-		mlog.Int64("term", s.term))
+	_, footerStart, err := unmarshalChunkTail(payload)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalTransformSection(payload, footerStart, index)
+}
+
+func unmarshalTransformSection(
+	payload []byte,
+	payloadEnd uint64,
+	index *streamingpb.VChannelSummaryChunkIndex,
+) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
+	vchannel := index.GetVchannel()
+	ref := index.GetTransform().GetRef()
+	if ref == nil {
+		return nil, storeCorruptedf("missing transform section for vchannel %s", vchannel)
+	}
+	end := ref.GetOffset() + ref.GetLength()
+	if ref.GetOffset() < uint64(chunkHeaderSize) || end > payloadEnd || ref.GetOffset() > end {
+		return nil, storeCorruptedf("invalid transform section range for vchannel %s", vchannel)
+	}
+	section := &streamingpb.VChannelSummaryTransformSection{}
+	if err := proto.Unmarshal(payload[ref.GetOffset():end], section); err != nil {
+		return nil, markStoreCorrupted(merr.Wrapf(err, "failed to decode transform section for vchannel %s", vchannel))
+	}
+	if uint64(len(section.GetRecords())) != ref.GetRecordCount() {
+		return nil, storeCorruptedf("transform section record count mismatch for vchannel %s", vchannel)
+	}
+	records := make([]*streamingpb.VChannelSummaryTransformRecord, 0, len(section.GetRecords()))
+	for _, record := range section.GetRecords() {
+		records = append(records, cloneTransformRecord(record))
+	}
+	return sortedTransformRecords(records), nil
+}
+
+func sortedTransformRecords(records []*streamingpb.VChannelSummaryTransformRecord) []*streamingpb.VChannelSummaryTransformRecord {
+	if len(records) < 2 {
+		return records
+	}
+	sorted := make([]*streamingpb.VChannelSummaryTransformRecord, len(records))
+	copy(sorted, records)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].GetTimeTick() < sorted[j].GetTimeTick()
+	})
+	return sorted
+}
+
+func cloneTransformRecord(record *streamingpb.VChannelSummaryTransformRecord) *streamingpb.VChannelSummaryTransformRecord {
+	if record == nil {
+		return nil
+	}
+	return proto.Clone(record).(*streamingpb.VChannelSummaryTransformRecord)
+}
+
+func transformRecordTimetickRange(records []*streamingpb.VChannelSummaryTransformRecord) (uint64, uint64) {
+	var start, end uint64
+	for _, record := range records {
+		tt := record.GetTimeTick()
+		if start == 0 || tt < start {
+			start = tt
+		}
+		if tt > end {
+			end = tt
+		}
+	}
+	return start, end
+}
+
+// sweepGarbage rediscovers unreferenced objects after a committed manifest.
+// It never touches later terms or the current term's recoverable upload tail.
+func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamingpb.SummaryCoverage, referenced map[ChunkRef]struct{}, budget int) (int, bool, error) {
+	prefix := buildChunkPrefix(s.chunkManager, s.pchannel)
+	deleted, finished := 0, true
+	var deleteErr error
+	err := s.chunkManager.WalkWithPrefix(ctx, prefix, false, func(info *storage.ChunkObjectInfo) bool {
+		generation, keyTerm, ok := parseChunkKey(strings.TrimPrefix(info.FilePath, prefix))
+		if !ok || keyTerm > term || (keyTerm == term && (coverage == nil || generation > coverage.Generation)) {
+			return true
+		}
+		if _, keep := referenced[ChunkRef{Generation: generation, Term: keyTerm}]; keep {
+			return true
+		}
+		if err := s.DeleteChunk(ctx, generation, keyTerm); err != nil {
+			deleteErr = err
+			return false
+		}
+		deleted++
+		if deleted >= budget {
+			finished = false
+			return false
+		}
+		return true
+	})
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return deleted, false, merr.Wrap(err, "failed to sweep summary garbage")
+	}
+	return deleted, finished && deleteErr == nil, deleteErr
 }

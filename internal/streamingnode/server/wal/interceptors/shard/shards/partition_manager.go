@@ -121,12 +121,7 @@ func (m *partitionManager) FlushAndDropPartition(policy policy.SealPolicy) []int
 
 	segmentIDs := make([]int64, 0, len(m.segments))
 	for _, segment := range m.segments {
-		segment.Flush(policy)
-		m.metrics.ObserveSegmentFlushed(
-			string(segment.SealPolicy().Policy),
-			int64(segment.GetFlushedStat().Modified.Rows),
-			int64(segment.GetFlushedStat().Modified.BinarySize),
-		)
+		m.flushSegment(segment, policy)
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
 	m.segments = make(map[int64]*segmentAllocManager)
@@ -143,12 +138,7 @@ func (m *partitionManager) FlushAndFenceSegmentUntil(timeTick uint64) []int64 {
 
 	segmentIDs := make([]int64, 0, len(m.segments))
 	for _, segment := range m.segments {
-		segment.Flush(policy.PolicyFenced(timeTick))
-		m.metrics.ObserveSegmentFlushed(
-			string(segment.SealPolicy().Policy),
-			int64(segment.GetFlushedStat().Modified.Rows),
-			int64(segment.GetFlushedStat().Modified.BinarySize),
-		)
+		m.flushSegment(segment, policy.PolicyFenced(timeTick))
 		segmentIDs = append(segmentIDs, segment.GetSegmentID())
 	}
 	m.segments = make(map[int64]*segmentAllocManager)
@@ -170,16 +160,25 @@ func (m *partitionManager) AsyncFlushSegment(signal utils.SealSegmentSignal) err
 		return ErrSegmentNotFound
 	}
 
-	if !sm.IsFlushed() {
-		sm.Flush(signal.SealPolicy)
-		m.metrics.ObserveSegmentFlushed(
-			string(sm.SealPolicy().Policy),
-			int64(sm.GetFlushedStat().Modified.Rows),
-			int64(sm.GetFlushedStat().Modified.BinarySize),
-		)
+	if m.flushSegment(sm, signal.SealPolicy) {
 		m.asyncFlushSegment(m.ctx, sm)
 	}
 	return nil
+}
+
+// flushSegment records metrics only on the first transition to flushed.
+// A segment may remain in the partition while its async Flush message is pending.
+func (m *partitionManager) flushSegment(segment *segmentAllocManager, sealPolicy policy.SealPolicy) bool {
+	if segment.IsFlushed() {
+		return false
+	}
+	segment.Flush(sealPolicy)
+	m.metrics.ObserveSegmentFlushed(
+		string(segment.SealPolicy().Policy),
+		int64(segment.GetFlushedStat().Modified.Rows),
+		int64(segment.GetFlushedStat().Modified.BinarySize),
+	)
+	return true
 }
 
 // MustRemoveFlushedSegment removes the flushed segment from the segment manager.

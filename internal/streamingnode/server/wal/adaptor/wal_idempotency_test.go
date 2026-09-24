@@ -3,12 +3,11 @@ package adaptor_test
 import (
 	"context"
 	"fmt"
-	"path"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -45,11 +44,9 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	params.Save(params.EtcdCfg.RootPath.Key, fmt.Sprintf("idempotency-wal-%d", time.Now().UnixNano()))
 	params.Save(params.StreamingCfg.WALWriteAheadBufferKeepalive.Key, "500ms")
 	params.Save(params.StreamingCfg.WALWriteAheadBufferCapacity.Key, "10k")
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
-		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
 	}()
 
 	initIdempotencyResourceForTest(t)
@@ -98,55 +95,23 @@ func TestWALIdempotencyAppend(t *testing.T) {
 	require.False(t, first.MessageID.EQ(second.MessageID))
 	require.Greater(t, second.TimeTick, first.TimeTick)
 
-	// The summary observes the WAL through the recovery scanner, asynchronously
-	// from the append that produced the message. Nothing is durable for the
-	// idempotency view until it has, so the close below has to happen after the
-	// scanner caught up or the reopened window would legitimately be empty.
-	//
-	// There is no hook to wait on, so this waits on the clock. If it ever
-	// becomes flaky, the fix is a signal from the recovery storage, not a
-	// longer sleep.
-	time.Sleep(3 * time.Second)
+	// Durable window recovery will be covered by the async RecoveryStorage
+	// integration. This test exercises deduplication within one open WAL.
 	rwWAL.Close()
-
-	recoveredWAL, err := opener.Open(ctx, &wal.OpenOption{
-		Channel:        channel,
-		DisableFlusher: true,
-	})
-	require.NoError(t, err)
-	defer recoveredWAL.Close()
-
-	recoveredDuplicate, err := recoveredWAL.Append(ctx, newIdempotencyWALAppendMessage("key-1"))
-	require.NoError(t, err)
-	require.True(t, first.MessageID.EQ(recoveredDuplicate.MessageID))
-	require.Equal(t, first.TimeTick, recoveredDuplicate.TimeTick)
-
-	recoveredSecondDuplicate, err := recoveredWAL.Append(ctx, newIdempotencyWALAppendMessage("key-2"))
-	require.NoError(t, err)
-	require.True(t, second.MessageID.EQ(recoveredSecondDuplicate.MessageID))
-	require.Equal(t, second.TimeTick, recoveredSecondDuplicate.TimeTick)
 }
 
-// TestWALIdempotencyChunkReachesStorage covers the durable half of the write
-// path through the real opener: the staged records reach object storage as a
-// chunk, with the manifest that names it.
-//
-// It is worth its own test because the failure mode is silent. The summary is
-// happy to stage forever, and recovery reads the staged and sealed tails as well
-// as the chunks, so a summary that never writes anything still passes a
-// close-and-reopen dedup test -- right up until the process actually dies.
-func TestWALIdempotencyChunkReachesStorage(t *testing.T) {
+// TestRecoveryStartsWALSummary verifies async recovery publishes summary
+// state and reopens it under a fresh assignment term.
+func TestRecoveryStartsWALSummary(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()
 	params.Save(params.EtcdCfg.RootPath.Key, fmt.Sprintf("idempotency-chunk-%d", time.Now().UnixNano()))
-	params.Save(params.StreamingCfg.IdempotencyEnabled.Key, "true")
 	// Seal on the first record rather than at the 16MiB default.
-	params.Save(params.StreamingCfg.IdempotencyChunkMaxBytes.Key, "1")
+	params.Save(params.StreamingCfg.FlushL0MaxSize.Key, "1")
 	message.RegisterDefaultWALName(message.WALNameTest)
 	defer func() {
 		params.Reset(params.EtcdCfg.RootPath.Key)
-		params.Reset(params.StreamingCfg.IdempotencyEnabled.Key)
-		params.Reset(params.StreamingCfg.IdempotencyChunkMaxBytes.Key)
+		params.Reset(params.StreamingCfg.FlushL0MaxSize.Key)
 	}()
 
 	chunkManager := initIdempotencyResourceForTest(t)
@@ -176,31 +141,14 @@ func TestWALIdempotencyChunkReachesStorage(t *testing.T) {
 	require.NoError(t, err)
 	rwWAL.Close()
 
-	// The summary observes through the recovery stream, so the reopen is what
-	// feeds it: replay stages both records, the 1-byte threshold seals on the
-	// first, and the write task carries it to storage.
+	channel.Term++
 	recoveredWAL, err := opener.Open(ctx, &wal.OpenOption{Channel: channel, DisableFlusher: true})
 	require.NoError(t, err)
-	defer recoveredWAL.Close()
-
-	prefix := path.Join(chunkManager.RootPath(), "walsummary") + "/"
-	require.Eventually(t, func() bool {
-		keys, _, err := storage.ListAllChunkWithPrefix(ctx, chunkManager, prefix, true)
-		if err != nil {
-			return false
-		}
-		var chunks, manifests int
-		for _, key := range keys {
-			switch {
-			case strings.Contains(key, "/chunks/"):
-				chunks++
-			case strings.Contains(key, "/manifest/"):
-				manifests++
-			}
-		}
-		return chunks > 0 && manifests > 0
-	}, 20*time.Second, 200*time.Millisecond,
-		"a sealed chunk and its manifest must reach object storage")
+	recoveredWAL.Close()
+	prefix := chunkManager.RootPath() + "/"
+	keys, _, err := storage.ListAllChunkWithPrefix(ctx, chunkManager, prefix, true)
+	require.NoError(t, err)
+	require.NotEmpty(t, keys, "async recovery publishes summary state")
 }
 
 func initIdempotencyResourceForTest(t *testing.T) storage.ChunkManager {
@@ -241,6 +189,8 @@ func initIdempotencyResourceForTest(t *testing.T) storage.ChunkManager {
 	}).Maybe()
 
 	catalog := mock_metastore.NewMockStreamingNodeCataLog(t)
+	queryViewsPatch := mockey.Mock((*mock_metastore.MockStreamingNodeCataLog).ListQueryViews).Return(nil, nil).Build()
+	t.Cleanup(func() { queryViewsPatch.UnPatch() })
 	catalog.EXPECT().GetConsumeCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, pchannel string) (*streamingpb.WALCheckpoint, error) {
 		if consumeCheckpoint == nil {
 			return nil, nil

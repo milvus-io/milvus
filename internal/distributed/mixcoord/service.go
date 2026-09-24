@@ -1222,3 +1222,11 @@ func (s *Server) DeleteClientCommand(ctx context.Context, req *milvuspb.DeleteCl
 func (s *Server) ListClientCommands(ctx context.Context, req *rootcoordpb.ListClientCommandsRequest) (*rootcoordpb.ListClientCommandsResponse, error) {
 	return s.mixCoord.ListClientCommands(ctx, req)
 }
+
+func (s *Server) GetQueryViewLoadInfo(ctx context.Context, req *querypb.GetQueryViewLoadInfoRequest) (*querypb.GetQueryViewLoadInfoResponse, error) {
+	return s.mixCoord.GetQueryViewLoadInfo(ctx, req)
+}
+
+func (s *Server) GetStreamingNodeQueryViewResources(ctx context.Context, req *datapb.GetStreamingNodeQueryViewResourcesRequest) (*datapb.GetStreamingNodeQueryViewResourcesResponse, error) {
+	return s.mixCoord.GetStreamingNodeQueryViewResources(ctx, req)
+}

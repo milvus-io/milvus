@@ -9,6 +9,7 @@ import (
 // NewMVCCManager creates a new mvcc timestamp manager.
 func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 	return &MVCCManager{
+		query:                  NewQueryMVCCManager(lastConfirmedTimeTick),
 		pchannelMVCCTimestamp:  lastConfirmedTimeTick,
 		vchannelMVCCTimestamps: make(map[string]uint64),
 	}
@@ -17,6 +18,7 @@ func NewMVCCManager(lastConfirmedTimeTick uint64) *MVCCManager {
 // MVCCManager is the manager that manages all the mvcc state of one wal.
 // It keeps the last confirmed timestamp as mvcc of one pchannel and maximum timetick persisted into the wal of each vchannel.
 type MVCCManager struct {
+	query                  *QueryMVCCManager
 	mu                     sync.Mutex
 	pchannelMVCCTimestamp  uint64            // the last confirmed timetick of the pchannel.
 	vchannelMVCCTimestamps map[string]uint64 // map the vchannel to the maximum timetick that is persisted into the wal.
@@ -44,6 +46,7 @@ func (cm *MVCCManager) GetMVCCOfVChannel(vchannel string) VChannelMVCC {
 
 // UpdateMVCC updates the mvcc state by incoming message.
 func (cm *MVCCManager) UpdateMVCC(msg message.MutableMessage) {
+	cm.query.UpdateMVCC(msg)
 	if !msg.IsPersisted() {
 		// A unpersisted message is always a time tick message that is used to sync up the system time.
 		// No data change should be made by this message so it should be ignored in the mvcc manager.
@@ -97,4 +100,12 @@ func (cm *MVCCManager) sync(tt uint64) {
 type VChannelMVCC struct {
 	Timetick  uint64 // the timetick of the mvcc.
 	Confirmed bool   // the mvcc is confirmed by the timeticksync operation.
+}
+
+func (cm *MVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChannelMVCC {
+	return cm.query.GetQueryMVCCOfVChannel(vchannel)
+}
+
+func (cm *MVCCManager) ApplyRecoveryBarrier(vchannel string, timetick uint64) {
+	cm.query.ApplyRecoveryBarrier(vchannel, timetick)
 }

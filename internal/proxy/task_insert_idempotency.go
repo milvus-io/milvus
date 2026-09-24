@@ -2,106 +2,31 @@ package proxy
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
-	"hash"
-	"sort"
-	"strconv"
-
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
-	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
-	"github.com/milvus-io/milvus/pkg/v3/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-func collectionInsertIdempotencyEnabled(properties []*commonpb.KeyValuePair) bool {
-	value, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CollectionInsertIdempotencyEnabledKey, properties)
-	if !ok {
-		return false
-	}
-	enabled, err := strconv.ParseBool(value)
-	if err != nil {
-		// Defense in depth: validateInsertIdempotencyProperty rejects an
-		// unparseable value at DDL time, so reaching here means the property
-		// entered the collection meta by some other path. Log it rather than
-		// disable the durability guarantee the operator believes is on without
-		// a trace.
-		mlog.Warn(context.TODO(), "malformed collection insert idempotency property; treating idempotency as disabled",
-			mlog.String("key", common.CollectionInsertIdempotencyEnabledKey),
-			mlog.String("value", value))
-		return false
-	}
-	return enabled
-}
-
-// validateInsertIdempotencyProperty rejects an unparseable
-// collection.insert.idempotency.enabled value at DDL time, so a typo cannot
-// silently disable the durability feature the operator believes is on.
-func validateInsertIdempotencyProperty(props []*commonpb.KeyValuePair) error {
-	value, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(common.CollectionInsertIdempotencyEnabledKey, props)
-	if !ok {
+// prepareIdempotencyKey enables request-level deduplication only for an explicit key.
+func (it *insertTask) prepareIdempotencyKey(collectionProperties []*commonpb.KeyValuePair) error {
+	it.idempotencyEnabled = it.idempotencyKey != ""
+	if !it.idempotencyEnabled {
 		return nil
 	}
-	if _, err := strconv.ParseBool(value); err != nil {
-		return merr.WrapErrParameterInvalidMsg("%s should be a boolean, but got %q", common.CollectionInsertIdempotencyEnabledKey, value)
-	}
-	return nil
-}
-
-func (it *insertTask) prepareAutoIdempotencyKeyIfEnabled(ctx context.Context, collectionProperties []*commonpb.KeyValuePair, excludeAutoIDPrimary bool) error {
-	globalIdempotencyEnabled := Params.StreamingCfg.IdempotencyEnabled.GetAsBool()
-	collectionIdempotencyEnabled := collectionInsertIdempotencyEnabled(collectionProperties)
-	// An encrypted collection cannot have both. The duplicate answer is the
-	// first attempt's primary keys, and it is carried in the message HEADER,
-	// which the builder serializes into a plaintext property -- the cipher
-	// covers the body only. The client key travels beside it in another
-	// plaintext property, and the summary store writes both again to object
-	// storage. Enabling idempotency here would move exactly the values
-	// collection encryption exists to protect into the clear, so it is refused
-	// rather than silently weakened.
+	// The key and duplicate result are plaintext message properties; collection
+	// encryption currently protects only the body.
 	if hookutil.IsClusterEncryptionEnabled() &&
 		hookutil.GetEzByCollProperties(collectionProperties, it.collectionID).AsMessageConfig() != nil {
-		if it.idempotencyKey != "" || collectionIdempotencyEnabled {
-			return merr.WrapErrParameterInvalidMsg(
-				"idempotent write is not supported for an encrypted collection: the duplicate result and the key would be stored unencrypted")
-		}
+		return merr.WrapErrParameterInvalidMsg(
+			"idempotent write is not supported for an encrypted collection: the duplicate result and the key would be stored unencrypted")
 	}
-	it.idempotencyEnabled = globalIdempotencyEnabled && collectionIdempotencyEnabled
-	if it.idempotencyKey != "" && !globalIdempotencyEnabled {
-		return merr.WrapErrParameterInvalidMsg("idempotency key is not accepted when idempotent write is globally disabled")
-	}
-	if it.idempotencyKey != "" && !collectionIdempotencyEnabled {
-		return merr.WrapErrParameterInvalidMsg("idempotency key is not accepted when collection idempotent write is disabled")
-	}
-	if !it.idempotencyEnabled {
-		it.idempotencyKey = ""
-		return nil
-	}
-
-	log := mlog.With(mlog.String("collectionName", it.insertMsg.GetCollectionName()))
-	if it.idempotencyKey == "" {
-		autoIdempotencyKey, err := canonicalInsertPayloadKey(insertIdempotencyScopeOf(it.insertMsg), it.insertMsg.GetNumRows(), it.insertMsg.GetFieldsData(), it.schema, excludeAutoIDPrimary)
-		if err != nil {
-			log.Warn(ctx, "compute insert idempotency key failed", mlog.Err(err))
-			return err
-		}
-		it.idempotencyKey = autoIdempotencyKey
-	}
-	// Validate the effective key length (client-supplied or auto-generated) after it
-	// is resolved, so an over-limit auto key is rejected here at the proxy instead of
-	// slipping through and getting a confusing rejection from the streaming node.
 	if limit := Params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt(); limit > 0 && len(it.idempotencyKey) > limit {
 		return merr.WrapErrParameterInvalidMsg("idempotency key length %d exceeds limit %d", len(it.idempotencyKey), limit)
 	}
@@ -338,140 +263,4 @@ func mergeInsertIDsByOffsets(dst *schemapb.IDs, src *schemapb.IDs, rowOffsets []
 		return nil
 	}
 	return merr.WrapErrServiceInternalMsg("unsupported idempotent insert result ids type")
-}
-
-// insertIdempotencyScope is the request-level destination of an insert: the
-// fields that select where the rows go but never appear in the column payload.
-//
-// They must be part of the auto-derived key. The server-side dedup window is
-// keyed by vchannel (see the idempotency interceptor), and a vchannel is a
-// collection shard, not a partition or a namespace: two logically distinct
-// inserts of the same rows into two partitions of one collection would hash to
-// one key, and the second one would be answered from the window as a duplicate
-// with the first insert's primary keys while its rows never reach the WAL. An
-// auto key is not under the caller's control, so the "do not reuse a key"
-// contract that covers an explicit client key does not excuse that collision.
-type insertIdempotencyScope struct {
-	dbName         string
-	collectionName string
-	partitionName  string
-	// namespace is optional: an unset namespace routes by primary key while an
-	// empty-string namespace routes by namespace, so nil and "" are distinct.
-	namespace *string
-}
-
-func insertIdempotencyScopeOf(insertMsg *msgstream.InsertMsg) insertIdempotencyScope {
-	return insertIdempotencyScope{
-		dbName:         insertMsg.GetDbName(),
-		collectionName: insertMsg.GetCollectionName(),
-		partitionName:  insertMsg.GetPartitionName(),
-		namespace:      insertMsg.Namespace,
-	}
-}
-
-// writeTo mixes the destination into h, length-prefixing every string so
-// neighboring fields cannot be shifted into each other.
-func (scope insertIdempotencyScope) writeTo(h hash.Hash) {
-	var buf [8]byte
-	writeString := func(value string) {
-		binary.LittleEndian.PutUint64(buf[:], uint64(len(value)))
-		h.Write(buf[:])
-		h.Write([]byte(value))
-	}
-	writeString(scope.dbName)
-	writeString(scope.collectionName)
-	writeString(scope.partitionName)
-	if scope.namespace == nil {
-		h.Write([]byte{0})
-		return
-	}
-	h.Write([]byte{1})
-	writeString(*scope.namespace)
-}
-
-// canonicalInsertPayloadKey derives a deterministic idempotency key from the
-// insert destination plus the insert payload. On the payload side it
-// intentionally covers only the client-supplied columns plus numRows: it runs
-// before the proxy fills field properties / function output / dynamic /
-// namespace fields, so by design it must not depend on any of them.
-//
-// NOTE: the destination is hashed exactly as the client sent it, before the
-// proxy resolves an empty partition name to the default partition. A retry
-// resends the same request, so the key stays stable; spelling the same
-// destination two ways only costs a dedup hit, it can never merge two
-// destinations.
-//
-// NOTE: at this point the client FieldData carry no field id yet (FieldId == 0),
-// so the sort below effectively orders by field NAME (the FieldID comparison is a
-// no-op), and the auto-id primary exclusion below matches by name. The hash is
-// still deterministic for byte-identical client payloads, which is all an
-// idempotent retry needs; do not assume field-id ordering here.
-func canonicalInsertPayloadKey(scope insertIdempotencyScope, numRows uint64, fieldsData []*schemapb.FieldData, schema *schemapb.CollectionSchema, excludeAutoIDPrimary bool) (string, error) {
-	if excludeAutoIDPrimary {
-		primaryField, err := typeutil.GetPrimaryFieldSchema(schema)
-		if err != nil {
-			return "", err
-		}
-		if primaryField.GetAutoID() {
-			filtered := make([]*schemapb.FieldData, 0, len(fieldsData))
-			for _, fieldData := range fieldsData {
-				if fieldData.GetFieldId() == primaryField.GetFieldID() || fieldData.GetFieldName() == primaryField.GetName() {
-					continue
-				}
-				filtered = append(filtered, fieldData)
-			}
-			fieldsData = filtered
-		}
-	}
-	if err := validateCanonicalInsertPayloadFields(fieldsData); err != nil {
-		return "", err
-	}
-
-	sortedFields := append([]*schemapb.FieldData(nil), fieldsData...)
-	sort.Slice(sortedFields, func(i, j int) bool {
-		left, right := sortedFields[i], sortedFields[j]
-		if left.GetFieldId() != right.GetFieldId() {
-			return left.GetFieldId() < right.GetFieldId()
-		}
-		return left.GetFieldName() < right.GetFieldName()
-	})
-
-	hash := sha256.New()
-	scope.writeTo(hash)
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], numRows)
-	hash.Write(buf[:])
-	for _, fieldData := range sortedFields {
-		payload, err := proto.MarshalOptions{Deterministic: true}.Marshal(fieldData)
-		if err != nil {
-			return "", err
-		}
-		binary.LittleEndian.PutUint64(buf[:], uint64(len(payload)))
-		hash.Write(buf[:])
-		hash.Write(payload)
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func validateCanonicalInsertPayloadFields(fieldsData []*schemapb.FieldData) error {
-	seenFieldIDs := make(map[int64]struct{}, len(fieldsData))
-	seenFieldNames := make(map[string]struct{}, len(fieldsData))
-	for _, fieldData := range fieldsData {
-		if fieldData == nil {
-			return merr.WrapErrParameterInvalidMsg("nil field data in insert payload")
-		}
-		if fieldID := fieldData.GetFieldId(); fieldID != 0 {
-			if _, ok := seenFieldIDs[fieldID]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicate field id %d in insert payload", fieldID)
-			}
-			seenFieldIDs[fieldID] = struct{}{}
-		}
-		if fieldName := fieldData.GetFieldName(); fieldName != "" {
-			if _, ok := seenFieldNames[fieldName]; ok {
-				return merr.WrapErrParameterInvalidMsg("duplicate field name %q in insert payload", fieldName)
-			}
-			seenFieldNames[fieldName] = struct{}{}
-		}
-	}
-	return nil
 }

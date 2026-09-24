@@ -6,10 +6,12 @@ import (
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/dataview"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/retry"
@@ -53,26 +55,59 @@ func (w *segmentLifecycleWriter) EnsureGrowingSegment(ctx context.Context, meta 
 	return err
 }
 
-func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) error {
-	req := buildCommitL1SegmentRequest(w.serverID, meta)
+func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta) (*viewpb.DataVersion, error) {
+	// All data packs have already published their positions. Preserve them on
+	// final commit, including retries recovered from SN metadata.
+	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
+	resp, err := w.coord.SaveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+			// A retired segment/channel does not need a fabricated publication version.
+			return nil, nil
+		}
+		if errors.Is(err, merr.ErrChannelMisrouted) || merr.GetErrorType(err) == merr.InputError {
+			err = retry.Unrecoverable(err)
+		}
+		return nil, err
+	}
+	return dataview.ParseFlushResult(resp)
+}
+
+// TODO: Remove after enabling queryview. Existing query recovery loads growing
+// binlogs through DataCoord, so publication must precede Insert completion.
+func (w *segmentLifecycleWriter) PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, start, checkpoint *msgpb.MsgPosition) error {
+	req := buildSaveBinlogPathsRequest(w.serverID, meta)
+	if start != nil {
+		req.StartPositions = []*datapb.SegmentStartPosition{{SegmentID: meta.GetSegmentId(), StartPosition: start}}
+	}
+	req.CheckPoints = []*datapb.CheckPoint{{
+		SegmentID: meta.GetSegmentId(),
+		NumOfRows: int64(meta.GetStat().GetModifiedRows()),
+		Position:  checkpoint,
+	}}
+	return w.saveBinlogPaths(ctx, req)
+}
+
+func (w *segmentLifecycleWriter) saveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error {
 	// Same bounded retry loop for the coordinator client's built-in retries as
 	// in EnsureGrowingSegment; further retries happen at the task layer.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
 	resp, err := w.coord.SaveBinlogPaths(ctx, req)
 	err = merr.CheckRPCCall(resp, err)
-	if errors.Is(err, merr.ErrSegmentNotFound) {
-		// The segment no longer exists in DataCoord (dropped or removed):
+	if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
+		// The segment or its channel has retired in DataCoord:
 		// there is nothing to commit, so ignore the error and treat the
 		// commit as done. DataCoord itself ignores writes to dropped
 		// segments (returns success), and retrying or failing the segment
 		// here would only surface a lifecycle event as a task failure.
-		mlog.Warn(ctx, "segment no longer exists in DataCoord, ignore the L1 commit",
-			mlog.Int64("segmentID", meta.GetSegmentId()),
-			mlog.String("vchannel", meta.GetVchannel()))
+		mlog.Warn(ctx, "segment or channel retired in DataCoord, ignore the L1 commit",
+			mlog.Int64("segmentID", req.GetSegmentID()),
+			mlog.String("vchannel", req.GetChannel()))
 		return nil
 	}
-	if merr.GetErrorType(err) == merr.InputError {
-		// A request-content rejection is permanent — e.g. a TEXT segment
+	if errors.Is(err, merr.ErrChannelMisrouted) || merr.GetErrorType(err) == merr.InputError {
+		// Lost WAL ownership is terminal for this publisher. A request-content
+		// rejection is also permanent — e.g. a TEXT segment
 		// saved with a pre-V3 storage version, or a V3 segment without a
 		// manifest path. DataCoord will never accept the same request, so
 		// fail the segment instead of hot-looping on it.
@@ -94,6 +129,16 @@ func buildEnsureGrowingSegmentRequest(meta *streamingpb.SegmentAssignmentMeta) *
 }
 
 func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssignmentMeta) *datapb.SaveBinlogPathsRequest {
+	req := buildSaveBinlogPathsRequest(serverID, meta)
+	req.Flushed = true
+	// An empty segment has no data or manifest to publish. Retire it explicitly
+	// and wait for DataCoord's confirmation before installing the SN tombstone.
+	// Use cumulative rows: an empty buffer may have already persisted data.
+	req.Dropped = meta.GetStat().GetModifiedRows() == 0
+	return req
+}
+
+func buildSaveBinlogPathsRequest(serverID int64, meta *streamingpb.SegmentAssignmentMeta) *datapb.SaveBinlogPathsRequest {
 	storage := meta.GetPersistedStorage()
 	binlogs := make([]*datapb.FieldBinlog, 0)
 	statslogs := make([]*datapb.FieldBinlog, 0)
@@ -121,34 +166,11 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 		Field2Bm25LogPaths:  bm25logs,
 		Deltalogs:           storage.GetDeltaBinlog(),
 		Stats:               storage.GetStatistics(),
-		CheckPoints: []*datapb.CheckPoint{
-			{
-				SegmentID: meta.GetSegmentId(),
-				NumOfRows: int64(meta.GetStat().GetModifiedRows()),
-				// Position must be non-nil: DataCoord skips checkpoint updates
-				// with a nil position, which would leave DmlPosition unset and
-				// drop the flushed segment from channel recovery.
-				Position: &msgpb.MsgPosition{
-					ChannelName: meta.GetVchannel(),
-					Timestamp:   meta.GetCheckpointTimeTick(),
-				},
-			},
-		},
-		StartPositions: []*datapb.SegmentStartPosition{
-			{
-				SegmentID: meta.GetSegmentId(),
-				StartPosition: &msgpb.MsgPosition{
-					ChannelName: meta.GetVchannel(),
-					Timestamp:   meta.GetStat().GetCreateSegmentTimeTick(),
-				},
-			},
-		},
-		Flushed:         true,
-		Channel:         meta.GetVchannel(),
-		SegLevel:        meta.GetStat().GetLevel(),
-		StorageVersion:  meta.GetStorageVersion(),
-		WithFullBinlogs: true,
-		ManifestPath:    storage.GetManifestPath(),
+		Channel:             meta.GetVchannel(),
+		SegLevel:            meta.GetStat().GetLevel(),
+		StorageVersion:      meta.GetStorageVersion(),
+		WithFullBinlogs:     true,
+		ManifestPath:        storage.GetManifestPath(),
 	}
 }
 

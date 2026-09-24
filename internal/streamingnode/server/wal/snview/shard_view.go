@@ -2,11 +2,12 @@ package snview
 
 import (
 	"context"
-	"sort"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/views/qviews"
+	"github.com/milvus-io/milvus/internal/views/viewerror"
 	"github.com/milvus-io/milvus/internal/views/worknode/handler"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -31,6 +32,7 @@ type snShardView struct {
 	views           map[qviews.QueryViewVersion]*snViewEntry
 	catalog         metastore.StreamingNodeCataLog
 	resMgr          StreamingNodeResourceManager
+	leaseDuration   time.Duration
 	onEmpty         func(*snShardView) // called (under mu) when the last view entry is removed
 }
 
@@ -38,6 +40,11 @@ type snShardView struct {
 type snViewEntry struct {
 	handler.ApplyView
 	sm             *snQueryViewStateMachine
+	queryRefs      int
+	leaseExpireAt  time.Time
+	pendingDown    bool
+	downTimer      *time.Timer
+	releasePending bool
 	releaseStarted bool
 	releaseDone    chan struct{}
 }
@@ -82,19 +89,10 @@ func recoverSnShardView(
 	return s
 }
 
-// startRecovery starts resource acquisition for recovered views after the
-// handler has published the shard and installed its empty callback.
-func (s *snShardView) startRecovery() {
+// startRecoveryVersions registers recovered views after all shards are published.
+func (s *snShardView) startRecoveryVersions(versions []qviews.QueryViewVersion) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	versions := make([]qviews.QueryViewVersion, 0, len(s.views))
-	for version := range s.views {
-		versions = append(versions, version)
-	}
-	sort.Slice(versions, func(i, j int) bool {
-		return versions[j].GT(versions[i])
-	})
 	for _, version := range versions {
 		key := qviews.QueryViewKey{ShardID: s.shardID, QueryViewVersion: version}
 		entry := s.views[version]
@@ -141,6 +139,7 @@ func (s *snShardView) CloseForHandoff() {
 	s.detached = true
 	releases := make([]<-chan struct{}, 0, len(s.views))
 	for version, entry := range s.views {
+		entry.cancelPendingDown()
 		releases = append(releases, s.startReleaseLocked(version, entry))
 	}
 	s.views = make(map[qviews.QueryViewVersion]*snViewEntry)
@@ -209,6 +208,14 @@ func (s *snShardView) applyOneLocked(av *handler.ApplyView) {
 	// Existing view: replace callback and deliver coord push.
 	entry.ApplyView = *av
 	entry.sm.UpdateView(av.View.IntoProto())
+	if pushedState == qviews.QueryViewStateDown && entry.sm.State() == qviews.QueryViewStateUp {
+		entry.pendingDown = true
+		s.advancePendingDownLocked(key.QueryViewVersion, entry)
+		return
+	}
+	if pushedState == qviews.QueryViewStateDropped {
+		entry.cancelPendingDown()
+	}
 	entry.sm.OnCoordStateDelivered(pushedState)
 	s.consumeReportPersistAndCleanup(key.QueryViewVersion, entry)
 }
@@ -343,6 +350,10 @@ func (s *snShardView) consumeAndRelease(version qviews.QueryViewVersion, entry *
 	if !entry.sm.ConsumeRelease() {
 		return
 	}
+	if entry.queryRefs > 0 {
+		entry.releasePending = true
+		return
+	}
 	s.startReleaseLocked(version, entry)
 }
 
@@ -367,4 +378,47 @@ func (s *snShardView) startReleaseLocked(version qviews.QueryViewVersion, entry 
 		},
 	})
 	return entry.releaseDone
+}
+
+func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var selected *snViewEntry
+	var selectedVersion qviews.QueryViewVersion
+	for version, entry := range s.views {
+		s.advancePendingDownLocked(version, entry)
+		if entry.sm.State() != qviews.QueryViewStateUp {
+			continue
+		}
+		if selected == nil || version.GT(selectedVersion) {
+			selected = entry
+			selectedVersion = version
+		}
+	}
+	if selected == nil {
+		return nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
+	}
+	return s.newQueryViewLeaseLocked(selectedVersion, selected), nil
+}
+
+func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entry, exists := s.views[version]
+	if !exists || entry.queryRefs == 0 {
+		return
+	}
+	entry.queryRefs--
+	s.advancePendingDownLocked(version, entry)
+	if entry.queryRefs == 0 && entry.releasePending {
+		entry.releasePending = false
+		s.startReleaseLocked(version, entry)
+	}
 }

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
+	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
@@ -52,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/interceptor"
@@ -78,11 +80,10 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	}, nil
 }
 
-// Flush notify segment to flush
-// this api only guarantees all the segments requested is sealed
-// these segments will be flushed only after the Flush policy is fulfilled
+// Flush waits for collection-wide L1 and L0 completion when streaming is enabled.
+// The legacy path seals segments and leaves persistence to the flush policy.
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	mlog.Info(context.TODO(), "receive flush request")
+	mlog.Info(ctx, "receive flush request")
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
 	defer sp.End()
 
@@ -92,17 +93,21 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
-	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
-	ts, err := s.allocator.AllocTimestamp(ctx)
-	if err != nil {
-		mlog.Warn(context.TODO(), "unable to alloc timestamp", mlog.Err(err))
-		return nil, err
+	var bc broadcaster.BroadcastAPI
+	if streamingutil.IsStreamingServiceEnabled() {
+		var err error
+		bc, err = s.startBroadcastWithCollectionID(ctx, req.GetCollectionID())
+		if err != nil {
+			return &datapb.FlushResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+		defer bc.Close()
 	}
-	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), ts, req.GetSegmentIDs())
+
+	flushResult, err := s.flushCollection(ctx, req.GetCollectionID(), req.GetSegmentIDs(), bc)
 	if err != nil {
-		return &datapb.FlushResponse{
-			Status: merr.Status(err),
-		}, nil
+		return &datapb.FlushResponse{Status: merr.Status(err)}, nil
 	}
 
 	return &datapb.FlushResponse{
@@ -117,11 +122,22 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	}, nil
 }
 
-func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flushTs uint64, toFlushSegments []UniqueID) (*datapb.FlushResult, error) {
+// broadcastManualFlush waits for L1 and L0 completion on every collection VChannel.
+func (s *Server) broadcastManualFlush(ctx context.Context, bc broadcaster.BroadcastAPI, coll *collectionInfo) error {
+	msg := message.NewManualFlushMessageBuilderV2().
+		WithHeader(&message.ManualFlushMessageHeader{CollectionId: coll.ID}).
+		WithBody(&message.ManualFlushMessageBody{}).
+		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
+		MustBuildBroadcast()
+	_, err := bc.Broadcast(ctx, msg)
+	return err
+}
+
+func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, toFlushSegments []UniqueID, bc broadcaster.BroadcastAPI) (*datapb.FlushResult, error) {
 	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
 	coll, err := s.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		mlog.Warn(context.TODO(), "fail to get collection", mlog.Err(err))
+		mlog.Warn(ctx, "fail to get collection", mlog.Err(err))
 		return nil, err
 	}
 	if coll == nil {
@@ -133,10 +149,22 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		channelCPs[vchannel] = cp
 	}
 
-	timeOfSeal, _ := tsoutil.ParseTS(flushTs)
+	var flushTs uint64
+	timeOfSeal := time.Now()
 	sealedSegmentsIDDict := make(map[UniqueID]bool)
 
-	if !streamingutil.IsStreamingServiceEnabled() {
+	if bc != nil {
+		// AckSyncUp proves completion directly; zero tells GetFlushState that
+		// no independently reported channel checkpoint needs to be checked.
+		if err := s.broadcastManualFlush(ctx, bc, coll); err != nil {
+			return nil, err
+		}
+	} else {
+		flushTs, err = s.allocator.AllocTimestamp(ctx)
+		if err != nil {
+			return nil, err
+		}
+		timeOfSeal, _ = tsoutil.ParseTS(flushTs)
 		for _, channel := range coll.VChannelNames {
 			sealedSegmentIDs, err := s.segmentManager.SealAllSegments(ctx, channel, toFlushSegments)
 			if err != nil {
@@ -159,7 +187,7 @@ func (s *Server) flushCollection(ctx context.Context, collectionID UniqueID, flu
 		}
 	}
 
-	mlog.Info(context.TODO(), "flush response with segments",
+	mlog.Info(ctx, "flush response with segments",
 		mlog.Int64("collectionID", collectionID),
 		mlog.Int64s("sealSegments", lo.Keys(sealedSegmentsIDDict)),
 		mlog.Int("flushedSegmentsCount", len(flushSegmentIDs)),
@@ -201,7 +229,7 @@ func (s *Server) FlushAll(ctx context.Context, req *datapb.FlushAllRequest) (*da
 	broadcastFlushAllMsg := message.NewFlushAllMessageBuilderV2().
 		WithHeader(&message.FlushAllMessageHeader{}).
 		WithBody(&message.FlushAllMessageBody{}).
-		WithClusterLevelBroadcast(cc).
+		WithClusterLevelBroadcast(cc, message.OptBuildBroadcastAckSyncUp()).
 		MustBuildBroadcast()
 	res, err := broadcaster.Broadcast(ctx, broadcastFlushAllMsg)
 	if err != nil {
@@ -626,10 +654,18 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		// Moreover, the Match operation may be called if the flusher is ready to work, but the channel manager on coord don't see the assignment success.
 		// So the match operation may be rejected and wait for retry.
 		// TODO: We need to make an idempotent operation to avoid the double flush strictly.
+		// Only a durable lifecycle tombstone allows a consumer to finish without
+		// registration. An unavailable assignment must remain retryable.
+		if funcutil.IsDroppedChannelCheckpoint(s.meta.GetChannelCheckpoint(channelName)) {
+			return merr.Status(merr.WrapErrChannelNotFound(channelName)), nil
+		}
 		targetID, err := snmanager.StaticStreamingNodeManager.GetLatestWALLocated(ctx, channelName)
-		if err != nil || targetID != nodeID {
-			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
-			mlog.Warn(context.TODO(), "failed to get latest wal allocated", mlog.Int64("nodeID", nodeID), mlog.Int64("channel nodeID", targetID), mlog.Err(err))
+		if err != nil {
+			return merr.Status(err), nil
+		}
+		if targetID != nodeID {
+			err := merr.WrapErrChannelMisrouted(channelName, fmt.Sprintf("WAL owner is node %d, publisher is node %d", targetID, nodeID))
+			mlog.Warn(ctx, "reject WAL publication from previous owner", mlog.Int64("nodeID", nodeID), mlog.Int64("channel nodeID", targetID), mlog.Err(err))
 			return merr.Status(err), nil
 		}
 	}
@@ -642,6 +678,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	operators := []UpdateOperator{}
+	var flushedVersion *viewpb.DataVersion
 
 	if req.GetSegLevel() == datapb.SegmentLevel_L0 {
 		operators = append(operators, CreateL0Operator(req.GetCollectionID(), req.GetPartitionID(), req.GetSegmentID(), req.GetChannel()))
@@ -654,8 +691,14 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 			return merr.Status(err), nil
 		}
 
+		if req.GetFlushed() && segment.GetSealedAtDataVersion() != nil {
+			return dataview.FlushResultStatus(segment.GetSealedAtDataVersion()), nil
+		}
 		if segment.State == commonpb.SegmentState_Dropped {
-			mlog.Info(context.TODO(), "save to dropped segment, ignore this request")
+			mlog.Info(ctx, "save to dropped segment, ignore this request")
+			if req.GetFlushed() {
+				return dataview.FlushResultStatus(nil), nil
+			}
 			return merr.Success(), nil
 		}
 
@@ -740,7 +783,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	// current invisible-while-published window is an acknowledged
 	// contradiction that StreamingNode-side sorting of flushed segments will
 	// eliminate in the future.
-	if s.dataViewManager != nil && req.GetFlushed() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
+	if s.dataViewManager != nil && req.GetFlushed() && !req.GetDropped() && req.GetSegLevel() != datapb.SegmentLevel_L0 {
 		segment := s.meta.GetSegment(ctx, req.GetSegmentID())
 		// Skip zero-row segments: the same txn marks them Dropped via
 		// UpdateAsDroppedIfEmptyWhenFlushing, so publishing them here would
@@ -806,6 +849,21 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 				mlog.Warn(ctx, "failed to prepare DataView flush snapshot", mlog.Err(err))
 				return merr.Status(err), nil
 			}
+			// PrepareFlush holds the collection lock. Recheck after acquiring it:
+			// another flush may have committed while this RPC was waiting.
+			current := s.meta.GetSegment(ctx, req.GetSegmentID())
+			if current == nil {
+				abortView()
+				return dataview.FlushResultStatus(nil), nil
+			}
+			if current.GetState() == commonpb.SegmentState_Dropped || current.GetSealedAtDataVersion() != nil {
+				abortView()
+				return dataview.FlushResultStatus(current.GetSealedAtDataVersion()), nil
+			}
+			flushedVersion = flushView.GetDataVersion()
+			if flushedVersion != nil {
+				operators = append(operators, setSealedAtDataVersion(req.GetSegmentID(), flushedVersion))
+			}
 			committed, err := s.meta.UpdateSegmentsInfoAndDataView(ctx, flushView, operators...)
 			if err != nil {
 				// Catalog failures were already retried in-function until
@@ -865,7 +923,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	}
 
 	// notify building index and compaction for "flushing/flushed" level one segment
-	if req.GetFlushed() {
+	if req.GetFlushed() && !req.GetDropped() {
 		// notify building index
 		s.flushCh <- req.SegmentID
 
@@ -881,6 +939,9 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		}
 	}
 
+	if req.GetFlushed() && s.dataViewManager != nil {
+		return dataview.FlushResultStatus(flushedVersion), nil
+	}
 	return merr.Success(), nil
 }
 
@@ -1638,6 +1699,8 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 }
 
 // GetFlushState gets the flush state of the collection based on the provided flush ts and segment IDs.
+// A zero flush timestamp requires only segment-state checks. Streaming Flush
+// returns zero after its AckSyncUp broadcast has completed all L1 and L0 work.
 func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateRequest) (*milvuspb.GetFlushStateResponse, error) {
 	log := mlog.With(mlog.Int64("collection", req.GetCollectionID()),
 		mlog.Uint64("flushTs", req.GetFlushTs()),
@@ -1654,9 +1717,6 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		for _, sid := range req.GetSegmentIDs() {
 			segment := s.meta.GetHealthySegment(ctx, sid)
 			// segment is nil if it was compacted, or it's an empty segment and is set to dropped
-			// TODO: Here's a dirty implementation, because a growing segment may cannot be seen right away by mixcoord,
-			// it can only be seen by streamingnode right away, so we need to check the flush state at streamingnode but not here.
-			// use timetick for GetFlushState in-future but not segment list.
 			if segment == nil || isFlushState(segment.GetState()) {
 				continue
 			}
@@ -1668,6 +1728,11 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 
 			return resp, nil
 		}
+	}
+
+	if req.GetFlushTs() == 0 {
+		resp.Flushed = true
+		return resp, nil
 	}
 
 	channels, err := s.getChannelsByCollectionID(ctx, req.GetCollectionID())
@@ -1728,110 +1793,15 @@ func (s *Server) getChannelsByCollectionID(ctx context.Context, collectionID int
 	return channels, nil
 }
 
-// GetFlushAllState checks if all DML messages before `FlushAllTs` have been flushed.
+// GetFlushAllState serves follow-up checks for a successfully returned FlushAll.
+// FlushAll waits for consuming-side Ack from every PChannel, so its L1 and L0
+// work is already complete. Channel checkpoint reporting may lag and must not
+// turn that completed operation back into an unfinished one.
 func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAllStateRequest) (*milvuspb.GetFlushAllStateResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &milvuspb.GetFlushAllStateResponse{
-			Status: merr.Status(err),
-		}, nil
+		return &milvuspb.GetFlushAllStateResponse{Status: merr.Status(err)}, nil
 	}
-
-	resp := &milvuspb.GetFlushAllStateResponse{
-		Status: merr.Success(),
-	}
-
-	// TODO: Introduce pchannel level flush checkpoint to
-	// check if the flush is complete.
-	// Rather than validate every vchannel checkpoint.
-
-	dbsRsp, err := s.broker.ListDatabases(ctx)
-	if err != nil {
-		mlog.Warn(context.TODO(), "failed to ListDatabases", mlog.Err(err))
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	targetDbs := lo.Uniq(dbsRsp.DbNames)
-	allFlushed := true
-OUTER:
-	for _, dbName := range targetDbs {
-		showColRsp, err := s.broker.ShowCollections(ctx, dbName)
-		if err != nil {
-			mlog.Warn(context.TODO(), "failed to ShowCollections", mlog.String("db", dbName), mlog.Err(err))
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-
-		for _, collectionID := range showColRsp.GetCollectionIds() {
-			describeColRsp, err := s.broker.DescribeCollectionInternal(ctx, collectionID)
-			if err != nil {
-				mlog.Warn(context.TODO(), "failed to DescribeCollectionInternal", mlog.Int64("collectionID", collectionID), mlog.Err(err))
-				resp.Status = merr.Status(err)
-				return resp, nil
-			}
-			for _, channel := range describeColRsp.GetVirtualChannelNames() {
-				if len(req.GetFlushAllTss()) > 0 {
-					ok, err := s.verifyFlushAllStateByChannelFlushAllTs(ctx, channel, req.GetFlushAllTss())
-					if err != nil {
-						resp.Status = merr.Status(err)
-						return resp, nil
-					}
-					if !ok {
-						allFlushed = false
-						break OUTER
-					}
-				} else if req.GetFlushAllTs() != 0 {
-					// For compatibility, if deprecated FlushAllTs is provided, use it to verify the flush state.
-					if !s.verifyFlushAllStateByLegacyFlushAllTs(ctx, channel, req.GetFlushAllTs()) {
-						allFlushed = false
-						break OUTER
-					}
-				} else {
-					resp.Status = merr.Status(merr.WrapErrParameterMissingMsg("FlushAllTss or FlushAllTs is required"))
-					return resp, nil
-				}
-			}
-		}
-	}
-
-	if allFlushed {
-		mlog.Info(context.TODO(), "GetFlushAllState all flushed", mlog.Any("flushAllTss", req.GetFlushAllTss()), mlog.Uint64("FlushAllTs", req.GetFlushAllTs()))
-	}
-
-	resp.Flushed = allFlushed
-	return resp, nil
-}
-
-func (s *Server) verifyFlushAllStateByChannelFlushAllTs(ctx context.Context, channel string, flushAllTss map[string]uint64) (bool, error) {
-	channelCP := s.meta.GetChannelCheckpoint(channel)
-	pchannel := funcutil.ToPhysicalChannel(channel)
-	flushAllTs, ok := flushAllTss[pchannel]
-	if !ok || flushAllTs == 0 {
-		mlog.Warn(ctx, "FlushAllTs not found for pchannel", mlog.String("pchannel", pchannel), mlog.Uint64("flushAllTs", flushAllTs))
-		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
-	}
-	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
-			mlog.String("vchannel", channel),
-			mlog.Uint64("flushAllTs", flushAllTs),
-			mlog.Uint64("channelCP", channelCP.GetTimestamp()),
-		)
-		return false, nil
-	}
-	return true, nil
-}
-
-func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(ctx context.Context, channel string, flushAllTs uint64) bool {
-	channelCP := s.meta.GetChannelCheckpoint(channel)
-	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
-		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
-			mlog.String("vchannel", channel),
-			mlog.Uint64("flushAllTs", flushAllTs),
-			mlog.Uint64("channelCP", channelCP.GetTimestamp()),
-		)
-		return false
-	}
-	return true
+	return &milvuspb.GetFlushAllStateResponse{Status: merr.Success(), Flushed: true}, nil
 }
 
 // Deprecated
@@ -2154,7 +2124,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 // on job-not-found). Instead the job is created directly in Failed state — a
 // terminal no-op for both commitImportV2AckCallback and HandleCommitVchannel —
 // and the failure stays visible via GetImportProgress.
-func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.ImportRequestInternal, commitByCoordinator bool) (*internalpb.ImportResponse, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &internalpb.ImportResponse{
 			Status: merr.Status(err),
@@ -2223,21 +2193,22 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	createTime := time.Now()
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:          jobID,
-			CollectionID:   in.GetCollectionID(),
-			CollectionName: in.GetCollectionName(),
-			PartitionIDs:   in.GetPartitionIDs(),
-			Vchannels:      importCollectionInfo.VChannelNames,
-			Schema:         in.GetSchema(),
-			TimeoutTs:      timeoutTs,
-			CleanupTs:      math.MaxUint64,
-			State:          internalpb.ImportJobState_Pending,
-			Files:          files,
-			Options:        in.GetOptions(),
-			CreateTime:     createTime.Format("2006-01-02T15:04:05Z07:00"),
-			ReadyVchannels: in.GetChannelNames(),
-			DataTs:         in.GetDataTimestamp(),
-			AutoCommit:     importutilv2.IsAutoCommit(in.GetOptions()),
+			JobID:               jobID,
+			CollectionID:        in.GetCollectionID(),
+			CollectionName:      in.GetCollectionName(),
+			PartitionIDs:        in.GetPartitionIDs(),
+			Vchannels:           importCollectionInfo.VChannelNames,
+			Schema:              in.GetSchema(),
+			TimeoutTs:           timeoutTs,
+			CleanupTs:           math.MaxUint64,
+			State:               internalpb.ImportJobState_Pending,
+			Files:               files,
+			Options:             in.GetOptions(),
+			CreateTime:          createTime.Format("2006-01-02T15:04:05Z07:00"),
+			ReadyVchannels:      in.GetChannelNames(),
+			DataTs:              in.GetDataTimestamp(),
+			AutoCommit:          importutilv2.IsAutoCommit(in.GetOptions()),
+			CommitByCoordinator: commitByCoordinator,
 		},
 		tr: timerecord.NewTimeRecorder("import job"),
 	}
@@ -2363,16 +2334,10 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		mlog.Int64("collectionID", collectionID))
 
 	for channelName, flushTs := range flushTsList {
-		// wait until the checkpoint reaches or exceeds the flush timestamp
-		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
-		if err != nil {
-			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
-			return err
-		}
-		// drop segments that were updated before the flush timestamp
-		err = s.meta.TruncateChannelByTime(ctx, channelName, flushTs)
-		if err != nil {
-			mlog.Warn(context.TODO(), "TruncateChannelByTime failed", mlog.Err(err))
+		// Truncate's consuming-side Acks already guarantee L1/L0 persistence and
+		// registration. Recovery checkpoint publication is independent of completion.
+		if err := s.meta.TruncateChannelByTime(ctx, channelName, flushTs); err != nil {
+			mlog.Warn(ctx, "TruncateChannelByTime failed", mlog.Err(err))
 			return err
 		}
 	}
@@ -2469,6 +2434,7 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(err), nil
 	}
 
+	// Business-channel Acks prove L1/L0 persistence through each snapshot fence.
 	// Broadcast CreateSnapshot message via DDL framework
 	// Snapshot ID is allocated in the callback
 	if _, err := broadcaster.Broadcast(ctx, message.NewCreateSnapshotMessageBuilderV2().
@@ -2479,8 +2445,8 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 			CompactionProtectionSeconds: req.GetCompactionProtectionSeconds(),
 		}).
 		WithBody(&message.CreateSnapshotMessageBody{}).
+		WithBroadcast(coll.VChannelNames, message.OptBuildBroadcastAckSyncUp()).
 		WithUnreplicable().
-		WithControlChannelBroadcast().
 		MustBuildBroadcast(),
 	); err != nil {
 		mlog.Error(context.TODO(), "CreateSnapshot broadcast failed", mlog.Err(err))
@@ -3207,11 +3173,9 @@ func (s *Server) ListRefreshExternalCollectionJobs(ctx context.Context, req *dat
 }
 
 // broadcastCommitImportMessage broadcasts a CommitImport WAL message for the given import job.
-// The message is broadcast to the job's data vchannels so each vchannel's WAL flusher
-// can observe the commit fence, flush pending DML, and call HandleCommitVchannel.
-// (Control-channel-only broadcast is dropped by the flusher's IsControlChannel guard
-// before reaching the CommitImport case, so it cannot drive per-vchannel commits; the
-// control channel is added on top of the data vchannels for ordering only.)
+// Business vchannels supply their own commit timestamps; CChannel supplies the
+// common ordering point for replicated broadcast callbacks. The callback makes
+// the imported segments visible and completes the job.
 func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3225,8 +3189,9 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 
 	msg := message.NewCommitImportMessageBuilderV2().
 		WithHeader(&message.CommitImportMessageHeader{
-			CollectionId: job.GetCollectionID(),
-			JobId:        job.GetJobID(),
+			CollectionId:        job.GetCollectionID(),
+			JobId:               job.GetJobID(),
+			CommitByCoordinator: job.GetCommitByCoordinator(),
 		}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast(vchannels).
@@ -3245,7 +3210,7 @@ func (s *Server) broadcastCommitImportMessage(ctx context.Context, job ImportJob
 var errRollbackImportNoVchannels = errors.New("import job has no vchannels")
 
 // broadcastRollbackImportMessage broadcasts a RollbackImport WAL message for the given import job.
-// Targets the job's data vchannels, matching the CommitImport routing.
+// Targets the job's data vchannels and CChannel, matching CommitImport routing.
 func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJob) error {
 	vchannels := job.GetVchannels()
 	if len(vchannels) == 0 {
@@ -3270,11 +3235,11 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 	return err
 }
 
-// broadcastImportIDRangeMessage allocates the per-file ID ranges for an import job
-// and broadcasts them as an ImportIDRange WAL message to the job's data vchannels.
+// broadcastUpdateImportMessage allocates the per-file ID ranges for an import job
+// and broadcasts them as an UpdateImport WAL message to the job's data vchannels.
 // It runs on the cluster acting as primary, inside the import checker's PreImporting
 // gate, once the post-preimport row counts are known. Each cluster's
-// importIDRangeAckCallback then applies the ranges to its local job meta so both derive
+// updateImportAckCallback then applies the ranges to its local job meta so both derive
 // identical autoID primary keys. fileRows is aligned with job.GetFiles() order.
 //
 // An allocation failure (rootcoord unavailable) is transient — the checker retries on the
@@ -3283,7 +3248,7 @@ func (s *Server) broadcastRollbackImportMessage(ctx context.Context, job ImportJ
 // WAL message, not local memory, decides which range is applied, and if a retry races a
 // persisted-but-errored broadcast, the control-channel order makes the first range win on
 // every cluster (a duplicate is ignored, never applied on one cluster only).
-func (s *Server) broadcastImportIDRangeMessage(ctx context.Context, job ImportJob, fileRows []int64) error {
+func (s *Server) broadcastUpdateImportMessage(ctx context.Context, job ImportJob, fileRows []int64) error {
 	ranges, err := importid.ReserveFileIDRanges(fileRows, s.allocator.AllocN, Params.CommonCfg.ClusterID.GetAsUint64())
 	if err != nil {
 		return err
@@ -3305,15 +3270,15 @@ func (s *Server) broadcastImportIDRangeMessage(ctx context.Context, job ImportJo
 	}
 
 	// No idempotency key. A checker retry that races a persisted-but-errored broadcast may
-	// mint a second ImportIDRange, but the control-channel copy orders it after the first
+	// mint a second UpdateImport, but the control-channel copy orders it after the first
 	// on every cluster and first-wins ignores it, so a duplicate can no longer diverge.
 	// Its freshly allocated ids leak harmlessly (the id space is TSO-derived).
-	msg := message.NewImportIDRangeMessageBuilderV2().
-		WithHeader(&message.ImportIDRangeMessageHeader{
+	msg := message.NewUpdateImportMessageBuilderV2().
+		WithHeader(&message.UpdateImportMessageHeader{
 			CollectionId: job.GetCollectionID(),
 			JobId:        job.GetJobID(),
 		}).
-		WithBody(&messagespb.ImportIDRangeMessageBody{
+		WithBody(&messagespb.UpdateImportMessageBody{
 			IdRanges: idRanges,
 		}).
 		WithBroadcast(vchannels).
@@ -3425,65 +3390,49 @@ func (s *Server) AbortImport(ctx context.Context, req *datapb.AbortImportRequest
 	)
 }
 
-// HandleCommitVchannel records that a vchannel has processed the commit fence for a 2PC import job.
-// When all vchannels have acknowledged, the import job transitions to Completed and segments become visible.
+// HandleCommitVchannel completes legacy Import commits. New jobs are committed
+// by the WAL callback; old StreamingNodes may still send this RPC for them.
 func (s *Server) HandleCommitVchannel(ctx context.Context, req *datapb.HandleCommitVchannelRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	jobID := req.GetJobId()
-	vchannel := req.GetVchannel()
-
-	// Pre-fetch segment IDs for this job+vchannel BEFORE calling HandleCommitVchannel.
-	// The callback must not access importMeta because HandleCommitVchannel holds m.mu (write lock);
-	// calling GetTaskBy inside the callback would attempt to re-acquire m.mu (read lock) → deadlock.
-	collectionID, segIDs := s.getImportSegmentIDsByVchannel(ctx, jobID, vchannel)
-
-	commitTs := req.GetCommitTimestamp()
-	err := s.importMeta.HandleCommitVchannel(ctx, jobID, vchannel, func() error {
-		// Only access s.meta (segment meta) here, NOT s.importMeta.
-		// Set CommitTimestamp and clear isImporting in a single call per segment.
-		ops := make([]UpdateOperator, 0, len(segIDs)*2)
-		for _, segID := range segIDs {
-			ops = append(ops,
-				UpdateCommitTimestamp(segID, commitTs),
-				UpdateIsImporting(segID, false),
-			)
+	job := s.importMeta.GetJob(ctx, req.GetJobId())
+	if job != nil && job.GetCommitByCoordinator() {
+		return merr.Success(), nil
+	}
+	// Fetch IDs before importMeta takes its write lock. The callback must not
+	// reenter importMeta while updating segment visibility.
+	ids := s.getImportSegmentIDsByVchannel(ctx, req.GetJobId(), req.GetVchannel())
+	err := s.importMeta.HandleCommitVchannel(ctx, req.GetJobId(), req.GetVchannel(), func() error {
+		ops := make([]UpdateOperator, 0, len(ids)*2)
+		for _, id := range ids {
+			ops = append(ops, UpdateCommitTimestamp(id, req.GetCommitTimestamp()), UpdateIsImporting(id, false))
 		}
 		if len(ops) == 0 {
 			return nil
 		}
-		if err := s.meta.UpdateSegmentsInfo(ctx, ops...); err != nil {
-			return err
-		}
-		return nil
+		return s.meta.UpdateSegmentsInfo(ctx, ops...)
 	})
 	if err != nil {
 		return merr.Status(err), nil
 	}
-	// The SegmentMeta mutation is committed (segments finalized, importing
-	// cleared); schedule an asynchronous DataView snapshot reconciliation.
-	// This also runs on an idempotent retry whose vchannel was already
-	// committed - the recompute is a no-op when the projection is unchanged.
-	if s.meta != nil {
-		s.meta.recomputeDataView(ctx, collectionID)
+	if job != nil && s.meta != nil {
+		s.meta.recomputeDataView(ctx, job.GetCollectionID())
 	}
 	return merr.Success(), nil
 }
 
 // getImportSegmentIDsByVchannel returns all segment IDs (including sorted segments) belonging to
 // the given import job that are assigned to the given vchannel.
-// This must be called BEFORE acquiring importMeta's mutex (i.e., before HandleCommitVchannel).
-func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) (int64, []int64) {
+// Called by the broadcast callback without holding importMeta's mutex.
+func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64, vchannel string) []int64 {
 	tasks := s.importMeta.GetTaskByJob(ctx, jobID, WithType(ImportTaskType))
-	var collectionID int64
 	var segIDs []int64
 	for _, task := range tasks {
 		it, ok := task.(*importTask)
 		if !ok {
 			continue
 		}
-		collectionID = it.GetCollectionID()
 		// Collect all candidate segment IDs from this task (safe copies).
 		candidates := make([]int64, 0, len(it.GetSegmentIDs())+len(it.GetSortedSegmentIDs()))
 		candidates = append(candidates, it.GetSegmentIDs()...)
@@ -3499,5 +3448,5 @@ func (s *Server) getImportSegmentIDsByVchannel(ctx context.Context, jobID int64,
 			segIDs = append(segIDs, segID)
 		}
 	}
-	return collectionID, segIDs
+	return segIDs
 }

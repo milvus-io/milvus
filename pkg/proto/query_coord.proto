@@ -5,6 +5,7 @@ package milvus.proto.query;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/querypb";
 
 import "common.proto";
+import "messages.proto";
 import "milvus.proto";
 import "rg.proto";
 import "internal.proto";
@@ -14,6 +15,7 @@ import "data_coord.proto";
 import "index_coord.proto";
 
 service QueryCoord {
+    rpc GetQueryViewLoadInfo(GetQueryViewLoadInfoRequest) returns (GetQueryViewLoadInfoResponse) {}
     rpc ShowLoadCollections(ShowCollectionsRequest)
         returns (ShowCollectionsResponse) {
     }
@@ -1193,4 +1195,20 @@ message ListLoadedSegmentsRequest {
 message ListLoadedSegmentsResponse {
     common.Status status = 1;
     repeated int64 segmentIDs = 2;
+}
+
+
+message GetQueryViewLoadInfoRequest {
+    common.MsgBase base = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+}
+
+message GetQueryViewLoadInfoResponse {
+    common.Status status = 1;
+    int64 collectionID = 2;
+    uint64 version = 3;
+    repeated int64 partitionIDs = 4;
+    repeated messages.LoadFieldConfig load_fields = 5;
+    repeated index.IndexInfo index_info_list = 6;
 }

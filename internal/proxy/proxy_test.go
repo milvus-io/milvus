@@ -2720,6 +2720,10 @@ func TestProxy(t *testing.T) {
 	})
 
 	t.Run("truncate collection", func(t *testing.T) {
+		// Completion must not wait for Summary's 600-second backlog flush.
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
 		_, err := proxy.GetMetaCache().GetCollectionID(ctx, dbName, collectionName)
 		assert.NoError(t, err)
 
