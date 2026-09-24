@@ -125,6 +125,11 @@ type CollectionInfo struct {
 	ShardsNum             int32
 	Aliases               []string
 	Properties            []*commonpb.KeyValuePair
+	// Shard routing facts as the coordinator reported them. Carried only so
+	// DescribeCollection can return them; nothing in the proxy routes by them.
+	ShardInfos     []*schemapb.CollectionShardInfo
+	RoutingModulus uint64
+	ShardBy        string
 }
 
 type DatabaseInfo struct {
@@ -658,6 +663,9 @@ func newCollectionInfo(collection *milvuspb.DescribeCollectionResponse, schemaIn
 		ShardsNum:             collection.ShardsNum,
 		Aliases:               collection.Aliases,
 		Properties:            collection.Properties,
+		ShardInfos:            collection.GetShardInfos(),
+		RoutingModulus:        collection.GetRoutingModulus(),
+		ShardBy:               collection.GetShardBy(),
 	}
 }
 

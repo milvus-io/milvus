@@ -1689,7 +1689,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		if cp != nil {
 			cpTs = cp.GetTimestamp()
 		}
-		if cp == nil || cpTs < req.GetFlushTs() {
+		if !s.channelCheckpointCovers(channel.GetName(), cp, req.GetFlushTs()) {
 			resp.Flushed = false
 
 			log.RatedInfo(ctx, rate.Limit(10), "GetFlushState failed, channel unflushed", mlog.String("channel", channel.GetName()),
@@ -1810,7 +1810,7 @@ func (s *Server) verifyFlushAllStateByChannelFlushAllTs(ctx context.Context, cha
 		mlog.Warn(ctx, "FlushAllTs not found for pchannel", mlog.String("pchannel", pchannel), mlog.Uint64("flushAllTs", flushAllTs))
 		return false, merr.WrapErrParameterInvalidMsg("FlushAllTs not found for pchannel %s", pchannel)
 	}
-	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+	if !s.channelCheckpointCovers(channel, channelCP, flushAllTs) {
 		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
 			mlog.String("vchannel", channel),
 			mlog.Uint64("flushAllTs", flushAllTs),
@@ -1823,7 +1823,7 @@ func (s *Server) verifyFlushAllStateByChannelFlushAllTs(ctx context.Context, cha
 
 func (s *Server) verifyFlushAllStateByLegacyFlushAllTs(ctx context.Context, channel string, flushAllTs uint64) bool {
 	channelCP := s.meta.GetChannelCheckpoint(channel)
-	if channelCP == nil || channelCP.GetTimestamp() < flushAllTs {
+	if !s.channelCheckpointCovers(channel, channelCP, flushAllTs) {
 		mlog.RatedInfo(ctx, rate.Limit(10), "channel unflushed",
 			mlog.String("vchannel", channel),
 			mlog.Uint64("flushAllTs", flushAllTs),
@@ -2363,8 +2363,16 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 		mlog.Int64("collectionID", collectionID))
 
 	for channelName, flushTs := range flushTsList {
-		// wait until the checkpoint reaches or exceeds the flush timestamp
-		err := s.meta.WatchChannelCheckpoint(ctx, channelName, flushTs)
+		// wait until the checkpoint reaches or exceeds the flush timestamp. A
+		// fenced shard split source is covered once its checkpoint reaches its
+		// recorded T_switch (channelCheckpointCovers): its data sync service is
+		// closed there and the checkpoint never reaches a later truncate tick,
+		// while the waiting callback holds the collection's resource key the
+		// adoption needs. Dropping by time stays exact: every segment of the
+		// source has its DML position at or before T_switch, below flushTs.
+		err := s.meta.WatchChannelCheckpointUntil(ctx, channelName, func(cp *msgpb.MsgPosition) bool {
+			return s.channelCheckpointCovers(channelName, cp, flushTs)
+		})
 		if err != nil {
 			mlog.Warn(ctx, "WatchChannelCheckpoint failed", mlog.Err(err))
 			return err
@@ -2380,6 +2388,25 @@ func (s *Server) DropSegmentsByTime(ctx context.Context, collectionID int64, flu
 	// DataView snapshot asynchronously - the recompute reads the dropped state.
 	s.meta.recomputeDataView(ctx, collectionID)
 
+	return nil
+}
+
+// checkSnapshotSupported refuses a snapshot of a collection that has been shard
+// split, which a non-zero routing modulus says. A snapshot records only the
+// vchannel list and the shard count: while a split source is still listed the
+// two disagree and a restore fails on the channel count, and once it is
+// delisted a restore would silently rebuild the collection under the legacy
+// hash % shards placement over rows laid out by residue.
+//
+// The request is valid and the topology was produced by Milvus itself, so this
+// is a capability the build lacks, not the caller's fault: it rides the
+// non-retriable ErrOperationNotSupported, not an InputError code.
+func checkSnapshotSupported(coll *milvuspb.DescribeCollectionResponse) error {
+	if modulus := coll.GetRoutingModulus(); modulus != 0 {
+		return merr.WrapErrOperationNotSupportedMsg(
+			"snapshot is not supported for collection %s (id=%d) because it has been shard split (routing modulus %d)",
+			coll.GetCollectionName(), coll.GetCollectionID(), modulus)
+	}
 	return nil
 }
 
@@ -2466,6 +2493,22 @@ func (s *Server) CreateSnapshot(ctx context.Context, req *datapb.CreateSnapshotR
 		return merr.Status(merr.WrapErrParameterInvalidMsg("snapshot name %s already exists in collection %d", req.GetName(), req.GetCollectionId())), nil
 	} else if !errors.Is(err, merr.ErrSnapshotNotFound) {
 		mlog.Warn(context.TODO(), "CreateSnapshot: failed to re-check snapshot existence after lock", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+
+	// Refuse a collection that has been shard split. Checked under the exclusive
+	// collection-name lock. A SplitShard broadcast must be issued under the same
+	// key (an obligation on its issuer, which does not exist on this branch) and
+	// then holds it until its ack callback has committed the routing; given
+	// that, the modulus read here cannot change before this snapshot's own
+	// callback runs.
+	collDesc, err := s.broker.DescribeCollectionInternal(ctx, req.GetCollectionId())
+	if err != nil {
+		mlog.Warn(ctx, "CreateSnapshot: failed to describe collection after lock", mlog.Err(err))
+		return merr.Status(err), nil
+	}
+	if err := checkSnapshotSupported(collDesc); err != nil {
+		mlog.Warn(ctx, "CreateSnapshot refused", mlog.Err(err))
 		return merr.Status(err), nil
 	}
 

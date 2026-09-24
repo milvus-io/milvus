@@ -814,6 +814,10 @@ dataCoord:
     balanceInterval: 360 # The interval with which the channel manager check dml channel balance status
     checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
+  shardSplit:
+    # Whether a new shard split may be issued. While it is off, the split builder refuses to issue one.
+    # It never affects a split already written to the WAL: that split is always carried through, on every cluster.
+    enable: false
   segment:
     maxSize: 1024 # The maximum size of a segment, unit: MB. datacoord.segment.maxSize and datacoord.segment.sealProportion together determine if a segment can be sealed.
     diskSegmentMaxSize: 2048 # Maximum size of a segment in MB for collection which has Disk index

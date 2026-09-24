@@ -181,6 +181,164 @@ func (_c *MockShardDelegator_Collection_Call) RunAndReturn(run func() int64) *Mo
 	return _c
 }
 
+// DetachSplitChild provides a mock function with given fields: childVChannel
+func (_m *MockShardDelegator) DetachSplitChild(childVChannel string) {
+	_m.Called(childVChannel)
+}
+
+// MockShardDelegator_DetachSplitChild_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DetachSplitChild'
+type MockShardDelegator_DetachSplitChild_Call struct {
+	*mock.Call
+}
+
+// DetachSplitChild is a helper method to define mock.On call
+//   - childVChannel string
+func (_e *MockShardDelegator_Expecter) DetachSplitChild(childVChannel interface{}) *MockShardDelegator_DetachSplitChild_Call {
+	return &MockShardDelegator_DetachSplitChild_Call{Call: _e.mock.On("DetachSplitChild", childVChannel)}
+}
+
+func (_c *MockShardDelegator_DetachSplitChild_Call) Run(run func(childVChannel string)) *MockShardDelegator_DetachSplitChild_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_DetachSplitChild_Call) Return() *MockShardDelegator_DetachSplitChild_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_DetachSplitChild_Call) RunAndReturn(run func(string)) *MockShardDelegator_DetachSplitChild_Call {
+	_c.Run(run)
+	return _c
+}
+
+// FinishSplitRecovery provides a mock function with no fields
+func (_m *MockShardDelegator) FinishSplitRecovery() {
+	_m.Called()
+}
+
+// MockShardDelegator_FinishSplitRecovery_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishSplitRecovery'
+type MockShardDelegator_FinishSplitRecovery_Call struct {
+	*mock.Call
+}
+
+// FinishSplitRecovery is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) FinishSplitRecovery() *MockShardDelegator_FinishSplitRecovery_Call {
+	return &MockShardDelegator_FinishSplitRecovery_Call{Call: _e.mock.On("FinishSplitRecovery")}
+}
+
+func (_c *MockShardDelegator_FinishSplitRecovery_Call) Run(run func()) *MockShardDelegator_FinishSplitRecovery_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_FinishSplitRecovery_Call) Return() *MockShardDelegator_FinishSplitRecovery_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_FinishSplitRecovery_Call) RunAndReturn(run func()) *MockShardDelegator_FinishSplitRecovery_Call {
+	_c.Run(run)
+	return _c
+}
+
+// ForwardKnownDeletesToParent provides a mock function with given fields: ctx
+func (_m *MockShardDelegator) ForwardKnownDeletesToParent(ctx context.Context) error {
+	ret := _m.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ForwardKnownDeletesToParent")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context) error); ok {
+		r0 = rf(ctx)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ForwardKnownDeletesToParent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForwardKnownDeletesToParent'
+type MockShardDelegator_ForwardKnownDeletesToParent_Call struct {
+	*mock.Call
+}
+
+// ForwardKnownDeletesToParent is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockShardDelegator_Expecter) ForwardKnownDeletesToParent(ctx interface{}) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	return &MockShardDelegator_ForwardKnownDeletesToParent_Call{Call: _e.mock.On("ForwardKnownDeletesToParent", ctx)}
+}
+
+func (_c *MockShardDelegator_ForwardKnownDeletesToParent_Call) Run(run func(ctx context.Context)) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ForwardKnownDeletesToParent_Call) Return(_a0 error) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ForwardKnownDeletesToParent_Call) RunAndReturn(run func(context.Context) error) *MockShardDelegator_ForwardKnownDeletesToParent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// FrontingParent provides a mock function with no fields
+func (_m *MockShardDelegator) FrontingParent() ShardDelegator {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for FrontingParent")
+	}
+
+	var r0 ShardDelegator
+	if rf, ok := ret.Get(0).(func() ShardDelegator); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(ShardDelegator)
+		}
+	}
+
+	return r0
+}
+
+// MockShardDelegator_FrontingParent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FrontingParent'
+type MockShardDelegator_FrontingParent_Call struct {
+	*mock.Call
+}
+
+// FrontingParent is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) FrontingParent() *MockShardDelegator_FrontingParent_Call {
+	return &MockShardDelegator_FrontingParent_Call{Call: _e.mock.On("FrontingParent")}
+}
+
+func (_c *MockShardDelegator_FrontingParent_Call) Run(run func()) *MockShardDelegator_FrontingParent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_FrontingParent_Call) Return(_a0 ShardDelegator) *MockShardDelegator_FrontingParent_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_FrontingParent_Call) RunAndReturn(run func() ShardDelegator) *MockShardDelegator_FrontingParent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetChannelQueryView provides a mock function with no fields
 func (_m *MockShardDelegator) GetChannelQueryView() *channelQueryView {
 	ret := _m.Called()
@@ -599,6 +757,51 @@ func (_c *MockShardDelegator_GetTSafe_Call) RunAndReturn(run func() uint64) *Moc
 	return _c
 }
 
+// IsUnadoptedSplitChild provides a mock function with no fields
+func (_m *MockShardDelegator) IsUnadoptedSplitChild() bool {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsUnadoptedSplitChild")
+	}
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func() bool); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_IsUnadoptedSplitChild_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsUnadoptedSplitChild'
+type MockShardDelegator_IsUnadoptedSplitChild_Call struct {
+	*mock.Call
+}
+
+// IsUnadoptedSplitChild is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) IsUnadoptedSplitChild() *MockShardDelegator_IsUnadoptedSplitChild_Call {
+	return &MockShardDelegator_IsUnadoptedSplitChild_Call{Call: _e.mock.On("IsUnadoptedSplitChild")}
+}
+
+func (_c *MockShardDelegator_IsUnadoptedSplitChild_Call) Run(run func()) *MockShardDelegator_IsUnadoptedSplitChild_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_IsUnadoptedSplitChild_Call) Return(_a0 bool) *MockShardDelegator_IsUnadoptedSplitChild_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_IsUnadoptedSplitChild_Call) RunAndReturn(run func() bool) *MockShardDelegator_IsUnadoptedSplitChild_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoadGrowing provides a mock function with given fields: ctx, infos, version
 func (_m *MockShardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error {
 	ret := _m.Called(ctx, infos, version)
@@ -742,6 +945,102 @@ func (_c *MockShardDelegator_LoadSegments_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
+// MarkAdopted provides a mock function with no fields
+func (_m *MockShardDelegator) MarkAdopted() {
+	_m.Called()
+}
+
+// MockShardDelegator_MarkAdopted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkAdopted'
+type MockShardDelegator_MarkAdopted_Call struct {
+	*mock.Call
+}
+
+// MarkAdopted is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) MarkAdopted() *MockShardDelegator_MarkAdopted_Call {
+	return &MockShardDelegator_MarkAdopted_Call{Call: _e.mock.On("MarkAdopted")}
+}
+
+func (_c *MockShardDelegator_MarkAdopted_Call) Run(run func()) *MockShardDelegator_MarkAdopted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkAdopted_Call) Return() *MockShardDelegator_MarkAdopted_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkAdopted_Call) RunAndReturn(run func()) *MockShardDelegator_MarkAdopted_Call {
+	_c.Run(run)
+	return _c
+}
+
+// MarkReleasing provides a mock function with no fields
+func (_m *MockShardDelegator) MarkReleasing() {
+	_m.Called()
+}
+
+// MockShardDelegator_MarkReleasing_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkReleasing'
+type MockShardDelegator_MarkReleasing_Call struct {
+	*mock.Call
+}
+
+// MarkReleasing is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) MarkReleasing() *MockShardDelegator_MarkReleasing_Call {
+	return &MockShardDelegator_MarkReleasing_Call{Call: _e.mock.On("MarkReleasing")}
+}
+
+func (_c *MockShardDelegator_MarkReleasing_Call) Run(run func()) *MockShardDelegator_MarkReleasing_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkReleasing_Call) Return() *MockShardDelegator_MarkReleasing_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkReleasing_Call) RunAndReturn(run func()) *MockShardDelegator_MarkReleasing_Call {
+	_c.Run(run)
+	return _c
+}
+
+// MarkSplitRecoveryPending provides a mock function with no fields
+func (_m *MockShardDelegator) MarkSplitRecoveryPending() {
+	_m.Called()
+}
+
+// MockShardDelegator_MarkSplitRecoveryPending_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkSplitRecoveryPending'
+type MockShardDelegator_MarkSplitRecoveryPending_Call struct {
+	*mock.Call
+}
+
+// MarkSplitRecoveryPending is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) MarkSplitRecoveryPending() *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	return &MockShardDelegator_MarkSplitRecoveryPending_Call{Call: _e.mock.On("MarkSplitRecoveryPending")}
+}
+
+func (_c *MockShardDelegator_MarkSplitRecoveryPending_Call) Run(run func()) *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkSplitRecoveryPending_Call) Return() *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_MarkSplitRecoveryPending_Call) RunAndReturn(run func()) *MockShardDelegator_MarkSplitRecoveryPending_Call {
+	_c.Run(run)
+	return _c
+}
+
 // ProcessDelete provides a mock function with given fields: deleteData, ts
 func (_m *MockShardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	_m.Called(deleteData, ts)
@@ -839,6 +1138,53 @@ func (_c *MockShardDelegator_ProcessInsert_Call) Return() *MockShardDelegator_Pr
 
 func (_c *MockShardDelegator_ProcessInsert_Call) RunAndReturn(run func(map[int64]*InsertData)) *MockShardDelegator_ProcessInsert_Call {
 	_c.Run(run)
+	return _c
+}
+
+// ProcessSplitShard provides a mock function with given fields: ctx, targets
+func (_m *MockShardDelegator) ProcessSplitShard(ctx context.Context, targets []string) error {
+	ret := _m.Called(ctx, targets)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ProcessSplitShard")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []string) error); ok {
+		r0 = rf(ctx, targets)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockShardDelegator_ProcessSplitShard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ProcessSplitShard'
+type MockShardDelegator_ProcessSplitShard_Call struct {
+	*mock.Call
+}
+
+// ProcessSplitShard is a helper method to define mock.On call
+//   - ctx context.Context
+//   - targets []string
+func (_e *MockShardDelegator_Expecter) ProcessSplitShard(ctx interface{}, targets interface{}) *MockShardDelegator_ProcessSplitShard_Call {
+	return &MockShardDelegator_ProcessSplitShard_Call{Call: _e.mock.On("ProcessSplitShard", ctx, targets)}
+}
+
+func (_c *MockShardDelegator_ProcessSplitShard_Call) Run(run func(ctx context.Context, targets []string)) *MockShardDelegator_ProcessSplitShard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]string))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_ProcessSplitShard_Call) Return(_a0 error) *MockShardDelegator_ProcessSplitShard_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_ProcessSplitShard_Call) RunAndReturn(run func(context.Context, []string) error) *MockShardDelegator_ProcessSplitShard_Call {
+	_c.Call.Return(run)
 	return _c
 }
 
@@ -946,6 +1292,39 @@ func (_c *MockShardDelegator_QueryStream_Call) Return(_a0 error) *MockShardDeleg
 
 func (_c *MockShardDelegator_QueryStream_Call) RunAndReturn(run func(context.Context, *querypb.QueryRequest, streamrpc.QueryStreamServer) error) *MockShardDelegator_QueryStream_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// RefuseReadsAsRetiredSource provides a mock function with given fields: ctx
+func (_m *MockShardDelegator) RefuseReadsAsRetiredSource(ctx context.Context) {
+	_m.Called(ctx)
+}
+
+// MockShardDelegator_RefuseReadsAsRetiredSource_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RefuseReadsAsRetiredSource'
+type MockShardDelegator_RefuseReadsAsRetiredSource_Call struct {
+	*mock.Call
+}
+
+// RefuseReadsAsRetiredSource is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockShardDelegator_Expecter) RefuseReadsAsRetiredSource(ctx interface{}) *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	return &MockShardDelegator_RefuseReadsAsRetiredSource_Call{Call: _e.mock.On("RefuseReadsAsRetiredSource", ctx)}
+}
+
+func (_c *MockShardDelegator_RefuseReadsAsRetiredSource_Call) Run(run func(ctx context.Context)) *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_RefuseReadsAsRetiredSource_Call) Return() *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_RefuseReadsAsRetiredSource_Call) RunAndReturn(run func(context.Context)) *MockShardDelegator_RefuseReadsAsRetiredSource_Call {
+	_c.Run(run)
 	return _c
 }
 
@@ -1156,6 +1535,119 @@ func (_c *MockShardDelegator_Serviceable_Call) Return(_a0 bool) *MockShardDelega
 }
 
 func (_c *MockShardDelegator_Serviceable_Call) RunAndReturn(run func() bool) *MockShardDelegator_Serviceable_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetChildSpawner provides a mock function with given fields: spawner
+func (_m *MockShardDelegator) SetChildSpawner(spawner ChildSpawner) {
+	_m.Called(spawner)
+}
+
+// MockShardDelegator_SetChildSpawner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetChildSpawner'
+type MockShardDelegator_SetChildSpawner_Call struct {
+	*mock.Call
+}
+
+// SetChildSpawner is a helper method to define mock.On call
+//   - spawner ChildSpawner
+func (_e *MockShardDelegator_Expecter) SetChildSpawner(spawner interface{}) *MockShardDelegator_SetChildSpawner_Call {
+	return &MockShardDelegator_SetChildSpawner_Call{Call: _e.mock.On("SetChildSpawner", spawner)}
+}
+
+func (_c *MockShardDelegator_SetChildSpawner_Call) Run(run func(spawner ChildSpawner)) *MockShardDelegator_SetChildSpawner_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ChildSpawner))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_SetChildSpawner_Call) Return() *MockShardDelegator_SetChildSpawner_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_SetChildSpawner_Call) RunAndReturn(run func(ChildSpawner)) *MockShardDelegator_SetChildSpawner_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetFrontingParent provides a mock function with given fields: parent
+func (_m *MockShardDelegator) SetFrontingParent(parent ShardDelegator) {
+	_m.Called(parent)
+}
+
+// MockShardDelegator_SetFrontingParent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetFrontingParent'
+type MockShardDelegator_SetFrontingParent_Call struct {
+	*mock.Call
+}
+
+// SetFrontingParent is a helper method to define mock.On call
+//   - parent ShardDelegator
+func (_e *MockShardDelegator_Expecter) SetFrontingParent(parent interface{}) *MockShardDelegator_SetFrontingParent_Call {
+	return &MockShardDelegator_SetFrontingParent_Call{Call: _e.mock.On("SetFrontingParent", parent)}
+}
+
+func (_c *MockShardDelegator_SetFrontingParent_Call) Run(run func(parent ShardDelegator)) *MockShardDelegator_SetFrontingParent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(ShardDelegator))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_SetFrontingParent_Call) Return() *MockShardDelegator_SetFrontingParent_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_SetFrontingParent_Call) RunAndReturn(run func(ShardDelegator)) *MockShardDelegator_SetFrontingParent_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SplitChildVChannels provides a mock function with no fields
+func (_m *MockShardDelegator) SplitChildVChannels() []string {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for SplitChildVChannels")
+	}
+
+	var r0 []string
+	if rf, ok := ret.Get(0).(func() []string); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]string)
+		}
+	}
+
+	return r0
+}
+
+// MockShardDelegator_SplitChildVChannels_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SplitChildVChannels'
+type MockShardDelegator_SplitChildVChannels_Call struct {
+	*mock.Call
+}
+
+// SplitChildVChannels is a helper method to define mock.On call
+func (_e *MockShardDelegator_Expecter) SplitChildVChannels() *MockShardDelegator_SplitChildVChannels_Call {
+	return &MockShardDelegator_SplitChildVChannels_Call{Call: _e.mock.On("SplitChildVChannels")}
+}
+
+func (_c *MockShardDelegator_SplitChildVChannels_Call) Run(run func()) *MockShardDelegator_SplitChildVChannels_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_SplitChildVChannels_Call) Return(_a0 []string) *MockShardDelegator_SplitChildVChannels_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_SplitChildVChannels_Call) RunAndReturn(run func() []string) *MockShardDelegator_SplitChildVChannels_Call {
 	_c.Call.Return(run)
 	return _c
 }
