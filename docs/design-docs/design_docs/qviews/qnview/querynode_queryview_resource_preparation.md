@@ -266,8 +266,15 @@ For each physically loaded segment:
 2. register it with `TransformLogBuffer`;
 3. store the registration and catch-up cancellation function;
 4. wait for `TransformRegistration.WaitCatchup`;
-5. mark the segment transform-loaded;
+5. validate that the catch-up task still belongs to the same readiness state,
+   then mark the segment transform-loaded;
 6. notify all waiting QueryViews through `OnReady`.
+
+Catch-up tasks retain their readiness-state identity and cancellation context
+from scheduling through registration and completion. Late registration failures,
+catch-up failures, and successful completions from a retired state must not
+modify a replacement with the same SegmentID. Query handles pin that concrete
+state, rather than looking up the latest state by SegmentID when releasing.
 
 If another QueryView references a segment that is already transform-loaded, the
 transform manager reports it ready immediately without reloading or
@@ -277,7 +284,8 @@ If registration or catch-up fails:
 
 1. cancel catch-up;
 2. unregister from TransformLog if a registration exists;
-3. release the loaded segment if present;
+3. retire the failed readiness state and release its loaded segment after its
+   last acquired query handle has been released;
 4. reset the physical segment state through `PhysicalSegmentResetter`;
 5. notify affected QueryViews with `OnUnrecoverable`.
 
