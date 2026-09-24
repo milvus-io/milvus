@@ -21,7 +21,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -33,6 +32,7 @@ import (
 	task2 "github.com/milvus-io/milvus/internal/datacoord/task"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 )
 
@@ -55,8 +55,11 @@ func (s *ImportInspectorSuite) SetupTest() {
 
 	s.catalog = mocks.NewDataCoordCatalog(s.T())
 	s.catalog.EXPECT().ListSegmentChangeGroups(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	s.catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
@@ -82,7 +85,7 @@ func (s *ImportInspectorSuite) SetupTest() {
 	s.importMeta, err = NewImportMeta(context.TODO(), s.catalog, s.alloc, s.meta)
 	s.NoError(err)
 	scheduler := task2.NewMockGlobalScheduler(s.T())
-	s.inspector = NewImportInspector(context.TODO(), s.meta, s.importMeta, scheduler).(*importInspector)
+	s.inspector = NewImportInspector(context.TODO(), s.meta, s.importMeta, scheduler, nil).(*importInspector)
 }
 
 func (s *ImportInspectorSuite) TestProcessPreImport() {
@@ -266,8 +269,9 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 	// Test case 1: No jobs and tasks
 	s.catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	s.catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	s.catalog.EXPECT().ListPreImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	s.catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
-	s.inspector.reloadFromMeta()
+	s.inspector.Reload()
 
 	// Test case 2: Jobs with in-progress tasks
 	jobProto := &datapb.ImportJob{
@@ -330,7 +334,7 @@ func (s *ImportInspectorSuite) TestReloadFromMeta() {
 
 	// Mock scheduler expectations
 	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().Enqueue(mock.Anything).Times(2)
-	s.inspector.reloadFromMeta()
+	s.inspector.Reload()
 }
 
 func (s *ImportInspectorSuite) TestIgnoreOrphanTasks() {
@@ -364,33 +368,104 @@ func (s *ImportInspectorSuite) TestIgnoreOrphanTasks() {
 	}))
 
 	// Orphan tasks are skipped just as they were when the inspector iterated jobs first.
-	s.inspector.reloadFromMeta()
+	s.inspector.Reload()
 	s.inspector.inspect()
 	s.Equal(commonpb.SegmentState_Importing, s.meta.GetSegment(context.TODO(), 10).GetState())
 }
 
-func (s *ImportInspectorSuite) TestSortImportTasks() {
-	newTask := func(jobID, taskID int64) ImportTask {
-		task := &importTask{}
-		task.task.Store(&datapb.ImportTaskV2{JobID: jobID, TaskID: taskID})
-		return task
-	}
-	tasks := []ImportTask{
-		newTask(2, 4),
-		newTask(1, 3),
-		newTask(2, 2),
-		newTask(1, 1),
+func (s *ImportInspectorSuite) TestReloadEnqueuesInProgressTasks() {
+	for _, jobID := range []int64{1, 2} {
+		job := &importJob{
+			ImportJob: &datapb.ImportJob{
+				JobID:        jobID,
+				CollectionID: s.collectionID,
+				TimeoutTs:    math.MaxUint64,
+				Schema:       &schemapb.CollectionSchema{},
+			},
+			tr: timerecord.NewTimeRecorder("import job"),
+		}
+		s.catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil)
+		s.NoError(s.importMeta.AddJob(context.TODO(), job))
 	}
 
-	sortImportTasks(tasks)
-	s.Equal([]int64{1, 1, 2, 2}, lo.Map(tasks, func(task ImportTask, _ int) int64 {
-		return task.GetJobID()
-	}))
-	s.Equal([]int64{1, 3, 2, 4}, lo.Map(tasks, func(task ImportTask, _ int) int64 {
-		return task.GetTaskID()
-	}))
+	addTask := func(jobID, taskID int64) {
+		task := &importTask{
+			importMeta: s.importMeta,
+			tr:         timerecord.NewTimeRecorder("import task"),
+		}
+		task.task.Store(&datapb.ImportTaskV2{
+			JobID:        jobID,
+			TaskID:       taskID,
+			CollectionID: s.collectionID,
+			State:        datapb.ImportTaskStateV2_InProgress,
+		})
+		s.catalog.EXPECT().SaveImportTask(mock.Anything, mock.Anything).Return(nil)
+		s.NoError(s.importMeta.AddTask(context.TODO(), task))
+	}
+	addTask(2, 4)
+	addTask(1, 3)
+	addTask(2, 2)
+	addTask(1, 1)
+
+	var enqueued []int64
+	s.inspector.scheduler.(*task2.MockGlobalScheduler).EXPECT().
+		Enqueue(mock.Anything).
+		Run(func(task task2.Task) { enqueued = append(enqueued, task.GetTaskID()) }).
+		Times(4)
+	s.inspector.Reload()
+	s.ElementsMatch([]int64{1, 2, 3, 4}, enqueued)
 }
 
 func TestImportInspector(t *testing.T) {
 	suite.Run(t, new(ImportInspectorSuite))
+}
+
+func TestImportInspectorSchedulesV3PendingTasksWithoutJobGate(t *testing.T) {
+	ctx := context.Background()
+	importMeta := NewMockImportMeta(t)
+	scheduler := task2.NewMockGlobalScheduler(t)
+	inspector := NewImportInspector(ctx, nil, importMeta, scheduler, nil).(*importInspector)
+	tasks := []ImportTask{
+		newReshardTask(&datapb.ReshardTask{JobId: 1, TaskId: 10, State: datapb.ImportTaskStateV2_Pending, NodeId: NullNodeID}, importMeta, nil, nil),
+		newImportTaskV3(&datapb.ImportTaskV3{JobId: 2, TaskId: 20, State: datapb.ImportTaskStateV2_Pending, NodeId: NullNodeID}, importMeta, nil, nil),
+	}
+	for _, task := range tasks {
+		scheduler.EXPECT().Enqueue(task).Once()
+		inspector.processPendingTask(task)
+	}
+}
+
+// TestImportInspectorReshardDispatchGate pins that a Pending ReshardTask is
+// enqueued only while the job can accept the dispatch (Pending/Resharding); in
+// the early pre-reshard states the inspector skips it, because the task is
+// persisted a moment before the job advances to Resharding.
+func TestImportInspectorReshardDispatchGate(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		state    internalpb.ImportJobState
+		dispatch bool
+	}{
+		{internalpb.ImportJobState_Resharding, true},
+		{internalpb.ImportJobState_Pending, true},
+		{internalpb.ImportJobState_PreImporting, false},
+		{internalpb.ImportJobState_AssigningIDRange, false},
+		{internalpb.ImportJobState_Planning, false},
+	} {
+		t.Run(tc.state.String(), func(t *testing.T) {
+			importMeta := NewMockImportMeta(t)
+			scheduler := task2.NewMockGlobalScheduler(t)
+			inspector := NewImportInspector(ctx, nil, importMeta, scheduler, nil).(*importInspector)
+			job := &importJob{ImportJob: &datapb.ImportJob{JobID: 1, State: tc.state}}
+			task := newReshardTask(&datapb.ReshardTask{
+				JobId: 1, TaskId: 10, State: datapb.ImportTaskStateV2_Pending, NodeId: NullNodeID,
+			}, importMeta, nil, nil)
+			importMeta.EXPECT().GetJobBy(mock.Anything).Return([]ImportJob{job}).Once()
+			importMeta.EXPECT().GetTaskByJob(mock.Anything, int64(1)).Return([]ImportTask{task}).Once()
+			if tc.dispatch {
+				scheduler.EXPECT().Enqueue(task).Once()
+			}
+
+			inspector.inspect()
+		})
+	}
 }
