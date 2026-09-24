@@ -21,7 +21,7 @@ type QueryViewSegmentReadinessManager struct {
 	physical     PhysicalSegmentManager
 	buffer       TransformLogBuffer
 	collections  QueryViewCollectionRuntimeManager
-	catchupTasks chan TransformSegment
+	catchupTasks chan segmentCatchupTask
 
 	mu       sync.Mutex
 	views    map[qviews.QueryViewKey]*transformViewRef
@@ -47,7 +47,7 @@ func NewQueryViewSegmentReadinessManagerWithScheduler(
 		physical:     physical,
 		buffer:       buffer,
 		collections:  collectionManager,
-		catchupTasks: make(chan TransformSegment, 1024),
+		catchupTasks: make(chan segmentCatchupTask, 1024),
 		views:        make(map[qviews.QueryViewKey]*transformViewRef),
 		segments:     make(map[int64]*transformSegmentState),
 	}
@@ -94,6 +94,14 @@ type transformSegmentState struct {
 	queryRefs     int
 	refs          map[qviews.QueryViewKey]struct{}
 	waiters       map[qviews.QueryViewKey]transformSegmentWaiter
+}
+
+// A task retains the state identity it was created for. Segment IDs can be
+// reused after a view drops while an older asynchronous task is still returning.
+type segmentCatchupTask struct {
+	ctx     context.Context
+	segment TransformSegment
+	state   *transformSegmentState
 }
 
 type transformSegmentWaiter struct {
@@ -181,7 +189,7 @@ func (m *QueryViewSegmentReadinessManager) continueAcquire(ctx context.Context, 
 			m.onPhysicalLoaded(loaded)
 		},
 		OnSegmentUnrecoverable: func(segmentID int64, err error) {
-			m.failSegment(segmentID, err)
+			m.failSegment(segmentID, nil, err)
 		},
 		OnUnrecoverable: func() {
 			m.failView(req.Key)
@@ -308,84 +316,85 @@ func (m *QueryViewSegmentReadinessManager) onPhysicalLoaded(segments []Transform
 		if segment == nil {
 			continue
 		}
-		if kept, schedule := m.markPhysicalLoaded(segment); schedule {
-			m.scheduleCatchup(segment)
+		if kept, task := m.markPhysicalLoaded(segment); task.state != nil {
+			m.scheduleCatchup(task)
 		} else if !kept {
 			_ = segment.Release(context.Background())
 		}
 	}
 }
 
-func (m *QueryViewSegmentReadinessManager) scheduleCatchup(segment TransformSegment) {
-	m.catchupTasks <- segment
+func (m *QueryViewSegmentReadinessManager) scheduleCatchup(task segmentCatchupTask) {
+	m.catchupTasks <- task
 }
 
 func (m *QueryViewSegmentReadinessManager) catchupWorker() {
-	for segment := range m.catchupTasks {
-		m.registerAndCatchup(segment)
+	for task := range m.catchupTasks {
+		m.registerAndCatchup(task)
 	}
 }
 
-func (m *QueryViewSegmentReadinessManager) markPhysicalLoaded(segment TransformSegment) (bool, bool) {
+func (m *QueryViewSegmentReadinessManager) markPhysicalLoaded(segment TransformSegment) (bool, segmentCatchupTask) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	state := m.segments[segment.ID()]
 	if state == nil || len(state.refs) == 0 {
-		return false, false
+		return false, segmentCatchupTask{}
 	}
 	if state.state == transformSegmentLoaded || state.state == transformSegmentCatchingUp {
-		return true, false
+		return true, segmentCatchupTask{}
 	}
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // owned by state; canceled on completion, failure or detach
 	state.segment = segment
 	state.state = transformSegmentCatchingUp
-	return true, true
+	state.catchupCancel = cancel
+	return true, segmentCatchupTask{ctx: ctx, segment: segment, state: state}
 }
 
-func (m *QueryViewSegmentReadinessManager) registerAndCatchup(segment TransformSegment) {
-	reg, err := m.buffer.RegisterSegment(context.Background(), segment)
+func (m *QueryViewSegmentReadinessManager) registerAndCatchup(task segmentCatchupTask) {
+	if task.ctx.Err() != nil {
+		return
+	}
+	reg, err := m.buffer.RegisterSegment(task.ctx, task.segment)
 	if err != nil {
-		m.failSegment(segment.ID(), err)
+		m.failSegment(task.segment.ID(), task.state, err)
 		return
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	if !m.storeRegistration(segment.ID(), segment, reg, cancel) {
-		cancel()
+	if !m.storeRegistration(task, reg) {
 		reg.Unregister()
 		return
 	}
-	if err := reg.WaitCatchup(ctx); err != nil {
-		cancel()
+	if err := reg.WaitCatchup(task.ctx); err != nil {
 		reg.Unregister()
-		m.failSegment(segment.ID(), err)
+		m.failSegment(task.segment.ID(), task.state, err)
 		return
 	}
-	cancel()
-	for _, waiter := range m.markSegmentReady(segment.ID()) {
+	for _, waiter := range m.markSegmentReady(task) {
 		waiter.reportReady()
 	}
 }
 
-func (m *QueryViewSegmentReadinessManager) storeRegistration(segmentID int64, segment TransformSegment, reg TransformRegistration, cancel context.CancelFunc) bool {
+func (m *QueryViewSegmentReadinessManager) storeRegistration(task segmentCatchupTask, reg TransformRegistration) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	state := m.segments[segmentID]
-	if state == nil || state.segment != segment || len(state.refs) == 0 {
+	state := m.segments[task.segment.ID()]
+	if state != task.state || len(state.refs) == 0 {
 		return false
 	}
 	state.reg = reg
-	state.catchupCancel = cancel
-	state.state = transformSegmentCatchingUp
 	return true
 }
 
-func (m *QueryViewSegmentReadinessManager) markSegmentReady(segmentID int64) []transformSegmentWaiter {
+func (m *QueryViewSegmentReadinessManager) markSegmentReady(task segmentCatchupTask) []transformSegmentWaiter {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	state := m.segments[segmentID]
-	if state == nil || state.state != transformSegmentCatchingUp {
+	state := m.segments[task.segment.ID()]
+	if state != task.state || state.state != transformSegmentCatchingUp {
 		return nil
 	}
+	state.catchupCancel()
+	state.catchupCancel = nil
 	state.state = transformSegmentLoaded
 	waiters := make([]transformSegmentWaiter, 0, len(state.waiters))
 	for key, waiter := range state.waiters {
@@ -398,16 +407,20 @@ func (m *QueryViewSegmentReadinessManager) markSegmentReady(segmentID int64) []t
 	return waiters
 }
 
-func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64, err error) {
+func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64, expected *transformSegmentState, err error) {
 	m.mu.Lock()
 	state := m.segments[segmentID]
-	if state == nil {
+	if state == nil || (expected != nil && state != expected) {
 		m.mu.Unlock()
 		return
 	}
 	reg := state.reg
 	cancel := state.catchupCancel
-	segment := state.segment
+	// Hold a cleanup reference until transform unregistration completes, even
+	// if the last query handle is released concurrently. Existing handles keep
+	// this retired state alive independently of a replacement in m.segments.
+	state.queryRefs++
+	state.refs = nil
 	waiters := make([]transformSegmentWaiter, 0, len(state.waiters))
 	for _, waiter := range state.waiters {
 		waiters = append(waiters, waiter)
@@ -421,9 +434,7 @@ func (m *QueryViewSegmentReadinessManager) failSegment(segmentID int64, err erro
 	if reg != nil {
 		reg.Unregister()
 	}
-	if segment != nil {
-		_ = segment.Release(context.Background())
-	}
+	m.releaseSealedSegmentHandle(segmentID, state)
 	if resetter, ok := m.physical.(PhysicalSegmentResetter); ok {
 		resetter.ResetSegment(segmentID)
 	}
