@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compactor"
 	"github.com/milvus-io/milvus/internal/datanode/external"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
+	"github.com/milvus-io/milvus/internal/datanode/importv3"
 	"github.com/milvus-io/milvus/internal/datanode/index"
 	"github.com/milvus-io/milvus/internal/flushcommon/io"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
@@ -455,6 +456,29 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	return merr.Success(), nil
 }
 
+// PreImportV2 runs the Import V3 count-only preimport: it reads every source
+// file for its exact row count (and size) without hashing, so DataCoord can
+// allocate exact per-file ID ranges before Reshard. L0 import is a V2-only path,
+// so it is not handled here. The task queues in the slot scheduler until the
+// node has free slots.
+func (node *DataNode) PreImportV2(ctx context.Context, req *datapb.PreImportRequest) (*commonpb.Status, error) {
+	mlog.Info(ctx, "datanode receive preimport v2 request")
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	cm, err := node.storageFactory.NewChunkManager(node.ctx, req.GetStorageConfig())
+	if err != nil {
+		mlog.Error(ctx, "create chunk manager failed", mlog.String("bucket", req.GetStorageConfig().GetBucketName()),
+			mlog.Err(err),
+		)
+		return merr.Status(err), nil
+	}
+
+	return node.submitImportV3WorkerTask(ctx, importv3.NewPreImportTask(req, cm))
+}
+
 func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (*commonpb.Status, error) {
 	mlog.Info(context.TODO(), "datanode receive import request")
 
@@ -515,6 +539,41 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 		Reason:    task.GetReason(),
 		FileStats: fileStats,
 	}, nil
+}
+
+// QueryPreImportV2 reads the count-only preimport task from the importv3 task
+// manager. A task still queued in the slot scheduler answers Pending instead
+// of "not found", so DataCoord waits for its slot instead of retrying.
+func (node *DataNode) QueryPreImportV2(ctx context.Context, req *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &datapb.QueryPreImportResponse{Status: merr.Status(err)}, nil
+	}
+	if node.importV3TaskMgr == nil {
+		return &datapb.QueryPreImportResponse{Status: merr.Status(merr.WrapErrServiceNotReadyMsg("import V3 task manager is not initialized"))}, nil
+	}
+	snapshot, ok := node.importV3TaskMgr.Query(req.GetTaskID(), 0)
+	if !ok {
+		// A task queued for a slot is already in the manager and answers
+		// Pending through the result below.
+		return &datapb.QueryPreImportResponse{
+			Status: merr.Status(importv2.WrapTaskNotFoundError(req.GetTaskID())),
+		}, nil
+	}
+	response := &datapb.QueryPreImportResponse{
+		Status: merr.Success(),
+		TaskID: snapshot.TaskID,
+		State:  snapshot.State,
+		Reason: snapshot.Reason,
+	}
+	if snapshot.Result != nil {
+		fileStats, ok := snapshot.Result.([]*datapb.ImportFileStats)
+		if !ok {
+			return &datapb.QueryPreImportResponse{Status: merr.Status(merr.WrapErrServiceInternalMsg(
+				"preimport task %d carries an unexpected result payload %T", req.GetTaskID(), snapshot.Result))}, nil
+		}
+		response.FileStats = fileStats
+	}
+	return response, nil
 }
 
 func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error) {
@@ -743,10 +802,13 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		totalSlots     = index.CalculateNodeSlots()
 		indexStatsUsed = node.taskScheduler.TaskQueue.GetUsingSlot()
 		compactionUsed = node.compactionExecutor.Slots()
-		importUsed     = node.importScheduler.Slots()
+		importV2Used   = node.importScheduler.Slots()
+		importV3Used   = node.importV3TaskMgr.Slots()
+		queueUsed      = node.importV3TaskMgr.QueuedSlots()
 	)
+	importUsed := importV2Used + importV3Used
 
-	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed
+	availableSlots := totalSlots - indexStatsUsed - compactionUsed - importUsed - queueUsed
 	if availableSlots < 0 {
 		availableSlots = 0
 	}
@@ -757,6 +819,8 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		mlog.Int64("indexStatsUsed", indexStatsUsed),
 		mlog.Int64("compactionUsed", compactionUsed),
 		mlog.Int64("importUsed", importUsed),
+		mlog.Int64("importV3Used", importV3Used),
+		mlog.Int64("importV3QueuedSlots", queueUsed),
 	)
 
 	metrics.DataNodeSlot.WithLabelValues(fmt.Sprint(node.GetNodeID()), "available").Set(float64(availableSlots))
@@ -804,6 +868,15 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.PreImport(ctx, req)
+	case taskcommon.PreImportV2:
+		req := &datapb.PreImportRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.PreImportV2(ctx, req)
 	case taskcommon.Import:
 		req := &datapb.ImportRequest{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -813,6 +886,24 @@ func (node *DataNode) CreateTask(ctx context.Context, request *workerpb.CreateTa
 			return merr.Status(err), nil
 		}
 		return node.ImportV2(ctx, req)
+	case taskcommon.Reshard:
+		req := &datapb.ReshardTaskRequest{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.submitReshardTask(ctx, req)
+	case taskcommon.ImportV3:
+		req := &datapb.ImportTaskV3Request{}
+		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
+			return merr.Status(err), nil
+		}
+		if err := hookutil.RegisterEZsFromPluginContext(req.GetPluginContext()); err != nil {
+			return merr.Status(err), nil
+		}
+		return node.submitImportTaskV3(ctx, req)
 	case taskcommon.Compaction:
 		req := &datapb.CompactionPlan{}
 		if err := proto.Unmarshal(request.GetPayload(), req); err != nil {
@@ -929,6 +1020,15 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.PreImportV2:
+		resp, err := node.QueryPreImportV2(ctx, &datapb.QueryPreImportRequest{ClusterID: clusterID, TaskID: taskID})
+		if err != nil {
+			return nil, err
+		}
+		resProperties := taskcommon.NewProperties(nil)
+		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
+		resProperties.AppendReason(resp.GetReason())
+		return wrapQueryTaskResult(resp, resProperties)
 	case taskcommon.Import:
 		resp, err := node.QueryImport(ctx, &datapb.QueryImportRequest{ClusterID: clusterID, TaskID: taskID})
 		if err != nil {
@@ -938,6 +1038,10 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 		resProperties.AppendTaskState(taskcommon.FromImportState(resp.GetState()))
 		resProperties.AppendReason(resp.GetReason())
 		return wrapQueryTaskResult(resp, resProperties)
+	case taskcommon.Reshard:
+		return node.queryImportV3WorkerTask(ctx, taskID, reqProperties.GetTaskVersion(), taskcommon.Reshard)
+	case taskcommon.ImportV3:
+		return node.queryImportV3WorkerTask(ctx, taskID, reqProperties.GetTaskVersion(), taskcommon.ImportV3)
 	case taskcommon.Compaction:
 		resp, err := node.GetCompactionState(ctx, &datapb.CompactionStateRequest{PlanID: taskID})
 		if err != nil {
@@ -1047,6 +1151,16 @@ func (node *DataNode) QueryTask(ctx context.Context, request *workerpb.QueryTask
 	}
 }
 
+// dropPreImportV2Task drops the count-only preimport task, whether it is
+// still queued or already running in the importv3 task manager. Best effort
+// and idempotent.
+func (node *DataNode) dropPreImportV2Task(taskID int64) (*commonpb.Status, error) {
+	if node.importV3TaskMgr != nil {
+		node.importV3TaskMgr.Drop(taskID, 0)
+	}
+	return merr.Success(), nil
+}
+
 // DropTask deletes specified type of task
 func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRequest) (*commonpb.Status, error) {
 	mlog.Info(ctx, "DropTask received", mlog.Any("properties", request.GetProperties()))
@@ -1065,6 +1179,10 @@ func (node *DataNode) DropTask(ctx context.Context, request *workerpb.DropTaskRe
 	switch taskType {
 	case taskcommon.PreImport, taskcommon.Import:
 		return node.DropImport(ctx, &datapb.DropImportRequest{TaskID: taskID})
+	case taskcommon.PreImportV2:
+		return node.dropPreImportV2Task(taskID)
+	case taskcommon.Reshard, taskcommon.ImportV3:
+		return node.dropImportV3WorkerTask(taskID, properties.GetTaskVersion())
 	case taskcommon.CopySegment, taskcommon.ExternalCopySegment:
 		return node.DropCopySegment(ctx, &datapb.DropCopySegmentRequest{TaskID: taskID})
 	case taskcommon.Compaction:

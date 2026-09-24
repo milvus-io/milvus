@@ -22,20 +22,12 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
-type FileType int
-
 const (
-	Invalid   FileType = 0
-	JSON      FileType = 1
-	Numpy     FileType = 2
-	Parquet   FileType = 3
-	CSV       FileType = 4
-	JSONLines FileType = 5
-
 	JSONFileExt    = ".json"
 	JSONLFileExt   = ".jsonl"
 	NDJSONFileExt  = ".ndjson"
@@ -44,26 +36,13 @@ const (
 	CSVFileExt     = ".csv"
 )
 
-var FileTypeName = map[int]string{
-	0: "Invalid",
-	1: "JSON",
-	2: "Numpy",
-	3: "Parquet",
-	4: "CSV",
-	5: "JSONLines",
-}
-
-func (f FileType) String() string {
-	return FileTypeName[int(f)]
-}
-
 func isJSONLinesType(ft string) bool {
 	return ft == JSONLFileExt || ft == NDJSONFileExt
 }
 
-func GetFileType(file *internalpb.ImportFile) (FileType, error) {
+func GetFileType(file *internalpb.ImportFile) (datapb.ImportFileType, error) {
 	if len(file.GetPaths()) == 0 {
-		return Invalid, merr.WrapErrImportFailed("no file to import")
+		return datapb.ImportFileType_Unspecified, merr.WrapErrImportFailed("no file to import")
 	}
 	exts := lo.Map(file.GetPaths(), func(path string, _ int) string {
 		return filepath.Ext(path)
@@ -76,7 +55,7 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 			continue
 		}
 		if exts[i] != ext {
-			return Invalid, merr.WrapErrImportFailed(
+			return datapb.ImportFileType_Unspecified, merr.WrapErrImportFailed(
 				fmt.Sprintf("inconsistency in file types, (%s) vs (%s)",
 					file.GetPaths()[0], file.GetPaths()[i]))
 		}
@@ -85,25 +64,25 @@ func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	switch ext {
 	case JSONFileExt, JSONLFileExt, NDJSONFileExt:
 		if len(file.GetPaths()) != 1 {
-			return Invalid, merr.WrapErrImportFailed("for JSON import, accepts only one file")
+			return datapb.ImportFileType_Unspecified, merr.WrapErrImportFailed("for JSON import, accepts only one file")
 		}
 		if isJSONLinesType(ext) {
-			return JSONLines, nil
+			return datapb.ImportFileType_JsonLines, nil
 		} else {
-			return JSON, nil
+			return datapb.ImportFileType_Json, nil
 		}
 	case NumpyFileExt:
-		return Numpy, nil
+		return datapb.ImportFileType_Numpy, nil
 	case ParquetFileExt:
 		if len(file.GetPaths()) != 1 {
-			return Invalid, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
+			return datapb.ImportFileType_Unspecified, merr.WrapErrImportFailed("for Parquet import, accepts only one file")
 		}
-		return Parquet, nil
+		return datapb.ImportFileType_Parquet, nil
 	case CSVFileExt:
 		if len(file.GetPaths()) != 1 {
-			return Invalid, merr.WrapErrImportFailed("for CSV import, accepts only one file")
+			return datapb.ImportFileType_Unspecified, merr.WrapErrImportFailed("for CSV import, accepts only one file")
 		}
-		return CSV, nil
+		return datapb.ImportFileType_Csv, nil
 	}
-	return Invalid, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
+	return datapb.ImportFileType_Unspecified, merr.WrapErrImportFailedMsg("unexpected file type, files=%v", file.GetPaths())
 }

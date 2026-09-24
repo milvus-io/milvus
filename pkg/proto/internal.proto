@@ -398,6 +398,8 @@ enum ImportJobState {
   Uncommitted = 8;
   Committing  = 9;
   AssigningIDRange = 10;
+  Planning = 11;
+  Resharding = 12;
 }
 
 message ImportFile {
@@ -429,6 +431,9 @@ message ImportRequestInternal {
   repeated common.KeyValuePair options = 8;
   uint64 data_timestamp = 9;
   int64 jobID = 10;
+  // Internal import execution version. Direct requests may leave 0 for DataCoord selection.
+  // ACK 0 means legacy V2; 2: ImportTaskV2; 3: ReshardTask + ImportTaskV3.
+  int64 version = 11;
 }
 
 message ImportRequest {

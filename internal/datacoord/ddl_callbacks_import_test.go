@@ -325,6 +325,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_ValidationFailsReturnsError()
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -375,6 +376,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_DescribeCollectionFailsReturn
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -435,6 +437,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_StartBroadcastFailsReturnsErr
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -500,6 +503,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SecondDescribeCollectionFails
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -567,6 +571,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.Error(err)
@@ -633,6 +638,7 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		1000,
 		[]string{"v1"},
 		"",
+		importVersionV2,
 	)
 
 	s.NoError(err)
@@ -926,8 +932,11 @@ func TestImportFlowIntegration(t *testing.T) {
 
 func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().ListReshardTasks(mock.Anything).Return(nil, nil).Maybe()
+	catalog.EXPECT().ListImportTasksV3(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportJobs(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListPreImportTasks(mock.Anything).Return(nil, nil)
+	catalog.EXPECT().ListPreImportV2Tasks(mock.Anything).Return(nil, nil).Maybe()
 	catalog.EXPECT().ListImportTasks(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().SaveImportJob(mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -1331,6 +1340,28 @@ func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) 
 	assert.True(t, errors.Is(err, merr.ErrServiceInternal))
 }
 
+// TestValidateImportRequest_RejectsDuplicateOptionKeys guards the bypass found
+// by adversarial review on milvus#51894: every check reads options as a
+// repeated KV (first match wins) while the broadcast body folds them into a map
+// (last value wins), so [{backup,false},{backup,true}] used to validate as an
+// ordinary import -- skipping the ImportBinlog privilege check -- and then
+// execute as a binlog import.
+func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
+	paramtable.Init()
+
+	s := &Server{}
+
+	err := s.validateImportRequest(context.Background(),
+		[]*msgpb.ImportFile{{Paths: []string{"staging/a.json"}}},
+		[]*commonpb.KeyValuePair{
+			{Key: "backup", Value: "false"},
+			{Key: "backup", Value: "true"},
+		})
+
+	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	assert.Contains(t, err.Error(), "backup")
+}
+
 // --------------------------------
 // importIDRangeAckCallback Tests
 // --------------------------------
@@ -1709,28 +1740,6 @@ func TestAssignAndBroadcastImportIDRange_ErrorPaths(t *testing.T) {
 	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
 	assert.Contains(t, err.Error(), "job 9 has no vchannels")
 	assert.False(t, broadcastStarted)
-}
-
-// TestValidateImportRequest_RejectsDuplicateOptionKeys guards the bypass found
-// by adversarial review on milvus#51894: every check reads options as a
-// repeated KV (first match wins) while the broadcast body folds them into a map
-// (last value wins), so [{backup,false},{backup,true}] used to validate as an
-// ordinary import -- skipping the ImportBinlog privilege check -- and then
-// execute as a binlog import.
-func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
-	paramtable.Init()
-
-	s := &Server{}
-
-	err := s.validateImportRequest(context.Background(),
-		[]*msgpb.ImportFile{{Paths: []string{"staging/a.json"}}},
-		[]*commonpb.KeyValuePair{
-			{Key: "backup", Value: "false"},
-			{Key: "backup", Value: "true"},
-		})
-
-	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-	assert.Contains(t, err.Error(), "backup")
 }
 
 // TestImportAckCallback_DropsControlChannelFromJobChannels pins the filter in

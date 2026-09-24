@@ -22,18 +22,19 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type HashedData [][]*storage.InsertData // [vchannelIndex][partitionIndex]*storage.InsertData
 
-func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum int) (HashedData, error) {
+func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum, rowsHint int) (HashedData, error) {
 	var err error
 	res := make(HashedData, channelNum)
 	for i := 0; i < channelNum; i++ {
 		res[i] = make([]*storage.InsertData, partitionNum)
 		for j := 0; j < partitionNum; j++ {
-			res[i][j], err = storage.NewInsertDataWithFunctionOutputField(schema)
+			res[i][j], err = storage.NewInsertDataWithCap(schema, rowsHint, true)
 			if err != nil {
 				return nil, err
 			}
@@ -43,11 +44,21 @@ func newHashedData(schema *schemapb.CollectionSchema, channelNum, partitionNum i
 }
 
 func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
+	return HashDataBySchema(typeutil.AppendSystemFields(task.GetSchema()), task.GetVchannels(), task.GetPartitionIDs(), rows)
+}
+
+// HashDataBySchema applies the same vchannel/partition hashing used by the
+// legacy ImportTask, but does not require a concrete V2 task object.  V3 uses
+// this adapter while keeping the old hash functions and field semantics as the
+// single source of truth.
+func HashDataBySchema(schema *schemapb.CollectionSchema, vchannels []string, partitionIDs []int64, rows *storage.InsertData) (HashedData, error) {
 	var (
-		schema       = typeutil.AppendSystemFields(task.GetSchema())
-		channelNum   = len(task.GetVchannels())
-		partitionNum = len(task.GetPartitionIDs())
+		channelNum   = len(vchannels)
+		partitionNum = len(partitionIDs)
 	)
+	if schema == nil || rows == nil || channelNum == 0 || partitionNum == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("invalid hash input")
+	}
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -61,7 +72,14 @@ func HashData(task Task, rows *storage.InsertData) (HashedData, error) {
 	f1 := hashByVChannel(int64(channelNum), pkField)
 	f2 := hashByPartition(int64(partitionNum), partKeyField)
 
-	res, err := newHashedData(schema, channelNum, partitionNum)
+	// Floor, not ceil: when buckets outnumber rows, ceiling forces one full row
+	// of capacity into every bucket and reserves numBuckets x rowSize per batch
+	// regardless of the batch size — an OOM hazard for high-dim vectors on
+	// partition-key collections with many partitions. Floor keeps the total
+	// reservation bounded by the batch row count and lets sparse buckets grow
+	// on demand.
+	rowsHint := rows.GetRowNum() / (channelNum * partitionNum)
+	res, err := newHashedData(schema, channelNum, partitionNum, rowsHint)
 	if err != nil {
 		return nil, err
 	}

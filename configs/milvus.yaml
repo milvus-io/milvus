@@ -975,7 +975,7 @@ dataCoord:
     # A cluster whose clients never send an Idempotency-Key is under no such requirement
     # and can lower this freely; 10800 was the default before idempotency keys existed.
     taskRetention: 172800
-    maxSizeInMBPerImportTask: 16384 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
+    maxSizeInMBPerImportTask: 8192 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
@@ -983,9 +983,15 @@ dataCoord:
     maxImportJobNum: 1024 # Maximum number of import jobs that are executing or pending.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
     enableInReplicatingCluster: false # Whether to allow import in a replicating cluster. When enabled, only auto_commit=false imports are accepted.
+    enableImportV3: false # One-way rollout gate for creating ImportTaskV3 jobs from new ordinary or backup import requests. Keep disabled until all DataNodes and all DataCoords that may become active support Import V3. The gate only selects the version for new requests; persisted WAL messages and jobs always resume with their stored version. Disabling the gate again after activation is unsupported.
     enableL0Import: false # Whether to allow importing L0 (delete-only) segments during a binlog/backup import. Disabled by default because restoring L0 segments is incompatible with commit_timestamp (two-phase-commit / replication imports), where it silently breaks delete semantics. Fold the L0 deletes into per-segment deltalogs before restore instead; set to true only to re-enable the legacy L0 import behavior.
     fileNumPerSlot: 4 # The files number per slot for pre-import/import task.
     memoryLimitPerSlot: 160 # The memory limit (in MB) of buffer size per slot for pre-import/import task.
+    fragmentSizeInMB: 128 # Target logical size in MiB for one sorted ImportTaskV3 fragment.
+    fragmentMergeFanIn: 128 # Maximum direct merge fan-in used by ImportTaskV3. Values must be in [2,1024].
+    reshardResidentBucketCap: 16 # Number of (vchannel, partition) buckets whose full in-flight working set (cap x fragmentSizeInMB) the ImportTaskV3 reshard slot estimate keeps memory-resident as a ceiling, so a job with at most this many buckets can reshard without local spill on an idle node. Beyond the cap the same total resident budget spreads across all buckets (per-bucket tail cap = cap x fragmentSizeInMB / buckets) and tails over it stream into the DataNode's shared spill log. The DataNode's dynamic memory probe may still spill below this ceiling when the real process memory is tight. The cap also bounds per-task slot demand so the task stays schedulable on small nodes.
+    reshardFlushConcurrency: 2 # Number of fragment writes one ImportTaskV3 reshard task keeps detached and in flight. A full bucket's sort/encode/upload runs on its own goroutine so it overlaps reading and hashing the next batches instead of stalling them. Every detached write holds its fragment input plus one sort copy, so the reshard slot estimate charges this many of them: raising it trades node task concurrency for per-task latency.
+    reshardMemoryExpansionFactor: 1.5 # Expansion factor applied to an ImportTaskV3 reshard task's whole per-task heap footprint when estimating its memory charge: WorkingSet charges factor x (fixed IO + pipeline + resident buckets + detached fragment inputs + their structural overhead + one sort copy per detached write). It covers the Go runtime headroom and the other growth between the source/flush boundaries the run returns memory at. Must be at least 1.
     maxSegmentsPerCopyTask: 100 # Maximum number of segments that can be grouped into a single copy task during snapshot restore.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   slot:
@@ -1050,6 +1056,7 @@ dataNode:
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
     readBufferSizeInMB: 16 # The base insert buffer size (in MB) during import. The actual buffer size will be dynamically calculated based on the number of shards.
     readDeleteBufferSizeInMB: 16 # The delete buffer size (in MB) during import.
+    reshardSpillMaxStreams: 128 # Maximum number of spill files (Arrow IPC streams) one ImportTaskV3 reshard run keeps open. Buckets are mapped to streams by a fixed hash, so every range of one bucket lives in exactly one file and a run with more buckets than streams never opens more files than this cap. A stream file is removed as soon as all of its ranges are consumed; the actual stream count is min(buckets, this value). Must be at least 1.
     memoryLimitPercentage: 10 # The percentage of memory limit for import/pre-import tasks.
     # Initial backoff interval in seconds for import write retry. Must be a positive integer;
     # a non-positive or unparseable value falls back to the default.

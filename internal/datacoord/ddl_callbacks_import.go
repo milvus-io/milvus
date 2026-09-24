@@ -38,6 +38,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
+const (
+	importVersionUnspecified int64 = 0 // Direct requests select a version; ACK restores historical messages as V2.
+	importVersionV2          int64 = 2 // Execute with ImportTaskV2.
+	importVersionV3          int64 = 3 // Execute with ReshardTask and ImportTaskV3.
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
@@ -82,6 +88,7 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
+		Version:       body.GetVersion(),
 	})
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -263,6 +270,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	jobID int64,
 	vchannels []string,
 	idempotencyKey string,
+	version int64,
 ) (duplicatedJobID int64, duplicated bool, err error) {
 	// Convert files to msgpb format for validation
 	msgFiles := lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
@@ -277,6 +285,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 		return 0, false, merr.Wrap(err, "failed to validate import request")
 	}
 
+	// No per-file ID range is frozen here: the two-phase flow allocates exact ranges
+	// after preimport (Import V2 via PreImportTask, Import V3 via PreImportV2) and
+	// ships them in the ImportIDRange WAL message.
 	// Get database name from collection metadata via broker
 	// This is safer than extracting from schema which may be stale
 	broadcaster, err := s.startBroadcastWithCollectionID(ctx, collectionID)
@@ -315,6 +326,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Files:          msgFiles,
 			Schema:         schema, // TODO: should we use the schema from the collection?
 			JobID:          jobID,
+			Version:        version,
 		}).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off

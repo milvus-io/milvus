@@ -21,6 +21,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
@@ -62,4 +63,36 @@ func TestWrapDecodeErr(t *testing.T) {
 		assert.False(t, IsTypedIOErr(errors.New("plain")))
 		assert.False(t, IsTypedIOErr(merr.WrapErrImportFailedMsg("bad file")))
 	})
+}
+
+func TestIsTerminalImportV3Err(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"plain non-milvus error", errors.New("plain etcd/io"), false},
+		// ErrIoFailed is what mapObjectStorageError assigns to unenumerated
+		// 5xx/timeout codes; it must stay transient so a storage outage
+		// retries instead of failing the job.
+		{"ErrIoFailed is transient", merr.WrapErrIoFailed("x", errors.New("io failed")), false},
+		{"ErrServiceUnavailable is transient", merr.WrapErrServiceUnavailable("transient storage outage"), false},
+		{"ErrIoUnexpectEOF is transient", merr.WrapErrIoUnexpectEOF("x", errors.New("unexpected eof")), false},
+		{"ErrIoTooManyRequests is transient", merr.WrapErrIoTooManyRequests("x", errors.New("too many requests")), false},
+		{"ErrIoKeyNotFound is terminal", merr.WrapErrIoKeyNotFound("x", "not found"), true},
+		{"ErrIoPermissionDenied is terminal", merr.WrapErrIoPermissionDenied("x", errors.New("denied")), true},
+		{"ErrDataIntegrity is terminal", merr.WrapErrDataIntegrityMsg("corrupt manifest"), true},
+		{"ErrImportFailed is terminal", merr.WrapErrImportFailedMsg("bad file"), true},
+		{"ErrImportSysFailed is terminal", merr.WrapErrImportSysFailedMsg("bad plan"), true},
+		// Caller-input defects are deterministic: an oversized import file or
+		// a parquet type/dimension mismatch cannot be retried away, and an
+		// uncapped retry loop would burn one segment and log range per round.
+		{"ErrParameterInvalid is terminal", merr.WrapErrParameterInvalidMsg("import file size exceeds the maximum"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			require.Equal(t, c.want, IsTerminalImportV3Err(c.err))
+		})
+	}
 }
