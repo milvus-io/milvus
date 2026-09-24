@@ -155,20 +155,30 @@ func (s *asyncTextIOCore) WriteWithCEntry(ent CEntry) {
 func (s *asyncTextIOCore) write(ent entryItem) {
 	length := ent.buf.Len()
 	if length == 0 {
+		ent.buf.Free()
 		return
 	}
-	var writeDroppedTimeout <-chan time.Time
-	if ent.level < s.nonDroppableLevel {
-		writeDroppedTimeout = time.After(s.writeDroppedTimeout)
+
+	timeout := s.writeDroppedTimeout
+	if ent.level >= s.nonDroppableLevel {
+		// Give important entries at least as much time to wait for space, but never block
+		// indefinitely when the underlying writer is stuck.
+		timeout = max(timeout, s.stopTimeout)
 	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case s.pending <- ent:
 		metrics.LoggingPendingWriteTotal.Inc()
-	case <-writeDroppedTimeout:
-		metrics.LoggingDroppedWriteTotal.Inc()
-		// drop the entry if the write is dropped due to timeout
-		ent.buf.Free()
+	case <-timer.C:
+		s.dropEntry(ent)
 	}
+}
+
+func (s *asyncTextIOCore) dropEntry(ent entryItem) {
+	metrics.LoggingDroppedWriteTotal.Inc()
+	ent.buf.Free()
 }
 
 type CEntryTextIOCore interface {
@@ -280,7 +290,14 @@ func (s *asyncTextIOCore) flushAllPendingWrites(done chan struct{}) {
 	}
 }
 
+// Stop requests shutdown and waits for at most the configured timeout. If the
+// underlying writer is blocked, its background goroutine may outlive Stop.
 func (s *asyncTextIOCore) Stop() {
 	s.notifier.Cancel()
-	s.notifier.BlockUntilFinish()
+	timer := time.NewTimer(s.stopTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.notifier.FinishChan():
+	case <-timer.C:
+	}
 }
