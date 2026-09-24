@@ -59,12 +59,7 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 	// All data packs have already published their positions. Preserve them on
 	// final commit, including retries recovered from SN metadata.
 	ctx = retry.WithMaxAttemptsContext(ctx, maxRPCAttempts)
-	req := buildCommitL1SegmentRequest(w.serverID, meta)
-	// An empty segment has no data or manifest to publish. Retire it explicitly
-	// and wait for DataCoord's confirmation before installing the SN tombstone.
-	// Use cumulative rows: an empty buffer may have already persisted data.
-	req.Dropped = meta.GetStat().GetModifiedRows() == 0
-	resp, err := w.coord.SaveBinlogPaths(ctx, req)
+	resp, err := w.coord.SaveBinlogPaths(ctx, buildCommitL1SegmentRequest(w.serverID, meta))
 	if err = merr.CheckRPCCall(resp, err); err != nil {
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 			// A retired segment/channel does not need a fabricated publication version.
@@ -81,8 +76,7 @@ func (w *segmentLifecycleWriter) CommitL1Segment(ctx context.Context, meta *stre
 // TODO: Remove after enabling queryview. Existing query recovery loads growing
 // binlogs through DataCoord, so publication must precede Insert completion.
 func (w *segmentLifecycleWriter) PersistGrowingSegment(ctx context.Context, meta *streamingpb.SegmentAssignmentMeta, start, checkpoint *msgpb.MsgPosition) error {
-	req := buildCommitL1SegmentRequest(w.serverID, meta)
-	req.Flushed = false
+	req := buildSaveBinlogPathsRequest(w.serverID, meta)
 	if start != nil {
 		req.StartPositions = []*datapb.SegmentStartPosition{{SegmentID: meta.GetSegmentId(), StartPosition: start}}
 	}
@@ -135,6 +129,16 @@ func buildEnsureGrowingSegmentRequest(meta *streamingpb.SegmentAssignmentMeta) *
 }
 
 func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssignmentMeta) *datapb.SaveBinlogPathsRequest {
+	req := buildSaveBinlogPathsRequest(serverID, meta)
+	req.Flushed = true
+	// An empty segment has no data or manifest to publish. Retire it explicitly
+	// and wait for DataCoord's confirmation before installing the SN tombstone.
+	// Use cumulative rows: an empty buffer may have already persisted data.
+	req.Dropped = meta.GetStat().GetModifiedRows() == 0
+	return req
+}
+
+func buildSaveBinlogPathsRequest(serverID int64, meta *streamingpb.SegmentAssignmentMeta) *datapb.SaveBinlogPathsRequest {
 	storage := meta.GetPersistedStorage()
 	binlogs := make([]*datapb.FieldBinlog, 0)
 	statslogs := make([]*datapb.FieldBinlog, 0)
@@ -162,7 +166,6 @@ func buildCommitL1SegmentRequest(serverID int64, meta *streamingpb.SegmentAssign
 		Field2Bm25LogPaths:  bm25logs,
 		Deltalogs:           storage.GetDeltaBinlog(),
 		Stats:               storage.GetStatistics(),
-		Flushed:             true,
 		Channel:             meta.GetVchannel(),
 		SegLevel:            meta.GetStat().GetLevel(),
 		StorageVersion:      meta.GetStorageVersion(),
