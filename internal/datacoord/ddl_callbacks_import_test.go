@@ -2040,23 +2040,25 @@ func TestValidateImportRequest_RejectsDuplicateOptionKeys(t *testing.T) {
 	assert.Contains(t, err.Error(), "backup")
 }
 
-// TestImportAckCallback_DropsControlChannelFromJobChannels pins the filter in
-// importV1AckCallback: the broadcaster stamps the control channel into every
-// broadcast, so the ack result carries a control-channel entry that must not
-// become one of the job's data vchannels, while its time tick still counts
-// toward DataTimestamp.
+// TestImportAckCallback_DropsControlChannelFromJobChannels exercises the real
+// ACK-to-job path: the broadcaster's control-channel entry must not become a
+// ready data vchannel, while its time tick still contributes to DataTs.
 func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
-	defer mockey.UnPatchAll()
-
-	// The request is read inside the hook: its memory is not valid after the call returns.
-	var channelNames []string
-	var dataTimestamp uint64
-	mockey.Mock((*Server).createImportJobFromAck).To(
-		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
-			channelNames = append([]string{}, in.GetChannelNames()...)
-			dataTimestamp = in.GetDataTimestamp()
-			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
-		}).Build()
+	paramtable.Init()
+	type ackAllocator struct{ allocator.Allocator }
+	type ackHandler struct{ Handler }
+	type ackMeta struct{ ImportMeta }
+	allocate := mockey.Mock((*ackAllocator).AllocN).Return(int64(10), int64(11), nil).Build()
+	defer allocate.UnPatch()
+	getCollection := mockey.Mock((*ackHandler).GetCollection).Return(
+		&collectionInfo{ID: 100, VChannelNames: []string{"vchannel1"}}, nil).Build()
+	defer getCollection.UnPatch()
+	var saved ImportJob
+	saveJob := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
+		saved = job
+		return nil
+	}).Build()
+	defer saveJob.UnPatch()
 
 	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
 	broadcastMsg := message.NewImportMessageBuilderV1().
@@ -2074,8 +2076,13 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 		},
 	}
 
-	callbacks := &DDLCallbacks{Server: &Server{}}
-	assert.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
-	assert.Equal(t, []string{"vchannel1"}, channelNames)
-	assert.Equal(t, uint64(200), dataTimestamp)
+	server := &Server{allocator: &ackAllocator{}, handler: &ackHandler{}, importMeta: &ackMeta{}}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	callbacks := &DDLCallbacks{Server: server}
+	require.NoError(t, callbacks.importV1AckCallback(context.Background(), result))
+	require.NotNil(t, saved)
+	assert.Equal(t, int64(1), saved.GetJobID())
+	assert.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
+	assert.Equal(t, []string{"vchannel1"}, saved.GetReadyVchannels())
+	assert.Equal(t, uint64(200), saved.GetDataTs())
 }
