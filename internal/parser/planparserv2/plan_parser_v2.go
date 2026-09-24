@@ -211,6 +211,19 @@ func ParseExprTemplate(schema *typeutil.SchemaHelper, exprStr string, visitorArg
 	return parseExprTemplateInner(schema, exprStr, visitorArgs)
 }
 
+// C++ builds element_filter at the plan-node level and cannot parse one nested
+// inside another expression. Check the executable tree after template filling:
+// a template such as true OR element_filter(...{value}...) may temporarily keep
+// both branches so a missing value is still reported before it folds to true.
+func validateElementFilterPlacement(expr *planpb.Expr) error {
+	if walkExpr(expr, func(node *planpb.Expr) bool {
+		return node != expr && node.GetElementFilterExpr() != nil
+	}) {
+		return merr.WrapErrQueryPlanMsg("element_filter must be the top-level filter expression; combine document-level predicates with AND")
+	}
+	return nil
+}
+
 func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateValues map[string]*schemapb.TemplateValue, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
 	expr, err := parseExprTemplateInner(schema, exprStr, visitorArgs)
 	if err != nil {
@@ -231,6 +244,9 @@ func parseExprInner(schema *typeutil.SchemaHelper, exprStr string, exprTemplateV
 	}
 
 	expr = rewriter.RewriteExpr(expr)
+	if err := validateElementFilterPlacement(expr); err != nil {
+		return nil, err
+	}
 	return expr, nil
 }
 
