@@ -138,7 +138,18 @@ func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visit
 		return nil, merr.WrapErrQueryPlanMsg("cannot parse expression: %s", exprStr)
 	}
 	if !canBeExecuted(predicate) {
-		return nil, merr.WrapErrQueryPlanMsg("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		// Standalone boolean literals are valid predicates. Normalize them to
+		// the same plan nodes used by constant-folded boolean expressions.
+		if boolVal := predicate.expr.GetValueExpr().GetValue(); boolVal != nil && IsBool(boolVal) {
+			if boolVal.GetBoolVal() {
+				predicate.expr = alwaysTrueExpr()
+			} else {
+				predicate.expr = alwaysFalseExpr()
+			}
+			predicate.nodeDependent = false
+		} else {
+			return nil, merr.WrapErrQueryPlanMsg("predicate is not a boolean expression: %s, data type: %s", exprStr, predicate.dataType)
+		}
 	}
 
 	return predicate.expr, nil

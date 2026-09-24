@@ -438,6 +438,11 @@ func (helper *SchemaHelper) GetTimezone() string {
 	return helper.timezone
 }
 
+// GetVersion returns the version of the collection schema used to build this helper.
+func (helper *SchemaHelper) GetVersion() int32 {
+	return helper.schema.GetVersion()
+}
+
 // GetPrimaryKeyField returns the schema of the primary key
 func (helper *SchemaHelper) GetPrimaryKeyField() (*schemapb.FieldSchema, error) {
 	if helper.primaryKeyOffset == -1 {
@@ -2791,8 +2796,7 @@ func GetPK(data *schemapb.IDs, idx int64) interface{} {
 }
 
 func GetDataIterator(field *schemapb.FieldData) func(int) any {
-	if field.GetValidData() != nil {
-		validData := field.GetValidData()
+	if validData := field.GetValidData(); len(validData) > 0 {
 		if IsCompactNullableVectorFieldData(field) {
 			idxs, _ := BuildNullableVectorDataIndices(validData)
 			return func(idx int) any {
