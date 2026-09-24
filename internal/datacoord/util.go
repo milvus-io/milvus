@@ -331,11 +331,23 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 		CollectionId:  task.GetCollectionID(),
 		PartitionId:   task.GetPartitionID(),
 		Channel:       task.GetChannel(),
-		Type:          commonpb.CompactionType(task.GetType()),
+		Type:          publicCompactionType(task.GetType()),
 		State:         commonpb.CompactionTaskState(task.GetState()),
 		FailureReason: task.GetFailReason(),
 		Targets:       task.GetResultSegments(),
 	}
+}
+
+// publicCompactionType maps an internal compaction type to the enum clients
+// read. The two share their wire values, except for the shard split rewrite:
+// milvus-proto has no member for it yet, so a numeric cast would hand clients
+// a value their enum cannot name. It is reported as Undefined until that
+// member exists (design doc §11).
+func publicCompactionType(t datapb.CompactionType) commonpb.CompactionType {
+	if t == datapb.CompactionType_HashSplitCompaction {
+		return commonpb.CompactionType_CompactionTypeUndefined
+	}
+	return commonpb.CompactionType(t)
 }
 
 func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {

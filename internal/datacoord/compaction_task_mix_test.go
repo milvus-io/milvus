@@ -2,10 +2,12 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/allocator"
 	"github.com/milvus-io/milvus/internal/datacoord/session"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/taskcommon"
@@ -69,6 +72,380 @@ func (s *MixCompactionTaskSuite) TestProcessRefreshPlan_NormalMix() {
 		return b.GetSegmentID()
 	})
 	s.ElementsMatch([]int64{200, 201}, segIDs)
+}
+
+// A shard split rewrite plan carries the targets and the modulus their
+// residues are taken against; the datanode routes every row by both.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitRouting() {
+	targets := []*datapb.SplitShardTaskTarget{
+		{Vchannel: "t0", Buckets: []uint64{0}},
+		{Vchannel: "t1", Buckets: []uint64{1}},
+	}
+	meta := NewMockCompactionMeta(s.T())
+	// The input is read with the source's L0 set, in one channel scan.
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).Return([]*SegmentInfo{{SegmentInfo: &datapb.SegmentInfo{
+		ID:            200,
+		Level:         datapb.SegmentLevel_L1,
+		InsertChannel: "src",
+		State:         commonpb.SegmentState_Flushed,
+	}}})
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_HashSplitCompaction,
+		Channel:          "src",
+		InputSegments:    []int64{200},
+		Schema:           &schemapb.CollectionSchema{Version: 1},
+		HashSplitTargets: targets,
+		HashSplitModulus: 2,
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	s.Equal(datapb.CompactionType_HashSplitCompaction, plan.GetType())
+	s.Equal("src", plan.GetChannel(), "the plan runs on the source, where its input lives")
+	s.Len(plan.GetHashSplitTargets(), 2)
+	s.EqualValues(2, plan.GetHashSplitModulus())
+}
+
+// Every rewrite plan carries the source channel's L0 deltalogs, so the datanode
+// can fold the deletes that never reached an L1 deltalog.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitCarriesSourceLevelZero() {
+	const (
+		srcChannel  = "src"
+		partitionID = int64(10)
+	)
+	input := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: srcChannel,
+		PartitionID: partitionID, State: commonpb.SegmentState_Flushed,
+	}}
+	levelZero := func(id, partition int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, Level: datapb.SegmentLevel_L0, InsertChannel: srcChannel,
+			PartitionID: partition, State: commonpb.SegmentState_Flushed,
+			ManifestPath: fmt.Sprintf("manifest/%d", id),
+			Deltalogs:    []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: fmt.Sprintf("delta/%d", id)}}}},
+		}}
+	}
+	// SelectSegments applies the caller's filters, exactly as the real meta does,
+	// so the partition and level rules below are the production ones.
+	selectFrom := func(pool []*SegmentInfo) func(context.Context, ...SegmentFilter) []*SegmentInfo {
+		return func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			return lo.Filter(pool, func(info *SegmentInfo, _ int) bool {
+				for _, filter := range filters {
+					if !filter.Match(info) {
+						return false
+					}
+				}
+				return true
+			})
+		}
+	}
+	buildPlan := func(pool []*SegmentInfo) *datapb.CompactionPlan {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(selectFrom(pool))
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:           1,
+			Type:             datapb.CompactionType_HashSplitCompaction,
+			Channel:          srcChannel,
+			PartitionID:      partitionID,
+			InputSegments:    []int64{200},
+			Schema:           &schemapb.CollectionSchema{Version: 1},
+			HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+			HashSplitModulus: 2,
+		}, nil, meta, newMockVersionManager())
+		alloc := allocator.NewMockAllocator(s.T())
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+		task.allocator = alloc
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		return plan
+	}
+
+	s.Run("the source L0s ride along, in id order, with their deltalogs", func() {
+		plan := buildPlan([]*SegmentInfo{input, levelZero(302, partitionID), levelZero(301, partitionID)})
+		s.Require().Len(plan.GetSegmentBinlogs(), 3)
+		s.EqualValues(200, plan.GetSegmentBinlogs()[0].GetSegmentID())
+		s.Equal(datapb.SegmentLevel_L0, plan.GetSegmentBinlogs()[1].GetLevel())
+		s.EqualValues([]int64{301, 302}, lo.Map(plan.GetSegmentBinlogs()[1:],
+			func(seg *datapb.CompactionSegmentBinlogs, _ int) int64 { return seg.GetSegmentID() }))
+		s.Equal("delta/301", plan.GetSegmentBinlogs()[1].GetDeltalogs()[0].GetBinlogs()[0].GetLogPath())
+		s.Equal("manifest/301", plan.GetSegmentBinlogs()[1].GetManifest())
+	})
+
+	s.Run("the L0s are delete sources, not inputs", func() {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(selectFrom([]*SegmentInfo{input, levelZero(301, partitionID)}))
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID:           1,
+			Type:             datapb.CompactionType_HashSplitCompaction,
+			Channel:          srcChannel,
+			PartitionID:      partitionID,
+			InputSegments:    []int64{200},
+			Schema:           &schemapb.CollectionSchema{Version: 1},
+			HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+			HashSplitModulus: 2,
+		}, nil, meta, newMockVersionManager())
+		alloc := allocator.NewMockAllocator(s.T())
+		alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+		task.allocator = alloc
+
+		plan, err := task.BuildCompactionRequest()
+		s.Require().NoError(err)
+		s.Len(plan.GetSegmentBinlogs(), 2)
+		// Nothing put the L0 on the task's InputSegments, which is the only list
+		// the commit retires and the inspector marks compacting. Several plans of
+		// one task share these L0s; retiring them per plan would pull them out
+		// from under the plans still running.
+		s.EqualValues([]int64{200}, task.GetTaskProto().GetInputSegments())
+	})
+
+	s.Run("another partition's L0 is left behind", func() {
+		plan := buildPlan([]*SegmentInfo{input, levelZero(301, partitionID+1), levelZero(302, common.AllPartitionsID)})
+		s.Require().Len(plan.GetSegmentBinlogs(), 2)
+		s.EqualValues(302, plan.GetSegmentBinlogs()[1].GetSegmentID())
+	})
+
+	s.Run("a dropped L0 is not a delete source", func() {
+		dropped := levelZero(301, partitionID)
+		dropped.State = commonpb.SegmentState_Dropped
+		plan := buildPlan([]*SegmentInfo{input, dropped})
+		s.Len(plan.GetSegmentBinlogs(), 1)
+	})
+
+	s.Run("no source L0 leaves the plan exactly as before", func() {
+		plan := buildPlan([]*SegmentInfo{input})
+		s.Len(plan.GetSegmentBinlogs(), 1)
+	})
+}
+
+// An L0 compaction commit moves deletes from the source's L0s into the input's
+// own deltalogs and retires those L0s in one write. A plan that read the input
+// before such a commit and the L0 set after it would carry the deletes in
+// neither, and its commit drops the input, so those rows would come back on the
+// targets for good. The input and the L0 set are read from one meta snapshot.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitReadsInputAndLevelZeroTogether() {
+	const (
+		srcChannel  = "src"
+		partitionID = int64(10)
+		foldedDelta = "delta/folded-by-l0-compaction"
+	)
+	// Before the L0 commit: the input has no deltalog, the delete is in an L0.
+	before := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: srcChannel,
+		PartitionID: partitionID, State: commonpb.SegmentState_Flushed,
+	}}
+	// After it: the delete is in the input's deltalogs, the L0 is Dropped.
+	after := before.Clone()
+	after.Deltalogs = []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: foldedDelta}}}}
+	retiredL0 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 301, Level: datapb.SegmentLevel_L0, InsertChannel: srcChannel,
+		PartitionID: partitionID, State: commonpb.SegmentState_Dropped,
+		Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogPath: "delta/301"}}}},
+	}}
+
+	meta := NewMockCompactionMeta(s.T())
+	// A per-segment read still sees the state before the commit; the channel
+	// scan runs after it.
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(before).Maybe()
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			return lo.Filter([]*SegmentInfo{after, retiredL0}, func(info *SegmentInfo, _ int) bool {
+				for _, filter := range filters {
+					if !filter.Match(info) {
+						return false
+					}
+				}
+				return true
+			})
+		})
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_HashSplitCompaction,
+		Channel:          srcChannel,
+		PartitionID:      partitionID,
+		InputSegments:    []int64{200},
+		Schema:           &schemapb.CollectionSchema{Version: 1},
+		HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+		HashSplitModulus: 2,
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	var paths []string
+	for _, seg := range plan.GetSegmentBinlogs() {
+		for _, field := range seg.GetDeltalogs() {
+			for _, binlog := range field.GetBinlogs() {
+				paths = append(paths, binlog.GetLogPath())
+			}
+		}
+	}
+	s.Contains(paths, foldedDelta, "the delete the L0 commit moved must reach the plan")
+}
+
+// A rewrite input the channel scan does not find healthy -- dropped by an
+// earlier plan, or not on the plan's channel -- refuses the plan.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_HashSplitInputMissingFromTheScan() {
+	dropped := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: "src", State: commonpb.SegmentState_Dropped,
+	}}
+	meta := NewMockCompactionMeta(s.T())
+	meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+			for _, filter := range filters {
+				if !filter.Match(dropped) {
+					return nil
+				}
+			}
+			return []*SegmentInfo{dropped}
+		})
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:           1,
+		Type:             datapb.CompactionType_HashSplitCompaction,
+		Channel:          "src",
+		InputSegments:    []int64{200},
+		Schema:           &schemapb.CollectionSchema{Version: 1},
+		HashSplitTargets: []*datapb.SplitShardTaskTarget{{Vchannel: "t0"}, {Vchannel: "t1"}},
+		HashSplitModulus: 2,
+	}, nil, meta, newMockVersionManager())
+	_, err := task.BuildCompactionRequest()
+	s.ErrorIs(err, merr.ErrSegmentNotFound)
+}
+
+// A rewrite plan carries its source channel's L0 delete set and the datanode
+// folds it per plan, so the task slot prices that the way an L0 compaction
+// prices the delete set it applies -- otherwise N concurrent rewrites of a
+// large backlog all look like one ordinary mix compaction to admission control.
+func (s *MixCompactionTaskSuite) TestGetTaskSlot_HashSplitPricesItsDeleteSources() {
+	const (
+		srcChannel  = "src"
+		partitionID = int64(10)
+		deleteRows  = int64(50000)
+	)
+	pt := paramtable.Get()
+	base := pt.DataCoordCfg.MixCompactionSlotUsage.GetAsInt64()
+	factor := pt.DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+	batch := int64(pt.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
+	s.Require().Positive(batch)
+
+	levelZero := func(id, rows int64) *SegmentInfo {
+		return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: id, Level: datapb.SegmentLevel_L0, InsertChannel: srcChannel,
+			PartitionID: partitionID, State: commonpb.SegmentState_Flushed,
+			Stats: &datapb.Statistics{DeleteNumRows: rows},
+		}}
+	}
+	newTask := func(taskType datapb.CompactionType, pool []*SegmentInfo) (*mixCompactionTask, *MockCompactionMeta) {
+		meta := NewMockCompactionMeta(s.T())
+		meta.EXPECT().SelectSegments(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, filters ...SegmentFilter) []*SegmentInfo {
+				return lo.Filter(pool, func(info *SegmentInfo, _ int) bool {
+					for _, filter := range filters {
+						if !filter.Match(info) {
+							return false
+						}
+					}
+					return true
+				})
+			}).Maybe()
+		return newMixCompactionTask(&datapb.CompactionTask{
+			PlanID: 1, Type: taskType, Channel: srcChannel, PartitionID: partitionID,
+			InputSegments: []int64{200}, Schema: &schemapb.CollectionSchema{Version: 1},
+		}, nil, meta, newMockVersionManager()), meta
+	}
+
+	s.Run("the delete backlog is priced on top of the flat rewrite cost", func() {
+		task, _ := newTask(datapb.CompactionType_HashSplitCompaction,
+			[]*SegmentInfo{levelZero(301, deleteRows/2), levelZero(302, deleteRows/2)})
+		s.Equal(base+factor*deleteRows/batch, task.GetTaskSlot())
+		s.Greater(task.GetTaskSlot(), base, "the check is meaningless if the term is zero")
+	})
+
+	s.Run("no backlog prices exactly as an ordinary mix compaction", func() {
+		task, _ := newTask(datapb.CompactionType_HashSplitCompaction, nil)
+		s.Equal(base, task.GetTaskSlot())
+	})
+
+	s.Run("the scan runs once and the slot is cached", func() {
+		task, meta := newTask(datapb.CompactionType_HashSplitCompaction, []*SegmentInfo{levelZero(301, deleteRows)})
+		first := task.GetTaskSlot()
+		s.Equal(first, task.GetTaskSlot())
+		meta.AssertNumberOfCalls(s.T(), "SelectSegments", 1)
+	})
+
+	s.Run("a sort compaction still prices by segment size", func() {
+		// The sort branch shares the switch the hash-split branch was added to;
+		// pin that adding the case left it alone.
+		meta := NewMockCompactionMeta(s.T())
+		segment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+			ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: srcChannel,
+			State: commonpb.SegmentState_Flushed,
+			Binlogs: []*datapb.FieldBinlog{{FieldID: 100, Binlogs: []*datapb.Binlog{
+				{LogID: 1, LogSize: 64 * 1024 * 1024, MemorySize: 64 * 1024 * 1024},
+			}}},
+		}}
+		meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(segment).Once()
+		task := newMixCompactionTask(&datapb.CompactionTask{
+			PlanID: 1, Type: datapb.CompactionType_SortCompaction, Channel: srcChannel,
+			PartitionID: partitionID, InputSegments: []int64{200},
+			Schema: &schemapb.CollectionSchema{Version: 1},
+		}, nil, meta, newMockVersionManager())
+		s.Equal(calculateStatsTaskSlot(segment.getSegmentSize()), task.GetTaskSlot())
+	})
+
+	s.Run("a mix compaction is not repriced", func() {
+		task, meta := newTask(datapb.CompactionType_MixCompaction, []*SegmentInfo{levelZero(301, deleteRows)})
+		s.Equal(base, task.GetTaskSlot())
+		meta.AssertNumberOfCalls(s.T(), "SelectSegments", 0)
+	})
+}
+
+func TestHashSplitDeleteSourceSlot(t *testing.T) {
+	pt := paramtable.Get()
+	factor := pt.DataCoordCfg.L0DeleteCompactionSlotUsage.GetAsInt64()
+	batch := int64(pt.CommonCfg.BloomFilterApplyBatchSize.GetAsInt())
+
+	assert.Zero(t, hashSplitDeleteSourceSlot(0, batch, factor), "no backlog costs nothing extra")
+	assert.Zero(t, hashSplitDeleteSourceSlot(-1, batch, factor))
+	// A zero batch size (misconfiguration) must not divide by zero.
+	assert.Zero(t, hashSplitDeleteSourceSlot(10*batch, 0, factor))
+	// The L0 task's own shape: factor * rows / batch, multiply first. No min-1
+	// floor, unlike l0CompactionTask.GetTaskSlot -- this is an addend, not the
+	// whole price, and the flat mix cost is already the floor.
+	assert.Equal(t, factor*(batch-1)/batch, hashSplitDeleteSourceSlot(batch-1, batch, factor))
+	assert.Equal(t, factor, hashSplitDeleteSourceSlot(batch, batch, factor))
+	assert.Equal(t, 10*factor, hashSplitDeleteSourceSlot(10*batch, batch, factor))
+}
+
+// A mix compaction must not start carrying L0s: its own commit would retire them
+// as inputs, and L0 compaction is what folds deletes for it.
+func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixCarriesNoLevelZero() {
+	meta := NewMockCompactionMeta(s.T())
+	meta.EXPECT().GetHealthySegment(mock.Anything, int64(200)).Return(&SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+		ID: 200, Level: datapb.SegmentLevel_L1, InsertChannel: "src", State: commonpb.SegmentState_Flushed,
+	}}).Once()
+	task := newMixCompactionTask(&datapb.CompactionTask{
+		PlanID:        1,
+		Type:          datapb.CompactionType_MixCompaction,
+		Channel:       "src",
+		InputSegments: []int64{200},
+		Schema:        &schemapb.CollectionSchema{Version: 1},
+	}, nil, meta, newMockVersionManager())
+	alloc := allocator.NewMockAllocator(s.T())
+	alloc.EXPECT().AllocN(mock.Anything).Return(int64(100), int64(200), nil).Once()
+	task.allocator = alloc
+
+	plan, err := task.BuildCompactionRequest()
+	s.Require().NoError(err)
+	s.Len(plan.GetSegmentBinlogs(), 1)
+	// SelectSegments was never called: mockery fails the test on an unexpected call.
 }
 
 func (s *MixCompactionTaskSuite) TestBuildCompactionRequest_MixFileResources() {

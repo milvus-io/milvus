@@ -92,6 +92,18 @@ func (b *StoppingBalancer) BalanceReplica(ctx context.Context, replica *meta.Rep
 	return segmentPlans, channelPlans
 }
 
+// BalanceReplicaSegments plans only the segments to move off the replica's
+// stopping nodes, whether or not channels are left there. BalanceReplica plans
+// segments only once no channel is left to move; a caller that has to hold a
+// channel on a stopping node (a shard split's source, see
+// meta.ShardSplitFreeze) uses this to drain the rest regardless.
+func (b *StoppingBalancer) BalanceReplicaSegments(ctx context.Context, replica *meta.Replica) []assign.SegmentAssignPlan {
+	if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
+		return nil
+	}
+	return b.balanceSegments(ctx, NewBalanceReport(), replica)
+}
+
 func (b *StoppingBalancer) balanceChannels(ctx context.Context, br *balanceReport, replica *meta.Replica) []assign.ChannelAssignPlan {
 	rwNodes, roNodes := b.GetRWAndRONodesForChannels(replica)
 

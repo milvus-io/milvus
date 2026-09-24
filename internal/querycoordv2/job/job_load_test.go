@@ -981,6 +981,8 @@ func (suite *IncrementalExpansionSuite) TestExpandedCollectionKeepsServingWhileN
 	// The observer reads the next target's version to decide whether a
 	// figure of 100 may be reused; a constant is enough for a mock target.
 	targetMgr.EXPECT().GetCollectionTargetVersion(mock.Anything, mock.Anything, mock.Anything).Return(int64(1)).Maybe()
+	// no shard split: the next target excludes no split window target.
+	targetMgr.EXPECT().GetSplitWindowExclusions(mock.Anything, mock.Anything, mock.Anything).Return(nil, true).Maybe()
 
 	// Node 1 belongs to rgA's replica and already serves the only channel
 	// target; rgB's replica has no node carrying anything.

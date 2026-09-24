@@ -268,6 +268,14 @@ func (suite *StoppingBalancerTestSuite) TestBalanceReplica_WithRONodes() {
 			suite.Equal(replicaID, plan.Replica.GetID())
 		}
 	}
+
+	// A caller that holds the channel on the stopping node still drains the
+	// segments, by planning them alone.
+	suite.Equal(suite.balancer.balanceSegments(ctx, NewBalanceReport(), gotReplica),
+		suite.balancer.BalanceReplicaSegments(ctx, gotReplica))
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key)
+	suite.Empty(suite.balancer.BalanceReplicaSegments(ctx, gotReplica), "stopping balance disabled")
 }
 
 func (suite *StoppingBalancerTestSuite) TestBalanceReplica_NoRWNodes() {

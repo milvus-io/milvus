@@ -1094,6 +1094,24 @@ func TestComponentParam(t *testing.T) {
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {
 		Params := &params.DataCoordCfg
+		// Off by default, and refreshable: it is read each time a split is issued.
+		assert.False(t, Params.ShardSplitEnable.GetAsBool())
+		params.Save(Params.ShardSplitEnable.Key, "true")
+		assert.True(t, Params.ShardSplitEnable.GetAsBool())
+		params.Reset(Params.ShardSplitEnable.Key)
+		assert.False(t, Params.ShardSplitEnable.GetAsBool())
+		// The trigger's thresholds and the manager's cadence.
+		assert.Equal(t, time.Hour, Params.ShardSplitCheckInterval.GetAsDuration(time.Second))
+		assert.Equal(t, 10*time.Second, Params.ShardSplitTaskInterval.GetAsDuration(time.Second))
+		assert.Equal(t, int64(2048), Params.ShardSplitMaxShardSize.GetAsInt64())
+		assert.Equal(t, int64(500000000), Params.ShardSplitMaxShardRows.GetAsInt64())
+		assert.Equal(t, 1, Params.ShardSplitMaxConcurrentTasks.GetAsInt())
+		assert.Equal(t, 64, Params.ShardSplitRewriteBatchSize.GetAsInt())
+		assert.Equal(t, 0.05, Params.ShardSplitMinSiblingRatio.GetAsFloat())
+		params.Save(Params.ShardSplitMaxShardRows.Key, "2000")
+		assert.Equal(t, int64(2000), Params.ShardSplitMaxShardRows.GetAsInt64())
+		params.Reset(Params.ShardSplitMaxShardRows.Key)
+
 		assert.Equal(t, 24*60*60*time.Second, Params.SegmentMaxLifetime.GetAsDuration(time.Second))
 		assert.True(t, Params.EnableGarbageCollection.GetAsBool())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)

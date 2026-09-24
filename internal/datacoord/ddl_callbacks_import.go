@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -299,6 +300,9 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := merr.CheckRPCCall(coll, err); err != nil {
 		return 0, false, err
 	}
+	if err := s.refuseImportOnMovingShards(collectionID, coll.GetVirtualChannelNames(), vchannels); err != nil {
+		return 0, false, err
+	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
@@ -349,6 +353,41 @@ func (s *Server) broadcastImport(ctx context.Context,
 		mlog.FieldJobID(originalJobID),
 		keyFingerprint)
 	return originalJobID, true, nil
+}
+
+// refuseImportOnMovingShards refuses an import that names a shard a shard
+// split is moving -- the source or a target of a split that is not Done -- or
+// a shard the collection no longer lists, such as a source a split retired.
+// Such a request comes from a proxy whose meta predates the split (the proxy
+// itself refuses an import into a collection a split has touched, on the meta
+// it holds).
+//
+// It runs under the collection's resource keys, the ones a split's write
+// switch and adoption are issued under, so the vchannels are judged against
+// the collection as it stands: an import let through here cannot name a shard
+// a later split fences without that split's drain seeing the job. Let through
+// onto a source, its rows would land after the drain held, the split could not
+// adopt, and an adoption already broadcast would hold the collection's keys --
+// this import's and every other DDL's -- until it did.
+//
+// A System error, and a retriable one: nothing in the request is at fault,
+// and the split's own broadcasts refresh the proxy's meta, after which the
+// retry is judged on the current shards.
+func (s *Server) refuseImportOnMovingShards(collectionID int64, listed []string, vchannels []string) error {
+	for _, vchannel := range vchannels {
+		if s.shardSplitManager != nil && s.shardSplitManager.IsVChannelSplitting(vchannel) {
+			return merr.WrapErrServiceUnavailableMsg(
+				"import into collection %d names vchannel %s, which a shard split is moving; retry once the collection's shards are refreshed",
+				collectionID, vchannel)
+		}
+		// An empty list is a record that carries no vchannels to judge by.
+		if len(listed) > 0 && !slices.Contains(listed, vchannel) {
+			return merr.WrapErrServiceUnavailableMsg(
+				"import into collection %d names vchannel %s, which the collection no longer lists; retry once the collection's shards are refreshed",
+				collectionID, vchannel)
+		}
+	}
+	return nil
 }
 
 func (c *DDLCallbacks) registerImportCallbacks() {

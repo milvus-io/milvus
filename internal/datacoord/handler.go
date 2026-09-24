@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"time"
@@ -139,6 +140,35 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // dropped segmentIDs    ---> dropped segments
 // level zero segmentIDs ---> L0 segments
 func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
+	var splitTargets []string
+	if manager := h.s.shardSplitManager; manager != nil {
+		splitTargets = manager.SplitTargetsOfSource(channel.GetName())
+	}
+	return h.GetQueryVChanPositionsOfSplitFamily(channel, splitTargets, partitionIDs...)
+}
+
+// getRealSegmentsForSplitFamily returns the channel's segments plus, when the
+// channel is the source of a lineage window, the flushed non-L0 segments of its
+// splitTargets (inheritedBySplitSource): the rewrite outputs published there
+// and the data flushed from the target WALs during the window.
+func (h *ServerHandler) getRealSegmentsForSplitFamily(channelName string, splitTargets []string) []*SegmentInfo {
+	segments := h.s.meta.GetRealSegmentsForChannel(channelName)
+	for _, target := range splitTargets {
+		for _, segment := range h.s.meta.GetRealSegmentsForChannel(target) {
+			if inheritedBySplitSource(segment) {
+				segments = append(segments, segment)
+			}
+		}
+	}
+	return segments
+}
+
+// GetQueryVChanPositionsOfSplitFamily is GetQueryVChanPositions over a split
+// family the caller has already resolved: splitTargets are the targets whose
+// flushed segments the channel's view takes in, nil when it is no split source.
+// A caller that also attributes the targets to the channel passes the family it
+// attributed, so the view and the attribution come from one task-state read.
+func (h *ServerHandler) GetQueryVChanPositionsOfSplitFamily(channel RWChannel, splitTargets []string, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	filterWithPartition := len(validPartitions) > 0
 	validPartitionsMap := make(map[int64]bool)
@@ -163,7 +193,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	)
 
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
+	segments := h.getRealSegmentsForSplitFamily(channel.GetName(), splitTargets)
 
 	validSegmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(context.Background(), h, h.s.meta, false, segments...)
@@ -192,6 +222,13 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		case !isFlushState(s.GetState()) || s.GetIsInvisible():
 			growingIDs.Insert(s.GetID())
 		case s.GetLevel() == datapb.SegmentLevel_L0:
+			if s.GetInsertChannel() != channel.GetName() {
+				// The L0 list and the delete checkpoint are the channel's own,
+				// even over a split family: a target's L0 is loaded by the
+				// target, and its later start would let the source drop
+				// buffered deletes that segments it loads later still need.
+				continue
+			}
 			levelZeroIDs.Insert(s.GetID())
 			// use smallest start position of l0 segments as deleteCheckPoint, so query coord will only maintain stream delete record  after this ts
 			if deleteCheckPoint == nil || s.GetStartPosition().GetTimestamp() < deleteCheckPoint.GetTimestamp() {
@@ -226,7 +263,19 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		return indexed.Contain(segID) || ((validSegmentInfos[segID].GetIsSorted() || validSegmentInfos[segID].GetIsSortedByNamespace()) && validSegmentInfos[segID].GetNumOfRows() < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64())
 	}
 
-	fallbackParentReady := func(segID UniqueID) bool { return indexed.Contain(segID) }
+	// The index fallback serves an unindexed child through its ready parents,
+	// which is only sound while the parent still answers the same rows as the
+	// child. A shard split rewrite's parent does not: its outputs carry the
+	// deletes of the source channel's L0s, folded in while the rows were
+	// routed, and those L0s are retired once nothing on the source is left to
+	// fold them. The parent's own deltalogs never received them, so a read
+	// served through it would resurrect deleted rows. The fallback is refused
+	// for such a parent and the outputs serve unindexed instead: the rows stay
+	// readable, brute-force until their index builds.
+	rewriteInputs := crossChannelParents(validSegmentInfos)
+	fallbackParentReady := func(segID UniqueID) bool {
+		return indexed.Contain(segID) && !rewriteInputs.Contain(segID)
+	}
 	flushedIDs, droppedIDs = retrieveSegment(validSegmentInfos, flushedIDs, droppedIDs, segmentIndexed, fallbackParentReady)
 
 	seekPosition := h.GetChannelSeekPosition(channel, partitionIDs...)
@@ -234,6 +283,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	if len(levelZeroIDs) == 0 {
 		deleteCheckPoint = seekPosition
 	}
+	deleteCheckPoint = h.clampSplitSourceDeleteCheckpoint(channel.GetName(), splitTargets, deleteCheckPoint)
 
 	return &datapb.VchannelInfo{
 		CollectionID:           channel.GetCollectionID(),
@@ -245,7 +295,69 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
 		PartitionStatsVersions: partStatsVersionsMap,
 		DeleteCheckpoint:       deleteCheckPoint,
+		// The split's targets while it has not finished on this cluster, in
+		// the same info as the seek position they qualify: a QueryNode
+		// recovers the split's children from a source only when it is set.
+		// splitTargets is the family the view was built over, so the field
+		// and the merged segments come from one task-state read.
+		SplitTargetChannels: slices.Clone(splitTargets),
 	}
+}
+
+// clampSplitSourceDeleteCheckpoint holds a split source's delete checkpoint at
+// or below its own T_switch for as long as its split is active (not Done or
+// Aborted).
+//
+// The delegator discards every buffered delete and every L0 below the delete
+// checkpoint. While a source L0 is alive it pins the checkpoint below T_switch,
+// but the rewrite retires those L0s once nothing on the source is left to fold
+// them, and the checkpoint would then jump to the channel's own seek position,
+// at or past T_switch and advancing. The source delegator would discard the
+// deletes its children forward from the target WALs, and any segment loaded
+// into it afterwards -- a querynode restart, a balance move, a target-flushed
+// segment newly attributed to the source -- would come up without them. The
+// rewrite's own outputs are safe either way, their deletes are folded in; a
+// target-flushed segment is not, so the ceiling holds for the whole window.
+//
+// splitTargets is the caller's own family read: non-empty exactly when the
+// channel is the source of an active split. Only the timestamp is lowered, on a
+// copy (the position may be an L0's own StartPosition out of meta); the delete
+// checkpoint is consumed by timestamp alone.
+func (h *ServerHandler) clampSplitSourceDeleteCheckpoint(
+	channelName string,
+	splitTargets []string,
+	deleteCheckPoint *msgpb.MsgPosition,
+) *msgpb.MsgPosition {
+	if len(splitTargets) == 0 || deleteCheckPoint == nil || h.s.shardSplitManager == nil {
+		return deleteCheckPoint
+	}
+	fence := h.s.shardSplitManager.activeSplitSourceFenceTick(channelName)
+	// Fence not recorded yet: the source still takes writes, its own L0s still
+	// carry them, and there is no tick to clamp to.
+	if fence == 0 || deleteCheckPoint.GetTimestamp() <= fence {
+		return deleteCheckPoint
+	}
+	clamped := proto.Clone(deleteCheckPoint).(*msgpb.MsgPosition)
+	clamped.Timestamp = fence
+	return clamped
+}
+
+// crossChannelParents collects the segments in the view that have a compaction
+// child on a DIFFERENT vchannel: the inputs of a shard split rewrite, and
+// nothing else -- a mix, sort or clustering compaction writes its outputs back
+// to the channel it read. A parent's children are all one way or the other: one
+// plan writes every output of one input.
+func crossChannelParents(validSegmentInfos map[int64]*SegmentInfo) typeutil.UniqueSet {
+	parents := make(typeutil.UniqueSet)
+	for _, child := range validSegmentInfos {
+		for _, parentID := range child.GetCompactionFrom() {
+			parent, ok := validSegmentInfos[parentID]
+			if ok && parent != nil && parent.GetInsertChannel() != child.GetInsertChannel() {
+				parents.Insert(parentID)
+			}
+		}
+	}
+	return parents
 }
 
 func retrieveSegment(validSegmentInfos map[int64]*SegmentInfo,

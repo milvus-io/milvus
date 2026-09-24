@@ -110,22 +110,7 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 	return loadInfo
 }
 
+// MergeDmChannelInfo is meta.MergeDmChannelInfo.
 func MergeDmChannelInfo(infos []*datapb.VchannelInfo) *meta.DmChannel {
-	var dmChannel *meta.DmChannel
-
-	for _, info := range infos {
-		if dmChannel == nil {
-			dmChannel = meta.DmChannelFromVChannel(info)
-			continue
-		}
-
-		if info.SeekPosition.GetTimestamp() < dmChannel.SeekPosition.GetTimestamp() {
-			dmChannel.SeekPosition = info.SeekPosition
-		}
-		dmChannel.DroppedSegmentIds = append(dmChannel.DroppedSegmentIds, info.DroppedSegmentIds...)
-		dmChannel.UnflushedSegmentIds = append(dmChannel.UnflushedSegmentIds, info.UnflushedSegmentIds...)
-		dmChannel.FlushedSegmentIds = append(dmChannel.FlushedSegmentIds, info.FlushedSegmentIds...)
-	}
-
-	return dmChannel
+	return meta.MergeDmChannelInfo(infos)
 }

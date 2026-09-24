@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/lock"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -98,6 +99,14 @@ type TargetObserver struct {
 
 	keylocks *lock.KeyLock[int64]
 
+	// splitState tells when a shard split window ended, so a next target
+	// pulled inside it is refreshed right away. nil disables that refresh.
+	splitState *meta.ShardSplitStateCache
+
+	// invalidateShardLeaders drops the proxies' cached shard leaders of the
+	// given collections. nil disables it. Set before Start.
+	invalidateShardLeaders func(collectionIDs ...int64)
+
 	startOnce sync.Once
 	stopOnce  sync.Once
 }
@@ -110,6 +119,41 @@ func NewTargetObserver(
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
 ) *TargetObserver {
+	return newTargetObserver(meta, targetMgr, distMgr, broker, cluster, nodeMgr, nil)
+}
+
+// NewTargetObserverWithSplitState is NewTargetObserver with the shard-split
+// state cache the observer checks to refresh a next target pulled inside a split
+// window as soon as that window ends. The querycoord server passes the same
+// cache as the target manager and the checkers.
+//
+// It panics on a nil cache: a caller that means to split must not silently lose
+// the window-end refresh. An observer without one is built by NewTargetObserver.
+func NewTargetObserverWithSplitState(
+	meta *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	distMgr *meta.DistributionManager,
+	broker meta.Broker,
+	cluster session.Cluster,
+	nodeMgr *session.NodeManager,
+	splitState *meta.ShardSplitStateCache,
+) *TargetObserver {
+	if splitState == nil {
+		panic(merr.WrapErrServiceInternal("NewTargetObserverWithSplitState requires a shard split state cache",
+			"build an observer without one with NewTargetObserver"))
+	}
+	return newTargetObserver(meta, targetMgr, distMgr, broker, cluster, nodeMgr, splitState)
+}
+
+func newTargetObserver(
+	meta *meta.Meta,
+	targetMgr meta.TargetManagerInterface,
+	distMgr *meta.DistributionManager,
+	broker meta.Broker,
+	cluster session.Cluster,
+	nodeMgr *session.NodeManager,
+	splitState *meta.ShardSplitStateCache,
+) *TargetObserver {
 	result := &TargetObserver{
 		meta:                 meta,
 		targetMgr:            targetMgr,
@@ -117,6 +161,7 @@ func NewTargetObserver(
 		broker:               broker,
 		cluster:              cluster,
 		nodeMgr:              nodeMgr,
+		splitState:           splitState,
 		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
 		updateChan:           make(chan targetUpdateRequest, 10),
 		readyNotifiers:       make(map[int64][]chan struct{}),
@@ -319,7 +364,9 @@ func (ob *TargetObserver) check(ctx context.Context, collectionID int64) {
 		// sync next target to delegator if current target not exist, to support partial search
 		if !ob.targetMgr.IsCurrentTargetExist(ctx, collectionID, -1) {
 			newVersion := ob.targetMgr.GetCollectionTargetVersion(ctx, collectionID, meta.NextTarget)
-			ob.syncNextTargetToDelegator(ctx, collectionID, ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)), newVersion)
+			delegators := ob.excludeSplitWindowTargets(ctx, collectionID,
+				ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collectionID)))
+			ob.syncNextTargetToDelegator(ctx, collectionID, delegators, newVersion)
 		}
 	}
 
@@ -418,7 +465,94 @@ func (ob *TargetObserver) clean() {
 }
 
 func (ob *TargetObserver) shouldUpdateNextTarget(ctx context.Context, collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(ctx, collectionID) || ob.isNextTargetExpired(collectionID)
+	return !ob.targetMgr.IsNextTargetExist(ctx, collectionID) ||
+		ob.isNextTargetExpired(collectionID) ||
+		ob.isSplitWindowOver(ctx, collectionID)
+}
+
+// isSplitWindowOver reports whether the next target was pulled inside a shard
+// split window that has since ended: it marks window targets, and a split
+// state read taken AFTER this next target's own pull shows none of them
+// Creating any more. Such a next target can never be promoted (its window
+// targets are held back from sync), so it is refreshed at once instead of
+// waiting out NextTargetSurviveTime. Liveness only: correctness rests on the
+// hold-back.
+//
+// The AFTER guard matters because the freshest split-state entry the cache can
+// produce can itself predate the pull: either this one read raced the fence
+// that opened the window, or -- the case that motivates the guard -- the
+// coordinator has been unreachable ever since, and ReadShardStates keeps
+// falling back to that same pre-pull entry on every check (its fetchedAt never
+// advances). Without the guard, such an entry looks like "nothing Creating" on
+// every single check and declares the window over every time, re-pulling on
+// every cycle for as long as the coordinator stays down. With the guard, a
+// state read that has not caught up with the pull yet answers "not known", and
+// the window-end check falls back to waiting out NextTargetSurviveTime
+// instead; once a read lands after the pull, it marks fresh window targets
+// again and the window-end check resumes normally.
+func (ob *TargetObserver) isSplitWindowOver(ctx context.Context, collectionID int64) bool {
+	if ob.splitState == nil {
+		return false
+	}
+	window := ob.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	if len(window) == 0 {
+		return false
+	}
+	pulledAt, _ := ob.nextTargetLastUpdate.Get(collectionID)
+	creatingChannels, ok := ob.splitState.CreatingTargetChannelsAsOf(ctx, collectionID, pulledAt)
+	if !ok {
+		return false
+	}
+	creating := typeutil.NewSet(creatingChannels...)
+	for channel := range window {
+		if creating.Contain(channel) {
+			return false
+		}
+	}
+	mlog.Info(ctx, "shard split window of the next target has ended, refresh the next target",
+		mlog.FieldCollectionID(collectionID),
+		mlog.Strings("windowTargets", window.Collect()))
+	return true
+}
+
+// excludeSplitWindowTargets drops the delegators of the channels the next target
+// marks as split window targets (see meta.ShardStateSnapshot.SplitWindowTargets):
+// every channel of the pull that the state read before it did not see Normal,
+// Splitting or Dropped, which covers every split target still Creating in the
+// pull. In such a snapshot datacoord attributes the targets' flushed data to
+// their source, so a target delegator owns no sealed segment in it and looks
+// data-ready, yet syncing it would make it serviceable with none of its data, and
+// promoting the snapshot would route reads to it directly and through the
+// source's fan-out. A target's first sync must come from a target pulled after
+// the source was delisted.
+//
+// A source reads Normal or Splitting in any state read taken after it was itself
+// adopted, so it is not marked and its delegator keeps being synced from window
+// snapshots: it serves the whole split key range through lineage attribution
+// until the flip.
+func (ob *TargetObserver) excludeSplitWindowTargets(ctx context.Context, collectionID int64, delegators []*meta.DmChannel) []*meta.DmChannel {
+	if len(delegators) == 0 {
+		return delegators
+	}
+	window := ob.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	if len(window) == 0 {
+		return delegators
+	}
+	kept := make([]*meta.DmChannel, 0, len(delegators))
+	heldBack := typeutil.NewSet[string]()
+	for _, delegator := range delegators {
+		if window.Contain(delegator.GetChannelName()) {
+			heldBack.Insert(delegator.GetChannelName())
+			continue
+		}
+		kept = append(kept, delegator)
+	}
+	if len(heldBack) > 0 {
+		mlog.RatedInfo(ctx, rate.Limit(10), "hold back split target delegators from a next target pulled inside the split window",
+			mlog.FieldCollectionID(collectionID),
+			mlog.Strings("channels", heldBack.Collect()))
+	}
+	return kept
 }
 
 func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
@@ -433,6 +567,10 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 	log := mlog.With(mlog.FieldCollectionID(collectionID))
 
 	log.RatedInfo(ctx, rate.Limit(10), "observer trigger update next target")
+	var windowBefore typeutil.Set[string]
+	if ob.splitState != nil {
+		windowBefore = ob.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	}
 	err := ob.targetMgr.UpdateCollectionNextTarget(ctx, collectionID)
 	if err != nil {
 		log.Warn(ctx, "failed to update next target for collection",
@@ -440,7 +578,29 @@ func (ob *TargetObserver) updateNextTarget(ctx context.Context, collectionID int
 		return err
 	}
 	ob.updateNextTargetTimestamp(collectionID)
+	ob.refreshShardStatesOnWindowChange(ctx, collectionID, windowBefore)
 	return nil
+}
+
+// refreshShardStatesOnWindowChange makes the checkers re-read the collection's
+// shard states when a pull changed its split window marks: the marks opening
+// give a fence away, and the marks going away an adoption. Either way the
+// cached states the freeze and the watch rules read may predate it -- the
+// pull's own state read can have failed and fallen back to that cached read --
+// and they should not be trusted for the rest of their TTL.
+func (ob *TargetObserver) refreshShardStatesOnWindowChange(ctx context.Context, collectionID int64, windowBefore typeutil.Set[string]) {
+	if ob.splitState == nil {
+		return
+	}
+	windowAfter := ob.targetMgr.GetSplitWindowTargets(ctx, collectionID, meta.NextTarget)
+	if len(windowBefore) == len(windowAfter) && windowBefore.Contain(windowAfter.Collect()...) {
+		return
+	}
+	mlog.Info(ctx, "split window marks changed, refresh the cached shard states",
+		mlog.FieldCollectionID(collectionID),
+		mlog.Strings("before", windowBefore.Collect()),
+		mlog.Strings("after", windowAfter.Collect()))
+	ob.splitState.Invalidate(collectionID)
 }
 
 func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
@@ -508,17 +668,49 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		}
 		readyDelegatorsInCollection = append(readyDelegatorsInCollection, readyDelegatorsInReplica...)
 	}
+	// Before the sync AND before the all-channels-synced check: a held-back
+	// split target is then neither synced nor counted, so a window snapshot is
+	// never promoted.
+	readyDelegatorsInCollection = ob.excludeSplitWindowTargets(ctx, collectionID, readyDelegatorsInCollection)
 
 	syncSuccess := ob.syncNextTargetToDelegator(ctx, collectionID, readyDelegatorsInCollection, newVersion)
 	syncedChannelNames := lo.Uniq(lo.Map(readyDelegatorsInCollection, func(ch *meta.DmChannel, _ int) string { return ch.ChannelName }))
-	// only after all channel are synced, we can consider the current target is ready
-	if !syncSuccess || !lo.Every(syncedChannelNames, lo.Keys(channelNames)) {
+
+	// The channels that must be synced before the current target can advance are
+	// the ones the promotion will actually list. For a next target pulled inside
+	// a shard split window that is its channels minus the window targets, which
+	// are held back above and can therefore never be among the synced ones:
+	// requiring them would keep the collection without a usable current target
+	// for the whole window. The exclusion is only ever granted while the
+	// collection's shard states still describe that window, and the promotion
+	// re-derives it under the same rule, so a state change between the two costs
+	// at most a refused promotion on this round.
+	servingChannelNames := lo.Keys(channelNames)
+	exclusions, _ := ob.targetMgr.GetSplitWindowExclusions(ctx, collectionID, meta.NextTarget)
+	if len(exclusions) > 0 {
+		servingChannelNames = lo.Filter(servingChannelNames, func(name string, _ int) bool {
+			return !exclusions.Contain(name)
+		})
+		if len(servingChannelNames) == 0 {
+			// defense in depth: the exclusion rule guarantees a fenced source
+			// stays, so this cannot be reached. lo.Every over an empty list is
+			// vacuously true, which would advance the current target to nothing.
+			log.Warn(ctx, "refuse to advance the current target to no channel at all",
+				mlog.Strings("excluded", exclusions.Collect()))
+			return false
+		}
+	}
+
+	// only after all serving channels are synced, we can consider the current target is ready
+	if !syncSuccess || !lo.Every(syncedChannelNames, servingChannelNames) {
 		return false
 	}
 
-	// segment data satisfies next target spec
+	// segment data satisfies next target spec. A segment attributed to an
+	// excluded split window target is not part of what the promotion serves,
+	// exactly as CollectionObserver leaves it out of the load progress.
 	return !paramtable.Get().QueryCoordCfg.UpdateTargetNeedSegmentDataReady.GetAsBool() ||
-		utils.CheckSegmentDataReady(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget) == nil
+		utils.CheckSegmentDataReadyExcluding(ctx, collectionID, ob.distMgr, ob.targetMgr, meta.NextTarget, exclusions) == nil
 }
 
 // sync next target info to delegator as readable snapshot
@@ -691,9 +883,33 @@ func (ob *TargetObserver) updateAllReplicasCheckpointMetric(ctx context.Context,
 	}
 }
 
+// SetShardLeaderInvalidator wires what drops the proxies' cached shard leaders
+// of a collection when its current target changes its channel set. Call it
+// before Start.
+func (ob *TargetObserver) SetShardLeaderInvalidator(invalidate func(collectionIDs ...int64)) {
+	ob.invalidateShardLeaders = invalidate
+}
+
 func (ob *TargetObserver) updateCurrentTarget(ctx context.Context, collectionID int64) {
 	mlog.RatedInfo(ctx, rate.Limit(10), "observer trigger update current target", mlog.FieldCollectionID(collectionID))
+	var before []string
+	if ob.invalidateShardLeaders != nil {
+		before = lo.Keys(ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget))
+	}
 	if ob.targetMgr.UpdateCollectionCurrentTarget(ctx, collectionID) {
+		// GetShardLeaders enumerates the current target and proxies cache its
+		// answer. When the channel set changes -- a shard split's flip drops the
+		// retired source and adds its targets -- a proxy holding the old answer
+		// would keep routing to the source until its release, and then fail
+		// with a non-retriable ErrChannelNotFound.
+		if ob.invalidateShardLeaders != nil {
+			after := lo.Keys(ob.targetMgr.GetDmChannelsByCollection(ctx, collectionID, meta.CurrentTarget))
+			if beforeSet := typeutil.NewSet(before...); len(before) != len(after) || !beforeSet.Contain(after...) {
+				mlog.Info(ctx, "current target changed its channel set, invalidate the proxies' shard leaders",
+					mlog.FieldCollectionID(collectionID), mlog.Strings("before", before), mlog.Strings("after", after))
+				ob.invalidateShardLeaders(collectionID)
+			}
+		}
 		ob.mut.Lock()
 		defer ob.mut.Unlock()
 		notifiers := ob.readyNotifiers[collectionID]
