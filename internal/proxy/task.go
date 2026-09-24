@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
@@ -42,52 +41,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/v3/util/retry"
 	"github.com/milvus-io/milvus/pkg/v3/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 const (
-	SumScorer string = "sum"
-	MaxScorer string = "max"
-	AvgScorer string = "avg"
-)
-
-const (
-	IgnoreGrowingKey     = "ignore_growing"
-	ReduceStopForBestKey = "reduce_stop_for_best"
-	IteratorField        = "iterator"
-	CollectionID         = "collection_id"
-	GroupByFieldKey      = "group_by_field"
-	GroupSizeKey         = "group_size"
-	StrictGroupSize      = "strict_group_size"
-	JSONPath             = "json_path"
-	JSONType             = "json_type"
-	StrictCastKey        = "strict_cast"
-	RankGroupScorer      = "rank_group_scorer"
-	AnnsFieldKey         = "anns_field"
-	AnalyzerKey          = "analyzer_name"
-	TopKKey              = "topk"
-	NQKey                = "nq"
-	MetricTypeKey        = common.MetricTypeKey
-	ParamsKey            = common.ParamsKey
-	ExprParamsKey        = "expr_params"
-	RoundDecimalKey      = "round_decimal"
-	OffsetKey            = "offset"
-	LimitKey             = "limit"
-	// key for timestamptz translation
-	TimefieldsKey = "time_fields"
-
-	SearchIterV2Key        = "search_iter_v2"
-	SearchIterBatchSizeKey = "search_iter_batch_size"
-	SearchIterLastBoundKey = "search_iter_last_bound"
-	SearchIterIdKey        = "search_iter_id"
-	QueryIterLastPKKey     = "query_iter_last_pk"
-	QueryIterLastOffsetKey = "query_iter_last_element_offset"
-	GroupByFieldsKey       = "group_by_fields"
-	OrderByFieldsKey       = "order_by_fields"
-	PipelineTraceKey       = "pipeline_trace"
-
 	InsertTaskName                = "InsertTask"
 	CreateCollectionTaskName      = "CreateCollectionTask"
 	DropCollectionTaskName        = "DropCollectionTask"
@@ -134,14 +92,6 @@ const (
 	AddFieldTaskName              = "AddFieldTaskName"
 	AddStructFieldTaskName        = "AddStructFieldTaskName"
 	AlterCollectionSchemaTaskName = "AlterCollectionSchemaTaskName"
-
-	// minFloat32 minimum float.
-	minFloat32 = -1 * float32(math.MaxFloat32)
-
-	RankTypeKey      = "strategy"
-	RRFParamsKey     = "k"
-	WeightsParamsKey = "weights"
-	NormScoreKey     = "norm_score"
 )
 
 func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
@@ -4211,108 +4161,4 @@ func (t *RunAnalyzerTask) Execute(ctx context.Context) error {
 
 func (t *RunAnalyzerTask) PostExecute(ctx context.Context) error {
 	return nil
-}
-
-// git highlight after search
-type HighlightTask struct {
-	baseTask
-	Condition
-	*querypb.GetHighlightRequest
-	ctx            context.Context
-	collectionName string
-	collectionID   typeutil.UniqueID
-	dbName         string
-	lb             shardclient.LBPolicy
-
-	result *querypb.GetHighlightResponse
-}
-
-func (t *HighlightTask) TraceCtx() context.Context {
-	return t.ctx
-}
-
-func (t *HighlightTask) ID() UniqueID {
-	return t.Base.MsgID
-}
-
-func (t *HighlightTask) SetID(uid UniqueID) {
-	t.Base.MsgID = uid
-}
-
-func (t *HighlightTask) Name() string {
-	return HighlightTaskName
-}
-
-func (t *HighlightTask) Type() commonpb.MsgType {
-	return t.Base.MsgType
-}
-
-func (t *HighlightTask) BeginTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *HighlightTask) EndTs() Timestamp {
-	return t.Base.Timestamp
-}
-
-func (t *HighlightTask) SetTs(ts Timestamp) {
-	t.Base.Timestamp = ts
-}
-
-func (t *HighlightTask) OnEnqueue() error {
-	if t.Base == nil {
-		t.Base = commonpbutil.NewMsgBase()
-	}
-	t.Base.MsgType = commonpb.MsgType_Undefined
-	t.Base.SourceID = paramtable.GetNodeID()
-	return nil
-}
-
-func (t *HighlightTask) PreExecute(ctx context.Context) error {
-	return nil
-}
-
-func (t *HighlightTask) getHighlightOnShardleader(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	ctx = retry.WithMaxAttemptsContext(ctx, 1)
-	t.Channel = channel
-	resp, err := qn.GetHighlight(ctx, t.GetHighlightRequest)
-	if err != nil {
-		return err
-	}
-
-	if err := merr.Error(resp.GetStatus()); err != nil {
-		return err
-	}
-	t.result = resp
-	return nil
-}
-
-func (t *HighlightTask) Execute(ctx context.Context) error {
-	err := t.lb.ExecuteOneChannel(ctx, shardclient.CollectionWorkLoad{
-		Db:             t.dbName,
-		CollectionName: t.collectionName,
-		CollectionID:   t.collectionID,
-		Nq:             int64(len(t.GetTopks()) * len(t.GetTasks())),
-		Exec:           t.getHighlightOnShardleader,
-	})
-
-	return err
-}
-
-func (t *HighlightTask) PostExecute(ctx context.Context) error {
-	return nil
-}
-
-// isIgnoreGrowing is used to check if the request should ignore growing
-func isIgnoreGrowing(params []*commonpb.KeyValuePair) (bool, error) {
-	for _, kv := range params {
-		if kv.GetKey() == IgnoreGrowingKey {
-			ignoreGrowing, err := strconv.ParseBool(kv.GetValue())
-			if err != nil {
-				return false, merr.WrapErrParameterInvalidMsg("parse ignore growing field failed")
-			}
-			return ignoreGrowing, nil
-		}
-	}
-	return false, nil
 }
