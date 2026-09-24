@@ -148,9 +148,11 @@ message TxnMessageBody {
 
 ///
 /// Message Header Definitions
-/// Used to fast handling at streaming node write ahead.
-/// The header should be simple and light enough to be parsed.
-/// Do not alter too much information in the header if unnecessary.
+/// Before you add a field to a header or a body, read the "Header vs Body"
+/// rules in docs/agent_guides/streaming-system/message/message.md.
+/// A header field must be one that the WAL infrastructure reads or writes
+/// without a body decode. It must have a small bounded size and must not
+/// contain secrets or user data, because the header is not encrypted.
 ///
 
 // TimeTickMessageHeader just nothing.
