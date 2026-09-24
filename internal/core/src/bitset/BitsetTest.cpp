@@ -2953,6 +2953,272 @@ TEST(ReadTest, VecRef) {
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
+template <typename T>
+void
+TestBulkRangeBoundaries() {
+    using P = milvus::bitset::detail::ElementWiseBitsetPolicy<T>;
+    constexpr size_t width = sizeof(T) * 8;
+    std::mt19937_64 rng(20260924);
+    for (size_t offset = 0; offset < width; ++offset) {
+        for (size_t size : {size_t(0),
+                            size_t(1),
+                            width - 1,
+                            width,
+                            width + 1,
+                            size_t(8191),
+                            size_t(8192),
+                            size_t(8193),
+                            size_t(16383),
+                            size_t(16384),
+                            size_t(16385),
+                            size_t(65539)}) {
+            for (int shape = 0; shape < 3; ++shape) {
+                std::vector<T> data((offset + size + width - 1) / width);
+                for (auto& word : data)
+                    word = shape == 0 ? T(0) : shape == 1 ? T(-1) : T(rng());
+                size_t expected = 0;
+                for (size_t i = 0; i < size; ++i)
+                    expected +=
+                        (data[(offset + i) / width] >> ((offset + i) % width)) &
+                        1;
+                ASSERT_EQ(P::op_count(data.data(), offset, size), expected);
+                ASSERT_EQ(P::op_all(data.data(), offset, size),
+                          expected == size);
+                ASSERT_EQ(P::op_none(data.data(), offset, size), expected == 0);
+            }
+        }
+    }
+    ASSERT_EQ(P::op_count(nullptr, 0, 0), 0);
+    ASSERT_TRUE(P::op_all(nullptr, 0, 0));
+    ASSERT_TRUE(P::op_none(nullptr, 0, 0));
+}
+
+TEST(BulkRangeBoundaryTest, ByteAndWordPolicies) {
+    TestBulkRangeBoundaries<uint8_t>();
+    TestBulkRangeBoundaries<uint64_t>();
+}
+
+TEST(BulkRangeBoundaryTest, ExactByteBuffers) {
+    using namespace milvus::bitset::detail;
+    std::mt19937_64 rng(9024);
+    for (size_t offset = 0; offset < 64; ++offset) {
+        for (size_t bytes : {size_t(1),
+                             size_t(7),
+                             size_t(8),
+                             size_t(15),
+                             size_t(16),
+                             size_t(31),
+                             size_t(32),
+                             size_t(1023),
+                             size_t(1024),
+                             size_t(1025),
+                             size_t(4099)}) {
+            std::vector<uint8_t> data(offset + bytes);
+            for (auto& value : data) value = uint8_t(rng());
+            size_t expected = 0;
+            for (size_t i = offset; i < data.size(); ++i)
+                expected += __builtin_popcount(data[i]);
+            ASSERT_EQ(CountBytesBulk(data.data() + offset, bytes), expected);
+            ASSERT_EQ(CountBytesScalar(data.data() + offset, bytes), expected);
+        }
+    }
+}
+
+template <typename T>
+void
+TestUnalignedOutputBoundaries() {
+    using P = milvus::bitset::detail::ElementWiseBitsetPolicy<T>;
+    constexpr size_t width = sizeof(T) * 8;
+    std::mt19937_64 rng(831);
+    for (size_t left = 0; left < width; ++left) {
+        for (size_t right = 0; right < width; ++right) {
+            for (size_t size :
+                 {4 * width - 1, 4 * width, 4 * width + 1, 9 * width + 3}) {
+                std::vector<T> a((left + size + width - 1) / width),
+                    b((right + size + width - 1) / width);
+                for (auto& value : a) value = T(rng());
+                for (auto& value : b) value = T(rng());
+                for (int op = 0; op < 7; ++op) {
+                    auto expected = a;
+                    auto actual = a;
+                    size_t ones = 0;
+                    for (size_t i = 0; i < size; ++i) {
+                        const bool x =
+                            (a[(left + i) / width] >> ((left + i) % width)) & 1;
+                        const bool y =
+                            (b[(right + i) / width] >> ((right + i) % width)) &
+                            1;
+                        const bool z = op == 0                ? y
+                                       : (op == 1 || op == 5) ? (x && y)
+                                       : (op == 2 || op == 6) ? (x || y)
+                                       : op == 3              ? (x != y)
+                                                              : (x && !y);
+                        auto m = T(T(1) << ((left + i) % width));
+                        expected[(left + i) / width] =
+                            T((expected[(left + i) / width] & ~m) |
+                              ((T(0) - T(z)) & m));
+                        ones += z;
+                    }
+                    switch (op) {
+                        case 0:
+                            P::op_copy(
+                                b.data(), right, actual.data(), left, size);
+                            break;
+                        case 1:
+                            P::op_and(
+                                actual.data(), b.data(), left, right, size);
+                            break;
+                        case 2:
+                            P::op_or(
+                                actual.data(), b.data(), left, right, size);
+                            break;
+                        case 3:
+                            P::op_xor(
+                                actual.data(), b.data(), left, right, size);
+                            break;
+                        case 4:
+                            P::op_sub(
+                                actual.data(), b.data(), left, right, size);
+                            break;
+                        case 5:
+                            ASSERT_EQ(
+                                P::op_and_with_count(
+                                    actual.data(), b.data(), left, right, size),
+                                ones);
+                            break;
+                        case 6:
+                            ASSERT_EQ(
+                                P::op_or_with_count(
+                                    actual.data(), b.data(), left, right, size),
+                                size - ones);
+                            break;
+                    }
+                    ASSERT_EQ(actual, expected)
+                        << "offsets=" << left << ',' << right << " op=" << op;
+                }
+            }
+        }
+    }
+}
+
+TEST(BulkRangeBoundaryTest, UnalignedOutputAndCountCallbacks) {
+    TestUnalignedOutputBoundaries<uint8_t>();
+    TestUnalignedOutputBoundaries<uint64_t>();
+}
+
+template <typename Policy>
+void
+TestAndFlipBoundaries() {
+    using T = typename Policy::data_type;
+    using View = BitsetView<Policy, true>;
+    constexpr size_t width = sizeof(T) * 8;
+    std::mt19937_64 rng(94025);
+    for (size_t left = 0; left < width; ++left) {
+        for (size_t right = 0; right < width; ++right) {
+            for (size_t size : {size_t(0),
+                                size_t(1),
+                                width - 1,
+                                width,
+                                width + 1,
+                                4 * width - 1,
+                                4 * width,
+                                4 * width + 1,
+                                9 * width + 3}) {
+                // Exact allocations: no SIMD padding may be assumed.
+                std::vector<T> a((left + size + width - 1) / width);
+                std::vector<T> b((right + size + width - 1) / width);
+                for (auto& value : a) value = T(rng());
+                for (auto& value : b) value = T(rng());
+                const auto original_b = b;
+                auto expected = a;
+                for (size_t i = 0; i < size; ++i) {
+                    const bool x =
+                        (a[(left + i) / width] >> ((left + i) % width)) & 1;
+                    const bool y =
+                        (b[(right + i) / width] >> ((right + i) % width)) & 1;
+                    const T mask = T(T(1) << ((left + i) % width));
+                    expected[(left + i) / width] =
+                        T((expected[(left + i) / width] & ~mask) |
+                          ((T(0) - T(!(x && y))) & mask));
+                }
+                View dst(a.data(), left, size);
+                const View src(b.data(), right, size);
+                dst.inplace_and_flip(src, size);
+                ASSERT_EQ(a, expected) << left << ',' << right << ',' << size;
+                ASSERT_EQ(b, original_b);
+            }
+        }
+    }
+    // The explicit size only changes a prefix of the destination view.
+    std::vector<T> data(8, T(-1)), valid(8, T(-1));
+    View dst(data.data(), 1, 6 * width);
+    const View src(valid.data(), 3, 6 * width);
+    dst.inplace_and_flip(src, width + 1);
+    for (size_t i = 0; i < data.size() * width; ++i) {
+        ASSERT_EQ(bool((data[i / width] >> (i % width)) & 1),
+                  !(i >= 1 && i < width + 2));
+    }
+    Policy::op_and_flip(nullptr, nullptr, 0, 0, 0);
+}
+
+template <typename Policy>
+void
+TestAndFlipAliasing() {
+    using T = typename Policy::data_type;
+    constexpr size_t width = sizeof(T) * 8;
+    std::mt19937_64 rng(921);
+    for (size_t left = 0; left < width; ++left) {
+        for (size_t right = 0; right < width; ++right) {
+            for (size_t size :
+                 {size_t(1), width + 1, 4 * width + 1, 9 * width + 3}) {
+                for (size_t delta_left : {size_t(0), size_t(1)}) {
+                    for (size_t delta_right : {size_t(0), size_t(1)}) {
+                        std::vector<T> expected(13);
+                        for (auto& value : expected) value = T(rng());
+                        auto actual = expected;
+                        Policy::op_and(expected.data() + delta_left,
+                                       expected.data() + delta_right,
+                                       left,
+                                       right,
+                                       size);
+                        Policy::op_flip(
+                            expected.data() + delta_left, left, size);
+                        Policy::op_and_flip(actual.data() + delta_left,
+                                            actual.data() + delta_right,
+                                            left,
+                                            right,
+                                            size);
+                        ASSERT_EQ(actual, expected)
+                            << left << ',' << right << ',' << size;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(AndFlipTest, BoundariesAndTruthTable) {
+    using namespace milvus::bitset::detail;
+    TestAndFlipBoundaries<ElementWiseBitsetPolicy<uint8_t>>();
+    TestAndFlipBoundaries<ElementWiseBitsetPolicy<uint64_t>>();
+    TestAndFlipBoundaries<BitWiseBitsetPolicy<uint8_t>>();
+    TestAndFlipBoundaries<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedRef>>();
+    TestAndFlipBoundaries<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedDynamic>>();
+}
+
+TEST(AndFlipTest, OverlappingViewsRetainTwoPassTraversal) {
+    using namespace milvus::bitset::detail;
+    TestAndFlipAliasing<ElementWiseBitsetPolicy<uint8_t>>();
+    TestAndFlipAliasing<ElementWiseBitsetPolicy<uint64_t>>();
+    TestAndFlipAliasing<BitWiseBitsetPolicy<uint8_t>>();
+    TestAndFlipAliasing<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedRef>>();
+    TestAndFlipAliasing<
+        VectorizedElementWiseBitsetPolicy<uint64_t, VectorizedDynamic>>();
+}
+
 int
 main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
