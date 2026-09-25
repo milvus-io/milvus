@@ -6238,6 +6238,7 @@ type dataCoordConfig struct {
 	SnapshotExportJobTimeout               ParamItem `refreshable:"true"`
 	SnapshotExportJobRetention             ParamItem `refreshable:"true"`
 	SnapshotExportMaxConcurrentJobs        ParamItem `refreshable:"true"`
+	SnapshotRestoreBrokerTimeout           ParamItem `refreshable:"false"`
 	EnableActiveStandby                    ParamItem `refreshable:"false"`
 
 	// LOB Garbage Collection
@@ -7361,6 +7362,22 @@ Startup processes fixed-size batches and retries failed reads per segment. An ex
 		Export: true,
 	}
 	p.SnapshotExportMaxConcurrentJobs.Init(base.mgr)
+
+	p.SnapshotRestoreBrokerTimeout = ParamItem{
+		Key:          "dataCoord.snapshot.restoreBrokerTimeout",
+		Version:      "3.0.2",
+		DefaultValue: "60000",
+		Doc:          "Timeout in milliseconds for the RootCoord CreateCollection/CreatePartition RPCs issued by snapshot restore. Kept separate from queryCoord.brokerTimeout because these DDLs go through the WAL and can legitimately take longer than a metadata RPC.",
+		Formatter: func(v string) string {
+			parsed, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || parsed <= 0 {
+				return "60000"
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.SnapshotRestoreBrokerTimeout.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "dataCoord.enableActiveStandby",
