@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync/atomic"
+	"time"
 
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
@@ -33,6 +35,13 @@ import (
 var (
 	_ scheduler.Task      = &SearchTask{}
 	_ scheduler.MergeTask = &SearchTask{}
+	// The scheduler asks for this interface at run time. Without the
+	// assertion a signature drift would silently fall back to the
+	// single-task path and stop isolating cancellation inside a group.
+	_ scheduler.PrunableTask = &SearchTask{}
+	// Likewise for the queue's expiry sweep, which would otherwise decide on
+	// the owner's context alone and end every request merged behind it.
+	_ scheduler.ExpirableGroup = &SearchTask{}
 )
 
 type SearchTask struct {
@@ -146,6 +155,10 @@ func (t *SearchTask) PreExecute() error {
 func (t *SearchTask) Execute() error {
 	if t.scheduleSpan != nil {
 		t.scheduleSpan.End()
+	}
+	if len(t.others) > 0 {
+		restore := t.useGroupContext()
+		defer restore()
 	}
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
@@ -411,7 +424,33 @@ func emptySearchResultData(nq, topK int64) *schemapb.SearchResultData {
 	}
 }
 
+// cancellationOf reports why a task's request was canceled, or nil if it was
+// not. A task built by NewSearchTask always carries a context, but the struct
+// is also built directly, notably in tests that exercise the merge rules
+// alone; a task with no context has nothing that could cancel it, and reading
+// the field directly would panic on one.
+func cancellationOf(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
+// Merge folds other into this task's group when the two are compatible. A
+// task whose context is already canceled is never merged, in either
+// direction: it would only be dropped again at dequeue.
 func (t *SearchTask) Merge(other *SearchTask) bool {
+	if cancellationOf(t.ctx) != nil || cancellationOf(other.ctx) != nil {
+		return false
+	}
+	if !t.canMerge(other) {
+		return false
+	}
+	t.absorb(other)
+	return true
+}
+
+func (t *SearchTask) canMerge(other *SearchTask) bool {
 	var (
 		nq        = t.nq
 		topk      = t.topk
@@ -439,28 +478,195 @@ func (t *SearchTask) Merge(other *SearchTask) bool {
 		!bytes.Equal(t.req.GetReq().GetSerializedExprPlan(), other.req.GetReq().GetSerializedExprPlan()) {
 		return false
 	}
+	return true
+}
 
-	// Merge
+// absorb adds other, which must be a standalone task, to this group without
+// re-checking compatibility.
+func (t *SearchTask) absorb(other *SearchTask) {
 	t.groupSize += other.groupSize
-	t.topk = maxTopk
-	t.nq += otherNq
+	t.topk = funcutil.Max(t.topk, other.topk)
+	t.nq += other.nq
 	t.originTopks = append(t.originTopks, other.originTopks...)
 	t.originNqs = append(t.originNqs, other.originNqs...)
 	t.others = append(t.others, other)
 	other.merged = true
+}
 
+// members returns the group owner followed by the merged members.
+func (t *SearchTask) members() []*SearchTask {
+	return append([]*SearchTask{t}, t.others...)
+}
+
+// resetGroup turns a task back into a standalone task carrying only its own
+// request, so that it can be regrouped.
+func (t *SearchTask) resetGroup() {
+	t.others = nil
+	t.merged = false
+	t.groupSize = 1
+	t.originTopks = []int64{t.originTopks[0]}
+	t.originNqs = []int64{t.originNqs[0]}
+	t.topk = t.originTopks[0]
+	t.nq = t.originNqs[0]
+}
+
+// PruneCanceled implements scheduler.PrunableTask. It must run before
+// Execute, while every member still holds its own placeholder group.
+//
+// Members whose context is canceled are completed right away with their own
+// context error and leave the group. The survivors are regrouped, with the
+// first of them as the new owner, so that canceling the owner does not end
+// the requests merged behind it.
+func (t *SearchTask) PruneCanceled() (scheduler.Task, int, error) {
+	members := t.members()
+	alive := make([]*SearchTask, 0, len(members))
+	var cause error
+	for _, m := range members {
+		if err := cancellationOf(m.ctx); err != nil {
+			m.finishPruned(err)
+			if cause == nil {
+				cause = err
+			}
+			continue
+		}
+		alive = append(alive, m)
+	}
+	dropped := len(members) - len(alive)
+	if dropped == 0 {
+		return t, 0, nil
+	}
+	if cancellationOf(t.ctx) != nil {
+		// The old owner is finished; drop its references to the survivors.
+		t.resetGroup()
+	}
+	if len(alive) == 0 {
+		return nil, dropped, cause
+	}
+	owner := alive[0]
+	owner.resetGroup()
+	for _, m := range alive[1:] {
+		m.resetGroup()
+		owner.absorb(m)
+	}
+	return owner, dropped, cause
+}
+
+// ExpiryReady implements scheduler.ExpirableGroup. The group may be taken out
+// of the queue only when every request in it is canceled or due by
+// cleanupTime: members can carry deadlines up to the merge gap apart, and one
+// member's reaching its deadline says nothing about the others'.
+func (t *SearchTask) ExpiryReady(cleanupTime time.Time) bool {
+	if !t.dueBy(cleanupTime) {
+		return false
+	}
+	for _, m := range t.others {
+		if !m.dueBy(cleanupTime) {
+			return false
+		}
+	}
 	return true
 }
 
+// dueBy reports whether this request is canceled or has a deadline no later
+// than cleanupTime.
+func (t *SearchTask) dueBy(cleanupTime time.Time) bool {
+	if cancellationOf(t.ctx) != nil {
+		return true
+	}
+	if t.ctx == nil {
+		return false
+	}
+	deadline, ok := t.ctx.Deadline()
+	return ok && !cleanupTime.Before(deadline)
+}
+
+// FinishExpired implements scheduler.ExpirableGroup. Every request is told its
+// own reason: its context error if it has one, otherwise DeadlineExceeded for
+// a request taken out a little ahead of its deadline.
+func (t *SearchTask) FinishExpired() {
+	for _, m := range t.members() {
+		err := cancellationOf(m.ctx)
+		if err == nil {
+			err = context.DeadlineExceeded
+		}
+		m.finishPruned(err)
+	}
+}
+
+// finishPruned completes a request that leaves without running, pruned or
+// expired. It records none of the group histograms that Done records: those
+// describe the groups that reach the executor, and this request is not in one.
+func (t *SearchTask) finishPruned(err error) {
+	if t.scheduleSpan != nil {
+		t.scheduleSpan.End()
+	}
+	t.notify(err)
+}
+
+func (t *SearchTask) notify(err error) {
+	t.notifier <- err
+}
+
+// resultErr is what a group member is told when the group finishes with
+// groupErr: its own context error if its request was canceled meanwhile,
+// otherwise the group's outcome.
+func (t *SearchTask) resultErr(groupErr error) error {
+	if err := cancellationOf(t.ctx); err != nil {
+		return err
+	}
+	return groupErr
+}
+
+// useGroupContext makes the group execute under a context that is canceled
+// only once every member's context is canceled, so that one member's
+// cancellation cannot fail the segcore call the others are waiting on. Trace
+// and other values of the owner's context are kept. The returned function
+// restores the owner's own context and releases the listeners.
+func (t *SearchTask) useGroupContext() func() {
+	members := t.members()
+	ownerCtx := t.ctx
+	groupCtx, cancel := context.WithCancel(context.WithoutCancel(ownerCtx))
+	var remaining atomic.Int64
+	remaining.Store(int64(len(members)))
+	stops := make([]func() bool, 0, len(members))
+	for _, m := range members {
+		stops = append(stops, context.AfterFunc(m.ctx, func() {
+			if remaining.Add(-1) == 0 {
+				cancel()
+			}
+		}))
+	}
+	t.ctx = groupCtx
+	return func() {
+		for _, stop := range stops {
+			stop()
+		}
+		cancel()
+		t.ctx = ownerCtx
+	}
+}
+
 func (t *SearchTask) Done(err error) {
+	// The group histograms describe the groups that reach the executor, once
+	// each, at the size they reach it with. A request pruned or expired before
+	// then leaves through finishPruned and is not counted, and a group every
+	// one of whose requests was canceled never reaches the executor and is not
+	// counted at all.
 	if !t.merged {
 		metrics.QueryNodeSearchGroupSize.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.groupSize))
 		metrics.QueryNodeSearchGroupNQ.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.nq))
 		metrics.QueryNodeSearchGroupTopK.WithLabelValues(fmt.Sprint(t.GetNodeID())).Observe(float64(t.topk))
 	}
-	t.notifier <- err
+	if len(t.others) == 0 {
+		t.notify(err)
+		return
+	}
+	// A merged group: each member learns its own outcome. A member canceled
+	// while the group ran gets its own context error; the others get the
+	// group's result.
+	t.notify(t.resultErr(err))
 	for _, other := range t.others {
-		other.Done(err)
+		other.notify(other.resultErr(err))
 	}
 }
 

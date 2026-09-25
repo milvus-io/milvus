@@ -285,12 +285,22 @@ func (s *scheduler) exec() {
 			mlog.Info(context.TODO(), "scheduler execChan closed, worker exit")
 			return
 		}
-		// Skip this task if task is canceled.
-		if err := t.Context().Err(); err != nil {
-			mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(err))
-			t.Done(err)
-			continue
+		// Drop the task, or the canceled members of a merged group, if the
+		// cancellation happened between dequeue and execution. Members that
+		// are dropped here have already been completed with their own
+		// context error; the survivors keep running. The cause is logged
+		// because it is what tells a client that went away from a request
+		// that ran out of time.
+		survivor, dropped, cause := pruneCanceled(t)
+		if dropped > 0 {
+			if survivor == nil {
+				mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(cause))
+				continue
+			}
+			mlog.Warn(context.TODO(), "canceled requests dropped from a search group before executing",
+				mlog.Int("dropped", dropped), mlog.Err(cause))
 		}
+		t = survivor
 		if err := t.PreExecute(); err != nil {
 			mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
 			t.Done(err)
@@ -349,13 +359,20 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 			if !lastWaitingTask.valid() {
 				break
 			}
-			if err := lastWaitingTask.Context().Err(); err != nil {
-				s.updateWaitingTaskCounter(-1, -lastWaitingTask.NQ())
+			// Remember the NQ the counters were credited with before any
+			// member is pruned away.
+			lastWaitingTask.accountedNQ = lastWaitingTask.NQ()
+			// A canceled task is dropped; a merged group loses only its
+			// canceled members and goes on with the rest. Dropped members
+			// are completed with their own context error.
+			survivor, _, _ := pruneCanceled(lastWaitingTask.Task)
+			if survivor == nil {
+				s.updateWaitingTaskCounter(-1, -lastWaitingTask.countedNQ())
 				s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeExpired)
-				lastWaitingTask.Done(err)
 				lastWaitingTask = nil
 				continue
 			}
+			lastWaitingTask.Task = survivor
 			s.recordReadTaskQueueDuration(lastWaitingTask, now, readTaskQueueOutcomeScheduled)
 			break
 		}
@@ -363,7 +380,7 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 	if lastWaitingTask.valid() {
 		// Try to sent task to execChan if there is a task ready to run.
 		execChan = s.execChan
-		nq = lastWaitingTask.NQ()
+		nq = lastWaitingTask.countedNQ()
 	}
 
 	return lastWaitingTask, nq, execChan
@@ -376,6 +393,12 @@ func (s *scheduler) cleanupExpiredTasks(now time.Time) {
 	for _, task := range tasks {
 		s.updateWaitingTaskCounter(-1, -task.NQ())
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)
+		// A group is only taken out once every request in it is done, and
+		// each is told its own reason rather than the owner's.
+		if g, ok := task.Task.(ExpirableGroup); ok {
+			g.FinishExpired()
+			continue
+		}
 		task.Done(cleanupTaskError(task))
 	}
 }
@@ -393,7 +416,7 @@ func (s *scheduler) clearQueuedTasks(filter TaskFilter, reason string, task *que
 		if !removedTask.valid() {
 			continue
 		}
-		nq := removedTask.NQ()
+		nq := removedTask.countedNQ()
 		result.QueuedCleared++
 		result.QueuedNQCleared += nq
 		s.updateWaitingTaskCounter(-1, -nq)
