@@ -168,6 +168,7 @@ def test_execution_guard_is_scoped_to_integrity_workloads(marked, opt_in, worker
                 "-m",
                 MARKER,
                 "milvus_client/test_milvus_client_data_integrity.py::TestMilvusClientCompactionDataIntegrity",
+                "milvus_client/test_milvus_client_continuous_data_integrity.py::TestMilvusClientContinuousStreamingDataIntegrity",
             ],
         ),
         (
