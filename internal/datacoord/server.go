@@ -1155,8 +1155,10 @@ func (s *Server) Stop() error {
 // CleanMeta only for test
 func (s *Server) CleanMeta() error {
 	mlog.Debug(s.ctx, "clean meta", mlog.Any("kv", s.kv))
-	err := s.kv.RemoveWithPrefix(s.ctx, "")
-	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "")
+	// Remove "<root>/" rather than "": an empty prefix resolves to the bare root path, and a prefix delete
+	// on it would also match sibling keys such as "<root>-xxx" owned by other tests sharing the same etcd.
+	err := s.kv.RemoveWithPrefix(s.ctx, "/")
+	err2 := s.watchClient.RemoveWithPrefix(s.ctx, "/")
 	if err2 != nil {
 		if err != nil {
 			err = merr.Wrapf(err, "failed to clean meta (watchdata cleanup error: %v)", err2)

@@ -725,6 +725,12 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 	}
 	version := cm.version
 	cchannelAssignment := proto.Clone(cm.cchannelMeta).(*streamingpb.CChannelMeta)
+	// The callback runs outside the lock and may serialize the streaming version, while MarkStreamingVersion
+	// updates it in place under the lock, so hand out a copy.
+	var streamingVersion *streamingpb.StreamingVersion
+	if cm.streamingVersion != nil {
+		streamingVersion = proto.Clone(cm.streamingVersion).(*streamingpb.StreamingVersion)
+	}
 	pchannelViews := newPChannelView(cm.channels)
 	cm.cond.L.Unlock()
 
@@ -733,7 +739,7 @@ func (cm *ChannelManager) applyAssignments(cb WatchChannelAssignmentsCallback) (
 		replicateConfig = cm.replicateConfig.GetReplicateConfiguration()
 	}
 	return version, cb(WatchChannelAssignmentsCallbackParam{
-		StreamingVersion: cm.streamingVersion,
+		StreamingVersion: streamingVersion,
 		Version:          version,
 		CChannelAssignment: &streamingpb.CChannelAssignment{
 			Meta: cchannelAssignment,
