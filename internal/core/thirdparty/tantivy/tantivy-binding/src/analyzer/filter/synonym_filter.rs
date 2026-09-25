@@ -9,13 +9,15 @@ use tantivy::tokenizer::{Token, TokenFilter, TokenStream, Tokenizer};
 pub struct SynonymDictBuilder {
     dict: HashMap<String, HashSet<String>>,
     expand: bool,
+    expand_mapping: bool,
 }
 
 impl SynonymDictBuilder {
-    fn new(expand: bool) -> SynonymDictBuilder {
+    fn new(expand: bool, expand_mapping: bool) -> SynonymDictBuilder {
         SynonymDictBuilder {
             dict: HashMap::new(),
-            expand: expand,
+            expand,
+            expand_mapping,
         }
     }
 
@@ -39,7 +41,11 @@ impl SynonymDictBuilder {
 
     fn add_mapping(&mut self, keys: Vec<String>, words: Vec<String>) {
         for key in keys {
-            self.add(key, words.clone());
+            let mut mapping = words.clone();
+            if self.expand_mapping {
+                mapping.push(key.clone());
+            }
+            self.add(key, mapping);
         }
     }
 
@@ -47,11 +53,7 @@ impl SynonymDictBuilder {
         if let Some(list) = self.dict.get_mut(&key) {
             list.extend(words);
         } else {
-            let mut set: HashSet<_> = words.into_iter().collect();
-            if self.expand {
-                set.insert(key.clone());
-            }
-            self.dict.insert(key, set);
+            self.dict.insert(key, words.into_iter().collect());
         }
     }
 
@@ -202,6 +204,7 @@ impl SynonymDict {
 #[derive(Clone)]
 pub struct SynonymFilter {
     dict: Arc<SynonymDict>,
+    use_current_token: bool,
 }
 
 impl SynonymFilter {
@@ -214,8 +217,16 @@ impl SynonymFilter {
                 "create synonym filter failed, `expand` must be bool".to_string(),
             ))
         })?;
+        let expand_mapping = params.get("expand_mapping").map_or(Ok(expand), |v| {
+            v.as_bool().ok_or(TantivyBindingError::InvalidArgument(
+                "create synonym filter failed, `expand_mapping` must be bool".to_string(),
+            ))
+        })?;
+        // `expand_mapping` marks an upgraded analyzer. Missing preserves the
+        // token_mut behavior of persisted analyzers created before it existed.
+        let use_current_token = params.contains_key("expand_mapping");
 
-        let mut builder = SynonymDictBuilder::new(expand);
+        let mut builder = SynonymDictBuilder::new(expand, expand_mapping);
         if let Some(dict) = params.get("synonyms") {
             dict.as_array()
                 .ok_or(TantivyBindingError::InvalidArgument(
@@ -249,12 +260,14 @@ impl SynonymFilter {
 
         Ok(SynonymFilter {
             dict: Arc::new(builder.build()),
+            use_current_token,
         })
     }
 }
 
 pub struct SynonymFilterStream<T> {
     dict: Arc<SynonymDict>,
+    use_current_token: bool,
     buffer: Vec<Token>,
     cursor: usize,
     tail: T,
@@ -266,6 +279,7 @@ impl TokenFilter for SynonymFilter {
     fn transform<T: Tokenizer>(self, tokenizer: T) -> SynonymFilterWrapper<T> {
         SynonymFilterWrapper {
             dict: self.dict,
+            use_current_token: self.use_current_token,
             inner: tokenizer,
         }
     }
@@ -274,6 +288,7 @@ impl TokenFilter for SynonymFilter {
 #[derive(Clone)]
 pub struct SynonymFilterWrapper<T> {
     dict: Arc<SynonymDict>,
+    use_current_token: bool,
     inner: T,
 }
 
@@ -283,6 +298,7 @@ impl<T: Tokenizer> Tokenizer for SynonymFilterWrapper<T> {
     fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
         SynonymFilterStream {
             dict: self.dict.clone(),
+            use_current_token: self.use_current_token,
             buffer: vec![],
             cursor: 0,
             tail: self.inner.token_stream(text),
@@ -341,6 +357,9 @@ impl<T: TokenStream> TokenStream for SynonymFilterStream<T> {
     }
 
     fn token_mut(&mut self) -> &mut Token {
+        if self.use_current_token && !self.buffer_empty() {
+            return self.buffer.get_mut(self.cursor).unwrap();
+        }
         self.tail.token_mut()
     }
 }
