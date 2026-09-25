@@ -1545,10 +1545,10 @@ func TestExternalCollectionRefreshChecker_IndexWait(t *testing.T) {
 	t.Run("turning the parameter off mid-wait releases the job without re-applying", func(t *testing.T) {
 		// Keying the branch on the parameter rather than the marker would send
 		// an already-applied job down the generic transition, which carries a
-		// pre-apply - and applyExternalRefreshPatch clears TextStatsLogs and
-		// JsonKeyStats, so the replay would discard indexes built during the
-		// very wait being disabled. An operator turning the hold off wants the
-		// held jobs released, so the job finishes at once instead.
+		// pre-apply with older text/JSON placeholders. That replay would discard
+		// stats built during the very wait being disabled. An operator turning
+		// the hold off wants the held jobs released, so the job finishes at once
+		// instead.
 		mockey.PatchConvey("parameter off mid-wait", t, func() {
 			pt := paramtable.Get()
 			pt.Save(pt.DataCoordCfg.RefreshWaitForIndex.Key, "true")
