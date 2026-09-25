@@ -49,7 +49,7 @@ func (c *Client) GetReplicateInfo(ctx context.Context, req *milvuspb.GetReplicat
 // CreateReplicateStream creates a replicate stream
 func (c *Client) CreateReplicateStream(ctx context.Context, opts ...grpc.CallOption) (milvuspb.MilvusService_CreateReplicateStreamClient, error) {
 	var streamClient milvuspb.MilvusService_CreateReplicateStreamClient
-	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callStreamService(func(milvusService milvuspb.MilvusServiceClient) error {
 		var err error
 		streamClient, err = milvusService.CreateReplicateStream(ctx, opts...)
 		if err != nil {
@@ -73,7 +73,7 @@ func (c *Client) CreateReplicateStream(ctx context.Context, opts ...grpc.CallOpt
 // until io.EOF.
 func (c *Client) DumpMessages(ctx context.Context, req *milvuspb.DumpMessagesRequest, opts ...grpc.CallOption) (milvuspb.MilvusService_DumpMessagesClient, error) {
 	var streamClient milvuspb.MilvusService_DumpMessagesClient
-	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err := c.callStreamService(func(milvusService milvuspb.MilvusServiceClient) error {
 		var err error
 		streamClient, err = milvusService.DumpMessages(ctx, req, opts...)
 		if err != nil {
