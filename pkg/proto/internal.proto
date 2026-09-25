@@ -216,6 +216,10 @@ message SearchResults {
   // Per-segment filter valid counts for two-stage search (filter-only mode).
   // Index corresponds to sealed_segmentIDs_searched.
   repeated int64 filter_valid_counts = 23;
+  // Execution features segcore used for this request (featureusage bit set),
+  // OR-merged wherever the results are merged. Zero unless the plan asked
+  // for them (PlanOption.collect_feature_bits).
+  uint64 feature_bits = 24;
 }
 
 message CostAggregation {
@@ -288,6 +292,9 @@ message RetrieveResults {
   // Actual MVCC snapshot used by a successful channel query, including empty results.
   // Zero means the QueryNode did not report a snapshot.
   uint64 mvcc_timestamp = 20;
+  // Execution features segcore used for this request; see
+  // SearchResults.feature_bits.
+  uint64 feature_bits = 21;
 }
 
 message LoadIndex {
@@ -529,6 +536,54 @@ message GetQuotaMetricsRequest {
 message GetQuotaMetricsResponse {
   common.Status status = 1;
   string metrics_info = 2;
+}
+
+// Feature usage reporting (see docs/design-docs/design_docs/20260902-feature-usage-reporting.md)
+
+message GetFeatureUsageRequest {
+  common.MsgBase base = 1;
+}
+
+// FeatureEntry is one record of the feature usage report.
+// The meaning of value depends on group; see the design doc.
+message FeatureEntry {
+  string group = 1;          // field_types / index_types / metric_types / functions / providers / declared /
+                             // properties / database_properties / field_params / index_params / objects /
+                             // distribution / segment / loaded / config / request
+  string name = 2;           // feature identifier, drawn from a code-defined set; never a user string
+  int64 value = 3;           // count
+  string bucket = 4;         // for group = "distribution", and for the request counters that are one
+                             // bucket of a distribution; empty otherwise
+  int64 last_used_at = 5;    // unix seconds of the most recent hit; only for group = "request", 0 otherwise
+}
+
+// GetFeatureUsageResponse is the view of one node.
+message GetFeatureUsageResponse {
+  common.Status status = 1;
+  string role = 2;
+  int64 node_id = 3;
+  int64 node_start_time = 4; // unix seconds; a change means request counters were reset
+  int64 collected_at = 5;    // unix seconds
+  repeated FeatureEntry entries = 6;
+}
+
+// FeatureUsageNode is one node inside the merged report.
+message FeatureUsageNode {
+  string role = 1;
+  int64 node_id = 2;
+  int64 node_start_time = 3;
+  bool reachable = 4;        // false: entries is empty and error explains why
+  string error = 5;
+  repeated FeatureEntry entries = 6;
+}
+
+// FeatureUsageReport is the merged report returned by MixCoord.
+message FeatureUsageReport {
+  common.Status status = 1;
+  int64 collected_at = 2;
+  string build_version = 3;
+  string deploy_mode = 4;
+  repeated FeatureUsageNode nodes = 5;
 }
 
 message FileResourceInfo {

@@ -27,6 +27,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/mocks/util/mock_segcore"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -237,6 +238,7 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 			SlicedBlob:         mockBlob,
 			ScannedRemoteBytes: 100,
 			ScannedTotalBytes:  200,
+			FeatureBits:        0b01,
 		}
 		results = append(results, subRes1)
 	}
@@ -248,6 +250,7 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 			SlicedBlob:         mockBlob,
 			ScannedRemoteBytes: 100,
 			ScannedTotalBytes:  200,
+			FeatureBits:        0b10,
 		}
 		results = append(results, subRes2)
 	}
@@ -263,6 +266,7 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode() {
 	suite.Equal(mockBlob, subRes1.GetSlicedBlob())
 	suite.Equal(int64(200), reducedRes.GetScannedRemoteBytes())
 	suite.Equal(int64(400), reducedRes.GetScannedTotalBytes())
+	suite.Equal(uint64(0b11), reducedRes.GetFeatureBits(), "feature bits are OR-merged")
 }
 
 func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
@@ -293,12 +297,23 @@ func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvanced() {
 	suite.NoError(err)
 	rEnc2.ScannedRemoteBytes = 333
 	rEnc2.ScannedTotalBytes = 444
+	rEnc1.FeatureBits = 0b100
+	rEnc2.FeatureBits = 0b001
 
 	out, err := ReduceSearchOnQueryNode(ctx, []*internalpb.SearchResults{rEnc1, rEnc2}, reduce.NewReduceSearchResultInfo(nq, topK).WithMetricType(metricType).WithPkType(schemapb.DataType_Int64))
 	suite.NoError(err)
 	// costs should aggregate across both included results
 	suite.Equal(int64(111+333), out.GetScannedRemoteBytes())
 	suite.Equal(int64(222+444), out.GetScannedTotalBytes())
+	suite.Equal(uint64(0b101), out.GetFeatureBits(), "feature bits are OR-merged")
+}
+
+func (suite *ResultSuite) TestColdReadFeatureBit() {
+	suite.Zero(ColdReadFeatureBit(0))
+	suite.Zero(ColdReadFeatureBit(-1))
+	bit, ok := featureusage.ExecBit(featureusage.FeatureTieredStorageColdRead)
+	suite.True(ok)
+	suite.Equal(bit, ColdReadFeatureBit(1))
 }
 
 func (suite *ResultSuite) TestReduceSearchOnQueryNode_NonAdvancedKeepsZeroHitWorkerMetadata() {

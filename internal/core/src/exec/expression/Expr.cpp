@@ -491,6 +491,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
     // non-pinned paths) to this expression. Runs for the whole compiled tree
     // because CompileExpression is recursive over inputs.
     result->SetSnapshot(context->get_read_snapshot().get());
+    result->SetFeatureRecorder(plan_options.feature_recorder.get());
     return result;
 }
 
@@ -609,14 +610,20 @@ SplitFuseGISConjunct(std::shared_ptr<milvus::exec::PhyConjunctFilterExpr>& expr,
                 p.has_index = segment->HasIndex(FieldId(field));
                 state->preds.push_back(std::move(p));
             }
-            out.push_back(std::make_shared<PhyGISCoarseConjunctExpr>(
+            auto coarse = std::make_shared<PhyGISCoarseConjunctExpr>(
                 state,
                 "PhyGISCoarseConjunctExpr",
                 op_ctx,
                 segment,
                 active,
                 bs,
-                cl));
+                cl);
+            // The coarse pass is where the R-Tree serves the group. The refine
+            // pass always re-checks its candidates on raw data by design, so
+            // it records nothing.
+            coarse->SetFeatureRecorder(
+                qc->get_plan_options().feature_recorder.get());
+            out.push_back(std::move(coarse));
             out.push_back(std::make_shared<PhyGISRefineConjunctExpr>(
                 state,
                 "PhyGISRefineConjunctExpr",

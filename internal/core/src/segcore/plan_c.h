@@ -62,6 +62,14 @@ HasTargetEntries(CSearchPlan plan);
 void
 SetMetricType(CSearchPlan plan, const char* metric_type);
 
+// Execution feature bits the plan recorded across every segment it ran on
+// (milvus::FeatureBit), or 0 when the plan does not collect them.
+uint64_t
+GetSearchPlanFeatureBits(CSearchPlan plan);
+
+uint64_t
+GetRetrievePlanFeatureBits(CRetrievePlan plan);
+
 void
 DeleteSearchPlan(CSearchPlan plan);
 

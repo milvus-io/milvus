@@ -302,6 +302,7 @@ func RunDelegatorQueryPipeline(
 	output.HasMoreResult = anyFieldTrueInternal(results, func(r *internalpb.RetrieveResults) bool { return r.GetHasMoreResult() })
 	output.ScannedRemoteBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedRemoteBytes() })
 	output.ScannedTotalBytes = sumInt64FieldInternal(results, func(r *internalpb.RetrieveResults) int64 { return r.GetScannedTotalBytes() })
+	output.FeatureBits = orFeatureBits(results)
 
 	// Only fill empty fields when result has no data at all (same guard as QN level).
 	if len(output.GetFieldsData()) == 0 {

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "common/Array.h"
+#include "common/FeatureBits.h"
 #include "common/ArrayOffsets.h"
 #include "common/FieldDataInterface.h"
 #include "common/Json.h"
@@ -40,6 +41,7 @@
 #include "expr/ITypeExpr.h"
 #include "index/Index.h"
 #include "index/JsonFlatIndex.h"
+#include "index/Meta.h"
 #include "log/Log.h"
 #include "mmap/ChunkedColumnInterface.h"
 #include "mmap/ChunkedColumnFilter.h"
@@ -418,6 +420,14 @@ class Expr : public std::enable_shared_from_this<Expr> {
     SetSnapshot(const segcore::SegmentReadSnapshot* snapshot) {
     }
 
+    // Bind the request's execution feature recorder, null unless the plan
+    // collects feature bits. Called by the expression compiler next to
+    // SetSnapshot; the recorder is owned by the plan and outlives the task.
+    // Default no-op for expressions that do not choose an execution path.
+    virtual void
+    SetFeatureRecorder(FeatureRecorder* recorder) {
+    }
+
  protected:
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
@@ -556,6 +566,21 @@ class SegmentExpr : public Expr {
     virtual bool
     IsSource() const override {
         return true;
+    }
+
+    // The TTL filter the compiler adds on its own is not a user filter, so an
+    // expression on the TTL field records nothing.
+    void
+    SetFeatureRecorder(FeatureRecorder* recorder) override {
+        if (recorder == nullptr) {
+            feature_recorder_ = nullptr;
+            return;
+        }
+        auto ttl_field = segment_->get_schema_snapshot()->get_ttl_field_id();
+        feature_recorder_ =
+            (ttl_field.has_value() && ttl_field.value() == field_id_)
+                ? nullptr
+                : recorder;
     }
 
     void
@@ -926,6 +951,7 @@ class SegmentExpr : public Expr {
         ExprResCacheManager::Value got;
         got.active_count = active_count_;
         if (ExprResCacheManager::Instance().Get(key, got)) {
+            MarkFeature(feature_recorder_, FeatureBit::ExprCacheHit);
             cached_index_chunk_res_ = got.result;
             cached_index_chunk_valid_res_ = got.valid_result;
             cached_index_chunk_id_ = 0;
@@ -2865,7 +2891,9 @@ class SegmentExpr : public Expr {
                         valid_res = index_ptr->IsNotNull();
                     }
                     return {std::move(res), std::move(valid_res)};
-                });
+                },
+                /*enable_cache_write=*/true,
+                feature_recorder_);
             cached_index_chunk_res_ = cached.result;
             cached_index_chunk_valid_res_ = cached.valid;
             cached_index_chunk_id_ = 0;
@@ -3522,8 +3550,104 @@ class SegmentExpr : public Expr {
     void
     EnsureExecPathDetermined() const {
         std::call_once(determine_exec_path_once_, [this]() {
-            const_cast<SegmentExpr*>(this)->DetermineExecPath();
+            auto self = const_cast<SegmentExpr*>(this);
+            self->DetermineExecPath();
+            self->RecordExecPath();
         });
+    }
+
+    // Whether this expression's execution path is a user-visible feature
+    // (filter_exec_path=*). False for internal nodes, such as the GIS refine
+    // pass that always re-checks the coarse candidates on raw data.
+    virtual bool
+    ReportsExecPath() const {
+        return true;
+    }
+
+    // Whether falling back to raw data despite an index on the field means
+    // the index was declined. False where raw data is the designed path
+    // whenever it exists (membership filters, timestamptz arithmetic) or
+    // where the index is a different kind the expression cannot use.
+    virtual bool
+    ReportsIndexDecline() const {
+        return true;
+    }
+
+    // Record the execution path DetermineExecPath() chose, once per
+    // expression per segment. Determined is not always executed: a later
+    // whole-filter cache hit or a conjunction that runs out of rows can skip
+    // the evaluation. The report counts feature use, so that only affects
+    // how often, never whether.
+    void
+    RecordExecPath() {
+        auto* recorder = feature_recorder_;
+        if (recorder == nullptr || !ReportsExecPath()) {
+            return;
+        }
+        switch (exec_path_) {
+            case ExprExecPath::ScalarIndex:
+                recorder->Mark(FeatureBit::FilterPathScalarIndex);
+                RecordScalarIndexType(recorder);
+                return;
+            case ExprExecPath::PkIndex:
+                recorder->Mark(FeatureBit::FilterPathPkIndex);
+                return;
+            case ExprExecPath::TextIndex:
+                recorder->Mark(FeatureBit::FilterPathTextMatchIndex);
+                return;
+            case ExprExecPath::JsonStats:
+                recorder->Mark(FeatureBit::FilterPathJsonShredding);
+                return;
+            case ExprExecPath::RawData:
+                // The NGRAM index is chosen outside the ScalarIndex path; the
+                // NGRAM hooks record it when it is actually used.
+                if (CanUseNgramIndex()) {
+                    return;
+                }
+                recorder->Mark(FeatureBit::FilterPathBruteForce);
+                // An index was pinned and then refined away, or the field
+                // has one the operator or literal cannot use.
+                if (ReportsIndexDecline() &&
+                    ((pinned_index_initialized_ && !pinned_index_.empty()) ||
+                     HasCompatibleScalarIndex())) {
+                    recorder->Mark(FeatureBit::FilterIndexDeclined);
+                }
+                return;
+        }
+    }
+
+    // The kind of the pinned scalar index, from the index object rather than
+    // anything the user wrote. A JSON flat index is an INVERTED index
+    // underneath, so it is checked first.
+    void
+    RecordScalarIndexType(FeatureRecorder* recorder) const {
+        if (pinned_index_.empty() || pinned_index_[0].get() == nullptr) {
+            return;
+        }
+        const auto* index = pinned_index_[0].get();
+        if (dynamic_cast<const index::JsonFlatIndex*>(index) != nullptr) {
+            recorder->Mark(FeatureBit::ScalarIndexJsonFlat);
+            return;
+        }
+        const auto& type = index->Type();
+        if (type == index::BITMAP_INDEX_TYPE) {
+            recorder->Mark(FeatureBit::ScalarIndexBitmap);
+        } else if (type == index::ASCENDING_SORT) {
+            recorder->Mark(FeatureBit::ScalarIndexStlSort);
+        } else if (type == index::MARISA_TRIE ||
+                   type == index::MARISA_TRIE_UPPER) {
+            recorder->Mark(FeatureBit::ScalarIndexTrie);
+        } else if (type == index::INVERTED_INDEX_TYPE) {
+            recorder->Mark(FeatureBit::ScalarIndexInverted);
+        } else if (type == index::HYBRID_INDEX_TYPE) {
+            recorder->Mark(FeatureBit::ScalarIndexHybrid);
+        } else if (type == index::RTREE_INDEX_TYPE) {
+            recorder->Mark(FeatureBit::ScalarIndexRtree);
+        } else if (type == index::NGRAM_INDEX_TYPE) {
+            recorder->Mark(FeatureBit::ScalarIndexNgram);
+        } else if (type == index::FMINDEX_INDEX_TYPE) {
+            recorder->Mark(FeatureBit::ScalarIndexFmindex);
+        }
     }
 
     // Determine the execution path for this expression.
@@ -3792,6 +3916,9 @@ class SegmentExpr : public Expr {
     bool is_json_contains_{false};
     bool is_data_mode_{false};
     query::PlanOptions plan_options_;
+    // Execution feature recorder of the request, or null; see
+    // SetFeatureRecorder.
+    FeatureRecorder* feature_recorder_{nullptr};
     // Execution path determined once, preferably by PrefetchAsync() on the
     // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};

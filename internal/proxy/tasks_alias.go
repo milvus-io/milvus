@@ -24,6 +24,10 @@ import (
 // using the original (unexported) type names. This is the only place in the
 // root package allowed to reference the dql package.
 
+// recordPlanExprFeatures counts the expression features of a plan the root
+// package builds itself (delete); the search and query tasks count their own.
+var recordPlanExprFeatures = dql.RecordPlanExprFeatures
+
 type (
 	searchTask                  = dql.SearchTask
 	queryTask                   = dql.QueryTask

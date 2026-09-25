@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/proxy/httpserver"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/distributed/utils"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
@@ -145,6 +146,7 @@ func authenticate(c *gin.Context) {
 	if ok {
 		if proxy.PasswordVerify(c, username, password) {
 			mlog.Debug(c.Request.Context(), "auth successful", mlog.String("username", username))
+			featureusage.Hit(featureusage.FeatureAuthPassword)
 			c.Set(httpserver.ContextUsername, username)
 			c.Set(httpserver.ContextToken, fmt.Sprintf("%s%s%s", username, util.CredentialSeparator, password))
 			return
@@ -154,6 +156,7 @@ func authenticate(c *gin.Context) {
 	if rawToken != "" && !strings.Contains(rawToken, util.CredentialSeparator) {
 		user, err := proxy.VerifyAPIKey(rawToken)
 		if err == nil {
+			featureusage.Hit(featureusage.FeatureAuthAPIKey)
 			c.Set(httpserver.ContextUsername, user)
 			c.Set(httpserver.ContextToken, rawToken)
 			return
@@ -1314,6 +1317,10 @@ func (s *Server) GetSegmentsInfo(ctx context.Context, req *internalpb.GetSegment
 
 func (s *Server) GetQuotaMetrics(ctx context.Context, req *internalpb.GetQuotaMetricsRequest) (*internalpb.GetQuotaMetricsResponse, error) {
 	return s.proxy.GetQuotaMetrics(ctx, req)
+}
+
+func (s *Server) GetFeatureUsage(ctx context.Context, req *internalpb.GetFeatureUsageRequest) (*internalpb.GetFeatureUsageResponse, error) {
+	return s.proxy.GetFeatureUsage(ctx, req)
 }
 
 func (s *Server) ClearReadTaskQueue(ctx context.Context, req *internalpb.ClearReadTaskQueueRequest) (*internalpb.ClearReadTaskQueueResponse, error) {

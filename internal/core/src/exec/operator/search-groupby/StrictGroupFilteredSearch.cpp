@@ -507,6 +507,7 @@ TryStrictGroupFilteredPhase2(const std::shared_ptr<VectorIterator>& iterator,
                batch_result.vector_iterators_->size());
     collector.EnableOffsetDeduplication();
     stats.used = true;
+    context->search_result->strict_group_phase2_used_ = true;
     stats.batch_count = 1;
     if (!batch_result.vector_iterators_->empty()) {
         stats.phase2_candidates = ConsumeGroupByIteratorUntil(

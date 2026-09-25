@@ -12,9 +12,11 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "common/Consts.h"
+#include "common/FeatureBits.h"
 #include "common/Schema.h"
 #include "exec/QueryContext.h"
 #include "exec/Task.h"
@@ -494,4 +496,111 @@ TEST_F(DetermineExecPathTest, FilterBitsNode_NoIndex_Correctness) {
         num_rows += result->size();
     }
     EXPECT_EQ(num_rows, N_) << "Result should cover all rows";
+}
+
+// --------------------------------------------------------------------------
+// Execution feature bits: the chosen path is recorded once per expression
+// when the plan collects them, and nothing is recorded otherwise.
+// --------------------------------------------------------------------------
+namespace {
+std::vector<ExprPtr>
+CompileWithRecorder(const std::vector<expr::TypedExprPtr>& logical_exprs,
+                    const segcore::SegmentInternalInterface* segment,
+                    int64_t active_count,
+                    const std::shared_ptr<FeatureRecorder>& recorder) {
+    PlanOptions options;
+    options.feature_recorder = recorder;
+    auto query_context = std::make_shared<QueryContext>(DEAFULT_QUERY_ID,
+                                                        segment,
+                                                        active_count,
+                                                        MAX_TIMESTAMP,
+                                                        0,
+                                                        0,
+                                                        options);
+    ExecContext context(query_context.get());
+    return CompileExpressions(logical_exprs, &context, {}, false);
+}
+
+uint64_t
+BitOf(FeatureBit bit) {
+    return uint64_t{1} << static_cast<uint32_t>(bit);
+}
+}  // namespace
+
+TEST(FeatureRecorderTest, MarkIsIdempotentAndConcurrent) {
+    FeatureRecorder recorder;
+    EXPECT_EQ(recorder.Bits(), 0);
+    std::vector<std::thread> threads;
+    for (int i = 0; i < 8; ++i) {
+        threads.emplace_back([&recorder, i]() {
+            for (int j = 0; j < 1000; ++j) {
+                recorder.Mark(i % 2 == 0 ? FeatureBit::FilterPathScalarIndex
+                                         : FeatureBit::ExprCacheHit);
+            }
+        });
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+    EXPECT_EQ(recorder.Bits(),
+              BitOf(FeatureBit::FilterPathScalarIndex) |
+                  BitOf(FeatureBit::ExprCacheHit));
+
+    MarkFeature(nullptr, FeatureBit::FilterPathBruteForce);  // no-op
+}
+
+TEST_F(DetermineExecPathTest, FeatureBits_ScalarIndexPathAndType) {
+    auto segment = CreateSegmentWithInt64Index();
+    auto recorder = std::make_shared<FeatureRecorder>();
+    auto expr = MakeUnaryRangeExpr(
+        int64_fid_, DataType::INT64, proto::plan::OpType::Equal, 42);
+    auto compiled = CompileWithRecorder({expr}, segment.get(), N_, recorder);
+    ASSERT_EQ(compiled.size(), 1);
+    EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
+    EXPECT_EQ(recorder->Bits(),
+              BitOf(FeatureBit::FilterPathScalarIndex) |
+                  BitOf(FeatureBit::ScalarIndexStlSort));
+}
+
+TEST_F(DetermineExecPathTest, FeatureBits_BruteForceWithoutIndex) {
+    auto segment = CreateSegmentNoIndex();
+    auto recorder = std::make_shared<FeatureRecorder>();
+    auto expr = MakeTermExpr(int64_fid_, DataType::INT64, {1, 2, 3});
+    auto compiled = CompileWithRecorder({expr}, segment.get(), N_, recorder);
+    ASSERT_EQ(compiled.size(), 1);
+    EXPECT_FALSE(compiled[0]->CanExecuteAllAtOnce());
+    EXPECT_EQ(recorder->Bits(), BitOf(FeatureBit::FilterPathBruteForce))
+        << "no index on the field: brute force, and no index was declined";
+}
+
+TEST_F(DetermineExecPathTest, FeatureBits_MixedConjunction) {
+    auto segment = CreateSegmentWithInt64Index();
+    auto recorder = std::make_shared<FeatureRecorder>();
+    auto indexed = MakeUnaryRangeExpr(
+        int64_fid_, DataType::INT64, proto::plan::OpType::LessThan, 100);
+    proto::plan::GenericValue val;
+    val.set_string_val("x");
+    auto raw = std::make_shared<expr::UnaryRangeFilterExpr>(
+        expr::ColumnInfo(varchar_no_index_fid_, DataType::VARCHAR),
+        proto::plan::OpType::Equal,
+        val,
+        std::vector<proto::plan::GenericValue>{});
+    auto conj = std::make_shared<expr::LogicalBinaryExpr>(
+        expr::LogicalBinaryExpr::OpType::And, indexed, raw);
+    auto compiled = CompileWithRecorder({conj}, segment.get(), N_, recorder);
+    ASSERT_EQ(compiled.size(), 1);
+    compiled[0]->CanExecuteAllAtOnce();
+    EXPECT_EQ(recorder->Bits(),
+              BitOf(FeatureBit::FilterPathScalarIndex) |
+                  BitOf(FeatureBit::ScalarIndexStlSort) |
+                  BitOf(FeatureBit::FilterPathBruteForce));
+}
+
+TEST_F(DetermineExecPathTest, FeatureBits_NoRecorderRecordsNothing) {
+    auto segment = CreateSegmentWithInt64Index();
+    auto expr = MakeUnaryRangeExpr(
+        int64_fid_, DataType::INT64, proto::plan::OpType::Equal, 42);
+    auto compiled = CompileWithRecorder({expr}, segment.get(), N_, nullptr);
+    ASSERT_EQ(compiled.size(), 1);
+    EXPECT_TRUE(compiled[0]->CanExecuteAllAtOnce());
 }

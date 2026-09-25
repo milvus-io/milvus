@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "common/FeatureBits.h"
 #include "common/FieldMeta.h"
 #include "common/QueryInfo.h"
 #include "common/Types.h"
@@ -30,6 +31,10 @@ class PlanNodeVisitor;
 
 struct PlanOptions {
     bool expr_use_json_stats = true;
+    // Non-null only when the plan collects execution feature bits. Shared by
+    // every copy of the options (query contexts, compiled expressions) so all
+    // segments of the request record into one set.
+    std::shared_ptr<FeatureRecorder> feature_recorder;
 };
 
 // Base of all Nodes

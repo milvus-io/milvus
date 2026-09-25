@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/agg"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
@@ -83,7 +84,15 @@ type QueryTask struct {
 	preferredNodes     map[string]int64
 	fastSkip           bool
 
-	reQuery              bool
+	reQuery bool
+	// internalTask marks a queryTask the Proxy synthesizes for itself: the
+	// requery that fetches vectors after a search, the retrieval an upsert does
+	// to read the rows it replaces, and the retrieval a search-by-primary-key
+	// turns into. The feature usage counters describe what users ask for, so
+	// they are skipped for these; counting them would report one user request
+	// as two, and would move counters the user never set (the synthesized
+	// request pins its own consistency level and output fields).
+	internalTask         bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
 	mustUsePartitionKey  bool
@@ -121,6 +130,14 @@ func NewQueryTask(ctx context.Context, node taskmodel.TaskNode, request *milvusp
 // Result returns the query result after execution.
 func (t *QueryTask) Result() *milvuspb.QueryResults {
 	return t.result
+}
+
+// MarkInternal flags a query the Proxy synthesizes to serve another request
+// (a search requery, an upsert read-back, the PK-search conversion). Its
+// request options and expressions are not the user's, so the query-side
+// feature counters must not see them.
+func (t *QueryTask) MarkInternal() {
+	t.internalTask = true
 }
 
 // SetActualChannelsMvcc installs the output snapshot for internal partial-update
@@ -625,11 +642,19 @@ func (t *QueryTask) createPlanArgs(ctx context.Context, visitorArgs *planparserv
 			metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.FailLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 			return WrapPlanCreationError(err, "failed to create query plan")
 		}
+		if !t.internalTask {
+			recordPlanExprFeatures(t.plan, t.request.GetExprTemplateValues())
+			collectExecFeatureBits(t.plan, featureusage.Enabled())
+		}
 		metrics.ProxyParseExpressionLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.QueryLabel, metrics.SuccessLabel).Observe(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
 	// parse output fields names
 	originalOuputFields := t.request.GetOutputFields()
 	t.translatedOutputFields, t.userOutputFields, t.userDynamicFields, t.userAggregates, _, err = translateOutputFields(t.request.GetOutputFields(), t.schema, false)
+	if !t.internalTask {
+		recordOutputFieldFeatures(t.userDynamicFields, t.translatedOutputFields, t.schema)
+		recordQueryAggregationFeatures(t.userAggregates)
+	}
 	if err != nil {
 		return err
 	}
@@ -812,6 +837,10 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !t.internalTask {
+		recordQueryIteratorFeature(queryParams.isIterator)
+		recordQueryParamKeyFeatures(t.request.GetQueryParams())
+	}
 	if queryParams.collectionID > 0 && queryParams.collectionID != t.GetCollectionID() {
 		return merr.WrapErrParameterInvalidMsg("Input collection id is not consistent to collectionID in the context," +
 			"alias or database may have changed")
@@ -987,6 +1016,9 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		mlog.Uint64("mvcc_ts", t.GetMvccTimestamp()),
 		mlog.Uint64("timeout_ts", t.GetTimeoutTimestamp()),
 		mlog.Uint64("collection_ttl_timestamps", t.CollectionTtlTimestamps))
+	if !t.internalTask {
+		recordCommonRequestFeatures(t.request)
+	}
 	return nil
 }
 
@@ -1056,6 +1088,7 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 	t.allQueryCnt = 0
 	t.totalRelatedDataSize = 0
 	t.storageCost = segcore.StorageCost{}
+	var execBits uint64
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn(ctx, "proxy", mlog.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
@@ -1068,10 +1101,12 @@ func (t *QueryTask) PostExecute(ctx context.Context) error {
 			t.storageCost.ScannedRemoteBytes += res.GetScannedRemoteBytes()
 			t.storageCost.ScannedTotalBytes += res.GetScannedTotalBytes()
 			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
+			execBits |= res.GetFeatureBits()
 			log.Debug(ctx, "proxy receives one query result", mlog.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})
 	}
+	recordExecFeatures(!t.internalTask && t.plan.GetPlanOptions().GetCollectFeatureBits(), execBits, t.storageCost.ScannedRemoteBytes)
 
 	metrics.ProxyDecodeResultLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), t.getQueryLabel()).Observe(0.0)
 	tr.CtxRecord(ctx, "reduceResultStart")

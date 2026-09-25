@@ -33,6 +33,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/featureusage"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
@@ -136,6 +137,7 @@ type IMetaTable interface {
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(ctx context.Context, db, name string) bool
 	ListAliasesByID(ctx context.Context, collID UniqueID) []string
+	FeatureUsageSnapshot(ctx context.Context) featureusage.CollectionInput
 
 	GetCredential(ctx context.Context, username string) (*internalpb.CredentialInfo, error)
 	InitCredential(ctx context.Context) error
@@ -1744,6 +1746,34 @@ func (mt *MetaTable) listAliasesByID(collID UniqueID) []string {
 		return true
 	})
 	return ret
+}
+
+// FeatureUsageSnapshot takes everything the feature usage report needs under a
+// single read lock and in one pass over each index: the databases, the
+// available collections of every database, and the alias total. Listing
+// collections per database instead walks the whole collection map once per
+// database and takes the lock once per database, and the three reads would not
+// describe the same instant.
+//
+// The collection models are the cached pointers, not clones, as with every
+// other cache read here; the report only reads them.
+func (mt *MetaTable) FeatureUsageSnapshot(ctx context.Context) featureusage.CollectionInput {
+	mt.ddLock.RLock()
+	defer mt.ddLock.RUnlock()
+
+	snap := featureusage.CollectionInput{
+		Databases:   maps.Values(mt.dbName2Meta),
+		Collections: make([]*model.Collection, 0, len(mt.collID2Meta)),
+	}
+	for _, coll := range mt.collID2Meta {
+		if coll.Available() {
+			snap.Collections = append(snap.Collections, coll)
+		}
+	}
+	for _, db := range mt.aliases.listDB() {
+		snap.AliasCount += len(mt.aliases.listCollections(db))
+	}
+	return snap
 }
 
 func (mt *MetaTable) ListAliasesByID(ctx context.Context, collID UniqueID) []string {
