@@ -28,8 +28,6 @@ import (
 
 const (
 	versionChecker260 = "<2.6.0-dev"
-	versionChecker265 = "<2.6.6-dev"
-	versionChecker300 = "<3.0.0-beta"
 )
 
 // errVersionWatchDone is an INTERNAL break-signal sentinel used by
@@ -205,33 +203,40 @@ func (b *balancerImpl) GetLatestWALLocated(ctx context.Context, pchannel string)
 	return b.channelMetaManager.GetLatestWALLocated(ctx, pchannel)
 }
 
-// WaitUntilWALbasedDDLReady waits until the WAL based DDL is ready.
-func (b *balancerImpl) WaitUntilWALbasedDDLReady(ctx context.Context) error {
-	if b.channelMetaManager.IsStreamingVersionAtLeast(channel.StreamingVersion265) {
+// WaitUntilVersionFeatureReady blocks until the version-gated feature is usable on this
+// cluster and then persists its marker, so later calls return immediately. The gate is
+// one-time per cluster: once the marker is written, no node version is consulted again.
+//
+// The wait order is: the feature it depends on, its own precondition if any, then every
+// required role. A constant without a descriptor is reported as an internal error rather
+// than a panic.
+func (b *balancerImpl) WaitUntilVersionFeatureReady(ctx context.Context, feature VersionFeature) error {
+	spec, err := feature.spec()
+	if err != nil {
+		return err
+	}
+	if b.channelMetaManager.IsStreamingVersionAtLeast(spec.marker) {
 		return nil
 	}
-	if err := b.channelMetaManager.WaitUntilStreamingEnabled(ctx); err != nil {
-		return err
-	}
-	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.StreamingNodeRole, versionChecker265); err != nil {
-		return err
-	}
-	return b.channelMetaManager.MarkStreamingVersion(ctx, channel.StreamingVersion265)
-}
+	b.Logger().Info(ctx, "waiting until streaming version feature is ready",
+		mlog.String("feature", spec.name), mlog.Int64("marker", spec.marker))
 
-// WaitUntilSchemaDropReady waits until every Proxy can attach schema version
-// to insert messages, so schema-drop DDL cannot race with legacy writes.
-func (b *balancerImpl) WaitUntilSchemaDropReady(ctx context.Context) error {
-	if b.channelMetaManager.IsStreamingVersionAtLeast(channel.StreamingVersion300) {
-		return nil
+	if spec.dependsOn != 0 {
+		if err := b.WaitUntilVersionFeatureReady(ctx, spec.dependsOn); err != nil {
+			return err
+		}
 	}
-	if err := b.WaitUntilWALbasedDDLReady(ctx); err != nil {
-		return err
+	if spec.precondition != nil {
+		if err := spec.precondition(ctx, b.channelMetaManager); err != nil {
+			return err
+		}
 	}
-	if err := b.blockUntilRoleGreaterThanVersion(ctx, typeutil.ProxyRole, versionChecker300); err != nil {
-		return err
+	for _, req := range spec.requires {
+		if err := b.blockUntilRoleGreaterThanVersion(ctx, req.Role, req.VersionRange); err != nil {
+			return err
+		}
 	}
-	return b.channelMetaManager.MarkStreamingVersion(ctx, channel.StreamingVersion300)
+	return b.channelMetaManager.MarkStreamingVersion(ctx, spec.marker)
 }
 
 // WatchChannelAssignments watches the balance result.
