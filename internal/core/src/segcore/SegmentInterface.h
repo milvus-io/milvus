@@ -605,6 +605,12 @@ class SegmentInternalInterface : public SegmentInterface {
                     SearchResult& results,
                     milvus::OpContext* op_ctx = nullptr) const override;
 
+    void
+    FillTargetEntry(const query::Plan* plan,
+                    const std::vector<FieldId>& field_ids,
+                    SearchResult& results,
+                    milvus::OpContext* op_ctx = nullptr) const;
+
     // Bring in base class Retrieve overloads to avoid name hiding
     using SegmentInterface::Retrieve;
 
@@ -829,7 +835,8 @@ class SegmentInternalInterface : public SegmentInterface {
     FillOrderByResult(
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
-        RetrieveResult& retrieveResult) const;
+        RetrieveResult& retrieveResult,
+        milvus::OpContext* op_ctx) const;
 
     void
     FillTargetEntry(
@@ -851,6 +858,17 @@ class SegmentInternalInterface : public SegmentInterface {
                                    int64_t count) const;
 
  protected:
+    // Fetch independent fields concurrently, then publish them to SearchResult
+    // on the caller thread. A null dynamic projection reads the full JSON field.
+    // Futures are drained before return, and each fetch has its own OpContext.
+    void
+    FillSearchResultOutputFields(
+        const query::Plan* plan,
+        const std::vector<FieldId>& field_ids,
+        SearchResult& results,
+        milvus::OpContext* op_ctx,
+        const std::vector<std::string>* target_dynamic_fields) const;
+
     // todo: use an Unified struct for all type in growing/seal segment to store data and valid_data.
     // internal API: return chunk_data in span
     virtual PinWrapper<SpanBase>
