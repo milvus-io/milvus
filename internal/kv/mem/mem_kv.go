@@ -18,6 +18,7 @@ package memkv
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -182,9 +183,18 @@ func (kv *MemoryKV) MultiLoad(ctx context.Context, keys []string) ([]string, err
 	kv.RLock()
 	defer kv.RUnlock()
 	result := make([]string, 0, len(keys))
+	invalid := make([]string, 0, len(keys))
 	for _, key := range keys {
 		item := kv.tree.Get(memoryKVItem{key: key})
+		if item == nil {
+			invalid = append(invalid, key)
+			result = append(result, "")
+			continue
+		}
 		result = append(result, item.(memoryKVItem).value.String())
+	}
+	if len(invalid) != 0 {
+		return result, merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 	}
 	return result, nil
 }
@@ -194,9 +204,18 @@ func (kv *MemoryKV) MultiLoadBytes(ctx context.Context, keys []string) ([][]byte
 	kv.RLock()
 	defer kv.RUnlock()
 	result := make([][]byte, 0, len(keys))
+	invalid := make([]string, 0, len(keys))
 	for _, key := range keys {
 		item := kv.tree.Get(memoryKVItem{key: key})
+		if item == nil {
+			invalid = append(invalid, key)
+			result = append(result, nil)
+			continue
+		}
 		result = append(result, item.(memoryKVItem).value.ByteSlice())
+	}
+	if len(invalid) != 0 {
+		return result, merr.WrapErrIoKeyNotFound(fmt.Sprintf("%v", invalid))
 	}
 	return result, nil
 }
