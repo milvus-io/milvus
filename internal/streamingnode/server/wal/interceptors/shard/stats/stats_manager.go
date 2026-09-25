@@ -17,11 +17,10 @@ import (
 )
 
 type (
-	SegmentStats         = utils.SegmentStats
-	ModifiedMetrics      = utils.ModifiedMetrics
-	SegmentBelongs       = utils.SegmentBelongs
-	SyncOperationMetrics = utils.SyncOperationMetrics
-	SealOperator         = utils.SealOperator
+	SegmentStats    = utils.SegmentStats
+	ModifiedMetrics = utils.ModifiedMetrics
+	SegmentBelongs  = utils.SegmentBelongs
+	SealOperator    = utils.SealOperator
 )
 
 var ErrNotEnoughSpace = errors.New("not enough space")
@@ -358,26 +357,6 @@ func (m *StatsManager) getSealOperator(segmentID int64) (SegmentBelongs, *Segmen
 		panic(fmt.Sprintf("seal operator of segment %d that not exist, critical bug", segmentID))
 	}
 	return belongs, stats.Copy(), sealOperator, true
-}
-
-// UpdateOnSync updates the stats of segment on sync.
-// It's an async update operation, so it's not necessary to do success.
-func (m *StatsManager) UpdateOnSync(segmentID int64, syncMetric SyncOperationMetrics) {
-	m.mu.Lock()
-	if _, ok := m.segmentIndex[segmentID]; !ok {
-		// UpdateOnSync is called asynchronously, so we need to check if the segment is still exist.
-		m.mu.Unlock()
-		return
-	}
-	m.segmentStats[segmentID].UpdateOnSync(syncMetric)
-	limit := uint64(m.cfg.maxBinlogFileNum)
-	notify := m.segmentStats[segmentID].BinLogCounter > limit
-	m.mu.Unlock()
-
-	// Trigger seal if the binlog file number reach the limit.
-	if notify {
-		m.worker.NotifySealSegment(segmentID, policy.PolicyBinlogNumber(limit))
-	}
 }
 
 // UnregisterSealedSegment unregisters the sealed segment.

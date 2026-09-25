@@ -67,7 +67,7 @@ type UpdateJobAction func(job ImportJob)
 const importJobReasonAbortedByUser = "aborted by user"
 
 // UnfailableJobStates are the committed states: the commit fence is out and
-// HandleCommitVchannel may already have made segments visible, so failing the
+// the commit callback may already have made segments visible, so failing the
 // job would drop committed data.
 var UnfailableJobStates = typeutil.NewSet(
 	internalpb.ImportJobState_Committing,
@@ -154,6 +154,7 @@ type ImportJob interface {
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
+	GetCommitByCoordinator() bool
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

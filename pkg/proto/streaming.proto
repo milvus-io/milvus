@@ -5,6 +5,7 @@ package milvus.proto.streaming;
 option go_package = "github.com/milvus-io/milvus/pkg/v3/proto/streamingpb";
 
 import "data_coord.proto";
+import "view.proto";
 import "messages.proto";
 import "common.proto";
 import "milvus.proto";
@@ -571,6 +572,25 @@ message ConsumeMessageReponse {
 }
 
 message CloseConsumerResponse {}
+message TransformDeleteBlock {
+    int64 partition_id = 1;
+    schema.IDs primary_keys = 2;
+}
+
+message TransformDeleteEntry {
+    repeated TransformDeleteBlock blocks = 1;
+}
+
+// TransformLogEntry is the durable recovery unit written from WAL Deletes.
+// It is kept as the record payload of VChannelSummaryTransformRecord.
+message TransformLogEntry {
+    uint64 time_tick = 1;
+
+    oneof entry {
+        TransformDeleteEntry delete = 2;
+    }
+}
+
 //
 // WALSummary
 //
@@ -586,22 +606,19 @@ message PChannelSummaryManifest {
     // Every chunk recovery may read, one entry each. Generations are contiguous:
     // retention only ever releases from the oldest end, never from the middle.
     repeated PChannelSummaryChunkIndexEntry chunks = 1;
-    // Chunks released by retention and not yet deleted. An entry present means
-    // "not deleted yet"; absent means "done". This is both the work queue and the
-    // progress record, so gc needs no watermark of its own -- and no cross-check
-    // against `chunks` either: an entry is only ever moved here by the same
-    // manifest write that stopped recovery depending on it.
-    repeated PChannelSummaryChunkRef pending_gc = 2;
-    // vchannel -> the timetick of the DDL that made every earlier record of that
-    // vchannel meaningless (a drop, an in-place truncate, a dropped partition).
-    //
-    // A pending entry marks the summary dirty by itself, which is what schedules
-    // the manifest PUT; without that the checkpoint would advance past the DDL
-    // while the tombstone was still only in memory, and a restart would
-    // resurrect exactly the facts it was meant to bury.
-    //
-    // An entry is dropped once no retained chunk reaches below it.
-    map<string, uint64> invalidated_vchannels = 3;
+    // Coverage survives retention of every chunk; it is not an object reference.
+    SummaryCoverage coverage = 2;
+    // Readers before this boundary explicitly fast-forward past retired Deletes.
+    map<string, uint64> transform_fast_forward_time_tick = 3;
+}
+
+// SummaryCoverage describes the complete WAL prefix accounted for by Summary.
+// generation and term identify the last continuously covered upload, not a live object.
+message SummaryCoverage {
+    uint64 generation = 1;
+    int64 term = 2;
+    uint64 start_time_tick = 3; // inclusive
+    uint64 end_time_tick = 4; // inclusive
 }
 
 // PChannelSummaryChunkIndexEntry is one chunk entry of the manifest.
@@ -614,15 +631,15 @@ message PChannelSummaryChunkIndexEntry {
     // depend on how the writes happened to be distributed, for a budget that is
     // spent on the object either way.
     uint64 object_size = 3;
-    // The chunk's own span, for coarse time filtering before any read.
-    uint64 start_timetick = 4;
+    // Complete WAL coverage [start_time_tick, end_timetick], including messages
+    // that produce no stored record.
+    uint64 start_time_tick = 4;
     uint64 end_timetick   = 5;
-    // The chunk footer's per-vchannel index, copied verbatim. Read by a consumer
-    // locating its own section; retention does not look at it.
+    // The chunk footer's per-vchannel indexes, used by reads and retention.
     repeated VChannelSummaryChunkIndex vchannels = 6;
 }
 
-// PChannelSummaryChunkRef is all gc needs to build the object key.
+// PChannelSummaryChunkRef identifies an immutable chunk object.
 message PChannelSummaryChunkRef {
     uint64 generation = 1;
     int64 term        = 2;
@@ -633,10 +650,9 @@ message PChannelSummaryChunkFooter {
     string pchannel   = 1;
     uint64 generation = 2;
     int64 term        = 3;
-    // The span covered by the whole object: the earliest and latest timetick
-    // across every vchannel in it. Each vchannel index below carries the same
-    // span narrowed to itself.
-    uint64 start_timetick = 4;
+    // Complete WAL coverage [start_time_tick, end_timetick]. Section indexes
+    // separately describe the actual records within that interval.
+    uint64 start_time_tick = 4;
     uint64 end_timetick   = 5;
     repeated VChannelSummaryChunkIndex chunks = 6;
 }
@@ -650,9 +666,16 @@ message VChannelSummaryChunkIndex {
     // Optional: written only for vchannels that carry idempotency keys.
     VChannelSummarySectionRef idempotency = 4;
     VChannelSummarySectionRef inserts     = 5;
-    // 6 is reserved for the transform log's section, which lands with its own
-    // consumer.
-    reserved 6;
+    VChannelSummaryTransformIndex transform = 6;
+}
+
+// One section's actual Delete range and total logical entry bytes.
+// Counts and offsets are in ref; no per-entry statistics are persisted.
+message VChannelSummaryTransformIndex {
+    VChannelSummarySectionRef ref = 1;
+    uint64 start_time_tick = 2;
+    uint64 end_time_tick = 3;
+    uint64 total_size = 4;
 }
 
 // VChannelSummarySectionRef is one section's location inside a chunk object.
@@ -660,6 +683,20 @@ message VChannelSummarySectionRef {
     uint64 offset       = 1;
     uint64 length       = 2;
     uint64 record_count = 3;
+}
+
+// VChannelSummaryTransformSection records the transform consumer's view of the
+// WAL: ordered delete entries, one per Delete or committed Txn containing
+// Delete, addressed by source WAL timetick.
+message VChannelSummaryTransformSection {
+    repeated VChannelSummaryTransformRecord records = 1;
+}
+
+// VChannelSummaryTransformRecord is one ordered delete entry of the transform
+// section.
+message VChannelSummaryTransformRecord {
+    uint64 time_tick = 1;
+    TransformDeleteEntry delete = 2;
 }
 
 // VChannelSummaryIdempotencySection is the idempotency overlay: which client key
@@ -711,7 +748,6 @@ message VChannelSummaryInsertRecord {
     schema.IDs ids                             = 4;
 }
 
-//
 // StreamingNodeManagerService
 //
 
@@ -794,6 +830,7 @@ message VChannelMeta {
     VChannelState state = 2; // vchannel state.
     CollectionInfoOfVChannel collection_info = 3; // if the channel is belong to a collection, the collection info will be setup.
     uint64 checkpoint_time_tick = 4; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 transform_materialized_time_tick = 5; // The L0 materialization frontier of the transform consumer. Delete entries through this timetick have been emitted as L0 output.
 }
 
 // CollectionInfoOfVChannel is the collection info in vchannel.
@@ -857,9 +894,9 @@ message SegmentAssignmentMeta {
     SegmentAssignmentState state = 5;
     SegmentAssignmentStat stat   = 6;
     int64 storage_version        = 7; // only available if level is L1 or Legacy.
-    uint64 checkpoint_time_tick  = 8; // The timetick of checkpoint, the meta already see the message at this timetick.
+    uint64 checkpoint_time_tick  = 8; // Complete durable effects of segment-relevant messages through this timetick.
     L1SegmentPersistedStorage persisted_storage = 9;
-    bool l1_commit_done = 10; // DataCoord accepted the final L1 binlog commit.
+    view.DataVersion sealed_at_data_version = 10; // First DataView publication of this segment; immutable after final commit.
     int32 schema_version = 11; // The schema version the segment was created with, propagated to AllocSegment.
 }
 
@@ -884,6 +921,8 @@ enum SegmentAssignmentState {
     SEGMENT_ASSIGNMENT_STATE_GROWING = 1;
     SEGMENT_ASSIGNMENT_STATE_FLUSHED = 2;
     SEGMENT_ASSIGNMENT_STATE_TOMBSTONED = 3;
+    // No more allocation; replay the outstanding insert tail before final commit.
+    SEGMENT_ASSIGNMENT_STATE_SEALED = 4;
 }
 
 // SegmentAssignmentStat is the stat of segment assignment.
@@ -907,9 +946,8 @@ message WALCheckpoint {
     // It's a hint for easier debugging.
     int64 recovery_magic = 3; // The recovery version of the checkpoint, it's used to hint the future recovery info upgrading.
     // Pchannel-scoped recovery control state (replication config/checkpoint
-    // and AlterWAL state). It advances atomically with the checkpoint: the
-    // checkpoint is the single source of truth for the control state after a
-    // crash.
+    // and AlterWAL state). Stored atomically with the checkpoint, but may
+    // cover a newer prefix than the global replay position.
     common.ReplicateConfiguration replicate_config = 4;
     common.ReplicateCheckpoint replicate_checkpoint = 5;
     AlterWALState alter_wal_state = 6;
@@ -920,6 +958,10 @@ message WALCheckpoint {
     // with the compare-and-swap commit of SaveRecoverySnapshot, this fences
     // checkpoint advancement across concurrent publishers.
     int64 term = 7;
+    // Applied-through local WAL timetick of the embedded control state.
+    // Only filters control effects during replay; never advances WAL truncation.
+    // Absent in older checkpoints, whose global time_tick is the recovery floor.
+    uint64 control_checkpoint_time_tick = 8;
 }
 
 message PChannelRecoveryControlMeta {

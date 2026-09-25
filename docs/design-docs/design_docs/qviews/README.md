@@ -250,9 +250,11 @@ recovery when a persisted Up view is older than the latest local SegmentModule
 state: the old Up view still needs a flushed-at-S1 Segment as a growing-side
 resource if its DataVersion has `streaming_version < S1`.
 
-The current DataView PR returns the Flush DataVersion but does not durably bind
-S1 to the Segment or deliver that binding to StreamingNode. That integration is
-required before this release rule is enabled.
+The recovery-storage implementation binds the first Flush DataVersion in
+DataCoord SegmentInfo and StreamingNode SegmentAssignmentMeta as
+`sealed_at_data_version`. Retried commits return this immutable version.
+QueryView-driven resource retention and physical Segment GC remain separate
+integration work; recording the binding alone does not enable this release rule.
 
 ## 9. Historical Query Segment Lifecycle
 

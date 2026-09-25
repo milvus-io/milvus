@@ -129,6 +129,11 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 	}
 	err := retry.Handle(ctx, func() (bool, error) {
 		err := b.broker.SaveBinlogPaths(ctx, req)
+		// This publisher has lost WAL ownership. Let the recovery task poison
+		// its handles; retrying this registration on the old node cannot help.
+		if errors.Is(err, merr.ErrChannelMisrouted) {
+			return false, err
+		}
 		// Segment not found during stale segment flush. Segment might get compacted already.
 		// Stop retry and still proceed to the end, ignoring this error.
 		if !pack.pack.isFlush && errors.Is(err, merr.ErrSegmentNotFound) {
@@ -139,7 +144,7 @@ func (b *brokerMetaWriter) UpdateSync(ctx context.Context, pack *SyncTask) error
 				mlog.Err(err))
 			return false, nil
 		}
-		// meta error, datanode handles a virtual channel does not belong here
+		// A missing channel now denotes a durable lifecycle tombstone.
 		if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrChannelNotFound) {
 			mlog.Warn(ctx, "meta error found, skip sync and start to drop virtual channel", mlog.String("channel", pack.channelName))
 			return false, nil

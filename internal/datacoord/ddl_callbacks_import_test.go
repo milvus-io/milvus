@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	mock_streaming "github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
@@ -51,7 +50,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -64,6 +62,12 @@ import (
 
 type ImportCallbacksSuite struct {
 	suite.Suite
+}
+
+func (s *ImportCallbacksSuite) SetupTest() {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
 }
 
 func TestImportCallbacksSuite(t *testing.T) {
@@ -552,10 +556,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_BroadcastFailsReturnsError() 
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
@@ -618,10 +618,6 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		meta:       newTestMetaWithChunkManager(s.T()),
 	}
 
-	wal := mock_streaming.NewMockWALAccesser(s.T())
-	wal.EXPECT().ControlChannel().Return(funcutil.GetControlChannel("by-dev-rootcoord-dml_0")).Maybe()
-	streaming.SetWALForTest(wal)
-
 	_, _, err := server.broadcastImport(
 		ctx,
 		"test_collection",
@@ -636,6 +632,8 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	)
 
 	s.NoError(err)
+	// The caller supplies data channels; Broadcaster adds the control channel.
+	s.ElementsMatch([]string{"v1"}, mockBroadcastAPI.capturedMsg.BroadcastHeader().VChannels)
 }
 
 // --------------------------------
@@ -939,7 +937,7 @@ func newTestImportMeta(t *testing.T) (ImportMeta, *mocks.DataCoordCatalog) {
 
 func buildCommitImportBroadcastResult(jobID int64) message.BroadcastResultCommitImportMessageV2 {
 	broadcastMsg := message.NewCommitImportMessageBuilderV2().
-		WithHeader(&message.CommitImportMessageHeader{JobId: jobID}).
+		WithHeader(&message.CommitImportMessageHeader{JobId: jobID, CommitByCoordinator: true}).
 		WithBody(&messagespb.CommitImportMessageBody{}).
 		WithBroadcast([]string{"control_channel"}).
 		MustBuildBroadcast()
@@ -961,7 +959,7 @@ func buildRollbackImportBroadcastResult(jobID int64) message.BroadcastResultRoll
 	}
 }
 
-func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
+func TestCommitImportCallback_UncommittedToCompleted(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 
@@ -982,7 +980,7 @@ func TestCommitImportCallback_UncommittedToCommitting(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 1)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }
 
 func TestCommitImportCallback_BeforeUncommitted_Retry(t *testing.T) {
@@ -1036,7 +1034,7 @@ func TestCommitImportCallback_MissingJob_Retry(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 13)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }
 
 func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
@@ -1066,7 +1064,7 @@ func TestCommitImportCallback_RetryAfterUncommitted(t *testing.T) {
 
 	updatedJob := importMeta.GetJob(ctx, 12)
 	assert.NotNil(t, updatedJob)
-	assert.Equal(t, internalpb.ImportJobState_Committing, updatedJob.GetState())
+	assert.Equal(t, internalpb.ImportJobState_Completed, updatedJob.GetState())
 }
 
 func TestRollbackImportCallback_TransitionToFailed(t *testing.T) {
@@ -1159,7 +1157,7 @@ func TestRollbackImportCallback_AfterCommit_NoOp(t *testing.T) {
 // on NewExclusiveCollectionNameResourceKey), so this race is unreachable. The
 // test documents the invariant from the callback side and provides regression
 // coverage against future drift: the job must end in a deterministic terminal
-// state (Committing or Failed) without panicking or corrupting meta. Run with
+// state (Completed or Failed) without panicking or corrupting meta. Run with
 // `-race` to detect any unsynchronized access.
 func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 	for iter := 0; iter < 32; iter++ {
@@ -1201,8 +1199,8 @@ func TestImportAckCallbacks_CommitVsAbort_Race(t *testing.T) {
 
 		final := importMeta.GetJob(ctx, jobID).GetState()
 		assert.Contains(t,
-			[]internalpb.ImportJobState{internalpb.ImportJobState_Committing, internalpb.ImportJobState_Failed},
-			final, "iter %d: terminal state must be Committing or Failed, got %s", iter, final)
+			[]internalpb.ImportJobState{internalpb.ImportJobState_Completed, internalpb.ImportJobState_Failed},
+			final, "iter %d: terminal state must be Completed or Failed, got %s", iter, final)
 	}
 }
 
@@ -1224,6 +1222,9 @@ func (c *captureBroadcastAPI) Broadcast(_ context.Context, msg message.Broadcast
 func (c *captureBroadcastAPI) Close() {}
 
 func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, context.Context, ImportJob) error) {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	t.Cleanup(func() { streaming.SetWALForTest(previous) })
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
@@ -1257,19 +1258,32 @@ func testBroadcastTargetsDataVchannels(t *testing.T, broadcastFn func(*Server, c
 	assert.NotNil(t, capture.captured, "Broadcast must have been called")
 	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
 		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
+	assert.False(t, capture.captured.BroadcastHeader().AckSyncUp)
 }
 
-// TestBroadcastCommitImportMessage_TargetsDataVchannels asserts that the
-// CommitImport WAL message is broadcast to the job's data vchannels.
-// Control-channel-only broadcasts are dropped by the WAL flusher's
-// IsControlChannel guard before reaching the CommitImport case, so the
-// message must reach data vchannels for HandleCommitVchannel to run.
+// CommitImport targets business channels and CChannel for the unified callback.
 func TestBroadcastCommitImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastCommitImportMessage)
 }
 
+func TestBroadcastCommitImportMessagePreservesJobProtocol(t *testing.T) {
+	previous := streaming.WAL()
+	streaming.SetupNoopWALForTest()
+	defer streaming.SetWALForTest(previous)
+	capture := &captureBroadcastAPI{}
+	patch := mockey.Mock((*Server).startBroadcastWithCollectionID).Return(capture, nil).Build()
+	defer patch.UnPatch()
+	for _, coordinator := range []bool{false, true} {
+		job := &importJob{ImportJob: &datapb.ImportJob{JobID: 7, CollectionID: 7, Vchannels: []string{"v1"}, CommitByCoordinator: coordinator}}
+		err := (&Server{}).broadcastCommitImportMessage(context.Background(), job)
+		assert.NoError(t, err)
+		msg := message.MustAsSpecializedBroadcastMessage[*message.CommitImportMessageHeader, *message.CommitImportMessageBody](capture.captured)
+		assert.Equal(t, coordinator, msg.Header().GetCommitByCoordinator())
+	}
+}
+
 // TestBroadcastRollbackImportMessage_TargetsDataVchannels asserts that the
-// RollbackImport WAL message is broadcast to the job's data vchannels,
+// RollbackImport WAL message is broadcast to the job's data vchannels and CChannel,
 // matching the CommitImport routing.
 func TestBroadcastRollbackImportMessage_TargetsDataVchannels(t *testing.T) {
 	testBroadcastTargetsDataVchannels(t, (*Server).broadcastRollbackImportMessage)
@@ -1332,24 +1346,24 @@ func TestJobIDFromDuplicatedBroadcast_RejectsADifferentCollection(t *testing.T) 
 }
 
 // --------------------------------
-// importIDRangeAckCallback Tests
+// updateImportAckCallback Tests
 // --------------------------------
 
-// buildImportIDRangeBroadcastResult constructs a BroadcastResult for an
-// ImportIDRange WAL message, mirroring the commit/rollback builders above.
+// buildUpdateImportBroadcastResult constructs a BroadcastResult for an
+// UpdateImport WAL message, mirroring the commit/rollback builders above.
 // A zero timeTick leaves Results empty, so GetMaxTimeTick() == 0.
-func buildImportIDRangeBroadcastResult(jobID int64, idRanges map[int64]*commonpb.IDRange, timeTick uint64) message.BroadcastResultImportIDRangeMessageV2 {
-	broadcastMsg := message.NewImportIDRangeMessageBuilderV2().
-		WithHeader(&message.ImportIDRangeMessageHeader{CollectionId: 1, JobId: jobID}).
-		WithBody(&messagespb.ImportIDRangeMessageBody{IdRanges: idRanges}).
+func buildUpdateImportBroadcastResult(jobID int64, idRanges map[int64]*commonpb.IDRange, timeTick uint64) message.BroadcastResultUpdateImportMessageV2 {
+	broadcastMsg := message.NewUpdateImportMessageBuilderV2().
+		WithHeader(&message.UpdateImportMessageHeader{CollectionId: 1, JobId: jobID}).
+		WithBody(&messagespb.UpdateImportMessageBody{IdRanges: idRanges}).
 		WithBroadcast([]string{"v0"}).
 		MustBuildBroadcast()
 	results := map[string]*message.AppendResult{}
 	if timeTick != 0 {
 		results["v0"] = &message.AppendResult{TimeTick: timeTick}
 	}
-	return message.BroadcastResultImportIDRangeMessageV2{
-		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportIDRangeMessageHeader, *messagespb.ImportIDRangeMessageBody](broadcastMsg),
+	return message.BroadcastResultUpdateImportMessageV2{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.UpdateImportMessageHeader, *messagespb.UpdateImportMessageBody](broadcastMsg),
 		Results: results,
 	}
 }
@@ -1379,7 +1393,7 @@ func validIDRangeFileRanges() map[int64]*commonpb.IDRange {
 
 // First delivery applies the ranges by Index and persists the updated job
 // through the catalog.
-func TestImportIDRangeAckCallback_FirstApply(t *testing.T) {
+func TestUpdateImportAckCallback_FirstApply(t *testing.T) {
 	ctx := context.Background()
 	var saved []*datapb.ImportJob
 	importMeta := newCapturingImportMeta(t, &saved)
@@ -1388,8 +1402,8 @@ func TestImportIDRangeAckCallback_FirstApply(t *testing.T) {
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-		buildImportIDRangeBroadcastResult(21, validIDRangeFileRanges(), 0)))
+	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(21, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 21)
 	require.NotNil(t, got)
@@ -1412,15 +1426,15 @@ func TestImportIDRangeAckCallback_FirstApply(t *testing.T) {
 
 // The ack callback applies ranges while the job waits in AssigningIDRange: the
 // state is left for the checker to advance.
-func TestImportIDRangeAckCallback_AppliesInAssigningIDRange(t *testing.T) {
+func TestUpdateImportAckCallback_AppliesInAssigningIDRange(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 	job := newIDRangeTestJob(24, internalpb.ImportJobState_AssigningIDRange)
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-		buildImportIDRangeBroadcastResult(24, validIDRangeFileRanges(), 0)))
+	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(24, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 24)
 	require.NotNil(t, got)
@@ -1432,7 +1446,7 @@ func TestImportIDRangeAckCallback_AppliesInAssigningIDRange(t *testing.T) {
 
 // At-least-once redelivery of the same message is a clean no-op; a conflicting
 // range must never overwrite the first applied one (first-range-wins).
-func TestImportIDRangeAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T) {
+func TestUpdateImportAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 	job := newIDRangeTestJob(22, internalpb.ImportJobState_PreImporting)
@@ -1440,12 +1454,12 @@ func TestImportIDRangeAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T)
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 
 	// First apply.
-	require.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-		buildImportIDRangeBroadcastResult(22, validIDRangeFileRanges(), 0)))
+	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(22, validIDRangeFileRanges(), 0)))
 
 	// Equal redelivery -> nil, nothing changes.
-	assert.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-		buildImportIDRangeBroadcastResult(22, validIDRangeFileRanges(), 0)))
+	assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(22, validIDRangeFileRanges(), 0)))
 	got := importMeta.GetJob(ctx, 22)
 	assert.EqualValues(t, 1000, got.GetFiles()[0].GetIdRange().GetBegin())
 	assert.Equal(t, internalpb.ImportJobState_PreImporting, got.GetState())
@@ -1456,8 +1470,8 @@ func TestImportIDRangeAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T)
 		0: {Begin: 2000, End: 2010},
 		1: {Begin: 2010, End: 2010},
 	}
-	assert.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-		buildImportIDRangeBroadcastResult(22, conflicting, 0)))
+	assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(22, conflicting, 0)))
 	got = importMeta.GetJob(ctx, 22)
 	assert.EqualValues(t, 1000, got.GetFiles()[0].GetIdRange().GetBegin(), "first applied range wins")
 	assert.EqualValues(t, 1010, got.GetFiles()[0].GetIdRange().GetEnd())
@@ -1467,22 +1481,22 @@ func TestImportIDRangeAckCallback_RedeliveryIdempotentAndFirstWins(t *testing.T)
 // A missing local job is unrecoverable (mid-import join, or a dropped collection whose
 // job creation was skipped): the callback WARNs and no-ops immediately so it never pins
 // the collection's exclusive lock. The broadcast tick is irrelevant.
-func TestImportIDRangeAckCallback_JobNotFoundNoOp(t *testing.T) {
+func TestUpdateImportAckCallback_JobNotFoundNoOp(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
 
 	freshTick := tsoutil.ComposeTSByTime(time.Now())
 	for _, tick := range []uint64{freshTick, 0} {
-		assert.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-			buildImportIDRangeBroadcastResult(31, validIDRangeFileRanges(), tick)))
+		assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+			buildUpdateImportBroadcastResult(31, validIDRangeFileRanges(), tick)))
 	}
 	assert.Nil(t, importMeta.GetJob(ctx, 31))
 }
 
 // A job at or past the range gate (Failed/Completed/Committing/Uncommitted) is
 // a race the callback must not disturb: nil no-op, ranges never applied.
-func TestImportIDRangeAckCallback_TerminalStatesNoOp(t *testing.T) {
+func TestUpdateImportAckCallback_TerminalStatesNoOp(t *testing.T) {
 	states := []internalpb.ImportJobState{
 		internalpb.ImportJobState_Failed,
 		internalpb.ImportJobState_Completed,
@@ -1497,8 +1511,8 @@ func TestImportIDRangeAckCallback_TerminalStatesNoOp(t *testing.T) {
 			require.NoError(t, importMeta.AddJob(ctx, job))
 
 			callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-			assert.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-				buildImportIDRangeBroadcastResult(41, validIDRangeFileRanges(), 0)))
+			assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+				buildUpdateImportBroadcastResult(41, validIDRangeFileRanges(), 0)))
 
 			got := importMeta.GetJob(ctx, 41)
 			assert.Equal(t, state, got.GetState())
@@ -1511,7 +1525,7 @@ func TestImportIDRangeAckCallback_TerminalStatesNoOp(t *testing.T) {
 // Protocol violations -- the two clusters disagree on the job's shape -- fail
 // the job loudly instead of applying a partial or misaligned range. Failing the
 // job is the callback's successful outcome (nil error).
-func TestImportIDRangeAckCallback_ProtocolViolationsFailJob(t *testing.T) {
+func TestUpdateImportAckCallback_ProtocolViolationsFailJob(t *testing.T) {
 	cases := []struct {
 		name           string
 		idRanges       map[int64]*commonpb.IDRange
@@ -1550,8 +1564,8 @@ func TestImportIDRangeAckCallback_ProtocolViolationsFailJob(t *testing.T) {
 			require.NoError(t, importMeta.AddJob(ctx, job))
 
 			callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-			assert.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-				buildImportIDRangeBroadcastResult(51, tc.idRanges, 0)))
+			assert.NoError(t, callbacks.updateImportAckCallback(ctx,
+				buildUpdateImportBroadcastResult(51, tc.idRanges, 0)))
 
 			got := importMeta.GetJob(ctx, 51)
 			require.NotNil(t, got)
@@ -1567,7 +1581,7 @@ func TestImportIDRangeAckCallback_ProtocolViolationsFailJob(t *testing.T) {
 // peer ranged rows for the same files. The ack must fail it instead of no-op'ing: Uncommitted
 // holds no Import task yet, so failing here still prevents the commit from landing an empty
 // import against the peer's rows.
-func TestImportIDRangeAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) {
+func TestUpdateImportAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T) {
 	ctx := context.Background()
 	importMeta, _ := newTestImportMeta(t)
 	job := &importJob{
@@ -1587,8 +1601,8 @@ func TestImportIDRangeAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T)
 	require.NoError(t, importMeta.AddJob(ctx, job))
 
 	callbacks := &DDLCallbacks{Server: &Server{importMeta: importMeta}}
-	require.NoError(t, callbacks.importIDRangeAckCallback(ctx,
-		buildImportIDRangeBroadcastResult(26, validIDRangeFileRanges(), 0)))
+	require.NoError(t, callbacks.updateImportAckCallback(ctx,
+		buildUpdateImportBroadcastResult(26, validIDRangeFileRanges(), 0)))
 
 	got := importMeta.GetJob(ctx, 26)
 	require.NotNil(t, got)
@@ -1597,13 +1611,13 @@ func TestImportIDRangeAckCallback_UncommittedWithoutRangesFailsJob(t *testing.T)
 }
 
 // --------------------------------
-// broadcastImportIDRangeMessage Tests
+// broadcastUpdateImportMessage Tests
 // --------------------------------
 
 // The producer side of the two-phase flow: per-file ranges (one entry per job file,
 // Index == position, range size == that file's post-preimport row count, zero-row
 // file gets an empty range) broadcast to the job's data vchannels.
-func TestAssignAndBroadcastImportIDRange_MessageShape(t *testing.T) {
+func TestAssignAndBroadcastUpdateImport_MessageShape(t *testing.T) {
 	ctx := context.Background()
 	wantVchannels := []string{"by-dev-rootcoord-dml_0_v0", "by-dev-rootcoord-dml_1_v0"}
 
@@ -1641,13 +1655,13 @@ func TestAssignAndBroadcastImportIDRange_MessageShape(t *testing.T) {
 	}
 
 	// fileRows aligned with job.GetFiles(): 10 rows, 0 rows (empty file), 5 rows.
-	require.NoError(t, server.broadcastImportIDRangeMessage(ctx, job, []int64{10, 0, 5}))
+	require.NoError(t, server.broadcastUpdateImportMessage(ctx, job, []int64{10, 0, 5}))
 
 	require.NotNil(t, capture.captured, "Broadcast must have been called")
 	assert.ElementsMatch(t, wantVchannels, capture.captured.BroadcastHeader().VChannels,
 		"broadcast must target the job's data vchannels; the broadcaster adds the control channel")
 
-	msg, err := message.AsBroadcastImportIDRangeMessageV2(capture.captured)
+	msg, err := message.AsBroadcastUpdateImportMessageV2(capture.captured)
 	require.NoError(t, err)
 	assert.EqualValues(t, 7, msg.Header().GetCollectionId())
 	assert.EqualValues(t, 9, msg.Header().GetJobId())
@@ -1665,7 +1679,7 @@ func TestAssignAndBroadcastImportIDRange_MessageShape(t *testing.T) {
 
 // Allocation failure is transient and propagates without any broadcast; a job
 // without vchannels can never deliver the message and fails loudly.
-func TestAssignAndBroadcastImportIDRange_ErrorPaths(t *testing.T) {
+func TestAssignAndBroadcastUpdateImport_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
 	// AllocN failure -> error propagates, nothing is broadcast.
@@ -1687,7 +1701,7 @@ func TestAssignAndBroadcastImportIDRange_ErrorPaths(t *testing.T) {
 		},
 		tr: timerecord.NewTimeRecorder("test"),
 	}
-	err := server.broadcastImportIDRangeMessage(ctx, job, []int64{10})
+	err := server.broadcastUpdateImportMessage(ctx, job, []int64{10})
 	assert.Error(t, err)
 	assert.False(t, broadcastStarted, "no broadcast without a successful allocation")
 
@@ -1704,7 +1718,7 @@ func TestAssignAndBroadcastImportIDRange_ErrorPaths(t *testing.T) {
 		},
 		tr: timerecord.NewTimeRecorder("test"),
 	}
-	err = server.broadcastImportIDRangeMessage(ctx, noVchannelJob, []int64{10})
+	err = server.broadcastUpdateImportMessage(ctx, noVchannelJob, []int64{10})
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrImportSysFailed))
 	assert.Contains(t, err.Error(), "job 9 has no vchannels")
@@ -1745,7 +1759,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	var channelNames []string
 	var dataTimestamp uint64
 	mockey.Mock((*Server).createImportJobFromAck).To(
-		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {
+		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
 			channelNames = append([]string{}, in.GetChannelNames()...)
 			dataTimestamp = in.GetDataTimestamp()
 			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil

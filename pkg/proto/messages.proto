@@ -70,7 +70,7 @@ enum MessageType {
     RollbackImport               = 46;
     AlterRLSMetadata             = 47;
     DropRLSMetadata              = 48;
-    ImportIDRange                = 49;
+    UpdateImport                 = 49;
 
     // AlterWAL is used to alter the wal configuration to the current cluster.
     AlterWAL             = 700;
@@ -322,7 +322,10 @@ message RollbackTxnMessageHeader {}
 // Just do nothing now.
 message TxnMessageHeader {}
 
-message ImportMessageHeader {}
+message ImportMessageHeader {
+    // Absent on legacy jobs, whose commit is completed by per-channel RPCs.
+    bool commit_by_coordinator = 1;
+}
 
 // SchemaChangeMessageHeader is the header of CollectionSchema update message.
 message SchemaChangeMessageHeader{
@@ -722,6 +725,7 @@ message RefreshExternalCollectionMessageBody {}
 message CommitImportMessageHeader {
     int64 collection_id = 1;
     int64 job_id        = 2;
+    bool commit_by_coordinator = 3; // Inherited from the Import job; false for legacy WAL messages.
 }
 
 // CommitImportMessageBody is the body of commit import message.
@@ -738,18 +742,18 @@ message RollbackImportMessageHeader {
 // Empty - all info is in header.
 message RollbackImportMessageBody {}
 
-// ImportIDRangeMessageHeader is the header of the import id range message.
-message ImportIDRangeMessageHeader {
+// UpdateImportMessageHeader is the header of the update import message.
+message UpdateImportMessageHeader {
     int64 collection_id = 1;
     int64 job_id        = 2;
 }
 
-// ImportIDRangeMessageBody carries the per-file ID ranges allocated from the exact
+// UpdateImportMessageBody carries the per-file ID ranges allocated from the exact
 // post-preimport row counts. The map key is the file's zero-based position in
 // ImportMsg.Files / job.Files order. The range size is the primary's exact
 // post-preimport row count, so it doubles as the cross-cluster divergence authority
 // and no separate row count is carried.
-message ImportIDRangeMessageBody {
+message UpdateImportMessageBody {
     map<int64, common.IDRange> id_ranges = 1;
 }
 

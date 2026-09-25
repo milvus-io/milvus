@@ -84,8 +84,8 @@ func (m *shardManagerImpl) CreatePartition(msg message.ImmutableCreatePartitionM
 	m.updateMetrics()
 }
 
-// DropPartition drops a partition manager when drop partition message is written into wal.
-// After DropPartition is called, the dml on the partition can not be applied.
+// DropPartition drops the target partition and fences the surviving partitions
+// to match RecoveryStorage's collection-wide flush.
 func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessageV1) {
 	collectionID := msg.Header().CollectionId
 	partitionID := msg.Header().PartitionId
@@ -95,20 +95,16 @@ func (m *shardManagerImpl) DropPartition(msg message.ImmutableDropPartitionMessa
 	defer m.mu.Unlock()
 
 	uniquePartitionKey := PartitionUniqueKey{CollectionID: collectionID, PartitionID: partitionID}
-	if err := m.checkIfPartitionExists(uniquePartitionKey); err != nil {
-		logger.Warn(m.ctx, "partition can not be dropped", mlog.Err(err))
-		return
-	}
-	delete(m.collections[collectionID].PartitionIDs, partitionID)
-
-	pm, ok := m.partitionManagers[uniquePartitionKey]
-	if !ok {
-		logger.Warn(m.ctx, "partition not exists", mlog.FieldCollectionID(collectionID), mlog.FieldPartitionID(partitionID))
-		return
+	if pm, ok := m.partitionManagers[uniquePartitionKey]; ok {
+		segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
+		delete(m.partitionManagers, uniquePartitionKey)
+		delete(m.collections[collectionID].PartitionIDs, partitionID)
+		logger.Info(m.ctx, "partition removed", mlog.Int64s("segmentIDs", segmentIDs))
+		m.updateMetrics()
 	}
 
-	delete(m.partitionManagers, uniquePartitionKey)
-	segmentIDs := pm.FlushAndDropPartition(policy.PolicyPartitionRemoved())
-	m.Logger().Info(m.ctx, "partition removed", mlog.Int64s("segmentIDs", segmentIDs))
-	m.updateMetrics()
+	// The caller still holds the VChannel exclusive append lock. Fence even if
+	// the partition was already dropped: every persisted DropPartition flushes
+	// all earlier segments. The target was removed first to retain its seal policy.
+	_, _ = m.flushAndFenceSegmentAllocUntil(collectionID, msg.TimeTick())
 }
