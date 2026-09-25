@@ -8886,6 +8886,10 @@ type streamingConfig struct {
 	// partial update
 	PartialUpdateVersionIndexMaxBytes ParamItem `refreshable:"false"`
 
+	// primary key index, experimental.
+	PKIndexEnabled     ParamItem `refreshable:"false"`
+	PKIndexLockStripes ParamItem `refreshable:"false"`
+
 	// memory usage control
 	FlushMemoryThreshold                 ParamItem `refreshable:"true"`
 	FlushGrowingSegmentBytesHwmThreshold ParamItem `refreshable:"true"`
@@ -9275,6 +9279,26 @@ If the wal implementation is woodpecker, the minimum threshold is 3s`,
 		Export:       false,
 	}
 	p.PartialUpdateVersionIndexMaxBytes.Init(base.mgr)
+
+	p.PKIndexEnabled = ParamItem{
+		Key:     "streaming.pkindex.enabled",
+		Version: "3.0.0",
+		Doc: `Experimental. Whether the streaming node maintains a primary key index on the write path,
+so that an insert of an existing primary key also deletes the old row.
+It has no effect unless the binary contains a primary key index engine.`,
+		DefaultValue: "false",
+		Export:       false,
+	}
+	p.PKIndexEnabled.Init(base.mgr)
+
+	p.PKIndexLockStripes = ParamItem{
+		Key:          "streaming.pkindex.lockStripes",
+		Version:      "3.0.0",
+		Doc:          "Experimental. The number of lock stripes that serialize primary key index decisions of one vchannel, 256 by default. A value of 0 or less means 1 stripe, which serializes all decisions of a vchannel",
+		DefaultValue: "256",
+		Export:       false,
+	}
+	p.PKIndexLockStripes.Init(base.mgr)
 
 	p.FlushMemoryThreshold = ParamItem{
 		Key:     "streaming.flush.memoryThreshold",
