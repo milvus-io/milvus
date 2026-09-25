@@ -24,15 +24,16 @@ The rewriter can be configured via the following parameter (refreshable at runti
 1) IN / NOT IN normalization and merges (`term_in.go`)
 - OR-equals to IN (same column):
   - `a == v1 OR a == v2 ...` → `a IN (v1, v2, ...)`
-  - Numeric columns only merge when count > threshold (default 150); others when count > 1.
+  - Merge two or more compatible equalities.
 - AND-not-equals to NOT IN (same column):
   - `a != v1 AND a != v2 ...` → `NOT (a IN (v1, v2, ...))`
-  - Same thresholds as above.
+  - Merge two or more compatible inequalities when `!=` is equivalent to `NOT (==)` for that column.
 - IN vs Equal redundancy elimination (same column):
   - AND: `(a ∈ S) AND (a = v)`:
     - if `v ∈ S` → `a = v`
     - if `v ∉ S` → contradiction → constant `false`
   - OR:  `(a ∈ S) OR (a = v)` → `a ∈ (S ∪ {v})` (always union)
+  - AND simplification requires exactly one remaining IN in the group. If an empty intersection cannot safely become a constant (nullable fields or missing paths), retain all remaining IN constraints.
 - IN with IN union:
   - OR: `(a ∈ S1) OR (a ∈ S2)` → `a ∈ (S1 ∪ S2)` with sorting/dedup
   - AND: `(a ∈ S1) AND (a ∈ S2)` → `a ∈ (S1 ∩ S2)`; empty intersection → constant `false`
@@ -104,7 +105,6 @@ The rewriter can be configured via the following parameter (refreshable at runti
 - Rewrite runs after template value filling; template placeholders do not appear here.
 - Optional visitor rewrites do not descend into `MatchExpr` or `ElementFilterExpr` predicates.
 - Sorting/dedup for IN/NOT IN is deterministic; duplicates are removed post-sort.
-- Numeric-threshold for OR→IN / AND≠→NOT IN is defined in `util.go` (`defaultConvertOrToInNumericLimit`, default 150).
 - Nullable fields keep contradiction/tautology predicates instead of folding to valid `true`/`false`, because NULL must remain unknown under outer logical operators such as `NOT`. Fixed JSON/array paths also avoid domain-wide folds that assume every path/index exists.
 
 ### Pass Ordering (current)
@@ -115,23 +115,21 @@ The rewriter can be configured via the following parameter (refreshable at runti
   4. TEXT_MATCH merge (no options)
   5. Range weaken (same-direction bounds)
   6. BinaryRangeExpr merge (overlapping/adjacent intervals)
-  7. IN with `!=` short-circuiting
-  8. IN ∪ IN union
-  9. IN vs Equal redundancy elimination
-  10. Fold back to BinaryExpr
+  7. IN ∪ IN union
+  8. IN vs Equal redundancy elimination
+  9. Fold back to BinaryExpr
 - AND branch:
   1. Flatten
   2. ARRAY `Contains` / `ContainsAll` → `ContainsAll`
   3. Range tighten / interval construction
   4. BinaryRangeExpr merge (intersection, also with UnaryRangeExpr)
-  5. IN ∪ IN intersection (if any)
-  6. IN with `!=` filtering
-  7. IN ∩ range filtering
-  8. IN vs Equal redundancy elimination
-  9. AND `!=` → NOT IN
-  10. Fold back to BinaryExpr
+  5. IN ∩ IN intersection (if any)
+  6. IN ∩ range filtering
+  7. IN vs Equal redundancy elimination
+  8. AND `!=` → NOT IN
+  9. Fold back to BinaryExpr
 
-Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
+Existing IN predicates are not merged with `!=` predicates; multiple `!=` predicates may still combine into NOT IN under AND. Each construction of IN will be normalized (sorted and deduplicated). TEXT_MATCH OR merge concatenates literals with a single space; no tokenization, deduplication, or sorting is performed.
 
 ### File Structure
 - `entry.go`      — rewrite entry and visitor orchestration
