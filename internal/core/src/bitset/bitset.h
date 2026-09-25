@@ -242,6 +242,19 @@ class BitsetBase {
             this->data(), other.data(), this->offset(), other.offset(), size);
     }
 
+    // AND with other, then complement the first size bits. Bits outside that
+    // range are unchanged. This is NAND, not AND-NOT (inplace_sub).
+    template <typename I, bool R>
+    inline void
+    inplace_and_flip(const BitsetBase<PolicyT, I, R>& other,
+                     const size_t size) {
+        range_checker::le(size, this->size());
+        range_checker::le(size, other.size());
+
+        policy_type::op_and_flip(
+            this->data(), other.data(), this->offset(), other.offset(), size);
+    }
+
     template <bool R>
     inline void
     inplace_and(const BitsetView<PolicyT, R>* const others,

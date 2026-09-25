@@ -67,8 +67,11 @@ ConvertPredicateToFilteredBitset(TargetBitmapView data,
         return true;
     }
 
-    data.inplace_and(valid, size);
-    data.flip();
+    data.inplace_and_flip(valid, size);
+    // Keep the original full-view FLIP behavior if size is a prefix.
+    if (size < data.size()) {
+        data.view(size).flip();
+    }
     valid.set();
     return false;
 }
