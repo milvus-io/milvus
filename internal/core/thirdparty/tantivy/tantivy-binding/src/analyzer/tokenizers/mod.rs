@@ -1,3 +1,4 @@
+mod char_filter_tokenizer;
 mod char_group_tokenizer;
 mod grpc_tokenizer;
 mod icu_tokneizer;
@@ -8,6 +9,7 @@ mod ngram_tokenizer_with_chars;
 mod thai_tokenizer;
 mod tokenizer;
 
+pub use self::char_filter_tokenizer::CharFilterTokenizer;
 pub use self::char_group_tokenizer::CharGroupTokenizer;
 pub use self::grpc_tokenizer::GrpcTokenizer;
 pub use self::icu_tokneizer::IcuTokenizer;
