@@ -29,4 +29,5 @@ exec pytest "$@" \
   --tags L3 \
   --run-compaction-integrity-serial \
   -m compaction_data_integrity_serial \
-  milvus_client/test_milvus_client_data_integrity.py::TestMilvusClientCompactionDataIntegrity
+  milvus_client/test_milvus_client_data_integrity.py::TestMilvusClientCompactionDataIntegrity \
+  milvus_client/test_milvus_client_continuous_data_integrity.py::TestMilvusClientContinuousStreamingDataIntegrity

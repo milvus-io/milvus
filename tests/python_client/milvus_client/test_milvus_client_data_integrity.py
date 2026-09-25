@@ -1409,8 +1409,15 @@ def _compaction_integrity_physical_pk(logical_pk, primary_key_type):
     return f"pk-{logical_pk:020d}"
 
 
-def _compaction_integrity_output_fields(include_struct_array, include_text, include_bm25_control):
+def _compaction_integrity_output_fields(
+    include_struct_array,
+    include_text,
+    include_bm25_control,
+    include_test_sequence_id=False,
+):
     output_fields = list(COMPACTION_INTEGRITY_BASE_OUTPUT_FIELDS)
+    if include_test_sequence_id:
+        output_fields.insert(output_fields.index("explicit_test_ts") + 1, "test_sequence_id")
     if not include_struct_array:
         output_fields = [
             field_name
@@ -1628,6 +1635,7 @@ def _build_compaction_integrity_row(
     include_text,
     include_bm25_control=False,
     include_struct_array=True,
+    test_sequence_id=None,
 ):
     physical_pk = _compaction_integrity_physical_pk(logical_pk, primary_key_type)
     varchar_signature = _compaction_integrity_signature(run_id, logical_pk, explicit_test_ts, 7)
@@ -1711,6 +1719,8 @@ def _build_compaction_integrity_row(
             "field": 19,
         },
     }
+    if test_sequence_id is not None:
+        row["test_sequence_id"] = test_sequence_id
     if not include_struct_array:
         row.pop(COMPACTION_INTEGRITY_STRUCT_ARRAY_FIELD)
         for field_name in COMPACTION_INTEGRITY_NULLABLE_VECTOR_FIELDS:
@@ -2096,6 +2106,7 @@ def _snapshot_compaction_integrity_segments(segments):
         segment.segment_id: {
             "segment_id": segment.segment_id,
             "state": segment.state_name,
+            "level": getattr(segment, "level_name", None),
             "num_rows": segment.num_rows,
             "is_sorted": segment.is_sorted,
             "storage_version": segment.storage_version,
@@ -2449,13 +2460,15 @@ def _assert_compaction_integrity_dataset(
     expected_by_pk,
     output_fields,
     primary_key_type,
+    query_filter=None,
 ):
     assert COMPACTION_INTEGRITY_QUERY_BATCH_SIZE > 0
     log.info(
         f"data integrity validation start collection={collection_name} rows={len(expected_by_pk)} "
         f"fields={len(output_fields)} output_fields={output_fields}"
     )
-    query_filter = "id >= 0" if primary_key_type == DataType.INT64 else 'id != ""'
+    if query_filter is None:
+        query_filter = "id >= 0" if primary_key_type == DataType.INT64 else 'id != ""'
     iterator = client.query_iterator(
         collection_name,
         batch_size=COMPACTION_INTEGRITY_QUERY_BATCH_SIZE,
@@ -3470,11 +3483,13 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         include_text,
         include_bm25_control=False,
         include_struct_array=True,
+        include_test_sequence_id=False,
     ):
         output_fields = _compaction_integrity_output_fields(
             include_struct_array,
             include_text,
             include_bm25_control,
+            include_test_sequence_id,
         )
         schema = self.create_schema(client, auto_id=False, enable_dynamic_field=True)[0]
         if primary_key_type == DataType.INT64:
@@ -3482,6 +3497,8 @@ class TestMilvusClientCompactionDataIntegrity(TestMilvusClientV2Base):
         else:
             schema.add_field("id", DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False)
         schema.add_field("explicit_test_ts", DataType.INT64)
+        if include_test_sequence_id:
+            schema.add_field("test_sequence_id", DataType.INT64)
         schema.add_field("bool_value", DataType.BOOL, nullable=True)
         schema.add_field("int8_value", DataType.INT8)
         schema.add_field("int16_value", DataType.INT16)
