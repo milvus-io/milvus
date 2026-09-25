@@ -258,8 +258,10 @@ CSearch(CSegmentInterface c_segment,
     std::mutex mu;
     mu.lock();
     futurePtr->registerReadyCallback(
-        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-        (CLockedGoMutex*)(&mu));
+        [](CFutureCallbackToken token) {
+            reinterpret_cast<std::mutex*>(token)->unlock();
+        },
+        reinterpret_cast<CFutureCallbackToken>(&mu));
     mu.lock();
 
     auto [searchResult, status] = futurePtr->leakyGet();
@@ -301,8 +303,10 @@ CRetrieve(CSegmentInterface c_segment,
     std::mutex mu;
     mu.lock();
     futurePtr->registerReadyCallback(
-        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-        (CLockedGoMutex*)(&mu));
+        [](CFutureCallbackToken token) {
+            reinterpret_cast<std::mutex*>(token)->unlock();
+        },
+        reinterpret_cast<CFutureCallbackToken>(&mu));
     mu.lock();
 
     auto [retrieveResult, status] = futurePtr->leakyGet();
@@ -328,8 +332,10 @@ CRetrieveByOffsets(CSegmentInterface c_segment,
     std::mutex mu;
     mu.lock();
     futurePtr->registerReadyCallback(
-        [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-        (CLockedGoMutex*)(&mu));
+        [](CFutureCallbackToken token) {
+            reinterpret_cast<std::mutex*>(token)->unlock();
+        },
+        reinterpret_cast<CFutureCallbackToken>(&mu));
     mu.lock();
 
     auto [retrieveResult, status] = futurePtr->leakyGet();

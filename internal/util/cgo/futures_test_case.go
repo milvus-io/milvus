@@ -40,6 +40,10 @@ func createFutureWithTestCase(ctx context.Context, testCase testCase) Future {
 	return future
 }
 
+func isUnderlyingFutureReadyForTest(future Future) bool {
+	return bool(C.future_is_ready(future.(*futureImpl).future))
+}
+
 func getCInt(p unsafe.Pointer) int {
 	return int(*(*C.int)(p))
 }

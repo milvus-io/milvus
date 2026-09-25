@@ -28,8 +28,8 @@ future_is_ready(CFuture* future);
 
 void
 future_register_ready_callback(CFuture* future,
-                               CUnlockGoMutexFn unlockFn,
-                               CLockedGoMutex* mutex);
+                               CFutureReadyCallbackFn callback,
+                               CFutureCallbackToken token);
 
 CStatus
 future_leak_and_get(CFuture* future, void** result);
