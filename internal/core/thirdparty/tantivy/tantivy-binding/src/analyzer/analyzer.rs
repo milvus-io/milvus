@@ -210,6 +210,16 @@ pub fn validate_analyzer(params: &str, extra_info: &str) -> Result<Vec<i64>> {
 mod tests {
     use crate::analyzer::analyzer::create_analyzer;
 
+    fn token_texts(params: &str, text: &str) -> Vec<String> {
+        let mut analyzer = create_analyzer(params, "").unwrap();
+        let mut stream = analyzer.token_stream(text);
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push(stream.token().text.clone());
+        }
+        tokens
+    }
+
     #[test]
     fn test_standard_analyzer() {
         let params = r#"{
@@ -219,6 +229,80 @@ mod tests {
 
         let tokenizer = create_analyzer(&params.to_string(), "");
         assert!(tokenizer.is_ok(), "error: {}", tokenizer.err().unwrap());
+    }
+
+    #[test]
+    fn test_custom_standard_tokenizer_options() {
+        let params = r#"{
+            "tokenizer": {
+                "type": "standard",
+                "uax29": true,
+                "max_token_length": 5
+            }
+        }"#;
+
+        assert_eq!(
+            token_texts(params, "Brown-Foxes jumped"),
+            vec!["Brown", "Foxes", "jumpe", "d"]
+        );
+    }
+
+    #[test]
+    fn test_standard_tokenizer_preserves_legacy_behavior_by_default() {
+        let params = r#"{
+            "tokenizer": "standard"
+        }"#;
+
+        assert_eq!(
+            token_texts(params, "dog's 32.3"),
+            vec!["dog", "s", "32", "3"]
+        );
+    }
+
+    #[test]
+    fn test_builtin_analyzers_preserve_legacy_standard_boundaries() {
+        for params in [
+            "",
+            r#"{"type": "standard"}"#,
+            r#"{"type": "english"}"#,
+            r#"{"type": "arabic"}"#,
+        ] {
+            assert_eq!(token_texts(params, "32.3"), vec!["32", "3"]);
+        }
+    }
+
+    #[test]
+    fn test_standard_tokenizer_enables_uax29_explicitly() {
+        let params = r#"{
+            "tokenizer": {
+                "type": "standard",
+                "uax29": true
+            }
+        }"#;
+
+        assert_eq!(token_texts(params, "dog's 32.3"), vec!["dog's", "32.3"]);
+    }
+
+    #[test]
+    fn test_custom_icu_tokenizer_position_mode() {
+        let params = r#"{
+            "tokenizer": {
+                "type": "icu",
+                "position_mode": "token",
+                "token_types": ["letter", "number"]
+            }
+        }"#;
+        let mut analyzer = create_analyzer(params, "").unwrap();
+        let mut stream = analyzer.token_stream("hello world");
+        let mut tokens = Vec::new();
+        while stream.advance() {
+            tokens.push((stream.token().text.clone(), stream.token().position));
+        }
+
+        assert_eq!(
+            tokens,
+            vec![("hello".to_string(), 0), ("world".to_string(), 1)]
+        );
     }
 
     #[test]
