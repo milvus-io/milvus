@@ -294,10 +294,10 @@ FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
             auto warmup_it = load_index_info->index_params.find("warmup");
             if (warmup_it != load_index_info->index_params.end()) {
                 load_index_info->warmup_policy = warmup_it->second;
-                LOG_INFO("Index warmup_policy extracted from index_params: {}",
-                         load_index_info->warmup_policy);
+                LOG_DEBUG("Index warmup_policy extracted from index_params: {}",
+                          load_index_info->warmup_policy);
             } else {
-                LOG_INFO(
+                LOG_DEBUG(
                     "No warmup key in index_params, warmup_policy will be "
                     "empty");
             }
