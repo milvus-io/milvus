@@ -163,6 +163,9 @@ func handleExprInternal(schema *typeutil.SchemaHelper, exprStr string, visitorAr
 	if isEmptyExpression(exprStr) {
 		return trueLiteral
 	}
+	if err := checkExprNestingDepth(exprStr); err != nil {
+		return err
+	}
 	ast, err := handleInternal(exprStr)
 	if err != nil {
 		return err
@@ -174,6 +177,106 @@ func handleExprInternal(schema *typeutil.SchemaHelper, exprStr string, visitorAr
 
 func handleExpr(schema *typeutil.SchemaHelper, exprStr string) (result interface{}) {
 	return handleExprInternal(schema, exprStr, &ParserVisitorArgs{})
+}
+
+const (
+	// defaultExprNestingDepth mirrors the proxy.maxExpressionDepth default.
+	defaultExprNestingDepth = 1000
+	// maxExprNestingDepthLimit is the hard upper bound accepted for
+	// proxy.maxExpressionDepth: a limit beyond it would defeat the purpose
+	// of the guard, since far shallower nesting already exhausts the
+	// goroutine stack.
+	maxExprNestingDepthLimit = 10000
+)
+
+// exprNestingLimit returns the effective expression nesting limit.
+func exprNestingLimit() int {
+	limit := paramtable.Get().ProxyCfg.MaxExpressionDepth.GetAsInt()
+	if limit <= 0 {
+		limit = defaultExprNestingDepth
+	}
+	return min(limit, maxExprNestingDepthLimit)
+}
+
+// exprNestingDepth measures the structural nesting of an expression. The
+// recursion points of the expression grammar (Plan.g4) are grouping
+// parentheses and brackets, exists/not/unary +/-/~ prefixes, and
+// parenthesized sub-expressions, so bounding them bounds both the ANTLR
+// parser and the plan visitor recursion.
+func exprNestingDepth(expr string) int {
+	depth, maxDepth := 0, 0
+	// Unary operators stack: "not not (" recurses two levels before the
+	// group, so pending prefixes are folded into the depth when the next
+	// non-unary token arrives.
+	pendingUnary := 0
+	applyPending := func() {
+		depth += pendingUnary
+		if depth > maxDepth {
+			maxDepth = depth
+		}
+		pendingUnary = 0
+	}
+	for i := 0; i < len(expr); {
+		if end, ok := unaryKeywordAt(expr, i); ok {
+			pendingUnary++
+			i = end
+			continue
+		}
+		switch expr[i] {
+		case '(', '[':
+			applyPending()
+			depth++
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		case ')', ']':
+			applyPending()
+			if depth > 0 {
+				depth--
+			}
+		case '!', '~', '+', '-':
+			applyPending()
+			pendingUnary++
+		default:
+			applyPending()
+		}
+		i++
+	}
+	applyPending()
+	return maxDepth
+}
+
+// unaryKeywordAt reports whether a not/exists keyword starts at index i and
+// returns the index just past it. Identifier boundaries are enforced so
+// names like "notes" do not count as unary prefixes.
+func unaryKeywordAt(expr string, i int) (int, bool) {
+	rest := expr[i:]
+	for _, kw := range []string{"not", "exists"} {
+		if len(rest) < len(kw) || !strings.EqualFold(rest[:len(kw)], kw) {
+			continue
+		}
+		end := i + len(kw)
+		if (i == 0 || !isWordChar(expr[i-1])) && (end == len(expr) || !isWordChar(expr[end])) {
+			return end, true
+		}
+	}
+	return i, false
+}
+
+func isWordChar(c byte) bool {
+	return c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// checkExprNestingDepth rejects expressions whose structural nesting exceeds
+// proxy.maxExpressionDepth before the ANTLR parser runs: parsing recurses
+// once per nesting level on the goroutine stack, and a stack overflow is a
+// fatal runtime error that recover() cannot intercept.
+func checkExprNestingDepth(expr string) error {
+	limit := exprNestingLimit()
+	if depth := exprNestingDepth(expr); depth > limit {
+		return merr.WrapErrParameterInvalidMsg("expression nesting depth %d exceeds the maximum allowed %d (proxy.maxExpressionDepth)", depth, limit)
+	}
+	return nil
 }
 
 func parseExprTemplateInner(schema *typeutil.SchemaHelper, exprStr string, visitorArgs *ParserVisitorArgs) (*planpb.Expr, error) {
