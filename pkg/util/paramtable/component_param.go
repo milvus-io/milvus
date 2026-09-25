@@ -107,6 +107,7 @@ type ComponentParam struct {
 	RootCoordCfg   rootCoordConfig
 	ProxyCfg       proxyConfig
 	QueryCoordCfg  queryCoordConfig
+	QueryViewCfg   queryViewConfig
 	QueryNodeCfg   queryNodeConfig
 	DataCoordCfg   dataCoordConfig
 	DataNodeCfg    dataNodeConfig
@@ -167,6 +168,7 @@ func (p *ComponentParam) init(bt *BaseTable) {
 	p.MixCoordCfg.init(bt)
 	p.ProxyCfg.init(bt)
 	p.QueryCoordCfg.init(bt)
+	p.QueryViewCfg.init(bt)
 	p.QueryNodeCfg.init(bt, p.LocalStorageCfg.Path.GetValue())
 	p.DataCoordCfg.init(bt)
 	p.DataNodeCfg.init(bt)

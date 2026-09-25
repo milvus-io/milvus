@@ -10,7 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/metautil"
 	"github.com/milvus-io/milvus/pkg/v3/util/nodescheduler"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -27,6 +27,7 @@ type ShardViewRegistry struct {
 	mu             sync.RWMutex
 	ctx            context.Context
 	flushScheduler *DirtyViewFlushScheduler
+	dataViewRefs   DataViewRefProvider
 
 	version  uint64
 	shards   map[qviews.ShardID]*ShardViewManager
@@ -38,7 +39,9 @@ type ShardViewRegistry struct {
 	collectionShards map[int64]map[qviews.ShardID]struct{}
 	nodeShards       map[int64]map[qviews.ShardID]struct{}
 
-	statsObservers []func(qviews.ShardID, *ShardStats)
+	statsObservers       []func(qviews.ShardID, *ShardStats)
+	publicationListeners map[uint64]ShardPublicationListener
+	nextListener         uint64
 }
 
 // RecoverShardViewRegistry constructs a ShardViewRegistry and rebuilds every
@@ -51,6 +54,7 @@ func RecoverShardViewRegistry(
 	ctx context.Context,
 	catalog queryview.QueryViewCatalog,
 	s syncer.ReliableSyncer,
+	dataViewRefs DataViewRefProvider,
 ) (*ShardViewRegistry, error) {
 	views, err := catalog.ListQueryViews(ctx)
 	if err != nil {
@@ -75,12 +79,21 @@ func RecoverShardViewRegistry(
 	batch := flushScheduler.Begin()
 	shards := make(map[qviews.ShardID]*ShardViewManager, len(byShardID))
 	for sid, recovered := range byShardID {
-		shards[sid] = newShardViewManager(ctx, sid, flushScheduler, recovered)
+		manager, err := RecoverShardViewManager(ctx, sid, flushScheduler, dataViewRefs, recovered)
+		if err != nil {
+			for _, recoveredManager := range shards {
+				recoveredManager.releaseAllRefs()
+			}
+			flushScheduler.Close()
+			return nil, err
+		}
+		shards[sid] = manager
 	}
 
 	registry := &ShardViewRegistry{
 		ctx:              ctx,
 		flushScheduler:   flushScheduler,
+		dataViewRefs:     dataViewRefs,
 		version:          1,
 		shards:           shards,
 		stats:            make(map[qviews.ShardID]*ShardStats, len(shards)),
@@ -92,14 +105,17 @@ func RecoverShardViewRegistry(
 		registry.stats[sid] = stats
 		registry.addCollectionShardLocked(sid)
 		registry.addNodeShardsLocked(sid, stats)
-		mgr.SetStatsObserver(registry.onShardStatsChanged)
-		mgr.setOnReleasedEmpty(registry.removeReleasedManager)
+		mgr.SetStatsObserver(registry.statsObserver(mgr))
+		mgr.setOnEmpty(registry.removeEmptyManager)
 	}
 	// Recovery sync callbacks may update manager stats immediately. Install all
 	// observers and indexes before releasing the held recovery events so those
 	// updates cannot be lost between the initial Stats call and observer setup.
 	batch.Commit()
 	if err := flushScheduler.Flush(ctx); err != nil {
+		for _, manager := range shards {
+			manager.releaseAllRefs()
+		}
 		flushScheduler.Close()
 		return nil, err
 	}
@@ -117,9 +133,9 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	}
 	r.mu.RUnlock()
 
-	mgr := newShardViewManager(r.ctx, shardID, r.flushScheduler, nil)
-	mgr.SetStatsObserver(r.onShardStatsChanged)
-	mgr.setOnReleasedEmpty(r.removeReleasedManager)
+	mgr := newShardViewManager(r.ctx, shardID, r.flushScheduler, nil, r.dataViewRefs)
+	mgr.SetStatsObserver(r.statsObserver(mgr))
+	mgr.setOnEmpty(r.removeEmptyManager)
 	stats := emptyShardStats()
 
 	r.mu.Lock()
@@ -131,6 +147,7 @@ func (r *ShardViewRegistry) Ensure(shardID qviews.ShardID) *ShardViewManager {
 	r.shards[shardID] = mgr
 	r.stats[shardID] = stats
 	r.addCollectionShardLocked(shardID)
+	r.publishShardLocked(shardID, stats)
 	r.version++
 	r.mu.Unlock()
 	return mgr
@@ -157,10 +174,16 @@ func (r *ShardViewRegistry) Get(shardID qviews.ShardID) *ShardViewManager {
 	return r.shards[shardID]
 }
 
-// removeReleasedManager reclaims a released manager after its last QueryView has
-// completed durable removal. The manager owns the release and emptiness
-// preconditions; the registry only verifies that it still owns this instance.
-func (r *ShardViewRegistry) removeReleasedManager(shardID qviews.ShardID, manager *ShardViewManager) {
+// removeEmptyManager reclaims a manager after its last QueryView has completed
+// durable removal. Recheck both emptiness and identity because the callback is
+// invoked after releasing the manager lock.
+func (r *ShardViewRegistry) removeEmptyManager(shardID qviews.ShardID, manager *ShardViewManager) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if len(manager.views) != 0 {
+		return
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.shards[shardID] != manager {
@@ -170,6 +193,7 @@ func (r *ShardViewRegistry) removeReleasedManager(shardID qviews.ShardID, manage
 	r.removeCollectionShardLocked(shardID)
 	delete(r.stats, shardID)
 	delete(r.shards, shardID)
+	r.publishShardLocked(shardID, nil)
 	r.version++
 }
 
@@ -239,12 +263,6 @@ func (r *ShardViewRegistry) ShardIDs() []qviews.ShardID {
 // RegisterStatsObserver registers an observer for future per-shard stats
 // updates. The current snapshot is not replayed; callers that need recovery
 // state should read Snapshot explicitly.
-//
-// Precondition: the observer MUST be a lightweight, non-blocking operation.
-// Publications originate from the shard manager while its lock is held (the
-// registry releases only its own lock before fan-out, so the manager lock is
-// still held during the callback), so the observer must not call back into a
-// manager or the registry (deadlock), perform metadata I/O, or block.
 func (r *ShardViewRegistry) RegisterStatsObserver(observer func(qviews.ShardID, *ShardStats)) {
 	if observer == nil {
 		return
@@ -284,19 +302,16 @@ func (s *ShardViewSnapshot) StatsMap() map[qviews.ShardID]*ShardStats {
 	return s.stats
 }
 
-// onShardStatsChanged applies a manager's stats publication. Only stats from
-// the manager currently resident in the registry are accepted: an evicted
-// manager (or a late callback from a replaced one) must not install its stale
-// placements into a shard slot now owned by a different manager.
-func (r *ShardViewRegistry) onShardStatsChanged(shardID qviews.ShardID, mgr *ShardViewManager, stats *ShardStats) {
+func (r *ShardViewRegistry) onManagerStatsChanged(manager *ShardViewManager, shardID qviews.ShardID, stats *ShardStats) {
 	r.mu.Lock()
-	if r.shards[shardID] != mgr {
+	if r.shards[shardID] != manager {
 		r.mu.Unlock()
 		return
 	}
 	r.removeNodeShardsLocked(shardID, r.stats[shardID])
 	r.stats[shardID] = stats
 	r.addNodeShardsLocked(shardID, stats)
+	r.publishShardLocked(shardID, stats)
 	r.version++
 	observers := append([]func(qviews.ShardID, *ShardStats){}, r.statsObservers...)
 	r.mu.Unlock()
@@ -311,23 +326,24 @@ func (r *ShardViewRegistry) publishSnapshotLocked() {
 }
 
 func (r *ShardViewRegistry) addCollectionShardLocked(shardID qviews.ShardID) {
-	_, collectionID, _, err := funcutil.ParseVChannel(shardID.VChannel)
+	channel, err := metautil.ParseChannel(shardID.VChannel, metautil.NewDynChannelMapper())
 	if err != nil {
 		return
 	}
-	shards := r.collectionShards[collectionID]
+	shards := r.collectionShards[channel.CollectionID()]
 	if shards == nil {
 		shards = make(map[qviews.ShardID]struct{})
-		r.collectionShards[collectionID] = shards
+		r.collectionShards[channel.CollectionID()] = shards
 	}
 	shards[shardID] = struct{}{}
 }
 
 func (r *ShardViewRegistry) removeCollectionShardLocked(shardID qviews.ShardID) {
-	_, collectionID, _, err := funcutil.ParseVChannel(shardID.VChannel)
+	channel, err := metautil.ParseChannel(shardID.VChannel, metautil.NewDynChannelMapper())
 	if err != nil {
 		return
 	}
+	collectionID := channel.CollectionID()
 	shards := r.collectionShards[collectionID]
 	delete(shards, shardID)
 	if len(shards) == 0 {
@@ -374,4 +390,36 @@ func (r *ShardViewRegistry) removeNodeShardsLocked(shardID qviews.ShardID, stats
 
 func emptyShardStats() *ShardStats {
 	return &ShardStats{Segments: make(map[int64]*SegmentStats)}
+}
+
+// ShardPublicationListener consumes immutable committed statistics; nil means
+// final removal. It must not re-enter the registry/managers or perform I/O.
+type ShardPublicationListener func(qviews.ShardID, *ShardStats)
+
+// RegisterPublicationListener installs and replays under the publication lock.
+func (r *ShardViewRegistry) RegisterPublicationListener(listener ShardPublicationListener) func() {
+	r.mu.Lock()
+	if r.publicationListeners == nil {
+		r.publicationListeners = make(map[uint64]ShardPublicationListener)
+	}
+	r.nextListener++
+	id := r.nextListener
+	r.publicationListeners[id] = listener
+	for shardID, stats := range r.stats {
+		listener(shardID, stats)
+	}
+	r.mu.Unlock()
+	return func() { r.mu.Lock(); delete(r.publicationListeners, id); r.mu.Unlock() }
+}
+
+func (r *ShardViewRegistry) publishShardLocked(shardID qviews.ShardID, stats *ShardStats) {
+	for _, listener := range r.publicationListeners {
+		listener(shardID, stats)
+	}
+}
+
+func (r *ShardViewRegistry) statsObserver(manager *ShardViewManager) func(qviews.ShardID, *ShardStats) {
+	return func(shardID qviews.ShardID, stats *ShardStats) {
+		r.onManagerStatsChanged(manager, shardID, stats)
+	}
 }

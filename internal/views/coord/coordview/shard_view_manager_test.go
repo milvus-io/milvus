@@ -2,9 +2,12 @@ package coordview
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 
+	"github.com/bytedance/mockey"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -12,7 +15,6 @@ import (
 	"github.com/milvus-io/milvus/internal/views/coord/coordview/syncer"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,6 +27,8 @@ type mockCatalog struct {
 	saved     []*viewpb.QueryViewOfShard   // accumulated across all calls
 	saveCalls [][]*viewpb.QueryViewOfShard // per-call batches
 	listed    []*viewpb.QueryViewOfShard   // returned by ListQueryViews
+	saveErr   error
+	onSave    func()
 }
 
 func newMockCatalog() *mockCatalog {
@@ -44,6 +48,12 @@ func (c *mockCatalog) ListQueryViews(ctx context.Context) ([]*viewpb.QueryViewOf
 func (c *mockCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryViewOfShard) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.onSave != nil {
+		c.onSave()
+	}
+	if c.saveErr != nil {
+		return c.saveErr
+	}
 	batch := make([]*viewpb.QueryViewOfShard, len(views))
 	for i, v := range views {
 		batch[i] = proto.Clone(v).(*viewpb.QueryViewOfShard)
@@ -51,6 +61,43 @@ func (c *mockCatalog) SaveQueryViews(ctx context.Context, views []*viewpb.QueryV
 	c.saveCalls = append(c.saveCalls, batch)
 	c.saved = append(c.saved, batch...)
 	return nil
+}
+
+// stubDataViewRef / stubDataViewRefProvider are bare shells implementing the
+// qviews interfaces so tests can hand them around; every behavior (Get,
+// Stats, Deref, ...) is supplied by mockey patches per test, so no mock
+// logic lives here.
+type stubDataViewRef struct {
+	version qviews.DataVersion
+}
+
+func (r stubDataViewRef) DataView() *viewpb.DataViewOfCollection { return nil }
+
+func (r stubDataViewRef) Version() *viewpb.DataVersion {
+	return r.version.IntoProto()
+}
+
+// Stats keeps a non-trivial body so mockey can rewrite it: a single
+// constant-return body compiles to too few instructions to patch at runtime.
+func (r stubDataViewRef) Stats(segmentID int64) (qviews.SegmentStats, bool) {
+	runtime.KeepAlive(r)
+	_ = segmentID
+	return qviews.SegmentStats{}, false
+}
+
+// Deref keeps a non-trivial body so mockey can rewrite it: an empty body
+// compiles to too few instructions to patch at runtime.
+func (r stubDataViewRef) Deref() {
+	runtime.KeepAlive(r)
+}
+
+type stubDataViewRefProvider struct{}
+
+// Get returns a ref for the requested version by default, matching the wired
+// behavior tests rely on; per-test mockey patches override it (error, nil
+// ref, event recording, ...).
+func (stubDataViewRefProvider) Get(_ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+	return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
 }
 
 func (c *mockCatalog) savedStates() []viewpb.QueryViewState {
@@ -245,7 +292,7 @@ func newTestManager(t *testing.T, catalog *mockCatalog, s *mockSyncer, recovered
 	t.Helper()
 	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
 	manager := &testShardViewManager{
-		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, recovered),
+		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, recovered, stubDataViewRefProvider{}),
 		t:                t,
 		scheduler:        scheduler,
 	}
@@ -253,6 +300,20 @@ func newTestManager(t *testing.T, catalog *mockCatalog, s *mockSyncer, recovered
 	s.waitFlush = manager.waitFlush
 	s.mu.Unlock()
 	manager.waitFlush()
+	return manager
+}
+
+func newTestManagerWithReferences(t *testing.T, catalog *mockCatalog, s *mockSyncer, refs DataViewRefProvider) *testShardViewManager {
+	t.Helper()
+	scheduler := newTestDirtyViewFlushScheduler(t, catalog, s, 128)
+	manager := &testShardViewManager{
+		ShardViewManager: newShardViewManager(context.Background(), testShardID, scheduler, nil, refs),
+		t:                t,
+		scheduler:        scheduler,
+	}
+	s.mu.Lock()
+	s.waitFlush = manager.waitFlush
+	s.mu.Unlock()
 	return manager
 }
 
@@ -288,6 +349,156 @@ func simulateNodeResponse(t *testing.T, s *mockSyncer, node qviews.WorkNode, ver
 // ===========================================================================
 // AddPreparing tests
 // ===========================================================================
+
+func TestShardViewManagerPinsBeforePersist(t *testing.T) {
+	events := make([]string, 0, 2)
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		events = append(events, "pin")
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	catalog := newMockCatalog()
+	catalog.onSave = func() { events = append(events, "persist") }
+	mgr := newTestManagerWithReferences(t, catalog, newMockSyncer(), stubDataViewRefProvider{})
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	require.Equal(t, []string{"pin", "persist"}, events)
+}
+
+func TestShardViewManagerPinFailureDoesNotPreemptCurrentView(t *testing.T) {
+	acquired := 0
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		acquired++
+		if acquired == 2 {
+			return nil, errors.New("pin failed")
+		}
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManagerWithReferences(t, catalog, s, stubDataViewRefProvider{})
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	catalog.reset()
+	s.reset()
+
+	err := mgr.AddPreparing(context.Background(), testBuilder(2, 1, 1))
+	require.EqualError(t, err, "pin failed")
+	require.Empty(t, catalog.saved)
+	require.Zero(t, s.syncViewCount())
+	mgr.mu.Lock()
+	require.Same(t, mgr.views[testVersion(1, 1, 1)], mgr.preparingView)
+	require.Len(t, mgr.views, 1)
+	mgr.mu.Unlock()
+}
+
+func TestShardViewManagerUnpinsOnlyAfterDroppedPersist(t *testing.T) {
+	var derefs []qviews.DataVersion
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	mockey.Mock((stubDataViewRef).Deref).To(func(ref stubDataViewRef) {
+		derefs = append(derefs, qviews.FromProtoDataVersion(ref.Version()))
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManagerWithReferences(t, catalog, s, stubDataViewRefProvider{})
+	version := testVersion(1, 1, 1)
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	require.NoError(t, mgr.RequestRelease(context.Background()))
+	simulateNodeResponse(t, s, testSN, version, qviews.QueryViewStateDropped)
+
+	catalog.saveErr = errors.New("persist failed")
+	s.mu.Lock()
+	s.waitFlush = nil
+	s.mu.Unlock()
+	simulateNodeResponse(t, s, testQN1, version, qviews.QueryViewStateDropped)
+	require.EqualError(t, mgr.scheduler.Flush(context.Background()), "persist failed")
+	require.Empty(t, derefs)
+	mgr.mu.Lock()
+	require.Contains(t, mgr.views, version)
+	mgr.mu.Unlock()
+
+	catalog.saveErr = nil
+	recovered := buildTestViewWithVersion(1, 1, 1, 1)
+	recovered.Meta.State = viewpb.QueryViewState_QueryViewStateUnrecoverable
+	recoveryCatalog := newMockCatalog()
+	recoverySyncer := newMockSyncer()
+	recoveryScheduler := newTestDirtyViewFlushScheduler(t, recoveryCatalog, recoverySyncer, 128)
+	recoveredManager, err := RecoverShardViewManager(context.Background(), testShardID, recoveryScheduler, stubDataViewRefProvider{}, []*viewpb.QueryViewOfShard{recovered})
+	require.NoError(t, err)
+	recoveredTestManager := &testShardViewManager{
+		ShardViewManager: recoveredManager,
+		t:                t,
+		scheduler:        recoveryScheduler,
+	}
+	recoverySyncer.mu.Lock()
+	recoverySyncer.waitFlush = recoveredTestManager.waitFlush
+	recoverySyncer.mu.Unlock()
+	recoveredTestManager.waitFlush()
+	require.NoError(t, recoveredTestManager.RequestRelease(context.Background()))
+
+	// A successful Dropped delete is the point at which the recovered ref may be released.
+	recoveredVersion := testVersion(1, 1, 1)
+	simulateNodeResponse(t, recoverySyncer, testSN, recoveredVersion, qviews.QueryViewStateDropped)
+	simulateNodeResponse(t, recoverySyncer, testQN1, recoveredVersion, qviews.QueryViewStateDropped)
+	require.Equal(t, []qviews.DataVersion{recoveredVersion.DataVersion}, derefs)
+}
+
+// TestShardViewManagerStatsCarriesRefRows verifies Stats().Segments carry the
+// published RowNum read from the resident QueryView's DataViewRef (lock-free
+// Stats) for placed segments, and stay zero when the ref publishes no
+// footprint.
+func TestShardViewManagerStatsCarriesRefRows(t *testing.T) {
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	mockey.Mock((stubDataViewRef).Stats).To(func(_ stubDataViewRef, segmentID int64) (qviews.SegmentStats, bool) {
+		if segmentID == 1001 {
+			return qviews.SegmentStats{RowNum: 42}, true
+		}
+		return qviews.SegmentStats{}, false
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManagerWithReferences(t, catalog, s, stubDataViewRefProvider{})
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+
+	stats := mgr.Stats()
+	require.Contains(t, stats.Segments, int64(1001))
+	require.Equal(t, int64(42), stats.Segments[1001].RowNum)
+}
+
+func TestShardViewManagerStatsRowsEmptyWhenRefUnpublished(t *testing.T) {
+	// The ref's Stats always miss: RowNum stays zero.
+	mockey.Mock((*stubDataViewRefProvider).Get).To(func(_ *stubDataViewRefProvider, _ context.Context, _ int64, version *viewpb.DataVersion) (qviews.DataViewRef, error) {
+		return stubDataViewRef{version: qviews.FromProtoDataVersion(version)}, nil
+	}).Build()
+	mockey.Mock((stubDataViewRef).Stats).To(func(_ stubDataViewRef, _ int64) (qviews.SegmentStats, bool) {
+		return qviews.SegmentStats{}, false
+	}).Build()
+	defer mockey.UnPatchAll()
+
+	catalog := newMockCatalog()
+	s := newMockSyncer()
+	mgr := newTestManagerWithReferences(t, catalog, s, stubDataViewRefProvider{})
+
+	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
+	stats := mgr.Stats()
+	require.NotEmpty(t, stats.Segments)
+	for _, segment := range stats.Segments {
+		require.Zero(t, segment.RowNum)
+	}
+}
 
 func TestAddPreparing_Success(t *testing.T) {
 	catalog := newMockCatalog()
@@ -426,8 +637,7 @@ func TestAddPreparing_DataVersionRollbackRejected(t *testing.T) {
 	// Try to add v2 with DV(1,1) → should fail with DataVersion rollback.
 	b2 := testBuilder(1, 1, 1)
 	err := mgr.AddPreparing(context.Background(), b2)
-	assert.Equal(t, merr.Code(merr.ErrServiceInternal), merr.Code(err))
-	assert.ErrorContains(t, err, "new data version must not be lower than any existing view's data version")
+	assert.ErrorIs(t, err, errDataVersionRollback)
 }
 
 func TestAddPreparing_BatchPersistAtomicity(t *testing.T) {
@@ -790,30 +1000,6 @@ func TestRequestRelease_MixedViews(t *testing.T) {
 	assert.Equal(t, 1, catalog.numSaveCalls())
 }
 
-func TestAddPreparing_RejectedAfterRequestRelease(t *testing.T) {
-	catalog := newMockCatalog()
-	s := newMockSyncer()
-	mgr := newTestManager(t, catalog, s)
-
-	require.NoError(t, mgr.AddPreparing(context.Background(), testBuilder(1, 1, 1)))
-	require.NoError(t, mgr.RequestRelease(context.Background()))
-
-	// A prepare arriving after release started must be rejected: resurrecting
-	// a Preparing view would fight the teardown already in flight.
-	catalog.reset()
-	s.reset()
-	err := mgr.AddPreparing(context.Background(), testBuilder(2, 1, 1))
-	require.Error(t, err)
-
-	// No new view, persist, or sync effects from the rejected prepare.
-	assert.Equal(t, 0, catalog.numSaveCalls())
-	assert.Zero(t, s.syncViewCount())
-	mgr.mu.Lock()
-	require.Len(t, mgr.views, 1)
-	assert.Equal(t, qviews.QueryViewStateDropping, mgr.views[testVersion(1, 1, 1)].State())
-	mgr.mu.Unlock()
-}
-
 // ===========================================================================
 // Recovery tests
 // ===========================================================================
@@ -957,8 +1143,8 @@ func TestOnQueryNodeLost_RemovedView_NoOp(t *testing.T) {
 }
 
 func TestShardViewManagerConsumesOnlyProcessedStateMachineEffects(t *testing.T) {
-	untouched := NewCoordQueryViewStateMachine(buildTestViewWithVersion(1, 1, 1, 1))
-	processed := NewCoordQueryViewStateMachine(buildTestViewWithVersion(1, 1, 1, 2))
+	untouched := NewCoordQueryViewStateMachine(buildTestViewWithVersion(1, 1, 1, 1), nil)
+	processed := NewCoordQueryViewStateMachine(buildTestViewWithVersion(1, 1, 1, 2), nil)
 	manager := &ShardViewManager{
 		ctx:     context.Background(),
 		shardID: testShardID,
@@ -977,64 +1163,4 @@ func TestShardViewManagerConsumesOnlyProcessedStateMachineEffects(t *testing.T) 
 	assert.Equal(t, processed.Version(), qviews.FromProtoQueryViewVersion(event.persists[0].GetMeta().GetVersion()))
 	assert.Len(t, event.syncs, 2)
 	assert.False(t, untouched.ConsumeFlush().Empty())
-}
-
-func TestShardViewManagerRemovesDroppedViewOnlyAfterPersist(t *testing.T) {
-	view := buildTestViewWithVersion(1, 1, 1, 1)
-	sm := NewCoordQueryViewStateMachine(view)
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateReady))
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateReady))
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateUp))
-	sm.ConsumeFlush()
-	sm.EnterDown()
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDown))
-	sm.ConsumeFlush()
-	sm.OnNodeStateReported(snReport(view, qviews.QueryViewStateDropped))
-	sm.OnNodeStateReported(qnReport(view, 1, qviews.QueryViewStateDropped))
-	require.Equal(t, qviews.QueryViewStateDropped, sm.State())
-
-	manager := &ShardViewManager{
-		ctx:     context.Background(),
-		shardID: testShardID,
-		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
-			sm.Version(): sm,
-		},
-	}
-	manager.mu.Lock()
-	manager.processStateMachine(sm)
-	event := manager.consumeDirtyEventLocked()
-	_, retainedBeforePersist := manager.views[sm.Version()]
-	manager.mu.Unlock()
-
-	assert.True(t, retainedBeforePersist)
-	require.Len(t, event.afterPersist, 1)
-	event.afterPersist[0]()
-
-	manager.mu.Lock()
-	_, retainedAfterPersist := manager.views[sm.Version()]
-	manager.mu.Unlock()
-	assert.False(t, retainedAfterPersist)
-}
-
-func TestShardViewManagerDoesNotPublishReleaseWithoutRequestRelease(t *testing.T) {
-	view := buildTestViewWithVersion(1, 1, 1, 1)
-	sm := NewCoordQueryViewStateMachine(view)
-	manager := &ShardViewManager{
-		ctx:     context.Background(),
-		shardID: testShardID,
-		views: map[qviews.QueryViewVersion]*CoordQueryViewStateMachine{
-			sm.Version(): sm,
-		},
-	}
-
-	released := false
-	manager.setOnReleasedEmpty(func(qviews.ShardID, *ShardViewManager) {
-		released = true
-	})
-	manager.finalizeRemoval(sm)
-
-	assert.False(t, released)
 }

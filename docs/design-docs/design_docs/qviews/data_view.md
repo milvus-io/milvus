@@ -29,6 +29,7 @@ type LoadableSegment struct {
     VChannel        string
     PartitionID     int64
     ManifestVersion int64
+    RowNum          int64 // in-memory published footprint, not persisted
 }
 ```
 
@@ -273,11 +274,59 @@ bug (see the precondition on the type).
 the exact requested version. An unknown Collection, a nil version, or a version
 that has already been collected returns `(nil, nil)`.
 
-When QueryView integration is introduced, a QueryView must retain its exact
+The coordview interface integration retains each QueryView's exact
 `DataViewRef` through Preparing, Ready, Up, Down, Unrecoverable, and Dropping,
-and release it only after reaching Dropped. Recovered QueryViews must reacquire
-their persisted DataVersion before GC is enabled. This lifecycle integration is
-outside the current PR.
+and releases it only after the Dropped deletion has been persisted. New views
+acquire their reference before preempting existing views; a missing version
+returns a retriable system error so the caller can rebuild its plan. Recovered
+QueryViews reacquire their persisted DataVersion; a genuinely missing version
+enters terminal cleanup. Production runtime wiring must complete this recovery
+before enabling DataView GC; that wiring is outside this PR.
+
+### View consumer interfaces
+
+The current implementation exposes two consumer contracts:
+
+- `qviews.DataViewRefProvider.Get` supplies exact-version references to
+  `ShardViewRegistry`. Each state machine owns one acquired reference.
+- `api.DataViewPublisher.RegisterDataViewListener` synchronously replays existing
+  immutable collection objects and publishes subsequent updates without a
+  missing-update window. Balancer reads these objects from its resident cache.
+
+The [Balancer Cache implementation](balancer_cache.md) replaces the Balancer's
+snapshot-pull path with `RegisterDataViewListener` synchronous publication hooks. At each committed publication, DataViewManager supplies a read-only
+Collection object with immutable membership and matching RowNum. The native
+projection is materialized once and retained for the latest publication. Each
+desired shard also publishes `TotalRows` and `SegmentCount`, so reconciliation
+does not rescan segments for these aggregates. Indexes and summaries are built
+once per published version, not per reconcile. The obsolete global and scoped
+DataViewSnapshot pull APIs have been removed.
+
+The hook covers create/bootstrap, recompute publication, successful flush
+commit, recovery footprint initialization, and logical collection drop. Abort
+does not publish a prepared DataView. Membership, DataVersion, RowNum, and shard
+summaries must belong to one publication; later recovery footprint fills must
+replace published read objects even if DataVersion is unchanged. The hook does
+not perform I/O or re-enter the manager. Registration and initial replay must
+not leave a missing-update window.
+
+Neither native planning snapshots nor cache read objects pin DataVersions.
+The exact-version `Get` performed by `AddPreparing` remains the acquisition
+point against GC. An old read object may remain readable after GC has collected
+its version, but it cannot then be used to create a new QueryView; the caller
+must replan. Do not expose mutable reference counters/tombstones through the
+cache object or call the copying `DataViewRef.DataView()` on its read path.
+
+`DataViewRef.Stats(segmentID)` exposes the reference's per-version RowNum map.
+Stats are immutable after publication and are not persisted. Recovery fills
+the latest version from SegmentMeta; retained historical versions may have
+unknown stats. Shard statistics combine the contributing retained versions,
+preferring the newest known footprint for each segment. An explicit presence
+flag distinguishes unknown from a published zero; only unknown values may
+fall back to known row statistics retained for planning. In the cache,
+the fallback and affected node contributions are maintained at publication,
+rather than reconstructed by reconciliation. Fallback values can be reclaimed
+when no latest/resident view needs them.
 
 Because DataVersion and DataViewRef are Collection-scoped while QueryView is
 Shard-scoped, one Shard can otherwise keep an old complete Collection snapshot
@@ -384,7 +433,7 @@ recognizes the CollectionMeta tombstone and removes the remaining DataView keys.
 
 The manager no longer owns `SegmentStore`, loadability checks, resident/visible
 split, temporary flush snapshots, SegmentMeta-derived delete-frontier
-projection, event-driven repair, Balancer snapshots, Segment reference queries,
+projection, event-driven repair, Balancer policy, Segment reference queries,
 or caller-supplied protected-version lists. The event API is reduced to
 Create/Bootstrap/PrepareFlush/Recompute/Drop; membership is a materialized view
 of SegmentMeta rather than an event-accumulated log. The delete frontier remains
