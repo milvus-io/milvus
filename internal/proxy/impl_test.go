@@ -2209,6 +2209,27 @@ func Test_GetPersistentSegmentInfoWithStates(t *testing.T) {
 	require.Equal(t, []int64{7, 8}, resp.GetInfos()[0].GetCompactionFrom())
 }
 
+func Test_GetPersistentSegmentInfoPropagatesGetSegmentsByStatesStatus(t *testing.T) {
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, "db", "collection").Return(int64(1), nil)
+	mockMixCoord := mocks.NewMockMixCoordClient(t)
+	mockMixCoord.EXPECT().GetSegmentsByStates(mock.Anything, mock.Anything).Return(
+		&datapb.GetSegmentsByStatesResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(1)),
+		}, nil,
+	)
+
+	proxy := &Proxy{mixCoord: mockMixCoord, metaCache: mockCache}
+	proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+	resp, err := proxy.GetPersistentSegmentInfo(context.Background(), &milvuspb.GetPersistentSegmentInfoRequest{
+		DbName:         "db",
+		CollectionName: "collection",
+	})
+	require.NoError(t, err)
+	require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrCollectionNotFound)
+	require.Empty(t, resp.GetInfos())
+}
+
 func Test_GetCompactionPlansDatabaseHeaderRouting(t *testing.T) {
 	cache := NewMockCache(t)
 	// Both databases contain the same collection name, with different IDs.

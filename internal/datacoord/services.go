@@ -1437,11 +1437,29 @@ func (s *Server) GetSegmentsByStates(ctx context.Context, req *datapb.GetSegment
 	}
 
 	var segmentIDs []UniqueID
-	channels, err := s.getChannelsByCollectionID(ctx, collectionID)
+	describeRsp, err := s.mixCoord.DescribeCollectionInternal(ctx, &milvuspb.DescribeCollectionRequest{
+		Base: &commonpb.MsgBase{
+			MsgType: commonpb.MsgType_DescribeCollection,
+		},
+		CollectionID: collectionID,
+	})
 	if err != nil {
 		return &datapb.GetSegmentsByStatesResponse{
 			Status: merr.Status(err),
 		}, nil
+	}
+	if err := merr.Error(describeRsp.GetStatus()); err != nil {
+		return &datapb.GetSegmentsByStatesResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	channels := make([]RWChannel, 0, len(describeRsp.GetVirtualChannelNames()))
+	for _, channel := range describeRsp.GetVirtualChannelNames() {
+		channels = append(channels, &channelMeta{
+			Name:          channel,
+			CollectionID:  collectionID,
+			StartPosition: toMsgPosition(channel, describeRsp.GetStartPositions()),
+		})
 	}
 	for _, channel := range channels {
 		channelSegmentsView := s.handler.GetCurrentSegmentsView(ctx, channel, partitionID)
