@@ -64,7 +64,9 @@ type EmbeddingRequest struct {
 
 	InputType string `json:"input_type,omitempty"`
 
-	Truncation bool `json:"truncation,omitempty"`
+	// Always sent: the service defaults an absent truncation to true, so
+	// omitting false would silently turn an explicit false into true.
+	Truncation bool `json:"truncation"`
 
 	OutputDimension int64 `json:"output_dimension,omitempty"`
 
