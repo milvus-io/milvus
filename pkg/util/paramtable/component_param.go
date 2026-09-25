@@ -79,6 +79,8 @@ const (
 	DefaultPQCodeBudgetGBRatio           = 0.125
 	DefaultBuildNumThreadsRatio          = 1.0
 	DefaultSearchCacheBudgetGBRatio      = 0.10
+	DefaultAiSAQSearchCacheBudgetGBRatio = 0.0
+	DefaultDiskPQCodeBudgetGBRatio       = 0.25
 	DefaultLoadNumThreadRatio            = 8.0
 	DefaultBeamWidthRatio                = 4.0
 	MaxClusterIDBits                     = 3

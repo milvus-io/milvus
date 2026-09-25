@@ -60,7 +60,7 @@ func IsOffsetCacheSupported(indexType IndexType) bool {
 }
 
 func IsDiskIndex(indexType IndexType) bool {
-	return vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType)
+	return vecindexmgr.GetVecIndexMgrInstance().IsDiskANN(indexType) || vecindexmgr.GetVecIndexMgrInstance().IsAISAQ(indexType)
 }
 
 func IsScalarMmapIndex(indexType IndexType) bool {
