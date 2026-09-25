@@ -684,6 +684,22 @@ func (m *ReplicaManager) GetByResourceGroup(ctx context.Context, rgName string) 
 // 2. Add new incoming nodes into the replica if they are not in-used by other replicas of same collection.
 // 3. replicas in same resource group will shared the nodes in resource group fairly.
 func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectionID typeutil.UniqueID, rgs map[string]*ResourceGroup) error {
+	return m.recoverNodesInCollection(ctx, collectionID, rgs, nil)
+}
+
+func (m *ReplicaManager) recoverNodesInCollection(ctx context.Context, collectionID int64, rgs map[string]*ResourceGroup, skipRG func(string) bool) error {
+	m.collLock.Lock(collectionID)
+	defer m.collLock.Unlock(collectionID)
+	modified, err := m.computeReplicaRecovery(ctx, collectionID, rgs, skipRG)
+	if err != nil {
+		return err
+	}
+	return m.put(ctx, collectionID, modified...)
+}
+
+// computeReplicaRecovery builds ordinary node changes without publishing them.
+// Caller holds the collection replica lock, including while applying placement changes.
+func (m *ReplicaManager) computeReplicaRecovery(ctx context.Context, collectionID int64, rgs map[string]*ResourceGroup, skipRG func(string) bool) ([]*Replica, error) {
 	// Build node sets from resource groups.
 	rgNodeSets := make(map[string]typeutil.UniqueSet, len(rgs))
 	for rgName, rg := range rgs {
@@ -695,25 +711,25 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 	}
 
 	if err := m.validateResourceGroups(rgNodeSets); err != nil {
-		return err
+		return nil, err
 	}
 
-	m.collLock.Lock(collectionID)
-	defer m.collLock.Unlock(collectionID)
-
 	if _, ok := m.coll2Replicas.Get(collectionID); !ok {
-		return merr.WrapErrCollectionNotLoaded(collectionID)
+		return nil, merr.WrapErrCollectionNotLoaded(collectionID)
 	}
 
 	// create a helper to do the recover.
 	helper, err := m.getCollectionAssignmentHelper(collectionID, rgNodeSets)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	modifiedReplicas := make([]*Replica, 0)
 	// recover node by resource group.
 	helper.RangeOverResourceGroup(func(replicaHelper *replicasInSameRGAssignmentHelper) {
+		if skipRG != nil && skipRG(replicaHelper.rgName) {
+			return
+		}
 		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
 			replica := assignment.GetReplica()
 			// For replicas with needWaitRGReady flag, skip assignment if the RG still has missing nodes.
@@ -765,10 +781,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(ctx context.Context, collectio
 		})
 	})
 
-	if len(modifiedReplicas) == 0 {
-		return nil
-	}
-	return m.put(ctx, collectionID, modifiedReplicas...)
+	return modifiedReplicas, nil
 }
 
 // validateResourceGroups checks if the resource groups are valid.
