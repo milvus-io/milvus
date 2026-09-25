@@ -209,12 +209,6 @@ std::map<std::string, std::string> strictGroupPhase2CandidatesLabels{
     {"type", "phase2_candidates"}};
 std::map<std::string, std::string> strictGroupBatchCountLabels{
     {"type", "batch_count"}};
-std::map<std::string, std::string> strictGroupProbeCandidatesLabels{
-    {"type", "probe_candidates"}};
-std::map<std::string, std::string> strictGroupProbeAcceptedLabels{
-    {"type", "probe_accepted"}};
-std::map<std::string, std::string> strictGroup_probe_group_hits_Labels{
-    {"type", "probe_group_hits"}};
 std::map<std::string, std::string>
     strictGroup_original_remaining_candidates_Labels{
         {"type", "original_remaining_candidates"}};
@@ -222,8 +216,8 @@ std::map<std::string, std::string> strictGroupMembershipBuildLatencyLabels{
     {"type", "membership_build_latency"}};
 std::map<std::string, std::string> strictGroupBitmapBuildLatencyLabels{
     {"type", "bitmap_build_latency"}};
-std::map<std::string, std::string> strictGroupAcceptanceRatioLabels{
-    {"type", "probe_acceptance_ratio"}};
+std::map<std::string, std::string> strictGroupSearchLatencyLabels{
+    {"type", "strict_group_search_latency"}};
 
 const prometheus::Histogram::BucketBoundaries strictGroupCountBuckets = {
     1,      2,       4,       8,        16,       32,       64,
@@ -280,9 +274,7 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(internal_core_gis_refine_ratio,
                                          gisRefineRatioLabels,
                                          ratioBuckets)
 DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_count,
-                                   "[cpp]strict group filtered iterator counts")
-DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_core_strict_group_phase2_ratio,
-                                   "[cpp]strict group filtered iterator ratios")
+                                   "[cpp]strict group completion counts")
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_strict_group_phase2_phase1_candidates,
     internal_core_strict_group_phase2_count,
@@ -299,21 +291,6 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     strictGroupBatchCountLabels,
     strictGroupCountBuckets)
 DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_strict_group_phase2_probe_candidates,
-    internal_core_strict_group_phase2_count,
-    strictGroupProbeCandidatesLabels,
-    strictGroupCountBuckets)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_strict_group_phase2_probe_accepted,
-    internal_core_strict_group_phase2_count,
-    strictGroupProbeAcceptedLabels,
-    strictGroupCountBuckets)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_strict_group_phase2_probe_group_hits,
-    internal_core_strict_group_phase2_count,
-    strictGroup_probe_group_hits_Labels,
-    strictGroupCountBuckets)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_strict_group_phase2_original_remaining_candidates,
     internal_core_strict_group_phase2_count,
     strictGroup_original_remaining_candidates_Labels,
@@ -326,11 +303,9 @@ DEFINE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_bitmap_build_latency,
     internal_core_search_latency,
     strictGroupBitmapBuildLatencyLabels)
-DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
-    internal_core_strict_group_phase2_acceptance_ratio,
-    internal_core_strict_group_phase2_ratio,
-    strictGroupAcceptanceRatioLabels,
-    ratioBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_core_strict_group_phase2_search_latency,
+                            internal_core_search_latency,
+                            strictGroupSearchLatencyLabels)
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
