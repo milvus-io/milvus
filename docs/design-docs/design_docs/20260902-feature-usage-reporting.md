@@ -520,11 +520,13 @@ are checked in, so the numbers below can be re-measured rather than trusted.
 |---|---|
 | Request hot path, per counted feature | one branch + one bit set in the task's `FeatureSet` |
 | Request hot path, when not counting | one branch per hook. Whether a search task counts is decided once at the top of `PreExecute` (counting enabled, and the first task for the user request); otherwise every hook receives a nil set and returns before scanning a parameter list, walking an expression or decoding JSON |
-| Request hot path, flush when `PreExecute` returns | 292 ns, 0 allocations, for a request that used six features; 38 ns for a request that used none. The scan is over the fixed counter-id space, so it is bounded and does not grow with the number of features a request uses. Hitting the six counters directly, which cannot dedupe, measures 261 ns |
+| Request hot path, flush when `PreExecute` returns | 297 ns, 0 allocations, for a request that used six features; 44 ns for a request that used none. The scan is over the fixed counter-id space, so it is bounded and does not grow with the number of features a request uses. Hitting the six counters directly, which cannot dedupe, measures 261 ns |
 | Request hot path, per-subrequest counters | 313 ns and 0 allocations per ANN subrequest: reading `ef` and `nprobe` from the params JSON, bucketing `limit` and `nq`, classifying the retrieval kind, and flushing the five counters it moved. 2.4 ns when the task does not count |
+| Execution features, when not collected | one null check per recording site; the plan option is off on every request the Proxy does not count |
+| Execution features, when collected | per expression per segment, one relaxed atomic load, plus one `fetch_or` the first time a bit is set in the request; one C call per QueryNode task to read the set; one `uint64` per result |
 | Request hot path, expressions | one walk of the parsed `planpb.Expr`: 3.8 ns at one term, 755 ns at a hundred, 0 allocations |
 | Request hot path, legacy `norm_score` | 19 ns and no allocation when the key is absent, which is every request that does not ask for normalization; 552 ns and 794 B when it is present and the `params` object is unmarshalled. This is the only hook that allocates |
-| Resident memory per search task | 145 bytes for the `FeatureSet` (one byte per counter) and 54 bytes for the per-subrequest `Tally`, on a struct the request already allocates |
+| Resident memory per search task | 165 bytes for the `FeatureSet` (one byte per counter) and 54 bytes for the per-subrequest `Tally`, on a struct the request already allocates |
 | Counter update itself | one `atomic.Add`, plus one forward-only compare-and-swap of the timestamp at most once per second per counter |
 | Resident memory per Proxy | number of counters × 16 bytes (`value` + `last_used_at`); on the order of one kilobyte, constant for the life of the process |
 | `GetFeatureUsage` on a node | copy of a fixed-size counter array |
@@ -744,7 +746,50 @@ A `brute_force_search` counter was implemented and removed during review. It fir
 a segment with no Go-side index metadata on the search field, but that does not establish that the
 segment was scanned brute force: a growing segment may still use an interim index built in segcore, and
 filter-only requests reach the same code. A counter whose name promises more than its signal can show is
-worse than no counter, so it is left out until the execution path itself reports which index ran.
+worse than no counter, so it was left out until the execution path itself reports which index ran. The
+next section is that report; `interim_index_search` there is what `brute_force_search` could not be.
+
+### Execution features (`request`, counted by the Proxy)
+
+These answer "did a feature the user set up actually take effect at run time": a scalar index that was
+built, the interim index, the expression result cache, JSON shredding, the second phase of a strict
+grouping search. They are feature statistics, not per-object usage: nothing names the index, field or
+collection that was used (see Non-Goals).
+
+**How they travel.** The Proxy sets `PlanOption.collect_feature_bits` on the plan of a request it counts
+and on no other. segcore then gives the plan a `FeatureRecorder`, a 64-bit atomic set shared by every
+copy of the plan options, so every segment the plan runs on, concurrently or not, records into one set;
+a feature already recorded costs one relaxed load. After the segments finish, the QueryNode reads the set
+through `GetSearchPlanFeatureBits` / `GetRetrievePlanFeatureBits` into `feature_bits` on
+`internalpb.SearchResults` / `RetrieveResults`. The delegator ORs it wherever it merges results, next to
+the storage cost it already sums, and the Proxy ORs the results of one request and counts each feature
+once. The bit positions are a wire format shared by `common/FeatureBits.h` and
+`internal/featureusage/execbits.go`, append only, and a Go test parses the header so the two cannot
+drift. A plan without the option records nothing, and every recording site is then one null check.
+
+| Entry | Recorded where | Signal |
+|---|---|---|
+| `filter_exec_path=scalar_index` / `pk_index` / `text_match_index` / `json_shredding` / `brute_force` | `SegmentExpr::EnsureExecPathDetermined`, the one place every expression settles its path | the path a filter expression took on a segment |
+| `filter_exec_path=ngram_index` | the NGRAM phase-one calls, single LIKE and batched LIKE | the NGRAM index served a LIKE; it is chosen outside the path above |
+| `scalar_index_type=BITMAP` / `STL_SORT` / `Trie` / `INVERTED` / `HYBRID` / `RTREE` / `NGRAM` / `FMINDEX` *(undocumented)* / `json_flat` | the pinned index object behind a `scalar_index` path | which kind of scalar index served it, from the index object, never from user input |
+| `filter_index_declined` | the same place | the field has a scalar index but the expression ran on raw data: the operator or literal is one the index does not serve, or a cost guard declined it |
+| `expr_cache_hit` | the expression result cache and the whole-filter cache | a filter result was served from the cache |
+| `interim_index_search` | growing-segment search and the sealed binlog-index branch | the interim index served a vector search |
+| `strict_group_size_effective` | the strict grouping search | its second phase, the re-search restricted to unfinished groups, ran |
+| `tiered_storage_cold_read` | the QueryNode, in Go | the request read bytes from remote storage. Taken from the storage cost before it is split across merged requests, since the split rounds small counts to zero. Needs `queryNode.segcore.tieredStorage.storageUsageTrackingEnabled` |
+
+Semantics the consumer relies on:
+
+- **Determined, not always executed.** A filter's path is recorded when it is settled, which can be
+  during prefetch; a later whole-filter cache hit or a conjunction that has run out of rows may skip the
+  evaluation. That changes how often, never whether a feature is in use.
+- **Merged requests share a set.** A QueryNode merges searches with identical plans into one execution;
+  each gets the union.
+- **Internal filters are not features.** The TTL filter segcore adds on its own records nothing, nor does
+  the raw-data refine pass of a fused GIS filter. Raw data is not counted as a declined index where it is
+  the designed path (membership filters, timestamptz arithmetic, IS NULL over a JSON path index).
+- **Only searches and queries report.** The retrieval behind a delete or an upsert, and the Proxy's own
+  requery, do not.
 
 ### Request-level features (`request`) — **decision per row**
 
@@ -942,6 +987,7 @@ counters compare only those. Each side is still an exact delta.
 | `TestSearchParameterDistributions` | every bucket of `ef`, `nprobe`, `limit` and `nq`, asserted on the per-subrequest counters only; a three-subrequest hybrid search adding three to its buckets and one to `hybrid_search_reqs`; the remaining `hybrid_search_reqs` buckets |
 | `TestRetrievalKinds` | `retrieval=sparse_vector` and `retrieval=full_text_search` on a collection with a dense, a sparse and a BM25 output field, and every combination `hybrid_search=*` can report |
 | `TestAggregationAndOrdering` | each query aggregation operator, `avg` next to its own parts counting each operator once, `order_by` on query, `order_by_fields` on search, `search_aggregation` |
+| `TestExecFeatures` | every execution feature on a real cluster: each `filter_exec_path` and `scalar_index_type` one filter at a time on a collection with one field per index kind (above the 1024-row threshold below which a segment is never indexed), a filter the index declines, a conjunction of an indexed and a raw predicate, a cached filter result, JSON statistics, the interim index on growing data, the second phase of a strict grouping search on data with one rare group, and a cold read from a collection without scalar warmup. The suite turns on the interim index, the expression cache (admission threshold 1) and remote-read accounting to reach them |
 | `TestDeleteAndUpsertModes` | both delete modes, both upsert modes including the promotion to a merge, every partial-update operator, and the `upsert_fields` buckets |
 | `TestZZCoverage` | the acceptance gate, below |
 
