@@ -33,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -4437,6 +4438,37 @@ func Test_ManualCompaction(t *testing.T) {
 }
 
 func Test_GetCompactionStateWithPlans(t *testing.T) {
+	t.Run("deny collection lookup without compaction privilege", func(t *testing.T) {
+		paramtable.Init()
+		paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		paramtable.Get().Save(Params.CommonCfg.RootShouldBindRole.Key, "false")
+		paramtable.Get().Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+		defer paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		defer paramtable.Get().Reset(Params.CommonCfg.RootShouldBindRole.Key)
+		defer paramtable.Get().Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+
+		client := &MockMixCoordClientInterface{}
+		client.listPolicy = func(ctx context.Context, in *internalpb.ListPolicyRequest) (*internalpb.ListPolicyResponse, error) {
+			return &internalpb.ListPolicyResponse{
+				Status:    merr.Success(),
+				UserRoles: []string{funcutil.EncodeUserRoleCache("observer", "role_observer")},
+			}, nil
+		}
+		mustInitMetaCacheForTest(context.Background(), client)
+
+		proxy := &Proxy{
+			mixCoord:  mocks.NewMockMixCoordClient(t),
+			metaCache: NewMockCache(t),
+		}
+		proxy.UpdateStateCode(commonpb.StateCode_Healthy)
+		resp, err := proxy.GetCompactionStateWithPlans(GetContext(context.Background(), "observer:123456"), &milvuspb.GetCompactionPlansRequest{
+			DbName:         "db",
+			CollectionName: "collection",
+		})
+		require.NoError(t, err)
+		require.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrPrivilegeNotPermitted)
+	})
+
 	t.Run("test get compaction state with plans", func(t *testing.T) {
 		mixCoord := &MixCoordMock{}
 		proxy := &Proxy{mixCoord: mixCoord}
