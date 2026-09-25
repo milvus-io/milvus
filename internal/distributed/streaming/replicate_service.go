@@ -5,12 +5,15 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/streamingcoord/client/assignment"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal"
 	"github.com/milvus-io/milvus/internal/util/streamingutil/status"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -173,7 +176,7 @@ func (s replicateService) overwriteReplicateMessage(ctx context.Context, msg mes
 	// create collection message will set the vchannel in its body, so we need to overwrite it.
 	switch msg.MessageType() {
 	case message.MessageTypeCreateCollection:
-		if err := s.overwriteCreateCollectionMessage(sourceCluster, msg); err != nil {
+		if err := s.overwriteCreateCollectionMessage(ctx, sourceCluster, msg); err != nil {
 			return nil, err
 		}
 	case message.MessageTypeAlterReplicateConfig:
@@ -207,7 +210,7 @@ func (s replicateService) getTargetVChannel(sourceCluster *replicateutil.MilvusC
 }
 
 // overwriteCreateCollectionMessage overwrites the create collection message.
-func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
+func (s replicateService) overwriteCreateCollectionMessage(ctx context.Context, sourceCluster *replicateutil.MilvusCluster, msg message.ReplicateMutableMessage) error {
 	createCollectionMsg := message.MustAsMutableCreateCollectionMessageV1(msg)
 	body := createCollectionMsg.MustBody()
 	for idx, sourcePChannel := range body.PhysicalChannelNames {
@@ -218,8 +221,52 @@ func (s replicateService) overwriteCreateCollectionMessage(sourceCluster *replic
 		body.PhysicalChannelNames[idx] = targetPChannel
 		body.VirtualChannelNames[idx] = strings.Replace(body.VirtualChannelNames[idx], sourcePChannel, targetPChannel, 1)
 	}
+	// Struct array sub-fields are stored as struct[sub]; the proxy applies that
+	// on the user-facing create path, which a replicated create never takes. A
+	// message forwarded from a peer cluster's WAL already carries qualified
+	// names and is left as is. One built by another producer from a
+	// DescribeCollection result carries the bare names DescribeCollection hands
+	// back, and has to be qualified here -- before the append -- so that the
+	// WAL, the streaming node's recovery state and RootCoord all agree.
+	changed, err := qualifyStructSubFieldNames(body)
+	if err != nil {
+		return status.NewReplicateViolation("failed to read collection schema, %s", err.Error())
+	}
+	if changed {
+		mlog.Warn(ctx, "create collection message carried unqualified struct array sub-field names, qualified them before append",
+			mlog.String("sourceCluster", sourceCluster.GetClusterId()),
+			mlog.String("dbName", body.GetDbName()),
+			mlog.String("collection", body.GetCollectionName()),
+			mlog.Int64("collectionID", body.GetCollectionID()))
+	}
 	createCollectionMsg.OverwriteBody(body)
 	return nil
+}
+
+// qualifyStructSubFieldNames qualifies the struct array sub-field names in
+// whichever schema representation the request carries, mirroring the read
+// side's precedence: collection_schema when set, else the legacy serialized
+// schema. It reports whether anything was rewritten.
+func qualifyStructSubFieldNames(body *message.CreateCollectionRequest) (bool, error) {
+	if schema := body.GetCollectionSchema(); schema != nil {
+		return typeutil.QualifyStructSubFieldNames(schema), nil
+	}
+	if len(body.GetSchema()) == 0 {
+		return false, nil
+	}
+	schema := &schemapb.CollectionSchema{}
+	if err := proto.Unmarshal(body.GetSchema(), schema); err != nil {
+		return false, err
+	}
+	if !typeutil.QualifyStructSubFieldNames(schema) {
+		return false, nil
+	}
+	bytes, err := proto.Marshal(schema)
+	if err != nil {
+		return false, err
+	}
+	body.Schema = bytes
+	return true, nil
 }
 
 // overwriteAlterReplicateConfigMessage overwrites the alter replicate configuration message.
