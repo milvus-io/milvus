@@ -238,10 +238,13 @@ func ValidateResourceGroupName(entity string) error {
 		return merr.WrapErrParameterInvalidMsg("%s the first character of a resource group name must be an underscore or letter", invalidMsg)
 	}
 
+	// Hyphens are allowed after the first character, as in partition names: a
+	// deployment that names its resource groups after instance IDs (such as
+	// "in01-3fa9c2") would otherwise have to translate every name it holds.
 	for i := 1; i < len(entity); i++ {
 		c := entity[i]
-		if c != '_' && !isAlpha(c) && !isNumber(c) {
-			return merr.WrapErrParameterInvalidMsg("%s resource group name can only contain numbers, letters and underscores", invalidMsg)
+		if c != '_' && c != '-' && !isAlpha(c) && !isNumber(c) {
+			return merr.WrapErrParameterInvalidMsg("%s resource group name can only contain numbers, letters, underscores and hyphens", invalidMsg)
 		}
 	}
 	return nil

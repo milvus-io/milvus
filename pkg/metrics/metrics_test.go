@@ -292,6 +292,8 @@ func observeProxyCollection(nodeID, db, collection string) {
 		ProxySearchSparseNumNonZeros.WithLabelValues(nodeID, db, collection, queryType, "1").Observe(1)
 		ProxyResourceGroupSQLatency.WithLabelValues(nodeID, queryType, db, collection, "rg").Observe(1)
 	}
+	ProxyResourceGroupFunctionCall.WithLabelValues(nodeID, "Search", SuccessLabel, CauseNA, db, collection, "rg").Inc()
+	ProxyResourceGroupSearchVectors.WithLabelValues(nodeID, db, collection, "rg").Add(1)
 	for _, msgType := range []string{InsertLabel, DeleteLabel, UpsertLabel, SearchLabel, HybridSearchLabel, QueryLabel} {
 		ProxyMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
 		ProxyCollectionMutationLatency.WithLabelValues(nodeID, msgType, db, collection).Observe(1)
