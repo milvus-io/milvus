@@ -76,6 +76,37 @@ func TestPoolResize(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestPoolFutureDone(t *testing.T) {
+	pool := NewPool[any](1)
+
+	release := make(chan struct{})
+	blocked := pool.Submit(func() (any, error) {
+		<-release
+		return nil, nil
+	})
+	assert.False(t, blocked.Done())
+	close(release)
+	assert.Eventually(t, blocked.Done, time.Second, 10*time.Millisecond)
+
+	done := pool.Submit(func() (any, error) {
+		return nil, nil
+	})
+	assert.Eventually(t, done.Done, time.Second, 10*time.Millisecond)
+}
+
+func TestPoolSubmitDoneWhenSubmitFails(t *testing.T) {
+	pool := NewPool[any](1)
+	pool.Release()
+
+	future := pool.Submit(func() (any, error) {
+		return nil, nil
+	})
+
+	_, err := future.Await()
+	assert.Error(t, err)
+	assert.True(t, future.Done())
+}
+
 func TestPoolWithPanic(t *testing.T) {
 	pool := NewPool[any](1, WithConcealPanic(true))
 
@@ -86,4 +117,5 @@ func TestPoolWithPanic(t *testing.T) {
 	// make sure error returned when conceal panic
 	_, err := future.Await()
 	assert.Error(t, err)
+	assert.True(t, future.Done())
 }
