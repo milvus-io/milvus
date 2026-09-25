@@ -200,6 +200,69 @@ func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_DefaultMode() 
 	s.Equal(ModeMultiply, combineExpr.mode)
 }
 
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_NullPolicyExecution() {
+	for _, test := range []struct {
+		name   string
+		policy *schemapb.FunctionParamValue
+		values []float32
+		valid  []bool
+	}{
+		{"omitted", nil, []float32{3, 0, 0}, []bool{true, false, false}},
+		{"propagate", stringParam("propagate"), []float32{3, 0, 0}, []bool{true, false, false}},
+		{"as_zero", stringParam("as_zero"), []float32{3, 3, 0}, []bool{true, true, true}},
+		{"skip", stringParam("skip"), []float32{3, 6, 0}, []bool{true, true, false}},
+	} {
+		s.Run(test.name, func() {
+			params := map[string]*schemapb.FunctionParamValue{ModeKey: stringParam(ModeAvg)}
+			if test.policy != nil {
+				params[NullPolicyKey] = test.policy
+			}
+			expression, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{Params: params})
+			s.Require().NoError(err)
+			first := s.createNullableFloat32ChunkedArray([]float32{2, 0, 0}, []bool{true, false, false})
+			defer first.Release()
+			second := s.createNullableFloat32ChunkedArray([]float32{4, 6, 0}, []bool{true, true, false})
+			defer second.Release()
+			outputs, err := expression.Execute(types.NewFuncContext(s.pool), []*arrow.Chunked{first, second})
+			s.Require().NoError(err)
+			defer outputs[0].Release()
+			result := outputs[0].Chunk(0).(*array.Float32)
+			for i, valid := range test.valid {
+				s.Equal(valid, result.IsValid(i), "row %d", i)
+				if valid {
+					s.Equal(test.values[i], result.Value(i), "row %d", i)
+				}
+			}
+		})
+	}
+}
+
+func (s *NumCombineExprTestSuite) TestNewNumCombineExprFromParams_InvalidNullPolicy() {
+	for _, test := range []struct {
+		name  string
+		value *schemapb.FunctionParamValue
+	}{
+		{"unknown", stringParam("ignore")},
+		{"empty", stringParam("")},
+		{"wrong_type", intParam(1)},
+		{"unset", &schemapb.FunctionParamValue{}},
+		{"nil", nil},
+	} {
+		s.Run(test.name, func() {
+			expression, err := NewNumCombineExprFromParams(types.FunctionBuildContext{}, types.FunctionConfig{
+				Params: map[string]*schemapb.FunctionParamValue{NullPolicyKey: test.value},
+			})
+			s.Nil(expression)
+			s.Require().ErrorIs(err, merr.ErrParameterInvalid)
+			status := merr.Status(err)
+			s.Equal(int32(1100), status.Code)
+			s.False(status.Retriable)
+			s.Equal("true", status.ExtraInfo[merr.InputErrorFlagKey])
+			s.Contains(status.Reason, "null_policy")
+		})
+	}
+}
+
 // =============================================================================
 // Execute Tests
 // =============================================================================

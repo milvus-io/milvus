@@ -21,6 +21,7 @@ package tasks
 import (
 	"container/heap"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/apache/arrow/go/v17/arrow"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/reduce"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
 func appendDefaultSegOffsetChunk(pool memory.Allocator, collector *chain.ChunkCollector, chunkIdx, rows int) {
@@ -2216,4 +2218,72 @@ func BenchmarkMergeLoopStringLegacy(b *testing.B) {
 
 func BenchmarkMergeLoopStringOptimized(b *testing.B) {
 	benchmarkMergeLoop(b, true, false)
+}
+
+func TestHeapMergeRejectsInvalidScoresBeforeTopK(t *testing.T) {
+	for _, stringPK := range []bool{false, true} {
+		for _, grouped := range []bool{false, true} {
+			for _, tc := range []struct {
+				name  string
+				value float32
+				null  bool
+			}{
+				{"null", 0, true},
+				{"nan", float32(math.NaN()), false},
+				{"positive_infinity", float32(math.Inf(1)), false},
+				{"negative_infinity", float32(math.Inf(-1)), false},
+			} {
+				t.Run(fmt.Sprintf("stringPK=%v/grouped=%v/%s", stringPK, grouped, tc.name), func(t *testing.T) {
+					pool := memory.NewCheckedAllocator(memory.NewGoAllocator())
+					t.Cleanup(func() { pool.AssertSize(t, 0) })
+					var source *chain.DataFrame
+					if stringPK {
+						source = buildTestDFWithStringPKAndGroupBy(pool, [][]string{{"a"}, {"b", "c"}}, [][]float32{{3}, {2, 1}}, [][]int64{{1}, {2, 3}}, groupByCol)
+					} else {
+						source = buildTestDFWithGroupBy(pool, [][]int64{{1}, {2, 3}}, [][]float32{{3}, {2, 1}}, [][]int64{{1}, {2, 3}}, groupByCol)
+					}
+					defer source.Release()
+					builder := chain.NewDataFrameBuilder().SetChunkSizes(source.ChunkSizes())
+					defer builder.Release()
+					for _, name := range source.ColumnNames() {
+						if name != scoreFieldName {
+							require.NoError(t, builder.AddColumnFrom(source, name))
+						}
+					}
+					scores := array.NewFloat32Builder(pool)
+					scores.Append(3)
+					first := scores.NewArray()
+					// A sliced array exercises null bitmap offsets as well as values.
+					scores.AppendValues([]float32{99, 2, tc.value}, []bool{true, true, !tc.null})
+					full := scores.NewArray()
+					second := array.NewSlice(full, 1, 3)
+					full.Release()
+					scores.Release()
+					require.NoError(t, builder.AddColumnFromChunks(scoreFieldName, []arrow.Array{first, second}))
+					df := builder.Build()
+					defer df.Release()
+					var opts *groupByOptions
+					if grouped {
+						opts = &groupByOptions{GroupSize: 1, Columns: []string{groupByCol}}
+					}
+					// A disjoint valid query must not inspect invalid chunks outside its range.
+					valid, err := heapMergeReduceRange(pool, []*chain.DataFrame{df}, 1, opts, 0, 1)
+					require.NoError(t, err)
+					valid.DF.Release()
+					// Even an invalid tail candidate excluded by topK must be rejected
+					// before the heap reads its raw value or drops its null bitmap.
+					result, err := heapMergeReduceRange(pool, []*chain.DataFrame{df}, 1, opts, 1, 1)
+					require.Nil(t, result)
+					require.ErrorIs(t, err, merr.ErrFunctionFailed)
+					require.Contains(t, err.Error(), "heapMergeReduce: input 0")
+					require.Contains(t, err.Error(), "chunk 1 at row 1")
+					if tc.null {
+						require.Contains(t, err.Error(), "$score contains null")
+					} else {
+						require.Contains(t, err.Error(), "$score contains non-finite value")
+					}
+				})
+			}
+		}
+	}
 }
