@@ -24,27 +24,30 @@
 namespace milvus {
 namespace exec {
 
-// Compression types stored in CacheEntryHeader.comp_type
-constexpr uint8_t kCompTypeLZ4 = 0;
+// Entry formats stored in EntryPool::Payload::comp_type.
+constexpr uint8_t kCompTypeIndependent = 3;
+constexpr uint8_t kCompTypeRaw = 0xFF;
+
+// Per-bitmap codecs inside Independent entries; Raw is also supported.
 constexpr uint8_t kCompTypeRoaring = 1;
 constexpr uint8_t kCompTypeRoaringInv =
-    2;  // inverted + Roaring (density > 97%)
-constexpr uint8_t kCompTypeRaw = 0xFF;
+    2;  // inverted + Roaring (density >= 97%)
 
 // Flag in valid_bit_count high bit: valid bitset is all-ones, not stored
 constexpr uint32_t kValidAllOnesMask = 0x80000000u;
 
-// Compressed data wrapper that supports both owned-buffer (Roaring) and
-// zero-copy scatter-gather (Raw) modes. Designed to avoid intermediate
-// allocations on the Raw fast path.
+// Each bitmap owns its Roaring bytes or borrows its input's Raw bytes until
+// flattened into the cache entry. Mixed encodings need no temporary Raw copy.
 struct CompressedData {
     uint8_t comp_type{kCompTypeRaw};
+    uint8_t result_comp_type{kCompTypeRaw};
+    uint8_t valid_comp_type{kCompTypeRaw};
 
     // Header (8 bytes): [result_bits][valid_bits_with_flag]
     char header[8];
 
-    // For Roaring/RoaringInv: full payload owned here
-    std::vector<char> payload;
+    std::vector<char> result_payload;
+    std::vector<char> valid_payload;
 
     // For Raw: zero-copy pointers to original data (header still in `header`)
     const char* raw_result_ptr{nullptr};
@@ -52,19 +55,39 @@ struct CompressedData {
     const char* raw_valid_ptr{nullptr};
     size_t raw_valid_size{0};
 
-    // Total entry data size on disk
+    size_t
+    result_size() const {
+        return raw_result_size + result_payload.size();
+    }
+
+    size_t
+    valid_size() const {
+        return raw_valid_size + valid_payload.size();
+    }
+
+    const char*
+    result_data() const {
+        return result_comp_type == kCompTypeRaw ? raw_result_ptr
+                                                : result_payload.data();
+    }
+
+    const char*
+    valid_data() const {
+        return valid_comp_type == kCompTypeRaw ? raw_valid_ptr
+                                               : valid_payload.data();
+    }
+
+    // Independent entries add two codec bytes and a four-byte result length.
     size_t
     total_size() const {
-        if (comp_type == kCompTypeRaw) {
-            return 8 + raw_result_size + raw_valid_size;
-        }
-        return 8 + payload.size();
+        return (comp_type == kCompTypeRaw ? 8 : 14) + result_size() +
+               valid_size();
     }
 };
 
 class CacheCompressor {
  public:
-    // Compress result+valid bitsets, auto-selecting the best method:
+    // Select the encoding independently for result and validity:
     //   density <= 3%     → Roaring
     //   density >= 97%    → inverted Roaring
     //   otherwise         → Raw (zero-copy)
@@ -74,8 +97,7 @@ class CacheCompressor {
              const TargetBitmap& valid,
              bool compression_enabled);
 
-    // Backward-compat: returns a flat buffer (header + payload).
-    // Used by tests; production path uses the CompressedData variant directly.
+    // Flatten both independently encoded bitmaps into an EntryPool buffer.
     static std::vector<char>
     Compress(const TargetBitmap& result,
              const TargetBitmap& valid,
@@ -91,7 +113,14 @@ class CacheCompressor {
 
  private:
     static std::vector<char>
-    CompressRoaring(const TargetBitmap& bset);
+    CompressRoaring(const TargetBitmap& bset, bool inverted = false);
+
+    static bool
+    DecompressBitmap(const char* data,
+                     uint32_t data_len,
+                     uint32_t num_bits,
+                     uint8_t comp_type,
+                     TargetBitmap& out);
 
     static bool
     DecompressRoaring(const char* data,
