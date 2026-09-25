@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -371,6 +372,186 @@ func (s *RowsSuite) TestNullablePointerColumns() {
 				s.True(isNull1)
 			}
 		}
+	})
+}
+
+func (s *RowsSuite) TestRowsToTimestamptzColumn() {
+	s.Run("plain_time", func() {
+		type TimestamptzRow struct {
+			ID        int64     `milvus:"primary_key"`
+			CreatedAt time.Time `milvus:"name:created_at"`
+		}
+
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz))
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		rows := []any{
+			&TimestamptzRow{ID: 1, CreatedAt: now},
+			&TimestamptzRow{ID: 2, CreatedAt: now.Add(time.Hour)},
+		}
+
+		columns, err := AnyToColumns(rows, false, schema)
+		s.Require().NoError(err)
+		s.Require().Len(columns, 2)
+
+		for _, col := range columns {
+			if col.Name() != "created_at" {
+				continue
+			}
+			s.Equal(entity.FieldTypeTimestamptz, col.Type())
+			s.Equal([]string{
+				now.Format(time.RFC3339Nano),
+				now.Add(time.Hour).Format(time.RFC3339Nano),
+			}, col.FieldData().GetScalars().GetStringData().GetData())
+		}
+	})
+
+	s.Run("nullable_pointer", func() {
+		type TimestamptzRow struct {
+			ID        int64      `milvus:"primary_key"`
+			CreatedAt *time.Time `milvus:"name:created_at"`
+		}
+
+		schema := entity.NewSchema().
+			WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+			WithField(entity.NewField().WithName("created_at").WithDataType(entity.FieldTypeTimestamptz).WithNullable(true))
+
+		now := time.Now().UTC().Truncate(time.Microsecond)
+		rows := []any{
+			&TimestamptzRow{ID: 1, CreatedAt: &now},
+			&TimestamptzRow{ID: 2, CreatedAt: nil},
+		}
+
+		columns, err := AnyToColumns(rows, false, schema)
+		s.Require().NoError(err)
+		s.Require().Len(columns, 2)
+
+		for _, col := range columns {
+			if col.Name() != "created_at" {
+				continue
+			}
+			s.Equal(entity.FieldTypeTimestamptz, col.Type())
+			s.True(col.Nullable())
+			isNull0, err := col.IsNull(0)
+			s.NoError(err)
+			s.False(isNull0)
+			isNull1, err := col.IsNull(1)
+			s.NoError(err)
+			s.True(isNull1)
+			s.Equal([]string{now.Format(time.RFC3339Nano)},
+				col.FieldData().GetScalars().GetStringData().GetData())
+		}
+	})
+}
+
+func (s *RowsSuite) TestColumnCreatorsAllScalarTypes() {
+	// Every scalar field type must yield a non-nil column from getColumnCreators.
+	// A missing case silently leaves the column nil and panics later in
+	// AnyToColumns' AppendValue, so enumerate all supported scalar types here.
+	scalarTypes := []entity.FieldType{
+		entity.FieldTypeBool,
+		entity.FieldTypeInt8,
+		entity.FieldTypeInt16,
+		entity.FieldTypeInt32,
+		entity.FieldTypeInt64,
+		entity.FieldTypeFloat,
+		entity.FieldTypeDouble,
+		entity.FieldTypeString,
+		entity.FieldTypeVarChar,
+		entity.FieldTypeText,
+		entity.FieldTypeJSON,
+		entity.FieldTypeTimestamptz,
+		entity.FieldTypeGeometry,
+	}
+	for _, dataType := range scalarTypes {
+		s.Run(dataType.Name(), func() {
+			field := entity.NewField().WithName("f").WithDataType(dataType)
+			creator := getColumnCreators(entity.NewSchema().WithField(field))["f"]
+			s.Require().NotNil(creator)
+			col, err := creator(1)
+			s.Require().NoError(err)
+			s.Require().NotNil(col, "field type %s must have a column creator", dataType.Name())
+			// FieldTypeString is normalized to a VarChar column by design.
+			if dataType == entity.FieldTypeString {
+				s.Equal(entity.FieldTypeVarChar, col.Type())
+			} else {
+				s.Equal(dataType, col.Type())
+			}
+			s.Zero(col.Len())
+		})
+	}
+}
+
+func (s *RowsSuite) TestRowsToGeometryColumn() {
+	type GeometryRow struct {
+		ID       int64  `milvus:"primary_key"`
+		Location string `milvus:"name:location"`
+	}
+
+	schema := entity.NewSchema().
+		WithField(entity.NewField().WithName("ID").WithDataType(entity.FieldTypeInt64).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("location").WithDataType(entity.FieldTypeGeometry))
+
+	rows := []any{
+		&GeometryRow{ID: 1, Location: "POINT (1 1)"},
+		&GeometryRow{ID: 2, Location: "POINT (2 2)"},
+	}
+
+	columns, err := AnyToColumns(rows, false, schema)
+	s.Require().NoError(err)
+	s.Require().Len(columns, 2)
+
+	for _, col := range columns {
+		if col.Name() != "location" {
+			continue
+		}
+		s.Equal(entity.FieldTypeGeometry, col.Type())
+		s.Equal([]string{"POINT (1 1)", "POINT (2 2)"},
+			col.FieldData().GetScalars().GetGeometryWktData().GetData())
+	}
+}
+
+func (s *RowsSuite) TestSetFieldTimestamptz() {
+	s.Run("time_value", func() {
+		type Row struct {
+			Ts time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Equal(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), row.Ts)
+	})
+
+	s.Run("pointer_value", func() {
+		type Row struct {
+			Ts *time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Require().NotNil(row.Ts)
+		s.Equal(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), *row.Ts)
+	})
+
+	s.Run("string_target_kept", func() {
+		type Row struct {
+			Ts string
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "2024-01-01T00:00:00Z")
+		s.NoError(err)
+		s.Equal("2024-01-01T00:00:00Z", row.Ts)
+	})
+
+	s.Run("parse_failure", func() {
+		type Row struct {
+			Ts time.Time
+		}
+		row := &Row{}
+		err := SetField(row, "Ts", "not-a-timestamp")
+		s.Error(err)
 	})
 }
 
