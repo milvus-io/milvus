@@ -67,6 +67,8 @@ type scheduler struct {
 	execChan    chan Task
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
+	// memProtector rejects new read tasks while process memory sits above the configured water level.
+	memProtector memProtector
 
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
@@ -235,6 +237,14 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 			int32(maxWaitTaskNum),
 			fmt.Sprintf("limit by %s", paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.Key),
 		)
+		req.err <- err
+	} else if s.memProtector.shouldReject(now) {
+		waterLevel := paramtable.Get().QueryNodeCfg.SchedulerMemProtectionWaterLevel
+		err := merr.WrapErrTooManyRequests(
+			int32(waterLevel.GetAsFloat()*100),
+			fmt.Sprintf("read task rejected under memory pressure, limit by %s", waterLevel.Key),
+		)
+		mlog.RatedWarn(context.TODO(), 1, "scheduler memory protection rejected read task", mlog.Err(err))
 		req.err <- err
 	} else {
 		// Push the task into the policy to schedule and update the counter of the ready queue.
