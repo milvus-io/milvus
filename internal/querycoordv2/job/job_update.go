@@ -22,10 +22,12 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
+	"github.com/milvus-io/milvus/internal/coordinator/snmanager"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/observers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/internal/util/streamingutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
@@ -183,6 +185,21 @@ func (job *UpdateLoadConfigJob) Execute() error {
 
 	// 6. recover node distribution among replicas
 	utils.RecoverReplicaOfCollection(job.ctx, job.meta, job.collectionID)
+	if streamingutil.IsStreamingServiceEnabled() {
+		// Recover streaming query nodes in the same pass. Without this, newly spawned
+		// replicas only get their streaming query nodes from the replica observer's
+		// node-changed/timeout loop, which can stall channel delegator setup for up to
+		// queryCoord.checkNodeInReplicaInterval (default 60s) after a scale-up.
+		if err := job.meta.RecoverSQNodesInCollections(
+			job.ctx,
+			[]int64{job.collectionID},
+			snmanager.StaticStreamingNodeManager.GetStreamingQueryNodeIDsByResourceGroup(),
+		); err != nil {
+			mlog.Warn(job.ctx, "failed to recover streaming query nodes after replica update",
+				mlog.FieldCollectionID(job.collectionID),
+				mlog.Err(err))
+		}
+	}
 
 	// 7. update replica number in meta
 	err = job.meta.UpdateReplicaNumber(job.ctx, job.collectionID, job.newReplicaNumber, job.userSpecifiedReplicaMode)
