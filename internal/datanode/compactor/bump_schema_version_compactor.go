@@ -681,6 +681,11 @@ func (t *bumpSchemaVersionCompactionTask) runFullSchemaRewrite(existingFields ma
 		storage.WithStorageConfig(t.compactionParams.StorageConfig),
 		storage.WithCollectionID(collectionID),
 		storage.WithUseLoonFFI(t.compactionParams.UseLoonFFI),
+		// Why: the full-rewrite path builds its own options instead of reusing
+		// newV3WriterResult(); without this it would stay on DefaultWriterOptions()'s
+		// 10 MiB part size even when dataNode.storage.multiPartUploadSize is raised,
+		// re-exposing rewritten segments to the S3 10,000-part limit.
+		storage.WithMultiPartUploadSize(paramtable.Get().DataNodeCfg.MultiPartUploadSize.GetAsInt64()),
 	}
 	if t.lobContext != nil && t.lobContext.ShouldRewriteAnyField() {
 		lobBasePath := storage.SegmentPartitionBasePath(
@@ -1066,11 +1071,15 @@ func (t *bumpSchemaVersionCompactionTask) newV3WriterResult(schema *schemapb.Col
 	writerFormat := paramtable.Get().DataNodeCfg.StorageFormat.GetValue()
 	columnGroups = storagecommon.FillColumnGroupFormats(columnGroups, writerFormat)
 	schemaBasedFormats := storagecommon.ColumnGroupFormats(columnGroups, writerFormat)
+	// Why: propagate the configured multiPartUploadSize to both writer variants so
+	// schema-bump compaction outputs are not stuck on the 10 MiB default part size
+	// (S3 10,000-part limit => permanently stuck compaction for large outputs).
+	multiPartUploadSize := paramtable.Get().DataNodeCfg.MultiPartUploadSize.GetAsInt64()
 	var writer bumpSchemaVersionBatchWriter
 	if schemaContainsTextField(schema) {
-		writer, err = storage.NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+		writer, err = storage.NewPartialPackedRecordBatchWriterWithTextRefsAsBinary(basePath, schema, int64(t.compactionParams.BinLogMaxSize), multiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
 	} else {
-		writer, err = storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), packed.DefaultMultiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
+		writer, err = storage.NewPartialPackedRecordBatchWriter(basePath, schema, int64(t.compactionParams.BinLogMaxSize), multiPartUploadSize, columnGroups, t.compactionParams.StorageConfig, pluginContext, writerFormat, schemaBasedFormats)
 	}
 	if err != nil {
 		return nil, err
