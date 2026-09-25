@@ -36,7 +36,14 @@ const (
 
 // SortTimings holds phase-level timing information from the Sort function.
 type SortTimings struct {
-	ReadCost   time.Duration
+	ReadCost time.Duration
+	// FetchCost is the part of ReadCost spent inside RecordReader.Next(), i.e.
+	// waiting for input to be downloaded and decoded. ReadCost - FetchCost is
+	// what the read loop itself costs: retaining each record and running the
+	// predicate over every row. Splitting the two tells a read that is slow
+	// because of object storage from one that is slow because of the
+	// per-row work, which no amount of read concurrency changes.
+	FetchCost  time.Duration
 	SortCost   time.Duration
 	WriteCost  time.Duration
 	NumBatches int
@@ -72,9 +79,12 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	}()
 
 	phaseStart := time.Now()
+	var fetchCost time.Duration
 	for _, r := range rr {
 		for {
+			fetchStart := time.Now()
 			rec, err := r.Next()
+			fetchCost += time.Since(fetchStart)
 			if err == nil {
 				rec.Retain()
 				ri := len(records)
@@ -94,7 +104,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 	readCost := time.Since(phaseStart)
 
 	if len(records) == 0 {
-		return 0, &SortTimings{ReadCost: readCost}, nil
+		return 0, &SortTimings{ReadCost: readCost, FetchCost: fetchCost}, nil
 	}
 
 	phaseStart = time.Now()
@@ -217,6 +227,7 @@ func Sort(batchSize uint64, schema *schemapb.CollectionSchema, rr []RecordReader
 
 	timings := &SortTimings{
 		ReadCost:   readCost,
+		FetchCost:  fetchCost,
 		SortCost:   sortCost,
 		WriteCost:  writeCost,
 		NumBatches: len(records),
