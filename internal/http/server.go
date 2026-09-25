@@ -136,7 +136,7 @@ func mustBeGated(pattern string) bool {
 	return false
 }
 
-func writeJSONError(w http.ResponseWriter, status int, msg string) {
+func writeJSONWithMsg(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(map[string]string{"msg": msg})
@@ -231,13 +231,12 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 			mlog.Info(ctx, "start to trigger component stop", mlog.String("role", truncateForLog(role)))
 			if err := triggerComponentStop(role); err != nil {
 				mlog.Warn(ctx, "failed to trigger component stop", mlog.Err(err))
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to trigger component stop, %s"}`, err.Error())
+				writeJSONWithMsg(w, http.StatusInternalServerError,
+					fmt.Sprintf("failed to trigger component stop, %s", err.Error()))
 				return
 			}
 			mlog.Info(ctx, "finish to trigger component stop", mlog.String("role", truncateForLog(role)))
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"msg": "OK"}`))
+			writeJSONWithMsg(w, http.StatusOK, "OK")
 		},
 		// /management/stop can DoS a running component. /management/check/ready
 		// below stays open because k8s probes cannot present credentials.
@@ -259,14 +258,13 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 				mlog.String("role", truncateForLog(role)))
 			if err := checkActive(role); err != nil {
 				mlog.RatedWarn(ctx, 1.0, "failed to check component ready", mlog.Err(err))
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, `{"msg": "failed to to check component ready, %s"}`, err.Error())
+				writeJSONWithMsg(w, http.StatusInternalServerError,
+					fmt.Sprintf("failed to to check component ready, %s", err.Error()))
 				return
 			}
 			mlog.RatedDebug(ctx, 1.0, "finish to check component ready",
 				mlog.String("role", truncateForLog(role)))
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"msg": "OK"}`))
+			writeJSONWithMsg(w, http.StatusOK, "OK")
 		},
 	})
 }

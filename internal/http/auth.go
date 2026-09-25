@@ -283,7 +283,7 @@ func wrapAdminAuth(next http.Handler, route string, document bool) http.Handler 
 				if document && decision.Status == http.StatusUnauthorized {
 					WriteBasicAuthChallenge(w)
 				}
-				writeJSONError(w, decision.Status, decision.Message)
+				writeJSONWithMsg(w, decision.Status, decision.Message)
 				return
 			}
 			req = decision.AuthenticatedRequest(req)
