@@ -635,6 +635,13 @@ func (r *absentFilledRecord) Column(i FieldID) arrow.Array {
 	return r.base.Column(i)
 }
 
+func (r *absentFilledRecord) TryColumn(i FieldID) (arrow.Array, bool) {
+	if col, ok := r.computed[i]; ok {
+		return col, true
+	}
+	return TryRecordColumn(r.base, i)
+}
+
 func (r *absentFilledRecord) Len() int { return r.base.Len() }
 
 func (r *absentFilledRecord) Retain() {

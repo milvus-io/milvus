@@ -412,8 +412,10 @@ func TestMergeSort(t *testing.T) {
 }
 
 func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
-	textBuilder := array.NewStringBuilder(memory.DefaultAllocator)
-	textBuilder.Append("not-a-lob-ref")
+	// UTF8 is valid decoded TEXT. An integer column violates both supported
+	// TEXT representations and must still propagate the Append error.
+	textBuilder := array.NewInt64Builder(memory.DefaultAllocator)
+	textBuilder.Append(42)
 	textColumn := textBuilder.NewArray()
 	defer textColumn.Release()
 	textBuilder.Release()
@@ -427,7 +429,7 @@ func TestMergeSortReturnsRecordBuilderAppendError(t *testing.T) {
 	rec := NewSimpleArrowRecord(array.NewRecord(
 		arrow.NewSchema([]arrow.Field{
 			{Name: "pk", Type: arrow.PrimitiveTypes.Int64},
-			{Name: "text", Type: arrow.BinaryTypes.String},
+			{Name: "text", Type: arrow.PrimitiveTypes.Int64},
 		}, nil),
 		[]arrow.Array{pkColumn, textColumn},
 		1,
