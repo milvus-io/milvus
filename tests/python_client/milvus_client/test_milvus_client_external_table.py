@@ -81,6 +81,7 @@ _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES = {
     "Date": 28,
     "Time": 29,
     "Decimal": 30,
+    "UUID": 31,
 }
 _EXTERNAL_ADD_FIELD_INTERNAL_TYPES = {
     DataType.NONE,
@@ -105,29 +106,47 @@ def _proto_data_type_values():
 
 
 def _assert_external_add_field_dtype_matrix_current():
-    supported = _supported_external_add_field_data_types()
+    supported_numbers = {int(dtype) for dtype in _supported_external_add_field_data_types()}
+    unsupported_numbers = {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES}
+    internal_numbers = {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_INTERNAL_TYPES}
+    proto_only_numbers = set(_EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.values())
+    sdk_only_numbers = {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_SDK_ONLY_INTERNAL_TYPES}
     proto_values = _proto_data_type_values()
     sdk_numbers = {int(dtype) for dtype in DataType}
-    classified_numbers = (
-        {int(dtype) for dtype in supported}
-        | {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_UNSUPPORTED_PUBLIC_TYPES}
-        | {int(dtype) for dtype in _EXTERNAL_ADD_FIELD_INTERNAL_TYPES}
-        | set(_EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.values())
-    )
-    assert set(proto_values.values()) == classified_numbers, (
-        "external add-field proto DataType matrix is stale; "
-        f"unclassified={set(proto_values.values()) - classified_numbers}, "
-        f"obsolete={classified_numbers - set(proto_values.values())}, proto={proto_values}"
-    )
-    stale_proto_only = {
-        name: number
-        for name, number in _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.items()
-        if number in sdk_numbers
+
+    categories = {
+        "supported": supported_numbers,
+        "unsupported public": unsupported_numbers,
+        "internal": internal_numbers,
+        "proto only": proto_only_numbers,
+        "SDK only": sdk_only_numbers,
     }
-    assert not stale_proto_only, (
-        "proto-only DataType is now exposed by PyMilvus DataType; "
-        f"move it to supported or unsupported public coverage: {stale_proto_only}"
+    classified = {}
+    for category, numbers in categories.items():
+        for number in numbers:
+            assert number not in classified, (
+                f"DataType {number} is classified as both {classified.get(number)} and {category}"
+            )
+            classified[number] = category
+
+    expected_proto_numbers = supported_numbers | unsupported_numbers | internal_numbers | proto_only_numbers
+    expected_sdk_numbers = supported_numbers | unsupported_numbers | internal_numbers | sdk_only_numbers
+    assert set(proto_values.values()) == expected_proto_numbers, (
+        "external add-field proto DataType matrix is stale; "
+        f"unclassified={set(proto_values.values()) - expected_proto_numbers}, "
+        f"obsolete={expected_proto_numbers - set(proto_values.values())}, proto={proto_values}"
     )
+    assert sdk_numbers == expected_sdk_numbers, (
+        "external add-field SDK DataType matrix is stale; "
+        f"unclassified={sdk_numbers - expected_sdk_numbers}, "
+        f"obsolete={expected_sdk_numbers - sdk_numbers}"
+    )
+    mismatched_proto_only = {
+        name: (number, proto_values.get(name))
+        for name, number in _EXTERNAL_ADD_FIELD_PROTO_ONLY_UNSUPPORTED_TYPES.items()
+        if proto_values.get(name) != number
+    }
+    assert not mismatched_proto_only, f"proto-only DataType names or values changed: {mismatched_proto_only}"
 
 
 def assert_external_spec_persisted(actual_spec, expected_spec, context):
@@ -2782,13 +2801,21 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         )
 
     @pytest.mark.tags(CaseLabel.L2)
+    def test_milvus_client_external_table_add_field_dtype_matrix_covers_proto_and_sdk(self):
+        """
+        target: keep external add-field DataType coverage current
+        method: classify every proto and SDK enum type without external services
+        expected: each type belongs to exactly one supported, unsupported, or internal category
+        """
+        _assert_external_add_field_dtype_matrix_current()
+
+    @pytest.mark.tags(CaseLabel.L2)
     def test_milvus_client_external_table_add_all_supported_field_types(self, minio_env, external_prefix):
         """
         target: test external table add all supported field types
-        method: validate the DataType matrix, add every supported parquet-backed type, and reject unsupported public types
+        method: add every supported parquet-backed type and reject unsupported public types
         expected: supported fields can be refreshed/indexed/queried/searched; unsupported public types remain rejected
         """
-        _assert_external_add_field_dtype_matrix_current()
         minio_client, cfg = minio_env
         client = self._client()
         coll = cf.gen_collection_name_by_testcase_name()
@@ -2826,14 +2853,19 @@ class TestMilvusClientExternalTableAddField(ExternalTableTestBase):
         self._assert_unsupported_add_field_types_rejected(client, coll)
 
         info = self.describe_collection(client, coll)[0]
-        added_field_names = {field["name"] for field in info["fields"]}
-        expected_added = {name for name, *_ in FULL_MATRIX_SCALAR_FIELDS}
-        expected_added.add(FULL_MATRIX_ARRAY_FIELD[0])
-        expected_added.add("geo")
-        expected_added.update(name for name, *_ in FULL_MATRIX_VECTOR_FIELDS)
-        assert expected_added.issubset(added_field_names), (
-            f"missing added full-matrix fields: {expected_added - added_field_names}"
+        fields_by_name = {field["name"]: field for field in info["fields"]}
+        expected_added_types = {name: dtype for name, dtype, *_ in FULL_MATRIX_SCALAR_FIELDS}
+        expected_added_types[FULL_MATRIX_ARRAY_FIELD[0]] = DataType.ARRAY
+        expected_added_types["geo"] = DataType.GEOMETRY
+        expected_added_types.update({name: dtype for name, dtype, *_ in FULL_MATRIX_VECTOR_FIELDS})
+        assert expected_added_types.keys() <= fields_by_name.keys(), (
+            f"missing added full-matrix fields: {expected_added_types.keys() - fields_by_name.keys()}"
         )
+        for name, dtype in expected_added_types.items():
+            field = fields_by_name[name]
+            assert field.get("type") == dtype, f"{name} type mismatch: {field}"
+            assert field.get("external_field") == name, f"{name} external_field mismatch: {field}"
+            assert field.get("nullable") is True, f"{name} should be nullable: {field}"
 
         self.refresh_and_wait(client, coll)
         create_full_matrix_indexes(self, client, coll)
