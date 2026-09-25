@@ -203,9 +203,38 @@ func MakePropertiesFromStorageConfig(storageConfig *indexpb.StorageConfig, extra
 	keys = append(keys, PropertyWriterFormat)
 	values = append(values, paramtable.Get().DataNodeCfg.StorageFormat.GetValue())
 
-	// No extfs.default.* properties here. Per-collection extfs properties
-	// (extfs.{collectionID}.*) are injected downstream via
-	// InjectExternalSpecProperties (C++ InjectExternalSpecProperties pipeline).
+	// Store the External Table mode in the same properties map; it is consumed
+	// by InjectExternalSpecProperties once the collection is known.
+	externalMode := uint32(0)
+	if storageConfig.GetTalonEnableForExternalTable() {
+		externalMode = storageConfig.GetTalonMode()
+	}
+	keys = append(keys, "milvus.talon.external_mode")
+	values = append(values, strconv.FormatUint(uint64(externalMode), 10))
+	for _, property := range []struct {
+		key   string
+		value uint32
+	}{
+		{"fs.talon.mode", storageConfig.GetTalonMode()},
+		{"fs.talon.small_read_threshold", storageConfig.GetTalonSmallReadThreshold()},
+		{"fs.talon.block_size", storageConfig.GetTalonBlockSize()},
+		{"fs.talon.max_idle_per_addr", storageConfig.GetTalonMaxIdlePerAddr()},
+	} {
+		isMode := property.key == "fs.talon.mode"
+		if !isMode && property.value == 0 {
+			continue // Older StorageConfig messages use the storage defaults.
+		}
+		value := property.value
+		if isMode && storageConfig.GetStorageType() == "local" {
+			value = 0
+		}
+		keys = append(keys, property.key)
+		values = append(values, strconv.FormatUint(uint64(value), 10))
+	}
+	if coordinator := storageConfig.GetTalonCoordinator(); coordinator != "" {
+		keys = append(keys, "fs.talon.coordinator")
+		values = append(values, coordinator)
+	}
 
 	// Add extra kvs (override existing keys if present)
 	for k, v := range extraKVs {

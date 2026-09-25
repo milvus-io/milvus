@@ -1247,6 +1247,17 @@ common:
         threshold: 1024 # split by average size policy threshold(in bytes) in storage v2
     useLoonFFI: false
     enableGrowingSourceFlush: false # enable flushing growing segment payload from QueryNode growing source through StorageV3 manifest path
+    talon:
+      # Remote milvus-storage reads: 0 = disabled, 1 = all reads, 2 = small reads only.
+      # Applies to internal filesystems; local filesystems and legacy chunk managers are unaffected.
+      # These settings require a restart.
+      mode: 0
+      enableForExternalTable: false # Also apply Talon to remote External Tables when mode is 1 or 2.
+      # Inclusive request size threshold in bytes for mode 2, before EOF clamping. Valid range: [1, 1048576].
+      smallReadThreshold: 524288 # 512 KiB
+      coordinator: "" # Talon coordinator address (host:port), required when mode is 1 or 2.
+      blockSize: 268435456 # Talon block size in bytes; must be greater than 0.
+      maxIdlePerAddr: 256 # Maximum idle TCP connections per peer in each Talon pool; does not limit active connections.
     iops:
       # Initial ObjectStore request rate used by the Lance AIMD limiter for External Table reads.
       # The value must be greater than 0. Values above a positive maxRate are reduced to maxRate.

@@ -106,6 +106,13 @@ NewPackedReaderWithStorageConfig(char** paths,
                 ? std::string(c_storage_config.tls_min_version)
                 : "",
             c_storage_config.use_crc32c_checksum,
+            c_storage_config.talon_mode,
+            c_storage_config.talon_small_read_threshold,
+            c_storage_config.talon_coordinator != nullptr
+                ? c_storage_config.talon_coordinator
+                : "",
+            c_storage_config.talon_block_size,
+            c_storage_config.talon_max_idle_per_addr,
         });
         if (!trueFs) {
             return milvus::FailureCStatus(

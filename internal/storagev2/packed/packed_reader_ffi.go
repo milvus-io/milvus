@@ -261,26 +261,32 @@ func newCPluginContext(storagePluginContext *indexcgopb.StoragePluginContext) (*
 
 func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, func()) {
 	cStorageConfig := C.CStorageConfig{
-		address:                C.CString(storageConfig.GetAddress()),
-		bucket_name:            C.CString(storageConfig.GetBucketName()),
-		access_key_id:          C.CString(storageConfig.GetAccessKeyID()),
-		access_key_value:       C.CString(storageConfig.GetSecretAccessKey()),
-		root_path:              C.CString(storageConfig.GetRootPath()),
-		storage_type:           C.CString(storageConfig.GetStorageType()),
-		cloud_provider:         C.CString(storageConfig.GetCloudProvider()),
-		iam_endpoint:           C.CString(storageConfig.GetIAMEndpoint()),
-		log_level:              C.CString("warn"),
-		useSSL:                 C.bool(storageConfig.GetUseSSL()),
-		sslCACert:              C.CString(storageConfig.GetSslCACert()),
-		useIAM:                 C.bool(storageConfig.GetUseIAM()),
-		region:                 C.CString(storageConfig.GetRegion()),
-		useVirtualHost:         C.bool(storageConfig.GetUseVirtualHost()),
-		requestTimeoutMs:       C.int64_t(storageConfig.GetRequestTimeoutMs()),
-		gcp_credential_json:    C.CString(storageConfig.GetGcpCredentialJSON()),
-		use_custom_part_upload: true,
-		max_connections:        C.uint32_t(storageConfig.GetMaxConnections()),
-		tls_min_version:        C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
-		use_crc32c_checksum:    C.bool(storageConfig.GetUseCrc32CChecksum()),
+		address:                         C.CString(storageConfig.GetAddress()),
+		bucket_name:                     C.CString(storageConfig.GetBucketName()),
+		access_key_id:                   C.CString(storageConfig.GetAccessKeyID()),
+		access_key_value:                C.CString(storageConfig.GetSecretAccessKey()),
+		root_path:                       C.CString(storageConfig.GetRootPath()),
+		storage_type:                    C.CString(storageConfig.GetStorageType()),
+		cloud_provider:                  C.CString(storageConfig.GetCloudProvider()),
+		iam_endpoint:                    C.CString(storageConfig.GetIAMEndpoint()),
+		log_level:                       C.CString("warn"),
+		useSSL:                          C.bool(storageConfig.GetUseSSL()),
+		sslCACert:                       C.CString(storageConfig.GetSslCACert()),
+		useIAM:                          C.bool(storageConfig.GetUseIAM()),
+		region:                          C.CString(storageConfig.GetRegion()),
+		useVirtualHost:                  C.bool(storageConfig.GetUseVirtualHost()),
+		requestTimeoutMs:                C.int64_t(storageConfig.GetRequestTimeoutMs()),
+		gcp_credential_json:             C.CString(storageConfig.GetGcpCredentialJSON()),
+		use_custom_part_upload:          true,
+		max_connections:                 C.uint32_t(storageConfig.GetMaxConnections()),
+		tls_min_version:                 C.CString(tlsMinVersionForStorage(storageConfig.GetSslTlsMinVersion())),
+		use_crc32c_checksum:             C.bool(storageConfig.GetUseCrc32CChecksum()),
+		talon_mode:                      C.uint32_t(storageConfig.GetTalonMode()),
+		talon_small_read_threshold:      C.uint32_t(storageConfig.GetTalonSmallReadThreshold()),
+		talon_coordinator:               C.CString(storageConfig.GetTalonCoordinator()),
+		talon_block_size:                C.uint32_t(storageConfig.GetTalonBlockSize()),
+		talon_max_idle_per_addr:         C.uint32_t(storageConfig.GetTalonMaxIdlePerAddr()),
+		talon_enable_for_external_table: C.bool(storageConfig.GetTalonEnableForExternalTable()),
 	}
 	return cStorageConfig, func() {
 		C.free(unsafe.Pointer(cStorageConfig.address))
@@ -296,6 +302,7 @@ func newCStorageConfig(storageConfig *indexpb.StorageConfig) (C.CStorageConfig, 
 		C.free(unsafe.Pointer(cStorageConfig.region))
 		C.free(unsafe.Pointer(cStorageConfig.gcp_credential_json))
 		C.free(unsafe.Pointer(cStorageConfig.tls_min_version))
+		C.free(unsafe.Pointer(cStorageConfig.talon_coordinator))
 	}
 }
 

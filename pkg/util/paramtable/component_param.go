@@ -315,6 +315,7 @@ func (p *ComponentParam) CleanEvent() {
 
 // /////////////////////////////////////////////////////////////////////////////
 // --- common ---
+
 type commonConfig struct {
 	ClusterPrefix ParamItem `refreshable:"false"`
 
@@ -418,12 +419,18 @@ type commonConfig struct {
 	UseLoonFFI                           ParamItem `refreshable:"true"`
 	EnableGrowingSourceFlush             ParamItem `refreshable:"false"`
 
-	StoragePathPrefix               ParamItem `refreshable:"false"`
-	StorageZstdConcurrency          ParamItem `refreshable:"false"`
-	StorageReadRetryAttempts        ParamItem `refreshable:"true"`
-	StorageIopsInitialRate          ParamItem `refreshable:"false"`
-	StorageIopsMaxRate              ParamItem `refreshable:"false"`
-	ExternalVectorPartialNullPolicy ParamItem `refreshable:"false"`
+	StoragePathPrefix                  ParamItem `refreshable:"false"`
+	StorageZstdConcurrency             ParamItem `refreshable:"false"`
+	StorageReadRetryAttempts           ParamItem `refreshable:"true"`
+	StorageIopsInitialRate             ParamItem `refreshable:"false"`
+	StorageIopsMaxRate                 ParamItem `refreshable:"false"`
+	StorageTalonMode                   ParamItem `refreshable:"false"`
+	StorageTalonEnableForExternalTable ParamItem `refreshable:"false"`
+	StorageTalonSmallReadThreshold     ParamItem `refreshable:"false"`
+	StorageTalonCoordinator            ParamItem `refreshable:"false"`
+	StorageTalonBlockSize              ParamItem `refreshable:"false"`
+	StorageTalonMaxIdlePerAddr         ParamItem `refreshable:"false"`
+	ExternalVectorPartialNullPolicy    ParamItem `refreshable:"false"`
 
 	TraceLogMode              ParamItem `refreshable:"true"`
 	BloomFilterEnabled        ParamItem `refreshable:"false"`
@@ -1458,6 +1465,88 @@ Rows whose child elements are all null are always promoted to row-level null for
 		Export: true,
 	}
 	p.ExternalVectorPartialNullPolicy.Init(base.mgr)
+
+	p.StorageTalonMode = ParamItem{
+		Key:          "common.storage.talon.mode",
+		Version:      "3.0.1",
+		DefaultValue: "0",
+		Doc:          "Remote milvus-storage read routing: 0 disables Talon, 1 routes all reads through Talon, and 2 routes only small reads. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed > 2 {
+				panic(fmt.Sprintf("invalid common.storage.talon.mode: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonMode.Init(base.mgr)
+
+	p.StorageTalonEnableForExternalTable = ParamItem{
+		Key:          "common.storage.talon.enableForExternalTable",
+		Version:      "3.0.1",
+		DefaultValue: "false",
+		Doc:          "Apply the configured Talon read routing to remote External Tables when mode is 1 or 2. Requires a restart.",
+		Export:       true,
+	}
+	p.StorageTalonEnableForExternalTable.Init(base.mgr)
+
+	p.StorageTalonSmallReadThreshold = ParamItem{
+		Key:          "common.storage.talon.smallReadThreshold",
+		Version:      "3.0.1",
+		DefaultValue: "524288",
+		Doc:          "Inclusive request size threshold in bytes for Talon mode 2, before EOF clamping. Defaults to 512 KiB. Valid range: [1, 1048576]. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 || parsed > 1048576 {
+				panic(fmt.Sprintf("invalid common.storage.talon.smallReadThreshold: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonSmallReadThreshold.Init(base.mgr)
+
+	p.StorageTalonCoordinator = ParamItem{
+		Key:          "common.storage.talon.coordinator",
+		Version:      "3.0.1",
+		DefaultValue: "",
+		Doc:          "Talon coordinator address (host:port), required when Talon mode is 1 or 2. Requires a restart.",
+		Export:       true,
+	}
+	p.StorageTalonCoordinator.Init(base.mgr)
+
+	p.StorageTalonBlockSize = ParamItem{
+		Key:          "common.storage.talon.blockSize",
+		Version:      "3.0.1",
+		DefaultValue: "268435456",
+		Doc:          "Talon block size in bytes; must be greater than 0. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 {
+				panic(fmt.Sprintf("invalid common.storage.talon.blockSize: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonBlockSize.Init(base.mgr)
+
+	p.StorageTalonMaxIdlePerAddr = ParamItem{
+		Key:          "common.storage.talon.maxIdlePerAddr",
+		Version:      "3.0.1",
+		DefaultValue: "256",
+		Doc:          "Maximum idle TCP connections per peer in each Talon pool. Must be greater than 0; does not limit active connections. Requires a restart.",
+		Formatter: func(value string) string {
+			parsed, err := strconv.ParseUint(value, 10, 32)
+			if err != nil || parsed == 0 {
+				panic(fmt.Sprintf("invalid common.storage.talon.maxIdlePerAddr: %q", value))
+			}
+			return strconv.FormatUint(parsed, 10)
+		},
+		Export: true,
+	}
+	p.StorageTalonMaxIdlePerAddr.Init(base.mgr)
 
 	p.StorageIopsInitialRate = ParamItem{
 		Key:          "common.storage.iops.initialRate",
