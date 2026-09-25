@@ -208,6 +208,8 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     //note it may enumerate all data inside a segment and can block following
     //query and search possibly
     std::vector<GroupedResult> res;
+    res.reserve(static_cast<size_t>(search_info.topk_) *
+                static_cast<size_t>(search_info.group_size_));
     CompositeGroupKey scratch_key;
     while (iterator->HasNext() && !groupMap.IsGroupResEnough()) {
         auto offset_dis_pair = iterator->Next();
