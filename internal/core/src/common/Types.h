@@ -599,6 +599,11 @@ IsVectorDataType(DataType data_type) {
 }
 
 inline bool
+IsOrdinaryVectorDataType(DataType data_type) {
+    return IsVectorDataType(data_type) && !IsVectorArrayDataType(data_type);
+}
+
+inline bool
 IsVariableDataType(DataType data_type) {
     return IsStringDataType(data_type) || IsBinaryDataType(data_type) ||
            IsSparseFloatVectorDataType(data_type);
