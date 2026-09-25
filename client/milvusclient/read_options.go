@@ -63,6 +63,7 @@ type searchOption struct {
 	namespace                  *string
 	outputFields               []string
 	searchAggregation          *SearchAggregation
+	highlighter                Highlighter
 	consistencyLevel           entity.ConsistencyLevel
 	useDefaultConsistencyLevel bool
 }
@@ -85,6 +86,7 @@ type AnnRequest struct {
 	templateParams  map[string]any
 
 	functionScore *entity.FunctionScore
+	highlighter   Highlighter
 }
 
 func NewAnnRequest(annField string, limit int, vectors ...entity.Vector) *AnnRequest {
@@ -178,6 +180,14 @@ func (r *AnnRequest) searchRequest() (*milvuspb.SearchRequest, error) {
 			return nil, errors.New("FunctionScore has no functions")
 		}
 		request.FunctionScore = r.functionScore.ProtoMessage()
+	}
+
+	if r.highlighter != nil {
+		highlighter, err := r.highlighter.protoMessage()
+		if err != nil {
+			return nil, err
+		}
+		request.Highlighter = highlighter
 	}
 
 	return request, nil
@@ -398,6 +408,19 @@ func (r *AnnRequest) WithFunctionScore(fs *entity.FunctionScore) *AnnRequest {
 	return r
 }
 
+// WithHighlighter attaches a Highlighter (e.g. NewLexicalHighlighter) to the
+// per-sub-request level. Supported on regular Search (via
+// (*searchOption).WithHighlighter) but rejected when the AnnRequest is fed
+// into a hybrid search — HybridRequest() errors before the wire call because
+// the server cannot carry a per-leg highlighter today.
+//
+// Remove WithHighlighter from the leg if you need both hybrid + highlight;
+// hybrid+highlight support is pending in the server.
+func (r *AnnRequest) WithHighlighter(h Highlighter) *AnnRequest {
+	r.highlighter = h
+	return r
+}
+
 // The returned request is NOT a snapshot of slice-valued template parameters:
 // it aliases the caller's backing arrays (see WithTemplateParam). Treat it as
 // valid only while those slices are unmodified.
@@ -434,6 +457,16 @@ func (opt *searchOption) Request() (*milvuspb.SearchRequest, error) {
 			return nil, err
 		}
 		request.SearchAggregation = searchAggregation
+	}
+	if opt.highlighter != nil {
+		if opt.searchAggregation != nil {
+			return nil, errors.New("highlighter and search_aggregation cannot be used simultaneously")
+		}
+		highlighter, err := opt.highlighter.protoMessage()
+		if err != nil {
+			return nil, err
+		}
+		request.Highlighter = highlighter
 	}
 
 	return request, nil
@@ -522,6 +555,15 @@ func (opt *searchOption) WithSearchParam(key, value string) *searchOption {
 
 func (opt *searchOption) WithSearchAggregation(agg *SearchAggregation) *searchOption {
 	opt.searchAggregation = agg
+	return opt
+}
+
+// WithHighlighter attaches a Highlighter (e.g. NewLexicalHighlighter) to the
+// search request. The server uses the highlighter to annotate matched terms
+// in the returned text fields. Currently mutually exclusive with
+// WithSearchAggregation and unsupported on the search iterator.
+func (opt *searchOption) WithHighlighter(h Highlighter) *searchOption {
+	opt.highlighter = h
 	return opt
 }
 
@@ -698,6 +740,18 @@ func (opt *hybridSearchOption) WithOffset(offset int) *hybridSearchOption {
 }
 
 func (opt *hybridSearchOption) HybridRequest() (*milvuspb.HybridSearchRequest, error) {
+	// Hybrid search does not support highlighter: convertHybridSearchToSearch
+	// (internal/proxy/search_util.go:1158) drops each sub-SearchRequest's
+	// Highlighter into SubSearchRequest, which has no such field. Until the
+	// server carries the per-leg highlighter through (e.g., via a proto
+	// change to SubSearchRequest), reject client-side so the user gets a
+	// clear error rather than a silent no-op.
+	for _, r := range opt.reqs {
+		if r != nil && r.highlighter != nil {
+			return nil, errors.New("hybrid search does not support highlighter")
+		}
+	}
+
 	requests := make([]*milvuspb.SearchRequest, 0, len(opt.reqs))
 	for _, annRequest := range opt.reqs {
 		req, err := annRequest.searchRequest()

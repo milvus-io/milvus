@@ -17,6 +17,7 @@
 package milvusclient
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -437,6 +438,67 @@ func (s *SearchOptionSuite) TestSearchAggregationRejectsConflictingOptions() {
 			s.Contains(err.Error(), tc.msg)
 		})
 	}
+}
+
+func (s *SearchOptionSuite) TestSearchOptionHighlighterBasic() {
+	opt := NewSearchOption("coll", 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithHighlighter(NewLexicalHighlighter().
+			WithQuery("text", "hello", "TextMatch").
+			WithPreTags("<em>").
+			WithPostTags("</em>").
+			WithFragmentSize(50).
+			WithFragmentOffset(5).
+			WithNumFragments(2).
+			WithHighlightSearchText(true))
+
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.Require().NotNil(req.GetHighlighter())
+	s.Equal(HighlightTypeLexical, req.GetHighlighter().GetType())
+
+	params := entity.KvPairsMap(req.GetHighlighter().GetParams())
+	s.Equal("[\"<em>\"]", params[preTagsKey])
+	s.Equal("[\"</em>\"]", params[postTagsKey])
+	s.Equal("true", params[highlightSearchTextKey])
+	s.Equal("50", params[fragmentSizeKey])
+	s.Equal("5", params[fragmentOffsetKey])
+	s.Equal("2", params[fragmentNumKey])
+
+	var queries []map[string]string
+	s.NoError(json.Unmarshal([]byte(params[highlightQueryKey]), &queries))
+	s.Len(queries, 1)
+	s.Equal("TextMatch", queries[0]["type"])
+	s.Equal("text", queries[0]["field"])
+	s.Equal("hello", queries[0]["text"])
+}
+
+func (s *SearchOptionSuite) TestSearchOptionHighlighterViaAnnRequest() {
+	r := NewAnnRequest("vector", 10, entity.FloatVector([]float32{0.1, 0.2})).
+		WithHighlighter(NewLexicalHighlighter().WithQuery("text", "hi", "TextMatch"))
+
+	req, err := r.searchRequest()
+	s.Require().NoError(err)
+	s.Require().NotNil(req.GetHighlighter())
+	s.Equal(HighlightTypeLexical, req.GetHighlighter().GetType())
+}
+
+func (s *SearchOptionSuite) TestSearchOptionHighlighterAndSearchAggregationRejected() {
+	opt := NewSearchOption("coll", 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithSearchAggregation(NewSearchAggregation([]string{"brand"}, 3)).
+		WithHighlighter(NewLexicalHighlighter().WithQuery("text", "hi", "TextMatch"))
+
+	_, err := opt.Request()
+	s.Require().Error(err)
+	s.Contains(err.Error(), "highlighter and search_aggregation cannot be used simultaneously")
+}
+
+func (s *SearchOptionSuite) TestSearchOptionHighlighterNilIsNoOp() {
+	opt := NewSearchOption("coll", 10, []entity.Vector{entity.FloatVector([]float32{0.1, 0.2})}).
+		WithHighlighter(nil)
+
+	req, err := opt.Request()
+	s.Require().NoError(err)
+	s.Nil(req.GetHighlighter())
 }
 
 func TestSearchOption(t *testing.T) {
