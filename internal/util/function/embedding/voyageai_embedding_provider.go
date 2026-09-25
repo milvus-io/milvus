@@ -58,7 +58,8 @@ func NewVoyageAIEmbeddingProvider(fieldSchema *schemapb.FieldSchema, functionSch
 	}
 	var modelName string
 	dim := int64(0)
-	truncate := false
+	// Matches the VoyageAI service default; the value is always sent.
+	truncate := true
 
 	for _, param := range functionSchema.Params {
 		switch strings.ToLower(param.Key) {

@@ -205,3 +205,35 @@ func TestRerankFailed(t *testing.T) {
 		assert.True(t, err != nil)
 	}
 }
+
+// VoyageAI defaults `truncation` to true when the field is absent, so the
+// request must carry the caller's value explicitly, including false.
+func TestEmbeddingSendsTruncation(t *testing.T) {
+	cases := []struct {
+		name       string
+		truncation bool
+	}{
+		{name: "truncation true", truncation: true},
+		{name: "truncation false", truncation: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var got map[string]any
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(`{"object":"list","data":[{"object":"embedding","embedding":[0.1,0.2],"index":0}]}`))
+			}))
+			defer ts.Close()
+
+			c, err := NewVoyageAIClient("mock_key")
+			assert.NoError(t, err)
+			_, err = c.Embedding(ts.URL, "voyage-3", []string{"sentence"}, 0, "query", "float", tc.truncation, 0)
+			assert.NoError(t, err)
+
+			value, ok := got["truncation"]
+			assert.True(t, ok, "request body must contain truncation, got %v", got)
+			assert.Equal(t, tc.truncation, value)
+		})
+	}
+}
