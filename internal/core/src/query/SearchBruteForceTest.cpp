@@ -185,6 +185,52 @@ TEST_F(TestFloatSearchBruteForce, IP) {
     Run(100, 10, 5, 128, "ip");
 }
 
+TEST(SearchBruteForce, MRLPrefixAndFullDimRefine) {
+    constexpr int64_t dim = 4;
+    const float base[] = {
+        0.0f,
+        0.0f,
+        100.0f,
+        100.0f,
+        1.0f,
+        1.0f,
+        0.0f,
+        0.0f,
+    };
+    const float query[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    dataset::SearchDataset query_dataset{
+        knowhere::metric::L2, 1, 1, -1, dim, query};
+    dataset::RawDataset raw_dataset{0, dim, 2, base};
+    std::map<std::string, std::string> index_info;
+    BitsetView bitset;
+
+    SearchInfo prefix_info;
+    prefix_info.topk_ = 1;
+    prefix_info.metric_type_ = knowhere::metric::L2;
+    prefix_info.brute_force_index_params_.mrl_dim_ = 2;
+    auto prefix_result = BruteForceSearch(query_dataset,
+                                          raw_dataset,
+                                          prefix_info,
+                                          index_info,
+                                          bitset,
+                                          DataType::VECTOR_FLOAT,
+                                          DataType::NONE,
+                                          nullptr);
+    ASSERT_EQ(prefix_result.get_offsets()[0], 0);
+
+    auto refined_info = prefix_info;
+    refined_info.brute_force_index_params_.with_mrl_refine_ = true;
+    auto refined_result = BruteForceSearch(query_dataset,
+                                           raw_dataset,
+                                           refined_info,
+                                           index_info,
+                                           bitset,
+                                           DataType::VECTOR_FLOAT,
+                                           DataType::NONE,
+                                           nullptr);
+    ASSERT_EQ(refined_result.get_offsets()[0], 1);
+}
+
 TEST_F(TestFloatSearchBruteForce, NotSupported) {
     Run(100, 10, 5, 128, "aaaaaaaaaaaa");
 }
@@ -282,4 +328,13 @@ TEST(PopulateBruteForceIndexParams, MinHashOverridesFromMeta) {
     const auto& p = search_info.brute_force_index_params_;
     ASSERT_EQ(p.minhash_lsh_band_.value(), 4);
     ASSERT_EQ(p.minhash_element_bit_width_.value(), 32);
+}
+
+TEST(PopulateBruteForceIndexParams, MRL) {
+    SearchInfo search_info;
+    FieldIndexMeta meta(
+        FieldId(100), {{MRL_DIM_KEY, "2"}, {WITH_MRL_REFINE_KEY, "true"}}, {});
+    PopulateBruteForceIndexParams(search_info, meta);
+    ASSERT_EQ(search_info.brute_force_index_params_.mrl_dim_, 2);
+    ASSERT_TRUE(search_info.brute_force_index_params_.with_mrl_refine_);
 }

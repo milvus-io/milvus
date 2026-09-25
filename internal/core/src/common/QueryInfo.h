@@ -40,6 +40,8 @@ struct BruteForceIndexParams {
     std::optional<float> bm25_b_;
     std::optional<int64_t> minhash_lsh_band_;
     std::optional<int64_t> minhash_element_bit_width_;
+    int64_t mrl_dim_{-1};
+    bool with_mrl_refine_{false};
 };
 
 struct SearchInfo {
