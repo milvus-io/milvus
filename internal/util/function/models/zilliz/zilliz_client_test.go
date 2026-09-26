@@ -815,3 +815,92 @@ func TestZillizClient_RequestContext(t *testing.T) {
 	assert.True(t, ok)
 	assert.Greater(t, time.Until(fbDeadline), 29*time.Second)
 }
+
+// A model service response carries its own Status. A non-zero code on an RPC
+// that itself returned normally must surface as an error from each client
+// method, instead of the (empty) payload being returned as a result.
+func TestZillizClient_ResponseStatus(t *testing.T) {
+	floatBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint32(floatBytes[0:4], 0x3f800000) // 1.0
+	binary.LittleEndian.PutUint32(floatBytes[4:8], 0x40000000) // 2.0
+
+	failed := &modelservicepb.Status{Code: 1, Msg: "model deployment not ready"}
+	ok := &modelservicepb.Status{Code: 0, Msg: "success"}
+
+	call := map[string]func(c *ZillizClient) (int, error){
+		"embedding": func(c *ZillizClient) (int, error) {
+			res, err := c.Embedding(context.Background(), []string{"a"}, nil)
+			return len(res), err
+		},
+		"rerank": func(c *ZillizClient) (int, error) {
+			res, err := c.Rerank(context.Background(), "q", []string{"a"}, nil)
+			return len(res), err
+		},
+		"highlight": func(c *ZillizClient) (int, error) {
+			res, _, err := c.Highlight(context.Background(), "q", []string{"a"}, nil)
+			return len(res), err
+		},
+	}
+
+	tests := []struct {
+		name    string
+		method  string
+		status  *modelservicepb.Status
+		wantErr bool
+		wantLen int
+	}{
+		{"embedding failed status", "embedding", failed, true, 0},
+		{"embedding ok status", "embedding", ok, false, 1},
+		{"embedding nil status", "embedding", nil, false, 1},
+		{"rerank failed status", "rerank", failed, true, 0},
+		{"rerank ok status", "rerank", ok, false, 1},
+		{"rerank nil status", "rerank", nil, false, 1},
+		{"highlight failed status", "highlight", failed, true, 0},
+		{"highlight ok status", "highlight", ok, false, 1},
+		{"highlight nil status", "highlight", nil, false, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, lis, dialer := setupMockServer(t)
+			defer lis.Close()
+			defer s.Stop()
+
+			// A failed status comes without a payload; a successful one with one.
+			embResp := &modelservicepb.TextEmbeddingResponse{Status: tt.status}
+			rerankResp := &modelservicepb.TextRerankResponse{Status: tt.status}
+			hlResp := &modelservicepb.HighlightResponse{Status: tt.status}
+			if !tt.wantErr {
+				embResp.Results = []*modelservicepb.EmbeddingResult{{
+					Dense: &modelservicepb.DenseVector{Dtype: modelservicepb.DenseVector_DTYPE_FLOAT, Data: floatBytes, Dim: 2},
+				}}
+				rerankResp.Scores = []float32{0.5}
+				hlResp.Results = []*modelservicepb.HighlightResult{{Sentences: []string{"a"}, Scores: []float32{0.5}}}
+			}
+			modelservicepb.RegisterTextEmbeddingServiceServer(s, &mockTextEmbeddingServer{response: embResp})
+			modelservicepb.RegisterRerankServiceServer(s, &mockRerankServer{response: rerankResp})
+			modelservicepb.RegisterHighlightServiceServer(s, &mockHighlightServer{response: hlResp})
+			go func() {
+				_ = s.Serve(lis)
+			}()
+
+			conn, err := grpc.DialContext(context.Background(), "bufnet",
+				grpc.WithContextDialer(dialer),
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
+				grpc.WithBlock(),
+			)
+			require.NoError(t, err)
+			defer conn.Close()
+
+			client := NewZilliClientForTests("test-deployment", "test-cluster", "", conn, 5000)
+			n, err := call[tt.method](client)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "model deployment not ready")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantLen, n)
+		})
+	}
+}
