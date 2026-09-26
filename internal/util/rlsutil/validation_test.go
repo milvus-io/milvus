@@ -31,6 +31,10 @@ func TestValidatePayloadBounds(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("policy action count", func(t *testing.T) {
+		require.ErrorIs(t, ValidatePolicyActionCount(0), merr.ErrParameterInvalid)
+		require.NoError(t, ValidatePolicyActionCount(maxSupportedPolicyActions))
+		require.ErrorIs(t, ValidatePolicyActionCount(maxSupportedPolicyActions+1), merr.ErrParameterInvalid)
+
 		actions := make([]PolicyAction, maxSupportedPolicyActions+1)
 		err := ValidatePolicy(
 			"policy",
@@ -42,9 +46,22 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("deprecated policy roles", func(t *testing.T) {
+		require.NoError(t, ValidatePolicyRoles(nil))
+		require.ErrorIs(t, ValidatePolicyRoles([]string{"reader"}), merr.ErrParameterInvalid)
+	})
+
 	t.Run("raw tag key transport count", func(t *testing.T) {
 		_, err := ValidateAndDeduplicateTagKeys(make([]string, MaxTransportTagKeys+1))
 		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	t.Run("raw principal tags transport bytes", func(t *testing.T) {
+		paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key)
+
+		require.NoError(t, ValidatePrincipalTagsTransportSize("a", strings.Repeat("x", MaxTransportIdentifierLength)))
+		require.ErrorIs(t, ValidatePrincipalTagsTransportSize("a", strings.Repeat("x", MaxTransportIdentifierLength+1)), merr.ErrParameterTooLarge)
 	})
 
 	t.Run("distinct tag key semantic count", func(t *testing.T) {
@@ -214,6 +231,17 @@ func TestValidatePayloadBounds(t *testing.T) {
 			_, err = TagsFromJSON(invalid)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		}
+	})
+
+	t.Run("bounded JSON tag payload", func(t *testing.T) {
+		tags, err := TagsFromJSONWithLimit(`{"tenant":"acme"}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, map[string]TagValue{"tenant": NewStringTagValue("acme")}, tags)
+
+		_, err = TagsFromJSONWithLimit(`{"tenant":"acme","level":3}`, 1)
+		require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+		_, err = TagsFromJSONWithLimit(`{"tenant":"acme","tenant":"other"}`, 1)
+		require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
 	})
 
 	t.Run("transport identifier bounds", func(t *testing.T) {

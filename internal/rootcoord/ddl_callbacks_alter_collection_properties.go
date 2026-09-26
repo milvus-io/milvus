@@ -161,6 +161,9 @@ func (c *Core) broadcastAlterCollectionForAlterCollection(ctx context.Context, r
 
 	// Check if the properties are changed.
 	newPropsKeyValuePairs := common.NewKeyValuePairs(newProperties)
+	if err := common.ValidateRLSForceRequiresEnabled(newPropsKeyValuePairs...); err != nil {
+		return err
+	}
 	if !newPropsKeyValuePairs.Equal(coll.Properties) {
 		udpates.Properties = newPropsKeyValuePairs
 		header.UpdateMask.Paths = append(header.UpdateMask.Paths, message.FieldMaskCollectionProperties)

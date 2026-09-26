@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
@@ -3389,6 +3390,26 @@ func (s *SearchPipelineSuite) TestRoundAggHitScores() {
 	s.Equal(float32(0), buckets[0].Hits[0].Score)
 	s.Equal(float32(0), buckets[0].Hits[1].Score)
 	s.Equal(float32(1), buckets[0].SubAggBuckets[0].Hits[0].Score)
+}
+
+func (s *SearchPipelineSuite) TestRequerySkipsRuntimeRLS() {
+	node := &namespaceRequeryMockNode{}
+	mocker := mockey.Mock((*namespaceRequeryMockNode).ExecuteQuery).To(func(_ *namespaceRequeryMockNode, _ context.Context, task taskmodel.Task, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		qt := task.(*QueryTask)
+		s.True(qt.skipRuntimeRLS)
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+	}).Build()
+	defer mocker.UnPatch()
+
+	op := &requeryOperator{
+		traceCtx:           context.Background(),
+		primaryFieldSchema: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		node:               node,
+	}
+	_, _, err := op.requery(context.Background(), s.span, &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+	}, nil)
+	s.NoError(err)
 }
 
 func (s *SearchPipelineSuite) TestRoundAggHitScoresDisabled() {

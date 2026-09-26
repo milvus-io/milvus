@@ -18,6 +18,7 @@ package dql
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -52,9 +53,10 @@ func TestSearchTask_Requery(t *testing.T) {
 	defer cancel()
 
 	const (
-		dim        = 128
-		rows       = 5
-		collection = "test-requery"
+		dim          = 128
+		rows         = 5
+		collection   = "test-requery"
+		collectionID = int64(123)
 
 		pkField  = "pk"
 		vecField = "vec"
@@ -72,7 +74,7 @@ func TestSearchTask_Requery(t *testing.T) {
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, UniqueID(0), nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": UniqueID(1)}, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema}, nil)
 
 	node := &namespaceRequeryMockNode{}
 
@@ -94,6 +96,7 @@ func TestSearchTask_Requery(t *testing.T) {
 					MsgType:  commonpb.MsgType_Search,
 					SourceID: paramtable.GetNodeID(),
 				},
+				CollectionID: collectionID,
 			},
 			request: &milvuspb.SearchRequest{
 				CollectionName: collectionName,
@@ -105,6 +108,7 @@ func TestSearchTask_Requery(t *testing.T) {
 				},
 			},
 			schema:                 schema,
+			rlsCollectionName:      collection,
 			tr:                     timerecord.NewTimeRecorder("search"),
 			node:                   node,
 			translatedOutputFields: outputFields,
@@ -118,6 +122,10 @@ func TestSearchTask_Requery(t *testing.T) {
 			queryTask := qt.(*QueryTask)
 			require.Equal(t, metrics.ReQueryLabel, queryTask.GetQueryLabel())
 			require.True(t, queryTask.ReQuery())
+			require.Equal(t, collection, queryTask.Request().GetCollectionName())
+			pinnedID, err := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, queryTask.Request().GetQueryParams())
+			require.NoError(t, err)
+			require.Equal(t, strconv.FormatInt(collectionID, 10), pinnedID)
 			return &milvuspb.QueryResults{
 				Status: merr.Success(),
 				FieldsData: []*schemapb.FieldData{
@@ -233,7 +241,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	collectionID := int64(1000)
 	mockTest(t, (*metacache.MetaCache).GetCollectionID, collectionID, nil)
 	mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil)
-	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID}, nil)
+	mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{CollID: collectionID, Schema: schemaInfo}, nil)
 	mockTest(t, (*metacache.MetaCache).GetPartitions, map[string]int64{"_default": 1}, nil)
 
 	qn := getQueryNodeClient()

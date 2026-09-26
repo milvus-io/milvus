@@ -250,3 +250,33 @@ func TestParseGroupByInfoLegacyFieldPrecedence(t *testing.T) {
 	assert.Equal(t, []int64{101, 102}, info.groupByFieldIds)
 	assert.Equal(t, []string{"brand", "category"}, info.groupByFieldNames)
 }
+
+func TestConvertHybridSearchToSearchUsesTopLevelRLS(t *testing.T) {
+	searchReq := ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		RlsPrincipal: "top-level-principal",
+		SkipRls:      true,
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      false,
+			},
+		},
+	})
+
+	assert.Equal(t, "top-level-principal", searchReq.GetRlsPrincipal())
+	assert.True(t, searchReq.GetSkipRls())
+}
+
+func TestConvertHybridSearchToSearchDoesNotFallbackToNestedRLS(t *testing.T) {
+	searchReq := ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      true,
+			},
+		},
+	})
+
+	assert.Empty(t, searchReq.GetRlsPrincipal())
+	assert.False(t, searchReq.GetSkipRls())
+}

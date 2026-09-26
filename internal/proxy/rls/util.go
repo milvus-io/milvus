@@ -42,9 +42,10 @@ type compiledExpression struct {
 }
 
 type compiledPolicyExpression struct {
-	expr           *planpb.Expr
-	needsPrincipal bool
-	tagVariables   map[string]string
+	expr                 *planpb.Expr
+	needsPrincipal       bool
+	tagVariables         map[string]string
+	tagVariableDataTypes map[string][]schemapb.DataType
 }
 
 func compiledExpressionNeedsTags(e *compiledExpression) bool {
@@ -230,10 +231,20 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 			return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS using expression")
 		}
 	}
+	var tagVariableDataTypes map[string][]schemapb.DataType
+	if len(template.tagVariables) > 0 {
+		tagVariableDataTypes = make(map[string][]schemapb.DataType, len(template.tagVariables))
+		for _, variable := range template.tagVariables {
+			dataTypes := make([]schemapb.DataType, 0, 1)
+			collectRLSTemplateDataTypes(parsedExpr, variable, &dataTypes)
+			tagVariableDataTypes[variable] = dataTypes
+		}
+	}
 	return &compiledPolicyExpression{
-		expr:           parsedExpr,
-		needsPrincipal: template.needsPrincipal,
-		tagVariables:   template.tagVariables,
+		expr:                 parsedExpr,
+		needsPrincipal:       template.needsPrincipal,
+		tagVariables:         template.tagVariables,
+		tagVariableDataTypes: tagVariableDataTypes,
 	}, nil
 }
 
@@ -314,7 +325,7 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 		if !ok {
 			return nil, nil
 		}
-		normalizedTagValue, ok = normalizeRLSTagValue(e.expr, variable, tagValue)
+		normalizedTagValue, ok = normalizeRLSTagValue(e.tagVariableDataTypes[variable], tagValue)
 		if !ok {
 			return nil, nil
 		}
@@ -365,9 +376,7 @@ func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType 
 // every occurrence of a tag variable in an expression. Numeric conversions are
 // allowed only when they preserve the value exactly; otherwise the policy is
 // treated as not matching instead of risking an over-permissive comparison.
-func normalizeRLSTagValue(expr *planpb.Expr, variable string, value rlsutil.TagValue) (rlsutil.TagValue, bool) {
-	dataTypes := make([]schemapb.DataType, 0, 1)
-	collectRLSTemplateDataTypes(expr, variable, &dataTypes)
+func normalizeRLSTagValue(dataTypes []schemapb.DataType, value rlsutil.TagValue) (rlsutil.TagValue, bool) {
 	if len(dataTypes) == 0 {
 		return rlsutil.TagValue{}, false
 	}
@@ -607,6 +616,14 @@ func mergePredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *plan
 	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
 		return userPredicate
 	}
+	switch wrapper := userPredicate.GetExpr().(type) {
+	case *planpb.Expr_RandomSampleExpr:
+		wrapper.RandomSampleExpr.Predicate = mergePredicate(wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate)
+		return userPredicate
+	case *planpb.Expr_ElementFilterExpr:
+		wrapper.ElementFilterExpr.Predicate = mergePredicate(wrapper.ElementFilterExpr.GetPredicate(), rlsPredicate)
+		return userPredicate
+	}
 	return rewriter.RewriteExpr(&planpb.Expr{
 		Expr: &planpb.Expr_BinaryExpr{
 			BinaryExpr: &planpb.BinaryExpr{
@@ -645,9 +662,30 @@ func ValidateCheckForWrite(ctx context.Context, collectionID UniqueID, principal
 	return validateCheckForWrite(ctx, defaultManager, collectionID, principalName, action, fieldsData, schemaHelper, rowNum, operation)
 }
 
+func ResolveCheckForWrite(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, schemaHelper *typeutil.SchemaHelper, operation string) (*planpb.Expr, error) {
+	checkExpr, err := defaultManager.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
+		return nil, err
+	}
+	return checkExpr, nil
+}
+
+func ValidateStaticCheckPredicate(checkExpr *planpb.Expr, operation string) error {
+	if checkExpr != nil && rewriter.IsAlwaysFalseExpr(checkExpr) {
+		return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS check expression", operation)
+	}
+	return nil
+}
+
 func validateCheckForWrite(ctx context.Context, m *manager, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, operation string) error {
 	checkExpr, err := m.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
 	if err != nil {
+		return err
+	}
+	if err := ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
 		return err
 	}
 	if checkExpr == nil {

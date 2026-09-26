@@ -3367,7 +3367,7 @@ Disabled if the value is less or equal to 0.`,
 		Version:      "3.0.0",
 		DefaultValue: "67108864",
 		PanicIfEmpty: true,
-		Doc:          "Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list.",
+		Doc:          "Maximum logical bytes of principal names, tag keys, and tag values cached per RLS collection or materialized by one non-paginated principal list. Together with the fixed principal-name allowance, it forms the combined raw name-and-tags budget of one principal update.",
 		Export:       true,
 		Formatter:    positiveProxyLimitFormatter("67108864"),
 	}

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/internal/json"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/function/embedding"
@@ -5221,6 +5222,8 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	cache, err := initMetaCache(context.Background(), qc)
 	assert.NoError(t, err)
 	collectionName := "test_alter_collection_check_loaded"
+	marshaledSchema, err := proto.Marshal(&schemapb.CollectionSchema{Name: collectionName})
+	require.NoError(t, err)
 	createColReq := &milvuspb.CreateCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DropCollection,
@@ -5229,7 +5232,7 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 		},
 		DbName:         dbName,
 		CollectionName: collectionName,
-		Schema:         nil,
+		Schema:         marshaledSchema,
 		ShardsNum:      1,
 	}
 	qc.CreateCollection(context.Background(), createColReq)
@@ -6009,6 +6012,255 @@ func TestCollectionNamespaceShardingEnabledValidation(t *testing.T) {
 		err = alterTask.PreExecute(ctx)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot delete namespace.sharding.enabled")
+	})
+}
+
+func TestCollectionRLSEnabledValidation(t *testing.T) {
+	qc := NewMixCoordMock()
+	ctx := context.Background()
+	cache := mustInitMetaCacheForTest(ctx, qc)
+	prefix := "TestRLSEnabled"
+
+	getSchemaBytes := func(colName string) []byte {
+		fieldName2Type := map[string]schemapb.DataType{
+			"fvec_field":  schemapb.DataType_FloatVector,
+			"int64_field": schemapb.DataType_Int64,
+		}
+		schema := constructCollectionSchemaByDataType(colName, fieldName2Type, "int64_field", false)
+		marshaledSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		return marshaledSchema
+	}
+
+	createCollection := func(colName string) {
+		createColReq := &milvuspb.CreateCollectionRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_CreateCollection,
+				MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+				Timestamp: Timestamp(time.Now().UnixNano()),
+			},
+			DbName:         dbName,
+			CollectionName: colName,
+			Schema:         getSchemaBytes(colName),
+			ShardsNum:      1,
+		}
+		status, err := qc.CreateCollection(ctx, createColReq)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
+	}
+
+	t.Run("create rejects invalid rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createTask := &createCollectionTask{
+			Condition: NewTaskCondition(ctx),
+			CreateCollectionRequest: &milvuspb.CreateCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgID:     UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),
+					Timestamp: Timestamp(time.Now().UnixNano()),
+				},
+				DbName:         "",
+				CollectionName: colName,
+				Schema:         getSchemaBytes(colName),
+				ShardsNum:      1,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "invalid"}},
+			},
+			ctx:      ctx,
+			mixCoord: qc,
+			result:   nil,
+			schema:   nil,
+		}
+		err := createTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid rls.enabled")
+	})
+
+	t.Run("alter rejects rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "cannot alter rls.enabled")
+	})
+
+	t.Run("alter rejects standard boolean rls.enabled spelling", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "True"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "cannot alter rls.enabled")
+	})
+
+	t.Run("alter rejects deleting rls.enabled", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{common.RLSEnabledKey},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.ErrorContains(t, err, "cannot delete rls.enabled")
+	})
+
+	t.Run("alter rejects wrong case rls.enabled delete key", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{"RLS.Enabled"},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "did you mean")
+	})
+
+	t.Run("alter accepts rls.force", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "true"}},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.NoError(t, err)
+	})
+
+	t.Run("alter rls properties requires ManageRLS", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false")
+		t.Cleanup(func() {
+			Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+			Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+		})
+
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		requests := []*milvuspb.AlterCollectionRequest{
+			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}}},
+			{CollectionName: colName, DeleteKeys: []string{common.RLSForceKey}},
+			{CollectionName: colName, Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}}},
+			{CollectionName: colName, DeleteKeys: []string{common.RLSEnabledKey}},
+		}
+		for _, request := range requests {
+			alterTask := &alterCollectionTask{
+				baseTask:               baseTask{MetaCache: cache},
+				AlterCollectionRequest: request,
+				mixCoord:               qc,
+			}
+			err := alterTask.PreExecute(GetContext(context.Background(), "alice:123456"))
+			assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		}
+
+		initPrivileges := func(policyDB, policyCollection string) {
+			coord := mocks.NewMockMixCoordClient(t)
+			coord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+				Status: merr.Success(),
+				PolicyInfos: []string{funcutil.PolicyForPrivilege("rls_admin", commonpb.ObjectType_Collection.String(),
+					policyCollection, commonpb.ObjectPrivilege_PrivilegeManageRLS.String(), policyDB)},
+				UserRoles: []string{funcutil.EncodeUserRoleCache("alice", "rls_admin")},
+			}, nil)
+			require.NoError(t, privilege.InitPrivilegeCache(context.Background(), coord))
+		}
+
+		request := &milvuspb.AlterCollectionRequest{
+			DbName:         "default",
+			CollectionName: colName,
+			Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
+		}
+		initPrivileges(request.GetDbName(), colName)
+		assert.NoError(t, (&alterCollectionTask{
+			baseTask:               baseTask{MetaCache: cache},
+			AlterCollectionRequest: request,
+			mixCoord:               qc,
+		}).PreExecute(GetContext(context.Background(), "alice:123456")))
+
+		for _, scope := range [][2]string{{"other_db", colName}, {request.GetDbName(), "other_collection"}} {
+			initPrivileges(scope[0], scope[1])
+			err := (&alterCollectionTask{
+				baseTask:               baseTask{MetaCache: cache},
+				AlterCollectionRequest: request,
+				mixCoord:               qc,
+			}).PreExecute(GetContext(context.Background(), "alice:123456"))
+			assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		}
+
+		initPrivileges("source_db", "moving_alias")
+		aliasCache := NewMockCache(t)
+		aliasCache.EXPECT().GetCollectionID(mock.Anything, "source_db", "moving_alias").Return(int64(100), nil).Once()
+		aliasCache.EXPECT().GetCollectionInfo(mock.Anything, "source_db", "moving_alias", int64(100)).Return(&collectionInfo{
+			CollID: int64(100),
+			DBName: "target_db",
+			Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: "canonical_collection"}},
+		}, nil).Once()
+		err := (&alterCollectionTask{
+			baseTask: baseTask{MetaCache: aliasCache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				DbName:         "source_db",
+				CollectionName: "moving_alias",
+				Properties:     []*commonpb.KeyValuePair{{Key: common.RLSForceKey, Value: "false"}},
+			},
+			mixCoord: qc,
+		}).PreExecute(GetContext(context.Background(), "alice:123456"))
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+
+		assert.NoError(t, (&alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				CollectionName: colName,
+				Properties:     []*commonpb.KeyValuePair{{Key: "unrelated.property", Value: "value"}},
+			},
+			mixCoord: qc,
+		}).PreExecute(GetContext(context.Background(), "alice:123456")))
+	})
+
+	t.Run("alter rejects wrong case rls.force delete key", func(t *testing.T) {
+		colName := prefix + funcutil.GenRandomStr()
+		createCollection(colName)
+		alterTask := &alterCollectionTask{
+			baseTask: baseTask{MetaCache: cache},
+			AlterCollectionRequest: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{},
+				CollectionName: colName,
+				DeleteKeys:     []string{"RLS.Force"},
+			},
+			mixCoord: qc,
+		}
+		err := alterTask.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "did you mean")
 	})
 }
 

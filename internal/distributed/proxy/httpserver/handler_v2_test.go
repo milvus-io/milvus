@@ -4976,6 +4976,71 @@ func TestDML(t *testing.T) {
 	validateTestCases(t, testEngine, queryTestCases, false)
 }
 
+func TestRESTV2ForwardsRLSFields(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaAndLimitsEnabled.Key))
+	})
+
+	matchesRLS := func(req interface {
+		GetRlsPrincipal() string
+		GetSkipRls() bool
+	}) bool {
+		return req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
+	}
+	mp := mocks.NewMockProxy(t)
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64, false, true),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Times(7)
+	mp.EXPECT().Query(mock.Anything, mock.MatchedBy(func(req *milvuspb.QueryRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.QueryResults{Status: commonSuccessStatus}, nil).Twice()
+	mp.EXPECT().Delete(mock.Anything, mock.MatchedBy(func(req *milvuspb.DeleteRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{Status: commonSuccessStatus}, nil).Once()
+	mp.EXPECT().Insert(mock.Anything, mock.MatchedBy(func(req *milvuspb.InsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: commonSuccessStatus, IDs: generateIDs(schemapb.DataType_Int64, 1), InsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(req *milvuspb.UpsertRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.MutationResult{
+		Status: commonSuccessStatus, IDs: generateIDs(schemapb.DataType_Int64, 1), UpsertCnt: 1,
+	}, nil).Once()
+	mp.EXPECT().Search(mock.Anything, mock.MatchedBy(func(req *milvuspb.SearchRequest) bool {
+		return matchesRLS(req)
+	})).Return(&milvuspb.SearchResults{
+		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.MatchedBy(func(req *milvuspb.HybridSearchRequest) bool {
+		return matchesRLS(req) && len(req.GetRequests()) == 1 &&
+			req.GetRequests()[0].GetRlsPrincipal() == "" && !req.GetRequests()[0].GetSkipRls()
+	})).Return(&milvuspb.SearchResults{
+		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
+	}, nil).Once()
+
+	engine := initHTTPServerV2(mp, false)
+	send := func(action, body string) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, action), strings.NewReader(body)))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+
+	send(QueryAction, `{"collectionName":"book","filter":"book_id > 0","rlsPrincipal":"alice","skipRls":true}`)
+	send(GetAction, `{"collectionName":"book","id":[1],"rlsPrincipal":"alice","skipRls":true}`)
+	send(DeleteAction, `{"collectionName":"book","filter":"book_id in [1]","rlsPrincipal":"alice","skipRls":true}`)
+	send(InsertAction, `{"collectionName":"book","data":[{"book_id":1,"word_count":1,"book_intro":[0.1,0.2]}],"rlsPrincipal":"alice","skipRls":true}`)
+	send(UpsertAction, `{"collectionName":"book","data":[{"book_id":1,"word_count":1,"book_intro":[0.1,0.2]}],"rlsPrincipal":"alice","skipRls":true}`)
+	send(SearchAction, `{"collectionName":"book","data":[[0.1,0.2]],"annsField":"book_intro","limit":1,"rlsPrincipal":"alice","skipRls":true}`)
+	send(HybridSearchAction, `{"collectionName":"book","search":[{"data":[[0.1,0.2]],"annsField":"book_intro","limit":1}],"limit":1,"rlsPrincipal":"alice","skipRls":true}`)
+}
+
 func TestQueryOrderByFields(t *testing.T) {
 	paramtable.Init()
 	// disable rate limit

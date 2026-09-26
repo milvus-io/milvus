@@ -233,7 +233,7 @@ recovery validation remains follow-up work.
 | `proxy.rls.maxTagValueLength` | Maximum string tag-value length in bytes. |
 | `proxy.rls.maxArrayLiteralElements` | Maximum literal elements in supported array expressions. |
 | `proxy.rls.maxPrincipalCacheEntries` | Maximum cached principal entries per collection. |
-| `proxy.rls.maxPrincipalCacheBytes` | Maximum total cached principal-name and tag payload bytes per collection. |
+| `proxy.rls.maxPrincipalCacheBytes` | Maximum cached principal-tag bytes per collection; combined with the fixed principal-name allowance for one raw name-and-tags update limit. |
 | `proxy.rls.metaRefreshInterval` | Policy freshness interval and principal-tag cache lifetime. |
 
 ## Compatibility And Rollout

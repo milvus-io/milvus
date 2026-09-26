@@ -26,23 +26,21 @@ import (
 func TestSearchTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 	mockey.PatchConvey("TestSearchTask_PlanNamespace_AfterPreExecute", t, func() {
 		cache := newTestCache()
+		schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
+			},
+			EnableNamespace: true,
+		})
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
 		mockTest(t, isPartitionKeyMode, false, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 
 		// Schema with namespace enabled and a vector field
-		mockTestTo(t, (*metacache.MetaCache).GetCollectionSchema, func(_ *metacache.MetaCache, _ context.Context, _ string, _ string) (*schemaInfo, error) {
-			schema := &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
-					{FieldID: 101, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "4"}}},
-				},
-				EnableNamespace: true,
-			}
-			return mustNewSchemaInfo(schema), nil
-		})
+		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schema, nil)
 
 		// Patch checkNq to bypass placeholder parsing
 		mockTest(t, (*SearchTask).checkNq, int64(1), nil)
@@ -89,8 +87,9 @@ func TestSearchTask_NamespaceSetsPartitionIDs(t *testing.T) {
 		)
 
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
-		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, mustNewSchemaInfo(schema), nil)
+		schemaInfo := mustNewSchemaInfo(schema)
+		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schemaInfo, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
+		mockTest(t, (*metacache.MetaCache).GetCollectionSchema, schemaInfo, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitionsIndex, partitionNames, nil)
 		mockTest(t, (*metacache.MetaCache).GetPartitions, partitionIDs, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
@@ -185,6 +184,9 @@ func (n *namespaceRequeryMockNode) LBPolicy() shardclient.LBPolicy       { retur
 func (n *namespaceRequeryMockNode) ShardMgr() shardclient.ShardClientMgr { return nil }
 func (n *namespaceRequeryMockNode) ChMgr() channelmgr.ChannelsMgr        { return nil }
 func (n *namespaceRequeryMockNode) TsoAllocator() taskmodel.TsoAllocator { return &mockTsoAllocator{} }
+func (n *namespaceRequeryMockNode) ResolveRLSEnforcement(_ context.Context, _ metacache.Cache, rlsEnabled, _, _ bool, _, _, _ string) (bool, error) {
+	return rlsEnabled, nil
+}
 func (n *namespaceRequeryMockNode) ExecuteQuery(ctx context.Context, qt taskmodel.Task, sp trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 	panic("ExecuteQuery must be patched by mockey")
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
@@ -57,6 +59,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -1573,6 +1576,7 @@ func TestProxy_Delete(t *testing.T) {
 	schema := mustNewSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
 		CollID: collectionID,
+		Schema: schema,
 	}
 	paramtable.Init()
 
@@ -2570,9 +2574,34 @@ func TestHandleIfSearchByPK_BM25Detection(t *testing.T) {
 	})
 }
 
-func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
-	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery", t, func() {
+func TestHandleIfSearchByPKRejectsHybridSearch(t *testing.T) {
+	req := &milvuspb.SearchRequest{
+		SearchInput: &milvuspb.SearchRequest_Ids{Ids: &schemapb.IDs{
+			IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+		}},
+		SubReqs: []*milvuspb.SubSearchRequest{{}},
+	}
+
+	_, _, err := handleIfSearchByPKForTest(&Proxy{}, context.Background(), req)
+	require.ErrorContains(t, err, "search by IDs is not supported for hybrid search")
+}
+
+func handleIfSearchByPKForTest(node *Proxy, ctx context.Context, request *milvuspb.SearchRequest) ([]bool, *planpb.Expr, error) {
+	preflight, err := node.preflightSearchByPK(ctx, request)
+	if err != nil {
+		return nil, nil, err
+	}
+	return node.transformSearchByPK(ctx, request, preflight)
+}
+
+func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity", t, func() {
 		paramtable.Init()
+		ctx := context.Background()
+		const collectionID = int64(987654321)
+		const aliasName = "test_collection_alias"
+		rls.InvalidatePolicies(collectionID, 0)
+		defer rls.InvalidatePolicies(collectionID, 0)
 
 		namespace := "tenant_a"
 		schema := &schemapb.CollectionSchema{
@@ -2591,13 +2620,51 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 
 		cache := NewMockCache(t)
 		cache.EXPECT().
-			GetCollectionInfo(mock.Anything, "default", "test_collection", int64(0)).
-			Return(&collectionInfo{Schema: mustNewSchemaInfo(schema)}, nil)
+			GetCollectionInfo(mock.Anything, "default", aliasName, int64(0)).
+			Return(&collectionInfo{CollID: collectionID, Schema: mustNewSchemaInfo(schema), RlsEnabled: true}, nil)
 		node := &Proxy{metaCache: cache}
 
+		mixCoord := mocks.NewMockMixCoordClient(t)
+		mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).Return(&rootcoordpb.GetRLSMetadataResponse{
+			Status:       merr.Success(),
+			CollectionId: collectionID,
+			Policies: []*rootcoordpb.RLSPolicyInfo{
+				{
+					CollectionId: collectionID,
+					PolicyId:     1,
+					PolicyName:   "search_by_pk",
+					PolicyType:   milvuspb.RowPolicyType_RowPolicyTypePermissive,
+					Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Search},
+					UsingExpr:    "id == 1",
+				},
+			},
+		}, nil).Once()
+		require.NoError(t, rls.Init(ctx, mixCoord))
+
 		var capturedNamespace *string
+		var setSkipRuntimeRLS func(*queryTask, bool)
+		skipRuntimeRLSPatch := mockey.Mock((*queryTask).SetSkipRuntimeRLS).
+			To(func(task *queryTask, skip bool) {
+				require.True(t, skip)
+				setSkipRuntimeRLS(task, skip)
+			}).Origin(&setSkipRuntimeRLS).Build()
+		defer skipRuntimeRLSPatch.UnPatch()
+
+		var mergePredicateToPlan func(*planpb.PlanNode, *planpb.Expr) error
+		mergePredicatePatch := mockey.Mock(rls.MergePredicateToPlan).
+			To(func(plan *planpb.PlanNode, predicate *planpb.Expr) error {
+				require.NotNil(t, plan)
+				require.NotNil(t, predicate)
+				return mergePredicateToPlan(plan, predicate)
+			}).Origin(&mergePredicateToPlan).Build()
+		defer mergePredicatePatch.UnPatch()
+
+		var capturedCollectionName string
+		var capturedCollectionID string
 		mockey.Mock((*Proxy).query).To(func(_ *Proxy, _ context.Context, qt *queryTask, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			capturedNamespace = qt.Request().Namespace
+			capturedCollectionName = qt.Request().GetCollectionName()
+			capturedCollectionID, _ = funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, qt.Request().GetQueryParams())
 			return &milvuspb.QueryResults{
 				Status: merr.Success(),
 				FieldsData: []*schemapb.FieldData{
@@ -2632,8 +2699,76 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 
 		req := &milvuspb.SearchRequest{
 			DbName:         "default",
-			CollectionName: "test_collection",
+			CollectionName: aliasName,
 			Namespace:      &namespace,
+			RlsPrincipal:   "alice",
+			SearchInput: &milvuspb.SearchRequest_Ids{
+				Ids: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+				},
+			},
+			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
+		}
+		mismatchedIDReq := proto.Clone(req).(*milvuspb.SearchRequest)
+		mismatchedIDReq.SearchParams = append(mismatchedIDReq.SearchParams,
+			&commonpb.KeyValuePair{Key: CollectionID, Value: "0"})
+
+		_, predicate, err := handleIfSearchByPKForTest(node, ctx, req)
+		assert.NoError(t, err)
+		require.NotNil(t, predicate)
+		require.NotNil(t, capturedNamespace)
+		assert.Equal(t, namespace, *capturedNamespace)
+		assert.Equal(t, 1, skipRuntimeRLSPatch.Times())
+		assert.Equal(t, 1, mergePredicatePatch.Times())
+		assert.Equal(t, schema.GetName(), capturedCollectionName)
+		assert.Equal(t, strconv.FormatInt(collectionID, 10), capturedCollectionID)
+		assert.Equal(t, schema.GetName(), req.GetCollectionName())
+		pinnedCollectionID, err := funcutil.GetAttrByKeyFromRepeatedKV(CollectionID, req.GetSearchParams())
+		require.NoError(t, err)
+		assert.Equal(t, strconv.FormatInt(collectionID, 10), pinnedCollectionID)
+
+		_, _, err = handleIfSearchByPKForTest(node, ctx, mismatchedIDReq)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+}
+
+func TestHandleIfSearchByPK_RLSForceRejectsSkip(t *testing.T) {
+	mockey.PatchConvey("TestHandleIfSearchByPK_RLSForceRejectsSkip", t, func() {
+		paramtable.Init()
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+
+		ctx := context.Background()
+		const canonicalName = "test_collection"
+		const aliasName = "test_collection_alias"
+
+		schema := &schemapb.CollectionSchema{
+			Name: canonicalName,
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 100, Name: "id", IsPrimaryKey: true, DataType: schemapb.DataType_Int64},
+				{
+					FieldID:    101,
+					Name:       "vec",
+					DataType:   schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "2"}},
+				},
+			},
+		}
+		cache := NewMockCache(t)
+		cache.EXPECT().
+			GetCollectionInfo(mock.Anything, "default", aliasName, int64(0)).
+			Return(&collectionInfo{
+				CollID:     987654322,
+				Schema:     mustNewSchemaInfo(schema),
+				RlsEnabled: true,
+				RlsForce:   true,
+			}, nil)
+		node := &Proxy{metaCache: cache}
+
+		req := &milvuspb.SearchRequest{
+			DbName:         "default",
+			CollectionName: aliasName,
+			SkipRls:        true,
 			SearchInput: &milvuspb.SearchRequest_Ids{
 				Ids: &schemapb.IDs{
 					IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
@@ -2642,10 +2777,11 @@ func TestHandleIfSearchByPK_PreservesNamespaceInInternalQuery(t *testing.T) {
 			SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}},
 		}
 
-		_, err := node.handleIfSearchByPK(context.Background(), req)
-		assert.NoError(t, err)
-		require.NotNil(t, capturedNamespace)
-		assert.Equal(t, namespace, *capturedNamespace)
+		_, _, err := handleIfSearchByPKForTest(node, ctx, req)
+		assert.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		assert.Contains(t, err.Error(), "rls.force")
+		assert.Contains(t, err.Error(), canonicalName)
+		assert.NotContains(t, err.Error(), aliasName)
 	})
 }
 
@@ -2741,7 +2877,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrder(t *testing.T) {
 
 		// caller asks in a different order
 		req := searchByPKRequest([]int64{3, 1, 2})
-		_, err := node.handleIfSearchByPK(context.Background(), req)
+		_, _, err := handleIfSearchByPKForTest(node, context.Background(), req)
 		require.NoError(t, err)
 
 		pb := &commonpb.PlaceholderGroup{}
@@ -2795,7 +2931,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForVarCharPK(t *testing.T) {
 				IdField: &schemapb.IDs_StrId{StrId: &schemapb.StringArray{Data: []string{"c", "a", "b"}}},
 			},
 		}
-		_, err := node.handleIfSearchByPK(context.Background(), req)
+		_, _, err := handleIfSearchByPKForTest(node, context.Background(), req)
 		require.NoError(t, err)
 
 		pb := &commonpb.PlaceholderGroup{}
@@ -2835,7 +2971,7 @@ func TestHandleIfSearchByPK_PreservesInputIDOrderForValidData(t *testing.T) {
 		}).Build()
 
 		req := searchByPKRequest([]int64{3, 1, 2})
-		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		validData, _, err := handleIfSearchByPKForTest(node, context.Background(), req)
 		require.NoError(t, err)
 
 		// ids are 3, 1, 2 and only PK 1 is null
@@ -2878,7 +3014,7 @@ func TestHandleIfSearchByPK_AllNullVectorsYieldEmptySearch(t *testing.T) {
 		}).Build()
 
 		req := searchByPKRequest([]int64{3, 1, 2})
-		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		validData, _, err := handleIfSearchByPKForTest(node, context.Background(), req)
 		require.NoError(t, err)
 
 		assert.Equal(t, []bool{false, false, false}, validData)
@@ -2981,7 +3117,7 @@ func TestHandleIfSearchByPK_CompactsNullableBM25Text(t *testing.T) {
 
 		req := searchByPKRequest([]int64{3, 1, 2})
 		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
-		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		validData, _, err := handleIfSearchByPKForTest(node, context.Background(), req)
 		require.NoError(t, err)
 
 		// ids are 3, 1, 2 and only PK 1 is null
@@ -3016,7 +3152,7 @@ func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
 
 		req := searchByPKRequest([]int64{2, 1})
 		req.SearchParams = []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "sparse"}}
-		validData, err := node.handleIfSearchByPK(context.Background(), req)
+		validData, _, err := handleIfSearchByPKForTest(node, context.Background(), req)
 		require.NoError(t, err)
 
 		assert.Equal(t, []bool{false, false}, validData)
@@ -3029,72 +3165,62 @@ func TestHandleIfSearchByPK_AllNullBM25TextYieldsEmptySearch(t *testing.T) {
 	})
 }
 
-// Proxy.Search may run node.search more than once (the non-optimized
-// fallback, recall evaluation, requery retry), and handleIfSearchByPK
-// rewrites the request it is given in place. Each attempt must therefore get
-// its own copy of a search-by-IDs request, so that the later ones still find
-// the IDs and re-derive the validity mask; otherwise they run as an ordinary
-// search over the rewritten placeholder and drop the null positions.
+// Every retry gets an independently mutable Search-by-ID request after the
+// non-mutating preflight succeeds.
 func TestProxy_Search_SearchByPKCopiesRequestPerAttempt(t *testing.T) {
 	mockey.PatchConvey("TestProxy_Search_SearchByPKCopiesRequestPerAttempt", t, func() {
-		paramtable.Init()
-
 		node := &Proxy{}
-
-		// The first attempt reports a topk-reduced, insufficient result so
-		// that Proxy.Search runs the non-optimized fallback.
-		var attempts []*milvuspb.SearchRequest
-		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
-			attempts = append(attempts, req)
-			// what handleIfSearchByPK does to the request it is handed
-			req.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("rewritten")}
-			insufficient := len(attempts) == 1
-			return &milvuspb.SearchResults{Status: merr.Success()}, insufficient, insufficient, false, nil
-		}).Build()
+		preflight := &searchByPKPreflight{}
+		mockey.Mock((*Proxy).preflightSearchByPK).Return(preflight, nil).Build()
 
 		request := searchByPKRequest([]int64{3, 1, 2})
-		rsp, err := node.Search(context.Background(), request)
+		first, firstPreflight, err := node.prepareSearchByPKAttempt(context.Background(), request)
 		require.NoError(t, err)
-		require.True(t, merr.Ok(rsp.GetStatus()), rsp.GetStatus().GetReason())
+		second, secondPreflight, err := node.prepareSearchByPKAttempt(context.Background(), request)
+		require.NoError(t, err)
 
-		require.Len(t, attempts, 2)
-		assert.NotSame(t, attempts[0], attempts[1])
-		assert.NotSame(t, request, attempts[0])
-		assert.NotSame(t, request, attempts[1])
-		// the caller's request is left untouched, and each attempt saw the IDs
+		assert.Same(t, preflight, firstPreflight)
+		assert.Same(t, preflight, secondPreflight)
+		assert.NotSame(t, first, second)
+		assert.NotSame(t, request, first)
+		assert.NotSame(t, request, second)
+		first.SearchInput = &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("rewritten")}
 		assert.Equal(t, []int64{3, 1, 2}, request.GetIds().GetIntId().GetData())
-		for i := range attempts {
-			assert.NotNil(t, attempts[i].GetPlaceholderGroup(), "attempt %d must have been handed a request that was then rewritten", i)
-		}
+		assert.Equal(t, []int64{3, 1, 2}, second.GetIds().GetIntId().GetData())
+	})
+}
+
+func TestProxy_Search_SearchByPKRejectsBeforeCopy(t *testing.T) {
+	mockey.PatchConvey("TestProxy_Search_SearchByPKRejectsBeforeCopy", t, func() {
+		node := &Proxy{}
+		expected := merr.WrapErrPrivilegeNotPermitted("missing RLS principal")
+		mockey.Mock((*Proxy).preflightSearchByPK).Return(nil, expected).Build()
+
+		request := searchByPKRequest([]int64{3, 1, 2})
+		attempt, preflight, err := node.prepareSearchByPKAttempt(context.Background(), request)
+		require.ErrorIs(t, err, expected)
+		assert.Same(t, request, attempt)
+		assert.Nil(t, preflight)
 	})
 }
 
 // An ordinary search is not copied: the request goes to every attempt as-is.
 func TestProxy_Search_PlainRequestNotCopied(t *testing.T) {
-	mockey.PatchConvey("TestProxy_Search_PlainRequestNotCopied", t, func() {
-		paramtable.Init()
+	node := &Proxy{}
+	request := &milvuspb.SearchRequest{
+		DbName:         "default",
+		CollectionName: "test_collection",
+		SearchInput:    &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("vectors")},
+	}
+	first, firstPreflight, err := node.prepareSearchByPKAttempt(context.Background(), request)
+	require.NoError(t, err)
+	second, secondPreflight, err := node.prepareSearchByPKAttempt(context.Background(), request)
+	require.NoError(t, err)
 
-		node := &Proxy{}
-		var attempts []*milvuspb.SearchRequest
-		mockey.Mock((*Proxy).search).To(func(_ *Proxy, _ context.Context, req *milvuspb.SearchRequest, _ bool, _ bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
-			attempts = append(attempts, req)
-			insufficient := len(attempts) == 1
-			return &milvuspb.SearchResults{Status: merr.Success()}, insufficient, insufficient, false, nil
-		}).Build()
-
-		request := &milvuspb.SearchRequest{
-			DbName:         "default",
-			CollectionName: "test_collection",
-			SearchInput:    &milvuspb.SearchRequest_PlaceholderGroup{PlaceholderGroup: []byte("vectors")},
-		}
-		rsp, err := node.Search(context.Background(), request)
-		require.NoError(t, err)
-		require.True(t, merr.Ok(rsp.GetStatus()))
-
-		require.Len(t, attempts, 2)
-		assert.Same(t, request, attempts[0])
-		assert.Same(t, request, attempts[1])
-	})
+	assert.Same(t, request, first)
+	assert.Same(t, request, second)
+	assert.Nil(t, firstPreflight)
+	assert.Nil(t, secondPreflight)
 }
 
 func TestProxy_ManualCompaction_ExternalCollection(t *testing.T) {
