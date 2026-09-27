@@ -73,20 +73,48 @@ func PrincipalTagsSize(principalName string, tags map[string]TagValue) (int64, e
 }
 
 func TagsFromJSON(payload string) (map[string]TagValue, error) {
+	return tagsFromJSON(payload, 0)
+}
+
+// TagsFromJSONWithLimit decodes at most maxTags JSON object members. The
+// limit is checked while streaming so untrusted requests cannot materialize
+// an oversized tag map before validation.
+func TagsFromJSONWithLimit(payload string, maxTags int) (map[string]TagValue, error) {
+	return tagsFromJSON(payload, maxTags)
+}
+
+func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 	decoder := json.NewDecoder(strings.NewReader(payload))
 	decoder.UseNumber()
-	var raw map[string]any
-	if err := decoder.Decode(&raw); err != nil {
+	token, err := decoder.Token()
+	if err != nil {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
 	}
-	if raw == nil {
+	delim, ok := token.(json.Delim)
+	if !ok || delim != '{' {
 		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a JSON object")
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return nil, err
-	}
-	tags := make(map[string]TagValue, len(raw))
-	for key, value := range raw {
+
+	tags := make(map[string]TagValue)
+	entryCount := 0
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object")
+		}
+		entryCount++
+		if maxTags > 0 && entryCount > maxTags {
+			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
+		}
+
+		value, err := decoder.Token()
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+		}
 		switch typed := value.(type) {
 		case string:
 			tags[key] = NewStringTagValue(typed)
@@ -114,6 +142,17 @@ func TagsFromJSON(payload string) (map[string]TagValue, error) {
 		default:
 			return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q must be a string, int64, or double", key)
 		}
+	}
+	closingToken, err := decoder.Token()
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object: %s", err)
+	}
+	closingDelim, ok := closingToken.(json.Delim)
+	if !ok || closingDelim != '}' {
+		return nil, merr.WrapErrParameterInvalidMsg("RLS principal tags must be a valid JSON object")
+	}
+	if err := ensureJSONEOF(decoder); err != nil {
+		return nil, err
 	}
 	return tags, nil
 }
@@ -189,23 +228,23 @@ const (
 func (action PolicyAction) String() string {
 	switch action {
 	case PolicyActionQuery:
-		return "RowPolicyActionQuery"
-	case PolicyActionQueryIterator:
-		return "RowPolicyActionQueryIterator"
+		return "Query"
 	case PolicyActionSearch:
-		return "RowPolicyActionSearch"
-	case PolicyActionSearchIterator:
-		return "RowPolicyActionSearchIterator"
-	case PolicyActionHybridSearch:
-		return "RowPolicyActionHybridSearch"
-	case PolicyActionDelete:
-		return "RowPolicyActionDelete"
+		return "Search"
 	case PolicyActionInsert:
-		return "RowPolicyActionInsert"
+		return "Insert"
+	case PolicyActionDelete:
+		return "Delete"
 	case PolicyActionUpsert:
-		return "RowPolicyActionUpsert"
+		return "Upsert"
+	case PolicyActionQueryIterator:
+		return "QueryIterator"
+	case PolicyActionSearchIterator:
+		return "SearchIterator"
+	case PolicyActionHybridSearch:
+		return "HybridSearch"
 	default:
-		return "RowPolicyActionUnknown"
+		return "Unknown"
 	}
 }
 
