@@ -1219,7 +1219,11 @@ func (t *QueryTask) queryShard(ctx context.Context, nodeID int64, qn types.Query
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn(ctx, "QueryNode query result error", mlog.Any("errorCode", result.GetStatus().GetErrorCode()), mlog.String("reason", result.GetStatus().GetReason()))
-		return errors.Wrapf(merr.Error(result.GetStatus()), "fail to Query on QueryNode %d", nodeID)
+		statusErr := merr.Error(result.GetStatus())
+		if errors.Is(statusErr, merr.ErrCollectionNotLoaded) {
+			t.shardclientMgr.InvalidateShardLeaderCache([]int64{t.GetCollectionID()})
+		}
+		return errors.Wrapf(statusErr, "fail to Query on QueryNode %d", nodeID)
 	}
 
 	log.Debug(ctx, "get query result")
