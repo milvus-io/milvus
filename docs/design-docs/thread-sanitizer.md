@@ -129,9 +129,12 @@ and deliberately racy OpenMP probes run with the same setting.
 
 External image builders must set `MILVUS_JEMALLOC_LIB` to an empty build
 argument, `MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so`, and `MILVUS_TSAN_OPTIONS`
-to `halt_on_error=1:exitcode=66:ignore_noninstrumented_modules=1:allow_addr2line=1`.
-Preserve symbols and supply llvm-symbolizer or GNU addr2line. The Dev CLI image
-installs binutils for the latter. After packaging, run
+to `halt_on_error=1:exitcode=66:ignore_noninstrumented_modules=1:external_symbolizer_path=/milvus/lib/llvm-symbolizer`.
+CMake installs the matching LLVM symbolizer and its dependencies in
+`lib/tsan-symbolizer`, with a `lib/llvm-symbolizer` launcher that isolates its
+library search path from Core's Conan libraries. Preserve this directory and
+launcher when copying native caches or packaging images. The report checker
+requires source filenames and line numbers as well as function names. After packaging, run
 `python3 internal/core/milvus_tsan.py verify-runtime lib` to reject missing
 runtime files, unresolved dependencies, GNU libgomp and GNU libtsan.
 

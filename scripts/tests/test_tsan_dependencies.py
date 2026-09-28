@@ -74,6 +74,9 @@ class ArtifactTests(unittest.TestCase):
             f"libclang_rt.tsan-{os.uname().machine}.so",
         ]:
             (self.lib / name).touch()
+        (self.lib / "tsan-symbolizer").mkdir()
+        for name in ["llvm-symbolizer", "tsan-symbolizer/llvm-symbolizer"]:
+            (self.lib / name).touch(mode=0o755)
         with patch.object(
             tsan.subprocess,
             "check_output",
@@ -93,6 +96,29 @@ class ArtifactTests(unittest.TestCase):
         (self.lib / "libarcher.so").unlink()
         with self.assertRaisesRegex(ValueError, "Missing LLVM runtime"):
             tsan.verify_runtime(self.lib)
+
+    def test_symbolizer_has_an_isolated_dependency_directory(self):
+        llvm = self.lib / "llvm"
+        (llvm / "bin").mkdir(parents=True)
+        binary = llvm / "bin/llvm-symbolizer"
+        binary.write_text('#!/bin/sh\nprintf "%s" "$LD_LIBRARY_PATH"\n')
+        binary.chmod(0o755)
+        library = llvm / "libtest-real.so"
+        library.write_bytes(b"symbolizer dependency")
+        output = f"libtest.so.1 => {library}\nlibc.so.6 => /unused/libc.so.6\n"
+        with (
+            patch.dict(
+                os.environ,
+                {"MILVUS_LLVM_ROOT": str(llvm), "LD_LIBRARY_PATH": "/wrong/conan"},
+            ),
+            patch.object(tsan.subprocess, "check_output", return_value=output),
+        ):
+            tsan.package_symbolizer(self.lib)
+        tool_dir = self.lib / "tsan-symbolizer"
+        self.assertEqual((tool_dir / "libtest.so.1").read_bytes(), library.read_bytes())
+        self.assertFalse((tool_dir / "libc.so.6").exists())
+        actual = subprocess.check_output([str(self.lib / "llvm-symbolizer")], text=True)
+        self.assertEqual(actual, str(tool_dir))
 
 
 @unittest.skipUnless(
