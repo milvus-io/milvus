@@ -249,7 +249,7 @@ TEST_F(ChunkedColumnGroupTest, DeferredGroupKeepsStateProbesCold) {
         auto translator = MakeGroupTranslator("deferred-state-probes");
         auto meta = static_cast<segcore::storagev2translator::GroupCTMeta*>(
             translator->meta());
-        meta->chunk_memory_size_ = {static_cast<size_t>(*params)};
+        meta->chunk_memory_size_ = {*params};
         return translator;
     };
     { auto unused = std::make_shared<ChunkedColumnGroup>(5, 2, factory); }
