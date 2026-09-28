@@ -25,6 +25,11 @@ cp -a "$PWD"/internal/core/output/lib/*.dylib* "$LIBRARY_PATH" 2>/dev/null || tr
 cp -a "$PWD"/internal/core/output/lib/*.so* "$LIBRARY_PATH" || true
 cp -a "$PWD"/internal/core/output/lib64/*.so* "$LIBRARY_PATH" 2>/dev/null || true
 cp -r "$PWD/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/core/output/lib64/milvus-sanitizer"; do
+    if [[ -f "$marker" ]]; then
+        cp "$marker" "$LIBRARY_PATH/"
+    fi
+done
 
 PYUDF_WHEEL_DIR="$PWD/cmake_build/runtime/pyudf/wheels"
 PYUDF_RUNTIME_DIR="$LIBRARY_PATH/pyudf"
@@ -39,6 +44,6 @@ rm -rf "$PYUDF_RUNTIME_DIR"
 mkdir -p "$PYUDF_RUNTIME_DIR"
 cp "${PYUDF_WHEELS[0]}" "$PYUDF_RUNTIME_DIR/"
 
-for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|atomic)' | awk '{print $3}'); do
+for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|tsan|atomic)' | awk '{print $3}'); do
     cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
 done
