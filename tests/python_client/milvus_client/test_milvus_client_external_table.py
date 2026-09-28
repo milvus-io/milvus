@@ -4248,9 +4248,7 @@ class TestMilvusClientExternalTableDQL(ExternalTableTestBase):
                 output_fields=["id", "sparse"],
                 consistency_level="Strong",
             )[0]
-            return sorted(
-                [{"id": row["id"], "sparse": row["sparse"]} for row in rows], key=lambda row: row["id"]
-            )
+            return sorted([{"id": row["id"], "sparse": row["sparse"]} for row in rows], key=lambda row: row["id"])
 
         assert query(coll) == query(reference)
         requests = [
