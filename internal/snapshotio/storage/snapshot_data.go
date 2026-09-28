@@ -413,8 +413,7 @@ func (r *SnapshotReader) ReadSnapshot(ctx context.Context, metadataFilePath stri
 	return r.ReadSnapshotFromMetadata(ctx, metadataFilePath, metadata, includeSegments)
 }
 
-// ReadMetadata performs only the top-level object read. Import captures its
-// result in the WAL before asynchronously loading any segment descriptors.
+// ReadMetadata performs only the top-level object read.
 func (r *SnapshotReader) ReadMetadata(ctx context.Context, metadataFilePath string) (*datapb.SnapshotMetadata, error) {
 	if metadataFilePath == "" {
 		return nil, merr.WrapErrServiceInternalMsg("metadata file path cannot be empty")

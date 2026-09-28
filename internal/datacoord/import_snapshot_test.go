@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -50,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	streamingutil "github.com/milvus-io/milvus/internal/util/streamingutil/util"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
@@ -187,6 +189,7 @@ func TestPrepareSnapshotImportMetadataOnly(t *testing.T) {
 					SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, Layout: layout,
 				}
 				metadata.SnapshotInfo.S3Location = uri
+				metadata.SnapshotInfo.Description = strings.Repeat("metadata-content", 20000)
 				for i := 0; i < count; i++ {
 					metadata.ManifestList = append(metadata.ManifestList, fmt.Sprintf("root/snapshots/1/manifests/2/%d", i))
 					metadata.SegmentIds = append(metadata.SegmentIds, int64(i+1))
@@ -209,21 +212,19 @@ func TestPrepareSnapshotImportMetadataOnly(t *testing.T) {
 				require.True(t, importutilv2.IsSnapshotPreparation(files))
 				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
 				require.ErrorIs(t, importutilv2.ValidateSnapshotImportTask(files, options, nil), merr.ErrServiceUnimplemented)
-				// The same descriptor survives actual WAL encoding and CDC channel
-				// rewriting without source I/O or interpreting metadata as row data.
-				wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{SnapshotSources: []*internalpb.SnapshotImportSource{files[0].SnapshotSource}}).
-					WithBody(&msgpb.ImportMsg{Files: []*msgpb.ImportFile{{}}}).WithBroadcast([]string{"target"}).MustBuildBroadcast()
+				// Only the reference survives WAL encoding and CDC rewriting.
+				wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+					WithBody(&msgpb.ImportMsg{Files: []*msgpb.ImportFile{{}}, Options: funcutil.KeyValuePair2Map(options)}).WithBroadcast([]string{"target"}).MustBuildBroadcast()
 				msgID := walimplstest.NewTestMessageID(1)
 				immutable := wal.WithBroadcastID(1).SplitIntoMutableMessage()[0].WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
 				replicated := message.MustNewReplicateMessage("source-cluster", immutable.IntoImmutableMessageProto())
 				replicated.OverwriteReplicateVChannel("replica", []string{"replica"})
 				replica := message.MustAsMutableImportMessageV1(replicated)
-				bound, err := bindSnapshotImportSources(replica.MustBody().GetFiles(), replica.Header().GetSnapshotSources())
-				require.NoError(t, err)
+				require.Equal(t, funcutil.KeyValuePair2Map(options), replica.MustBody().GetOptions())
+				bound := importFilesFromMessage(replica.MustBody().GetFiles(), funcutil.Map2KeyValuePair(replica.MustBody().GetOptions()))
 				require.True(t, proto.Equal(files[0], bound[0]))
-				decoded := &datapb.SnapshotMetadata{}
-				require.NoError(t, proto.Unmarshal(bound[0].SnapshotSource.SnapshotMetadata, decoded))
-				require.Len(t, decoded.ManifestList, count)
+				require.Equal(t, uri, replica.MustBody().Options[importutilv2.SnapshotSourceURI])
+				require.Less(t, wal.EstimateSize(), 2048, "WAL size must not scale with metadata size")
 			})
 		}
 	}
@@ -232,7 +233,7 @@ func TestPrepareSnapshotImportMetadataOnly(t *testing.T) {
 func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 	paramtable.Init()
 	type sourceCM struct{ milvusstorage.ChunkManager }
-	for _, mode := range []string{"ordinary", "legacy_backup", "invalid_options", "nil_cm", "files", "empty_paths", "multiple_files", "multiple_paths", "invalid_uri", "bare_path", "instance", "resolve", "read", "metadata", "location", "boundary", "schema", "external_source", "encryption", "target", "mapping", "layout", "encoding"} {
+	for _, mode := range []string{"ordinary", "legacy_backup", "invalid_options", "nil_cm", "files", "empty_paths", "multiple_files", "multiple_paths", "invalid_uri", "bare_path", "instance", "resolve", "read", "metadata", "location", "boundary", "schema", "external_source", "encryption", "target", "mapping", "layout"} {
 		t.Run(mode, func(t *testing.T) {
 			snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
 			metadata := &datapb.SnapshotMetadata{
@@ -290,8 +291,6 @@ func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 				options = append(options, &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"unknown":"target"}`})
 			case "layout":
 				metadata.Layout = datapb.SnapshotLayout(99)
-			case "encoding":
-				metadata.Collection.Schema.Name = "\xff"
 			}
 			instance := mockey.Mock(snapshotstorage.ValidateInstanceSnapshotImportURI).Return(instanceErr).Build()
 			defer instance.UnPatch()
@@ -314,7 +313,7 @@ func TestPrepareSnapshotImportAdmissionErrors(t *testing.T) {
 	}
 }
 
-func TestBroadcastSnapshotImportPreparationLimit(t *testing.T) {
+func TestBroadcastSnapshotImportLargeMetadataReference(t *testing.T) {
 	paramtable.Init()
 	patchSnapshotImportInstance(t)
 	ctx := context.Background()
@@ -338,16 +337,15 @@ func TestBroadcastSnapshotImportPreparationLimit(t *testing.T) {
 			read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).Return(metadata, nil).Build()
 			defer read.UnPatch()
 			files := []*internalpb.ImportFile{{Paths: []string{"s3://source/root/snapshots/1/metadata/2.json"}}}
-			// Construction does not publish the descriptor. The real broadcast
-			// entry point must reject it before acquiring the broadcast handle.
+			// Large metadata is validated, but only its reference enters the WAL.
 			captured, _, err := prepareSnapshotImportFiles(ctx, []int64{10}, cm, snapshotImportTestSchema(), files, snapshotImportTestOptions())
 			require.NoError(t, err)
-			require.Greater(t, proto.Size(captured[0]), importutilv2.SnapshotSourcePlanMaxBytes)
+			require.Less(t, proto.Size(captured[0]), 32)
+			before := start.Times()
 			_, _, err = server.broadcastImport(ctx, "target", 100, []int64{10}, files,
 				snapshotImportTestOptions(), snapshotImportTestSchema(), 1000, []string{"target_v1"}, "")
-			require.ErrorIs(t, err, merr.ErrImportFailed)
-			require.ErrorContains(t, err, "snapshot preparation input exceeds 256 KiB")
-			require.Zero(t, start.Times(), "oversized preparation must fail before broadcast")
+			require.ErrorIs(t, err, merr.ErrIoFailed)
+			require.Equal(t, before+1, start.Times(), "metadata size must not reject a small WAL reference")
 		})
 	}
 }
@@ -359,7 +357,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 	type alloc struct{ allocator.Allocator }
 	instance := mockey.Mock(snapshotstorage.ValidateInstanceSnapshotImportURI).Return(nil).Build()
 	defer instance.UnPatch()
-	for _, mode := range []string{"success", "missing_segment", "save_retry", "fail_save", "alloc_retry", "cancel_allocate", "superseded", "aborted", "canceled", "invalid_metadata", "invalid_shared_scope"} {
+	for _, mode := range []string{"success", "missing_segment", "save_retry", "fail_save", "alloc_retry", "cancel_allocate", "superseded", "aborted", "canceled", "invalid_metadata", "missing_metadata", "missing_uri", "recovery", "invalid_shared_scope"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -402,7 +400,7 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 			read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
 				reads++
 				if reads > 1 {
-					if mode == "missing_segment" || mode == "fail_save" {
+					if (mode == "missing_segment" || mode == "fail_save") && key != "root/snapshots/1/metadata/2.json" {
 						return nil, merr.ErrIoKeyNotFound
 					}
 					if mode == "aborted" {
@@ -422,16 +420,26 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 			files, options, err := prepareSnapshotImportFiles(ctx, nil, &sourceCM{}, snapshotImportTestSchema(),
 				[]*internalpb.ImportFile{{Paths: []string{uri}}}, snapshotImportTestOptions())
 			require.NoError(t, err)
-			// Root metadata is no longer available after create. Preparation must
-			// consume the captured bytes, not reopen this object or resolve latest.
-			delete(objects, "root/snapshots/1/metadata/2.json")
-			if mode == "invalid_metadata" {
-				files[0].SnapshotSource.SnapshotMetadata = []byte{0xff}
+			switch mode {
+			case "missing_metadata":
+				delete(objects, "root/snapshots/1/metadata/2.json")
+			case "invalid_metadata":
+				objects["root/snapshots/1/metadata/2.json"] = []byte{0xff}
+			case "missing_uri":
+				values := funcutil.KeyValuePair2Map(options)
+				delete(values, importutilv2.SnapshotSourceURI)
+				options = funcutil.Map2KeyValuePair(values)
 			}
 			job := &importJob{ImportJob: &datapb.ImportJob{
 				JobID: 10, State: internalpb.ImportJobState_Pending,
 				Files: files, Options: options, Schema: snapshotImportTestSchema(),
 			}}
+			if mode == "recovery" {
+				encoded, err := proto.Marshal(job.ImportJob)
+				require.NoError(t, err)
+				job = &importJob{ImportJob: &datapb.ImportJob{}}
+				require.NoError(t, proto.Unmarshal(encoded, job.ImportJob))
+			}
 			m.jobs[10] = job
 			failSave := mode == "save_retry" || mode == "fail_save"
 			save := mockey.Mock((*catalog).SaveImportJob).To(func(_ *catalog, _ context.Context, _ *datapb.ImportJob) error {
@@ -468,12 +476,15 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 			}
 			got := m.GetJob(ctx, 10)
 			switch mode {
-			case "missing_segment", "invalid_metadata", "aborted", "fail_save", "invalid_shared_scope":
+			case "missing_segment", "invalid_metadata", "missing_metadata", "missing_uri", "aborted", "fail_save", "invalid_shared_scope":
 				require.Equal(t, internalpb.ImportJobState_Failed, got.GetState())
 				require.True(t, importutilv2.IsSnapshotPreparation(got.GetFiles()))
 				if mode == "invalid_shared_scope" {
 					require.Positive(t, ids.Times(), "complete-plan validation must run after expansion and ID allocation")
 					require.Contains(t, got.GetReason(), "invalid task-shared snapshot source descriptor")
+				}
+				if mode == "missing_uri" {
+					require.Equal(t, 1, reads, "malformed recovered references must fail before I/O")
 				}
 			case "canceled", "cancel_allocate":
 				require.Equal(t, internalpb.ImportJobState_Pending, got.GetState())
@@ -488,6 +499,32 @@ func TestSnapshotPreparationPersistence(t *testing.T) {
 				require.NoError(t, importutilv2.ValidateSnapshotImportPlan(got.GetFiles(), got.GetOptions(), got.GetSnapshotL0Sources()))
 			}
 			require.Empty(t, m.tasks.listTasks(), "preparation must not create tasks before durable publication")
+		})
+	}
+}
+
+func TestReadSnapshotImportMetadataStorageErrors(t *testing.T) {
+	for _, external := range []bool{false, true} {
+		t.Run(fmt.Sprintf("external=%t", external), func(t *testing.T) {
+			options := snapshotImportTestOptions()
+			options = append(options, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"})
+			if external {
+				options = append(options, &commonpb.KeyValuePair{Key: importutilv2.ExternalSpec, Value: `{"extfs":{"region":"us-east-1"}}`})
+			}
+			identity := mockey.Mock(snapshotstorage.ValidateInstanceSnapshotImportURI).Return(merr.ErrParameterInvalid).Build()
+			defer identity.UnPatch()
+			resolve := mockey.Mock(importutilv2.ResolveSnapshotImportStorage).Return(nil, nil, merr.ErrIoPermissionDenied).Build()
+			defer resolve.UnPatch()
+			metadata, err := readSnapshotImportMetadata(context.Background(), nil, options)
+			require.Nil(t, metadata)
+			if external {
+				require.ErrorIs(t, err, merr.ErrIoPermissionDenied)
+				require.Zero(t, identity.Times())
+				require.Equal(t, 1, resolve.Times())
+			} else {
+				require.ErrorIs(t, err, merr.ErrParameterInvalid)
+				require.Zero(t, resolve.Times(), "a replica must reject a different instance identity before source I/O")
+			}
 		})
 	}
 }
@@ -509,7 +546,7 @@ func TestSnapshotPreparationFinalPlanLimit(t *testing.T) {
 			defer cancel()
 			snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutSelfContained)
 			snapshot.SnapshotInfo.S3Location = "s3://source/root/snapshots/1/metadata/2.json"
-			// The captured metadata is small, but relocating the bundle repeats
+			// The metadata reference is small, but relocating the bundle repeats
 			// the long root in every expanded file. Zero commit timestamps and no
 			// L0 deliberately bypass attachSnapshotImportSources' partial checks.
 			newRoot := strings.Repeat("r", 700)
@@ -620,12 +657,6 @@ func TestSnapshotPreparationBoundedAndCanceled(t *testing.T) {
 		return nil, ctx.Err()
 	}).Build()
 	defer read.UnPatch()
-	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
-	payload, err := proto.Marshal(&datapb.SnapshotMetadata{
-		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
-		SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, ManifestList: []string{"root/segment"},
-	})
-	require.NoError(t, err)
 	options := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
 		&commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"})
 	m := &importMeta{jobs: make(map[int64]ImportJob), tasks: newImportTasks()}
@@ -635,7 +666,7 @@ func TestSnapshotPreparationBoundedAndCanceled(t *testing.T) {
 		job := &importJob{ImportJob: &datapb.ImportJob{
 			JobID: i, State: internalpb.ImportJobState_Pending, Options: options,
 			Schema: snapshotImportTestSchema(), Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
-				Version: importutilv2.SnapshotPreparationVersion, SnapshotMetadata: payload,
+				Version: importutilv2.SnapshotPreparationVersion,
 			}}},
 		}}
 		m.jobs[i] = job
@@ -684,18 +715,12 @@ func TestSnapshotPreparationDeadline(t *testing.T) {
 		return nil, ctx.Err()
 	}).Build()
 	defer read.UnPatch()
-	snapshot := snapshotImportTestData(datapb.SnapshotLayout_SnapshotLayoutReferenced)
-	payload, err := proto.Marshal(&datapb.SnapshotMetadata{
-		FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
-		SnapshotInfo:  snapshot.SnapshotInfo, Collection: snapshot.Collection, ManifestList: []string{"root/segment"},
-	})
-	require.NoError(t, err)
 	job := &importJob{ImportJob: &datapb.ImportJob{
 		JobID: 1, TimeoutTs: 1, State: internalpb.ImportJobState_Pending,
 		Schema: snapshotImportTestSchema(), Options: append(snapshotImportTestOptions(),
 			&commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
 			&commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"}),
-		Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion, SnapshotMetadata: payload}}},
+		Files: []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion}}},
 	}}
 	checker := &importChecker{ctx: context.Background(), meta: &meta{chunkManager: &sourceCM{}}, closeChan: make(chan struct{})}
 	defer checker.Close()
@@ -1432,7 +1457,7 @@ func TestSnapshotSharedL0PlanAndTasks(t *testing.T) {
 		require.Empty(t, file.SnapshotSource.LegacyL0Deltalogs)
 	}
 	// Pending preparation persists the expanded plan directly to the catalog;
-	// only captured metadata crosses the WAL/CDC boundary.
+	// only the metadata URI and options cross the WAL/CDC boundary.
 	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, sources))
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, Files: files, Options: options, Schema: snapshotImportTestSchema(),
@@ -1592,33 +1617,17 @@ func TestSnapshotPartitionMappingFileGroups(t *testing.T) {
 	}
 }
 
-func TestSnapshotPartitionMappingTasksAndWAL(t *testing.T) {
+func TestSnapshotPartitionMappingTasksAndRecovery(t *testing.T) {
 	paramtable.Init()
 	opts := append(snapshotImportTestOptions(), &commonpb.KeyValuePair{Key: importutilv2.PartitionMapping, Value: `{"A":"X","B":"Y","C":"Z"}`})
-	sources := make([]*internalpb.SnapshotImportSource, 0, 3)
-	msgFiles := make([]*msgpb.ImportFile, 0, 3)
+	files := make([]*internalpb.ImportFile, 0, 3)
 	for i, partition := range []int64{300, 100, 200} {
-		sources = append(sources, &internalpb.SnapshotImportSource{
+		files = append(files, &internalpb.ImportFile{Id: int64(i + 1), SnapshotSource: &internalpb.SnapshotImportSource{
 			Version: 3, TargetPartitionId: partition,
 			ManifestPath: packed.MarshalManifestPath(fmt.Sprintf("root/data/%d", i), 7), SourceCommitTimestamp: 100,
-		})
-		msgFiles = append(msgFiles, &msgpb.ImportFile{Id: int64(i + 1)})
+		}})
 	}
-	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{SnapshotSources: sources}).
-		WithBody(&msgpb.ImportMsg{PartitionIDs: []int64{300, 100, 200}, Files: msgFiles}).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
-	decoded, err := message.AsBroadcastImportMessageV1(message.NewBroadcastMutableMessageBeforeAppend(wal.Payload(), wal.Properties().ToRawMap()))
-	require.NoError(t, err)
-	files, err := bindSnapshotImportSources(decoded.MustBody().GetFiles(), decoded.Header().GetSnapshotSources())
-	require.NoError(t, err)
 	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, opts, nil))
-	msgID := walimplstest.NewTestMessageID(1)
-	immutable := wal.WithBroadcastID(1).SplitIntoMutableMessage()[0].WithTimeTick(100).WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
-	replicated := message.MustNewReplicateMessage("source-cluster", immutable.IntoImmutableMessageProto())
-	replicated.OverwriteReplicateVChannel("replica_v1", []string{"replica_v1"})
-	replica := message.MustAsMutableImportMessageV1(replicated)
-	for i, source := range replica.Header().GetSnapshotSources() {
-		require.True(t, proto.Equal(sources[i], source))
-	}
 	encoded, err := proto.Marshal(&datapb.ImportJob{
 		JobID: 1, CollectionID: 2, Files: files, Options: opts,
 		PartitionIDs: []int64{300, 100, 200}, Vchannels: []string{"target_v1"}, Schema: snapshotImportTestSchema(), DataTs: 100, AutoCommit: false,
@@ -1693,59 +1702,41 @@ func TestSnapshotPartitionMappingTasksAndWAL(t *testing.T) {
 	require.Equal(t, job.PartitionIDs, importTaskPartitionIDs(legacy, job))
 }
 
-func TestSnapshotImportWALBinding(t *testing.T) {
-	sources := []*internalpb.SnapshotImportSource{
-		{Version: 1, ManifestPath: packed.MarshalManifestPath("root/data/1", 7), SourceCommitTimestamp: 300},
-		{Version: 1, ManifestPath: packed.MarshalManifestPath("root/data/2", 8)},
-	}
-	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{SnapshotSources: sources}).
-		WithBody(&msgpb.ImportMsg{PartitionIDs: []int64{20, 10}, Files: []*msgpb.ImportFile{{Id: 1}, {Id: 2}}}).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
+func TestSnapshotImportWALReference(t *testing.T) {
+	options := append(snapshotImportTestOptions(),
+		&commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
+		&commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: "referenced"})
+	header := &message.ImportMessageHeader{CommitByCoordinator: true}
+	wal := message.NewImportMessageBuilderV1().WithHeader(header).
+		WithBody(&msgpb.ImportMsg{PartitionIDs: []int64{20, 10}, Files: []*msgpb.ImportFile{{Id: 1}}, Options: funcutil.KeyValuePair2Map(options)}).
+		WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
 	decoded, err := message.AsBroadcastImportMessageV1(message.NewBroadcastMutableMessageBeforeAppend(wal.Payload(), wal.Properties().ToRawMap()))
 	require.NoError(t, err)
-	files, err := bindSnapshotImportSources(decoded.MustBody().GetFiles(), decoded.Header().GetSnapshotSources())
-	require.NoError(t, err)
-	for i, file := range files {
-		require.NotSame(t, decoded.Header().GetSnapshotSources()[i], file.SnapshotSource, "binding must not share mutable WAL descriptors")
-	}
-	encoded, err := proto.Marshal(&datapb.ImportJob{Files: files, PartitionIDs: decoded.MustBody().GetPartitionIDs()})
+	files := importFilesFromMessage(decoded.MustBody().GetFiles(), funcutil.Map2KeyValuePair(decoded.MustBody().Options))
+	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
+	require.True(t, proto.Equal(header, decoded.Header()), "the header must carry only the coordinator commit flag")
+	encoded, err := proto.Marshal(&datapb.ImportJob{Files: files, Options: options, PartitionIDs: decoded.MustBody().GetPartitionIDs()})
 	require.NoError(t, err)
 	job := &datapb.ImportJob{}
 	require.NoError(t, proto.Unmarshal(encoded, job))
-	require.Equal(t, []int64{20, 10}, job.GetPartitionIDs())
-	for i, file := range job.Files {
-		require.True(t, proto.Equal(sources[i], file.SnapshotSource))
-		require.Empty(t, file.Paths)
-	}
-	// CDC rewrites the transport channel, not the source channel association
-	// captured in the descriptors. Exercise the actual message transformation.
+	require.Equal(t, []int64{20, 10}, job.PartitionIDs)
+	require.NoError(t, importutilv2.ValidateSnapshotImportPlan(job.Files, job.Options, nil))
+	require.True(t, importutilv2.IsSnapshotPreparation(job.Files))
+
+	// CDC rewrites the transport channel, but preserves the URI and
+	// source options used independently by each cluster's Pending worker.
 	msgID := walimplstest.NewTestMessageID(1)
 	immutable := wal.WithBroadcastID(1).SplitIntoMutableMessage()[0].WithTimeTick(100).
 		WithLastConfirmed(msgID).IntoImmutableMessage(msgID)
 	replicated := message.MustNewReplicateMessage("source-cluster", immutable.IntoImmutableMessageProto())
 	replicated.OverwriteReplicateVChannel("replica_v1", []string{"replica_v1"})
-	replicatedImport := message.MustAsMutableImportMessageV1(replicated)
-	for i, source := range replicatedImport.Header().GetSnapshotSources() {
-		require.True(t, proto.Equal(sources[i], source))
-	}
-	require.Len(t, replicatedImport.Header().GetSnapshotSources(), len(sources))
-	job.Vchannels = []string{"target_v1"}
-	groups := RegroupImportFiles(&importJob{ImportJob: job}, []*datapb.ImportFileStats{
-		{ImportFile: job.Files[0], TotalMemorySize: 20}, {ImportFile: job.Files[1], TotalMemorySize: 10},
-	}, 1)
-	require.Len(t, groups, 2)
-	for _, group := range groups {
-		file := group[0].GetImportFile()
-		require.True(t, proto.Equal(sources[file.Id-1], file.GetSnapshotSource()))
-	}
-	for _, headers := range [][]*internalpb.SnapshotImportSource{sources[:1], {sources[0], nil}} {
-		_, err := bindSnapshotImportSources(decoded.MustBody().GetFiles(), headers)
-		require.ErrorIs(t, err, merr.ErrServiceInternal)
-	}
-	// Missing descriptors are valid for ordinary imports. Whether snapshot
-	// options require them is checked by job creation, not by the WAL binder.
-	files, err = bindSnapshotImportSources([]*msgpb.ImportFile{{Id: 1, Paths: []string{"legacy"}}}, nil)
-	require.NoError(t, err)
-	require.Equal(t, []*internalpb.ImportFile{{Id: 1, Paths: []string{"legacy"}}}, files)
+	replica := message.MustAsMutableImportMessageV1(replicated)
+	require.True(t, proto.Equal(header, replica.Header()))
+	require.Equal(t, decoded.MustBody().Options, replica.MustBody().Options)
+	require.True(t, proto.Equal(files[0], importFilesFromMessage(replica.MustBody().Files, funcutil.Map2KeyValuePair(replica.MustBody().Options))[0]))
+
+	ordinary := importFilesFromMessage([]*msgpb.ImportFile{{Id: 1, Paths: []string{"legacy"}}}, nil)
+	require.Equal(t, []*internalpb.ImportFile{{Id: 1, Paths: []string{"legacy"}}}, ordinary)
 }
 
 func TestSnapshotImportMessageAdmission(t *testing.T) {
@@ -1754,9 +1745,9 @@ func TestSnapshotImportMessageAdmission(t *testing.T) {
 			selection := mockey.Mock(streamingutil.MustSelectWALName).Return(backend).Build()
 			defer selection.UnPatch()
 			for _, size := range []int{10, 512 * 1024} {
-				msg := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
-					SnapshotSources: []*internalpb.SnapshotImportSource{{Version: 1, ManifestPath: strings.Repeat("x", size)}},
-				}).WithBody(&msgpb.ImportMsg{}).WithBroadcast([]string{"v1"}).MustBuildBroadcast()
+				msg := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+					WithBody(&msgpb.ImportMsg{Schema: &schemapb.CollectionSchema{Description: strings.Repeat("x", size)}}).
+					WithBroadcast([]string{"v1"}).MustBuildBroadcast()
 				err := validateSnapshotImportMessageSize(msg)
 				if size == 10 {
 					require.NoError(t, err)
@@ -1792,9 +1783,7 @@ func TestSnapshotImportAckCollectionUnavailable(t *testing.T) {
 	defer allocation.UnPatch()
 	server := &Server{handler: &missingHandler{}, allocator: &ackAllocator{}}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
-		SnapshotSources: []*internalpb.SnapshotImportSource{{Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1)}},
-	}).WithBody(&msgpb.ImportMsg{
+	wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).WithBody(&msgpb.ImportMsg{
 		CollectionID: 1, Files: []*msgpb.ImportFile{{}}, Options: funcutil.KeyValuePair2Map(snapshotImportTestOptions()),
 	}).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
 	for _, tc := range []struct {
@@ -1831,6 +1820,12 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 	defer handlerPatch.UnPatch()
 	allocatorPatch := mockey.Mock((*ackAllocator).AllocN).Return(int64(100), int64(110), nil).Build()
 	defer allocatorPatch.UnPatch()
+	read := mockey.Mock((*snapshotstorage.SnapshotReader).ReadMetadata).To(
+		func(*snapshotstorage.SnapshotReader, context.Context, string) (*datapb.SnapshotMetadata, error) {
+			t.Fatal("ACK must not perform source I/O")
+			return nil, nil
+		}).Build()
+	defer read.UnPatch()
 	var saved ImportJob
 	var saveErr error
 	metaPatch := mockey.Mock((*ackMeta).AddJob).To(func(_ *ackMeta, _ context.Context, job ImportJob) error {
@@ -1843,109 +1838,122 @@ func TestSnapshotImportAckFailure(t *testing.T) {
 	defer metaPatch.UnPatch()
 	server := &Server{handler: &ackHandler{}, allocator: &ackAllocator{}, importMeta: &ackMeta{}}
 	server.stateCode.Store(commonpb.StateCode_Healthy)
-	for _, mode := range []string{"valid", "preparation", "shared_without_preparation", "inline_legacy", "inline_manifest", "lost", "unknown", "mixed_paths", "nil_file", "binding_failure", "nil_descriptor", "bad_timeout"} {
+	for _, mode := range []string{"valid", "missing_uri", "missing_layout", "mixed_paths", "missing_file", "multiple_files", "bad_timeout"} {
 		t.Run(mode, func(t *testing.T) {
 			saved = nil
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info", Format: "json", DisableTimestamp: true})
 			body := &msgpb.ImportMsg{
 				JobID: 12, CollectionID: 1, PartitionIDs: []int64{10},
 				Schema: snapshotImportTestSchema(), Files: []*msgpb.ImportFile{{}},
 				Options: funcutil.KeyValuePair2Map(snapshotImportTestOptions()),
 			}
-			source := &internalpb.SnapshotImportSource{
-				Version: 1, ManifestPath: packed.MarshalManifestPath("root/segment", 1), SourceCommitTimestamp: 300,
-			}
+			body.Options[importutilv2.SnapshotSourceURI] = "s3://source/root/snapshots/1/metadata/2.json"
+			body.Options[importutilv2.SnapshotLayout] = "referenced"
+			body.Options[importutilv2.ExternalSpec] = `{"extfs":{"access_key_value":"ack-storage-secret"}}`
+			body.Options[importutilv2.EZK] = "ack-ezk-secret"
 			switch mode {
-			case "preparation":
-				metadata, err := proto.Marshal(&datapb.SnapshotMetadata{
-					FormatVersion: int32(snapshotstorage.SnapshotFormatVersion),
-					SnapshotInfo:  &datapb.SnapshotInfo{Id: 2, CollectionId: 1},
-					Collection:    &datapb.CollectionDescription{Schema: snapshotImportTestSchema()},
-					Layout:        datapb.SnapshotLayout_SnapshotLayoutReferenced,
-				})
-				require.NoError(t, err)
-				source = &internalpb.SnapshotImportSource{
-					Version: importutilv2.SnapshotPreparationVersion, SnapshotMetadata: metadata,
-				}
-				body.Options[importutilv2.SnapshotSourceURI] = "s3://source/root/snapshots/1/metadata/2.json"
-				body.Options[importutilv2.SnapshotLayout] = "referenced"
-			case "inline_legacy":
-				source.LegacyL0Deltalogs = []string{"root/delete"}
-			case "inline_manifest":
-				source.ManifestL0Deltalogs = []string{"root/delete"}
-			case "shared_without_preparation":
-				source.Version = 5
-				source.SourceChannel = "source"
-				source.SourcePartitionId = 10
-			case "lost":
-				source = nil
-			case "unknown":
-				source.Version = 99
+			case "missing_uri":
+				delete(body.Options, importutilv2.SnapshotSourceURI)
+			case "missing_layout":
+				delete(body.Options, importutilv2.SnapshotLayout)
 			case "mixed_paths":
 				body.Files[0].Paths = []string{"legacy"}
-			case "nil_file":
-				body.Files[0], source = nil, nil
-			case "binding_failure":
-				source.Version = 99
+			case "missing_file":
+				body.Files = nil
+			case "multiple_files":
+				body.Files = append(body.Files, &msgpb.ImportFile{})
 			case "bad_timeout":
 				body.Options["timeout"] = "invalid"
 			}
-			var sources []*internalpb.SnapshotImportSource
-			if source != nil {
-				sources = []*internalpb.SnapshotImportSource{source}
-			}
-			if mode == "binding_failure" {
-				sources = append(sources, source)
-			}
-			wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{
-				SnapshotSources: sources,
-			}).WithBody(body).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
+			wal := message.NewImportMessageBuilderV1().WithHeader(&message.ImportMessageHeader{}).
+				WithBody(body).WithBroadcast([]string{"target_v1"}).MustBuildBroadcast()
 			result := message.BroadcastResultImportMessageV1{
 				Message: message.MustAsBroadcastImportMessageV1(wal),
 				Results: map[string]*message.AppendResult{"target_v1": {TimeTick: 100}},
 			}
-			if mode == "nil_descriptor" {
-				// Protobuf encodes a nil repeated message as an empty descriptor;
-				// inject the malformed decoded header at the binding boundary.
-				result.Message.Header().SnapshotSources[0] = nil
-			}
 			callback := &DDLCallbacks{Server: server}
-			if mode == "binding_failure" {
+			if mode == "missing_uri" {
 				saveErr = merr.ErrServiceUnavailable
 				require.ErrorIs(t, callback.importV1AckCallback(context.Background(), result), saveErr,
-					"even a terminal source failure must retry until the job is persisted")
+					"even a terminal source failure must retry until persisted")
 				require.Nil(t, saved)
 				saveErr = nil
 			}
 			require.NoError(t, callback.importV1AckCallback(context.Background(), result),
-				"a malformed durable source must not retry the ACK forever")
+				"a malformed durable reference must not retry the ACK forever")
 			require.NotNil(t, saved)
-			require.Equal(t, int64(12), saved.GetJobID())
-			if mode == "valid" || mode == "preparation" {
+			require.EqualValues(t, 12, saved.GetJobID())
+			require.Zero(t, read.Times())
+			if mode == "valid" {
 				require.Equal(t, internalpb.ImportJobState_Pending, saved.GetState())
-				require.Empty(t, saved.GetSnapshotL0Sources(), "L0 inventories are produced only by Pending preparation")
-				if mode == "preparation" {
-					require.True(t, importutilv2.IsSnapshotPreparation(saved.GetFiles()))
-					require.True(t, proto.Equal(source, saved.GetFiles()[0].GetSnapshotSource()))
-				} else {
-					require.EqualValues(t, 300, saved.GetFiles()[0].GetSnapshotSource().GetSourceCommitTimestamp())
+				require.True(t, importutilv2.IsSnapshotPreparation(saved.GetFiles()))
+				require.Empty(t, saved.GetSnapshotL0Sources())
+				require.Equal(t, body.Options, funcutil.KeyValuePair2Map(saved.GetOptions()))
+				ackLogs := 0
+				for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+					if !strings.Contains(line, "creating import job from ack callback") && !strings.Contains(line, "add import job done") {
+						continue
+					}
+					ackLogs++
+					require.Less(t, len(line), 4096)
+					var entry map[string]json.RawMessage
+					require.NoError(t, json.Unmarshal([]byte(line), &entry))
+					require.NotContains(t, entry, "files")
+					require.JSONEq(t, "1", string(entry["fileNum"]))
+					require.JSONEq(t, "12", string(entry["jobID"]))
+					require.JSONEq(t, "1", string(entry["collectionID"]))
+					require.JSONEq(t, "[9]", string(entry["snapshotSourceVersions"]))
 				}
+				require.Equal(t, 2, ackLogs)
 			} else {
 				require.Equal(t, internalpb.ImportJobState_Failed, saved.GetState())
 				require.NotEmpty(t, saved.GetReason())
-				if strings.HasPrefix(mode, "inline_") {
-					require.Contains(t, saved.GetReason(), "inline L0 are no longer supported")
-				}
-				if mode == "shared_without_preparation" {
-					require.Contains(t, saved.GetReason(), "lost its shared L0 inventory")
-				}
-				if mode == "binding_failure" {
-					require.Contains(t, saved.GetReason(), "descriptor/file cardinality mismatch", "binding errors take precedence over plan validation")
-				}
-				if mode == "nil_descriptor" {
-					require.Contains(t, saved.GetReason(), "nil descriptor")
-				}
 				require.NotEqual(t, uint64(math.MaxUint64), saved.GetCleanupTs())
 			}
+			require.NotContains(t, logs.String(), "ack-storage-secret")
+			require.NotContains(t, logs.String(), "ack-ezk-secret")
+			require.Equal(t, body.Options, result.Message.MustBody().GetOptions(), "logging must not mutate options")
+		})
+	}
+}
+
+func TestImportFilesLogFields(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		files    []*internalpb.ImportFile
+		versions string
+	}{
+		{name: "empty"},
+		{name: "ordinary", files: []*internalpb.ImportFile{nil, {Id: 1, Paths: []string{"ordinary.json"}}}},
+		{
+			name: "mixed_invalid_sources",
+			files: []*internalpb.ImportFile{
+				nil, {Paths: []string{"ordinary.json"}},
+				{SnapshotSource: &internalpb.SnapshotImportSource{Version: 9, ManifestPath: "secret"}},
+				{SnapshotSource: &internalpb.SnapshotImportSource{Version: 99, ManifestPath: "secret"}},
+			},
+			versions: "[9,99]",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := proto.Clone(&internalpb.ImportRequestInternal{Files: tc.files})
+			logs := mlog.CaptureGlobalLogs(t, &mlog.Config{Level: "info", Format: "json", DisableTimestamp: true})
+			mlog.Info(context.Background(), "file summary", importFilesLogFields(tc.files)...)
+			var entry map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal([]byte(logs.String()), &entry))
+			require.JSONEq(t, fmt.Sprint(len(tc.files)), string(entry["fileNum"]))
+			if tc.versions == "" {
+				require.Contains(t, entry, "files", "ordinary imports retain file diagnostics")
+				require.NotContains(t, entry, "snapshotSourceVersions")
+				if len(tc.files) != 0 {
+					require.Contains(t, string(entry["files"]), "ordinary.json")
+				}
+			} else {
+				require.NotContains(t, entry, "files")
+				require.JSONEq(t, tc.versions, string(entry["snapshotSourceVersions"]))
+				require.NotContains(t, logs.String(), "secret")
+			}
+			require.True(t, proto.Equal(before, &internalpb.ImportRequestInternal{Files: tc.files}))
 		})
 	}
 }
@@ -2069,7 +2077,7 @@ func TestPrepareSnapshotImportOptions_Encryption(t *testing.T) {
 	}
 }
 
-func TestExpandSnapshotImportCapturedMetadata(t *testing.T) {
+func TestExpandSnapshotImportParsedMetadata(t *testing.T) {
 	paramtable.Init()
 	patchSnapshotImportInstance(t)
 	type sourceCM struct{ milvusstorage.ChunkManager }
@@ -2100,8 +2108,8 @@ func TestExpandSnapshotImportCapturedMetadata(t *testing.T) {
 				})
 			}
 			original := proto.Clone(metadata)
-			// Only segment descriptors remain accessible. The real reader must
-			// use the captured metadata, including on a preparation retry.
+			// Expansion receives parsed metadata from Pending. It must
+			// not reopen the root object during expansion.
 			var reads []string
 			read := mockey.Mock((*sourceCM).Read).To(func(_ *sourceCM, _ context.Context, key string) ([]byte, error) {
 				reads = append(reads, key)
@@ -2114,7 +2122,7 @@ func TestExpandSnapshotImportCapturedMetadata(t *testing.T) {
 			defer read.UnPatch()
 			_, _, _, err := expandSnapshotImportFiles(ctx, nil, &sourceCM{}, snapshotImportTestSchema(), uri, snapshotImportTestOptions(), nil)
 			require.ErrorIs(t, err, merr.ErrDataIntegrity)
-			require.Empty(t, reads, "missing captured metadata must not fall back to storage")
+			require.Empty(t, reads, "missing parsed metadata must not fall back to storage")
 
 			for attempt := 0; attempt < 2; attempt++ {
 				result, _, _, err := expandSnapshotImportFiles(ctx, nil, &sourceCM{}, snapshotImportTestSchema(), uri, snapshotImportTestOptions(), metadata)
@@ -2123,7 +2131,7 @@ func TestExpandSnapshotImportCapturedMetadata(t *testing.T) {
 				require.Equal(t, []string{snapshot.Segments[1].ManifestPath}, result[0].Paths)
 				require.Equal(t, []string{snapshot.Segments[0].ManifestPath}, result[1].Paths)
 				require.Equal(t, metadata.ManifestList, reads)
-				require.True(t, proto.Equal(original, metadata), "expansion must not mutate captured metadata")
+				require.True(t, proto.Equal(original, metadata), "expansion must not mutate parsed metadata")
 				reads = nil
 			}
 
@@ -2773,13 +2781,7 @@ func TestSnapshotImportManifestDeleteTimestamps(t *testing.T) {
 						require.EqualValues(t, 2, files[0].GetSnapshotSource().GetVersion())
 						options = append(options, &commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: uri})
 					}
-					var sources []*internalpb.SnapshotImportSource
-					if source := files[0].GetSnapshotSource(); source != nil {
-						sources = []*internalpb.SnapshotImportSource{source}
-					}
-					bound, err := bindSnapshotImportSources([]*msgpb.ImportFile{{Paths: files[0].GetPaths()}}, sources)
-					require.NoError(t, err)
-					encoded, err := proto.Marshal(bound[0])
+					encoded, err := proto.Marshal(files[0])
 					require.NoError(t, err)
 					for phase := 0; phase < 2; phase++ {
 						file := &internalpb.ImportFile{}
