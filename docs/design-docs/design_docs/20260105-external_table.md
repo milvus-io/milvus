@@ -4,7 +4,10 @@
 
 ### 1.1 Background
 
-External Table (External Collection) is a special type of data collection in Milvus that allows users to access data from external storage systems (such as S3, Iceberg, Delta Lake, etc.) without copying the data into Milvus local storage. This enables Milvus to serve as a query layer over existing data lakes while maintaining compatibility with standard Milvus query interfaces.
+External Table (External Collection) allows Milvus to query data in external
+storage through source-file manifests without first importing the dataset into
+Milvus-managed data files. QueryNode reads and caches source data as needed while
+exposing the standard Milvus query interfaces.
 
 ### 1.2 Goals
 
@@ -12,7 +15,7 @@ External Table (External Collection) is a special type of data collection in Mil
    - Create external collections through standard `CreateCollection` API with `external_source` parameter
    - Map external data files (Parquet, etc.) to Milvus storage format via manifest files
    - Support field mapping between external columns and Milvus schema fields
-   - Auto-inject virtual primary key for external collections
+   - Inject a virtual primary key when no user primary key is supplied
 
 2. **Support Vector Index Building on External Tables**
    - Enable index creation on vector fields of external collections
@@ -21,9 +24,10 @@ External Table (External Collection) is a special type of data collection in Mil
 
 3. **Support External Table Loading**
    - Load external collection segments into QueryNode memory
-   - Use `ExternalFieldChunkedColumn` for lazy data loading from external sources
-   - Generate virtual PKs using `(segmentID << 32) | offset` encoding
-   - Use `ExternalSegmentCandidate` for PK-based segment matching (replacing bloom filters)
+   - Load manifest column groups through `ManifestGroupTranslator`
+   - Generate virtual PKs from the lower 32 bits of segment ID and row offset
+   - Use `ExternalSegmentCandidate` for virtual PK routing and bloom filters for
+     real-PK `milvus-table` segments
 
 4. **Support External Table Querying**
    - Provide unified query interface consistent with regular collections
@@ -34,8 +38,10 @@ External Table (External Collection) is a special type of data collection in Mil
 5. **Support External Table Data Updates**
    - Support manual trigger to refresh external table data (automatic detection not supported yet)
    - Synchronize external data changes with segment-level granularity
-   - Implement incremental update strategy: keep unchanged segments, drop obsolete segments, add new segments
-   - Balance orphan fragments into new segments using bin-packing algorithm
+   - Keep unchanged segments, patch missing columns, drop obsolete segments and
+     add new segments
+   - Balance orphan file fragments into new segments; preserve source-segment
+     boundaries for `milvus-table`
 
 ### 1.3 Non-Goals
 
@@ -61,11 +67,12 @@ The following features are explicitly **NOT supported** for external tables in t
 
 4. **Dynamic Schema Features**
    - No support for dynamic fields (`EnableDynamicField`)
-   - Schema must be fixed and fully defined at creation time
+   - Fields must be explicitly declared; additive fields can be added later
 
 5. **Auto ID**
    - No support for auto-generated IDs (`AutoID`)
-   - Virtual PK is generated using `(segmentID << 32) | offset` encoding instead
+   - Collections without a user primary key use a virtual PK derived from segment
+     ID and row offset
 
 6. **Automatic Data Source Synchronization**
    - No support for automatic/periodic detection of external data source changes
@@ -85,81 +92,45 @@ The following features are explicitly **NOT supported** for external tables in t
 ### 2.1 System Architecture Diagram
 
 ```
-+-------------------------------------------------------------------------+
-|                              Client                                      |
-|  - CreateCollection(schema with external_source)                         |
-|  - AlterCollection (modify data source / trigger manual refresh)         |
-+-----------------------------------+-------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-|                             Proxy                                        |
-|  - ValidateExternalCollectionSchema()                                    |
-|  - Block write operations for external collections                       |
-+-----------------------------------+-------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-|                           RootCoord                                      |
-|  - ValidateExternalCollectionSchema()                                    |
-|  - Store ExternalSource/ExternalSpec in collection model                 |
-+-----------------------------------+-------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-|                           DataCoord                                      |
-|  +---------------------------------------------------------------+      |
-|  |              Compaction (DISABLED for external)                |      |
-|  |  - Single/L0/Clustering compaction skipped                     |      |
-|  +---------------------------------------------------------------+      |
-|  +---------------------------------------------------------------+      |
-|  |              Stats Inspector (LIMITED for external)            |      |
-|  |  - TextIndexJob enabled; JSON enabled for StorageV3 manifests   |      |
-|  |  - BM25 inspector jobs skipped                                 |      |
-|  +---------------------------------------------------------------+      |
-|  +---------------------------------------------------------------+      |
-|  |              UpdateExternalCollectionTask                      |      |
-|  |  - Handle manual refresh requests                              |      |
-|  |  - Coordinate with DataNode for data sync                      |      |
-|  +---------------------------------------------------------------+      |
-+-----------------------------------+-------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-|                           DataNode                                       |
-|  +---------------------------------------------------------------+      |
-|  |              ExternalCollectionManager                         |      |
-|  |  - Task lifecycle management                                   |      |
-|  |  - Worker pool for async execution                             |      |
-|  +---------------------------------------------------------------+      |
-|  +---------------------------------------------------------------+      |
-|  |              UpdateExternalTask                                |      |
-|  |  - Fetch fragments from external source                        |      |
-|  |  - Compare with current segments                               |      |
-|  |  - Organize orphan fragments into new segments                 |      |
-|  |  - Create manifest files for segments                          |      |
-|  +---------------------------------------------------------------+      |
-+-----------------------------------+-------------------------------------+
-                                    |
-                                    v
-+-------------------------------------------------------------------------+
-|                           QueryNode                                      |
-|  - Virtual PK generation: (segmentID << 32) | offset                    |
-|  - ExternalFieldChunkedColumn: Lazy load via milvus-storage             |
-|  - ExternalSegmentCandidate: PK-based segment matching                  |
-|  - Skip delta logs and bloom filters for external collections           |
-+-------------------------------------------------------------------------+
+                                +--------------------------+
+                                |          Client          |
+                                +--------------------------+
+                                              |
+                                              v
+                                +--------------------------+
+                                |          Proxy           |
+                                |    Validate and route    |
+                                +--------------------------+
+                                              |
+              +-------------------------------+-------------------------------+
+              |                               |                               |
+      CreateCollection           RefreshExternalCollection             Search / Query
+              v                               v                               v
++--------------------------+    +--------------------------+    +--------------------------+
+|        RootCoord         |    |        DataCoord         |    |        QueryNode         |
+| Validate resolved schema |    |  Submit refresh via WAL  |    |  Execute Search / Query  |
+|      Persist schema      |    | Explore / schedule tasks |    |    Read external data    |
+|                          |    |    Apply task results    |    |                          |
++--------------------------+    +-------+-----------+------+    +--------------------------+
+                                        |           ^
+                             Dispatch   |           |   Results
+                                        v           |
+                                +-------+-----------+------+
+                                |         DataNode         |
+                                |  Execute refresh tasks   |
+                                |    Prepare manifests     |
+                                +--------------------------+
 ```
 
 ### 2.2 Component Responsibilities
 
 | Component | Responsibility |
 |-----------|---------------|
-| `Proxy` | Validate external collection schema, skip PK validation, block write operations, handle refresh requests |
-| `RootCoord` | Validate schema, store external source configuration |
-| `DataCoord` | Disable compaction, allow external text-index stats, manage external collection update tasks |
-| `DataNode` | Execute external source scanning, organize segments, create manifests |
-| `QueryNode` | Load external data with virtual PK support, execute queries |
+| `Proxy` | Normalize and validate schema, inject a virtual PK when needed, block write operations, handle refresh requests |
+| `RootCoord` | Validate resolved schema, store external source configuration |
+| `DataCoord` | Disable compaction, allow text/eligible JSON stats, explore sources, schedule refresh tasks and apply results |
+| `DataNode` | Read assigned source fragments, organize or patch segments, create manifests |
+| `QueryNode` | Load external data with virtual or real PK support, apply deletes and execute queries |
 
 ---
 
@@ -171,7 +142,7 @@ External tables reuse existing Milvus APIs to minimize API surface and maintain 
 
 | Operation | API | Description |
 |-----------|-----|-------------|
-| Create external table | `CreateCollection` | Set `external_source` in schema to create external table |
+| Create external table | `CreateCollection` | Declare source-backed fields and optionally supply the source/spec pair |
 | Drop external table | `DropCollection` | Standard drop collection API |
 | Load external table | `LoadCollection` | Standard load collection API |
 | Query external table | `Search` / `Query` | Standard search and query APIs |
@@ -182,25 +153,25 @@ The following new APIs are introduced specifically for external table data refre
 
 | Operation | API | Description |
 |-----------|-----|-------------|
-| Trigger refresh | `RefreshExternalTable` | Manually trigger data refresh from external source |
-| Get refresh progress | `GetRefreshExternalTableProgress` | Get progress of a specific refresh job |
-| List refresh jobs | `ListRefreshExternalTableJobs` | List all refresh jobs for a collection |
+| Trigger refresh | `RefreshExternalCollection` | Manually trigger data refresh from external source |
+| Get refresh progress | `GetRefreshExternalCollectionProgress` | Get progress of a specific refresh job |
+| List refresh jobs | `ListRefreshExternalCollectionJobs` | List all refresh jobs for a collection |
 
-### 3.1.2 RefreshExternalTable API
+### 3.1.2 RefreshExternalCollection API
 
 Manually triggers a data refresh job for an external collection.
 
 **Proto Definition** (`milvus.proto`):
 ```protobuf
 // Job state enumeration for external table refresh
-enum RefreshExternalTableState {
-    RefreshStatePending = 0;      // Job is queued, waiting to execute
-    RefreshStateInProgress = 1;   // Job is currently executing
-    RefreshStateCompleted = 2;    // Job completed successfully
-    RefreshStateFailed = 3;       // Job failed with error
+enum RefreshExternalCollectionState {
+    RefreshPending = 0;      // Job is queued, waiting to execute
+    RefreshInProgress = 1;   // Job is currently executing
+    RefreshCompleted = 2;    // Job completed successfully
+    RefreshFailed = 3;       // Job failed with error
 }
 
-message RefreshExternalTableRequest {
+message RefreshExternalCollectionRequest {
     common.MsgBase base = 1;
     string db_name = 2;              // Database name
     string collection_name = 3;      // Collection name (required)
@@ -208,59 +179,63 @@ message RefreshExternalTableRequest {
     string external_spec = 5;        // Optional: new external spec configuration
 }
 
-message RefreshExternalTableResponse {
+message RefreshExternalCollectionResponse {
     common.Status status = 1;
-    string job_id = 2;               // Unique job identifier for tracking
+    int64 job_id = 2;               // Unique job identifier for tracking
 }
 ```
 
 **Behavior**:
-- If `external_source` or `external_spec` is provided, updates the collection's external configuration before triggering refresh
-- If not provided, refreshes using the current external source configuration
+- `external_source` and `external_spec` must be provided together or both omitted.
+- When omitted, the job uses the persisted external source configuration.
+- Overrides apply to the refresh job. After successful refresh, DataCoord attempts
+  to persist the new pair in the collection schema; a schema-update failure is
+  logged and can leave the persisted configuration stale.
+- Only one active refresh job is allowed per collection.
 - Returns a `job_id` that can be used to track progress
-- Job runs asynchronously; use `GetRefreshExternalTableProgress` to monitor
+- Job runs asynchronously; use `GetRefreshExternalCollectionProgress` to monitor
 
 **Example Usage**:
 ```python
 # Refresh with current data source
-response = client.refresh_external_table(
+job_id = client.refresh_external_collection(
     collection_name="my_external_collection"
 )
-job_id = response.job_id
 
 # Refresh with updated data source path
-response = client.refresh_external_table(
+job_id = client.refresh_external_collection(
     collection_name="my_external_collection",
     external_source="s3://my-bucket/new-path/",
     external_spec='{"format": "parquet"}'
 )
 ```
 
-### 3.1.3 GetRefreshExternalTableProgress API
+### 3.1.3 GetRefreshExternalCollectionProgress API
 
 Gets the current progress and status of a refresh job.
 
 **Proto Definition** (`milvus.proto`):
 ```protobuf
-message GetRefreshExternalTableProgressRequest {
+message GetRefreshExternalCollectionProgressRequest {
     common.MsgBase base = 1;
-    string job_id = 2;               // Job ID from RefreshExternalTable response
+    int64 job_id = 2;               // Job ID from RefreshExternalCollection response
 }
 
-message RefreshExternalTableJobInfo {
-    string job_id = 1;                   // Job identifier
+message RefreshExternalCollectionJobInfo {
+    int64 job_id = 1;                   // Job identifier
     string collection_name = 2;          // Collection name
-    RefreshExternalTableState state = 3; // Current job state
+    RefreshExternalCollectionState state = 3; // Current job state
     int64 progress = 4;                  // Progress percentage (0-100)
     string reason = 5;                   // Error message if failed
     string external_source = 6;          // External source used for this job
-    int64 start_time = 7;                // Job start timestamp
-    int64 end_time = 8;                  // Job end timestamp (0 if not completed)
+    int64 start_time = 7;                // Job start timestamp (Unix ms)
+    int64 end_time = 8;                  // Job end timestamp (Unix ms; 0 if not completed)
+    string external_spec = 9;            // External spec, with credentials redacted
 }
 
-message GetRefreshExternalTableProgressResponse {
+message GetRefreshExternalCollectionProgressResponse {
     common.Status status = 1;
-    RefreshExternalTableJobInfo job_info = 2;
+    RefreshExternalCollectionJobInfo job_info = 2;
 }
 ```
 
@@ -271,27 +246,26 @@ message GetRefreshExternalTableProgressResponse {
 **Example Usage**:
 ```python
 # Get progress of a specific job
-progress = client.get_refresh_external_table_progress(job_id="job_123456")
+progress = client.get_refresh_external_collection_progress(job_id=job_id)
 print(f"State: {progress.state}")
 print(f"Progress: {progress.progress}%")
 ```
 
-### 3.1.4 ListRefreshExternalTableJobs API
+### 3.1.4 ListRefreshExternalCollectionJobs API
 
 Lists all refresh jobs for a collection.
 
 **Proto Definition** (`milvus.proto`):
 ```protobuf
-message ListRefreshExternalTableJobsRequest {
+message ListRefreshExternalCollectionJobsRequest {
     common.MsgBase base = 1;
     string db_name = 2;              // Database name
     string collection_name = 3;      // Collection name (optional, if empty lists all)
-    int64 limit = 4;                 // Max number of jobs to return (default: 100)
 }
 
-message ListRefreshExternalTableJobsResponse {
+message ListRefreshExternalCollectionJobsResponse {
     common.Status status = 1;
-    repeated RefreshExternalTableJobInfo jobs = 2;
+    repeated RefreshExternalCollectionJobInfo jobs = 2;
 }
 ```
 
@@ -303,19 +277,21 @@ message ListRefreshExternalTableJobsResponse {
 **Example Usage**:
 ```python
 # List all jobs for a collection
-jobs = client.list_refresh_external_table_jobs(
+jobs = client.list_refresh_external_collection_jobs(
     collection_name="my_external_collection"
 )
 for job in jobs:
     print(f"Job {job.job_id}: {job.state} ({job.progress}%)")
 
 # List all external table refresh jobs
-all_jobs = client.list_refresh_external_table_jobs()
+all_jobs = client.list_refresh_external_collection_jobs()
 ```
 
 ### 3.2 Create External Table
 
-External collections are created through the standard `CreateCollection` API by setting `external_source` in the schema:
+External collections are created through `CreateCollection` with source-backed
+field mappings. The source/spec pair may be supplied at creation or deferred to a
+later refresh:
 
 ```go
 schema := &schemapb.CollectionSchema{
@@ -341,107 +317,81 @@ schema := &schemapb.CollectionSchema{
 
 ### 3.3 Schema Restrictions
 
-External collections have the following restrictions enforced by `ValidateExternalCollectionSchema()`:
+External collection creation uses `NormalizeAndValidateExternalCollectionSchema()`;
+resolved schemas are checked by `ValidateExternalCollectionResolvedSchema()`:
 
 | Feature | Status | Reason |
 |---------|--------|--------|
-| Primary Key | Not Allowed | Virtual PK generated automatically |
-| Dynamic Field | Not Allowed | Schema must be fixed |
+| Primary Key | Conditional | `milvus-table` may map the source primary key; otherwise a virtual PK is injected |
+| Dynamic Field | Not Allowed | Fields must be explicitly declared |
 | Partition Key | Not Allowed | External data partitioning not supported |
 | Clustering Key | Not Allowed | No clustering compaction |
-| Auto ID | Not Allowed | IDs come from external source |
-| Text Match | Not Allowed | Requires internal indexing |
-| Struct Array Fields | Not Allowed | Complex types not supported |
+| Auto ID | Not Allowed | IDs use source primary keys or generated virtual PKs |
+| Text Match | Supported | Text-index stats tasks build persisted indexes |
+| Struct Array Fields | Not Allowed | Milvus struct-array fields are unsupported |
 | Namespace Field | Not Allowed | External isolation not supported |
+| Add Field | Supported | Requires `external_field` mapping and a subsequent refresh |
+| Multiple Shards | Not Allowed | External collections use one shard |
+
+**Supported Field Types** (`isExternalFieldTypeSupported`):
+
+The following types are accepted for source-backed fields. Existing field
+constraints, such as vector dimensions and array element types, still apply.
+External types below are Arrow types returned by the source reader; the source
+file format must also support the selected representation.
+
+| Category | Data Types | Supported External Types (Arrow) | Notes |
+|----------|------------|----------------------------------|-------|
+| Boolean | `Bool` | `bool` | |
+| Integer | `Int8`, `Int16`, `Int32`, `Int64` | `int8`, `int16`, `int32`, `int64`, respectively | Exact type match; no automatic integer-width conversion |
+| Floating Point | `Float`, `Double` | `float32`, `float64`, respectively | Exact type match |
+| String | `VarChar`, `Text` | `string`, `binary` | String content |
+| JSON | `JSON` | `string`, `binary` | Serialized JSON, not Arrow Map/Struct |
+| Array | `Array` | `list<T>`, `binary` | `T` must match the declared scalar element type; Binary contains a serialized Milvus `ScalarField` |
+| Timestamp | `Timestamptz` | `timestamp`, `int64` | Timestamps are converted to microseconds; `int64` already represents microseconds |
+| Geometry | `Geometry` | `string`, `binary` | WKT strings or WKB bytes |
+| Dense Vector | `FloatVector` | `list<float32>`, `fixed_size_list<float32>`; raw-byte forms below | `dim` float32 values |
+| Dense Vector | `Float16Vector` | `list<float16>`, `fixed_size_list<float16>`; raw-byte forms below | `dim` float16 values |
+| Dense Vector | `BFloat16Vector` | `list<uint8>`, `fixed_size_list<uint8>`, `binary`, `fixed_size_binary` | Encoded bfloat16 bytes: `2 * dim` bytes per vector |
+| Dense Vector | `Int8Vector` | `list<int8>`, `fixed_size_list<int8>`; raw-byte forms below | `dim` int8 values |
+| Binary Vector | `BinaryVector` | `list<uint8>`, `fixed_size_list<uint8>`, `binary`, `fixed_size_binary` | Packed bits: `dim / 8` bytes per vector |
+| Sparse Vector | `SparseFloatVector` | `map<I, V>`, `struct<indices: list<I>, values: list<V>>`, `binary` | `I`: int32/uint32/int64/uint64; `V`: float32/float64. Binary uses native `(uint32, float32)` pairs; no `dim` required |
+| Vector Array | `ArrayOfVector` | `list<list<T>>`, `list<fixed_size_list<T>>`, `list<fixed_size_binary>` | Inner vectors follow the declared vector element type and dimension |
+
+Fixed-width vectors also accept raw bytes as `list<uint8>`,
+`fixed_size_list<uint8>`, `fixed_size_binary`, or `binary` for nullable fields.
+The byte count must match the vector type and dimension; uint8 values are
+interpreted as encoded bytes, not converted to numeric vector elements.
+
+The reader normalizes `large_string`/`string_view` and
+`large_binary`/`binary_view` to the corresponding types above. For Array and
+vector-list inputs, `large_list`/`list_view` are also accepted. Sparse Struct
+children accept `list` or `large_list`.
 
 **Implementation**: `pkg/util/typeutil/schema.go`
 
-```go
-// IsExternalCollection returns true when schema describes an external collection.
-// External collections are identified by having fields with ExternalField set,
-// since ExternalSource can be null for empty external collections.
-func IsExternalCollection(schema *schemapb.CollectionSchema) bool {
-    if schema == nil {
-        return false
-    }
-    for _, field := range schema.GetFields() {
-        if field.GetExternalField() != "" {
-            return true
-        }
-    }
-    return false
-}
+- External collections are identified by source-backed fields with `external_field`.
+  `external_source` and `external_spec` must both be set or both be empty; the
+  empty pair allows the source to be supplied on a later refresh.
+- Each source-backed field needs a unique `external_field` mapping and a supported
+  data type. Mappings must not collide with generated function output columns.
+- Function outputs must not specify `external_field`; they are excluded from
+  source-field validation and normalization.
+- Source-backed fields are normalized to nullable for ordinary external formats.
+  `milvus-table` preserves source nullability and checks alignment with the snapshot
+  schema.
 
-// ValidateExternalCollectionSchema ensures unsupported features are disabled for external collections.
-func ValidateExternalCollectionSchema(schema *schemapb.CollectionSchema) error {
-    if !IsExternalCollection(schema) {
-        return nil
-    }
+### 3.4 Primary Key Handling
 
-    if schema.GetEnableDynamicField() {
-        return fmt.Errorf("external collection %s does not support dynamic field", schema.GetName())
-    }
+**Implementation**: `internal/proxy/task.go`, `pkg/util/typeutil/schema.go`
 
-    if len(schema.GetStructArrayFields()) > 0 {
-        return fmt.Errorf("external collection %s does not support struct fields", schema.GetName())
-    }
+For collections without a user primary key, `CreateCollection` injects the
+`__virtual_pk__` field before normal primary-key validation. Its values are
+computed from the target segment ID and row offset.
 
-    for _, field := range schema.GetFields() {
-        // Skip system fields (RowID and Timestamp)
-        if field.GetName() == common.RowIDFieldName || field.GetName() == common.TimeStampFieldName {
-            continue
-        }
-
-        if field.GetIsPrimaryKey() {
-            return fmt.Errorf("external collection %s does not support primary key field %s", schema.GetName(), field.GetName())
-        }
-        if field.GetIsPartitionKey() {
-            return fmt.Errorf("external collection %s does not support partition key field %s", schema.GetName(), field.GetName())
-        }
-        if field.GetIsClusteringKey() {
-            return fmt.Errorf("external collection %s does not support clustering key field %s", schema.GetName(), field.GetName())
-        }
-        if field.GetAutoID() {
-            return fmt.Errorf("external collection %s does not support auto id on field %s", schema.GetName(), field.GetName())
-        }
-
-        helper := CreateFieldSchemaHelper(field)
-        if helper.EnableMatch() {
-            return fmt.Errorf("external collection %s does not support text match on field %s", schema.GetName(), field.GetName())
-        }
-
-        // Validate external_field mapping is set for all user fields
-        if field.GetExternalField() == "" {
-            return fmt.Errorf("field '%s' in external collection %s must have external_field mapping", field.GetName(), schema.GetName())
-        }
-    }
-
-    return nil
-}
-```
-
-### 3.4 No Primary Key
-**Primary Key Validation**: `internal/proxy/task.go`
-
-For external collections, primary key validation is skipped during `CreateCollection`:
-
-```go
-func (t *createCollectionTask) PreExecute(ctx context.Context) error {
-    // ...
-    isExternalCollection := typeutil.IsExternalCollection(t.schema)
-    if err := typeutil.ValidateExternalCollectionSchema(t.schema); err != nil {
-        return err
-    }
-
-    // validate primary key definition when needed
-    if !isExternalCollection {
-        if err := validatePrimaryKey(t.schema); err != nil {
-            return err
-        }
-    }
-    // ...
-}
-```
+`milvus-table` also supports a user primary key mapped to the source snapshot's
+primary key. This field is loaded from the source instead of synthesized; see
+[Milvus Snapshot as External Table Source](20260526-milvus-table-external-source.md).
 
 ### 3.5 External Field Mapping
 
@@ -514,19 +464,27 @@ type Collection struct {
 
 Supported formats:
 - `parquet` - Apache Parquet files
-- More formats to be added (e.g., `iceberg`, `delta`)
+- `lance-table` - Lance dataset directory
+- `vortex` - Vortex files
+- `iceberg-table` - Apache Iceberg tables
+- `milvus-table` - Milvus snapshot metadata and source segment manifests
+
+`external_spec` also supports `columns`, `extfs` storage overrides, and
+`snapshot_id` for Iceberg snapshot selection. Parsing and validation are defined
+in `pkg/util/externalspec/specutil/spec.go`.
 
 ### 4.4 Fragment Structure
 
-**File**: `internal/storagev2/exttable/manifest_ffi.go`
+**File**: `internal/storagev2/packed/manifest_ffi.go`
 
 ```go
 type Fragment struct {
-    FragmentID int64   // Unique fragment identifier
-    FilePath   string  // File path in external storage
-    StartRow   int64   // Start row index within the file (inclusive)
-    EndRow     int64   // End row index within the file (exclusive)
-    RowCount   int64   // Number of rows (EndRow - StartRow)
+    FragmentID int64                 // Unique fragment identifier
+    FilePath   string                // File path in external storage
+    StartRow   int64                 // Start row index within the file (inclusive)
+    EndRow     int64                 // End row index within the file (exclusive)
+    RowCount   int64                 // Number of rows (EndRow - StartRow)
+    Deltalogs  []*datapb.FieldBinlog // Source delete logs for milvus-table
 }
 ```
 
@@ -534,24 +492,15 @@ type Fragment struct {
 
 **File**: `internal/datanode/external/task_update.go`
 
-```go
-type SegmentRowMapping struct {
-    SegmentID int64
-    TotalRows int64
-    Ranges    []FragmentRowRange
-    Fragments []exttable.Fragment
-}
-
-type FragmentRowRange struct {
-    FragmentID int64
-    StartRow   int64  // inclusive
-    EndRow     int64  // exclusive
-}
-```
+`buildCurrentSegmentFragments` reads each current segment's manifest into a
+segment-to-fragments map. Fragment identity uses the source file path and row
+range. `organizeSegments` compares these fragments with the refreshed source to
+identify unchanged segments, segments requiring a manifest patch, and orphan
+fragments requiring new segments.
 
 ---
 
-## 5. Disabled Features for External Collections
+## 5. Feature Restrictions for External Collections
 
 ### 5.1 Compaction Disabled
 
@@ -612,7 +561,7 @@ func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, .
 | JSON Key Index Stats | Enabled only for StorageV3 external segments with a non-empty manifest path |
 | BM25 Stats | Disabled; BM25 function stats are generated during refresh |
 
-### 5.3 Write Operations Blocked
+### 5.3 Write and Schema Operations
 
 **Files**:
 - `internal/proxy/task_insert.go`
@@ -623,14 +572,14 @@ func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, .
 - `internal/proxy/task.go` (add field, alter field, create/drop partition)
 - `internal/proxy/impl.go` (manual compaction)
 
-| Operation | Status | Error Message |
+| Operation | Status | Details |
 |-----------|--------|---------------|
 | Insert | Blocked | "insert operation is not supported for external collection" |
 | Delete | Blocked | "delete operation is not supported for external collection" |
 | Upsert | Blocked | "upsert operation is not supported for external collection" |
 | Import | Blocked | "import operation is not supported for external collection" |
 | Flush | Blocked | "flush operation is not supported for external collection" |
-| Add Field | Blocked | "add field operation is not supported for external collection" |
+| Add Field | Allowed with constraints | Requires `external_field` mapping; refresh makes the added source column available |
 | Alter Field | Blocked | "alter field operation is not supported for external collection" |
 | Create Partition | Blocked | "create partition operation is not supported for external collection" |
 | Drop Partition | Blocked | "drop partition operation is not supported for external collection" |
@@ -642,97 +591,82 @@ func (si *statsInspector) SubmitStatsTask(..., subJobType indexpb.StatsSubJob, .
 
 ### 6.1 Virtual Primary Key
 
-External collections don't have a primary key field. Instead, a **virtual PK** is generated:
+Collections without a user primary key use a virtual PK. `milvus-table` collections
+with a mapped source primary key use the source values instead.
 
-**Format**: `(segmentID << 32) | offset`
+**Format**: `((segmentID & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF)`
 
 **File**: `internal/core/src/common/VirtualPK.h`
 
 ```cpp
-inline int64_t GenerateVirtualPK(int64_t segment_id, int32_t offset) {
-    return (segment_id << 32) | static_cast<int64_t>(offset);
+inline int64_t GetVirtualPK(int64_t segment_id, int64_t offset) {
+    return ((segment_id & 0xFFFFFFFF) << 32) | (offset & 0xFFFFFFFF);
 }
 
-inline std::pair<int64_t, int32_t> ParseVirtualPK(int64_t virtual_pk) {
-    int64_t segment_id = virtual_pk >> 32;
-    int32_t offset = static_cast<int32_t>(virtual_pk & 0xFFFFFFFF);
-    return {segment_id, offset};
+inline int64_t ExtractSegmentIDFromVirtualPK(int64_t virtual_pk) {
+    return static_cast<int64_t>(static_cast<uint64_t>(virtual_pk) >> 32);
+}
+
+inline int64_t ExtractOffsetFromVirtualPK(int64_t virtual_pk) {
+    return virtual_pk & 0xFFFFFFFF;
 }
 ```
 
-This encoding allows:
-- Up to 2^32 segments per collection
-- Up to 2^32 rows per segment
-- Efficient segment identification from PK
+The encoding reserves 32 bits for the row offset and retains only the lower
+32 bits of the segment ID. Segment matching compares these truncated IDs;
+uniqueness requires their values to be distinct among concurrently loaded
+segments of the same collection.
 
 ### 6.2 VirtualPKChunkedColumn
 
 **File**: `internal/core/src/mmap/VirtualPKChunkedColumn.h`
 
-Generates virtual PKs on-the-fly during loading without storing actual data:
+`VirtualPKChunkedColumn` implements `ChunkedColumnInterface` for collections
+without a source primary key. It synthesizes values from the segment ID and row
+offset. Accessors that require a contiguous buffer materialize the PK values
+locally; no source PK column is read.
 
-```cpp
-class VirtualPKChunkedColumn : public ChunkedColumnBase {
-public:
-    // Generates PKs based on segment ID and row offset
-    // No actual data storage needed
-    int64_t GetPK(int64_t row_offset) const {
-        return GenerateVirtualPK(segment_id_, row_offset);
-    }
-};
-```
+### 6.3 Manifest Column Loading
 
-### 6.3 ExternalFieldChunkedColumn
+**Files**:
+- `internal/core/src/segcore/ChunkedSegmentSealedImpl.cpp`
+- `internal/core/src/segcore/storagev2translator/ManifestGroupTranslator.cpp`
 
-**File**: `internal/core/src/mmap/ExternalFieldChunkedColumn.h`
+External fields are read through manifest column groups. Each load group uses a
+`ManifestGroupTranslator` and `ChunkedColumnGroup`, with a `ProxyChunkColumn` for
+each field. Warmup policy determines eager or lazy loading; source primary-key
+fields are loaded eagerly.
 
-Lazy-loads field data from external storage via milvus-storage library:
-
-```cpp
-class ExternalFieldChunkedColumn : public ChunkedColumnBase {
-    // Loads data chunks from external source on demand
-    // Uses milvus-storage library for S3/HDFS/etc. access
-};
-```
+Search and Query use the storage reader's `take()` API for eligible output fields
+when `queryNode.externalCollection.useTakeForOutput` is enabled (the default).
+Fields not filled by Take use the column-read path.
 
 ### 6.4 ExternalSegmentCandidate
 
 **File**: `internal/querynodev2/pkoracle/external_segment_candidate.go`
 
-Replaces bloom filter for PK-based segment matching:
+Virtual-PK collections use `ExternalSegmentCandidate` for segment matching instead
+of source primary-key bloom filters. It extracts the upper 32 bits of a virtual
+PK using an unsigned shift and compares them with `segmentID & 0xFFFFFFFF`.
 
-```go
-type ExternalSegmentCandidate struct {
-    segmentID int64
-    partition int64
-    typ       commonpb.SegmentState
-}
-
-func (c *ExternalSegmentCandidate) MayPkExist(pk storage.PrimaryKey) bool {
-    // Parse virtual PK to extract segment ID
-    virtualPK := pk.GetValue().(int64)
-    segmentID := virtualPK >> 32
-    return segmentID == c.segmentID
-}
-```
+Real-PK `milvus-table` segments use source primary-key bloom-filter statistics.
+Loading fails if the required bloom-filter candidate cannot be built.
 
 ### 6.5 Loading Flow
 
 **File**: `internal/querynodev2/segments/segment_loader.go`
 
-```go
-func (loader *segmentLoader) Load(...) {
-    if isExternalCollection(collectionSchema) {
-        // 1. Virtual PK field already injected during creation
+1. Load manifest column groups and indexes using the resolved field mappings.
+2. Synthesize virtual PKs when needed. For real-PK `milvus-table` segments, load
+   the source primary key and insert timestamps.
+3. Load applicable delta logs. For real-PK `milvus-table` segments, source deltas
+   use external storage configuration and target-owned deltas use target storage
+   configuration. Virtual-PK source deletes are converted during refresh.
+4. Install an `ExternalSegmentCandidate` for virtual PKs, or source bloom-filter
+   statistics for real PKs.
 
-        // 2. Skip delta logs (no delete support)
-        // 3. Skip bloom filter building
-        // 4. Use ExternalFieldChunkedColumn for field data
-        // 5. Use VirtualPKChunkedColumn for PK field
-        // 6. Use ExternalSegmentCandidate instead of bloom filter
-    }
-}
-```
+See [Milvus Snapshot as External Table Source](20260526-milvus-table-external-source.md)
+for snapshot delete handling.
 
 ---
 
@@ -740,105 +674,68 @@ func (loader *segmentLoader) Load(...) {
 
 ### 7.1 Task Flow Overview
 
-External table data refresh is **manually triggered** through the
-`RefreshExternalTable` API. This design provides users with full control over
-when data synchronization occurs and allows them to track progress. One
-refresh job can be split into multiple parallel tasks, while segment metadata
-is applied once at the job level after all tasks finish.
+External data refresh is manually triggered through `RefreshExternalCollection`.
+One refresh job may contain multiple DataNode tasks; clients track the job as a
+whole.
 
 ```
-                            Client
-                              |
-                              | RefreshExternalTable(collection_name)
-                              v
-                            Proxy
-                              |
-                              | Validate & Forward
-                              v
-                          DataCoord
-                              |
-                              | Create RefreshJob
-                              v
-                    ExternalCollectionTaskMeta
-                    (Store job with Pending state)
-                              |
-                              v
-                    ExternalCollectionScheduler
-                              |
-                              | Schedule job execution
-                              v
-                  CreateTaskOnWorker(s)
-                              |
-                              v
-                       DataNode(s)
-                (ExternalCollectionManager)
-                              |
-                              v
-             RefreshExternalCollectionTask
-                              |
-    +-------------------------+-------------------------+
-    |                         |                         |
-    v                         v                         v
-Fetch fragments      Compare with          Organize orphan
-from source         current segments       fragments to new
-                                           segments
-                              |
-                              v
-                    Create manifests
-                              |
-                              | Persist task results
-                              v
-                        DataCoord
-              (Aggregate after all tasks finish)
-                              |
-                              | Apply one job-level result
-                              v
-                    ExternalCollectionTaskMeta
-                              |
-    +-------------------------+-------------------------+
-    |                         |                         |
-    v                         v                         v
-Keep unchanged       Drop obsolete         Add new
-segments             segments              segments
-                              |
-                              v
-                    Mark job as Completed/Failed
-                              |
-                              v
-                        Client
-                              |
-              GetRefreshExternalTableProgress(job_id)
-                              |
-                    [Poll until completed]
+Client: RefreshExternalCollection
+                 |
+                 v
+Proxy: validate source/spec pair and forward
+                 |
+                 v
+DataCoord: allocate job ID and broadcast refresh through WAL
+                 |
+                 v
+ACK callback: persist job idempotently
+                 |
+                 v
+Refresh Manager: explore source and persist explore manifest
+                 |
+                 v
+Split file ranges into tasks and enqueue in the scheduler
+                 |
+                 v
+DataNode tasks: read assigned fragments, keep/patch/create segments
+                 |
+                 v
+DataCoord: persist each task's result
+                 |
+                 v
+All tasks finished: aggregate results and apply segment updates
+                 |
+                 v
+Complete job; attempt to persist changed source/spec in collection schema
+                 |
+                 v
+Client: GetRefreshExternalCollectionProgress(job_id)
 ```
+
+Task failures are reflected in the job state. Segment updates are applied from
+aggregated results after all tasks finish, rather than independently by each
+worker.
 
 ### 7.1.1 Job Lifecycle
 
 ```
-     RefreshExternalTable()
+RefreshExternalCollection()
               |
               v
-       +------+------+
-       |   Pending   |  <-- Job created, queued for execution
-       +------+------+
+           Pending ---- exploration failure / timeout ----> Failed
               |
-              | (Scheduler picks up job)
+              | Tasks scheduled
               v
-       +------+------+
-       | InProgress  |  <-- DataNodes executing refresh tasks
-       +------+------+
+          InProgress -------- task failure / timeout -----> Failed
               |
-        +-----+-----+
-        |           |
-        v           v
-  +-----+----+  +---+-----+
-  | Completed|  | Failed  |
-  +----------+  +---------+
+              | All results persisted and segment updates applied
+              v
+          Completed
 ```
 
 **State Descriptions**:
-- **Pending**: Job is created and waiting to be scheduled
-- **InProgress**: Job is actively being executed by DataNode
+- **Pending**: Job is persisted; source exploration or task scheduling is pending
+- **InProgress**: DataNode tasks are executing or retrying
 - **Completed**: Job finished successfully, segments updated
 - **Failed**: Job encountered an error, reason stored in job info
 
@@ -965,138 +862,61 @@ persisted ownership plan, aggregates them, and performs one job-level segment
 update. Baseline segments that are neither kept nor updated are removed in
 that single apply operation.
 
-### 7.2 ExternalCollectionScheduler
+### 7.2 External Collection Refresh Manager
 
-**File**: `internal/datacoord/external_collection_scheduler.go`
+**Files**:
+- `internal/datacoord/external_collection_refresh_manager.go`
+- `internal/datacoord/ddl_callbacks_external_collection.go`
 
-Manages the scheduling and execution of external collection refresh jobs:
+`SubmitRefreshJobWithID` accepts the job ID allocated before WAL broadcast and
+persists the job idempotently. Only one active job is allowed per collection.
 
-```go
-type ExternalCollectionScheduler interface {
-    Start()
-    Stop()
+The manager explores the source on DataCoord, writes an explore manifest, and
+splits the discovered file ranges into tasks using
+`dataCoord.externalCollectionFilesPerTask`. Tasks are persisted and submitted to
+the shared scheduler. The ownership planner merges ranges crossed by existing
+segments and assigns each baseline segment to one task, as described in Section
+7.1.2. Each task receives only its owned segments and checks their fragments
+against its assigned file range.
 
-    // SubmitRefreshJob creates a new refresh job for the collection
-    // Returns job_id for tracking
-    SubmitRefreshJob(ctx context.Context, req *RefreshJobRequest) (string, error)
+When all tasks finish with persisted results, the manager aggregates their kept
+segment IDs and updated segments and applies the collection-level change. It then
+attempts to update changed source/spec values in the collection schema. This
+schema update is best-effort: failure is logged without undoing the completed
+segment update.
 
-    // GetJobProgress returns the current progress of a job
-    GetJobProgress(ctx context.Context, jobID string) (*RefreshJobProgress, error)
+### 7.3 External Collection Refresh Metadata
 
-    // ListJobs returns all jobs for a collection (or all if collectionID is 0)
-    ListJobs(ctx context.Context, collectionID int64, limit int) ([]*RefreshJobInfo, error)
-}
+**Files**:
+- `internal/datacoord/external_collection_refresh_meta.go`
+- `pkg/proto/data_coord.proto`
 
-type RefreshJobRequest struct {
-    CollectionID   int64
-    CollectionName string
-    ExternalSource string  // Optional: update source before refresh
-    ExternalSpec   string  // Optional: update spec before refresh
-}
+| Record | Purpose | Persisted Information |
+|--------|---------|-----------------------|
+| `ExternalCollectionRefreshJob` | Client-visible refresh operation | Job/collection IDs, source/spec, state, progress, timestamps, failure reason, task IDs |
+| `ExternalCollectionRefreshTask` | Scheduler and worker execution unit | Task/job IDs, version, worker ID, state, explore manifest and file range, ownership plan version and owned segment IDs, kept segments, updated segments, result-ready flag |
 
-func (s *externalCollectionScheduler) SubmitRefreshJob(ctx context.Context, req *RefreshJobRequest) (string, error) {
-    // 1. Generate unique job ID
-    jobID := fmt.Sprintf("refresh_%d_%d", req.CollectionID, time.Now().UnixNano())
-
-    // 2. If external source/spec provided, update collection metadata
-    if req.ExternalSource != "" || req.ExternalSpec != "" {
-        if err := s.updateCollectionExternalConfig(ctx, req); err != nil {
-            return "", err
-        }
-    }
-
-    // 3. Create job record with Pending state
-    job := &ExternalCollectionTask{
-        JobID:          jobID,
-        CollectionID:   req.CollectionID,
-        CollectionName: req.CollectionName,
-        ExternalSource: req.ExternalSource,
-        ExternalSpec:   req.ExternalSpec,
-        State:          RefreshStatePending,
-        StartTime:      time.Now().UnixMilli(),
-    }
-
-    if err := s.taskMeta.AddTask(job); err != nil {
-        return "", err
-    }
-
-    // 4. Enqueue for execution
-    s.jobQueue <- job
-
-    return jobID, nil
-}
-```
-
-### 7.3 ExternalCollectionTaskMeta
-
-**File**: `internal/datacoord/external_collection_task_meta.go`
-
-Manages job records and state persistence:
-
-```go
-type ExternalCollectionTaskMeta interface {
-    // Job management
-    GetJob(jobID string) (*ExternalCollectionTask, error)
-    AddTask(task *ExternalCollectionTask) error
-    UpdateTask(task *ExternalCollectionTask) error
-
-    // Query methods
-    ListJobsByCollection(collectionID int64, limit int) ([]*ExternalCollectionTask, error)
-    ListAllJobs(limit int) ([]*ExternalCollectionTask, error)
-
-    // Cleanup
-    CleanupCompletedJobs(olderThan time.Duration) error
-}
-
-type ExternalCollectionTask struct {
-    JobID          string                     // Unique job identifier
-    CollectionID   int64                      // Collection ID
-    CollectionName string                     // Collection name
-    ExternalSource string                     // External source path used for this job
-    ExternalSpec   string                     // External spec used for this job
-    State          RefreshExternalTableState  // Current job state
-
-    // Progress tracking
-    TotalFragments     int64  // Total fragments to process
-    ProcessedFragments int64  // Fragments processed so far
-    NewSegments        int64  // Number of new segments created
-    DroppedSegments    int64  // Number of segments dropped
-    KeptSegments       int64  // Number of segments kept unchanged
-
-    // Timestamps
-    StartTime int64  // Job start time (Unix epoch ms)
-    EndTime   int64  // Job end time (0 if not completed)
-
-    // Error info
-    Reason string  // Error message if failed
-}
-```
+The metadata layer supports recovery, per-collection active-job checks and
+aggregation of task state and progress. A finished task must also have its result
+payload persisted before the job can apply segment updates.
 
 **Job Retention Policy**:
-- Completed/Failed jobs are retained for `external.collection.job.retention.duration` (default: 24 hours)
-- A background goroutine periodically cleans up old jobs
+- Finished/Failed jobs are retained for `dataCoord.externalCollectionJobRetention`
+  (seconds; default: 86400).
+- The refresh checker handles timeouts and garbage collection of expired jobs.
 
-### 7.4 UpdateExternalCollectionTask (DataCoord side)
+### 7.4 RefreshExternalCollectionTask (DataCoord side)
 
-**File**: `internal/datacoord/task_update_external_collection.go`
+**File**: `internal/datacoord/task_refresh_external_collection.go`
 
-Manages the lifecycle of external collection updates on coordinator:
+`refreshExternalCollectionTask` adapts persisted refresh tasks to the shared
+scheduler. `CreateTaskOnWorker`, `QueryTaskOnWorker` and `DropTaskOnWorker` manage
+worker execution. The request includes the assigned explore-manifest range,
+current segments, schema and pre-allocated segment IDs.
 
-```go
-type UpdateExternalCollectionTask struct {
-    taskID         int64
-    collectionID   int64
-    externalSource string
-    externalSpec   string
-    // ...
-}
-
-// Task lifecycle methods
-func (t *UpdateExternalCollectionTask) CreateTaskOnWorker() error
-func (t *UpdateExternalCollectionTask) QueryTaskOnWorker() error
-func (t *UpdateExternalCollectionTask) SetJobInfo() error      // Process results
-func (t *UpdateExternalCollectionTask) DropTaskOnWorker() error
-```
+`SetJobInfo` persists the worker's kept-segment IDs and updated-segment payload
+through `UpdateResultWithMeta`, then notifies the manager to process the job.
+Segment changes are applied at job level after result aggregation.
 
 ### 7.5 ExternalCollectionManager (DataNode side)
 
@@ -1114,72 +934,58 @@ type ExternalCollectionManager struct {
 
 func (m *ExternalCollectionManager) SubmitTask(
     clusterID string,
-    req *datapb.UpdateExternalCollectionRequest,
-    taskFunc func(context.Context) (*datapb.UpdateExternalCollectionResponse, error),
+    req *datapb.RefreshExternalCollectionTaskRequest,
+    taskFunc func(context.Context) (*datapb.RefreshExternalCollectionTaskResponse, error),
 ) error
 ```
 
-### 7.6 UpdateExternalTask (DataNode side)
+### 7.6 RefreshExternalCollectionTask (DataNode side)
 
 **File**: `internal/datanode/external/task_update.go`
 
-Executes the actual update logic:
+`RefreshExternalCollectionTask.Execute` performs the update for its assigned
+source range:
 
-```go
-type UpdateExternalTask struct {
-    ctx    context.Context
-    req    *datapb.UpdateExternalCollectionRequest
-    // ...
-}
-
-func (t *UpdateExternalTask) Execute(ctx context.Context) error {
-    // 1. Fetch fragments from external source
-    newFragments, err := t.fetchFragmentsFromExternalSource(ctx)
-
-    // 2. Build current segment -> fragments mapping
-    currentSegmentFragments := t.buildCurrentSegmentFragments()
-
-    // 3. Compare and organize segments
-    updatedSegments, err := t.organizeSegments(ctx, currentSegmentFragments, newFragments)
-
-    return nil
-}
-```
+1. Read source fragments from the explore manifest and assigned file range.
+2. Read current segment manifests and build the segment-to-fragments mapping.
+3. Compare fragments to retain unchanged segments, patch existing manifests, or
+   collect orphan fragments for new segments.
+4. Return unchanged segment IDs separately from updated segment payloads. Updated
+   segments include both same-ID patches and newly allocated segments.
 
 ### 7.7 Segment Update Strategy
 
 ```
-Current Segments in Milvus:  [S1, S2, S3, S4, S5]
+Current Segments in Milvus: [S1, S2, S3, S4, S5]
 
-Worker Response:
-  - keptSegments: [S1, S3]      (fragments unchanged)
-  - updatedSegments: [S6', S7']  (new segments from orphan fragments)
+Aggregated Task Results:
+  - keptSegments:    [S1]              (unchanged)
+  - updatedSegments: [S3', S6, S7]     (same-ID patch and new segments)
 
 Processing:
-  1. Keep: S1, S3 (unchanged)
-  2. Drop: S2, S4, S5 (mark as Dropped)
-  3. Add:  S6, S7 (allocate new segment IDs)
+  1. Keep S1 unchanged.
+  2. Patch S3 with its updated manifest and field metadata.
+  3. Drop S2, S4 and S5.
+  4. Add S6 and S7 with IDs allocated for the worker tasks.
 
-Final Segments: [S1, S3, S6, S7]
+Final Segments: [S1, S3', S6, S7]
 ```
+
+Add-column refresh can patch an existing segment while preserving its ID and row
+count. See [External Table Add-Column Refresh](20260526-external_table_add_column_refresh.md).
 
 ### 7.8 Fragment to Segment Organization
 
-The `balanceFragmentsToSegments` function organizes orphan fragments into balanced segments:
+`balanceFragmentsToSegments` organizes orphan fragments for new segments:
 
-```go
-func (t *UpdateExternalTask) balanceFragmentsToSegments(
-    ctx context.Context,
-    fragments []exttable.Fragment,
-) ([]*datapb.SegmentInfo, error) {
-    // 1. Calculate total rows
-    // 2. Determine target rows per segment (default: 1M rows)
-    // 3. Sort fragments by row count descending
-    // 4. Greedy bin-packing: assign each fragment to bin with lowest row count
-    // 5. Create manifest for each segment
-    // 6. Return SegmentInfo list
-}
-```
+1. Calculate total rows and read
+   `dataNode.externalCollection.targetRowsPerSegment` (default: 1,000,000).
+2. For ordinary file formats, sort fragments by row count descending and assign
+   each to the bin with the fewest rows.
+3. For `milvus-table`, map each source fragment to one target segment instead of
+   bin-packing, preserving alignment with the source manifest.
+4. Allocate segment IDs from the task's pre-allocated range and create manifests
+   and segment metadata.
 
 ---
 
@@ -1187,7 +993,7 @@ func (t *UpdateExternalTask) balanceFragmentsToSegments(
 
 ### 8.1 Manifest Creation
 
-**File**: `internal/storagev2/exttable/manifest_ffi.go`
+**File**: `internal/storagev2/packed/manifest_ffi.go`
 
 Manifests are created to describe segment contents:
 
@@ -1212,11 +1018,12 @@ func CreateManifestForSegment(
 func ReadFragmentsFromManifest(
     manifestPath string,
     storageConfig *indexpb.StorageConfig,
+    columns []string,
 ) ([]Fragment, error) {
     // 1. Parse manifest path to get base path
     // 2. Create properties from storage config
     // 3. Call exttable_read_column_groups FFI
-    // 4. Extract fragments from column groups
+    // 4. Extract fragments from matching column groups (all if columns is empty)
     // 5. Return fragment list
 }
 ```
@@ -1227,23 +1034,30 @@ func ReadFragmentsFromManifest(
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `external.collection.target.rows.per.segment` | Target rows per segment | 1,000,000 |
-| `external.collection.worker.pool.size` | DataNode worker pool size | 4 |
-| `external.collection.job.retention.duration` | How long to keep completed/failed jobs | 24h |
-| `external.collection.job.max.concurrent` | Max concurrent refresh jobs | 2 |
-| `external.collection.job.timeout` | Timeout for a single refresh job | 1h |
-| `dataCoord.externalCollectionFilesPerTask` | Target files per base refresh task; ownership closure may produce larger final tasks | 10,000 |
+| `dataNode.externalCollection.targetRowsPerSegment` | Target rows per segment for ordinary file formats | 1000000 |
+| `dataCoord.externalCollectionCheckInterval` | Refresh checker interval, in seconds | 10 |
+| `dataCoord.externalCollectionJobTimeout` | Refresh job timeout, in seconds | 3600 |
+| `dataCoord.externalCollectionJobRetention` | Retention of finished/failed jobs, in seconds | 86400 |
+| `dataCoord.externalCollectionFilesPerTask` | Target files per base refresh task; ownership closure may produce larger final tasks | 10000 |
+| `dataCoord.externalCollectionPreAllocSegments` | IDs pre-allocated per task; segments and fake binlogs consume separate IDs | 500000 |
+| `dataCoord.externalCollectionDropRatioWarn` | Segment-drop ratio above which a warning is logged | 0.9 |
+| `queryNode.externalCollection.useTakeForOutput` | Use Take for eligible external output fields | true |
+| `queryNode.externalCollection.samplePerSegment` | During new-segment creation: true samples each new segment; false reuses the first new segment's sample within each task. Add-column patches sample independently. | false |
+| `queryNode.externalCollection.sampleRows` | Rows sampled for external segment size estimation | 100 |
+| `queryNode.externalCollection.rawDataFactor` | Peak memory amplification factor for external loading | 2.0 |
+
+The DataNode external-task worker pool is currently constructed with 8 workers in
+`internal/datanode/data_node.go`; it is not controlled by an external-collection
+pool-size parameter. Refresh admission allows one active job per collection.
 
 ---
 
 ## 10. Future Enhancements
 
-1. **Index Building**: Support index creation on external collections
-2. **AlterCollection Support**: Add API to modify `external_source`/`external_spec`
-3. **More Data Formats**: Support Iceberg, Delta Lake, ORC, etc.
-4. **Partition Mapping**: Map external data partitions to Milvus partitions
-5. **Change Data Capture**: Support CDC-based incremental updates
-6. **Cross-source Query**: Query across multiple external sources
+1. **More Data Formats**: Support Delta Lake, ORC, etc.
+2. **Partition Mapping**: Map external data partitions to Milvus partitions
+3. **Change Data Capture**: Support CDC-based incremental updates
+4. **Cross-source Query**: Query across multiple external sources
 
 ---
 

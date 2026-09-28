@@ -3566,8 +3566,8 @@ func validateExternalFieldType(collectionName string, field *schemapb.FieldSchem
 // isExternalFieldTypeSupported returns true if the given data type can be
 // reliably used in external collections (both load and take modes).
 //
-// Blocked types and reasons:
-//   - SparseFloatVector: Custom binary encoding incompatible with external files
+// Sparse source columns are normalized from Arrow map/struct containers to
+// the Milvus-native sparse binary representation at read time.
 func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 	switch dt {
 	case schemapb.DataType_Bool,
@@ -3588,6 +3588,7 @@ func isExternalFieldTypeSupported(dt schemapb.DataType) bool {
 		schemapb.DataType_BFloat16Vector,
 		schemapb.DataType_BinaryVector,
 		schemapb.DataType_Int8Vector,
+		schemapb.DataType_SparseFloatVector,
 		schemapb.DataType_ArrayOfVector:
 		return true
 	default:
