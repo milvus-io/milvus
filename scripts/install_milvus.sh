@@ -24,7 +24,12 @@ cp $PWD"/internal/core/output/lib/"*.dylib* "$LIBRARY_PATH" 2>/dev/null || true
 cp $PWD"/internal/core/output/lib/"*.so* "$LIBRARY_PATH" || true
 cp $PWD"/internal/core/output/lib64/"*.so* "$LIBRARY_PATH" 2>/dev/null || true
 cp -r $PWD"/internal/core/output/lib/ossl-modules" "$LIBRARY_PATH" 2>/dev/null || true
+for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/core/output/lib64/milvus-sanitizer"; do
+    if [[ -f "$marker" ]]; then
+        cp "$marker" "$LIBRARY_PATH/"
+    fi
+done
 
-for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|atomic)' | awk '{print $3}'); do
+for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|tsan|atomic)' | awk '{print $3}'); do
     cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
 done

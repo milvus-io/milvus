@@ -13,6 +13,7 @@ FROM amazonlinux:2023
 
 ARG TARGETARCH
 ARG MILVUS_ASAN_LIB
+ARG MILVUS_JEMALLOC_LIB=/milvus/lib/libjemalloc.so
 ARG MILVUS_RUNTIME_USER=milvus:milvus
 
 RUN yum install -y wget libgomp libaio libatomic tzdata && \
@@ -33,7 +34,8 @@ COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
-ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
+ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:${MILVUS_JEMALLOC_LIB}
+ENV TSAN_OPTIONS=halt_on_error=1:exitcode=66
 ENV MALLOC_CONF=background_thread:true
 ENV OPENSSL_MODULES=/milvus/lib/ossl-modules
 

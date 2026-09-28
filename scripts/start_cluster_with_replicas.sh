@@ -26,9 +26,14 @@
 
 N=${N_REPLICAS:-2}
 
+source "$(dirname "${BASH_SOURCE[0]}")/sanitizer_env.sh"
+milvus_sanitizer_env "$PWD/internal/core/output" || exit 1
+
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
   LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
-  if test -f "$LIBJEMALLOC"; then
+  if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
+    echo "ThreadSanitizer enabled; jemalloc preload disabled"
+  elif test -f "$LIBJEMALLOC"; then
     export LD_PRELOAD="$LIBJEMALLOC"
     export MALLOC_CONF=background_thread:true
   else

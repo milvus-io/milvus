@@ -4,7 +4,8 @@
 #include <mutex>
 #include <thread>
 
-extern "C" void tsan_increment_c(void);
+extern "C" void
+tsan_increment_c(void);
 void
 tsan_increment_cpp();
 
