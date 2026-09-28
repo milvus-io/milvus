@@ -1468,7 +1468,7 @@ LoadIndexData(milvus::tracer::TraceContext& ctx,
             config, milvus::index::TANTIVY_INDEX_VERSION)
             .value_or(milvus::index::TANTIVY_INDEX_LATEST_VERSION);
 
-    LOG_INFO(
+    LOG_DEBUG(
         "[collection={}][segment={}][field={}][enable_mmap={}][load_"
         "priority={}] load index {}, "
         "mmap_dir_path={}",
