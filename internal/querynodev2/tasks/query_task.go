@@ -113,6 +113,9 @@ func (t *QueryTask) Execute() error {
 	return t.execute(nil)
 }
 
+// TODO(#40451): move selected-segment retrieval and reduction into the shared
+// QueryView execution layer so SN no longer depends on the legacy QueryNode task.
+// Keep segment selection and handle ownership with the QueryView caller.
 func (t *QueryTask) ExecuteOnSegments(selected []segments.Segment) error {
 	if selected == nil {
 		selected = []segments.Segment{}
