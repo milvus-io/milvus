@@ -23,6 +23,9 @@ type ViewQueryGrowingSegmentInfo struct {
 	VChannel     string
 }
 
+// TODO(#40451): remove this legacy QueryNode Segment adapter when QueryView
+// execution accepts segcore handles directly. Pinning and release must remain
+// owned by the caller's growing handles, not this borrowed wrapper.
 func NewGrowingSegmentForViewQuery(info ViewQueryGrowingSegmentInfo, csegment segcore.CSegment) Segment {
 	return &viewQueryGrowingSegment{
 		info:     info,

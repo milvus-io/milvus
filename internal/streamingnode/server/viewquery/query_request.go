@@ -9,6 +9,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 )
 
+// TODO(#40451): remove the legacy QueryNode request envelope when the shared
+// QueryView execution layer consumes the query plan and selected handles directly.
 func buildSNQueryRequest(req *internalpb.RetrieveRequest, mvcc *viewpb.QueryPlanMVCC, vchannel string, handles []snview.GrowingSegmentHandle) *querypb.QueryRequest {
 	queryReq := proto.Clone(req).(*internalpb.RetrieveRequest)
 	queryReq.MvccTimestamp = mvcc.GetGrowingTimetick()

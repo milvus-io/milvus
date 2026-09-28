@@ -471,32 +471,53 @@ func TestManagerResolveLoadInfoAppliesLoadInfoAndIndexInfos(t *testing.T) {
 	require.Equal(t, int64(101), view.IndexInfos[0].GetFieldID())
 }
 
-func TestManagerResolveLoadInfoFailureDelaysBuild(t *testing.T) {
-	scheduler := &capturedNodeScheduler{}
-	dispatcher := NewDispatcher(1)
-	defer dispatcher.Close()
-	manager := NewManager(Config{
-		Scheduler:  scheduler,
-		Dispatcher: dispatcher,
-		LoadInfoProvider: fakeLoadInfoProvider{
-			err: merr.WrapErrCollectionNotLoaded(1),
-		},
-	})
-	meta, key := testManagerQueryViewMetaAndKey(1)
-	meta.LoadInfoVersion = 7
-	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta}, func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
-		return walview.VChannelWALView{
-			CollectionID:    1,
-			LoadInfoVersion: meta.GetLoadInfoVersion(),
-		}, true
-	})
+func TestManagerClassifiesLoadInfoPreparationFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		retryable bool
+	}{
+		{"coord_not_ready", merr.ErrServiceNotReady, true},
+		{"collection_not_loaded", merr.WrapErrCollectionNotLoaded(1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := &capturedNodeScheduler{}
+			dispatcher := NewDispatcher(1)
+			defer dispatcher.Close()
+			manager := NewManager(Config{
+				Scheduler:        scheduler,
+				Dispatcher:       dispatcher,
+				LoadInfoProvider: fakeLoadInfoProvider{err: tc.err},
+			})
+			defer manager.Close()
+			meta, key := testManagerQueryViewMetaAndKey(1)
+			meta.LoadInfoVersion = 7
+			rejected := false
+			manager.AcquireLocked(snview.AcquireResource{
+				Key: key, Meta: meta, OnUnrecoverable: func() { rejected = true },
+			}, func(meta *viewpb.QueryViewMeta) (walview.VChannelWALView, bool) {
+				return walview.VChannelWALView{
+					CollectionID:    1,
+					LoadInfoVersion: meta.GetLoadInfoVersion(),
+				}, true
+			})
 
-	require.NotNil(t, scheduler.task)
-	require.NotPanics(t, func() {
-		err := scheduler.task.Execute(context.Background())
-		require.Error(t, err)
-		require.True(t, errors.Is(err, nodescheduler.ErrDelay))
-	})
+			runtime := manager.runtime
+			err := scheduler.task.Execute(context.Background())
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.retryable, errors.Is(err, nodescheduler.ErrDelay))
+			require.Equal(t, queryRuntimeClosed, runtime.state)
+			require.Nil(t, manager.runtime)
+			if tc.retryable {
+				require.NotNil(t, manager.task)
+				require.False(t, rejected)
+			} else {
+				require.Nil(t, manager.task)
+				require.NoError(t, scheduler.task.Execute(context.Background()))
+				require.True(t, rejected)
+			}
+		})
+	}
 }
 
 func loadFields(fieldIDs ...int64) []*messagespb.LoadFieldConfig {
