@@ -3196,6 +3196,62 @@ func TestProxy_Search_SearchByPKCopiesRequestPerAttempt(t *testing.T) {
 	})
 }
 
+func TestProxy_Search_ReusesRLSSnapshotAcrossAttempts(t *testing.T) {
+	mockey.PatchConvey("TestProxy_Search_ReusesRLSSnapshotAcrossAttempts", t, func() {
+		predicate := &planpb.Expr{}
+		preflight := &searchByPKPreflight{}
+		snapshot := &searchRLSSnapshot{
+			resolved:       true,
+			collectionID:   101,
+			dbName:         "canonical_db",
+			collectionName: "canonical_collection",
+			predicate:      predicate,
+			searchByPK:     preflight,
+		}
+		node := &Proxy{}
+		mockey.Mock((*Proxy).preflightSearchByPK).To(func(*Proxy, context.Context, *milvuspb.SearchRequest) (*searchByPKPreflight, error) {
+			return nil, errors.New("later attempts must not resolve search-by-primary-key RLS again")
+		}).Build()
+
+		request := searchByPKRequest([]int64{3, 1, 2})
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: CollectionID, Value: "9"})
+		attempt, gotPreflight, err := node.prepareSearchAttempt(context.Background(), request, snapshot)
+		require.NoError(t, err)
+		assert.Same(t, preflight, gotPreflight)
+		assert.NotSame(t, request, attempt)
+		assert.Equal(t, "canonical_db", attempt.GetDbName())
+		assert.Equal(t, "canonical_collection", attempt.GetCollectionName())
+		collectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, attempt.GetSearchParams())
+		require.True(t, ok)
+		assert.Equal(t, "101", collectionID)
+		originalCollectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.GetSearchParams())
+		require.True(t, ok)
+		assert.Equal(t, "9", originalCollectionID)
+
+		task := &searchTask{}
+		require.True(t, snapshot.presetTask(task))
+		assert.Same(t, predicate, task.ResolvedRLSSnapshot().Predicate)
+
+		hybrid := &milvuspb.SearchRequest{
+			DbName:         "alias_db",
+			CollectionName: "alias_collection",
+			SubReqs: []*milvuspb.SubSearchRequest{
+				{SearchParams: []*commonpb.KeyValuePair{{Key: CollectionID, Value: "9"}}},
+				{SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}}},
+			},
+		}
+		pinnedHybrid := snapshot.pinRequest(hybrid)
+		assert.NotSame(t, hybrid, pinnedHybrid)
+		assert.Equal(t, "canonical_db", pinnedHybrid.GetDbName())
+		assert.Equal(t, "canonical_collection", pinnedHybrid.GetCollectionName())
+		for _, subRequest := range pinnedHybrid.GetSubReqs() {
+			collectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, subRequest.GetSearchParams())
+			require.True(t, ok)
+			assert.Equal(t, "101", collectionID)
+		}
+	})
+}
+
 func TestProxy_Search_SearchByPKRejectsBeforeCopy(t *testing.T) {
 	mockey.PatchConvey("TestProxy_Search_SearchByPKRejectsBeforeCopy", t, func() {
 		node := &Proxy{}

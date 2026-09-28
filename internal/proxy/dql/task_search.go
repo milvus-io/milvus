@@ -138,6 +138,15 @@ type SearchTask struct {
 	chMgr channelmgr.ChannelsMgr
 }
 
+// ResolvedRLSSnapshot is the request-local RLS decision that later attempts
+// of the same Search or HybridSearch RPC must reuse.
+type ResolvedRLSSnapshot struct {
+	CollectionID   int64
+	DBName         string
+	CollectionName string
+	Predicate      *planpb.Expr
+}
+
 // NewSearchTask constructs a search task. Only request-specific inputs are
 // taken from the caller; the host node and its dependencies are derived from
 // the taskmodel.TaskNode contract and paramtable, so the root package does not
@@ -190,6 +199,20 @@ func (t *SearchTask) SetResolvedRLSPredicate(predicate *planpb.Expr) {
 	t.rlsPredicate = predicate
 	t.rlsResolved = true
 	t.rlsPreset = true
+}
+
+// ResolvedRLSSnapshot returns the predicate and canonical collection identity
+// after this task has resolved RLS. The predicate is immutable after resolution.
+func (t *SearchTask) ResolvedRLSSnapshot() *ResolvedRLSSnapshot {
+	if !t.rlsResolved {
+		return nil
+	}
+	return &ResolvedRLSSnapshot{
+		CollectionID:   t.GetCollectionID(),
+		DBName:         t.rlsDBName,
+		CollectionName: t.rlsCollectionName,
+		Predicate:      t.rlsPredicate,
+	}
 }
 
 // ResultSizeInsufficient reports whether the result was truncated because the

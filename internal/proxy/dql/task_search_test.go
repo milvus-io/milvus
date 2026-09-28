@@ -220,6 +220,25 @@ func TestSearchTaskPreExecutePreservesPresetRLSPredicate(t *testing.T) {
 	})
 }
 
+func TestSearchTaskResolvedRLSSnapshot(t *testing.T) {
+	predicate := &planpb.Expr{}
+	task := &SearchTask{
+		SearchRequest:     &internalpb.SearchRequest{CollectionID: 101},
+		rlsDBName:         "canonical_db",
+		rlsCollectionName: "canonical_collection",
+	}
+
+	assert.Nil(t, task.ResolvedRLSSnapshot())
+	task.SetResolvedRLSPredicate(predicate)
+
+	snapshot := task.ResolvedRLSSnapshot()
+	require.NotNil(t, snapshot)
+	assert.Equal(t, int64(101), snapshot.CollectionID)
+	assert.Equal(t, "canonical_db", snapshot.DBName)
+	assert.Equal(t, "canonical_collection", snapshot.CollectionName)
+	assert.Same(t, predicate, snapshot.Predicate)
+}
+
 func TestSearchTask_PostExecute(t *testing.T) {
 	var err error
 	ctx := context.TODO()

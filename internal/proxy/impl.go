@@ -2892,17 +2892,18 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
+	rlsSnapshot := &searchRLSSnapshot{}
 
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2925,7 +2926,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, request, false, true)
+			rspGT, _, _, _, err = node.search(ctx, request, false, true, rlsSnapshot)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2968,7 +2969,7 @@ func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
 	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -2994,7 +2995,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
 
-	request, searchByPK, err := node.prepareSearchByPKAttempt(ctx, request)
+	request, searchByPK, err := node.prepareSearchAttempt(ctx, request, rlsSnapshot)
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
@@ -3023,7 +3024,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
-	if searchByPK != nil {
+	if !rlsSnapshot.presetTask(qt) && searchByPK != nil {
 		qt.SetResolvedRLSPredicate(rlsPredicate)
 	}
 
@@ -3075,7 +3076,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		mlog.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	err = qt.WaitToFinish()
+	if ctx.Err() == nil {
+		rlsSnapshot.captureTask(qt)
+	}
+	if err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
 			mlog.Int64("nq", qt.GetNq()),
@@ -3167,15 +3172,16 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
+	rlsSnapshot := &searchRLSSnapshot{}
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -3219,7 +3225,7 @@ func (l *hybridSearchRequestExprLogger) String() string {
 	return builder.String()
 }
 
-func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3238,7 +3244,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
 	newSearchReq := ConvertHybridSearchToSearch(request)
+	newSearchReq = rlsSnapshot.pinRequest(newSearchReq)
 	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
+	rlsSnapshot.presetTask(qt)
 
 	succeeded := false
 	defer func() {
@@ -3292,14 +3300,18 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		mlog.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	waitErr := qt.WaitToFinish()
+	if ctx.Err() == nil {
+		rlsSnapshot.captureTask(qt)
+	}
+	if waitErr != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
+			mlog.Err(waitErr),
 		)
 
 		return &milvuspb.SearchResults{
-			Status: merr.Status(err),
+			Status: merr.Status(waitErr),
 		}, false, false, nil
 	}
 
@@ -3420,6 +3432,109 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 type searchByPKPreflight struct {
 	collectionInfo *collectionInfo
 	rlsPredicate   *planpb.Expr
+}
+
+type searchRLSSnapshot struct {
+	resolved       bool
+	collectionID   int64
+	dbName         string
+	collectionName string
+	predicate      *planpb.Expr
+	searchByPK     *searchByPKPreflight
+}
+
+func (snapshot *searchRLSSnapshot) captureTask(task *searchTask) {
+	if snapshot == nil || snapshot.resolved {
+		return
+	}
+	resolved := task.ResolvedRLSSnapshot()
+	if resolved == nil {
+		return
+	}
+	snapshot.resolved = true
+	snapshot.collectionID = resolved.CollectionID
+	snapshot.dbName = resolved.DBName
+	snapshot.collectionName = resolved.CollectionName
+	snapshot.predicate = resolved.Predicate
+}
+
+func (snapshot *searchRLSSnapshot) captureSearchByPK(request *milvuspb.SearchRequest, preflight *searchByPKPreflight) {
+	if snapshot == nil || snapshot.resolved || preflight == nil || preflight.collectionInfo == nil {
+		return
+	}
+	info := preflight.collectionInfo
+	dbName := info.DBName
+	if dbName == "" {
+		dbName = request.GetDbName()
+	}
+	snapshot.resolved = true
+	snapshot.collectionID = info.CollID
+	snapshot.dbName = dbName
+	snapshot.collectionName = info.Schema.GetName()
+	snapshot.predicate = preflight.rlsPredicate
+	snapshot.searchByPK = preflight
+}
+
+func (snapshot *searchRLSSnapshot) presetTask(task *searchTask) bool {
+	if snapshot == nil || !snapshot.resolved {
+		return false
+	}
+	task.SetResolvedRLSPredicate(snapshot.predicate)
+	return true
+}
+
+func (snapshot *searchRLSSnapshot) pinRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	if snapshot == nil || !snapshot.resolved {
+		return request
+	}
+	pinned := proto.Clone(request).(*milvuspb.SearchRequest)
+	pinned.DbName = snapshot.dbName
+	pinned.CollectionName = snapshot.collectionName
+	collectionID := strconv.FormatInt(snapshot.collectionID, 10)
+	if len(pinned.GetSubReqs()) == 0 {
+		pinned.SearchParams = pinSearchCollectionID(pinned.GetSearchParams(), collectionID)
+	} else {
+		for _, subRequest := range pinned.GetSubReqs() {
+			if subRequest == nil {
+				continue
+			}
+			subRequest.SearchParams = pinSearchCollectionID(subRequest.GetSearchParams(), collectionID)
+		}
+	}
+	return pinned
+}
+
+func pinSearchCollectionID(params []*commonpb.KeyValuePair, collectionID string) []*commonpb.KeyValuePair {
+	found := false
+	for _, param := range params {
+		if param.GetKey() == CollectionID {
+			param.Value = collectionID
+			found = true
+		}
+	}
+	if !found {
+		params = append(params, &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID})
+	}
+	return params
+}
+
+func (node *Proxy) prepareSearchAttempt(ctx context.Context, request *milvuspb.SearchRequest, snapshot *searchRLSSnapshot) (*milvuspb.SearchRequest, *searchByPKPreflight, error) {
+	if snapshot != nil && snapshot.resolved {
+		request = snapshot.pinRequest(request)
+		if ids := request.GetIds(); ids != nil && typeutil.GetSizeOfIDs(ids) > 0 {
+			if snapshot.searchByPK == nil {
+				return request, nil, merr.WrapErrServiceInternalMsg("search-by-primary-key RLS snapshot is incomplete")
+			}
+			return request, snapshot.searchByPK, nil
+		}
+		return request, nil, nil
+	}
+
+	attempt, preflight, err := node.prepareSearchByPKAttempt(ctx, request)
+	if err == nil && preflight != nil {
+		snapshot.captureSearchByPK(attempt, preflight)
+	}
+	return attempt, preflight, err
 }
 
 func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) (*searchByPKPreflight, error) {
