@@ -1928,7 +1928,8 @@ func TestImportFilesLogFields(t *testing.T) {
 		{
 			name: "mixed_invalid_sources",
 			files: []*internalpb.ImportFile{
-				nil, {Paths: []string{"ordinary.json"}},
+				nil,
+				{Paths: []string{"ordinary.json"}},
 				{SnapshotSource: &internalpb.SnapshotImportSource{Version: 9, ManifestPath: "secret"}},
 				{SnapshotSource: &internalpb.SnapshotImportSource{Version: 99, ManifestPath: "secret"}},
 			},
