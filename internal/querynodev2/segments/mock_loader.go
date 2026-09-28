@@ -72,6 +72,61 @@ func (_c *MockLoader_GetChunkManager_Call) RunAndReturn(run func() storage.Chunk
 	return _c
 }
 
+// GetLocalDiskUsage provides a mock function with no fields
+func (_m *MockLoader) GetLocalDiskUsage() (int64, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetLocalDiskUsage")
+	}
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (int64, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockLoader_GetLocalDiskUsage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetLocalDiskUsage'
+type MockLoader_GetLocalDiskUsage_Call struct {
+	*mock.Call
+}
+
+// GetLocalDiskUsage is a helper method to define mock.On call
+func (_e *MockLoader_Expecter) GetLocalDiskUsage() *MockLoader_GetLocalDiskUsage_Call {
+	return &MockLoader_GetLocalDiskUsage_Call{Call: _e.mock.On("GetLocalDiskUsage")}
+}
+
+func (_c *MockLoader_GetLocalDiskUsage_Call) Run(run func()) *MockLoader_GetLocalDiskUsage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockLoader_GetLocalDiskUsage_Call) Return(_a0 int64, _a1 error) *MockLoader_GetLocalDiskUsage_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockLoader_GetLocalDiskUsage_Call) RunAndReturn(run func() (int64, error)) *MockLoader_GetLocalDiskUsage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Load provides a mock function with given fields: ctx, collectionID, segmentType, version, _a4
 func (_m *MockLoader) Load(ctx context.Context, collectionID int64, segmentType commonpb.SegmentState, version int64, _a4 ...*querypb.SegmentLoadInfo) ([]Segment, error) {
 	_va := make([]interface{}, len(_a4))
