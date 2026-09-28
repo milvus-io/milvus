@@ -1072,8 +1072,12 @@ struct TantivyIndexWrapper {
                       uintptr_t min_gram,
                       uintptr_t max_gram,
                       void* bitset) {
-        auto array = tantivy_ngram_match_query(
-            reader_, literal.c_str(), min_gram, max_gram, bitset);
+        auto array = tantivy_ngram_match_query(reader_,
+                                               literal.data(),
+                                               literal.size(),
+                                               min_gram,
+                                               max_gram,
+                                               bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_match_query: {}",
@@ -1091,13 +1095,20 @@ struct TantivyIndexWrapper {
                    uintptr_t min_gram,
                    uintptr_t max_gram) {
         std::vector<const char*> c_literals;
+        std::vector<uintptr_t> c_literal_lens;
         c_literals.reserve(literals.size());
+        c_literal_lens.reserve(literals.size());
         for (const auto& lit : literals) {
-            c_literals.push_back(lit.c_str());
+            c_literals.push_back(lit.data());
+            c_literal_lens.push_back(lit.size());
         }
 
-        auto array = tantivy_ngram_tokenize(
-            reader_, c_literals.data(), c_literals.size(), min_gram, max_gram);
+        auto array = tantivy_ngram_tokenize(reader_,
+                                            c_literals.data(),
+                                            c_literal_lens.data(),
+                                            c_literals.size(),
+                                            min_gram,
+                                            max_gram);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_tokenize: {}",
@@ -1105,12 +1116,13 @@ struct TantivyIndexWrapper {
         AssertInfo(res.result_->value.tag == Value::Tag::RustStringArray,
                    "TantivyIndexWrapper.ngram_tokenize: invalid result type");
 
-        // Convert RustStringArray to std::vector<std::string>
+        // Convert RustStringArray (byte strings with explicit lengths, not
+        // NUL-terminated) to std::vector<std::string>
         auto& rust_array = res.result_->value.rust_string_array._0;
         std::vector<std::string> result;
         result.reserve(rust_array.len);
         for (size_t i = 0; i < rust_array.len; i++) {
-            result.emplace_back(rust_array.array[i]);
+            result.emplace_back(rust_array.array[i], rust_array.lens[i]);
         }
         return result;
     }
@@ -1118,8 +1130,8 @@ struct TantivyIndexWrapper {
     // Get the posting list for a single ngram term.
     void
     ngram_term_posting_list(const std::string& term, void* bitset) {
-        auto array =
-            tantivy_ngram_term_posting_list(reader_, term.c_str(), bitset);
+        auto array = tantivy_ngram_term_posting_list(
+            reader_, term.data(), term.size(), bitset);
         auto res = RustResultWrapper(array);
         AssertInfo(res.result_->success,
                    "TantivyIndexWrapper.ngram_term_posting_list: {}",

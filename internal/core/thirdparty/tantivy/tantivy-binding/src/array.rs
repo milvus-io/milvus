@@ -98,33 +98,32 @@ pub extern "C" fn free_rust_array_i64(array: RustArrayI64) {
     }
 }
 
-/// Array of C strings (char*) for returning Vec<String> to C++
+/// Array of byte strings for returning Vec<String> to C++. Each element is
+/// `array[i]` with `lens[i]` bytes, NOT NUL-terminated: the strings are index
+/// terms that may legitimately contain interior NUL bytes, which a C string
+/// cannot carry. `array` and `lens` are boxed slices of `len` elements.
 #[repr(C)]
 pub struct RustStringArray {
     pub array: *mut *mut c_char,
+    pub lens: *mut size_t,
     pub len: size_t,
-    pub cap: size_t,
 }
 
 impl RustStringArray {
     pub fn from_vec(vec: Vec<String>) -> RustStringArray {
         let len = vec.len();
-        let cap = vec.capacity();
-
-        // Convert Vec<String> to Vec<*mut c_char>
-        let c_strings: Vec<*mut c_char> = vec
-            .into_iter()
-            .map(|s| create_string(&s) as *mut c_char)
-            .collect();
-
-        let c_len = c_strings.len();
-        let c_cap = c_strings.capacity();
-        let ptr = c_strings.leak().as_mut_ptr();
+        let mut ptrs: Vec<*mut c_char> = Vec::with_capacity(len);
+        let mut lens: Vec<size_t> = Vec::with_capacity(len);
+        for s in vec {
+            let bytes = s.into_bytes().into_boxed_slice();
+            lens.push(bytes.len());
+            ptrs.push(Box::into_raw(bytes) as *mut c_char);
+        }
 
         RustStringArray {
-            array: ptr,
-            len: c_len,
-            cap: c_cap,
+            array: Box::into_raw(ptrs.into_boxed_slice()) as *mut *mut c_char,
+            lens: Box::into_raw(lens.into_boxed_slice()) as *mut size_t,
+            len,
         }
     }
 }
@@ -133,8 +132,8 @@ impl std::default::Default for RustStringArray {
     fn default() -> Self {
         RustStringArray {
             array: std::ptr::null_mut(),
+            lens: std::ptr::null_mut(),
             len: 0,
-            cap: 0,
         }
     }
 }
@@ -147,15 +146,19 @@ impl From<Vec<String>> for RustStringArray {
 
 #[no_mangle]
 pub extern "C" fn free_rust_string_array(array: RustStringArray) {
-    let RustStringArray { array, len, cap } = array;
+    let RustStringArray { array, lens, len } = array;
     if array.is_null() {
         return;
     }
     unsafe {
-        let vec = Vec::from_raw_parts(array, len, cap);
-        for s in vec {
-            if !s.is_null() {
-                free_rust_string(s);
+        let ptrs = Box::from_raw(std::slice::from_raw_parts_mut(array, len));
+        let lens = Box::from_raw(std::slice::from_raw_parts_mut(lens, len));
+        for (&p, &l) in ptrs.iter().zip(lens.iter()) {
+            if !p.is_null() {
+                drop(Box::from_raw(std::slice::from_raw_parts_mut(
+                    p as *mut u8,
+                    l,
+                )));
             }
         }
     }
@@ -324,4 +327,49 @@ pub extern "C" fn free_test_ptr(ptr: *mut c_void) {
         return;
     }
     free_binding::<u32>(ptr);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CStr;
+
+    use super::*;
+
+    // An error message may quote the caller's literal, which can carry an
+    // interior NUL. Building the C string must not panic: this conversion
+    // happens inside `extern "C"` frames, where a panic aborts the process.
+    #[test]
+    fn test_error_message_with_interior_nul_does_not_panic() {
+        let err: error::Result<()> = Err(error::TantivyBindingError::InternalError(
+            "bad \0 literal".to_string(),
+        ));
+        let result = RustResult::from(err);
+        assert!(!result.success);
+        let msg = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert!(msg.contains("\\0"), "unexpected message: {}", msg);
+        free_rust_result(result);
+
+        let result = RustResult::from_error("a\0b".to_string());
+        let msg = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert_eq!(msg, "a\\0b");
+        free_rust_result(result);
+    }
+
+    #[test]
+    fn test_rust_string_array_keeps_interior_nul() {
+        let array =
+            RustStringArray::from_vec(vec!["ab\0c".to_string(), String::new(), "测试".to_string()]);
+        assert_eq!(array.len, 3);
+        let got: Vec<Vec<u8>> = (0..array.len)
+            .map(|i| unsafe {
+                std::slice::from_raw_parts(*array.array.add(i) as *const u8, *array.lens.add(i))
+                    .to_vec()
+            })
+            .collect();
+        assert_eq!(got[0], b"ab\0c");
+        assert!(got[1].is_empty());
+        assert_eq!(got[2], "测试".as_bytes());
+        free_rust_string_array(array);
+        free_rust_string_array(RustStringArray::default());
+    }
 }

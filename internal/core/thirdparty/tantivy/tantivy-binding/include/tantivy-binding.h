@@ -34,11 +34,14 @@ struct RustArrayI64 {
   size_t cap;
 };
 
-/// Array of C strings (char*) for returning Vec<String> to C++
+/// Array of byte strings for returning Vec<String> to C++. Each element is
+/// `array[i]` with `lens[i]` bytes, NOT NUL-terminated: the strings are index
+/// terms that may legitimately contain interior NUL bytes, which a C string
+/// cannot carry. `array` and `lens` are boxed slices of `len` elements.
 struct RustStringArray {
   char **array;
+  size_t *lens;
   size_t len;
-  size_t cap;
 };
 
 struct Value {
@@ -375,17 +378,22 @@ RustResult tantivy_json_prefix_query(void *ptr,
 
 RustResult tantivy_ngram_match_query(void *ptr,
                                      const char *literal,
+                                     uintptr_t literal_len,
                                      uintptr_t min_gram,
                                      uintptr_t max_gram,
                                      void *bitset);
 
 RustResult tantivy_ngram_tokenize(void *ptr,
                                   const char *const *literals,
+                                  const uintptr_t *literal_lens,
                                   uintptr_t literals_len,
                                   uintptr_t min_gram,
                                   uintptr_t max_gram);
 
-RustResult tantivy_ngram_term_posting_list(void *ptr, const char *term, void *bitset);
+RustResult tantivy_ngram_term_posting_list(void *ptr,
+                                           const char *term,
+                                           uintptr_t term_len,
+                                           void *bitset);
 
 RustResult tantivy_match_query(void *ptr,
                                const char *query,

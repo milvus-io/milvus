@@ -999,9 +999,13 @@ NgramInvertedIndex::ExecutePhase2(const std::string& literal,
                                   TargetBitmap& candidates,
                                   int64_t segment_offset,
                                   int64_t batch_size) {
-    // InnerMatch with short literal doesn't need post-filter
+    // InnerMatch with a literal of at most max_gram chars needs no
+    // post-filter: the literal is itself an indexed gram and rust answers it
+    // with an exact term query. Count chars, as rust does; byte length would
+    // send every short multi-byte (e.g. CJK) literal through a redundant
+    // full post-filter.
     if (op_type == proto::plan::OpType::InnerMatch &&
-        literal.length() <= max_gram_) {
+        Utf8LiteralLength(literal) <= max_gram_) {
         return;
     }
 
