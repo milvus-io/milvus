@@ -9085,7 +9085,8 @@ type streamingConfig struct {
 	FlushL0MaxSize     ParamItem `refreshable:"true"`
 
 	// summary store retention
-	SummaryMaxBytesPerPChannel ParamItem `refreshable:"true"`
+	SummaryMaxBytesPerPChannel   ParamItem `refreshable:"true"`
+	SummaryCacheBytesPerPChannel ParamItem `refreshable:"false"`
 
 	// recovery configuration.
 	WALRecoveryPersistInterval           ParamItem `refreshable:"true"`
@@ -9538,6 +9539,15 @@ materialization frontiers.`,
 		Export:       false,
 	}
 	p.SummaryMaxBytesPerPChannel.Init(base.mgr)
+
+	p.SummaryCacheBytesPerPChannel = ParamItem{
+		Key:          "streaming.summary.cacheBytesPerPChannel",
+		Version:      "3.1.0",
+		DefaultValue: "64MB",
+		Doc:          "Encoded WALSummary chunk cache budget per PChannel. Zero disables residency. Indexes, in-flight reads and decoded delivery batches are accounted separately. Applied when the WAL opens.",
+		Export:       true,
+	}
+	p.SummaryCacheBytesPerPChannel.Init(base.mgr)
 
 	p.WALRecoveryPersistInterval = ParamItem{
 		Key:     "streaming.walRecovery.persistInterval",

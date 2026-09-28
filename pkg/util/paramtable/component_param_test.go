@@ -1440,6 +1440,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 10*time.Second, params.StreamingCfg.WALRecoveryPersistInterval.GetAsDurationByParse())
 		assert.Equal(t, int64(16*1024*1024), params.StreamingCfg.IdempotencyMaxBytesPerWindow.GetAsSize())
 		assert.Equal(t, int64(4*1024*1024*1024), params.StreamingCfg.SummaryMaxBytesPerPChannel.GetAsSize())
+		assert.Equal(t, int64(64*1024*1024), params.StreamingCfg.SummaryCacheBytesPerPChannel.GetAsSize())
 		assert.Equal(t, 256, params.StreamingCfg.IdempotencyMaxKeyLength.GetAsInt())
 		assert.Equal(t, int64(4*1024*1024*1024), params.StreamingCfg.WALRecoveryTailLowWatermark.GetAsSize())
 		assert.Equal(t, int64(8*1024*1024*1024), params.StreamingCfg.WALRecoveryTailSoftWatermark.GetAsSize())
