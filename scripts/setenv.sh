@@ -32,6 +32,8 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 export MILVUS_WORK_DIR=$ROOT_DIR
+source "${ROOT_DIR}/scripts/sanitizer_env.sh"
+milvus_sanitizer_env "${ROOT_DIR}/internal/core/output" || return 1
 
 unameOut="$(uname -s)"
 
@@ -45,7 +47,9 @@ case "${unameOut}" in
       fi
 
       LIBJEMALLOC=$PWD/internal/core/output/lib/libjemalloc.so
-      if test -f "$LIBJEMALLOC"; then
+      if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
+        echo "ThreadSanitizer enabled; jemalloc preload disabled"
+      elif test -f "$LIBJEMALLOC"; then
         export LD_PRELOAD="$LIBJEMALLOC"
       else
         echo "WARN: Cannot find $LIBJEMALLOC"
