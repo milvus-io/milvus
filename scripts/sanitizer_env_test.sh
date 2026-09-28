@@ -64,6 +64,22 @@ for conflict in asan race preload; do
     )
 done
 
+# Installed Archer metadata must activate OMPT and fail if the plugin is missing.
+(
+    unset USE_ASAN GOFLAGS LD_PRELOAD
+    export USE_TSAN=ON OMP_TOOL=disabled OMP_TOOL_LIBRARIES=/wrong/tool.so
+    printf 'llvm-20\n' > "${test_root}/tsan/lib/milvus-archer"
+    if milvus_sanitizer_env "${test_root}/tsan"; then
+        echo 'Expected missing Archer libraries to fail' >&2
+        exit 1
+    fi
+    touch "${test_root}/tsan/lib/libarcher.so" "${test_root}/tsan/lib/libomp.so.5"
+    milvus_sanitizer_env "${test_root}/tsan"
+    [[ "${OMP_TOOL}" == enabled ]]
+    [[ "${OMP_TOOL_LIBRARIES}" == "${test_root}/tsan/lib/libarcher.so" ]]
+    [[ "${TSAN_OPTIONS}" == *ignore_noninstrumented_modules=1* ]]
+)
+
 # Verify configure-time guards without compiling C/C++ or resolving dependencies.
 cmake_module="${scripts_dir}/../internal/core/cmake/Sanitizers.cmake"
 printf 'include("%s")\n' "${cmake_module}" > "${test_root}/check.cmake"

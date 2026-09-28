@@ -4,6 +4,8 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -18,22 +20,46 @@ PACKAGES = {
 FLAGS = {
     "tools.build:cflags": ["-g", "-fno-omit-frame-pointer", "-fsanitize=thread"],
     "tools.build:cxxflags": ["-g", "-fno-omit-frame-pointer", "-fsanitize=thread"],
-    "tools.build:sharedlinkflags": ["-fsanitize=thread"],
-    "tools.build:exelinkflags": ["-fsanitize=thread"],
+    "tools.build:sharedlinkflags": ["-fsanitize=thread", "-shared-libsan"],
+    "tools.build:exelinkflags": ["-fsanitize=thread", "-shared-libsan"],
 }
 MANIFEST = "tsan-dependencies.json"
 POLICY_CONF = "user.milvus:tsan_dependency_policy"
 
 
 def profile():
-    lines = ["[options]", "geos/*:shared=True", "gtest/*:shared=True", "", "[conf]"]
+    lines = ["[settings]"]
+    for pattern in ["&", *[f"{name}/*" for name in PACKAGES]]:
+        lines += [
+            f"{pattern}:compiler=clang",
+            f"{pattern}:compiler.version=20",
+            f"{pattern}:compiler.libcxx=libstdc++11",
+            f"{pattern}:compiler.cppstd=20",
+        ]
+    # OpenBLAS' GCC/Fortran OpenMP backend would introduce a second runtime.
+    # Its pthread backend retains parallel BLAS without linking libgomp.
+    lines += [
+        "",
+        "[options]",
+        "geos/*:shared=True",
+        "gtest/*:shared=True",
+        "openblas/*:use_openmp=False",
+        "",
+        "[conf]",
+    ]
     # Compiler flags normally do not affect Conan package IDs. Include them
     # explicitly so a prebuilt non-TSan package cannot satisfy this profile.
     lines.append("user.milvus:sanitizer=thread")
     lines.append("user.milvus:tsan_runtime_dependencies=True")
     lines.append("tools.info.package_id:confs=" + json.dumps([*FLAGS, POLICY_CONF]))
+    root = os.environ.get("MILVUS_LLVM_ROOT", "/usr/lib/llvm-20")
+    for pattern in ["&", *[f"{name}/*" for name in PACKAGES]]:
+        lines.append(
+            f"{pattern}:tools.build:compiler_executables="
+            + json.dumps({"c": f"{root}/bin/clang", "cpp": f"{root}/bin/clang++"})
+        )
     for package in PACKAGES:
-        lines.append(f"{package}/*:{POLICY_CONF}=2")
+        lines.append(f"{package}/*:{POLICY_CONF}=3")
         for key, flags in FLAGS.items():
             lines.append(f"{package}/*:{key}+=" + json.dumps(flags))
         lines.append(f"{package}/*:tools.build:skip_test=True")
@@ -44,7 +70,7 @@ def post_generate(conanfile, **kwargs):
     """Preserve flags overwritten by Folly's recipe after CMakeToolchain.generate()."""
     if conanfile.name != "folly" or conanfile.context != "host":
         return
-    if conanfile.conf.get(POLICY_CONF) != 2:
+    if conanfile.conf.get(POLICY_CONF) != 3:
         return
     toolchain = Path(conanfile.generators_folder) / "conan_toolchain.cmake"
     if not toolchain.is_file():
@@ -136,14 +162,41 @@ def verify(lib_dir):
         print(f"Verified TSan dependency: {name} ({package['reference']})")
 
 
+def verify_runtime(lib_dir):
+    """Reject missing OMPT tools, mixed runtimes and unresolved ELF dependencies."""
+    if (lib_dir / "milvus-archer").read_text().strip() != "llvm-20":
+        raise ValueError("Missing LLVM 20/Archer build metadata")
+    for name in [
+        "libarcher.so",
+        "libomp.so.5",
+        f"libclang_rt.tsan-{os.uname().machine}.so",
+    ]:
+        if not (lib_dir / name).is_file():
+            raise ValueError(f"Missing LLVM runtime: {name}")
+    env = {**os.environ, "LD_LIBRARY_PATH": str(lib_dir.resolve())}
+    paths = {path.resolve() for path in lib_dir.glob("*.so*")}
+    binary = lib_dir.parent / "bin/milvus"
+    if binary.is_file():
+        paths.add(binary.resolve())
+    for path in sorted(paths):
+        output = subprocess.check_output(["ldd", str(path)], text=True, env=env)
+        if re.search(r"lib(?:gomp|tsan)\.so|not found", output):
+            raise ValueError(
+                f"Invalid LLVM/Archer runtime dependencies for {path}:\n{output}"
+            )
+    print(f"Verified LLVM/Archer runtime closure: {len(paths)} ELF files")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["profile", "verify"])
+    parser.add_argument("command", choices=["profile", "verify", "verify-runtime"])
     parser.add_argument("lib_dir", type=Path, nargs="?")
     args = parser.parse_args()
     if args.command == "profile":
         print(profile(), end="")
     elif args.lib_dir is None:
         parser.error("verify requires a library directory")
+    elif args.command == "verify-runtime":
+        verify_runtime(args.lib_dir)
     else:
         verify(args.lib_dir)

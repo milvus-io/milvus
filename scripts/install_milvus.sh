@@ -30,6 +30,11 @@ for marker in "$PWD/internal/core/output/lib/milvus-sanitizer" "$PWD/internal/co
         cp "$marker" "$LIBRARY_PATH/"
     fi
 done
+for metadata in milvus-archer tsan-dependencies.json; do
+    if [[ -f "$PWD/internal/core/output/lib/$metadata" ]]; then
+        cp "$PWD/internal/core/output/lib/$metadata" "$LIBRARY_PATH/"
+    fi
+done
 
 PYUDF_WHEEL_DIR="$PWD/cmake_build/runtime/pyudf/wheels"
 PYUDF_RUNTIME_DIR="$LIBRARY_PATH/pyudf"
