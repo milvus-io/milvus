@@ -228,3 +228,30 @@ pub extern "C" fn free_test_ptr(ptr: *mut c_void) {
     }
     free_binding::<u32>(ptr);
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::CStr;
+
+    use super::*;
+
+    // An error message may quote the caller's literal, which can carry an
+    // interior NUL. Building the C string must not panic: this conversion
+    // happens inside `extern "C"` frames, where a panic aborts the process.
+    #[test]
+    fn test_error_message_with_interior_nul_does_not_panic() {
+        let err: error::Result<()> = Err(error::TantivyBindingError::InternalError(
+            "bad \0 literal".to_string(),
+        ));
+        let result = RustResult::from(err);
+        assert!(!result.success);
+        let msg = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert!(msg.contains("\\0"), "unexpected message: {}", msg);
+        free_rust_result(result);
+
+        let result = RustResult::from_error("a\0b".to_string());
+        let msg = unsafe { CStr::from_ptr(result.error) }.to_str().unwrap();
+        assert_eq!(msg, "a\\0b");
+        free_rust_result(result);
+    }
+}

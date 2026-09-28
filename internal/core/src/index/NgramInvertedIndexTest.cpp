@@ -1597,6 +1597,80 @@ TEST(NgramPatternMatchConsistency, SingleMultiByteCharLiterals) {
     }
 }
 
+// On 2.6 the tantivy string FFI truncates at NUL on both the write and the
+// query side, so a literal with an interior NUL cannot be served by the
+// index: it must fall back to brute force and still produce the right rows.
+// The InnerMatch case is <= max_gram chars (no post-filter); served by the
+// index it would have returned "xabzz" as a false positive.
+TEST(NgramPatternMatchConsistency, EmbeddedNulLiteralFallsBack) {
+    const std::string nul_row("xab\0cy", 6);
+    const std::string nul_short("ab\0c", 4);
+    boost::container::vector<std::string> test_data = {
+        nul_row, "xabzz", "hello", nul_short};
+
+    struct TestCase {
+        std::string literal;
+        proto::plan::OpType op_type;
+        std::vector<bool> expected;
+    };
+    std::vector<TestCase> test_cases = {
+        {nul_short,
+         proto::plan::OpType::InnerMatch,
+         {true, false, false, true}},
+        {nul_short,
+         proto::plan::OpType::PrefixMatch,
+         {false, false, false, true}},
+        {std::string("b\0c", 3),
+         proto::plan::OpType::PostfixMatch,
+         {false, false, false, true}},
+        {"%xa%" + std::string("\0cy", 3) + "%",
+         proto::plan::OpType::Match,
+         {true, false, false, false}},
+    };
+    for (const auto& test_case : test_cases) {
+        test_ngram_with_data(test_data,
+                             test_case.literal,
+                             test_case.op_type,
+                             test_case.expected,
+                             /*forward_to_br=*/true);
+    }
+}
+
+// The C++ gate is the primary defense; this pins the second one: a literal
+// that reaches the rust binding below min_gram must come back as a
+// SegcoreError, not a panic. The binding is entered through `extern "C"`
+// frames, where a panic cannot unwind and aborts the QueryNode.
+TEST(NgramPatternMatchConsistency, ShortLiteralAtRustBoundaryThrows) {
+    auto path = TestLocalPath + "ngram_short_literal_ffi/";
+    boost::filesystem::remove_all(path);
+    boost::filesystem::create_directories(path);
+
+    milvus::tantivy::TantivyIndexWrapper wrapper(
+        "ngram", path.c_str(), uintptr_t{2}, uintptr_t{3});
+    std::vector<std::string> data = {"订单（已取消）", "hello world"};
+    wrapper.add_data<std::string>(data.data(), data.size(), 0);
+    wrapper.finish();
+    wrapper.create_reader(milvus::index::SetBitsetSealed);
+
+    const std::string one_char_three_bytes = "订";
+    ASSERT_EQ(one_char_three_bytes.size(), 3);
+
+    {
+        TargetBitmap bitset(data.size());
+        EXPECT_THROW(
+            wrapper.ngram_match_query(one_char_three_bytes, 2, 3, &bitset),
+            milvus::SegcoreError);
+        EXPECT_THROW(wrapper.ngram_match_query("a", 2, 3, &bitset),
+                     milvus::SegcoreError);
+    }
+
+    // the reader is still usable afterwards
+    TargetBitmap bitset(data.size());
+    wrapper.ngram_match_query("订单", 2, 3, &bitset);
+    EXPECT_TRUE(bitset[0]);
+    EXPECT_FALSE(bitset[1]);
+}
+
 TEST(NgramPatternMatchConsistency, EscapeSequences) {
     // Test data with special characters
     boost::container::vector<std::string> test_data = {
