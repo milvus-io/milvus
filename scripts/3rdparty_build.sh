@@ -26,6 +26,7 @@ usage() {
   echo "Usage: $0 [-t BUILD_TYPE] [-h]"
   echo "  -t BUILD_TYPE     Set build type (Debug/Release/RelWithDebInfo/MinSizeRel, default: Release)"
   echo "  -h                Show this help message"
+  echo "  CONAN_HOST_PROFILE: optional host profile (e.g. internal/core/conan/profiles/tsan)"
   echo ""
   echo "Examples:"
   echo "  $0                          # Build with default settings (Release)"
@@ -71,12 +72,19 @@ esac
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 CPP_SRC_DIR="${ROOT_DIR}/internal/core"
 BUILD_OUTPUT_DIR="${ROOT_DIR}/cmake_build"
+CONAN_PROFILE_ARGS=()
+if [[ -n "${CONAN_HOST_PROFILE:-}" ]]; then
+  if [[ "${CONAN_HOST_PROFILE}" != /* && -f "${CONAN_HOST_PROFILE}" ]]; then
+    CONAN_HOST_PROFILE="$(cd "$(dirname "${CONAN_HOST_PROFILE}")" && pwd)/$(basename "${CONAN_HOST_PROFILE}")"
+  fi
+  CONAN_PROFILE_ARGS=(-pr:h "${CONAN_HOST_PROFILE}")
+fi
 
 if [[ ! -d ${BUILD_OUTPUT_DIR} ]]; then
   mkdir ${BUILD_OUTPUT_DIR}
 fi
 
-source ${ROOT_DIR}/scripts/setenv.sh
+source ${ROOT_DIR}/scripts/setenv.sh || exit 1
 
 # Allow overriding the Conan binary via CONAN_CMD, e.g. for developers who
 # keep Conan 1.x as their default `conan` (for release-2.5/2.6) but need 2.x
@@ -266,7 +274,7 @@ def post_package(conanfile, **kwargs):
         conanfile.output.info("Fixed macOS rpaths for: %s" % ", ".join(fixed))
 HOOK_EOF
 
-    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} || { echo 'conan install failed'; exit 1; }
+    "$CONAN" install ${CPP_SRC_DIR} ${CONAN_ARGS} "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     ;;
   Linux*)
     if [ -f /etc/os-release ]; then
@@ -277,10 +285,13 @@ HOOK_EOF
     echo "Running on ${OS_NAME}"
     export CPU_TARGET=avx
     GCC_VERSION=`gcc -dumpversion`
-    if [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
-      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
+    if [[ -n "${CONAN_HOST_PROFILE:-}" ]]; then
+      # An explicit profile owns compiler/ABI selection (including Clang).
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
+    elif [[ `gcc -v 2>&1 | sed -n 's/.*\(--with-default-libstdcxx-abi\)=\(\w*\).*/\2/p'` == "gcc4" ]]; then
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     else
-      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 || { echo 'conan install failed'; exit 1; }
+      "$CONAN" install ${CPP_SRC_DIR} --output-folder conan --build=missing -s build_type=${BUILD_TYPE} -s compiler.version=${GCC_VERSION} -s compiler.libcxx=libstdc++11 -s compiler.cppstd=20 -s:b compiler.cppstd=20 "${CONAN_PROFILE_ARGS[@]}" || { echo 'conan install failed'; exit 1; }
     fi
     ;;
   *)
