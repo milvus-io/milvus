@@ -56,6 +56,18 @@ milvus_sanitizer_env() {
     else
         unset LD_PRELOAD
     fi
+    # The installed marker distinguishes LLVM/Archer builds from legacy GCC ones.
+    if [[ -f "${prefix}/lib/milvus-archer" ]]; then
+        if [[ ! -f "${prefix}/lib/libarcher.so" || ! -f "${prefix}/lib/libomp.so.5" ]]; then
+            echo "ERROR: installed LLVM/Archer runtime is incomplete" >&2
+            return 1
+        fi
+        export OMP_TOOL=enabled
+        export OMP_TOOL_LIBRARIES="${prefix}/lib/libarcher.so"
+        # Upstream Archer excludes uninstrumented runtime internals. Native
+        # positive/negative probes guard against accidentally hiding application races.
+        export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}ignore_noninstrumented_modules=1:allow_addr2line=1"
+    fi
     # A detected race must fail the runner; user options may add symbolizer paths.
     export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}halt_on_error=1:exitcode=66"
 }

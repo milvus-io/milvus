@@ -61,6 +61,9 @@ fi
 
 if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
     BUILD_ARGS="${BUILD_ARGS} --build-arg MILVUS_JEMALLOC_LIB="
+    if [[ -f "${toplevel}/lib/milvus-archer" ]]; then
+        BUILD_ARGS="${BUILD_ARGS} --build-arg MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so --build-arg MILVUS_TSAN_OPTIONS=${TSAN_OPTIONS}"
+    fi
 fi
 
 pushd "${toplevel}"
