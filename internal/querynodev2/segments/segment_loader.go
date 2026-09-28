@@ -91,6 +91,9 @@ type Loader interface {
 	// GetChunkManager returns the chunk manager for remote storage access.
 	GetChunkManager() storage.ChunkManager
 
+	// GetLocalDiskUsage returns the cached size of the local storage directory.
+	GetLocalDiskUsage() (int64, error)
+
 	// ReopenSegments update segment data according to new load info.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
@@ -204,6 +207,10 @@ type segmentLoader struct {
 }
 
 var _ Loader = (*segmentLoader)(nil)
+
+func (loader *segmentLoader) GetLocalDiskUsage() (int64, error) {
+	return loader.duf.GetDiskUsage()
+}
 
 func (loader *segmentLoader) Load(ctx context.Context,
 	collectionID int64,

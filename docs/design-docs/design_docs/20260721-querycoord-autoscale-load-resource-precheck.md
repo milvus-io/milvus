@@ -35,9 +35,10 @@ failures or slow convergence after submitting the request.
 
 QueryCoord knows the requested partitions, fields, indexes, replica placement,
 and segment metadata. It can estimate the demand at the point where the load
-configuration is accepted. QueryNodes supply physical capacity and usage;
-the external control plane owns instance selection, node provisioning,
-resource-group placement, cooldown, and product limits.
+configuration is accepted. QueryNodes supply memory capacity and usage together
+with local-storage quota and directory usage. The external control plane owns
+instance selection, node provisioning, resource-group placement, cooldown,
+and product limits.
 
 The design gives the caller an early capacity decision and gives the control
 plane a demand signal in bytes. This keeps admission close to the load
@@ -188,8 +189,8 @@ adding a second replica in the same RG requires `40 + 120 = 160 MiB`.
 ### Capacity and admission
 
 With tiered eviction enabled, QueryCoord returns the estimated demand without
-collecting QN capacity metrics or checking physical availability and global
-autoscale limits. Existing evictable caches make physical usage unsuitable for
+collecting QN capacity metrics or checking node availability and global
+autoscale limits. Existing evictable caches make current usage unsuitable for
 this admission decision. Successful broadcasts still add the estimated demand
 to the counters; Worker QN enforces its loading-stage resource guard.
 
@@ -203,16 +204,27 @@ deduplicated; collection uses at most 16 concurrent calls and one attempt per
 node, with a shared ten-second timeout for the collection round. Any RPC,
 status, parsing, empty eligible-node set, or required-capacity failure
 invalidates the capacity evaluation while preserving successfully estimated demand.
+Each Worker QN reports its configured `LOCAL_STORAGE_SIZE` and cached
+local-storage directory usage in `system_info`, both in bytes. Missing or invalid
+local-storage data invalidates the capacity evaluation. Filesystem-wide disk
+metrics remain available for monitoring but do not enter this precheck.
+Worker QNs sharing one filesystem need per-QN `LOCAL_STORAGE_SIZE` quotas
+consistent with that shared capacity. The precheck follows each Worker's
+configured limit and does not reserve or coordinate filesystem free space
+between Workers.
 
 Let `hm` be `queryNodeMemoryHighWaterLevel` and `hd` be the parsed
 `maxDiskUsagePercentage` ratio:
 
 ```text
-node_memory_available = physical_memory * hm - memory_usage
-node_disk_available   = max(physical_disk * hd - disk_usage, 0)
+node_memory_capacity = physical_memory
+node_disk_capacity = LOCAL_STORAGE_SIZE
+node_memory_available = node_memory_capacity * hm - memory_usage
+node_disk_available = max(node_disk_capacity * hd - local_directory_usage, 0)
 
 rg_available = sum(node_available in RG)
-rg_usable_capacity = sum(node_physical_capacity in RG) * admission_ratio
+rg_usable_capacity.memory = sum(node_memory_capacity * hm in RG)
+rg_usable_capacity.disk = sum(node_disk_capacity * hd in RG)
 
 shortage(rg) = max(required(rg) - rg_available, 0)
 total_shortage = sum(shortage(rg))
@@ -227,7 +239,8 @@ If a shortage exists and autoscale admission is enabled, the request may use
 future usable capacity within global limits:
 
 ```text
-remaining_capacity = max(global_limit - global_physical_capacity, 0)
+remaining_capacity.memory = max(maxMemoryLimit - global_physical_memory_capacity, 0)
+remaining_capacity.disk = max(maxDiskLimit - global_local_storage_capacity, 0)
 usable_headroom.memory = remaining_capacity.memory * hm
 usable_headroom.disk   = remaining_capacity.disk * hd
 
@@ -235,9 +248,10 @@ admit if total_shortage.memory <= usable_headroom.memory
      and total_shortage.disk   <= usable_headroom.disk
 ```
 
-Global physical capacity includes online, non-stopping Worker QNs. The limits express a
-cluster-wide upper bound; the control plane supplies the actual nodes and
-assigns them to RGs.
+Global capacity includes online, non-stopping Worker QNs. Memory sums their
+physical memory capacity; disk sums their `LOCAL_STORAGE_SIZE` quotas. The
+limits express a cluster-wide upper bound; the control plane supplies the
+actual nodes and assigns them to RGs.
 
 For a rejected request, the suggestion uses threshold-adjusted RG capacity:
 
@@ -250,8 +264,8 @@ A positive shortage with zero capacity yields 100 percent. The result is a
 capacity hint, not an exact instance shape or node count.
 
 Capacity samples are observations, not reservations. Concurrent collection
-loads can see the same availability or headroom, and physical usage can lag
-accepted demand. RG aggregate admission also does not guarantee that an
+loads can see the same availability or headroom, and local directory usage
+can lag accepted demand. RG aggregate admission also does not guarantee that an
 individual segment fits a particular node. Worker QN's loading guard remains
 responsible for those node-level decisions.
 
@@ -323,7 +337,7 @@ All four settings are refreshable:
 | `precheckEnabled` | Enable resource precheck and accepted-demand recording. |
 | `enabled` | Allow admission using global autoscale upper bounds. |
 | `maxMemoryLimit` | Maximum global QN physical memory capacity after scaling, in GiB. |
-| `maxDiskLimit` | Maximum global QN physical disk capacity after scaling, in GiB. |
+| `maxDiskLimit` | Maximum sum of Worker QN `LOCAL_STORAGE_SIZE` quotas after scaling, in GiB. |
 
 With precheck disabled, normal load behavior applies. With precheck enabled
 and tiered eviction disabled, admission uses current capacity unless autoscale
@@ -334,14 +348,14 @@ provision resources. With tiered eviction enabled, precheck estimates demand
 only, regardless of the autoscale switch and capacity limits.
 
 Configured capacity limits use GiB: `1 GiB = 1024^3 bytes`. QN `GetMetrics`
-disk capacity and usage use decimal GB (`1 GB = 1e9 bytes`) and are converted
-back to bytes before comparison. Memory metrics, load demand counters, and all
-admission calculations use bytes.
+local-storage quota and directory usage, memory metrics, load demand counters,
+and all admission calculations use bytes. Filesystem-wide disk metrics use
+decimal GB (`1 GB = 1e9 bytes`) for monitoring and do not enter admission.
 
 Deployments should keep `queryNodeMemoryHighWaterLevel` no higher than the
 non-tiered Worker guard's `overloadedMemoryThresholdPercentage`. QueryCoord
-does not enforce this relationship. A QN-local disk cap below reported physical
-capacity is also enforced by the Worker guard.
+does not enforce this relationship. The Worker guard remains authoritative for
+individual loads, including its in-flight resource reservations.
 
 The public load request shape is unchanged. The scale-out suggestion uses
 `commonpb.Status.ExtraInfo`; clients may consume it alongside the error reason.
@@ -356,8 +370,10 @@ Unit tests cover the following behavior:
   retained replicas, and incoming replicas;
 - complete segment metadata lookup, V3 column-group summaries, and
   group-preserving field selection;
-- current-capacity and global-limit decisions, negative memory availability,
-  percentage rounding, and zero-capacity handling;
+- current-capacity and global-limit decisions using Worker QN local-storage
+  quotas independently of filesystem-wide disk metrics, including nodes that
+  share a filesystem, negative memory availability, percentage rounding, and
+  zero-capacity handling;
 - shared final/loading estimates, mmap and tiered settings, JSON/Text
   statistics, and Text validity bitmap memory;
 - bounded metrics collection, snapshot reuse, dependency failures, and

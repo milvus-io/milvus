@@ -4294,7 +4294,7 @@ Set to 0 to disable the penalty period.`,
 		Key:          "queryCoord.autoscale.maxDiskLimit",
 		Version:      "3.0.0",
 		DefaultValue: "0",
-		Doc:          "Maximum global QueryNode disk capacity after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.",
+		Doc:          "Maximum sum of Worker QueryNode LOCAL_STORAGE_SIZE after autoscale, unit: GiB (1 GiB = 1024^3 bytes). 0 means autoscale cannot add disk capacity.",
 		Export:       true,
 	}
 	p.AutoscaleMaxDiskLimit.Init(base.mgr)
