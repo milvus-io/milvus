@@ -30,6 +30,12 @@ namespace exec {
 
 class PhyMatchFilterExpr : public Expr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return inputs_.size() == 1 && inputs_[0] &&
+               inputs_[0]->SupportOffsetInput();
+    }
+
     PhyMatchFilterExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::MatchExpr>& expr,

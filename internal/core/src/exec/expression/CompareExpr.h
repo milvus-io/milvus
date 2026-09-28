@@ -144,6 +144,11 @@ struct CompareElementFunc {
 
 class PhyCompareFilterExpr : public Expr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyCompareFilterExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::CompareExpr>& expr,

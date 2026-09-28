@@ -30,6 +30,11 @@ namespace exec {
 
 class PhyValueExpr : public Expr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyValueExpr(const std::vector<std::shared_ptr<Expr>>& input,
                  const std::shared_ptr<const milvus::expr::ValueExpr> expr,
                  const std::string& name,

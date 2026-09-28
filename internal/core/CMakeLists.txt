@@ -451,7 +451,16 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/common/
         FILES_MATCHING PATTERN "*_c.h"
 )
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/common/AnnFusingPlugin.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/src/common/DataType.h
         DESTINATION include/common
+        COMPONENT AnnFusingSDK
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/exec/ExprExecPath.h
+        DESTINATION include/exec
+        COMPONENT AnnFusingSDK
+)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/index/ScalarIndexType.h
+        DESTINATION include/index
         COMPONENT AnnFusingSDK
 )
 

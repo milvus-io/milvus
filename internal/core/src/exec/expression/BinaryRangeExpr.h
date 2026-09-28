@@ -265,6 +265,11 @@ struct BinaryRangeIndexFunc {
 
 class PhyBinaryRangeFilterExpr : public SegmentExpr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyBinaryRangeFilterExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::BinaryRangeFilterExpr>& expr,
@@ -298,7 +303,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     void
     DetermineExecPath() override;
 
-    std::optional<FilterSourceInfo>
+    FilterSourceInfo
     DescribeFilterSource() const override {
         return DescribeColumnFilterSource(proto::plan::Expr::kBinaryRangeExpr);
     }

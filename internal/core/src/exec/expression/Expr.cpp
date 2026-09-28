@@ -280,6 +280,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+        result->SetExprType(proto::plan::Expr::kCallExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::UnaryRangeFilterExpr>(expr)) {
         result = std::make_shared<PhyUnaryRangeFilterExpr>(
@@ -293,10 +294,12 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_consistency_level(),
             plan_options,
             context->get_enable_sub_expr_cache_write());
+        result->SetExprType(proto::plan::Expr::kUnaryRangeExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalUnaryExpr>(expr)) {
         result = std::make_shared<PhyLogicalUnaryExpr>(
             compiled_inputs, casted_expr, "PhyLogicalUnaryExpr", op_ctx);
+        result->SetExprType(proto::plan::Expr::kUnaryExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TermFilterExpr>(expr)) {
         result = std::make_shared<PhyTermFilterExpr>(
@@ -310,6 +313,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level(),
             plan_options);
+        result->SetExprType(proto::plan::Expr::kTermExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::LogicalBinaryExpr>(expr)) {
         if (casted_expr->op_type_ ==
@@ -321,9 +325,11 @@ CompileExpression(const expr::TypedExprPtr& expr,
                 casted_expr->op_type_ ==
                     milvus::expr::LogicalBinaryExpr::OpType::And,
                 op_ctx);
+            result->SetExprType(proto::plan::Expr::kBinaryExpr);
         } else {
             result = std::make_shared<PhyLogicalBinaryExpr>(
                 compiled_inputs, casted_expr, "PhyLogicalBinaryExpr", op_ctx);
+            result->SetExprType(proto::plan::Expr::kBinaryExpr);
         }
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryRangeFilterExpr>(expr)) {
@@ -337,6 +343,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level(),
             plan_options);
+        result->SetExprType(proto::plan::Expr::kBinaryRangeExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::AlwaysTrueExpr>(expr)) {
         result = std::make_shared<PhyAlwaysTrueExpr>(
@@ -347,6 +354,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+        result->SetExprType(proto::plan::Expr::kAlwaysTrueExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BinaryArithOpEvalRangeExpr>(expr)) {
         result = std::make_shared<PhyBinaryArithOpEvalRangeExpr>(
@@ -358,6 +366,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+        result->SetExprType(proto::plan::Expr::kBinaryArithOpEvalRangeExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::TimestamptzArithCompareExpr>(expr)) {
         result = std::make_shared<PhyTimestamptzArithCompareExpr>(
@@ -369,6 +378,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+        result->SetExprType(proto::plan::Expr::kTimestamptzArithCompareExpr);
     } else if (auto casted_expr =
                    std::dynamic_pointer_cast<const milvus::expr::CompareExpr>(
                        expr)) {
@@ -380,6 +390,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+        result->SetExprType(proto::plan::Expr::kCompareExpr);
     } else if (auto casted_expr =
                    std::dynamic_pointer_cast<const milvus::expr::ExistsExpr>(
                        expr)) {
@@ -393,6 +404,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level(),
             plan_options);
+        result->SetExprType(proto::plan::Expr::kExistsExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::JsonContainsExpr>(expr)) {
         result = std::make_shared<PhyJsonContainsFilterExpr>(
@@ -405,6 +417,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level(),
             plan_options);
+        result->SetExprType(proto::plan::Expr::kJsonContainsExpr);
     } else if (auto value_expr =
                    std::dynamic_pointer_cast<const milvus::expr::ValueExpr>(
                        expr)) {
@@ -417,6 +430,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+        result->SetExprType(proto::plan::Expr::kValueExpr);
     } else if (auto column_expr =
                    std::dynamic_pointer_cast<const milvus::expr::ColumnExpr>(
                        expr)) {
@@ -428,6 +442,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+        result->SetExprType(proto::plan::Expr::kColumnExpr);
     } else if (auto column_expr =
                    std::dynamic_pointer_cast<const milvus::expr::NullExpr>(
                        expr)) {
@@ -440,6 +455,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+        result->SetExprType(proto::plan::Expr::kNullExpr);
     } else if (auto casted_expr = std::dynamic_pointer_cast<
                    const milvus::expr::GISFunctionFilterExpr>(expr)) {
         result = std::make_shared<PhyGISFunctionFilterExpr>(
@@ -451,6 +467,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+        result->SetExprType(proto::plan::Expr::kGisfunctionFilterExpr);
     } else if (auto match_expr =
                    std::dynamic_pointer_cast<const milvus::expr::MatchExpr>(
                        expr)) {
@@ -462,6 +479,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_segment(),
             context->get_active_count(),
             context->query_config()->get_expr_batch_size());
+        result->SetExprType(proto::plan::Expr::kMatchExpr);
     } else if (auto bloom_filter_expr = std::dynamic_pointer_cast<
                    const milvus::expr::BloomFilterExpr>(expr)) {
         result = std::make_shared<PhyBloomFilterExpr>(
@@ -473,6 +491,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+        result->SetExprType(proto::plan::Expr::kBloomFilterExpr);
     } else if (auto roaring_filter_expr = std::dynamic_pointer_cast<
                    const milvus::expr::RoaringFilterExpr>(expr)) {
         result = std::make_shared<PhyRoaringFilterExpr>(
@@ -484,6 +503,7 @@ CompileExpression(const expr::TypedExprPtr& expr,
             context->get_active_count(),
             context->query_config()->get_expr_batch_size(),
             context->get_consistency_level());
+        result->SetExprType(proto::plan::Expr::kRoaringFilterExpr);
     } else {
         ThrowInfo(UnexpectedError, "unsupport expr: {}", expr->ToString());
     }
@@ -987,102 +1007,22 @@ EvalExprSetOverAllBatches(ExprSet& expr_set,
     return bitset;
 }
 
-std::optional<FilterSourceInfo>
+FilterSourceInfo
 SegmentExpr::DescribeColumnFilterSource(
     proto::plan::Expr::ExprCase expr_type,
     proto::plan::OpType operation,
     proto::plan::ArithOpType arith_operation) const {
-    if (IsElementLevelExpression() || !nested_path_.empty()) {
-        return std::nullopt;
-    }
     EnsureExecPathDetermined();
-    MilvusAnnFusingDataType data_type = kAnnFusingDataTypeUnknown;
-    switch (field_type_) {
-        case DataType::BOOL:
-            data_type = kAnnFusingDataTypeBool;
-            break;
-        case DataType::INT8:
-            data_type = kAnnFusingDataTypeInt8;
-            break;
-        case DataType::INT16:
-            data_type = kAnnFusingDataTypeInt16;
-            break;
-        case DataType::INT32:
-            data_type = kAnnFusingDataTypeInt32;
-            break;
-        case DataType::INT64:
-            data_type = kAnnFusingDataTypeInt64;
-            break;
-        case DataType::FLOAT:
-            data_type = kAnnFusingDataTypeFloat;
-            break;
-        case DataType::DOUBLE:
-            data_type = kAnnFusingDataTypeDouble;
-            break;
-        case DataType::STRING:
-            data_type = kAnnFusingDataTypeString;
-            break;
-        case DataType::VARCHAR:
-            data_type = kAnnFusingDataTypeVarChar;
-            break;
-        case DataType::ARRAY:
-            data_type = kAnnFusingDataTypeArray;
-            break;
-        case DataType::JSON:
-            data_type = kAnnFusingDataTypeJSON;
-            break;
-        case DataType::GEOMETRY:
-            data_type = kAnnFusingDataTypeGeometry;
-            break;
-        case DataType::TEXT:
-            data_type = kAnnFusingDataTypeText;
-            break;
-        case DataType::TIMESTAMPTZ:
-            data_type = kAnnFusingDataTypeTimestamptz;
-            break;
-        default:
-            return std::nullopt;
+    auto kind = index::ScalarIndexType::NONE;
+    if (exec_path_ == ExprExecPath::ScalarIndex) {
+        kind = pinned_index_.empty() ? index::ScalarIndexType::UNKNOWN
+                                     : index::ParseScalarIndexType(
+                                           pinned_index_.front().get()->Type());
     }
-    MilvusAnnFusingAccessPath access_path = kAnnFusingAccessPathUnknown;
-    MilvusAnnFusingIndexType index_type = kAnnFusingIndexTypeNone;
-    switch (exec_path_) {
-        case ExprExecPath::RawData:
-            access_path = kAnnFusingAccessPathRawData;
-            break;
-        case ExprExecPath::PkIndex:
-            access_path = kAnnFusingAccessPathPkIndex;
-            break;
-        case ExprExecPath::TextIndex:
-            access_path = kAnnFusingAccessPathTextIndex;
-            break;
-        case ExprExecPath::JsonStats:
-            access_path = kAnnFusingAccessPathJsonStats;
-            break;
-        case ExprExecPath::ScalarIndex: {
-            access_path = kAnnFusingAccessPathScalarIndex;
-            index_type = kAnnFusingIndexTypeUnknown;
-            if (!pinned_index_.empty()) {
-                const auto& kind = pinned_index_.front().get()->Type();
-                if (kind == "STL_SORT")
-                    index_type = kAnnFusingIndexTypeStlSort;
-                else if (kind == "BITMAP")
-                    index_type = kAnnFusingIndexTypeBitmap;
-                else if (kind == "INVERTED")
-                    index_type = kAnnFusingIndexTypeInverted;
-                else if (kind == "Trie")
-                    index_type = kAnnFusingIndexTypeTrie;
-                else if (kind == "HYBRID")
-                    index_type = kAnnFusingIndexTypeHybrid;
-            }
-            break;
-        }
-    }
-    LOG_DEBUG("ann_fusing source access={} index={} retained_index_pins={}",
-              static_cast<uint32_t>(access_path),
-              static_cast<uint32_t>(index_type),
-              pinned_index_.size());
-    return FilterSourceInfo{data_type, expr_type, operation, arith_operation,
-                            access_path, index_type};
+    // Describe the actual loaded path. No eligibility/type whitelist belongs
+    // here; the same original facts feed policy for every column expression.
+    return {
+        field_type_, expr_type, operation, arith_operation, exec_path_, kind};
 }
 
 std::optional<FieldId>
@@ -1116,23 +1056,22 @@ Expr::ConsiderAnnFusing(AnnFilterFusingRequest request) {
         !SupportOffsetInput()) {
         return false;
     }
-    const auto started = std::chrono::steady_clock::now();
-    const auto facts = DescribeFilterSource();
-    // Unknown leaves must not inherit the permissive offset-input default.
-    if (!facts) {
-        return false;
-    }
+    // Debug forcing bypasses cost policy, not the original offset capability.
+    // It must not require a policy descriptor or prepare an index for policy.
     if (request != AnnFilterFusingRequest::Auto) {
         return true;
     }
+    const auto started = std::chrono::steady_clock::now();
+    const auto facts = DescribeFilterSource();
     const auto& policy = AnnFusingPolicy::Instance();
-    const MilvusAnnFusingRuleV3 rule{sizeof(MilvusAnnFusingRuleV3),
-                                     facts->data_type,
-                                     facts->expr_type,
-                                     facts->operation,
-                                     facts->arith_operation,
-                                     facts->access_path,
-                                     facts->index_type};
+    const MilvusAnnFusingRuleV4 rule{
+        sizeof(MilvusAnnFusingRuleV4),
+        static_cast<uint32_t>(facts.data_type),
+        static_cast<uint32_t>(facts.expr_type),
+        static_cast<uint32_t>(facts.operation),
+        static_cast<uint32_t>(facts.arith_operation),
+        static_cast<uint32_t>(facts.access_path),
+        static_cast<uint32_t>(facts.index_type)};
     const bool result = policy.available() && policy.Consider(rule);
     LOG_DEBUG(
         "ann_fusing auto rule type={} expr={} op={} arith={} access={} index={} consider={} "

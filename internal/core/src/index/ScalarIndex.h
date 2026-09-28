@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "index/ScalarIndexType.h"
+
 #include <boost/dynamic_bitset.hpp>
 #include <map>
 #include <memory>
@@ -36,19 +38,6 @@ using MemFileManagerImplPtr = std::shared_ptr<MemFileManagerImpl>;
 }  // namespace milvus::storage
 
 namespace milvus::index {
-
-enum class ScalarIndexType {
-    NONE = 0,
-    BITMAP,
-    STLSORT,
-    MARISA,
-    INVERTED,
-    HYBRID,
-    JSONSTATS,
-    RTREE,
-    NGRAM,
-    FMINDEX,
-};
 
 inline std::string
 ToString(ScalarIndexType type) {
@@ -77,8 +66,12 @@ ToString(ScalarIndexType type) {
 }
 
 inline ScalarIndexType
-FromString(const std::string& type) {
-    if (type == "BITMAP") {
+ParseScalarIndexType(const std::string& type) {
+    if (type == "NONE") {
+        return ScalarIndexType::NONE;
+    } else if (type == "JSONSTATS") {
+        return ScalarIndexType::JSONSTATS;
+    } else if (type == "BITMAP") {
         return ScalarIndexType::BITMAP;
     } else if (type == "STLSORT" || type == "STL_SORT") {
         return ScalarIndexType::STLSORT;
@@ -95,8 +88,14 @@ FromString(const std::string& type) {
     } else if (type == "FMINDEX") {
         return ScalarIndexType::FMINDEX;
     } else {
-        return ScalarIndexType::NONE;
+        return ScalarIndexType::UNKNOWN;
     }
+}
+
+inline ScalarIndexType
+FromString(const std::string& type) {
+    const auto parsed = ParseScalarIndexType(type);
+    return parsed == ScalarIndexType::UNKNOWN ? ScalarIndexType::NONE : parsed;
 }
 
 template <typename T>

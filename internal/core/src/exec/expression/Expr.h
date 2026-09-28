@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include "exec/ExprExecPath.h"
+#include "index/ScalarIndexType.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -54,13 +57,6 @@ enum class FilterType { sequential = 0, random = 1 };
 
 // Execution path for expression evaluation.
 // Determines how the expression result bitmap is produced.
-enum class ExprExecPath {
-    RawData,      // brute-force scan raw data
-    ScalarIndex,  // pinned_index_ scalar index
-    PkIndex,      // segment_->pk_range / search_ids
-    TextIndex,    // segment_->GetTextIndex
-    JsonStats,    // segment_->GetJsonStats
-};
 
 inline std::vector<PinWrapper<const index::IndexBase*>>
 PinIndex(milvus::OpContext* op_ctx,
@@ -173,12 +169,12 @@ ApplyValidMask(ValidityView validity,
 // Scheduling facts, not a second operator representation. Each physical leaf
 // supplies its operation and actual access path from its own module.
 struct FilterSourceInfo {
-    MilvusAnnFusingDataType data_type;
+    DataType data_type;
     proto::plan::Expr::ExprCase expr_type;
     proto::plan::OpType operation;
     proto::plan::ArithOpType arith_operation;
-    MilvusAnnFusingAccessPath access_path;
-    MilvusAnnFusingIndexType index_type;
+    ExprExecPath access_path;
+    index::ScalarIndexType index_type;
 };
 
 class Expr : public std::enable_shared_from_this<Expr> {
@@ -195,9 +191,21 @@ class Expr : public std::enable_shared_from_this<Expr> {
 
     virtual ~Expr() = default;
 
-    virtual std::optional<FilterSourceInfo>
+    virtual FilterSourceInfo
     DescribeFilterSource() const {
-        return std::nullopt;
+        return {DataType::NONE,
+                expr_type_,
+                proto::plan::Invalid,
+                proto::plan::Unknown,
+                ExprExecPath::Unknown,
+                index::ScalarIndexType::UNKNOWN};
+    }
+
+    // Retain the original schema tag during normal expression compilation.
+    // It is descriptive metadata, never a second execution/support registry.
+    void
+    SetExprType(proto::plan::Expr::ExprCase type) {
+        expr_type_ = type;
     }
 
     virtual std::optional<FieldId>
@@ -235,7 +243,9 @@ class Expr : public std::enable_shared_from_this<Expr> {
 
     virtual bool
     SupportOffsetInput() {
-        return true;
+        // Concrete offset consumers opt in. Unknown/new nodes must not inherit
+        // permission from policy metadata or a permissive base default.
+        return false;
     }
 
     virtual std::string
@@ -322,6 +332,7 @@ class Expr : public std::enable_shared_from_this<Expr> {
     }
 
  protected:
+    proto::plan::Expr::ExprCase expr_type_{proto::plan::Expr::EXPR_NOT_SET};
     DataType type_;
     std::vector<std::shared_ptr<Expr>> inputs_;
     std::string name_;
@@ -339,7 +350,12 @@ using ExprPtr = std::shared_ptr<milvus::exec::Expr>;
  */
 class SegmentExpr : public Expr {
  public:
-    std::optional<FilterSourceInfo>
+    FilterSourceInfo
+    DescribeFilterSource() const override {
+        return DescribeColumnFilterSource(expr_type_);
+    }
+
+    FilterSourceInfo
     DescribeColumnFilterSource(
         proto::plan::Expr::ExprCase expr_type,
         proto::plan::OpType operation = proto::plan::Invalid,

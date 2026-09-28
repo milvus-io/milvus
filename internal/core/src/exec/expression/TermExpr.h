@@ -46,6 +46,11 @@ struct TermIndexFunc {
 
 class PhyTermFilterExpr : public SegmentExpr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyTermFilterExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::TermFilterExpr>& expr,

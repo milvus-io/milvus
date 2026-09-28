@@ -37,6 +37,11 @@ namespace exec {
 
 class PhyAlwaysTrueExpr : public Expr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyAlwaysTrueExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::AlwaysTrueExpr>& expr,

@@ -17,6 +17,8 @@
 #include "index/StringIndexMarisa.h"
 #include "index/StringIndexSort.h"
 #include "exec/expression/Expr.h"
+#include "exec/AnnFusingPolicy.h"
+#include "exec/expression/ConjunctExpr.h"
 #include "segcore/ChunkedSegmentSealedImpl.h"
 #include "storage/LocalChunkManagerSingleton.h"
 
@@ -312,3 +314,76 @@ TEST_F(ScalarIndexLookupViewsTest, ExprMaskAndBatchCursor) {
 
 }  // namespace
 }  // namespace milvus::index
+
+namespace milvus::exec {
+namespace {
+class MetadataProbeExpr : public Expr {
+ public:
+    MetadataProbeExpr() : Expr(DataType::BOOL, {}, "metadata-probe", nullptr) {
+    }
+    FilterSourceInfo
+    DescribeFilterSource() const override {
+        ++described;
+        return Expr::DescribeFilterSource();
+    }
+    mutable int described{0};
+};
+
+class OffsetMetadataProbeExpr : public MetadataProbeExpr {
+ public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+};
+
+TEST(AnnFusingPolicyFacts, ExecutionAndPolicyAreIndependent) {
+    MetadataProbeExpr unknown;
+    EXPECT_FALSE(unknown.SupportOffsetInput());
+    EXPECT_FALSE(unknown.ConsiderAnnFusing(AnnFilterFusingRequest::Auto));
+    EXPECT_EQ(unknown.described, 0);
+    OffsetMetadataProbeExpr supported;
+    supported.SetExprType(proto::plan::Expr::kTermExpr);
+    auto facts = supported.DescribeFilterSource();
+    EXPECT_EQ(facts.expr_type, proto::plan::Expr::kTermExpr);
+    EXPECT_EQ(facts.data_type, DataType::NONE);
+    supported.described = 0;
+    EXPECT_FALSE(supported.ConsiderAnnFusing(AnnFilterFusingRequest::Baseline));
+    EXPECT_EQ(supported.described, 0);
+    // Forcing must not inspect policy facts or bypass actual offset capability.
+    EXPECT_TRUE(
+        supported.ConsiderAnnFusing(AnnFilterFusingRequest::ExplicitFusing));
+    EXPECT_EQ(supported.described, 0);
+    EXPECT_FALSE(
+        unknown.ConsiderAnnFusing(AnnFilterFusingRequest::ExplicitFusing));
+    for (bool is_and : {true, false}) {
+        std::vector<ExprPtr> inputs{std::make_shared<OffsetMetadataProbeExpr>(),
+                                    std::make_shared<MetadataProbeExpr>()};
+        PhyConjunctFilterExpr combined(std::move(inputs), is_and, nullptr);
+        EXPECT_FALSE(combined.SupportOffsetInput());
+        EXPECT_FALSE(
+            combined.ConsiderAnnFusing(AnnFilterFusingRequest::ExplicitFusing));
+    }
+}
+
+TEST(AnnFusingPolicyFacts, UnknownIndexIsNotNoIndex) {
+    EXPECT_EQ(index::ParseScalarIndexType("STL_SORT"),
+              index::ScalarIndexType::STLSORT);
+    EXPECT_EQ(index::ParseScalarIndexType("NONE"),
+              index::ScalarIndexType::NONE);
+    EXPECT_EQ(index::ParseScalarIndexType("future-index"),
+              index::ScalarIndexType::UNKNOWN);
+    EXPECT_EQ(index::FromString("future-index"), index::ScalarIndexType::NONE);
+}
+
+TEST(AnnFusingPolicyFacts, RejectLegacyPlugin) {
+    const char* legacy = std::getenv("MILVUS_TEST_LEGACY_ANN_PLUGIN");
+    if (!legacy) {
+        GTEST_SKIP() << "frozen previous plugin not configured";
+    }
+    // No V4 symbol in the frozen V3 DSO: reject before interpreting its structs.
+    EXPECT_FALSE(AnnFusingPolicy::Initialize(legacy, "/unused-legacy-config"));
+    EXPECT_FALSE(AnnFusingPolicy::Instance().available());
+}
+}  // namespace
+}  // namespace milvus::exec

@@ -1026,7 +1026,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
         return true;
     }
 
-    std::optional<FilterSourceInfo>
+    FilterSourceInfo
     DescribeFilterSource() const override {
         return DescribeColumnFilterSource(proto::plan::Expr::kUnaryRangeExpr,
                                           expr_->op_type_);

@@ -444,6 +444,11 @@ class ShreddingArrayBsonContainsAnyWithDiffTypeExecutor {
 
 class PhyJsonContainsFilterExpr : public SegmentExpr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyJsonContainsFilterExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::JsonContainsExpr>& expr,

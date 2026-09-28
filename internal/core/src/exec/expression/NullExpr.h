@@ -30,6 +30,11 @@ namespace exec {
 
 class PhyNullExpr : public SegmentExpr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyNullExpr(const std::vector<std::shared_ptr<Expr>>& input,
                 const std::shared_ptr<const milvus::expr::NullExpr>& expr,
                 const std::string& name,

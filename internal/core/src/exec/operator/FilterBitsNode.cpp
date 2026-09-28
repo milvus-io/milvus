@@ -137,7 +137,7 @@ PhyFilterBitsNode::PhyFilterBitsNode(
                         filter->filter(), *field, exec_context);
                 }
                 chosen = ratio && AnnFusingPolicy::Instance().Choose(
-                                      {sizeof(MilvusAnnFusingSampleV3),
+                                      {sizeof(MilvusAnnFusingSampleV4),
                                        ratio.value_or(1),
                                        -1});
                 LOG_DEBUG("ann_fusing auto sample decision={} filter_ratio={}",

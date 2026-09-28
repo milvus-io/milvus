@@ -22,6 +22,11 @@ namespace milvus::exec {
 
 class PhyTimestamptzArithCompareExpr : public SegmentExpr {
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyTimestamptzArithCompareExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::TimestamptzArithCompareExpr>&

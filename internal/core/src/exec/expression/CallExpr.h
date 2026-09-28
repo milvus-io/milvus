@@ -40,6 +40,15 @@ namespace exec {
 
 class PhyCallExpr : public Expr {
  public:
+    bool
+    SupportOffsetInput() override {
+        for (const auto& input : inputs_) {
+            if (!input || !input->SupportOffsetInput())
+                return false;
+        }
+        return true;
+    }
+
     PhyCallExpr(const std::vector<std::shared_ptr<Expr>>& input,
                 const std::shared_ptr<const milvus::expr::CallExpr>& expr,
                 const std::string& name,

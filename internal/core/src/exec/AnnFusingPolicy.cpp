@@ -46,11 +46,11 @@ AnnFusingPolicy::Load(const char* path, const char* config) {
                  "AUTO keeps baseline", path, dlerror());
         return false;
     }
-    auto create = reinterpret_cast<MilvusCreateAnnFusingPluginV3Fn>(
-        dlsym(library_, "MilvusCreateAnnFusingPluginV3"));
-    MilvusAnnFusingPluginV3 candidate{};
+    auto create = reinterpret_cast<MilvusCreateAnnFusingPluginV4Fn>(
+        dlsym(library_, "MilvusCreateAnnFusingPluginV4"));
+    MilvusAnnFusingPluginV4 candidate{};
     if (!create || !create(config, sizeof(candidate), &candidate) ||
-        candidate.abi_major != 3 ||
+        candidate.abi_major != 4 ||
         candidate.struct_size != sizeof(candidate) || !candidate.context ||
         !candidate.consider || !candidate.choose || !candidate.destroy) {
         // A conforming factory leaves output untouched on failure. Do not
@@ -63,7 +63,7 @@ AnnFusingPolicy::Load(const char* path, const char* config) {
     }
     api_ = candidate;
     ready_.store(true, std::memory_order_release);
-    LOG_INFO("ann_fusing native policy loaded abi=3 path={} config={}",
+    LOG_INFO("ann_fusing native policy loaded abi=4 path={} config={}",
              path,
              config);
     return true;
@@ -79,12 +79,12 @@ AnnFusingPolicy::~AnnFusingPolicy() {
 }
 
 bool
-AnnFusingPolicy::Consider(const MilvusAnnFusingRuleV3& request) const {
+AnnFusingPolicy::Consider(const MilvusAnnFusingRuleV4& request) const {
     return available() && api_.consider(api_.context, &request);
 }
 
 bool
-AnnFusingPolicy::Choose(const MilvusAnnFusingSampleV3& request) const {
+AnnFusingPolicy::Choose(const MilvusAnnFusingSampleV4& request) const {
     return available() && api_.choose(api_.context, &request);
 }
 

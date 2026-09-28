@@ -246,6 +246,11 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     friend class PhyTimestamptzArithCompareExpr;
 
  public:
+    bool
+    SupportOffsetInput() override {
+        return true;
+    }
+
     PhyBinaryArithOpEvalRangeExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::BinaryArithOpEvalRangeExpr>&
@@ -273,7 +278,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     void
     Eval(EvalCtx& context, VectorPtr& result) override;
 
-    std::optional<FilterSourceInfo>
+    FilterSourceInfo
     DescribeFilterSource() const override {
         return DescribeColumnFilterSource(
             proto::plan::Expr::kBinaryArithOpEvalRangeExpr,
