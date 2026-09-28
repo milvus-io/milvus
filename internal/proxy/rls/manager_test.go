@@ -1596,6 +1596,12 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.NotSame(t, normalizedRandomSamplePredicate, normalizedRandomSamplePlan.GetQuery().GetPredicates())
 	require.True(t, proto.Equal(normalizedRandomSampleBefore, normalizedRandomSamplePredicate))
 	require.True(t, proto.Equal(rlsBefore, rlsPredicate))
+	mergedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr().GetPredicate().GetBinaryExpr()
+	require.NotNil(t, mergedRandomSamplePredicate)
+	require.True(t,
+		mergedRandomSamplePredicate.GetLeft() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate() ||
+			mergedRandomSamplePredicate.GetRight() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate(),
+	)
 	require.NoError(t, MergePredicateToPlan(randomSamplePlan, rlsPredicate))
 	require.Same(t, randomSample, randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr())
 	assert.InDelta(t, 0.5, randomSample.GetSampleFactor(), 0.0001)
@@ -1623,6 +1629,14 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.NotSame(t, normalizedElementPredicate, normalizedElementPlan.GetVectorAnns().GetPredicates())
 	require.True(t, proto.Equal(normalizedElementBefore, normalizedElementPredicate))
 	require.True(t, proto.Equal(rlsBefore, rlsPredicate))
+	mergedElementFilter := normalizedElementPlan.GetVectorAnns().GetPredicates().GetElementFilterExpr()
+	require.Same(t, normalizedElementPredicate.GetElementFilterExpr().GetElementExpr(), mergedElementFilter.GetElementExpr())
+	mergedElementPredicate := mergedElementFilter.GetPredicate().GetBinaryExpr()
+	require.NotNil(t, mergedElementPredicate)
+	require.True(t,
+		mergedElementPredicate.GetLeft() == normalizedElementPredicate.GetElementFilterExpr().GetPredicate() ||
+			mergedElementPredicate.GetRight() == normalizedElementPredicate.GetElementFilterExpr().GetPredicate(),
+	)
 	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
 	require.Same(t, elementFilter, searchPlan.GetVectorAnns().GetPredicates().GetElementFilterExpr())
 	require.Same(t, elementExpr, elementFilter.GetElementExpr())

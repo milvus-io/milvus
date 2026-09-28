@@ -1272,10 +1272,6 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 			return true
 		})
 	}
-	var rlsPredicate *planpb.Expr
-	if t.rlsPredicate != nil {
-		rlsPredicate = proto.Clone(t.rlsPredicate).(*planpb.Expr)
-	}
 	collectionName := t.rlsCollectionName
 	if collectionName == "" {
 		collectionName = t.request.GetCollectionName()
@@ -1286,7 +1282,7 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
-		rlsPredicate:       rlsPredicate,
+		rlsPredicate:       t.rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
 		dbName:             dbName,

@@ -52,6 +52,13 @@ func (v *visitor) visitExpr(expr *planpb.Expr) interface{} {
 		return v.visitTermExpr(real.TermExpr)
 	case *planpb.Expr_ValueExpr:
 		return v.visitValueExpr(real.ValueExpr, expr)
+	case *planpb.Expr_RandomSampleExpr:
+		real.RandomSampleExpr.Predicate = v.visitExpr(real.RandomSampleExpr.GetPredicate()).(*planpb.Expr)
+		return expr
+	case *planpb.Expr_ElementFilterExpr:
+		real.ElementFilterExpr.ElementExpr = v.visitExpr(real.ElementFilterExpr.GetElementExpr()).(*planpb.Expr)
+		real.ElementFilterExpr.Predicate = v.visitExpr(real.ElementFilterExpr.GetPredicate()).(*planpb.Expr)
+		return expr
 	// no optimization for other types
 	default:
 		return expr

@@ -3412,6 +3412,26 @@ func (s *SearchPipelineSuite) TestRequerySkipsRuntimeRLS() {
 	s.NoError(err)
 }
 
+func (s *SearchPipelineSuite) TestNewRequeryOperatorReusesRLSPredicate() {
+	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	predicate := &planpb.Expr{Expr: &planpb.Expr_AlwaysTrueExpr{AlwaysTrueExpr: &planpb.AlwaysTrueExpr{}}}
+	task := &SearchTask{
+		ctx:           context.Background(),
+		SearchRequest: &internalpb.SearchRequest{},
+		request:       &milvuspb.SearchRequest{},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
+			PkField:          pkField,
+		},
+		rlsPredicate: predicate,
+		tr:           timerecord.NewTimeRecorder("test"),
+	}
+
+	op, err := newRequeryOperator(task, nil)
+	s.NoError(err)
+	s.Same(predicate, op.(*requeryOperator).rlsPredicate)
+}
+
 func (s *SearchPipelineSuite) TestRoundAggHitScoresDisabled() {
 	buckets := []*search_agg.AggBucketResult{
 		{Hits: []*search_agg.HitResult{{Score: 0.49}, {Score: 0.36}}},

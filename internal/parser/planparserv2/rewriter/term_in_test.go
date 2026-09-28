@@ -505,6 +505,44 @@ func TestMergeNormalizedAnd_NaNTermFallsBack(t *testing.T) {
 	require.Same(t, right, merged.GetRight())
 }
 
+func TestRewrite_NormalizesWrappedPredicates(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 101, DataType: schemapb.DataType_Int64}
+	term := func(values ...int64) *planpb.Expr {
+		genericValues := make([]*planpb.GenericValue, 0, len(values))
+		for _, value := range values {
+			genericValues = append(genericValues, &planpb.GenericValue{
+				Val: &planpb.GenericValue_Int64Val{Int64Val: value},
+			})
+		}
+		return &planpb.Expr{Expr: &planpb.Expr_TermExpr{TermExpr: &planpb.TermExpr{
+			ColumnInfo: column,
+			Values:     genericValues,
+		}}}
+	}
+	values := func(expr *planpb.Expr) []int64 {
+		result := make([]int64, 0, len(expr.GetTermExpr().GetValues()))
+		for _, value := range expr.GetTermExpr().GetValues() {
+			result = append(result, value.GetInt64Val())
+		}
+		return result
+	}
+
+	randomSample := &planpb.Expr{Expr: &planpb.Expr_RandomSampleExpr{RandomSampleExpr: &planpb.RandomSampleExpr{
+		SampleFactor: 0.5,
+		Predicate:    term(3, 1, 2, 2),
+	}}}
+	randomSample = rewriter.RewriteExpr(randomSample)
+	require.Equal(t, []int64{1, 2, 3}, values(randomSample.GetRandomSampleExpr().GetPredicate()))
+
+	elementFilter := &planpb.Expr{Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
+		ElementExpr: term(6, 4, 5),
+		Predicate:   term(9, 7, 8),
+	}}}
+	elementFilter = rewriter.RewriteExpr(elementFilter)
+	require.Equal(t, []int64{4, 5, 6}, values(elementFilter.GetElementFilterExpr().GetElementExpr()))
+	require.Equal(t, []int64{7, 8, 9}, values(elementFilter.GetElementFilterExpr().GetPredicate()))
+}
+
 func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field in [11,12,13,14,15,16,17,18,19,20]`, nil)

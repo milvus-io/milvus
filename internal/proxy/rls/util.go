@@ -661,19 +661,26 @@ func mergeNormalizedPredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.E
 	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
 		return userPredicate
 	}
-	switch userPredicate.GetExpr().(type) {
+	switch wrapper := userPredicate.GetExpr().(type) {
 	case *planpb.Expr_RandomSampleExpr:
-		cloned := proto.Clone(userPredicate).(*planpb.Expr)
-		wrapper := cloned.GetRandomSampleExpr()
-		wrapper.Predicate = mergeNormalizedPredicate(
-			rewriter.RewriteExpr(wrapper.GetPredicate()), rlsPredicate)
-		return cloned
+		return &planpb.Expr{
+			Expr: &planpb.Expr_RandomSampleExpr{RandomSampleExpr: &planpb.RandomSampleExpr{
+				SampleFactor: wrapper.RandomSampleExpr.GetSampleFactor(),
+				Predicate: mergeNormalizedPredicate(
+					wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate),
+			}},
+			IsTemplate: userPredicate.GetIsTemplate(),
+		}
 	case *planpb.Expr_ElementFilterExpr:
-		cloned := proto.Clone(userPredicate).(*planpb.Expr)
-		wrapper := cloned.GetElementFilterExpr()
-		wrapper.Predicate = mergeNormalizedPredicate(
-			rewriter.RewriteExpr(wrapper.GetPredicate()), rlsPredicate)
-		return cloned
+		return &planpb.Expr{
+			Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
+				ElementExpr: wrapper.ElementFilterExpr.GetElementExpr(),
+				StructName:  wrapper.ElementFilterExpr.GetStructName(),
+				Predicate: mergeNormalizedPredicate(
+					wrapper.ElementFilterExpr.GetPredicate(), rlsPredicate),
+			}},
+			IsTemplate: userPredicate.GetIsTemplate(),
+		}
 	}
 	return rewriter.MergeNormalizedAnd(userPredicate, rlsPredicate)
 }
