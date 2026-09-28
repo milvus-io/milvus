@@ -54,6 +54,9 @@ func RateLimitInterceptorWithMetaCache(GetMetaCache func() Cache, limiter types.
 			mlog.Warn(context.TODO(), "failed to get request info", mlog.Err(err))
 			return handler(ctx, req)
 		}
+		if n == 0 {
+			return handler(ctx, req)
+		}
 		if rt == internalpb.RateType_DMLBulkLoad {
 			if importReq, ok := req.(*milvuspb.ImportRequest); ok {
 				if importutilv2.SkipDiskQuotaCheck(importReq.GetOptions()) {

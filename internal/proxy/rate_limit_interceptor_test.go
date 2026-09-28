@@ -18,10 +18,12 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -33,9 +35,12 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/metrics"
+	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/requestutil"
 )
@@ -446,7 +451,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 	})
 }
 
-func TestRateLimitInterceptor_SnapshotManagementBypassesDDLLimit(t *testing.T) {
+func TestRateLimitInterceptor_ZeroTokenRequestsBypassLimiter(t *testing.T) {
 	quotaConfig := &Params.QuotaConfig.QuotaAndLimitsEnabled
 	originalValue := quotaConfig.GetValue()
 	require.NoError(t, Params.Save(quotaConfig.Key, "true"))
@@ -456,9 +461,17 @@ func TestRateLimitInterceptor_SnapshotManagementBypassesDDLLimit(t *testing.T) {
 	limiter.rateLimiter.GetRootLimiters().GetLimiters().Insert(
 		internalpb.RateType_DDLCollection, ratelimitutil.NewLimiter(0, 0))
 	require.ErrorIs(t, limiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLCollection, 1), merr.ErrServiceQuotaExceeded)
+	check := mockey.Mock((*SimpleLimiter).Check).Return(merr.ErrServiceQuotaExceeded).Build()
+	defer check.UnPatch()
 
 	// These requests must not resolve collection or database metadata for quotas.
-	metaCache := &struct{ Cache }{}
+	metaCache := &MetaCache{}
+	getDatabase := mockey.Mock((*MetaCache).GetDatabaseInfo).Return(nil, merr.ErrServiceNotReady).Build()
+	defer getDatabase.UnPatch()
+	getCollection := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(0), merr.ErrServiceNotReady).Build()
+	defer getCollection.UnPatch()
+	warn := mockey.Mock(mlog.RatedWarn).Return().Build()
+	defer warn.UnPatch()
 	interceptor := RateLimitInterceptorWithMetaCache(func() Cache { return metaCache }, limiter)
 	testCases := []struct {
 		name    string
@@ -469,17 +482,21 @@ func TestRateLimitInterceptor_SnapshotManagementBypassesDDLLimit(t *testing.T) {
 		{"pin", &milvuspb.PinSnapshotDataRequest{DbName: "db1", CollectionName: "source", Name: "snapshot"}},
 		{"unpin", &milvuspb.UnpinSnapshotDataRequest{PinId: 1}},
 		{"export", &milvuspb.ExportSnapshotRequest{DbName: "db1", CollectionName: "source", Name: "snapshot", TargetS3Path: "s3://bucket/export-root"}},
+		{"list file resources", &milvuspb.ListFileResourcesRequest{}},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			dbID, collections, rateType, tokens, err := GetRequestInfo(ctx, metaCache, tc.request)
+			dbID, collections, _, tokens, err := GetRequestInfo(ctx, metaCache, tc.request)
 			require.NoError(t, err)
 			assert.Equal(t, util.InvalidDBID, dbID)
 			assert.Empty(t, collections)
-			assert.Zero(t, rateType)
 			assert.Zero(t, tokens)
-			require.NoError(t, limiter.Check(dbID, collections, rateType, tokens))
+			nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
+			before := make(map[string]float64)
+			for _, status := range []string{metrics.TotalLabel, metrics.SuccessLabel, metrics.FailLabel} {
+				before[status] = testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status))
+			}
 
 			want := merr.Success()
 			handlerCalled := false
@@ -492,9 +509,15 @@ func TestRateLimitInterceptor_SnapshotManagementBypassesDDLLimit(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, handlerCalled)
 			assert.Same(t, want, resp)
+			assert.Zero(t, check.Times(), "zero-token requests must not call the limiter")
+			assert.Zero(t, getDatabase.Times(), "zero-token requests must not resolve database metadata")
+			assert.Zero(t, getCollection.Times(), "zero-token requests must not resolve collection metadata")
+			assert.Zero(t, warn.Times(), "supported exempt requests must not emit an unsupported-request warning")
+			for status, value := range before {
+				assert.Equal(t, value, testutil.ToFloat64(metrics.ProxyRateLimitReqCount.WithLabelValues(nodeID, internalpb.RateType_DDLCollection.String(), status)), status)
+			}
 		})
 	}
-	require.ErrorIs(t, limiter.Check(util.InvalidDBID, nil, internalpb.RateType_DDLCollection, 1), merr.ErrServiceQuotaExceeded)
 }
 
 func TestRateLimitInterceptor_SnapshotRestoreRemainsRateLimited(t *testing.T) {
