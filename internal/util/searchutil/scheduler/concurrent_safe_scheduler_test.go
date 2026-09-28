@@ -28,6 +28,9 @@ func TestScheduler(t *testing.T) {
 	t.Run("fifo", func(t *testing.T) {
 		testScheduler(t, newFIFOPolicy())
 	})
+	t.Run("requery-edf", func(t *testing.T) {
+		testScheduler(t, newRequeryEDFPolicy())
+	})
 	t.Run("scheduler_not_working", func(t *testing.T) {
 		scheduler := newScheduler(newFIFOPolicy())
 

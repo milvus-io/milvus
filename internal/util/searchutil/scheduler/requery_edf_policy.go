@@ -28,7 +28,12 @@ func newRequeryEDFPolicy() *requeryEDFPolicy {
 	}
 }
 
+func (p *requeryEDFPolicy) OwnsQueueCapacity() bool {
+	return true
+}
+
 func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
+	task.schedulingDeadline, _ = task.Context().Deadline()
 	cfg := &paramtable.Get().QueryNodeCfg
 	if contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel {
 		if p.requeryCapacity > 0 && int64(p.requery.len()) >= p.requeryCapacity {
@@ -51,13 +56,9 @@ func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
 	return p.regular.Push(task)
 }
 
+// Pop compares lane heads at selection time. The generic scheduler may stage
+// the selected task before execution; later arrivals do not replace it.
 func (p *requeryEDFPolicy) Pop(now time.Time) *queuedTask {
-	return p.popReady(now, true, true)
-}
-
-// popReady never stages a live task for a busy pool. Expired heads are returned
-// regardless of pool capacity so the scheduler can settle counters and Done.
-func (p *requeryEDFPolicy) popReady(now time.Time, cpuReady, gpuReady bool) *queuedTask {
 	regular, requery := p.regular.queue.front(), p.requery.front()
 	if regular.cleanupReady(now) {
 		return p.regular.queue.pop()
@@ -65,25 +66,15 @@ func (p *requeryEDFPolicy) popReady(now time.Time, cpuReady, gpuReady bool) *que
 	if requery.cleanupReady(now) {
 		return p.requery.pop()
 	}
-	ready := func(task *queuedTask) bool {
-		if !task.valid() {
-			return false
-		}
-		if task.IsGpuIndex() {
-			return gpuReady
-		}
-		return cpuReady
-	}
-	regularReady, requeryReady := ready(regular), ready(requery)
 	switch {
-	case regularReady && requeryReady:
+	case regular.valid() && requery.valid():
 		if edfRegularFirst(regular, requery) {
 			return p.regular.queue.pop()
 		}
 		return p.requery.pop()
-	case regularReady:
+	case regular.valid():
 		return p.regular.queue.pop()
-	case requeryReady:
+	case requery.valid():
 		return p.requery.pop()
 	default:
 		return nil

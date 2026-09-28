@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -25,9 +24,7 @@ func edfTestTask(t *testing.T, deadline time.Time, requery bool) *queuedTask {
 	if requery {
 		ctx = contextutil.WithQueryLabel(ctx, metrics.ReQueryLabel)
 	}
-	task := newQueuedTask(newMockTask(mockTaskConfig{ctx: ctx}), time.Now())
-	task.schedulingDeadline = deadline
-	return task
+	return newQueuedTask(newMockTask(mockTaskConfig{ctx: ctx}), time.Now())
 }
 
 func TestRequeryEDFOrdering(t *testing.T) {
@@ -112,7 +109,7 @@ func TestRequeryEDFIndependentCapacity(t *testing.T) {
 	require.EqualValues(t, 1024, p.requeryCapacity)
 }
 
-func TestRequeryEDFExpiredHeadWithoutSlot(t *testing.T) {
+func TestRequeryEDFExpiredHead(t *testing.T) {
 	paramtable.Init()
 	p := newRequeryEDFPolicy()
 	now := time.Now()
@@ -121,145 +118,101 @@ func TestRequeryEDFExpiredHeadWithoutSlot(t *testing.T) {
 	require.NoError(t, err)
 	_, err = p.Push(edfTestTask(t, now.Add(time.Minute), false))
 	require.NoError(t, err)
-	task := p.popReady(now, false, false)
+	task := p.Pop(now)
 	require.True(t, task.cleanupReady(now))
-	require.Nil(t, p.popReady(now, false, false))
-	require.NotNil(t, p.popReady(now, true, false))
+	require.NotNil(t, p.Pop(now))
+	require.Nil(t, p.Pop(now))
 }
 
-type edfExecutionTask struct {
-	Task
-	run func() error
-	gpu bool
-}
-
-func (t *edfExecutionTask) Execute() error { return t.run() }
-
-func (t *edfExecutionTask) IsGpuIndex() bool { return t.gpu }
-
-func TestRequeryEDFSkipsBusyPoolHead(t *testing.T) {
-	paramtable.Init()
-	p := newRequeryEDFPolicy()
-	now := time.Now()
-	gpuTask := edfTestTask(t, now.Add(time.Minute), false)
-	gpuTask.Task = &edfExecutionTask{Task: gpuTask.Task, gpu: true}
-	_, err := p.Push(gpuTask)
-	require.NoError(t, err)
-	_, err = p.Push(edfTestTask(t, now.Add(2*time.Minute), true))
-	require.NoError(t, err)
-	task := p.popReady(now, true, false)
-	require.Equal(t, metrics.ReQueryLabel, contextutil.GetQueryLabel(task.Context()))
-	require.Nil(t, p.popReady(now, true, false))
-	require.True(t, p.popReady(now, false, true).IsGpuIndex())
-}
-
-func newEDFSingleSlotScheduler(t *testing.T) *requeryEDFScheduler {
+func newEDFTestScheduler(t *testing.T) *scheduler {
 	t.Helper()
 	paramtable.Init()
-	cfg := &paramtable.Get().QueryNodeCfg
-	// This parameter is a CPU ratio, clamped to at least one execution slot.
-	require.NoError(t, paramtable.Get().Save(cfg.MaxReadConcurrency.Key, "0.001"))
-	t.Cleanup(func() { paramtable.Get().Reset(cfg.MaxReadConcurrency.Key) })
-	s := NewScheduler(schedulePolicyNameRequeryEDF).(*requeryEDFScheduler)
-	require.Equal(t, 1, s.pool.Cap())
-	s.Start()
+	s, ok := NewScheduler(schedulePolicyNameRequeryEDF).(*scheduler)
+	require.True(t, ok, "EDF must use the generic scheduler")
+	require.True(t, s.policyOwnsQueueCapacity)
+	t.Cleanup(s.Stop)
 	return s
 }
 
-func TestRequeryEDFSelectsAfterSlotReleased(t *testing.T) {
-	s := newEDFSingleSlotScheduler(t)
-	started, release := make(chan struct{}), make(chan struct{})
-	blocker := &edfExecutionTask{
-		Task: edfTestTask(t, time.Now().Add(time.Minute), false).Task,
-		run: func() error {
-			close(started)
-			<-release
-			return nil
-		},
-	}
-	// Always release the worker before Stop, including on an assertion failure.
-	defer s.Stop()
-	defer close(release)
-	require.NoError(t, s.Add(blocker))
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("worker did not start")
-	}
-	order := make(chan string, 2)
-	regular := &edfExecutionTask{
-		Task: edfTestTask(t, time.Now().Add(2*time.Minute), false).Task,
-		run:  func() error { order <- "regular"; return nil },
-	}
-	requery := &edfExecutionTask{
-		Task: edfTestTask(t, time.Now().Add(time.Minute), true).Task,
-		run:  func() error { order <- "requery"; return nil },
-	}
-	require.NoError(t, s.Add(regular))
-	require.NoError(t, s.Add(requery))
-	require.EqualValues(t, 2, s.GetWaitingTaskTotal())
-	// A value releases this worker, while the deferred close remains safe.
-	release <- struct{}{}
-	for _, want := range []string{"requery", "regular"} {
-		select {
-		case got := <-order:
-			require.Equal(t, want, got)
-		case <-time.After(5 * time.Second):
-			t.Fatal("queued work did not execute")
-		}
-	}
-	require.NoError(t, blocker.Wait())
-	require.NoError(t, requery.Wait())
-	require.NoError(t, regular.Wait())
-	require.Zero(t, s.GetWaitingTaskTotal())
-	require.Zero(t, s.GetWaitingTaskTotalNQ())
+func admitEDFTestTask(s *scheduler, task Task, now time.Time) (bool, error) {
+	errCh := make(chan error, 1)
+	keepConsuming := s.handleAddTaskRequest(addTaskReq{task: task, err: errCh},
+		paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.GetAsInt64(), now)
+	return keepConsuming, <-errCh
 }
 
-func TestRequeryEDFClearAndStop(t *testing.T) {
-	s := newEDFSingleSlotScheduler(t)
-	var stopOnce sync.Once
-	stop := func() { stopOnce.Do(s.Stop) }
-	defer stop()
-	started, release := make(chan struct{}), make(chan struct{})
-	blocker := &edfExecutionTask{
-		Task: edfTestTask(t, time.Time{}, false).Task,
-		run:  func() error { close(started); <-release; return nil },
-	}
-	defer close(release)
-	require.NoError(t, s.Add(blocker))
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("worker did not start")
-	}
-	queued := edfTestTask(t, time.Time{}, true).Task
-	require.NoError(t, s.Add(queued))
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	result, err := s.ClearQueued(ctx, nil, "test")
+func TestRequeryEDFAdmissionUsesIndependentCapacity(t *testing.T) {
+	s := newEDFTestScheduler(t)
+	cfg := &paramtable.Get().QueryNodeCfg
+	require.NoError(t, paramtable.Get().Save(cfg.MaxUnsolvedQueueSize.Key, "1"))
+	t.Cleanup(func() { paramtable.Get().Reset(cfg.MaxUnsolvedQueueSize.Key) })
+	now := time.Now()
+	keepConsuming, err := admitEDFTestTask(s, edfTestTask(t, time.Time{}, false).Task, now)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, result.QueuedCleared)
-	require.ErrorIs(t, queued.Wait(), context.Canceled)
-	drainTask := &edfExecutionTask{
-		Task: edfTestTask(t, time.Time{}, true).Task,
-		run:  func() error { return nil },
+	require.True(t, keepConsuming)
+	_, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, true).Task, now)
+	require.NoError(t, err, "a full regular queue must not reject requery")
+	keepConsuming, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, false).Task, now)
+	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.False(t, keepConsuming)
+	_, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, true).Task, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, s.GetWaitingTaskTotal())
+	require.EqualValues(t, 3, s.GetWaitingTaskTotalNQ())
+}
+
+func TestRequeryEDFAdmissionCleansExpiredLane(t *testing.T) {
+	for _, requery := range []bool{false, true} {
+		name := "regular"
+		if requery {
+			name = "requery"
+		}
+		t.Run(name, func(t *testing.T) {
+			s := newEDFTestScheduler(t)
+			cfg := &paramtable.Get().QueryNodeCfg
+			require.NoError(t, paramtable.Get().Save(cfg.MaxUnsolvedQueueSize.Key, "1"))
+			t.Cleanup(func() { paramtable.Get().Reset(cfg.MaxUnsolvedQueueSize.Key) })
+			capacity := int64(1)
+			if requery {
+				capacity = s.policy.(*requeryEDFPolicy).requeryCapacity
+			}
+			now := time.Now()
+			expired := edfTestTask(t, now.Add(-time.Second), requery)
+			expiredTask := expired.Task
+			_, err := s.policy.Push(expired)
+			require.NoError(t, err)
+			s.updateWaitingTaskCounter(1, expired.NQ())
+			for i := int64(1); i < capacity; i++ {
+				_, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, requery).Task, now)
+				require.NoError(t, err)
+			}
+			_, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, requery).Task, now)
+			require.NoError(t, err)
+			require.ErrorIs(t, expiredTask.Wait(), context.DeadlineExceeded)
+			require.EqualValues(t, capacity, s.GetWaitingTaskTotal())
+			require.EqualValues(t, capacity, s.GetWaitingTaskTotalNQ())
+		})
 	}
-	require.NoError(t, s.Add(drainTask))
-	stopped := make(chan struct{})
-	go func() { stop(); close(stopped) }()
-	select {
-	case <-stopped:
-		t.Fatal("Stop returned before the executing task completed")
-	default:
-	}
-	release <- struct{}{}
-	select {
-	case <-stopped:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Stop did not drain the running task")
-	}
-	require.NoError(t, blocker.Wait())
-	require.NoError(t, drainTask.Wait())
+}
+
+func TestRequeryEDFPreservesStagedTask(t *testing.T) {
+	s := newEDFTestScheduler(t)
+	now := time.Now()
+	regular := edfTestTask(t, now.Add(2*time.Minute), false).Task
+	_, err := admitEDFTestTask(s, regular, now)
+	require.NoError(t, err)
+	staged, _, _ := s.setupExecListener(nil, now)
+	require.Same(t, regular, staged.Task)
+	requery := edfTestTask(t, now.Add(time.Minute), true).Task
+	_, err = admitEDFTestTask(s, requery, now)
+	require.NoError(t, err)
+	next, _, _ := s.setupExecListener(staged, now)
+	require.Same(t, staged, next, "an earlier deadline must not replace an already popped task")
+	result, remaining := s.clearQueuedTasks(nil, "test", staged, now)
+	require.Nil(t, remaining)
+	require.EqualValues(t, 2, result.QueuedCleared)
+	require.ErrorIs(t, regular.Wait(), context.Canceled)
+	require.ErrorIs(t, requery.Wait(), context.Canceled)
 	require.Zero(t, s.GetWaitingTaskTotal())
 	require.Zero(t, s.GetWaitingTaskTotalNQ())
 }

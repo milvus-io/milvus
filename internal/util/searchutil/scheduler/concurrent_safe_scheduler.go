@@ -40,6 +40,8 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
+
+		policyOwnsQueueCapacity: policy.OwnsQueueCapacity(),
 	}
 }
 
@@ -67,6 +69,8 @@ type scheduler struct {
 	execChan    chan Task
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
+
+	policyOwnsQueueCapacity bool
 
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
@@ -223,6 +227,10 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 // HandleAddTaskRequest handle a add task request.
 // Return true if the process can be continued.
 func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, now time.Time) bool {
+	if s.policyOwnsQueueCapacity {
+		// Independent queues enforce their own limits in Push.
+		maxWaitTaskNum = 0
+	}
 	if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
 		s.cleanupExpiredTasks(now)
 	}
@@ -241,10 +249,27 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, n
 		queued := newQueuedTask(req.task, now)
 		nq := queued.NQ()
 		newTaskAdded, err := s.policy.Push(queued)
+		if s.policyOwnsQueueCapacity && errors.Is(err, merr.ErrServiceTooManyRequests) {
+			// Reclaim actually expired tasks and retry once, without advancing
+			// deadlines or changing the legacy shared-limit admission path.
+			for _, expired := range s.policy.Cleanup(now) {
+				s.updateWaitingTaskCounter(-1, -expired.NQ())
+				s.recordReadTaskQueueDuration(expired, now, readTaskQueueOutcomeExpired)
+				expired.Done(cleanupTaskError(expired))
+			}
+			if queued.cleanupReady(time.Now()) {
+				err = cleanupTaskError(queued)
+			} else {
+				newTaskAdded, err = s.policy.Push(queued)
+			}
+		}
 		if err == nil {
 			s.updateWaitingTaskCounter(int64(newTaskAdded), nq)
 		}
 		req.err <- err
+		if s.policyOwnsQueueCapacity && errors.Is(err, merr.ErrServiceTooManyRequests) {
+			return false
+		}
 	}
 
 	// Continue processing if the queue isn't reach the max limit.

@@ -23,7 +23,7 @@ func NewScheduler(policyName string) Scheduler {
 			newFIFOPolicy(),
 		)
 	case schedulePolicyNameRequeryEDF:
-		return newRequeryEDFScheduler()
+		return newScheduler(newRequeryEDFPolicy())
 	case schedulePolicyNameUserTaskPolling:
 		return newScheduler(
 			newUserTaskPollingPolicy(),
@@ -76,6 +76,10 @@ type ClearResult struct {
 
 // schedulePolicy is the policy of scheduler.
 type schedulePolicy interface {
+	// OwnsQueueCapacity bypasses the scheduler's shared queue limit when Push
+	// enforces independent queue limits. This capability is fixed at creation.
+	OwnsQueueCapacity() bool
+
 	// Cleanup removes queued tasks whose context deadline has been reached.
 	// Removed tasks are returned to scheduler for error notification.
 	Cleanup(now time.Time) []*queuedTask
