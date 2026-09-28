@@ -154,6 +154,9 @@ class MilvusConan(ConanFile):
         deps.set_property("libavrocpp", "cmake_target_name", "libavrocpp::libavrocpp")
         deps.generate()
         tc = CMakeToolchain(self)
+        tc.variables["MILVUS_CONAN_SANITIZER"] = self.conf.get(
+            "user.milvus:sanitizer", default="none"
+        )
         tc.generate()
         # Copy shared libraries (replaces imports() from Conan 1)
         # In Conan 1, imports() dst="lib" was relative to the build dir (cmake_build/).
