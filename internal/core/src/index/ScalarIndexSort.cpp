@@ -634,24 +634,27 @@ ScalarIndexSort<T>::Range(const T& lower_bound_value,
 }
 
 template <typename T>
-std::optional<T>
-ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
-    AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
-    AssertInfo(is_built_, "index has not been built");
-
-    return LookupValue(idx);
-}
-
-template <typename T>
-std::optional<T>
+FOLLY_ALWAYS_INLINE std::optional<T>
 ScalarIndexSort<T>::LookupValue(size_t idx) const {
-    AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
+    // Baseline index arithmetic still calls Reverse_Lookup for every row.
+    // Keep this shared mapping inlined: an out-of-line helper adds a second
+    // call (via PLT) to that O(N) path, even without using batch Views. Both
+    // callers validate bounds; do not add another check here per row.
 
     if (!valid_bitset_[idx]) {
         return std::nullopt;
     }
     auto offset = idx_to_offsets_ptr_[idx];
     return operator[](offset).a_;
+}
+
+template <typename T>
+std::optional<T>
+ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
+    AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
+    AssertInfo(is_built_, "index has not been built");
+
+    return LookupValue(idx);
 }
 
 template <typename T>
@@ -664,6 +667,8 @@ ScalarIndexSort<T>::Reverse_LookupViews(ScalarIndexOffsets offsets) const {
     AssertInfo(is_built_, "index has not been built");
     for (size_t i = 0; i < offsets.size(); ++i) {
         AssertInfo(offsets[i] >= 0, "negative scalar index offset");
+        AssertInfo(static_cast<size_t>(offsets[i]) < idx_to_offsets_size_,
+                   "out of range of total count");
         auto value = LookupValue(static_cast<size_t>(offsets[i]));
         if (value.has_value()) {
             result.SetView(i, *value);

@@ -1333,7 +1333,8 @@ StringIndexSortMemoryImpl::PatternMatch(const std::string& pattern,
     return bitset;
 }
 
-std::optional<std::string_view>
+// Share the row mapping without adding an out-of-line call per candidate.
+FOLLY_ALWAYS_INLINE std::optional<std::string_view>
 StringIndexSortMemoryImpl::LookupView(size_t offset,
                                       size_t total_num_rows,
                                       const TargetBitmap& valid_bitset,
@@ -1873,7 +1874,7 @@ StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
     return bitset;
 }
 
-std::optional<std::string_view>
+FOLLY_ALWAYS_INLINE std::optional<std::string_view>
 StringIndexSortMmapImpl::LookupView(size_t offset,
                                     size_t total_num_rows,
                                     const TargetBitmap& valid_bitset,
