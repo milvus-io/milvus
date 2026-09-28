@@ -1096,7 +1096,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
             *old_properties, defaults)
             .ok());
     EXPECT_EQ(defaults.talon_mode, milvus_storage::TalonMode::Disabled);
-    EXPECT_EQ(defaults.talon_small_read_threshold, 1048576);
+    EXPECT_EQ(defaults.talon_small_read_threshold, 524288);
 
     // The configured 512 KiB default is forwarded like any other value.
     // Zero remains unset; it does not introduce a Milvus default at this boundary.
@@ -1104,7 +1104,7 @@ TEST(StorageTalonConfig, PropertiesFollowStorageConfig) {
         auto config = ToCStorageConfig(first);
         config.talon_small_read_threshold = threshold;
         const auto expected_threshold =
-            threshold == 0 ? uint32_t{1048576} : threshold;
+            threshold == 0 ? uint32_t{524288} : threshold;
         auto properties = MakeInternalPropertiesFromStorageConfig(config);
         auto internal =
             milvus_storage::FilesystemCache::getInstance().resolve_config(
