@@ -139,27 +139,38 @@ func (s *Store) WriteChunk(
 	sectionsByVChannel map[string]*ChunkSections,
 	coverage TimeTickRange,
 ) (*streamingpb.PChannelSummaryChunkFooter, uint64, error) {
+	footer, payload, err := s.writeChunk(ctx, generation, sectionsByVChannel, coverage)
+	return footer, uint64(len(payload)), err
+}
+
+// writeChunk also returns the actual stored encoding for the write-through cache.
+func (s *Store) writeChunk(
+	ctx context.Context,
+	generation uint64,
+	sectionsByVChannel map[string]*ChunkSections,
+	coverage TimeTickRange,
+) (*streamingpb.PChannelSummaryChunkFooter, []byte, error) {
 	payload, footer, err := marshalChunk(s.pchannel, generation, s.term, sectionsByVChannel, coverage)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, err
 	}
 	key := s.ChunkKey(generation)
 	exists, err := s.chunkManager.Exist(ctx, key)
 	if err != nil {
-		return nil, 0, merr.Wrapf(err, "failed to probe summary chunk %s", key)
+		return nil, nil, merr.Wrapf(err, "failed to probe summary chunk %s", key)
 	}
 	if !exists {
 		if err := s.chunkManager.Write(ctx, key, payload); err != nil {
-			return nil, 0, merr.Wrapf(err, "failed to write summary chunk %s", key)
+			return nil, nil, merr.Wrapf(err, "failed to write summary chunk %s", key)
 		}
-		return footer, uint64(len(payload)), nil
+		return footer, payload, nil
 	}
 	existingPayload, err := s.chunkManager.Read(ctx, key)
 	if err != nil {
-		return nil, 0, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
+		return nil, nil, merr.Wrapf(err, "failed to read existing summary chunk %s", key)
 	}
 	if bytes.Equal(existingPayload, payload) {
-		return footer, uint64(len(payload)), nil
+		return footer, payload, nil
 	}
 	// Same key, different bytes. The key carries this store's term and the
 	// footer is marshaled from that same term, so a split-brain owner writes a
@@ -183,10 +194,10 @@ func (s *Store) WriteChunk(
 			// every later ranged read slice the wrong range. The object is not
 			// rewritten, so what the manifest describes has to be the object
 			// that is there.
-			return existingFooter, uint64(len(existingPayload)), nil
+			return existingFooter, existingPayload, nil
 		}
 	}
-	return nil, 0, storeCorruptedf("summary chunk already exists with different payload: %s", key)
+	return nil, nil, storeCorruptedf("summary chunk already exists with different payload: %s", key)
 }
 
 // ReadChunk reads and decodes one chunk object. The term of the chunk is
@@ -1171,4 +1182,28 @@ func (s *Store) sweepGarbage(ctx context.Context, term int64, coverage *streamin
 		return deleted, false, merr.Wrap(err, "failed to sweep summary garbage")
 	}
 	return deleted, finished && deleteErr == nil, deleteErr
+}
+
+// readChunkPayload validates a retained object against the captured manifest
+// before making its bytes available to all readers of this index node.
+func (s *Store) readChunkPayload(ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+	key := buildChunkKey(s.chunkManager, s.pchannel, index.GetGeneration(), index.GetTerm())
+	payload, err := s.chunkManager.Read(ctx, key)
+	if err != nil {
+		return nil, merr.Wrapf(err, "failed to read summary chunk %s", key)
+	}
+	footer, start, err := unmarshalChunkTail(payload)
+	if err != nil {
+		return nil, err
+	}
+	if footer.GetPchannel() != s.pchannel || !proto.Equal(chunkIndexEntryFromFooter(footer, uint64(len(payload))), index) {
+		return nil, storeCorruptedf("summary chunk differs from retained index: %s", key)
+	}
+	return &chunkPayload{bytes: payload, footerStart: start}, nil
+}
+
+// chunkFooterOffset is used only with bytes produced or validated by writeChunk.
+func chunkFooterOffset(payload []byte) uint64 {
+	end := len(payload) - len(chunkFooterMagic) - 4
+	return uint64(end - chunkChecksumSize - int(binary.BigEndian.Uint32(payload[end:end+4])))
 }

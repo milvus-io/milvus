@@ -14,6 +14,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/resource"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/moduleapi"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
@@ -21,6 +22,7 @@ import (
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/vchannel/l0materializer"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walsummary"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
+	"github.com/milvus-io/milvus/pkg/v3/objectstorage"
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
@@ -700,7 +702,8 @@ func TestPersistenceFailureNotifiesWALOwner(t *testing.T) {
 }
 
 func TestSummaryFailureNotifiesWALOwner(t *testing.T) {
-	resource.InitForTest(t)
+	cm := storage.NewLocalChunkManager(objectstorage.RootPath(t.TempDir()))
+	resource.InitForTest(t, resource.OptChunkManager(cm))
 	for _, closing := range []bool{false, true} {
 		name := "terminal_error"
 		if closing {
@@ -709,29 +712,29 @@ func TestSummaryFailureNotifiesWALOwner(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
 			checkpoint := &utility.WALCheckpoint{MessageID: walimplstest.NewTestMessageID(1), TimeTick: 10}
-			storage := newTestRecoveryStorage(t, checkpoint)
-			t.Cleanup(storage.metrics.Close)
-			t.Cleanup(storage.taskScheduler.Close)
-			t.Cleanup(storage.backgroundTaskNotifier.Cancel)
+			recovery := newTestRecoveryStorage(t, checkpoint)
+			t.Cleanup(recovery.metrics.Close)
+			t.Cleanup(recovery.taskScheduler.Close)
+			t.Cleanup(recovery.backgroundTaskNotifier.Cancel)
 			reported := make(chan error, 1)
-			WithRecoveryFatalHandler(func(err error) { reported <- err })(storage)
-			storage.summaryManager = storage.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
-			storage.summaryManager.InitLastAcked(10)
-			patch := mockey.Mock((*walsummary.Store).WriteChunk).Return(nil, uint64(0), walsummary.ErrStoreCorrupted).Build()
+			WithRecoveryFatalHandler(func(err error) { reported <- err })(recovery)
+			recovery.summaryManager = recovery.newSummaryManager(moduleapi.Runtime{Scheduler: immediateTaskScheduler{}})
+			recovery.summaryManager.InitLastAcked(10)
+			patch := mockey.Mock((*storage.LocalChunkManager).Write).Return(walsummary.ErrStoreCorrupted).Build()
 			defer patch.UnPatch()
 			if closing {
-				storage.backgroundTaskNotifier.Cancel()
+				recovery.backgroundTaskNotifier.Cancel()
 			}
-			storage.summaryManager.ObserveMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
-			storage.summaryManager.RequestFlushThrough(20)
+			recovery.summaryManager.ObserveMessage(ctx, newRecoveryTestDeleteMessage(t, "v1", 20))
+			recovery.summaryManager.RequestFlushThrough(20)
 			if closing {
 				require.Empty(t, reported)
 			} else {
 				require.Len(t, reported, 1)
 				require.ErrorIs(t, <-reported, walsummary.ErrStoreCorrupted)
 			}
-			require.Equal(t, uint64(10), storage.summaryManager.LastAcked())
-			require.Equal(t, uint64(10), storage.GetCheckpoint(ctx).TimeTick)
+			require.Equal(t, uint64(10), recovery.summaryManager.LastAcked())
+			require.Equal(t, uint64(10), recovery.GetCheckpoint(ctx).TimeTick)
 		})
 	}
 }

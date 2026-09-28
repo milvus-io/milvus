@@ -76,8 +76,8 @@ func (m *Manager) notifyReadersLocked() {
 // ReadTransform reads a complete, bounded prefix of (after, through]. The
 // snapshot includes durable chunks, sealed records and the pending tail exactly
 // once, even if a writer moves records between these states during the read.
-// Local physical GC is pinned only for this call. No payload cache grows with
-// backlog: decoding uses at most one chunk section in addition to the batch.
+// Local physical GC is pinned only for this call. Chunk buffers use the shared
+// byte-budgeted cache; decoding adds one section in addition to the batch.
 func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, through uint64, limits ReadLimits) (TransformBatch, error) {
 	m.readMu.RLock()
 	defer m.readMu.RUnlock()
@@ -101,7 +101,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	} else if coverage.GetStartTimeTick() > 0 {
 		fastForward = max(fastForward, coverage.GetStartTimeTick()-1)
 	}
-	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
+	chunks := m.chunkIndex.snapshot(after, min(through, batch.ReadableThrough))
 	// Only copy slice descriptors, never the unmaterialized payload window.
 	sealed := make([][]*stagedRecord, 0, len(m.pendingSealed))
 	for _, chunk := range m.pendingSealed {
@@ -147,11 +147,20 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if chunk.GetStartTimeTick() > target {
 			break
 		}
-		index := vchannelChunkIndex(chunk, vchannel)
-		if index == nil || index.GetTransform() == nil {
+		index := vchannelChunkIndex(chunk.PChannelSummaryChunkIndexEntry, vchannel)
+		if index == nil || index.GetTransform() == nil || index.GetTransform().GetEndTimeTick() <= after || index.GetTransform().GetStartTimeTick() > target {
 			continue
 		}
-		records, err := m.cfg.Store.ReadTransformSection(ctx, chunk.GetGeneration(), chunk.GetTerm(), vchannel, index)
+		// Once a batch is full, do not fetch the next object just to reject
+		// its first entry. Coverage remains at the last complete entry.
+		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows >= limits.MaxRows) || (limits.MaxBytes > 0 && bytes >= limits.MaxBytes)) {
+			return batch, nil
+		}
+		payload, err := m.chunkIndex.cache.read(ctx, m.cfg.Store, chunk)
+		if err != nil {
+			return TransformBatch{}, err
+		}
+		records, err := unmarshalTransformSection(payload.bytes, payload.footerStart, index)
 		if err != nil {
 			return TransformBatch{}, err
 		}
