@@ -601,6 +601,38 @@ class SegmentExpr : public Expr {
                    : static_cast<int64_t>(chunk) * size_per_chunk_ + chunk_pos;
     }
 
+    ExprExecPath
+    GetExecPath() const {
+        EnsureExecPathDetermined();
+        return exec_path_;
+    }
+
+    const segcore::SegmentInternalInterface*
+    GetSegment() const {
+        return segment_;
+    }
+
+    int64_t
+    GetActiveCount() const {
+        return active_count_;
+    }
+
+    // Opt-in contract for the composition-based RawData expression-cache
+    // adapter. An undecorated expression keeps its original execution hot path.
+    virtual bool
+    SupportsRawExprCache() const {
+        return false;
+    }
+
+    std::string
+    GetSignatureForRawExprCache() const {
+        // Null-rejecting scans may omit validity for skipped chunks. Keep
+        // their entries separate from evaluations that must preserve UNKNOWN,
+        // and namespace both modes away from other execution paths' keys.
+        return fmt::format(
+            "raw:null_rejecting={}:{}", null_rejecting_, ToString());
+    }
+
     void
     AdvanceDataChunkCursor(int64_t rows) {
         AssertInfo(
@@ -917,21 +949,24 @@ class SegmentExpr : public Expr {
         if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
             return false;
         }
-        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment_->type() != SegmentType::Sealed) {
-            return false;
-        }
-        ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                     this->ToString()};
-        ExprResCacheManager::Value got;
-        got.active_count = active_count_;
-        if (ExprResCacheManager::Instance().Get(key, got)) {
-            cached_index_chunk_res_ = got.result;
-            cached_index_chunk_valid_res_ = got.valid_result;
-            cached_index_chunk_id_ = 0;
-            return true;
-        }
-        return false;
+        bool cache_hit = false;
+        RunExprCacheBestEffort([&]() {
+            auto& manager = ExprResCacheManager::Instance();
+            if (!manager.CanCacheSegment(segment_->type())) {
+                return;
+            }
+            ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                         this->ToString()};
+            ExprResCacheManager::Value got;
+            got.active_count = active_count_;
+            if (manager.Get(key, got)) {
+                cached_index_chunk_res_ = got.result;
+                cached_index_chunk_valid_res_ = got.valid_result;
+                cached_index_chunk_id_ = 0;
+                cache_hit = true;
+            }
+        });
+        return cache_hit;
     }
 
     // Put the current cached_index_chunk_res_ into ExprResCache.
@@ -941,21 +976,23 @@ class SegmentExpr : public Expr {
         if (!ExprResCacheManager::IsEnabled() || segment_ == nullptr) {
             return;
         }
-        if (ExprResCacheManager::Instance().GetMode() == CacheMode::Disk &&
-            segment_->type() != SegmentType::Sealed) {
-            return;
-        }
         if (!cached_index_chunk_res_ || !cached_index_chunk_valid_res_) {
             return;
         }
-        ExprResCacheManager::Key key{segment_->get_segment_id(),
-                                     this->ToString()};
-        ExprResCacheManager::Value v;
-        v.result = cached_index_chunk_res_;
-        v.valid_result = cached_index_chunk_valid_res_;
-        v.active_count = active_count_;
-        v.eval_duration_us = eval_duration_us;
-        ExprResCacheManager::Instance().Put(key, v);
+        RunExprCacheBestEffort([&]() {
+            auto& manager = ExprResCacheManager::Instance();
+            if (!manager.CanCacheSegment(segment_->type())) {
+                return;
+            }
+            ExprResCacheManager::Key key{segment_->get_segment_id(),
+                                         this->ToString()};
+            ExprResCacheManager::Value v;
+            v.result = cached_index_chunk_res_;
+            v.valid_result = cached_index_chunk_valid_res_;
+            v.active_count = active_count_;
+            v.eval_duration_us = eval_duration_us;
+            manager.Put(key, v);
+        });
     }
 
     using CacheClock = std::chrono::steady_clock;
@@ -2812,7 +2849,7 @@ class SegmentExpr : public Expr {
 
             auto cached = ExprCacheHelper::GetOrCompute(
                 segment_,
-                this->ToString(),
+                [this]() { return this->ToString(); },
                 active_count_,
                 [&]() -> ExprCacheHelper::ComputeResult {
                     prepare_index();
@@ -2840,16 +2877,20 @@ class SegmentExpr : public Expr {
                     if (json_value_type.has_value()) {
                         const auto family =
                             static_cast<unsigned int>(json_value_type.value());
-                        const auto signature = fmt::format(
-                            "json-flat-validity:v1:field={}:path-length={}:"
-                            "path={}:family={}",
-                            field_id_.get(),
-                            json_pointer.size(),
-                            json_pointer,
-                            family);
                         if (ExprResCacheManager::IsEnabled()) {
                             auto validity = ExprCacheHelper::GetOrComputeBitmap(
-                                segment_, signature, active_count_, [&]() {
+                                segment_,
+                                [&]() {
+                                    return fmt::format(
+                                        "json-flat-validity:v1:field={}:"
+                                        "path-length={}:path={}:family={}",
+                                        field_id_.get(),
+                                        json_pointer.size(),
+                                        json_pointer,
+                                        family);
+                                },
+                                active_count_,
+                                [&]() {
                                     return executor->ExactPathExists(
                                         json_value_type.value());
                                 });
@@ -3643,20 +3684,28 @@ class SegmentExpr : public Expr {
                       prefetch_pool) override {
         auto self = std::static_pointer_cast<SegmentExpr>(shared_from_this());
         prefetch_future_.emplace(folly::via(prefetch_pool.get(), [self]() {
-            if (self->op_ctx_ != nullptr &&
-                self->op_ctx_->cancellation_token.isCancellationRequested()) {
-                return;
-            }
-            self->EnsureExecPathDetermined();
-            if (self->exec_path_ == ExprExecPath::RawData) {
-                if (self->ShouldPrefetchRawDataEagerly()) {
-                    self->PrefetchRawData();
-                    self->prefetched_ = true;
-                } else {
-                    self->raw_data_prefetch_deferred_ = true;
-                }
-            }
+            self->PrefetchOnCurrentThread();
         }));
+    }
+
+    // Execute the prefetch body without scheduling another task. This keeps
+    // composition wrappers that already run on the prefetch pool from adding
+    // a second queueing hop.
+    void
+    PrefetchOnCurrentThread() {
+        if (op_ctx_ != nullptr &&
+            op_ctx_->cancellation_token.isCancellationRequested()) {
+            return;
+        }
+        EnsureExecPathDetermined();
+        if (exec_path_ == ExprExecPath::RawData) {
+            if (ShouldPrefetchRawDataEagerly()) {
+                PrefetchRawData();
+                prefetched_ = true;
+            } else {
+                raw_data_prefetch_deferred_ = true;
+            }
+        }
     }
 
     bool

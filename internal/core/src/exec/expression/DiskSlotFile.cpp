@@ -16,6 +16,7 @@
 
 #include "exec/expression/DiskSlotFile.h"
 
+#include <folly/ScopeGuard.h>
 #include <sys/stat.h>
 #include <cstring>
 
@@ -50,6 +51,15 @@ DiskSlotFile::DiskSlotFile(int64_t segment_id,
         return;
     }
 
+    // The destructor does not run if construction throws after opening the
+    // file (for example, while formatting a log message).
+    auto close_on_failure = folly::makeGuard([&]() {
+        if (fd_ >= 0) {
+            ::close(fd_);
+            fd_ = -1;
+        }
+    });
+
     // Allocate file space
     size_t file_size =
         kFileHeaderSize + static_cast<size_t>(num_slots_) * slot_size_;
@@ -65,12 +75,6 @@ DiskSlotFile::DiskSlotFile(int64_t segment_id,
     // Write file header
     WriteFileHeader();
 
-    // Initialize free slots (all slots start as free)
-    free_slots_.reserve(num_slots_);
-    for (uint32_t i = 0; i < num_slots_; ++i) {
-        free_slots_.push_back(i);
-    }
-
     LOG_DEBUG(
         "DiskSlotFile: created segment_id={} path={} row_count={} "
         "slot_size={} num_slots={} bitset_bytes={}",
@@ -80,6 +84,7 @@ DiskSlotFile::DiskSlotFile(int64_t segment_id,
         slot_size_,
         num_slots_,
         bitset_bytes_);
+    close_on_failure.dismiss();
 }
 
 DiskSlotFile::~DiskSlotFile() {
@@ -108,7 +113,8 @@ bool
 DiskSlotFile::Get(const std::string& signature,
                   int64_t active_count,
                   TargetBitmap& out_result,
-                  TargetBitmap& out_valid) {
+                  TargetBitmap& out_valid,
+                  const std::function<bool()>& before_materialize) {
     std::shared_lock lock(mutex_);
 
     if (fd_ < 0) {
@@ -124,6 +130,10 @@ DiskSlotFile::Get(const std::string& signature,
 
     // Staleness check
     if (meta.active_count != active_count) {
+        return false;
+    }
+
+    if (before_materialize && !before_materialize()) {
         return false;
     }
 
@@ -282,7 +292,13 @@ DiskSlotFile::AllocateSlot() {
         return slot_id;
     }
 
-    // No free slots — evict one via Clock
+    // Keep room to recycle a slot on write failure or eviction.
+    free_slots_.reserve(1);
+    if (next_unused_slot_ < num_slots_) {
+        return next_unused_slot_++;
+    }
+
+    // All slots have been allocated — evict one via Clock.
     EvictOne();
 
     if (!free_slots_.empty()) {
@@ -389,6 +405,7 @@ DiskSlotFile::Close() {
     }
     slot_index_.clear();
     free_slots_.clear();
+    next_unused_slot_ = 0;
     clock_keys_.clear();
     clock_hand_ = 0;
     clock_dirty_ = true;
@@ -398,12 +415,6 @@ uint32_t
 DiskSlotFile::GetUsedCount() const {
     std::shared_lock lock(mutex_);
     return static_cast<uint32_t>(slot_index_.size());
-}
-
-bool
-DiskSlotFile::HasSignature(const std::string& signature) const {
-    std::shared_lock lock(mutex_);
-    return slot_index_.find(signature) != slot_index_.end();
 }
 
 uint64_t

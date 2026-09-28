@@ -118,6 +118,9 @@ DECLARE_PROMETHEUS_HISTOGRAM(
 DECLARE_PROMETHEUS_HISTOGRAM(
     internal_core_strict_group_phase2_acceptance_ratio);
 
+// expression result cache metrics
+DECLARE_PROMETHEUS_COUNTER(internal_expr_cache_hit_total);
+
 // async cgo metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_cgo_queue_duration_seconds);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_cgo_queue_duration_seconds_search);

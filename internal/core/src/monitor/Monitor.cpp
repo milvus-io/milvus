@@ -331,6 +331,14 @@ DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
     internal_core_strict_group_phase2_ratio,
     strictGroupAcceptanceRatioLabels,
     ratioBuckets)
+
+DEFINE_PROMETHEUS_COUNTER_FAMILY(
+    internal_expr_cache_hit_total,
+    "[cpp]successful expression result cache lookups");
+DEFINE_PROMETHEUS_COUNTER(internal_expr_cache_hit_total,
+                          internal_expr_cache_hit_total,
+                          {});
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};
