@@ -27,3 +27,16 @@ endforeach()
 
 # Do not install an intentionally racy executable into output/unittest: legacy
 # runners execute every file in that directory and expect each one to pass.
+
+add_executable(tsan_openmp_probe openmp.cpp)
+target_compile_features(tsan_openmp_probe PRIVATE cxx_std_11)
+target_link_libraries(tsan_openmp_probe PRIVATE OpenMP::OpenMP_CXX)
+foreach(mode omp-clean-lock omp-clean-barrier omp-clean-task omp-race)
+    add_test(NAME tsan-${mode}
+        COMMAND "${CMAKE_COMMAND}"
+            "-DPROBE=$<TARGET_FILE:tsan_openmp_probe>"
+            "-DMODE=${mode}"
+            "-DARCHER=${MILVUS_ARCHER_LIBRARY}"
+            -P "${CMAKE_CURRENT_LIST_DIR}/CheckReport.cmake")
+    set_tests_properties(tsan-${mode} PROPERTIES LABELS tsan TIMEOUT 60)
+endforeach()

@@ -79,7 +79,11 @@ $(error USE_TSAN cannot be combined with Go -race)
 endif
 	override CGO_CFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
 	override CGO_CXXFLAGS += -fsanitize=thread -g -fno-omit-frame-pointer
-	override CGO_LDFLAGS += -fsanitize=thread
+	override CGO_LDFLAGS += -fsanitize=thread -shared-libsan
+	MILVUS_LLVM_ROOT ?= /usr/lib/llvm-20
+	override CC := $(MILVUS_LLVM_ROOT)/bin/clang
+	override CXX := $(MILVUS_LLVM_ROOT)/bin/clang++
+	export CC CXX MILVUS_LLVM_ROOT
 	MILVUS_GO_BUILD_TAGS := dynamic,sonic,$(SONIC_PLUGIN_SYNC_TAG)
 	TSAN_GO_LDFLAGS := -linkmode=external
 endif

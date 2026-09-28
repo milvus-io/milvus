@@ -22,20 +22,14 @@ endif()
 
 if(USE_TSAN)
     set(MILVUS_SANITIZER "thread")
-    set(MILVUS_SANITIZER_LINK_FLAGS "-fsanitize=thread")
+    set(MILVUS_SANITIZER_LINK_FLAGS "-fsanitize=thread -shared-libsan")
     if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
         message(FATAL_ERROR "USE_TSAN currently supports 64-bit Linux only")
     endif()
     if(MILVUS_GPU_VERSION OR WITH_CUVS)
         message(FATAL_ERROR "USE_TSAN does not support GPU builds")
     endif()
-    if(NOT CMAKE_C_COMPILER_ID MATCHES "^(GNU|Clang)$" OR
-       NOT CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$")
-        message(FATAL_ERROR "USE_TSAN requires GCC or Clang for both C and C++")
-    endif()
-    if(NOT CMAKE_C_COMPILER_ID STREQUAL CMAKE_CXX_COMPILER_ID)
-        message(FATAL_ERROR "USE_TSAN requires matching C and C++ compiler families")
-    endif()
+    include("${CMAKE_CURRENT_LIST_DIR}/Archer.cmake")
 
     # Test the driver and runtime link, not just acceptance of a compiler flag.
     include(CMakePushCheckState)
@@ -47,7 +41,7 @@ if(USE_TSAN)
         # executable here so a missing sanitizer runtime is detected as well.
         set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
         set(CMAKE_REQUIRED_FLAGS "-fsanitize=thread")
-        set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=thread")
+        set(CMAKE_REQUIRED_LINK_OPTIONS "-fsanitize=thread;-shared-libsan;-Wl,-rpath,${MILVUS_TSAN_RUNTIME_DIR}")
         check_c_source_compiles("int value; int main(void) { return value; }"
             MILVUS_C_HAS_TSAN)
         check_cxx_source_compiles("int value; int main() { return value; }"
@@ -65,7 +59,7 @@ if(USE_TSAN)
         "$<$<COMPILE_LANGUAGE:C,CXX>:-fsanitize=thread>"
         "$<$<COMPILE_LANGUAGE:C,CXX>:-g>"
         "$<$<COMPILE_LANGUAGE:C,CXX>:-fno-omit-frame-pointer>")
-    add_link_options(-fsanitize=thread)
+    add_link_options(-fsanitize=thread -shared-libsan)
     message(STATUS "Building Milvus C/C++ targets with ThreadSanitizer")
     if(NOT MILVUS_CONAN_SANITIZER STREQUAL "thread")
         message(WARNING

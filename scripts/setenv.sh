@@ -32,6 +32,7 @@ while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
 done
 ROOT_DIR="$( cd -P "$( dirname "$SOURCE" )/.." && pwd )"
 export MILVUS_WORK_DIR=$ROOT_DIR
+source "${ROOT_DIR}/scripts/tsan_toolchain.sh" || return 1
 source "${ROOT_DIR}/scripts/sanitizer_env.sh"
 milvus_sanitizer_env "${ROOT_DIR}/internal/core/output" || return 1
 
