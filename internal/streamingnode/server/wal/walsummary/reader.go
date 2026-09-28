@@ -38,12 +38,22 @@ type TransformBatch struct {
 	// FastForwardTimeTick explicitly identifies retired history skipped by this read.
 	FastForwardTimeTick uint64
 	Changed             <-chan struct{}
+	// TransformChanged is captured with the same snapshot when WatchTransform
+	// is active for this VChannel. It omits unrelated PChannel coverage updates.
+	TransformChanged <-chan struct{}
 }
 
 // TransformReader is the storage contract shared by L0 and future subscriptions.
 type TransformReader interface {
 	ReadTransform(context.Context, string, uint64, uint64, ReadLimits) (TransformBatch, error)
 	TransformStats(string, uint64, uint64) TransformStats
+}
+
+// TransformChangeWatcher optionally supplies scoped notifications for live
+// subscriptions. Readers without it retain global coverage notifications.
+type TransformChangeWatcher interface {
+	// WatchTransform retains notification state until the returned release is called.
+	WatchTransform(vchannel string) (release func())
 }
 
 func (m *Manager) advanceReadableLocked(tt uint64) {
@@ -76,6 +86,12 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		m.readableChanged = make(chan struct{})
 	}
 	batch := TransformBatch{CoveredThrough: after, ReadableThrough: m.readableThrough, Changed: m.readableChanged}
+	if notifier := m.transformNotifiers[vchannel]; notifier != nil {
+		if notifier.changed == nil {
+			notifier.changed = make(chan struct{})
+		}
+		batch.TransformChanged = notifier.changed
+	}
 	terminal := m.terminalErr
 	fastForward := m.manifest.GetTransformFastForwardTimeTick()[vchannel]
 	// The initial checkpoint is a replay floor, not readable stored history.

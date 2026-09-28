@@ -576,6 +576,38 @@ and Summary backlog requests. Notifications alone do not force L0 output. Local
 subscriptions use progress notifications to follow the tail without adding
 another WAL observer.
 
+For unbounded TransformLog subscriptions, distinguish **readable coverage** from
+**notification scope**. `ReadableThrough` remains the complete PChannel prefix;
+`Changed` still notifies ordinary readers and bounded replays of every coverage
+advance. An active `WatchTransform(vchannel)` additionally makes each read return
+`TransformChanged`, captured under the same lock as that read's coverage and
+retention floor. The unbounded adaptor waits on this scoped token. Other
+VChannels' ordinary messages can extend readable coverage without waking it.
+
+Scoped notifications follow query Transform MVCC semantics, using the shared
+message classification in `messageutil` rather than the presence of a stored
+Delete payload. Delete, CreateCollection, transaction commit (including an
+insert-only assembled transaction), CommitImport, Flush/ManualFlush, relevant
+DDL and schema changes notify their VChannel. Plain Inserts, property-only
+AlterCollection and ordinary TimeTick confirmations do not. PChannel-wide
+FlushAll/AlterWAL and RecoveryBarrier notify every active scope. GC wakes scopes
+whose history is retired; a terminal failure wakes every scope. These signals
+do not implement the deferred DDL visibility effects.
+
+Each active VChannel owns one reference-counted notifier shared by subscriptions.
+The last subscription release removes it. Tokens are allocated only on reads and
+cleared on notification, coalescing messages until a reader captures another
+token. This adds O(active VChannels) notification metadata and no worker
+goroutines. Ordinary scoped notification is an O(1) lookup rather than a scan of
+all subscriptions; global barriers retain their necessary fan-out. Existing
+subscription goroutines and their bounded delivery buffers remain unchanged.
+Consumers without the optional watch capability retain global notifications.
+
+Scope registration precedes the first read. Subsequent reads capture both state
+and the replacement token atomically, so a change during I/O or before waiting
+cannot be lost. Watchers do not pin objects or acknowledge GC; the existing
+QueryView retention contract still protects future reads.
+
 Summary owns any decoded cache and shared object-fetch coordination. Cache
 memory must be bounded independently of total retained history. PChannel
 objects can contain many VChannels; reuse reads where possible instead of
