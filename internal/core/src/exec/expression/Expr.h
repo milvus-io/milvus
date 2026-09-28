@@ -462,6 +462,66 @@ class SegmentExpr : public Expr {
             active_count_ - static_cast<int64_t>(chunk) * size_per_chunk_);
     }
 
+    // Apply field nullability to an already-initialized valid_result bitmap.
+    // Pinned path reads the column from the frozen snapshot so the validity
+    // data comes from the same generation as the chunk boundaries above.
+    void
+    ApplyFieldValidData(milvus::OpContext* op_ctx,
+                        FieldId field_id,
+                        int64_t chunk_id,
+                        int64_t offset,
+                        int64_t size,
+                        TargetBitmapView valid_result) const {
+        if (size == 0) {
+            return;
+        }
+        if (snapshot_) {
+            auto column = snapshot_->GetDataScanResources(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} column must exist when validity is requested",
+                       field_id.get());
+            column->ApplyValidDataInChunk(
+                op_ctx, chunk_id, offset, size, valid_result);
+        } else {
+            segment_->ApplyFieldValidData(
+                op_ctx, field_id, chunk_id, offset, size, valid_result);
+        }
+    }
+
+    // Apply field nullability for segment-level row offsets. Pinned path reads
+    // the column from the frozen snapshot, same generation as all reads above.
+    void
+    ApplyFieldValidDataByOffsets(milvus::OpContext* op_ctx,
+                                 FieldId field_id,
+                                 const int64_t* offsets,
+                                 int64_t count,
+                                 TargetBitmapView valid_result) const {
+        if (count == 0) {
+            return;
+        }
+        if (snapshot_) {
+            auto column = snapshot_->GetDataScanResources(field_id);
+            AssertInfo(column != nullptr,
+                       "field {} column must exist when validity is requested",
+                       field_id.get());
+            if (!column->IsNullable()) {
+                return;
+            }
+            column->BulkIsValid(
+                op_ctx,
+                [&valid_result](bool is_valid, size_t i) {
+                    if (!is_valid) {
+                        valid_result[i] = false;
+                    }
+                },
+                offsets,
+                count);
+        } else {
+            segment_->ApplyFieldValidDataByOffsets(
+                op_ctx, field_id, offsets, count, valid_result);
+        }
+    }
+
     void
     MoveCursorForData() {
         int64_t processed_size = 0;
@@ -2146,12 +2206,12 @@ class SegmentExpr : public Expr {
             if (size == 0) {
                 continue;
             }
-            segment_->ApplyFieldValidData(op_ctx_,
-                                          field_id_,
-                                          chunk_id,
-                                          0,
-                                          size,
-                                          valid_result.view() + processed_size);
+            ApplyFieldValidData(op_ctx_,
+                                field_id_,
+                                chunk_id,
+                                0,
+                                size,
+                                valid_result.view() + processed_size);
             processed_size += size;
         }
         AssertInfo(processed_size == row_count,
@@ -2431,12 +2491,11 @@ class SegmentExpr : public Expr {
 
         auto apply_field_valid_data = [&]() {
             std::vector<int64_t> offsets(input.begin(), input.end());
-            segment_->ApplyFieldValidDataByOffsets(
-                op_ctx_,
-                field_id_,
-                offsets.data(),
-                batch_size,
-                TargetBitmapView(valid_result));
+            ApplyFieldValidDataByOffsets(op_ctx_,
+                                         field_id_,
+                                         offsets.data(),
+                                         batch_size,
+                                         TargetBitmapView(valid_result));
         };
 
         if constexpr (std::is_same_v<T, VectorArray>) {
@@ -2532,16 +2591,15 @@ class SegmentExpr : public Expr {
                                   : active_count_ - data_pos)
                            : size_per_chunk_ - data_pos;
             }
-
             size = std::min(size, batch_size_ - processed_size);
             if (size == 0)
                 continue;  //do not go empty-loop at the bound of the chunk
-            segment_->ApplyFieldValidData(op_ctx_,
-                                          field_id_,
-                                          i,
-                                          data_pos,
-                                          size,
-                                          valid_result + processed_size);
+            ApplyFieldValidData(op_ctx_,
+                                field_id_,
+                                i,
+                                data_pos,
+                                size,
+                                valid_result + processed_size);
 
             processed_size += size;
             if (processed_size >= batch_size_) {

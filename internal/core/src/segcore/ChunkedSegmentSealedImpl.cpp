@@ -1085,6 +1085,12 @@ class ChunkedSegmentSealedImpl::SealedReadSnapshot
         return state_->runtime->row_count;
     }
 
+    std::shared_ptr<ChunkedColumnInterface>
+    GetDataScanResources(FieldId field_id) const override {
+        auto it = state_->runtime->fields.find(field_id);
+        return it == state_->runtime->fields.end() ? nullptr : it->second;
+    }
+
  private:
     bool
     FieldDataReady(FieldId field_id) const {

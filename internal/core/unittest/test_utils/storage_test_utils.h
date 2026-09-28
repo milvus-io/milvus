@@ -235,6 +235,63 @@ CreateSealedWithFieldDataLoaded(milvus::SchemaPtr schema,
     return segment;
 }
 
+// Build a sealed segment whose data spans two chunks: one binlog per input
+// dataset, both datasets must share the same schema. Useful for exercising
+// per-chunk reads (chunk boundaries, validity) that a single-chunk sealed
+// segment cannot cover.
+inline std::unique_ptr<milvus::segcore::SegmentSealed>
+CreateTwoChunkSealed(const milvus::SchemaPtr& schema,
+                     const GeneratedData& first,
+                     const GeneratedData& second) {
+    std::unordered_map<int64_t, std::vector<FieldDataPtr>> field_chunks;
+
+    auto append_dataset = [&](const GeneratedData& dataset) {
+        const auto row_count = dataset.row_ids_.size();
+
+        auto row_ids = std::make_shared<milvus::FieldData<int64_t>>(
+            DataType::INT64, false);
+        row_ids->FillFieldData(dataset.row_ids_.data(), row_count);
+        field_chunks[RowFieldID.get()].push_back(std::move(row_ids));
+
+        auto timestamps = std::make_shared<milvus::FieldData<int64_t>>(
+            DataType::INT64, false);
+        timestamps->FillFieldData(dataset.timestamps_.data(), row_count);
+        field_chunks[TimestampFieldID.get()].push_back(std::move(timestamps));
+
+        const auto fields = schema->get_fields();
+        for (const auto& data : dataset.raw_->fields_data()) {
+            const auto field_id = data.field_id();
+            field_chunks[field_id].push_back(
+                milvus::segcore::CreateFieldDataFromDataArray(
+                    row_count, &data, fields.at(FieldId(field_id))));
+        }
+    };
+
+    append_dataset(first);
+    append_dataset(second);
+
+    LoadFieldDataInfo combined_load_info;
+    auto cm = milvus::storage::RemoteChunkManagerSingleton::GetInstance()
+                  .GetRemoteChunkManager();
+    for (auto& [field_id, chunks] : field_chunks) {
+        auto field_load_info = PrepareSingleFieldInsertBinlog(kCollectionID,
+                                                              kPartitionID,
+                                                              kSegmentID,
+                                                              field_id,
+                                                              std::move(chunks),
+                                                              cm);
+        combined_load_info.field_infos.merge(field_load_info.field_infos);
+    }
+
+    auto segment =
+        milvus::segcore::CreateSealedSegment(schema, milvus::empty_index_meta);
+    const auto status = LoadFieldData(segment.get(), &combined_load_info);
+    AssertInfo(status.error_code == milvus::ErrorCode::Success,
+               "Failed to load two-chunk sealed data: {}",
+               status.error_msg);
+    return segment;
+}
+
 inline std::unique_ptr<milvus::segcore::SegmentGrowing>
 CreateGrowingWithFieldDataLoaded(milvus::SchemaPtr schema,
                                  milvus::IndexMetaPtr indexMeta,
