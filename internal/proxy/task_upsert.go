@@ -59,17 +59,16 @@ type upsertTask struct {
 
 	ctx context.Context
 
-	timestamps            []uint64
-	rowIDs                []int64
-	result                *milvuspb.MutationResult
-	idAllocator           *allocator.IDAllocator
-	collectionName        string
-	collectionID          UniqueID
-	chMgr                 channelmgr.ChannelsMgr
-	rlsEnabled            bool
-	rlsUsingPredicate     *planpb.Expr
-	rlsCheckPredicate     *planpb.Expr
-	rlsPredicatesResolved bool
+	timestamps        []uint64
+	rowIDs            []int64
+	result            *milvuspb.MutationResult
+	idAllocator       *allocator.IDAllocator
+	collectionName    string
+	collectionID      UniqueID
+	chMgr             channelmgr.ChannelsMgr
+	rlsEnabled        bool
+	rlsUsingPredicate *planpb.Expr
+	rlsCheckPredicate *planpb.Expr
 
 	vChannels        []vChan
 	pChannels        []pChan
@@ -278,9 +277,6 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 // between Full AutoID, RLS-enabled Full, and Partial Upsert. Only Partial
 // restores retry state, merges old fields, and prepares CAS proofs.
 func (it *upsertTask) prepareUpsert(ctx context.Context) error {
-	if err := it.resolveRLSPredicates(ctx); err != nil {
-		return err
-	}
 	if it.rlsEnabled {
 		if err := rls.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
 			return err
@@ -353,10 +349,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	generateFunctions := func() error {
 		return genFunctionFields(ctx, it.upsertMsg.InsertMsg, it.schema, partialUpdate)
 	}
-	if err := it.resolveRLSPredicates(ctx); err != nil {
-		return nil, err
-	}
-
 	primaryFieldSchema, err := typeutil.GetPrimaryFieldSchema(it.schema.CollectionSchema)
 	if err != nil {
 		log.Warn(ctx, "get primary field schema failed", mlog.Err(err))
@@ -937,18 +929,6 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		}
 	}
 	return insertIdxInUpsert, nil
-}
-
-func (it *upsertTask) resolveRLSPredicates(ctx context.Context) error {
-	if !it.rlsEnabled || it.rlsPredicatesResolved {
-		return nil
-	}
-	var err error
-	it.rlsUsingPredicate, it.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(ctx, it.collectionID, it.req.GetRlsPrincipal(), it.schema.SchemaHelper)
-	if err == nil {
-		it.rlsPredicatesResolved = true
-	}
-	return err
 }
 
 // allocateMissingAutoIDs applies a batch of business PKs before internal RowIDs
@@ -1875,9 +1855,6 @@ func (it *upsertTask) insertPreExecute(ctx context.Context) error {
 		return err
 	}
 
-	if err := it.resolveRLSPredicates(ctx); err != nil {
-		return err
-	}
 	if it.rlsEnabled {
 		if err := rls.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
 			it.rlsCheckPredicate, "upsert", "check"); err != nil {
@@ -2099,7 +2076,14 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 
 	it.rlsUsingPredicate = nil
 	it.rlsCheckPredicate = nil
-	it.rlsPredicatesResolved = false
+	if it.rlsEnabled {
+		it.rlsUsingPredicate, it.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
+			ctx, it.collectionID, it.req.GetRlsPrincipal(), it.schema.SchemaHelper,
+		)
+		if err != nil {
+			return err
+		}
+	}
 
 	if it.req.GetPartialUpdate() {
 		it.partialUpdateOriginalFields = cloneFieldDataList(it.req.GetFieldsData())

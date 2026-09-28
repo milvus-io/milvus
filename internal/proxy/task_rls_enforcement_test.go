@@ -564,6 +564,13 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 		}
 		return task
 	}
+	resolvePredicates := func(task *upsertTask) {
+		var err error
+		task.rlsUsingPredicate, task.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
+			context.Background(), task.collectionID, task.req.GetRlsPrincipal(), task.schema.SchemaHelper,
+		)
+		require.NoError(t, err)
+	}
 
 	mockey.PatchConvey("upsert with only new rows does not evaluate the using policy", t, func() {
 		const collectionID = int64(991006)
@@ -577,6 +584,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 			UsingExpr:  "false",
 			CheckExpr:  "true",
 		}})
+		resolvePredicates(task)
 		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil).Build()
 
 		missingRows, err := task.queryPreExecute(ctx)
@@ -594,6 +602,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 			UsingExpr:  "true",
 			CheckExpr:  "true",
 		}})
+		resolvePredicates(task)
 		readCalls := 0
 		mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			readCalls++
@@ -624,6 +633,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 			UsingExpr:  "false",
 			CheckExpr:  "true",
 		}})
+		resolvePredicates(task)
 		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
 			Status:     merr.Success(),
 			FieldsData: []*schemapb.FieldData{proto.Clone(task.req.GetFieldsData()[0]).(*schemapb.FieldData)},
@@ -649,6 +659,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 			UsingExpr:  "true",
 			CheckExpr:  "false",
 		}})
+		resolvePredicates(task)
 		readCalls := 0
 		mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			readCalls++
@@ -708,6 +719,11 @@ func TestUpsertPinsUsingAndCheckToOneSnapshot(t *testing.T) {
 			UsingExpr:  "id == 1",
 			CheckExpr:  "id == -1",
 		}})
+		var err error
+		task.rlsUsingPredicate, task.rlsCheckPredicate, err = rls.ResolveUpsertPredicates(
+			ctx, collectionID, task.req.GetRlsPrincipal(), task.schema.SchemaHelper,
+		)
+		require.NoError(t, err)
 		mockey.Mock(retrieveByPKs).To(func(context.Context, *upsertTask, *schemapb.IDs, []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
 			rls.InvalidatePolicies(collectionID, 0)
 			coord := mocks.NewMockMixCoordClient(t)
@@ -730,7 +746,10 @@ func TestUpsertPinsUsingAndCheckToOneSnapshot(t *testing.T) {
 		}).Build()
 
 		require.NoError(t, task.prepareUpsert(ctx))
-		err := task.insertPreExecute(ctx)
+		// CAS retries rebuild the request state but must keep the request-level
+		// RLS snapshot resolved before the first attempt.
+		require.NoError(t, task.prepareUpsert(ctx))
+		err = task.insertPreExecute(ctx)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 	})
 }

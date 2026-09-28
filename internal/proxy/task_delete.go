@@ -407,7 +407,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := rls.MergePredicateToPlan(dr.plan, predicate); err != nil {
+		if err := rls.MergeNormalizedPredicateToPlan(dr.plan, predicate); err != nil {
 			return err
 		}
 	}

@@ -898,7 +898,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := rls.MergePredicateToPlan(t.plan, predicate); err != nil {
+		if err := rls.MergeNormalizedPredicateToPlan(t.plan, predicate); err != nil {
 			return err
 		}
 	}

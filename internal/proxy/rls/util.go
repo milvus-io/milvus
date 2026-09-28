@@ -661,15 +661,19 @@ func mergeNormalizedPredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.E
 	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
 		return userPredicate
 	}
-	switch wrapper := userPredicate.GetExpr().(type) {
+	switch userPredicate.GetExpr().(type) {
 	case *planpb.Expr_RandomSampleExpr:
-		wrapper.RandomSampleExpr.Predicate = mergeNormalizedPredicate(
-			rewriter.RewriteExpr(wrapper.RandomSampleExpr.GetPredicate()), rlsPredicate)
-		return userPredicate
+		cloned := proto.Clone(userPredicate).(*planpb.Expr)
+		wrapper := cloned.GetRandomSampleExpr()
+		wrapper.Predicate = mergeNormalizedPredicate(
+			rewriter.RewriteExpr(wrapper.GetPredicate()), rlsPredicate)
+		return cloned
 	case *planpb.Expr_ElementFilterExpr:
-		wrapper.ElementFilterExpr.Predicate = mergeNormalizedPredicate(
-			rewriter.RewriteExpr(wrapper.ElementFilterExpr.GetPredicate()), rlsPredicate)
-		return userPredicate
+		cloned := proto.Clone(userPredicate).(*planpb.Expr)
+		wrapper := cloned.GetElementFilterExpr()
+		wrapper.Predicate = mergeNormalizedPredicate(
+			rewriter.RewriteExpr(wrapper.GetPredicate()), rlsPredicate)
+		return cloned
 	}
 	return rewriter.MergeNormalizedAnd(userPredicate, rlsPredicate)
 }
