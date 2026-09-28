@@ -49,16 +49,25 @@ wrapper build and Go/cgo compilation receive their own TSan flags.
 
 ## Conan dependency variants
 
-The default TSan build can consume existing Conan packages and emits a warning
-that their native accesses are not instrumented. For an instrumented native
-dependency graph, opt into the provided host profile:
+The standard build scripts rebuild Folly, milvus-common, libevent, oneTBB,
+GEOS and gtest with TSan by default. Synchronization in prebuilt Folly is not
+visible to TSan and can produce reports during service startup. The generated
+host profile keeps build tools unchanged and makes sanitizer flags part of
+package IDs. A scoped Conan hook preserves the flags that the Folly recipe
+otherwise overwrites. The generated dependency manifest verifies native symbols
+and records package revisions and library hashes; the worker validates it again
+after cache restore.
+
+Other Conan dependencies remain prebuilt. For broader native dependency
+instrumentation, opt into the provided full host profile (this broader profile
+still requires validation of each recipe):
 
 ```bash
 CONAN_HOST_PROFILE="$PWD/internal/core/conan/profiles/tsan" \
     make USE_TSAN=ON mode=RelWithDebInfo build-cpp-with-unittest
 ```
 
-The profile extends `default` and configures C/C++ compile flags and executable/
+The full profile extends `default` and configures C/C++ compile flags and executable/
 shared-library link flags. It includes those settings and the sanitizer marker
 in Conan package IDs. `--build=missing` can therefore reuse TSan variants without
 silently substituting ordinary packages. Build-context tools retain the normal
