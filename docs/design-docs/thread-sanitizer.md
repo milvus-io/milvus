@@ -188,6 +188,23 @@ report races for correctly locked OpenMP accesses. The LLVM/Archer profile repla
 with upstream OMPT annotations. The earlier HNSW finding remains a separate
 algorithm issue; this integration does not suppress it.
 
+### LLVM/Archer validation
+
+The LLVM 20.1.8 native + Go image built at `31b47db2d0` reached Healthy. The
+packaged runtime audit checked 163 ELF files without unresolved dependencies,
+GNU libgomp or GNU libtsan. All seven smoke cases passed, including a separate
+run with the CMake-installed symbolizer and runtime libraries.
+
+SDK insertion passed. Growing binary search found an unsynchronized static
+cache in Knowhere's `get_l3_size()` (`utils.cpp:40` read versus `:50` write).
+An isolated sealed-search case reproduced the HNSW neighbor-array race above.
+Both service failures exited 66 and included source filenames and lines from
+the packaged symbolizer. The HNSW report contains official `libarcher.so`
+callbacks for the two distinct locks. Independent HNSW controls passed three
+single-thread runs and reported the race in all three four-thread runs.
+These application races remain follow-up work; the integration does not hide
+them or establish a clean SDK search suite.
+
 ## References
 
 - [LLVM Archer](https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/openmp/tools/archer/README.md)
