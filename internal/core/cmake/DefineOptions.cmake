@@ -44,6 +44,8 @@ endmacro()
 set_option_category("Milvus Build Option")
 
 define_option(MILVUS_GPU_VERSION "Build GPU version" OFF)
+define_option(USE_ASAN "Build C/C++ code with AddressSanitizer" OFF)
+define_option(USE_TSAN "Build C/C++ code with ThreadSanitizer" OFF)
 
 #----------------------------------------------------------------------
 set_option_category("Thirdparty")

@@ -86,11 +86,6 @@ set_target_properties(tantivy_binding
         IMPORTED_LOCATION "${TANTIVY_LIB_DIR}/${TANTIVY_NAME}"
         INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/include")
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        add_compile_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-        add_link_options(-fno-stack-protector -fno-omit-frame-pointer -fno-var-tracking -fsanitize=address)
-endif()
-
 # TODO: move these below tests to ut.
 
 option(BUILD_TANTIVY_WITH_UT "compile tantivy with ut" OFF)
