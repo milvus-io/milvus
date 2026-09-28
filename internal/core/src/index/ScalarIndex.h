@@ -26,6 +26,7 @@
 #include "index/Index.h"
 #include "fmt/format.h"
 #include "index/Meta.h"
+#include "index/ScalarIndexLookup.h"
 
 namespace milvus::storage {
 class IndexEntryWriter;
@@ -172,6 +173,24 @@ class ScalarIndex : public IndexBase {
 
     virtual std::optional<T>
     Reverse_Lookup(size_t offset) const = 0;
+
+    // Batch value views in input order. The caller must hold this index's pin
+    // until the returned views have been consumed. The default preserves the
+    // single-row API's NULL/error behavior and owns any decoded string values;
+    // indexes with directly readable storage override it to avoid row-wise
+    // virtual dispatch and string copies. No predicate is evaluated here.
+    virtual ScalarIndexLookupViews<T>
+    Reverse_LookupViews(ScalarIndexOffsets offsets) const {
+        ScalarIndexLookupViews<T> result(offsets.size());
+        for (size_t i = 0; i < offsets.size(); ++i) {
+            AssertInfo(offsets[i] >= 0, "negative scalar index offset");
+            auto value = Reverse_Lookup(static_cast<size_t>(offsets[i]));
+            if (value.has_value()) {
+                result.SetOwned(i, std::move(*value));
+            }
+        }
+        return result;
+    }
 
     // True iff per-row Reverse_Lookup is cheap (O(1)/O(log n)/O(strlen)).
     // BITMAP without an offset cache reverse-looks-up in O(cardinality) per

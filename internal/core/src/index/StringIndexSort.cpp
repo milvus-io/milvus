@@ -530,6 +530,16 @@ StringIndexSort::Reverse_Lookup(size_t offset) const {
                                  idx_to_offsets_size_);
 }
 
+ScalarIndexLookupViews<std::string>
+StringIndexSort::Reverse_LookupViews(ScalarIndexOffsets offsets) const {
+    assert(impl_ != nullptr);
+    return impl_->Reverse_LookupViews(offsets,
+                                      total_num_rows_,
+                                      valid_bitset_,
+                                      idx_to_offsets_ptr_,
+                                      idx_to_offsets_size_);
+}
+
 int64_t
 StringIndexSort::Size() {
     return total_size_;
@@ -1323,12 +1333,12 @@ StringIndexSortMemoryImpl::PatternMatch(const std::string& pattern,
     return bitset;
 }
 
-std::optional<std::string>
-StringIndexSortMemoryImpl::Reverse_Lookup(size_t offset,
-                                          size_t total_num_rows,
-                                          const TargetBitmap& valid_bitset,
-                                          const int32_t* idx_to_offsets_ptr,
-                                          size_t idx_to_offsets_size) const {
+std::optional<std::string_view>
+StringIndexSortMemoryImpl::LookupView(size_t offset,
+                                      size_t total_num_rows,
+                                      const TargetBitmap& valid_bitset,
+                                      const int32_t* idx_to_offsets_ptr,
+                                      size_t idx_to_offsets_size) const {
     if (offset >= total_num_rows || !valid_bitset[offset]) {
         return std::nullopt;
     }
@@ -1341,6 +1351,42 @@ StringIndexSortMemoryImpl::Reverse_Lookup(size_t offset,
     }
 
     return std::nullopt;
+}
+
+std::optional<std::string>
+StringIndexSortMemoryImpl::Reverse_Lookup(size_t offset,
+                                          size_t total_num_rows,
+                                          const TargetBitmap& valid_bitset,
+                                          const int32_t* idx_to_offsets_ptr,
+                                          size_t idx_to_offsets_size) const {
+    auto value = LookupView(offset,
+                            total_num_rows,
+                            valid_bitset,
+                            idx_to_offsets_ptr,
+                            idx_to_offsets_size);
+    return value ? std::make_optional<std::string>(*value) : std::nullopt;
+}
+
+ScalarIndexLookupViews<std::string>
+StringIndexSortMemoryImpl::Reverse_LookupViews(
+    ScalarIndexOffsets offsets,
+    size_t total_num_rows,
+    const TargetBitmap& valid_bitset,
+    const int32_t* idx_to_offsets_ptr,
+    size_t idx_to_offsets_size) const {
+    ScalarIndexLookupViews<std::string> result(offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        AssertInfo(offsets[i] >= 0, "negative scalar index offset");
+        auto value = LookupView(offsets[i],
+                                total_num_rows,
+                                valid_bitset,
+                                idx_to_offsets_ptr,
+                                idx_to_offsets_size);
+        if (value) {
+            result.SetView(i, *value);
+        }
+    }
+    return result;
 }
 
 int64_t
@@ -1827,12 +1873,12 @@ StringIndexSortMmapImpl::PatternMatch(const std::string& pattern,
     return bitset;
 }
 
-std::optional<std::string>
-StringIndexSortMmapImpl::Reverse_Lookup(size_t offset,
-                                        size_t total_num_rows,
-                                        const TargetBitmap& valid_bitset,
-                                        const int32_t* idx_to_offsets_ptr,
-                                        size_t idx_to_offsets_size) const {
+std::optional<std::string_view>
+StringIndexSortMmapImpl::LookupView(size_t offset,
+                                    size_t total_num_rows,
+                                    const TargetBitmap& valid_bitset,
+                                    const int32_t* idx_to_offsets_ptr,
+                                    size_t idx_to_offsets_size) const {
     if (offset >= total_num_rows || !valid_bitset[offset]) {
         return std::nullopt;
     }
@@ -1842,13 +1888,46 @@ StringIndexSortMmapImpl::Reverse_Lookup(size_t offset,
         if (unique_idx >= 0 &&
             static_cast<size_t>(unique_idx) < unique_count_) {
             MmapEntry entry = GetEntry(unique_idx);
-            // Convert string_view to string for return
-            std::string_view sv = entry.get_string_view();
-            return std::string(sv);
+            return entry.get_string_view();
         }
     }
 
     return std::nullopt;
+}
+
+std::optional<std::string>
+StringIndexSortMmapImpl::Reverse_Lookup(size_t offset,
+                                        size_t total_num_rows,
+                                        const TargetBitmap& valid_bitset,
+                                        const int32_t* idx_to_offsets_ptr,
+                                        size_t idx_to_offsets_size) const {
+    auto value = LookupView(offset,
+                            total_num_rows,
+                            valid_bitset,
+                            idx_to_offsets_ptr,
+                            idx_to_offsets_size);
+    return value ? std::make_optional<std::string>(*value) : std::nullopt;
+}
+
+ScalarIndexLookupViews<std::string>
+StringIndexSortMmapImpl::Reverse_LookupViews(ScalarIndexOffsets offsets,
+                                             size_t total_num_rows,
+                                             const TargetBitmap& valid_bitset,
+                                             const int32_t* idx_to_offsets_ptr,
+                                             size_t idx_to_offsets_size) const {
+    ScalarIndexLookupViews<std::string> result(offsets.size());
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        AssertInfo(offsets[i] >= 0, "negative scalar index offset");
+        auto value = LookupView(offsets[i],
+                                total_num_rows,
+                                valid_bitset,
+                                idx_to_offsets_ptr,
+                                idx_to_offsets_size);
+        if (value) {
+            result.SetView(i, *value);
+        }
+    }
+    return result;
 }
 
 int64_t

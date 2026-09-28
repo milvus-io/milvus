@@ -140,6 +140,9 @@ class StringIndexSort : public StringIndex {
     std::optional<std::string>
     Reverse_Lookup(size_t offset) const override;
 
+    ScalarIndexLookupViews<std::string>
+    Reverse_LookupViews(ScalarIndexOffsets offsets) const override;
+
     int64_t
     Size() override;
 
@@ -255,6 +258,13 @@ class StringIndexSortImpl {
                    const int32_t* idx_to_offsets_ptr,
                    size_t idx_to_offsets_size) const = 0;
 
+    virtual ScalarIndexLookupViews<std::string>
+    Reverse_LookupViews(ScalarIndexOffsets offsets,
+                        size_t total_num_rows,
+                        const TargetBitmap& valid_bitset,
+                        const int32_t* idx_to_offsets_ptr,
+                        size_t idx_to_offsets_size) const = 0;
+
     virtual int64_t
     Size() = 0;
 
@@ -351,6 +361,13 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
                    const int32_t* idx_to_offsets_ptr,
                    size_t idx_to_offsets_size) const override;
 
+    ScalarIndexLookupViews<std::string>
+    Reverse_LookupViews(ScalarIndexOffsets offsets,
+                        size_t total_num_rows,
+                        const TargetBitmap& valid_bitset,
+                        const int32_t* idx_to_offsets_ptr,
+                        size_t idx_to_offsets_size) const override;
+
     int64_t
     Size() override;
 
@@ -358,6 +375,13 @@ class StringIndexSortMemoryImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
+    std::optional<std::string_view>
+    LookupView(size_t offset,
+               size_t total_num_rows,
+               const TargetBitmap& valid_bitset,
+               const int32_t* idx_to_offsets_ptr,
+               size_t idx_to_offsets_size) const;
+
     // Helper method for binary search
     size_t
     FindValueIndex(const std::string& value) const;
@@ -507,6 +531,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
                    const int32_t* idx_to_offsets_ptr,
                    size_t idx_to_offsets_size) const override;
 
+    ScalarIndexLookupViews<std::string>
+    Reverse_LookupViews(ScalarIndexOffsets offsets,
+                        size_t total_num_rows,
+                        const TargetBitmap& valid_bitset,
+                        const int32_t* idx_to_offsets_ptr,
+                        size_t idx_to_offsets_size) const override;
+
     int64_t
     Size() override;
 
@@ -514,6 +545,13 @@ class StringIndexSortMmapImpl : public StringIndexSortImpl {
     ByteSize() const override;
 
  private:
+    std::optional<std::string_view>
+    LookupView(size_t offset,
+               size_t total_num_rows,
+               const TargetBitmap& valid_bitset,
+               const int32_t* idx_to_offsets_ptr,
+               size_t idx_to_offsets_size) const;
+
     // Binary search for a value
     size_t
     FindValueIndex(const std::string& value) const;

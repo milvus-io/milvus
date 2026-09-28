@@ -130,6 +130,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     std::optional<T>
     Reverse_Lookup(size_t offset) const override;
 
+    ScalarIndexLookupViews<T>
+    Reverse_LookupViews(ScalarIndexOffsets offsets) const override;
+
     int64_t
     Size() override {
         return (int64_t)size_;
@@ -178,6 +181,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
  private:
+    std::optional<T>
+    LookupValue(size_t offset) const;
+
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 

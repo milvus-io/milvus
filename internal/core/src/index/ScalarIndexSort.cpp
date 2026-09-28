@@ -639,11 +639,37 @@ ScalarIndexSort<T>::Reverse_Lookup(size_t idx) const {
     AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
     AssertInfo(is_built_, "index has not been built");
 
+    return LookupValue(idx);
+}
+
+template <typename T>
+std::optional<T>
+ScalarIndexSort<T>::LookupValue(size_t idx) const {
+    AssertInfo(idx < idx_to_offsets_size_, "out of range of total count");
+
     if (!valid_bitset_[idx]) {
         return std::nullopt;
     }
     auto offset = idx_to_offsets_ptr_[idx];
     return operator[](offset).a_;
+}
+
+template <typename T>
+ScalarIndexLookupViews<T>
+ScalarIndexSort<T>::Reverse_LookupViews(ScalarIndexOffsets offsets) const {
+    ScalarIndexLookupViews<T> result(offsets.size());
+    if (offsets.empty()) {
+        return result;
+    }
+    AssertInfo(is_built_, "index has not been built");
+    for (size_t i = 0; i < offsets.size(); ++i) {
+        AssertInfo(offsets[i] >= 0, "negative scalar index offset");
+        auto value = LookupValue(static_cast<size_t>(offsets[i]));
+        if (value.has_value()) {
+            result.SetView(i, *value);
+        }
+    }
+    return result;
 }
 
 template <typename T>

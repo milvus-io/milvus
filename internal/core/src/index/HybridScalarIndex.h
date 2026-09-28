@@ -159,6 +159,11 @@ class HybridScalarIndex : public ScalarIndex<T> {
         return internal_index_->Reverse_Lookup(offset);
     }
 
+    ScalarIndexLookupViews<T>
+    Reverse_LookupViews(ScalarIndexOffsets offsets) const override {
+        return internal_index_->Reverse_LookupViews(offsets);
+    }
+
     bool
     SupportFastReverseLookup() const override {
         return internal_index_->SupportFastReverseLookup();

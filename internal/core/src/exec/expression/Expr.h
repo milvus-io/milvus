@@ -802,8 +802,6 @@ class SegmentExpr : public Expr {
         using Index = index::ScalarIndex<IndexInnerType>;
         auto scalar_index = dynamic_cast<const Index*>(pinned_index_[0].get());
         auto* index_ptr = const_cast<Index*>(scalar_index);
-        const auto& valid_result = GetCachedIndexValidBitmap(index_ptr);
-        const bool all_valid = cached_index_all_valid_;
         auto batch_size = input->size();
         const bool has_candidate_mask =
             candidate_mask != nullptr && !candidate_mask->empty();
@@ -818,44 +816,80 @@ class SegmentExpr : public Expr {
         // offset's original chunk boundary, so applying chunk-0 SkipIndex to
         // the whole candidate batch is incorrect. Reverse lookup is already
         // candidate-local; evaluate every offset instead.
-        for (auto i = 0; i < batch_size; ++i) {
+        // Keep the public index API independent of expression masks. Read
+        // active runs only, with bounded offset scratch, and preserve logical
+        // candidate positions for the existing kernel's bitmap-input cursor.
+        constexpr size_t kLookupRows = 64;
+        std::array<int64_t, kLookupRows> offsets;
+        for (size_t i = 0; i < batch_size;) {
             if (has_candidate_mask && !(*candidate_mask)[i]) {
-                // Preserve the evaluator's candidate-position cursor without
-                // reading or changing this already-excluded row.
+                auto end = i + 1;
+                while (end < batch_size && !(*candidate_mask)[end]) {
+                    ++end;
+                }
                 evaluate_batch.template operator()<FilterType::random>(
                     nullptr,
                     nullptr,
                     nullptr,
-                    1,
+                    end - i,
                     res + i,
                     valid_res + i,
                     values...);
+                i = end;
                 continue;
             }
-            auto offset = (*input)[i];
-            auto raw = index_ptr->Reverse_Lookup(offset);
-            if (!raw.has_value()) {
-                res[i] = valid_res[i] = false;
+            size_t count = 0;
+            while (i + count < batch_size && count < kLookupRows &&
+                   (!has_candidate_mask || (*candidate_mask)[i + count])) {
+                offsets[count] = (*input)[i + count];
+                ++count;
+            }
+            auto batch =
+                index_ptr->Reverse_LookupViews({offsets.data(), count});
+            AssertInfo(batch.size() == count,
+                       "index lookup batch size mismatch");
+            // Legacy owning-string kernels (also instantiated for growing
+            // columns) retain their input type. Sealed string_view kernels
+            // consume the index views directly, with no string materialization.
+            FixedVector<T> owning_values;
+            const T* data;
+            if constexpr (std::is_same_v<T, std::string>) {
+                owning_values.reserve(count);
+                for (auto value : batch.values()) {
+                    owning_values.emplace_back(value);
+                }
+                data = owning_values.data();
+            } else {
+                data = batch.values().data();
+            }
+            // Never execute a predicate on a NULL placeholder. This matters
+            // for operations whose invalid/default value is not safe to read.
+            // Both the batch and pinned_index_ outlive every kernel call.
+            // Views carries validity for these candidates, so this reader no
+            // longer needs a segment-sized IsNotNull() copy per expression.
+            auto is_valid = [&](size_t lane) { return batch.is_valid(lane); };
+            for (size_t first = 0; first < count;) {
+                const bool valid = is_valid(first);
+                auto end = first + 1;
+                while (end < count && is_valid(end) == valid) {
+                    ++end;
+                }
+                if (!valid) {
+                    for (auto lane = first; lane < end; ++lane) {
+                        res[i + lane] = valid_res[i + lane] = false;
+                    }
+                }
                 evaluate_batch.template operator()<FilterType::random>(
-                    nullptr,
+                    valid ? data + first : nullptr,
                     ValidityView{},
                     nullptr,
-                    1,
-                    res + i,
-                    valid_res + i,
+                    end - first,
+                    res + i + first,
+                    valid_res + i + first,
                     values...);
-                continue;
+                first = end;
             }
-            T raw_data = raw.value();
-            bool valid_data = all_valid || valid_result[offset];
-            evaluate_batch.template operator()<FilterType::random>(
-                &raw_data,
-                ValidityView::FromExpanded(&valid_data),
-                nullptr,
-                1,
-                res + i,
-                valid_res + i,
-                values...);
+            i += count;
         }
 
         return batch_size;
@@ -1019,38 +1053,29 @@ class SegmentExpr : public Expr {
                 const bool skip =
                     skip_func &&
                     skip_func(*skip_index, field_id_, run_chunk_id);
-                for (size_t i = 0; i < batch_offsets.size(); ++i) {
-                    const auto validity =
-                        valid_data.empty()
-                            ? ValidityView{}
-                            : ValidityView::FromExpanded(valid_data.data() + i);
-                    if (!skip) {
-                        evaluate_batch.template operator()<FilterType::random>(
-                            data_vec.data() + i,
-                            validity,
-                            nullptr,
-                            1,
-                            res + processed_size,
-                            valid_res + processed_size,
-                            values...);
-                    } else {
-                        ApplyValidData(validity,
-                                       res + processed_size,
-                                       valid_res + processed_size,
-                                       1);
-                        // Keep cursor-tracking callbacks aligned when the
-                        // current chunk is pruned by SkipIndex.
-                        evaluate_batch.template operator()<FilterType::random>(
-                            nullptr,
-                            ValidityView{},
-                            nullptr,
-                            1,
-                            res + processed_size,
-                            valid_res + processed_size,
-                            values...);
-                    }
-                    ++processed_size;
+                const auto count = batch_offsets.size();
+                const auto validity =
+                    valid_data.empty()
+                        ? ValidityView{}
+                        : ValidityView::FromExpanded(valid_data.data());
+                if (skip) {
+                    ApplyValidData(validity,
+                                   res + processed_size,
+                                   valid_res + processed_size,
+                                   count);
                 }
+                // The PinWrapper stays alive for the entire batch, including
+                // borrowed string/array contents. Keep the random kernel and
+                // advance the position cursor once by the same logical count.
+                evaluate_batch.template operator()<FilterType::random>(
+                    skip ? nullptr : data_vec.data(),
+                    validity,
+                    nullptr,
+                    count,
+                    res + processed_size,
+                    valid_res + processed_size,
+                    values...);
+                processed_size += count;
             }
             return input->size();
         };
