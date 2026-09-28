@@ -427,7 +427,10 @@ func TestRateLimitInterceptor(t *testing.T) {
 		// test 0 rate, force deny
 		limiter.rate = 0
 		interceptorFun = RateLimitInterceptorWithMetaCache(func() Cache { return mockCache }, &limiter)
-		rsp, err = interceptorFun(context.Background(), &milvuspb.InsertRequest{}, serverInfo, handler)
+		// A force-deny check needs tokens; an empty protobuf request is exempt.
+		request := &milvuspb.InsertRequest{DbName: "db1", CollectionName: "foo"}
+		require.Positive(t, proto.Size(request))
+		rsp, err = interceptorFun(context.Background(), request, serverInfo, handler)
 		assert.Equal(t, commonpb.ErrorCode_ForceDeny, rsp.(*milvuspb.MutationResult).GetStatus().GetErrorCode())
 		assert.NoError(t, err)
 	})
