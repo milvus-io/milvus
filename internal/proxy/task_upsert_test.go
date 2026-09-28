@@ -1470,9 +1470,6 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessag
 func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 	for _, partitionKey := range []bool{false, true} {
 		t.Run(map[bool]string{false: "primary key", true: "partition key"}[partitionKey], func(t *testing.T) {
-			collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(int64(1001), nil).Build()
-			defer collectionPatch.UnPatch()
-
 			primaryPatch := mockey.Mock(repackInsertDataForStreamingService).
 				Return([]streamingmessage.MutableMessage{}, nil).
 				Build()
@@ -1488,12 +1485,14 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			t.Cleanup(func() { streaming.SetWALForTest(oldWAL) })
 
 			task := &insertTask{
-				baseTask: baseTask{MetaCache: &MetaCache{}},
-				ctx:      context.Background(),
+				baseTask:     baseTask{MetaCache: NewMockCache(t)},
+				ctx:          context.Background(),
+				collectionID: 1001,
 				insertMsg: &msgstream.InsertMsg{InsertRequest: &msgpb.InsertRequest{
 					Base:           &commonpb.MsgBase{},
 					DbName:         "test_db",
 					CollectionName: "test_collection",
+					CollectionID:   2002,
 				}},
 				result: &milvuspb.MutationResult{},
 				chMgr: channelmgr.NewChannelsMgr(func(typeutil.UniqueID) (channelmgr.ChannelInfo, error) {
@@ -1509,6 +1508,7 @@ func TestInsertTaskExecuteSelectsPartitionRouting(t *testing.T) {
 			}
 
 			require.NoError(t, task.Execute(context.Background()))
+			require.Equal(t, int64(1001), task.insertMsg.GetCollectionID())
 			require.Equal(t, 1, fakeWAL.appendCalls)
 		})
 	}
@@ -1540,8 +1540,11 @@ func TestPackInsertMessageUsesPartitionKeyRouting(t *testing.T) {
 func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 	task := partialUpdateCASRealPackTestTask(t, []int64{10, 20}, []int64{10, 1001}, []int64{10})
 	task.req.PartialUpdate = false
-	collectionPatch := mockey.Mock((*MetaCache).GetCollectionID).Return(task.collectionID, nil).Build()
-	defer collectionPatch.UnPatch()
+	// Packing must use the collection resolved during PreExecute, not resolve
+	// the mutable request name again.
+	task.MetaCache = NewMockCache(t)
+	task.upsertMsg.InsertMsg.CollectionName = "moving_alias"
+	task.upsertMsg.InsertMsg.CollectionID = task.collectionID + 1
 
 	var routingIDs *schemapb.IDs
 	repackPatch := mockey.Mock(repackInsertDataForStreamingService).To(
@@ -1556,6 +1559,7 @@ func TestPackInsertMessageUsesFinalInsertIDsForRouting(t *testing.T) {
 			_ map[string]*messagespb.PartialUpdateCAS,
 			_ *insertIdempotencyDecoration,
 		) ([]streamingmessage.MutableMessage, error) {
+			require.Equal(t, task.collectionID, insertMsg.GetCollectionID())
 			routingIDs = result.GetIDs()
 			primaryData, err := typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), task.schema.GetFields()[0])
 			require.NoError(t, err)
@@ -3295,6 +3299,7 @@ func TestPrepareUpsertFullAutoIDRejectsAllocatedIDCollision(t *testing.T) {
 }
 
 func TestUpdateTaskPreExecutePinsAliasTargetSchema(t *testing.T) {
+	const canonicalDBName = "canonical_db"
 	task := createTestUpdateTask()
 	task.req.CollectionName = "moving_alias"
 	pinnedSchema := task.schema
@@ -3305,6 +3310,7 @@ func TestUpdateTaskPreExecutePinsAliasTargetSchema(t *testing.T) {
 	defer collectionID.UnPatch()
 	collectionInfoPatch := mockey.Mock((*MetaCache).GetCollectionInfo).Return(&collectionInfo{
 		CollID: task.collectionID,
+		DBName: canonicalDBName,
 		Schema: pinnedSchema,
 	}, nil).Build()
 	defer collectionInfoPatch.UnPatch()
@@ -3326,6 +3332,12 @@ func TestUpdateTaskPreExecutePinsAliasTargetSchema(t *testing.T) {
 	require.Same(t, pinnedSchema, task.schema)
 	require.Equal(t, pinnedSchema.GetName(), task.collectionName)
 	require.Equal(t, "moving_alias", task.req.GetCollectionName())
+	require.Equal(t, canonicalDBName, task.upsertMsg.InsertMsg.GetDbName())
+	require.Equal(t, pinnedSchema.GetName(), task.upsertMsg.InsertMsg.GetCollectionName())
+	require.Equal(t, task.collectionID, task.upsertMsg.InsertMsg.GetCollectionID())
+	require.Equal(t, canonicalDBName, task.upsertMsg.DeleteMsg.GetDbName())
+	require.Equal(t, pinnedSchema.GetName(), task.upsertMsg.DeleteMsg.GetCollectionName())
+	require.Equal(t, task.collectionID, task.upsertMsg.DeleteMsg.GetCollectionID())
 	require.Zero(t, schemaLookups)
 }
 

@@ -1909,7 +1909,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 			log.Warn(ctx, "Invalid partition name", mlog.String("partitionName", partName), mlog.Err(err))
 			return err
 		}
-		partID, err := it.GetMetaCache().GetPartitionID(ctx, it.req.GetDbName(), collName, partName)
+		partID, err := it.GetMetaCache().GetPartitionID(ctx, it.upsertMsg.DeleteMsg.GetDbName(), collName, partName)
 		if err != nil {
 			log.Warn(ctx, "Failed to get partition id", mlog.String("collectionName", collName), mlog.String("partitionName", partName), mlog.Err(err))
 			return err
@@ -2053,13 +2053,13 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 					commonpbutil.WithMsgType(commonpb.MsgType_Insert),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
-				CollectionName: it.req.CollectionName,
+				CollectionName: it.collectionName,
 				CollectionID:   it.collectionID,
 				PartitionName:  it.req.PartitionName,
 				FieldsData:     it.req.FieldsData,
 				NumRows:        uint64(it.req.NumRows),
 				Version:        msgpb.InsertDataVersion_ColumnBased,
-				DbName:         it.req.DbName,
+				DbName:         canonicalDBName,
 				Namespace:      it.req.Namespace,
 			},
 		},
@@ -2069,8 +2069,8 @@ func (it *upsertTask) PreExecute(ctx context.Context) error {
 					commonpbutil.WithMsgType(commonpb.MsgType_Delete),
 					commonpbutil.WithSourceID(paramtable.GetNodeID()),
 				),
-				DbName:         it.req.DbName,
-				CollectionName: it.req.CollectionName,
+				DbName:         canonicalDBName,
+				CollectionName: it.collectionName,
 				CollectionID:   it.collectionID,
 				NumRows:        int64(it.req.NumRows),
 				PartitionName:  it.req.PartitionName,

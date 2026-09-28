@@ -168,9 +168,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 	if canonicalDBName == "" {
 		canonicalDBName = it.insertMsg.GetDbName()
 	}
+	collectionName = colInfo.Schema.GetName()
+	it.insertMsg.DbName = canonicalDBName
+	it.insertMsg.CollectionName = collectionName
+	it.insertMsg.CollectionID = collID
 	if rlsEnabled && it.skipRLS {
 		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, true,
-			canonicalDBName, colInfo.Schema.GetName(), "insert")
+			canonicalDBName, collectionName, "insert")
 		if err != nil {
 			return err
 		}

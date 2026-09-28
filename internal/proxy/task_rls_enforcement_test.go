@@ -310,6 +310,8 @@ func TestRLSOperationsUseSchemaFromPinnedCollectionInfo(t *testing.T) {
 		require.NoError(t, task.OnEnqueue())
 		require.NoError(t, task.PreExecute(ctx))
 		require.Same(t, pinnedSchema.CollectionSchema, task.schema)
+		require.Equal(t, canonicalName, task.insertMsg.GetCollectionName())
+		require.Equal(t, collectionID, task.insertMsg.GetCollectionID())
 		require.Zero(t, *nameSchemaLoads)
 	})
 
