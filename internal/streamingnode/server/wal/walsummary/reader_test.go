@@ -7,6 +7,7 @@ import (
 
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/pkg/v3/proto/streamingpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -130,14 +131,16 @@ func TestReadSnapshotPinsObjectsAcrossGC(t *testing.T) {
 	// While the reader holds a captured durable/hot snapshot, move the hot
 	// section to disk and release the older manifest entry. Physical GC needs
 	// the exclusive read lock and must wait for this read to return.
-	var origin func(*Store, context.Context, uint64, int64, string, *streamingpb.VChannelSummaryChunkIndex) ([]*streamingpb.VChannelSummaryTransformRecord, error)
-	patch := mockey.Mock((*Store).ReadTransformSection).Origin(&origin).To(func(store *Store, ctx context.Context, gen uint64, term int64, vc string, index *streamingpb.VChannelSummaryChunkIndex) ([]*streamingpb.VChannelSummaryTransformRecord, error) {
+	var origin func(*Store, context.Context, *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error)
+	patch := mockey.Mock((*Store).readChunkPayload).Origin(&origin).To(func(store *Store, ctx context.Context, index *streamingpb.PChannelSummaryChunkIndexEntry) (*chunkPayload, error) {
+		// Copy the mock pointer argument before calling back into the manager.
+		copied := proto.Clone(index).(*streamingpb.PChannelSummaryChunkIndexEntry)
 		require.NoError(t, m.writeChunk(ctx, sc))
 		m.AdvanceGCTimeTick("v1", 100)
 		m.cfg.RetentionMaxBytes = 1
 		require.NoError(t, m.GCOnce(ctx))
 		require.False(t, m.readMu.TryLock(), "physical GC cannot acquire its lock during a read")
-		return origin(store, ctx, gen, term, vc, index)
+		return origin(store, ctx, copied)
 	}).Build()
 	defer patch.UnPatch()
 	b, err := m.ReadTransform(ctx, "v1", 0, 200, ReadLimits{})

@@ -52,6 +52,7 @@ const DroppedVChannelTimeTick = math.MaxUint64
 // completed point before publishing a checkpoint.
 // mu guards in-memory state; publishMu serializes manifest writes.
 type Manager struct {
+	chunkIndex     *chunkIndex
 	queryRetention map[string]uint64 // exclusive lower bound required by query snapshots
 
 	mu sync.Mutex
@@ -90,7 +91,9 @@ type Manager struct {
 
 // ManagerConfig carries the wiring of one pchannel's summary manager.
 type ManagerConfig struct {
-	Runtime moduleapi.Runtime
+	// CacheMaxBytes bounds cached encoded chunk buffers per PChannel; zero disables residency.
+	CacheMaxBytes uint64
+	Runtime       moduleapi.Runtime
 	// FlushMaxBytes seals a chunk at this staging size. Zero disables size-based sealing.
 	FlushMaxBytes uint64
 	PChannel      string
@@ -115,6 +118,7 @@ type ManagerConfig struct {
 // NewManager creates the summary manager of one pchannel.
 func NewManager(config ManagerConfig) *Manager {
 	return &Manager{
+		chunkIndex:            newChunkIndex(config.CacheMaxBytes),
 		gcFrontiers:           make(map[string]uint64),
 		pendingTransforms:     make(map[string]*streamingpb.VChannelSummaryTransformIndex),
 		materializedFrontiers: make(map[string]uint64),
@@ -428,15 +432,17 @@ func (m *Manager) writeChunk(ctx context.Context, sc *SealedChunk) error {
 		}
 		sections[vchannel] = cs
 	}
-	footer, size, err := m.cfg.Store.WriteChunk(ctx, sc.Generation, sections, sc.Coverage)
+	footer, payload, err := m.cfg.Store.writeChunk(ctx, sc.Generation, sections, sc.Coverage)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
-	sc.index = chunkIndexEntryFromFooter(footer, size)
+	sc.index = m.chunkIndex.newChunk(chunkIndexEntryFromFooter(footer, uint64(len(payload))),
+		&chunkPayload{bytes: payload, footerStart: chunkFooterOffset(payload)})
 	for len(m.pendingSealed) > 0 && m.pendingSealed[0].index != nil {
 		head := m.pendingSealed[0]
-		recordChunk(m.manifest, head.index)
+		recordChunk(m.manifest, head.index.PChannelSummaryChunkIndexEntry)
+		m.chunkIndex.chunks = append(m.chunkIndex.chunks, head.index)
 		for vchannel, records := range head.RecordsByVChannel {
 			for _, record := range records {
 				m.durableFrontiers[vchannel] = max(m.durableFrontiers[vchannel], record.timeTick)
@@ -542,10 +548,10 @@ func (m *Manager) ReadIdempotencyEntries(
 //
 // The chunk loop is the OUTER one on purpose: a chunk is a pchannel-wide object
 // with no range read, so reading vchannel by vchannel would download the same
-// object once per vchannel. Here each chunk is fetched once, decoded for every
-// vchannel that has a section in it, and released before the next one -- the
-// transfer drops from O(chunks x vchannels) to O(chunks) with no more memory
-// than a single chunk at a time.
+// object once per vchannel if the cache cannot retain the working set. Each
+// chunk is acquired once and decoded for all requested vchannels before moving
+// on. Encoded buffers share the bounded chunk cache; decoded results belong to
+// the caller.
 func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 	ctx context.Context,
 	vchannels []string,
@@ -575,7 +581,7 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 		}
 		inMemory[vchannel] = append(tails, staged)
 	}
-	chunks := append([]*streamingpb.PChannelSummaryChunkIndexEntry(nil), m.manifest.GetChunks()...)
+	chunks := m.chunkIndex.snapshot(from, to)
 	m.mu.Unlock()
 
 	out := make(map[string]*ChunkSections, len(vchannels))
@@ -590,7 +596,7 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 		}
 		indexes := make(map[string]*streamingpb.VChannelSummaryChunkIndex)
 		for _, vchannel := range vchannels {
-			index := vchannelChunkIndex(chunk, vchannel)
+			index := vchannelChunkIndex(chunk.PChannelSummaryChunkIndexEntry, vchannel)
 			if index == nil || index.GetInserts() == nil {
 				continue
 			}
@@ -599,11 +605,15 @@ func (m *Manager) ReadIdempotencyEntriesOfVChannels(
 		if len(indexes) == 0 {
 			continue
 		}
-		decoded, err := m.cfg.Store.ReadIdempotencySectionsOfChunk(ctx, chunk.GetGeneration(), chunk.GetTerm(), indexes)
+		payload, err := m.chunkIndex.cache.read(ctx, m.cfg.Store, chunk)
 		if err != nil {
 			return nil, err
 		}
-		for vchannel, sections := range decoded {
+		for vchannel, index := range indexes {
+			sections, err := unmarshalIdempotencySections(payload.bytes, payload.footerStart, index)
+			if err != nil {
+				return nil, err
+			}
 			hasKeys := len(sections.Idempotency) != 0
 			anyKeys[vchannel] = anyKeys[vchannel] || hasKeys
 			target := out[vchannel]
@@ -708,7 +718,7 @@ type stagedRecord struct {
 // object without touching the manager state.
 type SealedChunk struct {
 	task              *chunkWriteTask
-	index             *streamingpb.PChannelSummaryChunkIndexEntry
+	index             *indexedChunk
 	Coverage          TimeTickRange
 	Transforms        map[string]*streamingpb.VChannelSummaryTransformIndex
 	Generation        uint64

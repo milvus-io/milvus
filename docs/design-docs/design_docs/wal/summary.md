@@ -198,9 +198,10 @@ footer bytes, never a re-marshaled proto. Manifest objects use a separate
 that payload. Corruption is reported rather than converted into an empty view.
 
 The layout supports ranged reads, but the current store reads a whole chunk
-and decodes the requested sections. `ReadIdempotencySectionsOfChunk` shares that
-read across requested vchannels. True section-only object reads remain an
-optimization; an index entry alone does not make transfer cost constant.
+and decodes the requested sections. Manager reads share the resident chunk
+cache (§5.4.1); the uncached `ReadIdempotencySectionsOfChunk` Store API also
+shares one read across requested vchannels. True section-only object reads
+remain an optimization; an index entry alone does not make transfer cost constant.
 
 Retries of an immutable chunk key accept identical bytes or equivalent decoded
 records and coverage. If encodings differ but content is equivalent, the store
@@ -608,11 +609,79 @@ and the replacement token atomically, so a change during I/O or before waiting
 cannot be lost. Watchers do not pin objects or acknowledge GC; the existing
 QueryView retention contract still protects future reads.
 
-Summary owns any decoded cache and shared object-fetch coordination. Cache
-memory must be bounded independently of total retained history. PChannel
-objects can contain many VChannels; reuse reads where possible instead of
-fetching the same object for each subscriber. Section indexes do not imply
-section-only I/O: the current Store downloads the whole chunk (§2.5).
+Summary owns the complete resident chunk index and shared object cache described
+below. Section indexes do not imply section-only I/O: a cold read still downloads
+the whole chunk (§2.5).
+
+### 5.4.1 Resident Index And Chunk Cache
+
+The runtime index mirrors the retained chunks of the in-memory manifest in
+generation/TimeTick order. Each leaf contains the immutable chunk metadata,
+including VChannel section indexes, and an optional cached object buffer.
+Restore creates all index leaves without loading retained payloads. Reads use
+binary search to capture only intersecting leaves under the Manager lock.
+The manifest remains the persistence representation; cache residency, LRU order
+and in-flight loads are never serialized. The on-storage manifest may lag the
+in-memory index until the existing publisher completes.
+
+All VChannels, subscriptions and idempotency reads share a leaf's encoded object
+buffer. Section decoding produces caller-owned records. Keeping encoded bytes
+avoids another permanent decoded representation and provides an explicit buffer
+budget; it does not eliminate per-page section decoding.
+
+There are two cache admission paths:
+
+- **Read:** a cache miss loads and validates the object against the captured
+  manifest index, then admits its bytes. Concurrent readers of the same leaf
+  share the load and its result, including when the object is too large to retain.
+- **Write:** a successful upload admits the actual stored bytes, including the
+  pre-existing encoding accepted by an equivalent-content retry. Out-of-order
+  upload completions have cache leaves owned by their pending chunks; only the
+  continuous completed prefix joins the readable durable index. These buffers
+  already participate in the same cache budget, so blocked publication does not
+  accumulate an additional unbounded encoded backlog.
+
+`streaming.summary.cacheBytesPerPChannel` (version 3.1.0, default 64 MiB, applied
+when a WAL opens) limits resident encoded-buffer capacity per PChannel. Zero
+disables residency. LRU access ordering is shared by read and write admissions;
+eviction drops only the payload, retaining the complete index for future loads.
+An object larger than the budget bypasses residency without evicting the whole
+working set. No subscriber cursor pins the cache, and no cache worker/timer or
+per-VChannel goroutine is introduced. Slow consumers fall back to object reads.
+
+This is a cache-buffer budget, not a total-process memory limit. Metadata,
+pending/sealed source records, delivery batches, section decoding and buffers
+still referenced by active reads require additional memory. Cold downloads are
+limited to four concurrent loads per PChannel; waiting callers can cancel.
+An evicted buffer stays valid for readers that already acquired it. Total node
+residency scales with its number of PChannels; node-wide budgeting and scan-
+resistant admission remain future tuning work.
+
+A canceled loader cannot fail unrelated subscribers with its cancellation:
+remaining waiters retry loading with their own contexts. Other load errors are
+returned without caching them. No detached loader survives its calling read.
+I/O never holds the Manager or cache lock. Cache insertion and membership changes
+preserve the existing pending/sealed/durable snapshot boundary.
+
+GC removes the leaf with its manifest reference and discards its resident buffer.
+An in-flight old snapshot can finish under the existing read pin, but cannot
+reinsert a retired leaf into the cache. Every new read still checks terminal
+errors and FastForwardTimeTick; cache contents never resurrect retired history
+or participate in LastAcked, checkpoint, or retention authorization.
+
+Before loading a leaf, Transform reads additionally filter its VChannel's actual
+Delete interval against `(after,target]`. A section ending at/before the cursor
+or starting after the target requires no payload read; complete Summary coverage
+still proves empty intervals. Batch limits count Delete primary keys and logical
+serialized Entry bytes (currently 4096 keys / 4 MiB in Stream), not object I/O.
+Whole Entries/transactions remain indivisible, including a first oversized Entry.
+Once a batch has exhausted either budget, do not load another object merely to
+discover that its first Entry cannot fit. Multi-page reads reuse resident chunks.
+
+Validation must count actual chunk reads for empty ranges, page boundaries,
+same/cross-VChannel sharing and write admission; also cover eviction, disabled
+and oversized caches, concurrent cancellation/failure, out-of-order upload,
+equivalent write retries, GC during loading and restart without payload preload.
 
 ### 5.5 TransformLog Adaptor
 

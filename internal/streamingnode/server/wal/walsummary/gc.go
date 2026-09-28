@@ -62,6 +62,7 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 				}
 			}
 			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)
+			m.chunkIndex.remove(ref.Generation)
 		}
 		m.manifestVersion++
 		m.notifyReadersLocked()
