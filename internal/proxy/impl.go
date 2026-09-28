@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -3487,7 +3488,7 @@ func (snapshot *searchRLSSnapshot) pinRequest(request *milvuspb.SearchRequest) *
 	if snapshot == nil || !snapshot.resolved {
 		return request
 	}
-	pinned := proto.Clone(request).(*milvuspb.SearchRequest)
+	pinned := copySearchRequestForAttempt(request)
 	pinned.DbName = snapshot.dbName
 	pinned.CollectionName = snapshot.collectionName
 	collectionID := strconv.FormatInt(snapshot.collectionID, 10)
@@ -3504,11 +3505,62 @@ func (snapshot *searchRLSSnapshot) pinRequest(request *milvuspb.SearchRequest) *
 	return pinned
 }
 
+// copySearchRequestForAttempt isolates the fields mutated while preparing a
+// search attempt without copying immutable vector payloads.
+func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	if request == nil {
+		return nil
+	}
+	copied := &milvuspb.SearchRequest{
+		Base:                  request.GetBase(),
+		DbName:                request.GetDbName(),
+		CollectionName:        request.GetCollectionName(),
+		PartitionNames:        request.GetPartitionNames(),
+		Dsl:                   request.GetDsl(),
+		SearchInput:           request.GetSearchInput(),
+		DslType:               request.GetDslType(),
+		OutputFields:          request.GetOutputFields(),
+		SearchParams:          slices.Clone(request.GetSearchParams()),
+		TravelTimestamp:       request.GetTravelTimestamp(),
+		GuaranteeTimestamp:    request.GetGuaranteeTimestamp(),
+		Nq:                    request.GetNq(),
+		NotReturnAllMeta:      request.GetNotReturnAllMeta(),
+		ConsistencyLevel:      request.GetConsistencyLevel(),
+		UseDefaultConsistency: request.GetUseDefaultConsistency(),
+		SearchByPrimaryKeys:   request.GetSearchByPrimaryKeys(),
+		ExprTemplateValues:    request.GetExprTemplateValues(),
+		FunctionScore:         request.GetFunctionScore(),
+		Namespace:             request.Namespace,
+		Highlighter:           request.GetHighlighter(),
+		SearchAggregation:     request.GetSearchAggregation(),
+		FunctionChains:        request.GetFunctionChains(),
+		RlsPrincipal:          request.GetRlsPrincipal(),
+		SkipRls:               request.GetSkipRls(),
+	}
+	for _, subRequest := range request.GetSubReqs() {
+		if subRequest == nil {
+			copied.SubReqs = append(copied.SubReqs, nil)
+			continue
+		}
+		copied.SubReqs = append(copied.SubReqs, &milvuspb.SubSearchRequest{
+			Dsl:                subRequest.GetDsl(),
+			PlaceholderGroup:   subRequest.GetPlaceholderGroup(),
+			DslType:            subRequest.GetDslType(),
+			SearchParams:       slices.Clone(subRequest.GetSearchParams()),
+			Nq:                 subRequest.GetNq(),
+			ExprTemplateValues: subRequest.GetExprTemplateValues(),
+			Namespace:          subRequest.Namespace,
+			FunctionChains:     subRequest.GetFunctionChains(),
+		})
+	}
+	return copied
+}
+
 func pinSearchCollectionID(params []*commonpb.KeyValuePair, collectionID string) []*commonpb.KeyValuePair {
 	found := false
-	for _, param := range params {
+	for i, param := range params {
 		if param.GetKey() == CollectionID {
-			param.Value = collectionID
+			params[i] = &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID}
 			found = true
 		}
 	}
@@ -3596,7 +3648,7 @@ func (node *Proxy) prepareSearchByPKAttempt(ctx context.Context, request *milvus
 	if err != nil || preflight == nil {
 		return request, preflight, err
 	}
-	return proto.Clone(request).(*milvuspb.SearchRequest), preflight, nil
+	return copySearchRequestForAttempt(request), preflight, nil
 }
 
 // transformSearchByPK rewrites an ID search after its non-mutating preflight.
@@ -3691,7 +3743,7 @@ func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.Se
 	// Apply the top-level Search policy pinned by the preflight, then prevent
 	// queryTask from applying a Query policy to the same internal retrieval.
 	if preflight.rlsPredicate != nil {
-		if err := rls.MergePredicateToPlan(plan, preflight.rlsPredicate); err != nil {
+		if err := rls.AttachPredicateToRequeryPlan(plan, preflight.rlsPredicate); err != nil {
 			return nil, nil, err
 		}
 	}

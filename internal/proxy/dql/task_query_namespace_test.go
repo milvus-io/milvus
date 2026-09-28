@@ -65,7 +65,6 @@ func TestQueryTask_PlanNamespace_AfterPreExecute(t *testing.T) {
 		})
 		mockTest(t, (*metacache.MetaCache).GetCollectionID, int64(1001), nil)
 		mockTest(t, (*metacache.MetaCache).GetCollectionInfo, &collectionInfo{Schema: schema, UpdateTimestamp: 12345, ConsistencyLevel: commonpb.ConsistencyLevel_Strong}, nil)
-		mockTest(t, isPartitionKeyMode, false, nil)
 		mockTest(t, validatePartitionTag, nil)
 		mockTest(t, isIgnoreGrowing, false, nil)
 

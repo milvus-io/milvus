@@ -560,6 +560,14 @@ func MergeNormalizedPredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.
 	return mergePredicateToPlan(plan, rlsPredicate, mergeNormalizedPredicate)
 }
 
+// AttachPredicateToRequeryPlan combines independently executable predicates
+// without rewriting either tree. Requery primary-key terms may be large.
+func AttachPredicateToRequeryPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
+	return mergePredicateToPlan(plan, rlsPredicate, func(userPredicate, rlsPredicate *planpb.Expr) *planpb.Expr {
+		return combinePredicate(userPredicate, rlsPredicate, planpb.BinaryExpr_LogicalAnd)
+	})
+}
+
 func mergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr, merge func(*planpb.Expr, *planpb.Expr) *planpb.Expr) error {
 	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
 		return nil

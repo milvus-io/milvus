@@ -1348,7 +1348,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	plan.Namespace = op.planNamespace
 	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
 	// not resolve a separate Query-action policy for this internal retrieval.
-	if err := rls.MergePredicateToPlan(plan, op.rlsPredicate); err != nil {
+	if err := rls.AttachPredicateToRequeryPlan(plan, op.rlsPredicate); err != nil {
 		return nil, segcore.StorageCost{}, err
 	}
 	channelsMvcc := make(map[string]Timestamp)

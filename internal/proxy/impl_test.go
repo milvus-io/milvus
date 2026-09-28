@@ -2653,14 +2653,14 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 			}).Origin(&setSkipRuntimeRLS).Build()
 		defer skipRuntimeRLSPatch.UnPatch()
 
-		var mergePredicateToPlan func(*planpb.PlanNode, *planpb.Expr) error
-		mergePredicatePatch := mockey.Mock(rls.MergePredicateToPlan).
+		var attachPredicateToRequeryPlan func(*planpb.PlanNode, *planpb.Expr) error
+		attachPredicatePatch := mockey.Mock(rls.AttachPredicateToRequeryPlan).
 			To(func(plan *planpb.PlanNode, predicate *planpb.Expr) error {
 				require.NotNil(t, plan)
 				require.NotNil(t, predicate)
-				return mergePredicateToPlan(plan, predicate)
-			}).Origin(&mergePredicateToPlan).Build()
-		defer mergePredicatePatch.UnPatch()
+				return attachPredicateToRequeryPlan(plan, predicate)
+			}).Origin(&attachPredicateToRequeryPlan).Build()
+		defer attachPredicatePatch.UnPatch()
 
 		var capturedCollectionName string
 		var capturedCollectionID string
@@ -2723,7 +2723,7 @@ func TestHandleIfSearchByPK_PreservesNamespaceSearchRLSAndCollectionIdentity(t *
 		require.NotNil(t, capturedNamespace)
 		assert.Equal(t, namespace, *capturedNamespace)
 		assert.Equal(t, 1, skipRuntimeRLSPatch.Times())
-		assert.Equal(t, 1, mergePredicatePatch.Times())
+		assert.Equal(t, 1, attachPredicatePatch.Times())
 		assert.Equal(t, canonicalDBName, capturedDBName)
 		assert.Equal(t, schema.GetName(), capturedCollectionName)
 		assert.Equal(t, strconv.FormatInt(collectionID, 10), capturedCollectionID)
@@ -3236,12 +3236,14 @@ func TestProxy_Search_ReusesRLSSnapshotAcrossAttempts(t *testing.T) {
 			DbName:         "alias_db",
 			CollectionName: "alias_collection",
 			SubReqs: []*milvuspb.SubSearchRequest{
-				{SearchParams: []*commonpb.KeyValuePair{{Key: CollectionID, Value: "9"}}},
+				{PlaceholderGroup: []byte("vectors"), Nq: 7, SearchParams: []*commonpb.KeyValuePair{{Key: CollectionID, Value: "9"}}},
 				{SearchParams: []*commonpb.KeyValuePair{{Key: AnnsFieldKey, Value: "vec"}}},
 			},
 		}
 		pinnedHybrid := snapshot.pinRequest(hybrid)
 		assert.NotSame(t, hybrid, pinnedHybrid)
+		assert.NotSame(t, hybrid.GetSubReqs()[0], pinnedHybrid.GetSubReqs()[0])
+		assert.True(t, &hybrid.GetSubReqs()[0].PlaceholderGroup[0] == &pinnedHybrid.GetSubReqs()[0].PlaceholderGroup[0])
 		assert.Equal(t, "canonical_db", pinnedHybrid.GetDbName())
 		assert.Equal(t, "canonical_collection", pinnedHybrid.GetCollectionName())
 		for _, subRequest := range pinnedHybrid.GetSubReqs() {
@@ -3249,6 +3251,9 @@ func TestProxy_Search_ReusesRLSSnapshotAcrossAttempts(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, "101", collectionID)
 		}
+		assert.Equal(t, "9", hybrid.GetSubReqs()[0].GetSearchParams()[0].GetValue())
+		pinnedHybrid.GetSubReqs()[0].Nq = 99
+		assert.Equal(t, int64(7), hybrid.GetSubReqs()[0].GetNq())
 	})
 }
 

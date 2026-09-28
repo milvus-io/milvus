@@ -1563,6 +1563,24 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.True(t, proto.Equal(userBefore, userPredicate))
 	require.True(t, proto.Equal(rlsBefore, normalizedRLS))
 
+	// Requery IDs may be large. Attaching RLS must preserve the ID term without
+	// sorting, deduplicating, or intersecting it with a same-field policy.
+	requeryPlan := planparserv2.CreateRequeryPlan(schema.GetFields()[0], &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3, 1, 3}}},
+	})
+	requeryPredicate := requeryPlan.GetQuery().GetPredicates()
+	requeryRLS, err := planparserv2.ParseExpr(helper, "id in [1, 3]", nil)
+	require.NoError(t, err)
+	require.NoError(t, AttachPredicateToRequeryPlan(requeryPlan, requeryRLS))
+	mergedRequery := requeryPlan.GetQuery().GetPredicates().GetBinaryExpr()
+	require.NotNil(t, mergedRequery)
+	require.Same(t, requeryPredicate, mergedRequery.GetLeft())
+	require.Same(t, requeryRLS, mergedRequery.GetRight())
+	values := mergedRequery.GetLeft().GetTermExpr().GetValues()
+	require.Equal(t, []int64{3, 1, 3}, []int64{
+		values[0].GetInt64Val(), values[1].GetInt64Val(), values[2].GetInt64Val(),
+	})
+
 	randomSamplePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18 && random_sample(0.5)", nil, visitorArgs)
 	require.NoError(t, err)
 	randomSample := randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr()

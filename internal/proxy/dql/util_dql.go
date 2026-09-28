@@ -319,21 +319,6 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	return resultFieldNames, userOutputFields, userDynamicFields, aggregates, userRequestedPkFieldExplicitly, nil
 }
 
-func isPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, colName string) (bool, error) {
-	colSchema, err := metaCache.GetCollectionSchema(ctx, dbName, colName)
-	if err != nil {
-		return false, err
-	}
-
-	for _, fieldSchema := range colSchema.GetFields() {
-		if fieldSchema.IsPartitionKey {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
 func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
