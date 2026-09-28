@@ -63,10 +63,7 @@ func (p *requeryEDFPolicy) Pop(now time.Time) *queuedTask {
 	}
 	switch {
 	case regular.valid() && requery.valid():
-		if edfRegularFirst(regular, requery) {
-			return p.regular.queue.pop()
-		}
-		return p.requery.pop()
+		return p.earlierDeadlineQueue(regular, requery).pop()
 	case regular.valid():
 		return p.regular.queue.pop()
 	case requery.valid():
@@ -76,20 +73,23 @@ func (p *requeryEDFPolicy) Pop(now time.Time) *queuedTask {
 	}
 }
 
-func edfRegularFirst(regular, requery *queuedTask) bool {
+func (p *requeryEDFPolicy) earlierDeadlineQueue(regular, requery *queuedTask) *mergeTaskQueue {
 	regularDeadline, requeryDeadline := regular.schedulingDeadline, requery.schedulingDeadline
 	if regularDeadline.IsZero() && requeryDeadline.IsZero() {
 		// Without deadlines, preserve arrival order across the two lanes.
-		return regular.enqueueTime.Before(requery.enqueueTime) || regular.enqueueTime.Equal(requery.enqueueTime)
+		if regular.enqueueTime.Before(requery.enqueueTime) || regular.enqueueTime.Equal(requery.enqueueTime) {
+			return p.regular.queue
+		}
+		return p.requery
 	}
 	if regularDeadline.IsZero() {
-		return false
+		return p.requery
 	}
-	if requeryDeadline.IsZero() {
-		return true
+	if requeryDeadline.IsZero() || regularDeadline.Before(requeryDeadline) {
+		return p.regular.queue
 	}
 	// Equal finite deadlines favor completion of an existing search request.
-	return regularDeadline.Before(requeryDeadline)
+	return p.requery
 }
 
 func (p *requeryEDFPolicy) Cleanup(now time.Time) []*queuedTask {
