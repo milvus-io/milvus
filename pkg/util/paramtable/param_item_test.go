@@ -261,3 +261,50 @@ func TestGetAsDuration_UnitIsPartOfCacheKey(t *testing.T) {
 		assert.Equal(t, 7*time.Second, param.GetAsDuration(time.Millisecond))
 	})
 }
+
+func TestIsSetByUser(t *testing.T) {
+	newItem := func(manager *config.Manager) *ParamItem {
+		item := &ParamItem{
+			Key:          "test.issetbyuser.key",
+			DefaultValue: "0",
+			Formatter: func(v string) string {
+				if v == "0" {
+					return "8"
+				}
+				return v
+			},
+		}
+		item.Init(manager)
+		return item
+	}
+
+	t.Run("absent key is not set", func(t *testing.T) {
+		item := newItem(config.NewManager())
+		assert.False(t, item.IsSetByUser())
+		assert.Equal(t, 8, item.GetAsInt(), "the derived value is still what callers read")
+	})
+
+	t.Run("value equal to the default is not set", func(t *testing.T) {
+		manager := config.NewManager()
+		manager.SetConfig("test.issetbyuser.key", "0")
+		item := newItem(manager)
+		assert.False(t, item.IsSetByUser(),
+			"a configured 0 asks for the derived value, which is not a choice of value")
+	})
+
+	t.Run("value different from the default is set", func(t *testing.T) {
+		manager := config.NewManager()
+		manager.SetConfig("test.issetbyuser.key", "3")
+		item := newItem(manager)
+		assert.True(t, item.IsSetByUser())
+		assert.Equal(t, 3, item.GetAsInt())
+	})
+
+	t.Run("follows later updates", func(t *testing.T) {
+		manager := config.NewManager()
+		item := newItem(manager)
+		assert.False(t, item.IsSetByUser())
+		manager.SetConfig("test.issetbyuser.key", "5")
+		assert.True(t, item.IsSetByUser())
+	})
+}
