@@ -1629,20 +1629,15 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow(OffsetVector* input) {
         auto val = GetValueFromProto<int64_t>(expr_->val_);
 
         if (milvus::query::out_of_range<T>(val)) {
-            int64_t batch_size;
-            if (input != nullptr) {
-                batch_size = input->size();
-            } else {
-                batch_size = overflow_check_pos_ + batch_size_ >= active_count_
-                                 ? active_count_ - overflow_check_pos_
-                                 : batch_size_;
-                overflow_check_pos_ += batch_size;
-            }
+            // Size the batch from the cursor that produced `valid`. A separate
+            // cursor was not advanced when a conjunct skipped this expression
+            // via MoveCursor(), so data and valid bitmaps got different sizes.
             auto valid =
                 (input != nullptr)
                     ? ProcessChunksForValidByOffsets<T>(
                           SegmentExpr::CanUseIndex(), *input)
                     : ProcessChunksForValid<T>(SegmentExpr::CanUseIndex());
+            const int64_t batch_size = valid.size();
             auto res_vec = std::make_shared<ColumnVector>(
                 TargetBitmap(batch_size), std::move(valid));
             TargetBitmapView res(res_vec->GetRawData(), batch_size);
