@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v2/proto/querypb"
@@ -44,6 +46,90 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 )
+
+func TestGetLocalDiskUsage(t *testing.T) {
+	duf := &diskUsageFetcher{
+		usage: atomic.NewInt64(0),
+		err:   atomic.NewError(nil),
+	}
+	loader := &segmentLoader{duf: duf}
+	usage, err := loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Zero(t, usage)
+
+	duf.usage.Store(100)
+	loader.committedResource.DiskSize = 20
+	usage, err = loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), usage)
+
+	duf.err.Store(merr.WrapErrServiceInternalMsg("disk usage unavailable"))
+	_, err = loader.GetLocalDiskUsage()
+	assert.Error(t, err)
+}
+
+func TestCheckSegmentSizePreservesStructArrayAccounting(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	for key, value := range map[string]string{
+		params.QueryCoordCfg.AutoscalePrecheckEnabled.Key:           "false",
+		params.QueryNodeCfg.TieredEvictionEnabled.Key:               "false",
+		params.QueryNodeCfg.MmapScalarIndex.Key:                     "false",
+		params.QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key: "95",
+	} {
+		require.NoError(t, params.Save(key, value))
+		t.Cleanup(func() { params.Reset(key) })
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Name: "index_update_with_struct",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200,
+			Name:    "items",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			},
+		}},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID: 1,
+		SegmentID:    2,
+		NumOfRows:    1_000_000,
+		IndexInfos: []*querypb.FieldIndexInfo{{
+			FieldID:        101,
+			IndexSize:      1 << 20,
+			NumRows:        1_000_000,
+			IndexFilePaths: []string{"metadata-only-index"},
+			IndexParams:    []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED}},
+		}},
+	}
+	indexUsage, err := loadresource.EstimateIndexLoadResource(context.Background(), schema.Fields[1], loadInfo, loadInfo.IndexInfos[0])
+	require.NoError(t, err)
+
+	collectionManager := NewMockCollectionManager(t)
+	collectionManager.EXPECT().Get(loadInfo.GetCollectionID()).
+		Return(NewCollectionWithoutSegcoreForTest(loadInfo.GetCollectionID(), schema)).Twice()
+	loader := &segmentLoader{manager: &Manager{Collection: collectionManager}}
+
+	// Preserve the 2.6 reservation: schema-only struct offsets do not consume
+	// the remaining capacity, while struct field data still does.
+	const totalMemory, usedMemory = uint64(64 << 20), uint64(56 << 20)
+	memory, disk, err := loader.checkSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{loadInfo}, totalMemory, usedMemory, 0)
+	require.NoError(t, err)
+	require.Equal(t, indexUsage.MaxMemoryBytes, memory)
+	require.Equal(t, indexUsage.MaxDiskBytes, disk)
+
+	loadInfo.BinlogPaths = []*datapb.FieldBinlog{{
+		FieldID: 201,
+		Binlogs: []*datapb.Binlog{{MemorySize: 32 << 20}},
+	}}
+	_, _, err = loader.checkSegmentSize(context.Background(), []*querypb.SegmentLoadInfo{loadInfo}, totalMemory, usedMemory, 0)
+	require.ErrorIs(t, err, merr.ErrSegmentRequestResourceFailed)
+}
 
 type SegmentLoaderSuite struct {
 	suite.Suite

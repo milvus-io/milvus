@@ -17,11 +17,13 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus/pkg/v2/common"

@@ -18,6 +18,7 @@ package loadresource
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -100,7 +101,7 @@ func TestEstimateSegmentFinalResourceUsesBinlogStatsAndTieredRatio(t *testing.T)
 		expectedDisk   uint64
 	}{
 		{name: "disabled uses full evictable resource", expectedMemory: 778, expectedDisk: 310},
-		{name: "enabled applies cache ratios", tieredEnabled: true, expectedMemory: 484, expectedDisk: 78},
+		{name: "enabled applies cache ratios", tieredEnabled: true, expectedMemory: 484, expectedDisk: 190},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			usage, err := EstimateSegmentFinalResource(context.Background(), schema, loadInfo, SegmentFinalEstimateOptions{
@@ -119,6 +120,62 @@ func TestEstimateSegmentFinalResourceUsesBinlogStatsAndTieredRatio(t *testing.T)
 			require.Equal(t, test.expectedMemory, usage.MemoryBytes)
 			require.Equal(t, test.expectedDisk, usage.DiskBytes)
 		})
+	}
+}
+
+func TestEstimateSegmentJSONStatsResourceAccounting(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:   "json_stats_accounting",
+		Fields: []*schemapb.FieldSchema{{FieldID: 101, Name: "json", DataType: schemapb.DataType_JSON}},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		JsonKeyStatsLogs: map[int64]*datapb.JsonKeyStats{
+			101: {FieldID: 101, MemorySize: 101, LogSize: 80},
+		},
+	}
+
+	for _, tiered := range []bool{false, true} {
+		for _, mmap := range []bool{false, true} {
+			for _, ratio := range []float64{0, 0.3, 1} {
+				t.Run(fmt.Sprintf("tiered=%t/mmap=%t/ratio=%g", tiered, mmap, ratio), func(t *testing.T) {
+					usage, err := EstimateSegmentFinalResource(context.Background(), schema, loadInfo, SegmentFinalEstimateOptions{
+						MmapJSONStats:                   mmap,
+						MmapScalarField:                 !mmap,
+						JSONKeyStatsExpansionFactor:     1.5,
+						TieredEvictionEnabled:           tiered,
+						TieredEvictableMemoryCacheRatio: ratio,
+						TieredEvictableDiskCacheRatio:   ratio,
+					}, nil)
+					require.NoError(t, err)
+
+					// Final accounting reserves all JSON stats even when the evictable
+					// cache budget is zero; the 2.6 BSON index remains resident.
+					wantFinal := SegmentResourceUsage{MemoryBytes: 152}
+					if mmap {
+						wantFinal = SegmentResourceUsage{DiskBytes: 152}
+					}
+					require.Equal(t, wantFinal, usage)
+
+					// Keep the existing 2.6 loading reservation, including its rounding
+					// and omission of JSON stats when tiered eviction is enabled.
+					loading, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{
+						MmapJSONStats:               mmap,
+						JSONKeyStatsExpansionFactor: 1.5,
+						TieredEvictionEnabled:       tiered,
+					}, nil)
+					require.NoError(t, err)
+					var wantLoading SegmentResourceUsage
+					if !tiered {
+						if mmap {
+							wantLoading.DiskBytes = 151
+						} else {
+							wantLoading.MemoryBytes = 151
+						}
+					}
+					require.Equal(t, wantLoading, loading)
+				})
+			}
+		}
 	}
 }
 
@@ -158,6 +215,106 @@ func TestEstimateSegmentLoadingResourceAccountsForTantivyValidityBitmap(t *testi
 			require.NoError(t, err)
 			require.Equal(t, test.expectedMemory, usage.MemoryBytes)
 			require.Equal(t, test.expectedDisk, usage.DiskBytes)
+		})
+	}
+}
+
+func TestEstimateSegmentLoadingResourcePreserves26StructAccounting(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.MmapScalarIndex.Key, "false"))
+	t.Cleanup(func() { params.Reset(params.QueryNodeCfg.MmapScalarIndex.Key) })
+
+	schema := &schemapb.CollectionSchema{
+		Name: "struct_offsets",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "value", DataType: schemapb.DataType_Int64},
+		},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			FieldID: 200,
+			Name:    "items",
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: 201, Name: "items[value]", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+			},
+		}},
+	}
+	loadInfo := &querypb.SegmentLoadInfo{
+		CollectionID: 1,
+		PartitionID:  2,
+		SegmentID:    3,
+		NumOfRows:    1_000_000,
+		IndexInfos: []*querypb.FieldIndexInfo{{
+			FieldID:        101,
+			IndexSize:      1 << 20,
+			NumRows:        1_000_000,
+			IndexFilePaths: []string{"metadata-only-index"},
+			IndexParams:    []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "INVERTED"}},
+		}},
+	}
+	indexUsage, err := EstimateIndexLoadResource(context.Background(), schema.Fields[1], loadInfo, loadInfo.IndexInfos[0])
+	require.NoError(t, err)
+
+	for _, tiered := range []bool{false, true} {
+		for _, fieldBytes := range []int64{0, 16_000_000} {
+			t.Run(fmt.Sprintf("fieldBytes=%d/tiered=%t", fieldBytes, tiered), func(t *testing.T) {
+				// Index updates have no struct field data in the reservation;
+				// full loads include it. Neither adds schema-only offsets in 2.6.
+				loadInfo.BinlogPaths = nil
+				if fieldBytes > 0 {
+					loadInfo.BinlogPaths = []*datapb.FieldBinlog{{
+						FieldID: 201,
+						Binlogs: []*datapb.Binlog{{MemorySize: fieldBytes}},
+					}}
+				}
+				usage, err := EstimateSegmentLoadingResource(context.Background(), schema, loadInfo, SegmentLoadingEstimateOptions{
+					TieredEvictionEnabled: tiered,
+				}, nil)
+				require.NoError(t, err)
+
+				var expectedMemory, expectedDisk uint64
+				if !tiered {
+					expectedMemory = indexUsage.MaxMemoryBytes + uint64(fieldBytes)
+					expectedDisk = indexUsage.MaxDiskBytes
+				}
+				require.Equal(t, expectedMemory, usage.MemoryBytes)
+				require.Equal(t, expectedDisk, usage.DiskBytes)
+			})
+		}
+	}
+}
+
+func TestEstimateSegmentLoadingResourceRejectsUnknownFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+	}
+	for _, test := range []struct {
+		name string
+		info *querypb.SegmentLoadInfo
+	}{
+		{
+			name: "index",
+			info: &querypb.SegmentLoadInfo{IndexInfos: []*querypb.FieldIndexInfo{
+				{FieldID: 999, IndexFilePaths: []string{"index"}},
+			}},
+		},
+		{
+			name: "binlog",
+			info: &querypb.SegmentLoadInfo{BinlogPaths: []*datapb.FieldBinlog{
+				{FieldID: 999, Binlogs: []*datapb.Binlog{{MemorySize: 128}}},
+			}},
+		},
+		{
+			name: "packed group",
+			info: &querypb.SegmentLoadInfo{BinlogPaths: []*datapb.FieldBinlog{
+				{FieldID: 0, ChildFields: []int64{100, 999}, Binlogs: []*datapb.Binlog{{MemorySize: 128}}},
+			}},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			usage, err := EstimateSegmentLoadingResource(context.Background(), schema, test.info, SegmentLoadingEstimateOptions{}, nil)
+			require.Error(t, err)
+			require.Zero(t, usage)
 		})
 	}
 }

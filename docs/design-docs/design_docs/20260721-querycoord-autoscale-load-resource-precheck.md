@@ -35,9 +35,10 @@ failures or slow convergence after submitting the request.
 
 QueryCoord knows the requested partitions, fields, indexes, replica placement,
 and segment metadata. It can estimate the demand at the point where the load
-configuration is accepted. QueryNodes supply physical capacity and usage;
-the external control plane owns instance selection, node provisioning,
-resource-group placement, cooldown, and product limits.
+configuration is accepted. QueryNodes supply memory capacity and usage together
+with local-storage quota and directory usage. The external control plane owns
+instance selection, node provisioning, resource-group placement, cooldown,
+and product limits.
 
 The design gives the caller an early capacity decision and gives the control
 plane a demand signal in bytes. This keeps admission close to the load
@@ -113,22 +114,21 @@ resource estimator without reading index files. Raw data follows mmap placement
 and type-specific overhead rules; Text estimates include index-file bytes and
 a separate word-aligned validity bitmap.
 
-Internal Storage V3 segments can supply raw column-group sizes through
-`Statistics.load_resource.column_groups` and delete memory through
-`Statistics.delta_binlog_size`. A column group records its ID, member fields,
-and uncompressed memory total. When raw binlog arrays are present, the estimator
-uses the supplied raw/delta arrays. Otherwise, an internal V3 segment with a
-manifest and a non-nil load-resource summary uses pathless raw/delta metadata
-derived from that summary. This adaptation requires no manifest read and
-leaves the load message intact. JSON/Text statistics use their existing
-metadata maps.
+Milvus 2.6 supplies V1/V2 raw and delta metadata through binlog arrays.
+Packed column groups retain their child-field membership for load-field filtering.
+JSON/Text statistics use their existing metadata maps.
 
 The final estimator uses a positive binlog `MemorySize`, falling back to
 `LogSize` otherwise; the loading estimator uses explicit `MemorySize`.
-JSON/Text estimates use `MemorySize` in both paths. A V3 synthetic delta with
-positive memory and zero serialized size contributes 1x final memory and 2x
-loading memory. An index that supplies raw data can suppress its corresponding
-field-binlog entry according to the index and raw-data preference settings.
+JSON/Text estimates use `MemorySize` in both paths. An index that supplies raw
+data suppresses its corresponding field-binlog entry.
+
+In Milvus 2.6, the JSON stats BSON index remains resident for the segment's
+lifetime. JSON stats metadata combines BSON, shredding data, and metadata sizes
+without separating their resource costs. The final estimator conservatively
+accounts for the full JSON stats size, including its expansion factor, outside
+the tiered cache ratios. The JSON stats mmap setting selects memory or disk
+accounting. This can overestimate the evictable shredding portion.
 
 With tiered eviction enabled, final footprint includes only the configured
 cache share of evictable resources:
@@ -140,7 +140,9 @@ final_disk   = non_evictable_disk   + ceil(evictable_disk * disk_cache_ratio)
 
 With tiered eviction disabled, the complete evictable footprint is included.
 Zero cache ratios are valid. QN logical accounting uses the same final
-estimator and caches its result before compacting runtime load metadata.
+estimator for DiskCache weights and cache load/evict byte metrics, independently
+of the QueryCoord precheck switch. These estimates include JSON/Text costs and
+the binlog `LogSize` fallback when `MemorySize` is unavailable.
 QN `requestResource` uses the separate loading-peak estimator, which also
 accounts for transient allocations.
 
@@ -155,10 +157,9 @@ formulas do not imply identical input selection.
 
 Metadata and segment/index estimates execute sequentially within a precheck.
 QueryCoord invokes CGo synchronously; QN uses its dynamic pool. The estimate is
-best-effort: V3 summaries have no completeness or version check and do not
-describe every runtime allocation or child-manifest delete source. Raw-vector
-placement uses the global mmap option, so per-field vector overrides can
-differ from actual loading.
+best-effort: binlog, index, and statistics metadata do not describe every
+runtime allocation. Raw-vector placement uses the global mmap option, so
+per-field vector overrides can differ from actual loading.
 
 ### Incremental demand
 
@@ -188,8 +189,8 @@ adding a second replica in the same RG requires `40 + 120 = 160 MiB`.
 ### Capacity and admission
 
 With tiered eviction enabled, QueryCoord returns the estimated demand without
-collecting QN capacity metrics or checking physical availability and global
-autoscale limits. Existing evictable caches make physical usage unsuitable for
+collecting QN capacity metrics or checking node availability and global
+autoscale limits. Existing evictable caches make current usage unsuitable for
 this admission decision. Successful broadcasts still add the estimated demand
 to the counters; Worker QN enforces its loading-stage resource guard.
 
@@ -203,16 +204,27 @@ deduplicated; collection uses at most 16 concurrent calls and one attempt per
 node, with a shared ten-second timeout for the collection round. Any RPC,
 status, parsing, empty eligible-node set, or required-capacity failure
 invalidates the capacity evaluation while preserving successfully estimated demand.
+Each Worker QN reports its configured `LOCAL_STORAGE_SIZE` and cached
+local-storage directory usage in `system_info`, both in bytes. Missing or invalid
+local-storage data invalidates the capacity evaluation. Filesystem-wide disk
+metrics remain available for monitoring but do not enter this precheck.
+Worker QNs sharing one filesystem need per-QN `LOCAL_STORAGE_SIZE` quotas
+consistent with that shared capacity. The precheck follows each Worker's
+configured limit and does not reserve or coordinate filesystem free space
+between Workers.
 
 Let `hm` be `queryNodeMemoryHighWaterLevel` and `hd` be the parsed
 `maxDiskUsagePercentage` ratio:
 
 ```text
-node_memory_available = physical_memory * hm - memory_usage
-node_disk_available   = max(physical_disk * hd - disk_usage, 0)
+node_memory_capacity = physical_memory
+node_disk_capacity = LOCAL_STORAGE_SIZE
+node_memory_available = node_memory_capacity * hm - memory_usage
+node_disk_available = max(node_disk_capacity * hd - local_directory_usage, 0)
 
 rg_available = sum(node_available in RG)
-rg_usable_capacity = sum(node_physical_capacity in RG) * admission_ratio
+rg_usable_capacity.memory = sum(node_memory_capacity * hm in RG)
+rg_usable_capacity.disk = sum(node_disk_capacity * hd in RG)
 
 shortage(rg) = max(required(rg) - rg_available, 0)
 total_shortage = sum(shortage(rg))
@@ -227,7 +239,8 @@ If a shortage exists and autoscale admission is enabled, the request may use
 future usable capacity within global limits:
 
 ```text
-remaining_capacity = max(global_limit - global_physical_capacity, 0)
+remaining_capacity.memory = max(maxMemoryLimit - global_physical_memory_capacity, 0)
+remaining_capacity.disk = max(maxDiskLimit - global_local_storage_capacity, 0)
 usable_headroom.memory = remaining_capacity.memory * hm
 usable_headroom.disk   = remaining_capacity.disk * hd
 
@@ -235,9 +248,10 @@ admit if total_shortage.memory <= usable_headroom.memory
      and total_shortage.disk   <= usable_headroom.disk
 ```
 
-Global physical capacity includes online, non-stopping Worker QNs. The limits express a
-cluster-wide upper bound; the control plane supplies the actual nodes and
-assigns them to RGs.
+Global capacity includes online, non-stopping Worker QNs. Memory sums their
+physical memory capacity; disk sums their `LOCAL_STORAGE_SIZE` quotas. The
+limits express a cluster-wide upper bound; the control plane supplies the
+actual nodes and assigns them to RGs.
 
 For a rejected request, the suggestion uses threshold-adjusted RG capacity:
 
@@ -250,8 +264,8 @@ A positive shortage with zero capacity yields 100 percent. The result is a
 capacity hint, not an exact instance shape or node count.
 
 Capacity samples are observations, not reservations. Concurrent collection
-loads can see the same availability or headroom, and physical usage can lag
-accepted demand. RG aggregate admission also does not guarantee that an
+loads can see the same availability or headroom, and local directory usage
+can lag accepted demand. RG aggregate admission also does not guarantee that an
 individual segment fits a particular node. Worker QN's loading guard remains
 responsible for those node-level decisions.
 
@@ -323,25 +337,26 @@ All four settings are refreshable:
 | `precheckEnabled` | Enable resource precheck and accepted-demand recording. |
 | `enabled` | Allow admission using global autoscale upper bounds. |
 | `maxMemoryLimit` | Maximum global QN physical memory capacity after scaling, in GiB. |
-| `maxDiskLimit` | Maximum global QN physical disk capacity after scaling, in GiB. |
+| `maxDiskLimit` | Maximum sum of Worker QN `LOCAL_STORAGE_SIZE` quotas after scaling, in GiB. |
 
-With precheck disabled, normal load behavior applies. With precheck enabled
-and tiered eviction disabled, admission uses current capacity unless autoscale
-upper-bound admission is enabled. A zero global limit
+With precheck disabled, QueryCoord skips demand estimation and capacity
+admission checks. Worker QN final-resource accounting remains active.
+With precheck enabled and tiered eviction disabled, admission uses current
+capacity unless autoscale upper-bound admission is enabled. A zero global limit
 cannot cover a positive shortage. Enabling both switches permits admission
 within configured limits when tiered eviction is disabled, but does not itself
 provision resources. With tiered eviction enabled, precheck estimates demand
 only, regardless of the autoscale switch and capacity limits.
 
 Configured capacity limits use GiB: `1 GiB = 1024^3 bytes`. QN `GetMetrics`
-disk capacity and usage use decimal GB (`1 GB = 1e9 bytes`) and are converted
-back to bytes before comparison. Memory metrics, load demand counters, and all
-admission calculations use bytes.
+local-storage quota and directory usage, memory metrics, load demand counters,
+and all admission calculations use bytes. Filesystem-wide disk metrics use
+decimal GB (`1 GB = 1e9 bytes`) for monitoring and do not enter admission.
 
 Deployments should keep `queryNodeMemoryHighWaterLevel` no higher than the
 non-tiered Worker guard's `overloadedMemoryThresholdPercentage`. QueryCoord
-does not enforce this relationship. A QN-local disk cap below reported physical
-capacity is also enforced by the Worker guard.
+does not enforce this relationship. The Worker guard remains authoritative for
+individual loads, including its in-flight resource reservations.
 
 The public load request shape is unchanged. The scale-out suggestion uses
 `commonpb.Status.ExtraInfo`; clients may consume it alongside the error reason.
@@ -354,10 +369,12 @@ Unit tests cover the following behavior:
 
 - incremental demand for initial loads, partition/field/index changes,
   retained replicas, and incoming replicas;
-- complete segment metadata lookup, V3 column-group summaries, and
+- complete segment metadata lookup, V1/V2 binlogs, and
   group-preserving field selection;
-- current-capacity and global-limit decisions, negative memory availability,
-  percentage rounding, and zero-capacity handling;
+- current-capacity and global-limit decisions using Worker QN local-storage
+  quotas independently of filesystem-wide disk metrics, including nodes that
+  share a filesystem, negative memory availability, percentage rounding, and
+  zero-capacity handling;
 - shared final/loading estimates, mmap and tiered settings, JSON/Text
   statistics, and Text validity bitmap memory;
 - bounded metrics collection, snapshot reuse, dependency failures, and
@@ -368,7 +385,7 @@ Unit tests cover the following behavior:
 
 Integration validation should cover the complete load request through
 DataCoord metadata lookup, QueryCoord broadcast, and Worker QN loading,
-including V3 loads after metadata recovery. It should verify that only
+including V1/V2 loads after metadata recovery. It should verify that only
 successfully broadcast, evaluated demand reaches the counters and that
 metadata or estimation failures permit loading without a metric increment,
 while capacity-metrics failures preserve demand for successful broadcasts. Control-plane

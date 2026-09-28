@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagecommon"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
+	"github.com/milvus-io/milvus/internal/util/segcore/loadresource"
 	"github.com/milvus-io/milvus/internal/util/vecindexmgr"
 	"github.com/milvus-io/milvus/pkg/v2/common"
 	"github.com/milvus-io/milvus/pkg/v2/log"
@@ -59,7 +60,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v2/util/logutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
@@ -102,28 +102,13 @@ type Loader interface {
 		segment Segment,
 		info *querypb.SegmentLoadInfo) error
 
+	// GetLocalDiskUsage returns the cached size of the local storage directory.
+	GetLocalDiskUsage() (int64, error)
+
 	// ReopenSegments update segment data according to new load info.
 	ReopenSegments(ctx context.Context,
 		loadInfos []*querypb.SegmentLoadInfo,
 	) error
-}
-
-type ResourceEstimate struct {
-	MaxMemoryCost   uint64
-	MaxDiskCost     uint64
-	FinalMemoryCost uint64
-	FinalDiskCost   uint64
-	HasRawData      bool
-}
-
-func GetResourceEstimate(estimate *C.LoadResourceRequest) ResourceEstimate {
-	return ResourceEstimate{
-		MaxMemoryCost:   uint64(estimate.max_memory_cost),
-		MaxDiskCost:     uint64(estimate.max_disk_cost),
-		FinalMemoryCost: uint64(estimate.final_memory_cost),
-		FinalDiskCost:   uint64(estimate.final_disk_cost),
-		HasRawData:      bool(estimate.has_raw_data),
-	}
 }
 
 type requestResourceResult struct {
@@ -252,6 +237,10 @@ func addBucketNameStorageV2(segmentInfo *querypb.SegmentLoadInfo) {
 			}
 		}
 	}
+}
+
+func (loader *segmentLoader) GetLocalDiskUsage() (int64, error) {
+	return loader.duf.GetDiskUsage()
 }
 
 func (loader *segmentLoader) Load(ctx context.Context,
@@ -1556,7 +1545,6 @@ func (loader *segmentLoader) checkLogicalSegmentSize(ctx context.Context, segmen
 		deltaDataExpansionFactor:        paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
 		jsonKeyStatsExpansionFactor:     paramtable.Get().QueryNodeCfg.JSONKeyStatsExpansionFactor.GetAsFloat(),
 		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
-		textIndexExpansionFactor:        paramtable.Get().QueryNodeCfg.TextIndexExpansionFactor.GetAsFloat(),
 		TieredEvictionEnabled:           paramtable.Get().QueryNodeCfg.TieredEvictionEnabled.GetAsBool(),
 		TieredEvictableMemoryCacheRatio: paramtable.Get().QueryNodeCfg.TieredEvictableMemoryCacheRatio.GetAsFloat(),
 		TieredEvictableDiskCacheRatio:   paramtable.Get().QueryNodeCfg.TieredEvictableDiskCacheRatio.GetAsFloat(),
@@ -1801,23 +1789,6 @@ func estimateLoadingResourceUsageOfSegment(schema *schemapb.CollectionSchema, lo
 		MmapFieldCount:     estimate.MmapFieldCount,
 		FieldGpuMemorySize: estimate.FieldGPUMemoryBytes,
 	}, nil
-}
-
-func DoubleMemoryDataType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_String ||
-		dataType == schemapb.DataType_VarChar ||
-		dataType == schemapb.DataType_JSON
-}
-
-func DoubleMemorySystemField(fieldID int64) bool {
-	return fieldID == common.TimeStampField
-}
-
-func SupportInterimIndexDataType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_FloatVector ||
-		dataType == schemapb.DataType_SparseFloatVector ||
-		dataType == schemapb.DataType_Float16Vector ||
-		dataType == schemapb.DataType_BFloat16Vector
 }
 
 func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {

@@ -276,12 +276,19 @@ type QueryNodeCollectionMetrics struct {
 	CollectionRows map[int64]int64
 }
 
+// QueryNodeLocalStorageMetrics describes the QueryNode local-storage quota and directory usage.
+type QueryNodeLocalStorageMetrics struct {
+	CapacityBytes int64 `json:"capacity_bytes"`
+	UsedBytes     int64 `json:"used_bytes"`
+}
+
 // QueryNodeInfos implements ComponentInfos
 type QueryNodeInfos struct {
 	BaseComponentInfos
-	SystemConfigurations QueryNodeConfiguration      `json:"system_configurations"`
-	QuotaMetrics         *QueryNodeQuotaMetrics      `json:"quota_metrics"`
-	CollectionMetrics    *QueryNodeCollectionMetrics `json:"collection_metrics"`
+	SystemConfigurations QueryNodeConfiguration        `json:"system_configurations"`
+	QuotaMetrics         *QueryNodeQuotaMetrics        `json:"quota_metrics"`
+	CollectionMetrics    *QueryNodeCollectionMetrics   `json:"collection_metrics"`
+	LocalStorage         *QueryNodeLocalStorageMetrics `json:"local_storage,omitempty"`
 }
 
 // QueryCoordConfiguration records the configuration of QueryCoord.

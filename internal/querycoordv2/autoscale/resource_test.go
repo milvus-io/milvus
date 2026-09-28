@@ -103,22 +103,6 @@ func TestEstimateSegmentsLoadResourceSkipsRawVectorWhenIndexHasRawData(t *testin
 	assert.Zero(t, usage.DiskBytes)
 }
 
-func TestEstimateSegmentsLoadResourceKeepsRawVectorWhenPreferFieldData(t *testing.T) {
-	schema := testSchema()
-	segments := []*datapb.SegmentInfo{{ID: 1, NumOfRows: 1000, Binlogs: testRawBinlogs()}}
-	indexes := map[int64][]*querypb.FieldIndexInfo{
-		1: {testVectorIndex("HNSW", 10000)},
-	}
-
-	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, indexes, EstimateOptions{
-		PreferFieldDataWhenIndexHasRawData: true,
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, int64(530000), usage.MemoryBytes)
-	assert.Zero(t, usage.DiskBytes)
-}
-
 func TestEstimateSegmentsLoadResourceEstimatesHNSWIndexWhenSizeMissing(t *testing.T) {
 	schema := testSchema()
 	segments := []*datapb.SegmentInfo{{ID: 1, NumOfRows: 1000, Binlogs: testRawBinlogs()}}
@@ -209,22 +193,34 @@ func TestEstimateSegmentsLoadResourceIncludesJSONKeyStats(t *testing.T) {
 		},
 	}
 
-	usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
-		JSONKeyStatsExpansionFactor: 1.5,
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, int64(1500), usage.MemoryBytes)
-	assert.Zero(t, usage.DiskBytes)
-
-	usage, err = EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
-		MmapJSONStats:               true,
-		JSONKeyStatsExpansionFactor: 1.5,
-	})
-
-	require.NoError(t, err)
-	assert.Zero(t, usage.MemoryBytes)
-	assert.Equal(t, int64(1500), usage.DiskBytes)
+	for _, test := range []struct {
+		name   string
+		mmap   bool
+		tiered bool
+	}{
+		{name: "memory"},
+		{name: "disk", mmap: true},
+		{name: "memory with zero tiered budget", tiered: true},
+		{name: "disk with zero tiered budget", mmap: true, tiered: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			usage, err := EstimateSegmentsLoadResource(context.Background(), schema, segments, nil, EstimateOptions{
+				MmapJSONStats:               test.mmap,
+				JSONKeyStatsExpansionFactor: 1.5,
+				TieredEvictionEnabled:       test.tiered,
+				TieredMemoryCacheRatio:      0,
+				TieredDiskCacheRatio:        0,
+			})
+			require.NoError(t, err)
+			if test.mmap {
+				assert.Zero(t, usage.MemoryBytes)
+				assert.Equal(t, int64(1500), usage.DiskBytes)
+			} else {
+				assert.Equal(t, int64(1500), usage.MemoryBytes)
+				assert.Zero(t, usage.DiskBytes)
+			}
+		})
+	}
 }
 
 func TestEstimateSegmentsLoadResourceIncludesTextStats(t *testing.T) {
@@ -281,7 +277,7 @@ func TestEstimateSegmentsLoadResourceUsesStorageV2Binlogs(t *testing.T) {
 	assert.Zero(t, usage.DiskBytes)
 }
 
-func TestEstimateSegmentsLoadResourceAppliesTieredRatioToStats(t *testing.T) {
+func TestEstimateSegmentsLoadResourceKeepsJSONStatsOutsideTieredRatio(t *testing.T) {
 	schema := &schemapb.CollectionSchema{}
 	segments := []*datapb.SegmentInfo{
 		{
@@ -304,8 +300,8 @@ func TestEstimateSegmentsLoadResourceAppliesTieredRatioToStats(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	// The memory ratio applies to JSON stats plus the text validity bitmap.
-	assert.Equal(t, int64(69), usage.MemoryBytes)
+	// Only the text validity bitmap is discounted: 101 + ceil(128 * 0.3).
+	assert.Equal(t, int64(140), usage.MemoryBytes)
 	assert.Equal(t, int64(101), usage.DiskBytes)
 }
 

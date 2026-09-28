@@ -136,7 +136,7 @@ func TestAutoscalePrecheckDecisionByResourceGroup(t *testing.T) {
 	))
 }
 
-func TestAutoscalePrecheckGlobalLimitUsesPhysicalCapacity(t *testing.T) {
+func TestAutoscalePrecheckGlobalLimitUsesTotalCapacity(t *testing.T) {
 	setAutoscaleCapacityRatiosForTest(t, "0.9", "90")
 
 	globalCapacity := autoscaleResourceUsage{memoryBytes: 80, diskBytes: 80}
@@ -329,16 +329,12 @@ func TestGetIndexInfoBySegmentsBatchesRequests(t *testing.T) {
 	assert.Equal(t, int64(101), indexes[segmentIDs[maxSegmentNumPerGetIndexInfoRequest]][0].GetIndexID())
 }
 
-func TestAvailableResourceFromMetricsUsesQueryNodeMetrics(t *testing.T) {
+func TestMemoryResourceFromMetricsUsesQueryNodeMetrics(t *testing.T) {
 	params := paramtable.Get()
 	params.Save(params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key, "0.4")
 	defer params.Reset(params.QuotaConfig.QueryNodeMemoryLowWaterLevel.Key)
 	params.Save(params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key, "0.5")
 	defer params.Reset(params.QuotaConfig.QueryNodeMemoryHighWaterLevel.Key)
-	params.Save(params.QueryNodeCfg.DiskCapacityLimit.Key, "1")
-	defer params.Reset(params.QueryNodeCfg.DiskCapacityLimit.Key)
-	params.Save(params.QueryNodeCfg.MaxDiskUsagePercentage.Key, "50")
-	defer params.Reset(params.QueryNodeCfg.MaxDiskUsagePercentage.Key)
 
 	for _, test := range []struct {
 		usedMemory        uint64
@@ -353,11 +349,6 @@ func TestAvailableResourceFromMetricsUsesQueryNodeMetrics(t *testing.T) {
 		assert.Equal(t, test.expectedAvailable, availableMemoryBytes)
 		assert.Equal(t, int64(1000), capacityMemoryBytes)
 	}
-
-	availableDiskBytes, capacityDiskBytes, ok := diskResourceFromMetrics(10, 0.1)
-	require.True(t, ok)
-	assert.Equal(t, int64(4_900_000_000), availableDiskBytes)
-	assert.Equal(t, int64(10_000_000_000), capacityDiskBytes)
 }
 
 const (
@@ -504,6 +495,7 @@ func newAutoscalePrecheckTestServer(t *testing.T, cluster session.Cluster) *Serv
 
 func newAutoscalePrecheckMetrics(t *testing.T, memory, memoryUsage uint64, disk float64) string {
 	t.Helper()
+	localDiskCapacity := int64(disk * 1e9)
 	metrics, err := metricsinfo.MarshalComponentInfos(metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
 			HardwareInfos: metricsinfo.HardwareMetrics{
@@ -511,6 +503,10 @@ func newAutoscalePrecheckMetrics(t *testing.T, memory, memoryUsage uint64, disk 
 				MemoryUsage: memoryUsage,
 				Disk:        disk,
 			},
+		},
+		LocalStorage: &metricsinfo.QueryNodeLocalStorageMetrics{
+			CapacityBytes: localDiskCapacity,
+			UsedBytes:     0,
 		},
 	})
 	require.NoError(t, err)
@@ -530,9 +526,7 @@ func TestCurrentQueryNodeResourceStatusByRGUsesReportedAvailability(t *testing.T
 	server := newAutoscalePrecheckTestServer(t, cluster)
 
 	rawMemory, capacityMemory := memoryResourceFromMetrics(1024, 512)
-	rawDisk, capacityDisk, ok := diskResourceFromMetrics(1, 0)
-	require.True(t, ok)
-	usableCapacity := usableResourceCapacity(autoscaleResourceUsage{memoryBytes: capacityMemory, diskBytes: capacityDisk})
+	usableCapacity := usableResourceCapacity(autoscaleResourceUsage{memoryBytes: capacityMemory, diskBytes: 1e9})
 	availableByRG, capacityByRG, _, err := server.currentQueryNodeResourceStatus(
 		context.Background(),
 		map[string]autoscaleResourceUsage{meta.DefaultResourceGroupName: {memoryBytes: 1}},
@@ -541,9 +535,173 @@ func TestCurrentQueryNodeResourceStatusByRGUsesReportedAvailability(t *testing.T
 
 	require.NoError(t, err)
 	assert.Equal(t, rawMemory, availableByRG[meta.DefaultResourceGroupName].memoryBytes)
-	assert.Equal(t, rawDisk, availableByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, usableCapacity.diskBytes, availableByRG[meta.DefaultResourceGroupName].diskBytes)
 	assert.Equal(t, usableCapacity.memoryBytes, capacityByRG[meta.DefaultResourceGroupName].memoryBytes)
 	assert.Equal(t, usableCapacity.diskBytes, capacityByRG[meta.DefaultResourceGroupName].diskBytes)
+}
+
+func TestCurrentQueryNodeResourceStatusUsesQueryNodeDiskQuota(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.MaxDiskUsagePercentage.Key, "95")
+	defer params.Reset(params.QueryNodeCfg.MaxDiskUsagePercentage.Key)
+
+	const gib = int64(1024 * 1024 * 1024)
+	filesystemBytes := int64(3584) * gib
+	workerUsableBytes := int64(1520) * gib
+	workerUsedBytes := 17 * gib / 10
+	workerAvailableBytes := workerUsableBytes - workerUsedBytes
+	physicalUsedBytes := 1312 * gib / 10
+	metricsPayload, err := metricsinfo.MarshalComponentInfos(metricsinfo.QueryNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				Memory:      1024,
+				MemoryUsage: 512,
+				Disk:        float64(filesystemBytes) / 1e9,
+				DiskUsage:   float64(physicalUsedBytes) / 1e9,
+			},
+		},
+		LocalStorage: &metricsinfo.QueryNodeLocalStorageMetrics{
+			CapacityBytes: 1600 * gib,
+			UsedBytes:     workerUsedBytes,
+		},
+	})
+	require.NoError(t, err)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().GetMetrics(mock.Anything, int64(1), mock.Anything).
+		Return(&milvuspb.GetMetricsResponse{Status: merr.Success(), Response: metricsPayload}, nil).Once()
+	server := newAutoscalePrecheckTestServer(t, cluster)
+
+	availableByRG, capacityByRG, globalCapacity, err := server.currentQueryNodeResourceStatus(
+		context.Background(),
+		map[string]autoscaleResourceUsage{meta.DefaultResourceGroupName: {diskBytes: 1}},
+		true,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, workerAvailableBytes, availableByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, workerUsableBytes, capacityByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, int64(1600)*gib, globalCapacity.diskBytes)
+	assert.True(t, canExpandWithinGlobalLimit(
+		autoscaleResourceUsage{diskBytes: 1000 * gib},
+		globalCapacity,
+		autoscaleResourceUsage{diskBytes: 3000 * gib},
+	))
+	assert.False(t, canExpandWithinGlobalLimit(
+		autoscaleResourceUsage{diskBytes: 1000 * gib},
+		globalCapacity,
+		autoscaleResourceUsage{diskBytes: 2000 * gib},
+	))
+}
+
+func TestCurrentQueryNodeResourceStatusUsesLocalBudgetWithoutPhysicalMinimum(t *testing.T) {
+	params := paramtable.Get()
+	params.Save(params.QueryNodeCfg.MaxDiskUsagePercentage.Key, "95")
+	defer params.Reset(params.QueryNodeCfg.MaxDiskUsagePercentage.Key)
+
+	const gib = int64(1024 * 1024 * 1024)
+	const filesystemBytes = int64(1000) * gib
+	physicalUsedBytes := int64(900) * gib
+	metricsPayload, err := metricsinfo.MarshalComponentInfos(metricsinfo.QueryNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				Memory:      1024,
+				MemoryUsage: 512,
+				Disk:        float64(filesystemBytes) / 1e9,
+				DiskUsage:   float64(physicalUsedBytes) / 1e9,
+			},
+		},
+		LocalStorage: &metricsinfo.QueryNodeLocalStorageMetrics{
+			CapacityBytes: 1600 * gib,
+			UsedBytes:     2 * gib,
+		},
+	})
+	require.NoError(t, err)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().GetMetrics(mock.Anything, int64(1), mock.Anything).
+		Return(&milvuspb.GetMetricsResponse{Status: merr.Success(), Response: metricsPayload}, nil).Once()
+	server := newAutoscalePrecheckTestServer(t, cluster)
+
+	availableByRG, capacityByRG, _, err := server.currentQueryNodeResourceStatus(
+		context.Background(),
+		map[string]autoscaleResourceUsage{meta.DefaultResourceGroupName: {diskBytes: 1}},
+		false,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, int64(1518)*gib, availableByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, int64(1520)*gib, capacityByRG[meta.DefaultResourceGroupName].diskBytes)
+}
+
+func TestCurrentQueryNodeResourceStatusDoesNotRequireFilesystemDiskMetrics(t *testing.T) {
+	const gib = int64(1024 * 1024 * 1024)
+	metricsPayload, err := metricsinfo.MarshalComponentInfos(metricsinfo.QueryNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				Memory:      1024,
+				MemoryUsage: 512,
+			},
+		},
+		LocalStorage: &metricsinfo.QueryNodeLocalStorageMetrics{
+			CapacityBytes: 1600 * gib,
+			UsedBytes:     2 * gib,
+		},
+	})
+	require.NoError(t, err)
+	cluster := session.NewMockCluster(t)
+	cluster.EXPECT().GetMetrics(mock.Anything, int64(1), mock.Anything).
+		Return(&milvuspb.GetMetricsResponse{Status: merr.Success(), Response: metricsPayload}, nil).Once()
+	server := newAutoscalePrecheckTestServer(t, cluster)
+
+	availableByRG, capacityByRG, globalCapacity, err := server.currentQueryNodeResourceStatus(
+		context.Background(),
+		map[string]autoscaleResourceUsage{meta.DefaultResourceGroupName: {diskBytes: 1}},
+		true,
+	)
+
+	require.NoError(t, err)
+	usableDiskBytes := usableResourceCapacity(autoscaleResourceUsage{diskBytes: 1600 * gib}).diskBytes
+	assert.Equal(t, usableDiskBytes-2*gib, availableByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, usableDiskBytes, capacityByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, int64(1600)*gib, globalCapacity.diskBytes)
+}
+
+func TestQueryNodeResourceSnapshotSharedFilesystemUsesLocalStorageQuotas(t *testing.T) {
+	params := paramtable.Get()
+	require.NoError(t, params.Save(params.QueryNodeCfg.MaxDiskUsagePercentage.Key, "95"))
+	t.Cleanup(func() { params.Reset(params.QueryNodeCfg.MaxDiskUsagePercentage.Key) })
+
+	const gib = int64(1024 * 1024 * 1024)
+	metricsPayload, err := metricsinfo.MarshalComponentInfos(metricsinfo.QueryNodeInfos{
+		BaseComponentInfos: metricsinfo.BaseComponentInfos{
+			HardwareInfos: metricsinfo.HardwareMetrics{
+				Memory:      1024,
+				MemoryUsage: 512,
+				Disk:        1000,
+				DiskUsage:   500,
+			},
+		},
+		LocalStorage: &metricsinfo.QueryNodeLocalStorageMetrics{
+			CapacityBytes: 300 * gib,
+			UsedBytes:     10 * gib,
+		},
+	})
+	require.NoError(t, err)
+
+	cluster := session.NewMockCluster(t)
+	nodes := make([]*session.NodeInfo, 0, 3)
+	for nodeID := int64(1); nodeID <= 3; nodeID++ {
+		nodes = append(nodes, session.NewNodeInfo(session.ImmutableNodeInfo{NodeID: nodeID}))
+		cluster.EXPECT().GetMetrics(mock.Anything, nodeID, mock.Anything).
+			Return(&milvuspb.GetMetricsResponse{Status: merr.Success(), Response: metricsPayload}, nil).Once()
+	}
+	server := &Server{cluster: cluster}
+
+	snapshot, err := server.queryNodeResourceSnapshot(context.Background(), nodes)
+	require.NoError(t, err)
+	available, capacity, ok := queryNodeResourceStatusFromSnapshot(nodes, snapshot)
+	require.True(t, ok)
+	assert.Equal(t, int64(3*275)*gib, available.diskBytes)
+	assert.Equal(t, int64(3*300)*gib, capacity.diskBytes)
 }
 
 func TestCurrentQueryNodeResourceStatusByRGUsesActiveResourceGroupNodes(t *testing.T) {
@@ -583,9 +741,7 @@ func TestCurrentQueryNodeResourceStatusByRGUsesActiveResourceGroupNodes(t *testi
 	}
 
 	rawMemory, capacityMemory := memoryResourceFromMetrics(1024, 512)
-	rawDisk, capacityDisk, ok := diskResourceFromMetrics(1, 0)
-	require.True(t, ok)
-	usableCapacity := usableResourceCapacity(autoscaleResourceUsage{memoryBytes: capacityMemory, diskBytes: capacityDisk})
+	usableCapacity := usableResourceCapacity(autoscaleResourceUsage{memoryBytes: capacityMemory, diskBytes: 1e9})
 	availableByRG, capacityByRG, _, err := server.currentQueryNodeResourceStatus(
 		context.Background(),
 		map[string]autoscaleResourceUsage{meta.DefaultResourceGroupName: {memoryBytes: 1}},
@@ -594,7 +750,7 @@ func TestCurrentQueryNodeResourceStatusByRGUsesActiveResourceGroupNodes(t *testi
 
 	require.NoError(t, err)
 	assert.Equal(t, rawMemory, availableByRG[meta.DefaultResourceGroupName].memoryBytes)
-	assert.Equal(t, rawDisk, availableByRG[meta.DefaultResourceGroupName].diskBytes)
+	assert.Equal(t, usableCapacity.diskBytes, availableByRG[meta.DefaultResourceGroupName].diskBytes)
 	assert.Equal(t, usableCapacity.memoryBytes, capacityByRG[meta.DefaultResourceGroupName].memoryBytes)
 	assert.Equal(t, usableCapacity.diskBytes, capacityByRG[meta.DefaultResourceGroupName].diskBytes)
 }
@@ -722,23 +878,24 @@ func TestCheckLoadResourceSkipsResourceGroupMetricsErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "missing disk metrics",
-			resp: &milvuspb.GetMetricsResponse{
-				Status: merr.Success(),
-				Response: `{
-					"hardware_infos": {
-						"memory": 1024,
-						"memory_usage": 512
-					}
-				}`,
-			},
-		},
-		{
 			name: "missing memory metrics",
 			resp: &milvuspb.GetMetricsResponse{
 				Status: merr.Success(),
 				Response: `{
 					"hardware_infos": {
+						"disk": 1
+					}
+				}`,
+			},
+		},
+		{
+			name: "missing local storage metrics",
+			resp: &milvuspb.GetMetricsResponse{
+				Status: merr.Success(),
+				Response: `{
+					"hardware_infos": {
+						"memory": 1024,
+						"memory_usage": 512,
 						"disk": 1
 					}
 				}`,

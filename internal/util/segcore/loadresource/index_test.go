@@ -207,7 +207,7 @@ func TestBuildCLoadIndexInfoResolvesMmap(t *testing.T) {
 
 func TestBuildCLoadIndexInfoResolvesWarmup(t *testing.T) {
 	paramtable.Init()
-	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key, common.WarmupAsync)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key, common.WarmupSync)
 	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.TieredWarmupScalarIndex.Key)
 
 	t.Run("index setting takes precedence", func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestBuildCLoadIndexInfoResolvesWarmup(t *testing.T) {
 		)
 
 		require.NoError(t, err)
-		require.Equal(t, common.WarmupAsync, info.GetIndexParams()[common.WarmupKey])
+		require.Equal(t, common.WarmupSync, info.GetIndexParams()[common.WarmupKey])
 	})
 }
 

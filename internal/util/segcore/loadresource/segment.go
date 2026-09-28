@@ -18,12 +18,12 @@ package loadresource
 
 import (
 	"context"
-	"go.uber.org/zap"
 	"math"
 	"strconv"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -254,11 +254,14 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 	}
 
 	for _, stats := range loadInfo.GetJsonKeyStatsLogs() {
+		// Milvus 2.6 retains the BSON index for the segment's lifetime. The
+		// metadata does not separate it from evictable shredding data, so
+		// conservatively reserve the full JSON stats size outside cache ratios.
 		size := uint64(math.Ceil(float64(stats.GetMemorySize()) * options.JSONKeyStatsExpansionFactor))
 		if options.MmapJSONStats {
-			evictable.DiskBytes += size
+			inevictable.DiskBytes += size
 		} else {
-			evictable.MemoryBytes += size
+			inevictable.MemoryBytes += size
 		}
 	}
 	validityBitmapBytes := estimateTantivyValidityBitmapBytes(loadInfo.GetNumOfRows())
@@ -279,6 +282,7 @@ func EstimateSegmentFinalResource(ctx context.Context, schema *schemapb.Collecti
 }
 
 // EstimateSegmentLoadingResource estimates the resource usage of the segment when loading.
+// It preserves the Worker QN loading reservation formulas used by Milvus 2.6.
 // It returns different results depending on whether tiered eviction is enabled:
 //   - when tiered eviction is enabled, the result is the max resource usage of the segment
 //     that cannot be managed by caching layer, which should be a subset of the segment inevictable part
@@ -307,9 +311,7 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 		if len(fieldIndexInfo.GetIndexFilePaths()) > 0 {
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				// field might have been dropped, skip its index
-				log.Ctx(ctx).Info("skip index for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
-				continue
+				return SegmentResourceUsage{}, err
 			}
 			indexedFields[fieldID] = struct{}{}
 
@@ -317,7 +319,7 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 
 			estimateResult, err := EstimateIndexLoadResourceWithRunner(ctx, fieldSchema, loadInfo, fieldIndexInfo, runner)
 			if err != nil {
-				return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate loading resource usage of index, collection %d, segment %d, indexBuildID %d",
+				return SegmentResourceUsage{}, merr.Wrapf(err, "failed to estimate loading resource usage of index, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
@@ -347,7 +349,7 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 
 			metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, fieldIndexInfo.IndexParams)
 			if err != nil {
-				return SegmentResourceUsage{}, errors.Wrapf(err, "failed to estimate loading resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
+				return SegmentResourceUsage{}, merr.Wrapf(err, "failed to estimate loading resource usage of index, metric type not found, collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
@@ -380,10 +382,8 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 			// get field schema from fieldID
 			fieldSchema, err := schemaHelper.GetFieldFromID(fieldID)
 			if err != nil {
-				// field might have been dropped, skip it and continue processing
-				// other fields in the same column group
-				log.Ctx(ctx).Info("skip binlog for dropped field", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()))
-				continue
+				log.Ctx(ctx).Warn("failed to get field schema", zap.Int64("fieldID", fieldID), zap.String("name", schema.GetName()), zap.Error(err))
+				return SegmentResourceUsage{}, err
 			}
 			if _, ok := indexedFields[fieldID]; !ok {
 				hasIndex = false
@@ -491,17 +491,7 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 		}
 	}
 
-	// per struct memory size, used to keep mapping between row id and element id
-	var structArrayOffsetsSize uint64
-	// PART 6: calculate size of struct array offsets
-	// The memory size is 4 * row_count + 4 * total_element_count
-	// We cannot easily get the element count, so we estimate it by the row count * 10
-	rowCount := uint64(loadInfo.GetNumOfRows())
-	for range len(schema.GetStructArrayFields()) {
-		structArrayOffsetsSize += 4*rowCount + 4*rowCount*10
-	}
-
-	// PART 7: calculate size of text index stats data
+	// PART 6: calculate size of text index stats data
 	// text index data is managed by the caching layer when tiered eviction is enabled,
 	// so it only needs to be included when tiered eviction is disabled.
 	// Text match index mmap is driven by scalar_field_enable_mmap (same as raw scalar data).
@@ -524,7 +514,7 @@ func EstimateSegmentLoadingResource(ctx context.Context, schema *schemapb.Collec
 	}
 
 	return SegmentResourceUsage{
-		MemoryBytes:         segMemoryLoadingSize + indexMemorySize + structArrayOffsetsSize,
+		MemoryBytes:         segMemoryLoadingSize + indexMemorySize,
 		DiskBytes:           segDiskLoadingSize,
 		FieldGPUMemoryBytes: fieldGPUMemorySize,
 	}, nil
