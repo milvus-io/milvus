@@ -99,6 +99,37 @@ If Summary has not reached that position, the subscription waits or reports an
 explicit failure; an empty read is not successful completion. In particular,
 StreamingNode preparation must not complete with an incomplete Delete replay.
 
+### Unbounded subscriptions for QueryNode
+
+The local adaptor's unbounded mode uses WALSummary's VChannel-scoped transform
+notifications. This prepares the server-side behavior for QueryNode; remote
+transport and QN integration remain outside this extraction. Bounded SN bootstrap
+keeps its existing global-coverage notification behavior.
+
+The QN contract is to wait for the VChannel `transforming_timetick` selected by
+the query plan. Ordinary messages on B do not advance A's query Transform MVCC,
+so they need not wake A or produce a new A SyncUp merely because the global
+Summary coverage increased. Initial historical reads still use complete global
+coverage; after catch-up, A wakes for its own query-transform changes or an
+applicable global barrier. It reads and delivers the required Delete prefix
+before reporting SyncUp. QN must finish applying that prefix before advancing
+its local visibility; receipt of a notification is not query readiness.
+
+Notifications cover payload-free changes too: insert-only transaction commits,
+flush/import publication, relevant DDL and schema changes. Their classification
+is shared with query-plan MVCC advancement. PChannel-wide FlushAll/AlterWAL and
+recovery baselines remain broadcasts. GC truncation and terminal failures wake
+readers to fail explicitly rather than leave them waiting indefinitely.
+
+An unbounded subscription acquires one scoped-notifier reference and releases
+it on cancellation, closure or failure. Multiple subscribers share notification
+state, but still have independent delivery cursors and reads; this change does
+not introduce shared payload decoding or eliminate subscription goroutines.
+The optimization promises progress to VChannel query Transform targets, not
+continuous delivery of every unrelated global TimeTick. A future consumer that
+requires an arbitrary PChannel target must use global notifications or add an
+explicit progress request protocol.
+
 Use bounded work and delivery buffers. A slow subscriber must not block WAL
 observation or create an unbounded adaptor backlog. A stream that cannot keep up
 may be closed and resumed from its accepted cursor. Sharing reads for live
