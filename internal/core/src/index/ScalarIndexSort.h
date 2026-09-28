@@ -181,9 +181,6 @@ class ScalarIndexSort : public ScalarIndex<T> {
     BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
  private:
-    std::optional<T>
-    LookupValue(size_t offset) const;
-
     void
     BuildWithArrayDataNested(const std::vector<FieldDataPtr>& datas);
 
