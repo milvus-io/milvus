@@ -2,6 +2,7 @@ package queryresource
 
 import (
 	"context"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/snview"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
@@ -89,29 +92,41 @@ func TestBootstrapRetryCapturesFreshSnapshotAndLiveEvents(t *testing.T) {
 }
 
 func TestBootstrapRetriesWithoutNewWALEvents(t *testing.T) {
-	scheduler := nodescheduler.New(1)
-	defer scheduler.Close()
-	dispatcher := NewDispatcher(1)
-	defer dispatcher.Close()
-	manager := NewManager(Config{Scheduler: scheduler, Dispatcher: dispatcher, Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{prepare: func(context.Context, qviews.DataVersion) error { return nil }}}})
-	var attempts atomic.Int32
-	patch := mockey.Mock((*versionedQueryRuntimeModule).Prepare).To(func(*versionedQueryRuntimeModule, context.Context, walview.VChannelWALView) error {
-		if attempts.Add(1) < 3 {
-			return context.DeadlineExceeded
-		}
-		return nil
-	}).Build()
-	defer patch.UnPatch()
-	defer manager.Close()
-	ready := make(chan struct{})
-	meta, key := testManagerQueryViewMetaAndKey(1)
-	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { close(ready) }}, testManagerViewBuilder)
-	select {
-	case <-ready:
-	case <-time.After(5 * time.Second):
-		t.Fatal("retry needed an external WAL event")
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"deadline", context.DeadlineExceeded},
+		{"transport_eof", merr.Wrap(merr.ErrIoUnexpectEOF, "read BM25 stats")},
+		{"storage_throttled", merr.ErrIoTooManyRequests},
+		{"rpc_unavailable", status.Error(codes.Unavailable, "coordinator unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := nodescheduler.New(1)
+			defer scheduler.Close()
+			dispatcher := NewDispatcher(1)
+			defer dispatcher.Close()
+			manager := NewManager(Config{Scheduler: scheduler, Dispatcher: dispatcher, Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{prepare: func(context.Context, qviews.DataVersion) error { return nil }}}})
+			var attempts atomic.Int32
+			patch := mockey.Mock((*versionedQueryRuntimeModule).Prepare).To(func(*versionedQueryRuntimeModule, context.Context, walview.VChannelWALView) error {
+				if attempts.Add(1) < 3 {
+					return tc.err
+				}
+				return nil
+			}).Build()
+			defer patch.UnPatch()
+			defer manager.Close()
+			ready := make(chan struct{})
+			meta, key := testManagerQueryViewMetaAndKey(1)
+			manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnReady: func() { close(ready) }}, testManagerViewBuilder)
+			select {
+			case <-ready:
+			case <-time.After(5 * time.Second):
+				t.Fatal("retry needed an external WAL event")
+			}
+			require.Equal(t, int32(3), attempts.Load())
+		})
 	}
-	require.Equal(t, int32(3), attempts.Load())
 }
 
 func TestBootstrapRetryDoesNotResurrectReleasedView(t *testing.T) {
@@ -133,21 +148,45 @@ func TestBootstrapRetryDoesNotResurrectReleasedView(t *testing.T) {
 	require.Same(t, current, manager.runtime)
 }
 
-func TestBootstrapDataIntegrityFailureIsUnrecoverable(t *testing.T) {
-	scheduler := &capturedNodeScheduler{}
-	dispatcher := NewDispatcher(1)
-	defer dispatcher.Close()
-	manager := NewManager(Config{Scheduler: scheduler, Dispatcher: dispatcher})
-	defer manager.Close()
-	patch := mockey.Mock((*QueryRuntime).Initialize).Return(merr.ErrDataIntegrity).Build()
-	defer patch.UnPatch()
-	rejected := false
-	meta, key := testManagerQueryViewMetaAndKey(1)
-	manager.AcquireLocked(snview.AcquireResource{Key: key, Meta: meta, OnUnrecoverable: func() { rejected = true }}, testManagerViewBuilder)
-	require.ErrorIs(t, scheduler.task.Execute(context.Background()), merr.ErrDataIntegrity)
-	require.NoError(t, scheduler.task.Execute(context.Background()))
-	require.True(t, rejected)
-	require.Nil(t, manager.runtime)
+func TestBootstrapPermanentFailureIsUnrecoverable(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"data_integrity", merr.ErrDataIntegrity},
+		{"bm25_decode", merr.WrapErrSerializationFailed(io.ErrUnexpectedEOF, "decode BM25 stats")},
+		{"invalid_resource_response", merr.WrapErrServiceInternalMsg("query view resource version mismatch")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := &capturedNodeScheduler{}
+			dispatcher := NewDispatcher(1)
+			defer dispatcher.Close()
+			manager := NewManager(Config{
+				Scheduler: scheduler, Dispatcher: dispatcher,
+				Builders: []QueryRuntimeModuleBuilder{versionedQueryRuntimeModuleBuilder{}},
+			})
+			defer manager.Close()
+			patch := mockey.Mock((*versionedQueryRuntimeModule).Prepare).Return(tc.err).Build()
+			defer patch.UnPatch()
+			rejected, ready := false, false
+			meta, key := testManagerQueryViewMetaAndKey(1)
+			manager.AcquireLocked(snview.AcquireResource{
+				Key: key, Meta: meta,
+				OnReady: func() { ready = true }, OnUnrecoverable: func() { rejected = true },
+			}, testManagerViewBuilder)
+			runtime := manager.runtime
+			err := scheduler.task.Execute(context.Background())
+			require.ErrorIs(t, err, tc.err)
+			require.NotErrorIs(t, err, nodescheduler.ErrDelay)
+			require.NoError(t, scheduler.task.Execute(context.Background()))
+			require.True(t, rejected)
+			require.False(t, ready)
+			require.Equal(t, queryRuntimeClosed, runtime.state)
+			require.Nil(t, manager.runtime)
+			require.Nil(t, manager.task)
+			require.ErrorIs(t, manager.err, tc.err)
+		})
+	}
 }
 
 func TestResolvedEmptyLoadScopeIsNotUnrestricted(t *testing.T) {

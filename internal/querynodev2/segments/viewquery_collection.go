@@ -10,6 +10,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+// TODO(#40451): remove this borrowed collection adapter when QueryView execution
+// uses segcore collections directly instead of the legacy QueryNode task layer.
 func NewCollectionFromCCollectionForViewQuery(ccollection *segcore.CCollection) (*Collection, error) {
 	if ccollection == nil {
 		return nil, merr.WrapErrServiceInternalMsg("nil collection for view query execution")

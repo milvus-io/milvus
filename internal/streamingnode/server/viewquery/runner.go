@@ -10,6 +10,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 )
 
+// TODO(#40451): replace the legacy QueryNode SearchTask/QueryTask execution and
+// reduce adapters below with a shared QueryView execution layer over segcore
+// handles, preserving QueryView-owned MVCC checks and handle lifetimes.
 type SearchTaskRunner interface {
 	Search(ctx context.Context, collection *segcore.CCollection, selected []segcore.CSegment, req *querypb.SearchRequest, serverID int64) (*internalpb.SearchResults, error)
 }
@@ -59,6 +62,8 @@ func buildGrowingQueryTaskInputs(collection *segcore.CCollection, selected []seg
 	return buildGrowingTaskInputs(collection, selected, legacyReq.GetCollectionID(), partitionIDFromQueryRequest(legacyReq), firstDMLChannel(req.GetDmlChannels()))
 }
 
+// TODO(#40451): remove these legacy QueryNode collection/segment wrappers when
+// QueryView execution accepts the pinned segcore handles directly.
 func buildGrowingTaskInputs(collection *segcore.CCollection, selected []segcore.CSegment, collectionID int64, partitionID int64, vchannel string) (*segments.Collection, []segments.Segment, error) {
 	qnCollection, err := segments.NewCollectionFromCCollectionForViewQuery(collection)
 	if err != nil {
