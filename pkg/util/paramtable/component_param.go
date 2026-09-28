@@ -4011,6 +4011,7 @@ type queryNodeConfig struct {
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
 
 	MaxUnsolvedQueueSize         ParamItem `refreshable:"true"`
+	RequeryUnsolvedQueueSize     ParamItem `refreshable:"false"`
 	MaxReadConcurrency           ParamItem `refreshable:"true"`
 	MaxGpuReadConcurrency        ParamItem `refreshable:"false"`
 	MaxGroupNQ                   ParamItem `refreshable:"true"`
@@ -4977,6 +4978,23 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	}
 	p.MaxUnsolvedQueueSize.Init(base.mgr)
 
+	p.RequeryUnsolvedQueueSize = ParamItem{
+		Key:          "queryNode.scheduler.requeryUnsolvedQueueSize",
+		Version:      "3.0.0",
+		DefaultValue: "1024",
+		Formatter: func(v string) string {
+			if capacity, err := strconv.ParseInt(v, 10, 64); err == nil && capacity >= 1024 {
+				return v
+			}
+			return "1024"
+		},
+		Doc: "Independent waiting-task capacity of the requery lane under requery-edf. " +
+			"Captured when the scheduler is created; restart is required to change it. " +
+			"Values below 1024 or invalid values fall back to 1024. Ignored by other policies.",
+		Export: true,
+	}
+	p.RequeryUnsolvedQueueSize.Init(base.mgr)
+
 	p.MaxGroupNQ = ParamItem{
 		Key:          "queryNode.grouping.maxNQ",
 		Version:      "2.0.0",
@@ -5245,6 +5263,8 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.3.0",
 		DefaultValue: "fifo",
 		Doc: `fifo: A FIFO queue support the schedule.
+requery-edf:
+	Compare the deadlines of regular and requery FIFO lane heads when an execution slot is available.
 user-task-polling:
 	The user's tasks will be polled one by one and scheduled.
 	Scheduling is fair on task granularity.

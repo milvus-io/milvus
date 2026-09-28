@@ -9,6 +9,7 @@ import (
 
 const (
 	schedulePolicyNameFIFO            = "fifo"
+	schedulePolicyNameRequeryEDF      = "requery-edf"
 	schedulePolicyNameUserTaskPolling = "user-task-polling"
 )
 
@@ -21,6 +22,8 @@ func NewScheduler(policyName string) Scheduler {
 		return newScheduler(
 			newFIFOPolicy(),
 		)
+	case schedulePolicyNameRequeryEDF:
+		return newRequeryEDFScheduler()
 	case schedulePolicyNameUserTaskPolling:
 		return newScheduler(
 			newUserTaskPollingPolicy(),
@@ -95,6 +98,9 @@ type queuedTask struct {
 	Task
 
 	enqueueTime time.Time
+	// schedulingDeadline is populated only by EDF and tracks the earliest
+	// merged request deadline; it does not change the task's cancellation context.
+	schedulingDeadline time.Time
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {

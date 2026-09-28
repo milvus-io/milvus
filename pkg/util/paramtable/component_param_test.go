@@ -93,6 +93,20 @@ func TestComponentParam_DataCoordBumpSchemaVersionCompactionParams(t *testing.T)
 	assert.EqualValues(t, 1, params.DataCoordCfg.BumpSchemaVersionCompactionSlotUsage.GetAsInt64())
 }
 
+func TestComponentParam_RequeryEDFCapacity(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+	capacity := &params.QueryNodeCfg.RequeryUnsolvedQueueSize
+	assert.EqualValues(t, 1024, capacity.GetAsInt64())
+	assert.NoError(t, params.Save(capacity.Key, "2048"))
+	assert.EqualValues(t, 2048, capacity.GetAsInt64())
+	for _, invalid := range []string{"-1", "0", "1023", "invalid"} {
+		assert.NoError(t, params.Save(capacity.Key, invalid))
+		assert.EqualValues(t, 1024, capacity.GetAsInt64())
+	}
+	assert.Equal(t, "fifo", params.QueryNodeCfg.SchedulePolicyName.GetValue())
+}
+
 func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	Init()
 	params := Get()

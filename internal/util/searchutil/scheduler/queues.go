@@ -191,6 +191,10 @@ func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio fl
 			if (canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) &&
 				canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap)) &&
 				taskInQueue.MergeWith(mergeTask) {
+				if deadline := task.schedulingDeadline; !deadline.IsZero() &&
+					(q.tasks[i].schedulingDeadline.IsZero() || deadline.Before(q.tasks[i].schedulingDeadline)) {
+					q.tasks[i].schedulingDeadline = deadline
+				}
 				return true
 			}
 		}
