@@ -177,6 +177,15 @@ fi
 # differ from the conan home in CI containers.
 CONAN_HOME_DIR=$("$CONAN" config home 2>/dev/null || echo "${CONAN_HOME:-$HOME/.conan2}")
 mkdir -p "$CONAN_HOME_DIR/extensions/hooks"
+if [[ "${USE_TSAN:-OFF}" == "ON" ]]; then
+    # Rebuild synchronization-critical native dependencies by default. An
+    # explicit profile may select a different diagnostic coverage policy.
+    if [[ -z "${CONAN_HOST_PROFILE:-}" ]]; then
+        python3 "${CPP_SRC_DIR}/milvus_tsan.py" profile > "${BUILD_OUTPUT_DIR}/tsan.profile" || exit 1
+        CONAN_PROFILE_ARGS=(-pr:h default -pr:h "${BUILD_OUTPUT_DIR}/tsan.profile")
+    fi
+    cp "${CPP_SRC_DIR}/milvus_tsan.py" "$CONAN_HOME_DIR/extensions/hooks/hook_milvus_tsan.py"
+fi
 cat > "$CONAN_HOME_DIR/extensions/hooks/hook_fix_shared_lib_env.py" << 'HOOK_EOF'
 import os, platform
 

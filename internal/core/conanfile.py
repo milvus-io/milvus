@@ -4,6 +4,9 @@ from conan import ConanFile
 from conan.tools.cmake import CMakeDeps, CMakeToolchain
 from conan.tools.files import copy
 import os
+import json
+
+from milvus_tsan import MANIFEST, dependency_manifest
 
 
 class MilvusConan(ConanFile):
@@ -148,6 +151,9 @@ class MilvusConan(ConanFile):
             self.requires("s2n/1.6.0#4fa3b751b92e126a55e45dce723f0384", force=True)
 
     def generate(self):
+        manifest = None
+        if self.conf.get("user.milvus:tsan_runtime_dependencies", default=False):
+            manifest = dependency_manifest(self.dependencies.host.values())
         deps = CMakeDeps(self)
         # Set cmake file names to match what downstream projects expect
         deps.set_property("libavrocpp", "cmake_file_name", "libavrocpp")
@@ -174,3 +180,6 @@ class MilvusConan(ConanFile):
                      dst=os.path.join(build_dir, "bin"))
                 copy(self, "*.proto", src=os.path.join(dep.package_folder, "include"),
                      dst=os.path.join(build_dir, "include"))
+        if manifest is not None:
+            with open(os.path.join(build_dir, "lib", MANIFEST), "w") as output:
+                json.dump(manifest, output, indent=2)
