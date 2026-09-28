@@ -342,7 +342,8 @@ func (it *upsertTask) prepareUpsert(ctx context.Context) error {
 // queryPreExecute shares PK classification and delete preparation between Full
 // AutoID and Partial Upsert. Full returns after classification; Partial also
 // allocates missing AutoIDs and merges old fields here.
-// Returned missing-row offsets refer to request order before any merge.
+// Returned missing-row offsets refer to request order before any merge. They
+// are collected only when Partial or AutoID Upsert consumes them.
 func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	log := mlog.With(mlog.String("collectionName", it.req.CollectionName))
 	partialUpdate := it.req.GetPartialUpdate()
@@ -354,6 +355,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		log.Warn(ctx, "get primary field schema failed", mlog.Err(err))
 		return nil, err
 	}
+	collectMissingRows := partialUpdate || primaryFieldSchema.GetAutoID()
 
 	requestFields := it.req.GetFieldsData()
 	if !partialUpdate {
@@ -417,9 +419,12 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		if partialUpdate {
 			return nil, merr.WrapErrParameterInvalidMsg("retrieve by primary key failed, no data found")
 		}
-		missingRows := make([]int, upsertIDSize)
-		for i := range missingRows {
-			missingRows[i] = i
+		var missingRows []int
+		if collectMissingRows {
+			missingRows = make([]int, upsertIDSize)
+			for i := range missingRows {
+				missingRows[i] = i
+			}
 		}
 		if err := generateFunctions(); err != nil {
 			return nil, err
@@ -466,6 +471,7 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 
 	var insertIdxInUpsert, updateIdxInUpsert []int
+	missingCount := 0
 	// 1. split upsert data into insert and update by query result
 	idsChecker, err := typeutil.NewIDsChecker(existIDs)
 	if err != nil {
@@ -486,7 +492,10 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 				updateIdxInUpsert = append(updateIdxInUpsert, upsertIdx)
 			}
 		} else {
-			insertIdxInUpsert = append(insertIdxInUpsert, upsertIdx)
+			missingCount++
+			if collectMissingRows {
+				insertIdxInUpsert = append(insertIdxInUpsert, upsertIdx)
+			}
 		}
 	}
 
@@ -495,8 +504,8 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		mlog.Int("resultNum", existRowNum),
 		mlog.Int64("latency", tr.ElapseSpan().Milliseconds()),
 		mlog.Bool("partialUpdate", partialUpdate),
-		mlog.Int("existingCount", upsertIDSize-len(insertIdxInUpsert)),
-		mlog.Int("notFoundCount", len(insertIdxInUpsert)))
+		mlog.Int("existingCount", upsertIDSize-missingCount),
+		mlog.Int("notFoundCount", missingCount))
 
 	if !partialUpdate {
 		// Full Upsert keeps request order and never inherits old fields or CAS state.

@@ -589,7 +589,31 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 
 		missingRows, err := task.queryPreExecute(ctx)
 		require.NoError(t, err)
-		require.Equal(t, []int{0, 1, 2}, missingRows)
+		require.Nil(t, missingRows)
+	})
+
+	mockey.PatchConvey("full caller PK does not collect mixed missing-row offsets", t, func() {
+		const collectionID = int64(991011)
+		task := newTask(collectionID)
+		refreshRLSOperationTestMetadata(t, collectionID, []*rlsutil.RowPolicy{{
+			PolicyName: "upsert_allow_mixed",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+			UsingExpr:  "id > 0",
+			CheckExpr:  "true",
+		}})
+		resolvePredicates(task)
+		existingPK := proto.Clone(task.req.GetFieldsData()[0]).(*schemapb.FieldData)
+		existingPK.GetScalars().GetLongData().Data = []int64{1}
+		mockey.Mock(retrieveByPKs).Return(&milvuspb.QueryResults{
+			Status:     merr.Success(),
+			FieldsData: []*schemapb.FieldData{existingPK},
+		}, segcore.StorageCost{}, nil).Build()
+
+		missingRows, err := task.queryPreExecute(context.Background())
+		require.NoError(t, err)
+		require.Nil(t, missingRows)
+		require.Equal(t, []int64{1}, task.deletePKs.GetIntId().GetData())
 	})
 
 	mockey.PatchConvey("always-true using policy preserves direct full upsert", t, func() {
