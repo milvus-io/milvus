@@ -39,7 +39,7 @@ func TestMinioConfig_MultipartCopyThreshold(t *testing.T) {
 	params.Init(base)
 	assert.Equal(t, "minio.multipartCopyThreshold", params.MultipartCopyThreshold.Key)
 	assert.Equal(t, "3.0.3", params.MultipartCopyThreshold.Version)
-	assert.False(t, params.MultipartCopyThreshold.Export)
+	assert.True(t, params.MultipartCopyThreshold.Export)
 	assert.Equal(t, int64(1024*1024*1024), params.MultipartCopyThreshold.GetAsInt64())
 
 	for _, tc := range []struct {

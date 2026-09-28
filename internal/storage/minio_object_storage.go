@@ -29,7 +29,7 @@ import (
 
 var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
-// S3 limits a single CopyObject request to 5 GiB, regardless of the configured threshold.
+// minio-go caps a single CopyObject request at 5 GiB, regardless of the configured threshold.
 const minioSingleCopyObjectMaxSize = 5 * 1024 * 1024 * 1024
 
 type MinioObjectStorage struct {
@@ -51,11 +51,13 @@ func (or *ObjectReader) Size() (int64, error) {
 }
 
 func newMinioObjectStorageWithConfig(ctx context.Context, c *objectstorage.Config) (*MinioObjectStorage, error) {
-	minIOClient, err := objectstorage.NewMinioClient(ctx, c)
+	resolvedConfig := *c
+	resolvedConfig.CloudProvider = objectstorage.ResolveCloudProvider(c)
+	minIOClient, err := objectstorage.NewMinioClient(ctx, &resolvedConfig)
 	if err != nil {
 		return nil, err
 	}
-	return &MinioObjectStorage{Client: minIOClient, cloudProvider: c.CloudProvider}, nil
+	return &MinioObjectStorage{Client: minIOClient, cloudProvider: resolvedConfig.CloudProvider}, nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error) {

@@ -44,6 +44,24 @@ const (
 
 var CheckBucketRetryAttempts uint = 20
 
+// ResolveCloudProvider applies the endpoint compatibility rules used by the
+// MinIO client factory without changing the caller's configuration.
+func ResolveCloudProvider(c *Config) string {
+	switch c.CloudProvider {
+	case CloudProviderAliyun, CloudProviderGCP, CloudProviderTencent, CloudProviderHuawei:
+		return c.CloudProvider
+	}
+	// Preserve endpoint inference for the default S3-compatible client path.
+	switch {
+	case strings.Contains(c.Address, gcp.GcsDefaultAddress):
+		return CloudProviderGCP
+	case strings.Contains(c.Address, aliyun.OSSAddressFeatureString):
+		return CloudProviderAliyun
+	default:
+		return c.CloudProvider
+	}
+}
+
 func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	newMinioFn := minio.New
@@ -53,8 +71,7 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 		bucketLookupType = minio.BucketLookupDNS
 	}
 
-	matchedDefault := false
-	switch c.CloudProvider {
+	switch ResolveCloudProvider(c) {
 	case CloudProviderAliyun:
 		// auto doesn't work for aliyun, so we set to dns deliberately
 		bucketLookupType = minio.BucketLookupDNS
@@ -81,34 +98,6 @@ func NewMinioClient(ctx context.Context, c *Config) (*minio.Client, error) {
 			creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
 		}
 	default: // aws, minio
-		matchedDefault = true
-	}
-
-	// Compatibility logic. If the cloud provider is not specified in the request,
-	// it shall be inferred based on the service address.
-	if matchedDefault {
-		matchedDefault = false
-		switch {
-		case strings.Contains(c.Address, gcp.GcsDefaultAddress):
-			newMinioFn = gcp.NewMinioClient
-			if !c.UseIAM {
-				creds = credentials.NewStaticV2(c.AccessKeyID, c.SecretAccessKeyID, "")
-			}
-		case strings.Contains(c.Address, aliyun.OSSAddressFeatureString):
-			// auto doesn't work for aliyun, so we set to dns deliberately
-			bucketLookupType = minio.BucketLookupDNS
-			if c.UseIAM {
-				newMinioFn = aliyun.NewMinioClient
-			} else {
-				creds = credentials.NewStaticV4(c.AccessKeyID, c.SecretAccessKeyID, "")
-			}
-		default:
-			matchedDefault = true
-		}
-	}
-
-	if matchedDefault {
-		// aws, minio
 		if c.UseIAM {
 			creds = credentials.NewIAM("")
 		} else {

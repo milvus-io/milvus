@@ -1955,7 +1955,7 @@ Leave it empty if you want to use AWS default endpoint`,
 			}
 			return v
 		},
-		Export: false,
+		Export: true,
 	}
 	p.MultipartCopyThreshold.Init(base.mgr)
 
