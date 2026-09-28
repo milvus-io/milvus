@@ -26,12 +26,22 @@ const (
 	readTaskQueueOutcomeCleared   = "cleared"
 )
 
+// readTaskObserver is optional diagnostics, not part of scheduling decisions.
+// Queue callbacks run on the schedule goroutine; execution callbacks may overlap.
+type readTaskObserver interface {
+	onTaskRejected(Task)
+	onTaskQueueEvent(*queuedTask, time.Time, string)
+	onTaskExecutionFinished(Task, error, time.Duration, bool)
+}
+
 // newScheduler create a scheduler with given schedule policy.
 func newScheduler(policy schedulePolicy) Scheduler {
+	observer, _ := policy.(readTaskObserver)
 	maxReadConcurrency := paramtable.Get().QueryNodeCfg.MaxReadConcurrency.GetAsInt()
 	mlog.Info(context.TODO(), "query node use concurrent safe scheduler", mlog.Int("max_concurrency", maxReadConcurrency))
 	return &scheduler{
 		policy:           policy,
+		observer:         observer,
 		receiveChan:      make(chan addTaskReq),
 		clearChan:        make(chan clearQueuedReq),
 		execChan:         make(chan Task),
@@ -61,6 +71,7 @@ type clearQueuedResp struct {
 // scheduler is a general concurrent safe scheduler implementation by wrapping a schedule policy.
 type scheduler struct {
 	policy      schedulePolicy
+	observer    readTaskObserver
 	receiveChan chan addTaskReq
 	clearChan   chan clearQueuedReq
 	execChan    chan Task
@@ -230,6 +241,9 @@ func (s *scheduler) handleAddTaskRequest(req addTaskReq, now time.Time) bool {
 		mlog.Warn(context.TODO(), "task canceled before enqueue", mlog.Err(err))
 		req.err <- err
 	} else if admissionErr != nil {
+		if s.observer != nil {
+			s.observer.onTaskRejected(req.task)
+		}
 		req.err <- admissionErr
 	} else {
 		// Push the task into the policy to schedule and update the counter of the ready queue.
@@ -283,11 +297,17 @@ func (s *scheduler) exec() {
 		// Skip this task if task is canceled.
 		if err := t.Context().Err(); err != nil {
 			mlog.Warn(context.TODO(), "task canceled before executing", mlog.Err(err))
+			if s.observer != nil {
+				s.observer.onTaskExecutionFinished(t, err, 0, false)
+			}
 			t.Done(err)
 			continue
 		}
 		if err := t.PreExecute(); err != nil {
 			mlog.Warn(context.TODO(), "failed to pre-execute task", mlog.Err(err))
+			if s.observer != nil {
+				s.observer.onTaskExecutionFinished(t, err, 0, false)
+			}
 			t.Done(err)
 			continue
 		}
@@ -299,10 +319,14 @@ func (s *scheduler) exec() {
 
 			executeStart := time.Now()
 			err := t.Execute()
+			executeDuration := time.Since(executeStart)
+			if s.observer != nil {
+				s.observer.onTaskExecutionFinished(t, err, executeDuration, true)
+			}
 			metrics.QueryNodeReadTaskExecuteDuration.WithLabelValues(
 				paramtable.GetStringNodeID(),
 				readTaskExecuteOutcome(err),
-			).Observe(float64(time.Since(executeStart).Microseconds()) / 1000.0)
+			).Observe(float64(executeDuration.Microseconds()) / 1000.0)
 
 			// Update all metric after task finished.
 			metrics.QueryNodeReadTaskConcurrency.WithLabelValues(paramtable.GetStringNodeID()).Dec()
@@ -417,6 +441,9 @@ func (s *scheduler) setupReadyLenMetric() {
 func (s *scheduler) recordReadTaskQueueDuration(task *queuedTask, now time.Time, outcome string) {
 	if !task.valid() {
 		return
+	}
+	if s.observer != nil {
+		s.observer.onTaskQueueEvent(task, now, outcome)
 	}
 	metrics.QueryNodeReadTaskQueueDuration.WithLabelValues(
 		paramtable.GetStringNodeID(),
