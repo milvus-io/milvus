@@ -44,6 +44,71 @@ TEST(Util_Common, CheckPlusOverflowKeepsSystemClassification) {
     }
 }
 
+TEST(Util_Common, SparseRowValidationAndCopy) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    SparseRow source(std::vector<std::pair<uint32_t, float>>{
+        {0, 0.0f},
+        {std::numeric_limits<uint32_t>::max() - 1,
+         std::numeric_limits<float>::max()}});
+    std::string unaligned(source.data_byte_size() + 1, '\0');
+    std::memcpy(unaligned.data() + 1, source.data(), source.data_byte_size());
+    auto* data = unaligned.data() + 1;
+    EXPECT_EQ(milvus::ValidateSparseRow(data, source.data_byte_size()),
+              nullptr);
+    auto copy =
+        milvus::CopyAndWrapSparseRow(data, source.data_byte_size(), true);
+    ASSERT_EQ(copy.size(), source.size());
+    for (size_t i = 0; i < source.size(); ++i) {
+        EXPECT_EQ(copy[i].id, source[i].id);
+        EXPECT_EQ(copy[i].val, source[i].val);
+    }
+    std::memset(data, 0, source.data_byte_size());
+    EXPECT_EQ(copy[1].id, source[1].id);
+    EXPECT_EQ(copy[1].val, source[1].val);
+
+    EXPECT_EQ(milvus::ValidateSparseRow(nullptr, 0), nullptr);
+    EXPECT_EQ(milvus::CopyAndWrapSparseRow("", 0, true).size(), 0);
+}
+
+TEST(Util_Common, SparseRowValidationRejectsInvalidData) {
+    using SparseRow = knowhere::sparse::SparseRow<milvus::SparseValueType>;
+    auto check_invalid = [](const void* data, size_t size, const char* reason) {
+        EXPECT_STREQ(milvus::ValidateSparseRow(data, size), reason);
+        try {
+            milvus::CopyAndWrapSparseRow(data, size, true);
+            FAIL() << "expected rejection: " << reason;
+        } catch (const milvus::SegcoreError& e) {
+            EXPECT_EQ(e.get_error_code(), milvus::UnexpectedError);
+            EXPECT_NE(std::string(e.what()).find(reason), std::string::npos);
+        }
+    };
+    // Invalid lengths must fail before accessing or copying the buffer.
+    check_invalid(nullptr, 1, "Invalid size for sparse row data");
+    check_invalid(nullptr,
+                  SparseRow::element_size() + 1,
+                  "Invalid size for sparse row data");
+    const std::vector<
+        std::pair<std::vector<std::pair<uint32_t, float>>, const char*>>
+        cases = {{{{2, 1}, {2, 2}},
+                  "Invalid sparse row: id should be strict ascending"},
+                 {{{3, 1}, {2, 2}},
+                  "Invalid sparse row: id should be strict ascending"},
+                 {{{std::numeric_limits<uint32_t>::max(), 1}},
+                  "Invalid sparse row: id should be smaller than uint32 max"},
+                 {{{1, -1}}, "Invalid sparse row: negative value"},
+                 {{{1, std::numeric_limits<float>::infinity()}},
+                  "Invalid sparse row: NaN or Inf value"},
+                 {{{1, std::numeric_limits<float>::quiet_NaN()}},
+                  "Invalid sparse row: NaN or Inf value"}};
+    for (const auto& [entries, reason] : cases) {
+        SparseRow source(entries);
+        check_invalid(source.data(), source.data_byte_size(), reason);
+        // Trusted callers retain the existing opt-out from validation.
+        EXPECT_NO_THROW(milvus::CopyAndWrapSparseRow(
+            source.data(), source.data_byte_size(), false));
+    }
+}
+
 TEST(SimilarityCorelation, Naive) {
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::IP));
     ASSERT_TRUE(milvus::PositivelyRelated(knowhere::metric::COSINE));
