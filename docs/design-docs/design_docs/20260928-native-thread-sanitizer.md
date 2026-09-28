@@ -1,6 +1,12 @@
-# Native ThreadSanitizer builds
+# MEP: Native ThreadSanitizer builds with LLVM Archer
 
-## Scope
+- **Created:** 2026-09-28
+- **Author(s):** @zhuwenxing
+- **Status:** Under Review
+- **Component:** Other (native build and test infrastructure)
+- **Related Issues:** #53763
+
+## Summary
 
 `USE_TSAN` is an opt-in CMake option for 64-bit Linux CPU builds with LLVM 20 (Clang, compiler-rt,
 libomp and Archer). It instruments Milvus C/C++ targets and CMake source dependencies with
@@ -13,7 +19,15 @@ prebuilt Conan packages do not become instrumented when this option is enabled.
 GPU builds are rejected. Runtime compatibility and dependency coverage must be
 validated for the particular compiler, container, and dependency versions used.
 
-## Build interface
+## Motivation
+
+Native concurrency investigations currently require manual sanitizer flags,
+dependency rebuilds and OpenMP synchronization controls. A repeatable build
+must expose application races without treating invisible OpenMP synchronization
+as a missing lock. The build also needs to preserve symbols and runtime
+compatibility when artifacts move from a compiler environment into an image.
+
+## Public Interfaces
 
 The existing build entry points propagate the option:
 
@@ -61,7 +75,9 @@ implicitly enable ASan just because the build type is Debug; select `USE_ASAN`
 explicitly. TSan builds skip jemalloc and split DWARF. The handwritten parser
 wrapper build and Go/cgo compilation receive their own TSan flags.
 
-## Conan dependency variants
+## Design Details
+
+### Conan dependency variants
 
 The standard build scripts rebuild Folly, milvus-common, libevent, oneTBB,
 GEOS and gtest with TSan by default. Synchronization in prebuilt Folly is not
@@ -103,7 +119,7 @@ Rust coverage requires a separately validated nightly toolchain and compatible
 sanitizer runtime. CMake flags cannot instrument a prebuilt archive or a Cargo
 build automatically.
 
-## Runtime and packaging
+### Runtime and packaging
 
 CMake installs `lib/milvus-sanitizer` (or `lib64` on applicable layouts), recording
 `none`, `address`, or `thread`. The shell environment and local launchers use it
@@ -143,7 +159,23 @@ has special cgo/Tsan boundary annotations; these do not provide complete
 cross-language race detection. Never combine native TSan with Go `-race` and
 interpret successful startup or a passing SDK query as race coverage.
 
-## Verification
+## Compatibility, Deprecation, and Migration Plan
+
+`USE_TSAN` defaults to `OFF`. Enabling it requires a fresh build/install tree
+and LLVM 20 with compiler-rt, libomp and Archer; existing GCC TSan outputs must
+be rebuilt. Ordinary builds retain their compiler selection. TSan rejects
+ASan, Go `-race` and GPU combinations, and removes jemalloc preloading.
+Tantivy's C++ helpers now follow the explicit `USE_ASAN` selection rather than
+implicitly enabling ASan solely for Debug builds.
+
+No API, protobuf, persisted data format or database configuration changes are
+introduced. These artifacts are for diagnostic use and add substantial runtime
+and memory overhead. Returning to ordinary artifacts requires a separate clean
+build/install tree. Automated CI scheduling and Dev CLI distribution are
+separate integration work; this change supplies the repository-owned build,
+runtime and smoke-test entry points.
+
+## Test Plan
 
 The dependency-free smoke fixture lives in `internal/core/unittest/tsan`. It can
 be configured independently on a Linux runner, or built as part of a TSan Core
@@ -204,6 +236,19 @@ callbacks for the two distinct locks. Independent HNSW controls passed three
 single-thread runs and reported the race in all three four-thread runs.
 These application races remain follow-up work; the integration does not hide
 them or establish a clean SDK search suite.
+
+## Rejected Alternatives
+
+- Merely add `-fsanitize=thread` to the final shared library: this misses the
+  OBJECT libraries and prebuilt dependencies that perform native accesses.
+- Keep GNU libgomp and add project-specific synchronization wrappers: these
+  require ongoing maintenance and do not cover OpenMP barriers/tasks as
+  comprehensively as upstream Archer's OMPT callbacks.
+- Suppress entire project libraries: this can hide the application races the
+  build is intended to expose. Synchronized and deliberately racy controls
+  instead verify the same LLVM/Archer runtime configuration.
+- Claim whole-process coverage: Go, stable Rust and remaining uninstrumented
+  dependencies require separate tooling and validation.
 
 ## References
 
