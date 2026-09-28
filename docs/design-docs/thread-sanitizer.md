@@ -22,9 +22,19 @@ make USE_TSAN=ON mode=RelWithDebInfo build-cpp-with-unittest
 make USE_TSAN=ON mode=RelWithDebInfo install
 ```
 
-These are commands for the Linux build environment. In the development workflow,
-use the remote runner once it supports passing this option; setting a local
-environment variable does not automatically forward it to a remote job.
+These are commands for the Linux build environment. With a TSan-capable
+Milvus Dev CLI client and server, the remote development workflow is:
+
+```bash
+milvus-dev-cli build local . -b master --tsan --debug
+milvus-dev-cli cpp-ut local . -b master --tsan -j 1 -t bitset_test
+```
+
+The worker runs the CMake smoke fixture before the build, isolates native and
+Conan caches from ordinary/ASan builds, and verifies installed dependency
+instrumentation. TSan worker compiler parallelism defaults to eight jobs;
+test sharding is a separate setting. A local `USE_TSAN` environment variable
+does not automatically forward the option to a remote job.
 
 The direct Core script accepts `-T ON`. Direct CMake users pass
 `-DUSE_TSAN=ON` along with their existing Conan toolchain, install prefix and
@@ -132,6 +142,23 @@ libraries, run the positive and negative smoke cases, then exercise real
 concurrent Core paths and language boundaries. A clean report only describes
 executed, instrumented paths. Full process and image validation is separate
 from verifying that CMake emits the required options.
+
+### Initial Linux validation
+
+The GCC 12.3.0 native + Go build and image completed with the six instrumented
+Conan packages. The image reached Healthy, and SDK insertion and growing-query
+cases passed. A sealed-query case failed during HNSW construction with a
+neighbor-array read/write race in Knowhere `faff72c4931ca6e4d3642aca26fbe3085f2fb23b`
+(`HNSW.cpp:328` and `:423`). Isolated native controls reproduced that access
+pair after exposing OpenMP synchronization to TSan; the reader and writer hold
+different per-node locks. This finding is not fixed or suppressed by the build
+option. A successful sanitizer build does not imply that all existing workloads
+run without sanitizer findings.
+
+The same controls show that the worker's uninstrumented `libgomp` can also
+report races for correctly locked OpenMP accesses. Those synchronization
+visibility reports require separate triage; do not automatically dismiss all
+HNSW reports as OpenMP false positives.
 
 ## References
 
