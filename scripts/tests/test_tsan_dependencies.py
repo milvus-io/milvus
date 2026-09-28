@@ -66,6 +66,34 @@ class ArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "incomplete package set"):
             tsan.verify(self.lib)
 
+    def test_runtime_audit_rejects_mixed_or_missing_libraries(self):
+        (self.lib / "milvus-archer").write_text("llvm-20\n")
+        for name in [
+            "libarcher.so",
+            "libomp.so.5",
+            f"libclang_rt.tsan-{os.uname().machine}.so",
+        ]:
+            (self.lib / name).touch()
+        with patch.object(
+            tsan.subprocess,
+            "check_output",
+            return_value="libomp.so.5 => /lib/libomp.so.5",
+        ):
+            tsan.verify_runtime(self.lib)
+        for dependency in [
+            "libgomp.so.1",
+            "libtsan.so.2",
+            "libmissing.so => not found",
+        ]:
+            with (
+                patch.object(tsan.subprocess, "check_output", return_value=dependency),
+                self.assertRaisesRegex(ValueError, "Invalid LLVM/Archer"),
+            ):
+                tsan.verify_runtime(self.lib)
+        (self.lib / "libarcher.so").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing LLVM runtime"):
+            tsan.verify_runtime(self.lib)
+
 
 @unittest.skipUnless(
     shutil.which("conan"), "Conan 2 is required for package identity checks"
@@ -107,7 +135,7 @@ class ConanIdentityTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             config = ConfDefinition()
-            config.loads(f"{tsan.POLICY_CONF}=2")
+            config.loads(f"{tsan.POLICY_CONF}=3")
             recipe = SimpleNamespace(
                 name="folly",
                 context="host",
@@ -158,12 +186,20 @@ class ConanIdentityTests(unittest.TestCase):
                 ' settings="os", "arch", "compiler", "build_type"\n'
             )
             conan("export", str(package))
+            ordinary_recipe = root / "ordinary"
+            ordinary_recipe.mkdir()
+            (ordinary_recipe / "conanfile.py").write_text(
+                (package / "conanfile.py")
+                .read_text()
+                .replace('name="folly"', 'name="ordinary"')
+            )
+            conan("export", str(ordinary_recipe))
             consumer = root / "consumer"
             consumer.mkdir()
             (consumer / "conanfile.py").write_text(
                 "from conan import ConanFile\nclass Consumer(ConanFile):\n"
                 ' settings="os", "arch", "compiler", "build_type"\n'
-                ' requires="folly/0.1"\n tool_requires="folly/0.1"\n'
+                ' requires="folly/0.1", "ordinary/0.1"\n tool_requires="folly/0.1"\n'
             )
             profile = root / "tsan.profile"
             profile.write_text(tsan.profile())
@@ -175,15 +211,27 @@ class ConanIdentityTests(unittest.TestCase):
                     )
                 )
                 return {
-                    node["context"]: node["package_id"]
+                    (node.get("name"), node["context"]): node
                     for node in data["graph"]["nodes"].values()
-                    if (node.get("ref") or "").startswith("folly/0.1")
                 }
 
             normal = identities([])
             sanitized = identities(["-pr:h", "default", "-pr:h", str(profile)])
-            self.assertNotEqual(normal["host"], sanitized["host"])
-            self.assertEqual(normal["build"], sanitized["build"])
+            self.assertNotEqual(
+                normal[("folly", "host")]["package_id"],
+                sanitized[("folly", "host")]["package_id"],
+            )
+            for key in [("folly", "build"), ("ordinary", "host")]:
+                self.assertEqual(
+                    normal[key]["package_id"], sanitized[key]["package_id"]
+                )
+                self.assertEqual(normal[key]["settings"], sanitized[key]["settings"])
+            for key in [(None, "host"), ("folly", "host")]:
+                settings = sanitized[key]["settings"]
+                self.assertEqual(settings["compiler"], "clang")
+                self.assertEqual(settings["compiler.version"], "20")
+                self.assertEqual(settings["compiler.cppstd"], "20")
+                self.assertEqual(settings["compiler.libcxx"], "libstdc++11")
 
 
 if __name__ == "__main__":

@@ -2,8 +2,8 @@
 
 ## Scope
 
-`USE_TSAN` is an opt-in CMake option for 64-bit Linux CPU builds with GCC or
-Clang. It instruments Milvus C/C++ targets and CMake source dependencies with
+`USE_TSAN` is an opt-in CMake option for 64-bit Linux CPU builds with LLVM 20 (Clang, compiler-rt,
+libomp and Archer). It instruments Milvus C/C++ targets and CMake source dependencies with
 `-fsanitize=thread`, debug information, and frame pointers. It is independent of
 `BUILD_UNIT_TEST` and defaults to `OFF`. ASan and TSan cannot be combined.
 
@@ -22,7 +22,11 @@ make USE_TSAN=ON mode=RelWithDebInfo build-cpp-with-unittest
 make USE_TSAN=ON mode=RelWithDebInfo install
 ```
 
-These are commands for the Linux build environment. With a TSan-capable
+These are commands for the Linux build environment with LLVM 20 installed.
+`MILVUS_LLVM_ROOT` defaults to `/usr/lib/llvm-20`; the build scripts select its
+Clang drivers and fail if the compiler-rt, libomp or Archer library is absent.
+The native/cgo links use `-shared-libsan` so DSOs and the Go executable share
+one LLVM TSan runtime. The C++ ABI remains `libstdc++11`. With a TSan-capable
 Milvus Dev CLI client and server, the remote development workflow is:
 
 ```bash
@@ -62,13 +66,17 @@ wrapper build and Go/cgo compilation receive their own TSan flags.
 The standard build scripts rebuild Folly, milvus-common, libevent, oneTBB,
 GEOS and gtest with TSan by default. Synchronization in prebuilt Folly is not
 visible to TSan and can produce reports during service startup. The generated
-host profile keeps build tools unchanged and makes sanitizer flags part of
+host profile selects Clang 20 and C++20 for Core and these six packages,
+retains the default compiler identity for other packages and build tools and makes sanitizer flags part of
 package IDs. A scoped Conan hook preserves the flags that the Folly recipe
 otherwise overwrites. The generated dependency manifest verifies native symbols
 and records package revisions and library hashes; the worker validates it again
 after cache restore.
 
-Other Conan dependencies remain prebuilt. For broader native dependency
+OpenBLAS uses its pthread backend in the TSan profile. Its default GCC/Fortran
+OpenMP backend would introduce `libgomp` alongside LLVM `libomp`; pthread BLAS
+preserves parallelism without mixing OpenMP runtimes. Other Conan dependencies
+remain prebuilt. For broader native dependency
 instrumentation, opt into the provided full host profile (this broader profile
 still requires validation of each recipe):
 
@@ -99,8 +107,8 @@ build automatically.
 
 CMake installs `lib/milvus-sanitizer` (or `lib64` on applicable layouts), recording
 `none`, `address`, or `thread`. The shell environment and local launchers use it
-to recognize TSan builds even when the original build environment is gone or
-Clang has linked the runtime statically. They remove jemalloc preloads, reject
+to recognize TSan builds even when the original build environment is gone.
+They remove jemalloc preloads, reject
 ASan preloads and Go `-race` in `GOFLAGS`, and enforce
 `TSAN_OPTIONS=...:halt_on_error=1:exitcode=66`.
 
@@ -108,9 +116,24 @@ The C++ runner defaults to one shard for TSan; callers can set `CPP_UT_SHARDS`
 and `TEST_TIMEOUT` for the available resources. The installation script copies
 the dynamically linked TSan runtime with the other runtime libraries.
 `build/build_image.sh` disables jemalloc preloading when packaging a TSan build.
-External image builders must likewise set `MILVUS_JEMALLOC_LIB` to an empty
-build argument for the CPU Dockerfiles. Preserve symbols and supply a compatible
-symbolizer in the test environment.
+CMake also installs `libomp.so.5`, `libarcher.so`, the shared compiler-rt and a
+`milvus-archer` marker. Launchers and the Dev CLI image activate OMPT through
+`OMP_TOOL=enabled` and an absolute `OMP_TOOL_LIBRARIES` path. Native caches use
+an LLVM/Archer-specific namespace and require these artifacts.
+
+Archer's upstream configuration uses `ignore_noninstrumented_modules=1` to
+exclude runtime internals. This reduces coverage of accesses originating in
+uninstrumented dependencies; it is not a declaration that those dependencies
+are race-free. No project-wide race suppression is installed. Both synchronized
+and deliberately racy OpenMP probes run with the same setting.
+
+External image builders must set `MILVUS_JEMALLOC_LIB` to an empty build
+argument, `MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so`, and `MILVUS_TSAN_OPTIONS`
+to `halt_on_error=1:exitcode=66:ignore_noninstrumented_modules=1:allow_addr2line=1`.
+Preserve symbols and supply llvm-symbolizer or GNU addr2line. The Dev CLI image
+installs binutils for the latter. After packaging, run
+`python3 internal/core/milvus_tsan.py verify-runtime lib` to reject missing
+runtime files, unresolved dependencies, GNU libgomp and GNU libtsan.
 
 `all_tests` has a C++ main but also loads the Go plan-parser shared library. Go
 has special cgo/Tsan boundary annotations; these do not provide complete
@@ -126,9 +149,11 @@ UT build. `ctest --test-dir <build-dir> -L tsan --output-on-failure` runs:
 - A mutex-protected C/C++ shared-library access case that must pass.
 - An intentional C data race in a shared library that must report and exit 66.
 - An intentional C++ data race in a shared library with the same requirement.
+- OpenMP lock, barrier and task-depend cases that must be race-free.
+- An intentionally racy OpenMP case that must report and exit 66.
 
 The report checker rejects initialization crashes, silent success, wrong exit
-codes, and missing symbolized access functions. The intentionally racy probe is
+codes, missing symbolized access functions, and a missing Archer startup banner. The intentionally racy probe is
 not installed among ordinary UT executables. No suppressions are enabled by
 default. `bash scripts/sanitizer_env_test.sh` checks allocator handling, parser
 and image command propagation, and configuration conflicts without compiling
@@ -143,7 +168,7 @@ concurrent Core paths and language boundaries. A clean report only describes
 executed, instrumented paths. Full process and image validation is separate
 from verifying that CMake emits the required options.
 
-### Initial Linux validation
+### Historical GCC validation
 
 The GCC 12.3.0 native + Go build and image completed with the six instrumented
 Conan packages. The image reached Healthy, and SDK insertion and growing-query
@@ -156,12 +181,13 @@ option. A successful sanitizer build does not imply that all existing workloads
 run without sanitizer findings.
 
 The same controls show that the worker's uninstrumented `libgomp` can also
-report races for correctly locked OpenMP accesses. Those synchronization
-visibility reports require separate triage; do not automatically dismiss all
-HNSW reports as OpenMP false positives.
+report races for correctly locked OpenMP accesses. The LLVM/Archer profile replaces those diagnostic synchronization wrappers
+with upstream OMPT annotations. The earlier HNSW finding remains a separate
+algorithm issue; this integration does not suppress it.
 
 ## References
 
+- [LLVM Archer](https://github.com/llvm/llvm-project/blob/llvmorg-20.1.8/openmp/tools/archer/README.md)
 - [Clang ThreadSanitizer](https://clang.llvm.org/docs/ThreadSanitizer.html)
 - [Conan configuration and package-ID confs](https://docs.conan.io/2/reference/config_files/global_conf.html)
 - [Go cgo boundary implementation](https://go.dev/src/cmd/cgo/out.go)
