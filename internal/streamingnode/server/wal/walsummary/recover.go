@@ -79,6 +79,9 @@ func (m *Manager) Restore(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	m.manifest = manifest
+	for _, chunk := range manifest.GetChunks() {
+		m.chunkIndex.chunks = append(m.chunkIndex.chunks, m.chunkIndex.newChunk(chunk, nil))
+	}
 	m.reopenedTerm = found && sourceTerm == m.cfg.Term
 	m.manifestPublished = found && sourceTerm == m.cfg.Term
 	m.manifestVersion = 1

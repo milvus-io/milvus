@@ -34,6 +34,11 @@ historical catch-up, live delivery, and subscription errors. WALSummary owns
 payloads, indexes, bounded reads, storage caches, readable coverage, and GC.
 The adaptor keeps only bounded delivery batches; it does not mirror the full
 Summary backlog or maintain independent chunks, manifests, or catalog keys.
+Summary's resident chunk index owns a shared, byte-budgeted LRU of encoded
+objects, populated by both successful reads and writes. Pagination and different
+VChannel subscriptions reuse the same chunk buffer while resident. Cache eviction
+does not remove index entries or change delivery cursors; live subscriptions may
+read object storage again after eviction. See [chunk cache](summary.md#541-resident-index-and-chunk-cache).
 
 The qv branch's stream protocol and consumers are the reference for external
 behavior. Its independent VChannel storage and retained-message write path are
