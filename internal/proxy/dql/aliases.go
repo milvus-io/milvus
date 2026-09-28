@@ -28,16 +28,15 @@ import (
 // structs keep their original (embedded) names without importing the root
 // proxy package. Follows the pChan/vChan precedent in DEPENDENCIES.md.
 type (
-	baseTask        = taskmodel.BaseTask
-	Condition       = taskmodel.Condition
-	schemaInfo      = metacache.SchemaInfo
-	Timestamp       = typeutil.Timestamp
-	UniqueID        = typeutil.UniqueID
-	pChan           = taskmodel.PChan
-	vChan           = taskmodel.VChan
-	pChanStatistics = taskmodel.PChanStatistics
-	Cache           = metacache.Cache
-	collectionInfo  = metacache.CollectionInfo
+	baseTask       = taskmodel.BaseTask
+	Condition      = taskmodel.Condition
+	schemaInfo     = metacache.SchemaInfo
+	Timestamp      = typeutil.Timestamp
+	UniqueID       = typeutil.UniqueID
+	pChan          = taskmodel.PChan
+	vChan          = taskmodel.VChan
+	Cache          = metacache.Cache
+	collectionInfo = metacache.CollectionInfo
 )
 
 func NewTaskCondition(ctx context.Context) *taskmodel.TaskCondition {
