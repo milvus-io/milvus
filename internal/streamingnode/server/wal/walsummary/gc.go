@@ -58,6 +58,7 @@ func (m *Manager) GCOnce(ctx context.Context) error {
 					}
 					vc := index.GetVchannel()
 					m.manifest.TransformFastForwardTimeTick[vc] = max(m.manifest.TransformFastForwardTimeTick[vc], end)
+					m.notifyTransformLocked(vc)
 				}
 			}
 			m.manifest.Chunks = removeChunkEntry(m.manifest.Chunks, ref.Generation)

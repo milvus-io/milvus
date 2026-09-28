@@ -76,7 +76,7 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg message.MutableMessage) {
 		return
 	}
 	if vchannel == "" {
-		if isPChannelTransformBarrier(msgType) {
+		if messageutil.IsPChannelTransformBarrier(msgType) {
 			cm.advanceTransformingAllLocked(tt)
 		}
 		return
@@ -106,38 +106,15 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg message.MutableMessage) {
 		}
 		mvcc.TransformingTimetick = tt
 		mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, mvcc.TransformingTimetick)
-	case message.MessageTypeCommitImport:
-		// Import commit behaves like a flush barrier: it publishes sealed
-		// segments to the query view at its commit fence, so it advances the
-		// transforming frontier only. Growing MVCC must NOT move — imported
-		// rows live in sealed segments served by QueryNode (which filters by
-		// the transforming frontier), and advancing the growing frontier would
-		// stall streamingnode WaitMVCCVisible on vchannels with no insert
-		// traffic.
-		if tt <= mvcc.TransformingTimetick {
-			return
-		}
-		mvcc.TransformingTimetick = tt
-	case message.MessageTypeFlush,
-		message.MessageTypeManualFlush,
-		message.MessageTypeDropPartition,
-		message.MessageTypeDropCollection,
-		message.MessageTypeTruncateCollection,
-		message.MessageTypeFlushAll,
-		message.MessageTypeAlterWAL:
-		if tt <= mvcc.TransformingTimetick {
-			return
-		}
-		mvcc.TransformingTimetick = tt
-	case message.MessageTypeAlterCollection:
-		alter := message.MustAsMutableAlterCollectionMessageV2(msg)
-		if !messageutil.IsSchemaChange(alter.Header()) || tt <= mvcc.TransformingTimetick {
-			return
-		}
-		mvcc.TransformingTimetick = tt
 	default:
-		return
+		// Publication/schema barriers advance only the transform frontier.
+		// Inserts into sealed segments must not make growing queries wait.
+		if !messageutil.AdvancesQueryTransformMVCC(msg) || tt <= mvcc.TransformingTimetick {
+			return
+		}
+		mvcc.TransformingTimetick = tt
 	}
+
 	mvcc.Confirmed = false
 	cm.vchannelMVCCs[vchannel] = mvcc
 	cm.unconfirmedVChannels[vchannel] = struct{}{}
@@ -165,11 +142,6 @@ func (cm *QueryMVCCManager) advanceTransformingAllLocked(tt uint64) {
 		cm.vchannelMVCCs[vchannel] = mvcc
 		cm.unconfirmedVChannels[vchannel] = struct{}{}
 	}
-}
-
-func isPChannelTransformBarrier(msgType message.MessageType) bool {
-	return msgType == message.MessageTypeFlushAll ||
-		msgType == message.MessageTypeAlterWAL
 }
 
 // QueryVChannelMVCC is a mvcc of one vchannel

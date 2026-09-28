@@ -51,6 +51,14 @@ func (s *Stream) Subscribe(ctx context.Context, opt wal.TransformLogSubscription
 }
 
 func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOption) error {
+	scopedNotifications := false
+	if opt.EndTimeTick == 0 {
+		if watcher, ok := s.reader.(TransformChangeWatcher); ok {
+			release := watcher.WatchTransform(opt.VChannel)
+			defer release()
+			scopedNotifications = true
+		}
+	}
 	through := opt.EndTimeTick
 	if through == 0 {
 		through = math.MaxUint64
@@ -79,10 +87,14 @@ func (s *Stream) read(ctx context.Context, opt wal.TransformLogSubscriptionOptio
 			if after >= through {
 				return nil
 			}
+			changed := batch.Changed
+			if scopedNotifications {
+				changed = batch.TransformChanged
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-batch.Changed:
+			case <-changed:
 			}
 		}
 	}
