@@ -536,6 +536,13 @@ func TestComponentParam(t *testing.T) {
 		nprobe = Params.InterimIndexNProbe.GetAsInt64()
 		assert.Equal(t, int64(16), nprobe)
 
+		assert.Equal(t, false, Params.InterimIndexAsyncBuild.GetAsBool())
+		assert.Equal(t, "queryNode.segcore.interimIndex.asyncGrowingBuild", Params.InterimIndexAsyncBuild.Key)
+		assert.Equal(t, int64(20), Params.InterimIndexAsyncFinalizeBudgetMs.GetAsInt64())
+		assert.Equal(t, "queryNode.segcore.interimIndex.asyncGrowingFinalizeBudgetMs", Params.InterimIndexAsyncFinalizeBudgetMs.Key)
+		assert.Equal(t, int64(30000), Params.InterimIndexAsyncCatchupDeadlineMs.GetAsInt64())
+		assert.Equal(t, "queryNode.segcore.interimIndex.asyncGrowingCatchupDeadlineMs", Params.InterimIndexAsyncCatchupDeadlineMs.Key)
+
 		params.Remove("queryNode.segcore.growing.nlist")
 		params.Remove("queryNode.segcore.growing.nprobe")
 		params.Save("queryNode.segcore.chunkRows", "64")

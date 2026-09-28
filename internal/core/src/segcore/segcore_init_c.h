@@ -58,6 +58,21 @@ void
 SegcoreSetIndexBuildRatio(const float);
 
 void
+SegcoreSetEnableAsyncGrowingIndexBuild(const bool value);
+
+void
+SegcoreSetAsyncGrowingIndexFinalizeBudgetMs(const int64_t value);
+
+void
+SegcoreSetAsyncGrowingIndexCatchupDeadlineMs(const int64_t value);
+
+// One-shot, not hot-updatable: the async growing-index build pool is a
+// function-local static sized from this ratio when the first async build
+// runs. Calls after that first construction have no effect on pool capacity.
+void
+SegcoreSetGrowingIndexBuildPoolRatio(const float value);
+
+void
 SegcoreInterminDenseIndexType(const char*);
 
 void
