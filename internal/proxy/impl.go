@@ -6777,10 +6777,6 @@ func nilRLSRequestStatus(method string) *commonpb.Status {
 	return merr.Status(merr.WrapErrParameterInvalidMsg("%s request is nil", method))
 }
 
-func validateRLSRequestTarget(dbName, collectionName string) error {
-	return rlsutil.ValidateRequestTarget(dbName, collectionName)
-}
-
 type rlsManagementRequest interface {
 	proto.Message
 	GetDbName() string
@@ -6809,12 +6805,18 @@ func (node *Proxy) resolveRLSRequestTarget(ctx context.Context, req rlsManagemen
 		dbName = req.GetDbName()
 	}
 	collectionName := collectionInfo.Schema.GetName()
-	permitted, err := isCurrentUserPermitted(ctx, node.GetMetaCache(), dbName, privilegeExt.ObjectType.String(), collectionName, privilegeExt.ObjectPrivilege.String())
+	authorizationDBName := dbName
+	authorizationCollectionName := collectionName
+	if !Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() {
+		authorizationDBName = GetCurDBNameFromRequestOrContext(ctx, req)
+		authorizationCollectionName = req.GetCollectionName()
+	}
+	permitted, err := isCurrentUserPermitted(ctx, node.GetMetaCache(), authorizationDBName, privilegeExt.ObjectType.String(), authorizationCollectionName, privilegeExt.ObjectPrivilege.String())
 	if err != nil {
 		return "", "", err
 	}
 	if !permitted {
-		return "", "", merr.WrapErrPrivilegeNotPermitted("%s is required on collection %s", privilegeExt.ObjectPrivilege.String(), collectionName)
+		return "", "", merr.WrapErrPrivilegeNotPermitted("%s is required on collection %s", privilegeExt.ObjectPrivilege.String(), authorizationCollectionName)
 	}
 	return dbName, collectionName, nil
 }
@@ -6845,7 +6847,7 @@ func (node *Proxy) CreateRowPolicy(ctx context.Context, req *milvuspb.CreateRowP
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := rlsutil.ValidatePolicyRoles(req.GetRoles()); err != nil {
@@ -6885,7 +6887,7 @@ func (node *Proxy) UpdateRowPolicy(ctx context.Context, req *milvuspb.UpdateRowP
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := rlsutil.ValidatePolicyRoles(req.GetRoles()); err != nil {
@@ -6925,7 +6927,7 @@ func (node *Proxy) DropRowPolicy(ctx context.Context, req *milvuspb.DropRowPolic
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := rlsutil.ValidatePolicyName(req.GetPolicyName()); err != nil {
@@ -6962,7 +6964,7 @@ func (node *Proxy) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPol
 			CollectionName: req.GetCollectionName(),
 		}, nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return &milvuspb.ListRowPoliciesResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -6998,16 +7000,13 @@ func (node *Proxy) SetRLSPrincipalTags(ctx context.Context, req *milvuspb.SetRLS
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return merr.Status(err), nil
 	}
 	// Proxy only enforces the fixed transport bound. RootCoord checks whether
 	// the principal already exists under the collection guard and applies the
 	// refreshable creation limit only to new principals.
 	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
-		return merr.Status(err), nil
-	}
-	if err := rlsutil.ValidatePrincipalTagsTransportSize(req.GetPrincipalName(), req.GetTags()); err != nil {
 		return merr.Status(err), nil
 	}
 	tags, err := rlsutil.TagsFromJSONWithLimit(req.GetTags(), paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt())
@@ -7049,7 +7048,7 @@ func (node *Proxy) GetRLSPrincipalTags(ctx context.Context, req *milvuspb.GetRLS
 			PrincipalName:  req.GetPrincipalName(),
 		}, nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return &milvuspb.GetRLSPrincipalTagsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -7097,7 +7096,7 @@ func (node *Proxy) ListRLSPrincipals(ctx context.Context, req *milvuspb.ListRLSP
 			CollectionName: req.GetCollectionName(),
 		}, nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return &milvuspb.ListRLSPrincipalsResponse{
 			Status: merr.Status(err),
 		}, nil
@@ -7133,7 +7132,7 @@ func (node *Proxy) DeleteRLSPrincipalTags(ctx context.Context, req *milvuspb.Del
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	if err := validateRLSRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
+	if err := rlsutil.ValidateRequestTarget(req.GetDbName(), req.GetCollectionName()); err != nil {
 		return merr.Status(err), nil
 	}
 	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {

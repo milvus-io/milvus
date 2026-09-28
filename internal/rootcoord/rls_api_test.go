@@ -121,7 +121,8 @@ func TestSetRLSPrincipalTagsRequestFromProto(t *testing.T) {
 	require.Equal(t, rlsutil.NewStringTagValue("acme"), req.GetTags()["tenant"])
 
 	_, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
-		Tags: `{"tenant":true}`,
+		PrincipalName: "alice",
+		Tags:          `{"tenant":true}`,
 	})
 	require.ErrorIs(t, err, merr.ErrParameterInvalid)
 
@@ -130,17 +131,20 @@ func TestSetRLSPrincipalTagsRequestFromProto(t *testing.T) {
 		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.Key))
 	})
 	_, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
-		Tags: `{"tenant":"acme","level":3}`,
+		PrincipalName: "alice",
+		Tags:          `{"tenant":"acme","level":3}`,
 	})
 	require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
 
-	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.Key, "1"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.Key, "1"))
 	t.Cleanup(func() {
-		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.Key))
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.Key))
 	})
 	_, err = setRLSPrincipalTagsRequestFromProto(&milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",
-		Tags:          `{"key":"` + strings.Repeat("x", rlsutil.MaxTransportIdentifierLength) + `"}`,
+		Tags:          `{"key":"` + strings.Repeat("x", rlsutil.MaxTransportIdentifierLength*2) + `"}`,
 	})
 	require.ErrorIs(t, err, merr.ErrParameterTooLarge)
 }

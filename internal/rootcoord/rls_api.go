@@ -82,7 +82,7 @@ func (c *Core) ListRowPolicies(ctx context.Context, req *milvuspb.ListRowPolicie
 		policies = append(policies, &milvuspb.RowPolicy{
 			PolicyName:  policy.PolicyName,
 			PolicyType:  milvuspb.RowPolicyType(policy.PolicyType),
-			Actions:     policyActionsToProto(policy.Actions),
+			Actions:     policyActionsToMilvusProto(policy.Actions),
 			UsingExpr:   policy.UsingExpr,
 			CheckExpr:   policy.CheckExpr,
 			Description: policy.Description,
@@ -111,7 +111,7 @@ func setRLSPrincipalTagsRequestFromProto(req *milvuspb.SetRLSPrincipalTagsReques
 	if req == nil {
 		return nil, nil
 	}
-	if err := rlsutil.ValidatePrincipalTagsTransportSize(req.GetPrincipalName(), req.GetTags()); err != nil {
+	if err := rlsutil.ValidatePrincipalName(req.GetPrincipalName()); err != nil {
 		return nil, err
 	}
 	tags, err := rlsutil.TagsFromJSONWithLimit(req.GetTags(), paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.GetAsInt())
@@ -206,7 +206,7 @@ func createRowPolicyRequestFromProto(req *milvuspb.CreateRowPolicyRequest) *rlsu
 		CollectionName: req.GetCollectionName(),
 		PolicyName:     req.GetPolicyName(),
 		PolicyType:     policyType,
-		Actions:        policyActionsFromProto(req.GetActions()),
+		Actions:        policyActionsFromMilvusProto(req.GetActions()),
 		UsingExpr:      req.GetUsingExpr(),
 		CheckExpr:      req.GetCheckExpr(),
 		Description:    req.GetDescription(),
@@ -222,25 +222,9 @@ func updateRowPolicyRequestFromProto(req *milvuspb.UpdateRowPolicyRequest) *rlsu
 		CollectionName: req.GetCollectionName(),
 		PolicyName:     req.GetPolicyName(),
 		PolicyType:     rlsutil.PolicyType(req.GetPolicyType()),
-		Actions:        policyActionsFromProto(req.GetActions()),
+		Actions:        policyActionsFromMilvusProto(req.GetActions()),
 		UsingExpr:      req.GetUsingExpr(),
 		CheckExpr:      req.GetCheckExpr(),
 		Description:    req.GetDescription(),
 	}
-}
-
-func policyActionsFromProto(actions []milvuspb.RowPolicyAction) []rlsutil.PolicyAction {
-	converted := make([]rlsutil.PolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = rlsutil.PolicyAction(action)
-	}
-	return converted
-}
-
-func policyActionsToProto(actions []rlsutil.PolicyAction) []milvuspb.RowPolicyAction {
-	converted := make([]milvuspb.RowPolicyAction, len(actions))
-	for i, action := range actions {
-		converted[i] = milvuspb.RowPolicyAction(action)
-	}
-	return converted
 }

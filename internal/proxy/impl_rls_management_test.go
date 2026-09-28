@@ -258,6 +258,63 @@ func TestProxyRLSAPIReauthorizesCanonicalTarget(t *testing.T) {
 	mixCoord.AssertNotCalled(t, "CreateRowPolicy", mock.Anything, mock.Anything)
 }
 
+func TestProxyRLSAPIReauthorizesAliasWhenResolutionDisabled(t *testing.T) {
+	const (
+		requestDBName       = "source_db"
+		canonicalDBName     = "target_db"
+		aliasName           = "rls_alias"
+		canonicalCollection = "collection"
+		roleName            = "rls_admin"
+		username            = "alice"
+	)
+	require.NoError(t, Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true"))
+	require.NoError(t, Params.Save(Params.ProxyCfg.ResolveAliasForPrivilege.Key, "false"))
+	privilege.ResetPrivilegeCacheForTest()
+	t.Cleanup(func() {
+		Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		Params.Reset(Params.ProxyCfg.ResolveAliasForPrivilege.Key)
+		privilege.ResetPrivilegeCacheForTest()
+	})
+
+	policyCoord := mocks.NewMockMixCoordClient(t)
+	policyCoord.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{
+		Status: merr.Success(),
+		PolicyInfos: []string{
+			funcutil.PolicyForPrivilege(roleName, commonpb.ObjectType_Collection.String(),
+				aliasName, commonpb.ObjectPrivilege_PrivilegeManageRLS.String(), requestDBName),
+		},
+		UserRoles: []string{funcutil.EncodeUserRoleCache(username, roleName)},
+	}, nil).Once()
+	require.NoError(t, privilege.InitPrivilegeCache(context.Background(), policyCoord))
+
+	cache := NewMockCache(t)
+	req := &milvuspb.CreateRowPolicyRequest{
+		CollectionName: aliasName,
+		PolicyName:     "policy",
+		Actions:        []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Query},
+		UsingExpr:      "true",
+	}
+	ctx, err := PrivilegeInterceptorWithMetaCache(func() Cache { return cache })(GetContextWithDB(context.Background(), username+":password", requestDBName), req)
+	require.NoError(t, err)
+
+	cache.EXPECT().GetCollectionID(mock.Anything, "", aliasName).Return(int64(2), nil).Once()
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "", "", int64(2)).Return(&collectionInfo{
+		CollID: int64(2),
+		DBName: canonicalDBName,
+		Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{Name: canonicalCollection}},
+	}, nil).Once()
+
+	mixCoord := mocks.NewMockMixCoordClient(t)
+	mixCoord.EXPECT().CreateRowPolicy(mock.Anything, mock.MatchedBy(func(req *milvuspb.CreateRowPolicyRequest) bool {
+		return req.GetDbName() == canonicalDBName && req.GetCollectionName() == canonicalCollection
+	})).Return(merr.Success(), nil).Once()
+	node := &Proxy{mixCoord: mixCoord, metaCache: cache}
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	status, err := node.CreateRowPolicy(ctx, req)
+	require.NoError(t, err)
+	require.True(t, merr.Ok(status))
+}
+
 func TestProxyRLSAPIStopsOnTargetResolutionError(t *testing.T) {
 	ctx := context.Background()
 	targetErr := merr.WrapErrAsInputError(merr.WrapErrCollectionNotFound("coll"))
@@ -346,13 +403,17 @@ func TestProxyRLSAPIsRejectInvalidPayloadBeforeForwarding(t *testing.T) {
 	require.NoError(t, err)
 	assertErrorStatus(t, status, merr.ErrServiceQuotaExceeded)
 
-	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.Key, "1"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.Key, "1"))
+	require.NoError(t, paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.Key, "1"))
 	t.Cleanup(func() {
-		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key))
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagsPerPrincipal.Key))
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.Key))
+		require.NoError(t, paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.Key))
 	})
 	status, err = node.SetRLSPrincipalTags(ctx, &milvuspb.SetRLSPrincipalTagsRequest{
 		PrincipalName: "alice",
-		Tags:          `{"key":"` + strings.Repeat("x", rlsutil.MaxTransportIdentifierLength) + `"}`,
+		Tags:          `{"key":"` + strings.Repeat("x", rlsutil.MaxTransportIdentifierLength*2) + `"}`,
 	})
 	require.NoError(t, err)
 	assertErrorStatus(t, status, merr.ErrParameterTooLarge)

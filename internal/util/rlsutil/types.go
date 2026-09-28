@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
 type TagValueKind int32
@@ -76,10 +77,15 @@ func TagsFromJSON(payload string) (map[string]TagValue, error) {
 	return tagsFromJSON(payload, 0)
 }
 
-// TagsFromJSONWithLimit decodes at most maxTags JSON object members. The
-// limit is checked while streaming so untrusted requests cannot materialize
-// an oversized tag map before validation.
+// TagsFromJSONWithLimit bounds the raw payload before decoding, then decodes
+// at most maxTags JSON object members so untrusted requests cannot materialize
+// unbounded tokens or oversized tag maps before validation.
 func TagsFromJSONWithLimit(payload string, maxTags int) (map[string]TagValue, error) {
+	if maxTags > 0 {
+		if err := validatePrincipalTagsJSONTransportSize(payload, maxTags); err != nil {
+			return nil, err
+		}
+	}
 	return tagsFromJSON(payload, maxTags)
 }
 
@@ -110,6 +116,12 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 		if maxTags > 0 && entryCount > maxTags {
 			return nil, merr.WrapErrServiceQuotaExceeded("unable to set RLS principal tags because the number of tags has reached the limit")
 		}
+		if maxTags > 0 {
+			maxTagKeyLength := paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt()
+			if len(key) > maxTagKeyLength {
+				return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag key exceeds max length %d", maxTagKeyLength)
+			}
+		}
 
 		value, err := decoder.Token()
 		if err != nil {
@@ -117,23 +129,30 @@ func tagsFromJSON(payload string, maxTags int) (map[string]TagValue, error) {
 		}
 		switch typed := value.(type) {
 		case string:
+			if maxTags > 0 {
+				maxTagValueLength := paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt()
+				if len(typed) > maxTagValueLength {
+					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag value exceeds max length %d", maxTagValueLength)
+				}
+			}
 			tags[key] = NewStringTagValue(typed)
 		case json.Number:
-			if strings.ContainsAny(typed.String(), ".eE") {
-				value, err := strconv.ParseFloat(typed.String(), 64)
+			number := typed.String()
+			if strings.ContainsAny(number, ".eE") {
+				value, err := strconv.ParseFloat(number, 64)
 				if err != nil {
 					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid double value", key)
 				}
 				tags[key] = NewDoubleTagValue(value)
 			} else {
-				value, err := strconv.ParseInt(typed.String(), 10, 64)
+				value, err := strconv.ParseInt(number, 10, 64)
 				if err == nil {
 					tags[key] = NewInt64TagValue(value)
 					continue
 				}
 				// encoding/json may serialize an integral double without a decimal
 				// point. Preserve values outside int64 as doubles on round trip.
-				doubleValue, doubleErr := strconv.ParseFloat(typed.String(), 64)
+				doubleValue, doubleErr := strconv.ParseFloat(number, 64)
 				if doubleErr != nil {
 					return nil, merr.WrapErrParameterInvalidMsg("RLS principal tag %q has an invalid numeric value", key)
 				}

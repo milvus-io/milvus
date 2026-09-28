@@ -57,11 +57,43 @@ func TestValidatePayloadBounds(t *testing.T) {
 	})
 
 	t.Run("raw principal tags transport bytes", func(t *testing.T) {
-		paramtable.Get().Save(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key, "1")
-		defer paramtable.Get().Reset(paramtable.Get().ProxyCfg.RLSMaxPrincipalCacheBytes.Key)
+		params := paramtable.Get().ProxyCfg
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagsPerPrincipal.Key, "1"))
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagKeyLength.Key, "1"))
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagValueLength.Key, "1"))
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxPrincipalCacheBytes.Key, "1"))
+		defer func() {
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxTagsPerPrincipal.Key))
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxTagKeyLength.Key))
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxTagValueLength.Key))
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxPrincipalCacheBytes.Key))
+		}()
 
-		require.NoError(t, ValidatePrincipalTagsTransportSize("a", strings.Repeat("x", MaxTransportIdentifierLength)))
-		require.ErrorIs(t, ValidatePrincipalTagsTransportSize("a", strings.Repeat("x", MaxTransportIdentifierLength+1)), merr.ErrParameterTooLarge)
+		maxPayloadBytes := maxPrincipalTagsJSONLength(1)
+		_, err := TagsFromJSONWithLimit(`{"k":"`+strings.Repeat("x", int(maxPayloadBytes))+`"}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		_, err = TagsFromJSONWithLimit(`{"k":`+strings.Repeat("1", int(maxPayloadBytes))+`}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		tags, err := TagsFromJSONWithLimit(`{"k":`+strings.Repeat("1", maxJSONNumberLength+1)+`}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, TagValueKindDouble, tags["k"].Kind)
+		_, err = TagsFromJSONWithLimit(`{"kk":"x"}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		_, err = TagsFromJSONWithLimit(`{"k":"xx"}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		storedTags, err := TagsFromJSON(`{"kk":"xx"}`)
+		require.NoError(t, err)
+		require.Equal(t, NewStringTagValue("xx"), storedTags["kk"])
+		_, err = TagsFromJSON(`{"k":` + strings.Repeat("1", maxJSONNumberLength+1) + `}`)
+		require.NoError(t, err)
+
+		tags, err = TagsFromJSONWithLimit(`{"k":-9223372036854775808}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, NewInt64TagValue(math.MinInt64), tags["k"])
+		tags, err = TagsFromJSONWithLimit(`{"k":-1.7976931348623157e+308}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, NewDoubleTagValue(-math.MaxFloat64), tags["k"])
 	})
 
 	t.Run("distinct tag key semantic count", func(t *testing.T) {
