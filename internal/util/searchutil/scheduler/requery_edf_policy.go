@@ -30,17 +30,23 @@ func newRequeryEDFPolicy() *requeryEDFPolicy {
 
 func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
 	cfg := &paramtable.Get().QueryNodeCfg
-	queue, capacity, key := p.regular.queue, cfg.MaxUnsolvedQueueSize.GetAsInt64(), cfg.MaxUnsolvedQueueSize.Key
-	requery := contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel
-	if requery {
-		queue, capacity, key = p.requery, p.requeryCapacity, cfg.RequeryUnsolvedQueueSize.Key
-	}
-	if capacity > 0 && int64(queue.len()) >= capacity {
-		return 0, merr.WrapErrTooManyRequests(int32(capacity), fmt.Sprintf("limit by %s", key))
-	}
-	if requery {
-		queue.push(task)
+	if contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel {
+		if p.requeryCapacity > 0 && int64(p.requery.len()) >= p.requeryCapacity {
+			return 0, merr.WrapErrTooManyRequests(
+				int32(p.requeryCapacity),
+				fmt.Sprintf("limit by %s", cfg.RequeryUnsolvedQueueSize.Key),
+			)
+		}
+		p.requery.push(task)
 		return 1, nil
+	}
+
+	regularCapacity := cfg.MaxUnsolvedQueueSize.GetAsInt64()
+	if regularCapacity > 0 && int64(p.regular.Len()) >= regularCapacity {
+		return 0, merr.WrapErrTooManyRequests(
+			int32(regularCapacity),
+			fmt.Sprintf("limit by %s", cfg.MaxUnsolvedQueueSize.Key),
+		)
 	}
 	return p.regular.Push(task)
 }
@@ -85,19 +91,19 @@ func (p *requeryEDFPolicy) popReady(now time.Time, cpuReady, gpuReady bool) *que
 }
 
 func edfRegularFirst(regular, requery *queuedTask) bool {
-	rd, qd := regular.schedulingDeadline, requery.schedulingDeadline
-	if rd.IsZero() && qd.IsZero() {
+	regularDeadline, requeryDeadline := regular.schedulingDeadline, requery.schedulingDeadline
+	if regularDeadline.IsZero() && requeryDeadline.IsZero() {
 		// Without deadlines, preserve arrival order across the two lanes.
-		return !regular.enqueueTime.After(requery.enqueueTime)
+		return regular.enqueueTime.Before(requery.enqueueTime) || regular.enqueueTime.Equal(requery.enqueueTime)
 	}
-	if rd.IsZero() {
+	if regularDeadline.IsZero() {
 		return false
 	}
-	if qd.IsZero() {
+	if requeryDeadline.IsZero() {
 		return true
 	}
 	// Equal finite deadlines favor completion of an existing search request.
-	return rd.Before(qd)
+	return regularDeadline.Before(requeryDeadline)
 }
 
 func (p *requeryEDFPolicy) Cleanup(now time.Time) []*queuedTask {
