@@ -88,17 +88,19 @@ func (c *importChecker) scheduleSnapshotPreparation(job ImportJob) {
 }
 
 func (c *importChecker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
-	metadata := &datapb.SnapshotMetadata{}
-	err := proto.Unmarshal(job.GetFiles()[0].GetSnapshotSource().GetSnapshotMetadata(), metadata)
+	// Recovered jobs must validate the reference before doing source I/O.
+	err := importutilv2.ValidateSnapshotImportPlan(job.GetFiles(), job.GetOptions(), nil)
 	var files []*internalpb.ImportFile
 	var options importutilv2.Options
 	var sources []*internalpb.SnapshotImportL0Source
-	if err != nil {
-		err = merr.Wrap(err, "invalid captured snapshot metadata")
-	} else {
+	if err == nil {
+		var metadata *datapb.SnapshotMetadata
+		metadata, err = readSnapshotImportMetadata(ctx, c.meta.chunkManager, job.GetOptions())
 		uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(importutilv2.SnapshotSourceURI, job.GetOptions())
-		files, options, sources, err = expandSnapshotImportFiles(ctx, job.GetPartitionIDs(), c.meta.chunkManager, job.GetSchema(),
-			uri, job.GetOptions(), metadata)
+		if err == nil {
+			files, options, sources, err = expandSnapshotImportFiles(ctx, job.GetPartitionIDs(), c.meta.chunkManager, job.GetSchema(),
+				uri, job.GetOptions(), metadata)
+		}
 	}
 	if ctx.Err() != nil {
 		return // Cancellation/leadership loss never publishes a partial plan.
@@ -147,7 +149,26 @@ func (c *importChecker) prepareSnapshotJob(ctx context.Context, job ImportJob) {
 	}
 }
 
-// prepareSnapshotImportFiles captures only the top-level metadata in the WAL.
+// readSnapshotImportMetadata reopens the exact reference validated by the
+// Pending job. Callers must keep the snapshot and all referenced objects
+// unchanged and readable through retries and imports in every cluster. Import
+// does not detect in-place replacement of otherwise valid source objects.
+func readSnapshotImportMetadata(ctx context.Context, cm milvusstorage.ChunkManager, options importutilv2.Options) (*datapb.SnapshotMetadata, error) {
+	uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(importutilv2.SnapshotSourceURI, options)
+	if !importutilv2.HasExternalSource(options) {
+		if err := storage.ValidateInstanceSnapshotImportURI(storage.InstanceConfigFromParamtable(paramtable.Get()), uri); err != nil {
+			return nil, err
+		}
+	}
+	cm, _, err := importutilv2.ResolveSnapshotImportStorage(ctx, cm, nil, uri, options)
+	if err != nil {
+		return nil, err
+	}
+	return storage.NewSnapshotReader(cm).ReadMetadata(ctx, uri)
+}
+
+// prepareSnapshotImportFiles records the top-level metadata URI and layout
+// in WAL body options; it never embeds the metadata itself.
 // Segment metadata and physical manifest I/O belong to Pending/PreImport, not the
 // user-facing create RPC. A version-9 descriptor is not executable by a worker.
 // broadcastImport validates the completed descriptor before broadcasting it.
@@ -213,29 +234,20 @@ func prepareSnapshotImportFiles(ctx context.Context, partitions []int64, cm milv
 	default:
 		return nil, nil, merr.WrapErrImportFailedMsg("unsupported snapshot layout: %s", snapshot.Layout.String())
 	}
-	// These artifacts are not used by Import. Do not amplify WAL/catalog size
-	// with index build metadata, nor retain unused source external credentials.
-	metadata.Indexes = nil
-	metadata.BuildIds = nil
-	payload, err := proto.Marshal(metadata)
-	if err != nil {
-		return nil, nil, merr.Wrap(err, "failed to encode snapshot preparation input")
-	}
 	options = append(append(importutilv2.Options(nil), options...),
 		&commonpb.KeyValuePair{Key: importutilv2.SnapshotSourceURI, Value: uri},
 		&commonpb.KeyValuePair{Key: importutilv2.SnapshotLayout, Value: layout})
 	files = []*internalpb.ImportFile{{SnapshotSource: &internalpb.SnapshotImportSource{
-		Version: importutilv2.SnapshotPreparationVersion, SnapshotMetadata: payload,
+		Version: importutilv2.SnapshotPreparationVersion,
 	}}}
 	return files, options, nil
 }
 
-// expandSnapshotImportFiles converts captured snapshot metadata
-// into one ImportFile per selected source segment in the Pending phase. The
-// captured metadata and immutable segment metadata pin the manifest versions;
-// neither preparation retries nor workers resolve latest. The complete plan
-// is persisted before task creation. Captured metadata is required; expansion
-// never reopens the top-level object. Only snapshot preparation jobs reach this
+// expandSnapshotImportFiles converts parsed snapshot metadata into one ImportFile
+// per selected source segment in the Pending phase. Callers must keep source
+// objects immutable; expansion uses their exact manifest versions, never latest.
+// The complete plan is persisted before task creation. Expansion never reopens
+// the top-level object. Only snapshot preparation jobs reach this
 // function; ordinary Import passthrough belongs to prepareSnapshotImportFiles.
 // Caller-owned options are never modified.
 func expandSnapshotImportFiles(
@@ -245,7 +257,7 @@ func expandSnapshotImportFiles(
 	targetSchema *schemapb.CollectionSchema,
 	metadataURI string,
 	options importutilv2.Options,
-	captured *datapb.SnapshotMetadata,
+	metadata *datapb.SnapshotMetadata,
 ) ([]*internalpb.ImportFile, importutilv2.Options, []*internalpb.SnapshotImportL0Source, error) {
 	if err := importutilv2.ValidateSnapshotSourceOptions(options); err != nil {
 		return nil, nil, nil, err
@@ -278,7 +290,7 @@ func expandSnapshotImportFiles(
 		return nil, nil, nil, err
 	}
 	reader := storage.NewSnapshotReader(cm)
-	snapshot, err := reader.ReadSnapshotFromMetadata(ctx, metadataPath, captured, true)
+	snapshot, err := reader.ReadSnapshotFromMetadata(ctx, metadataPath, metadata, true)
 	if err != nil {
 		return nil, nil, nil, merr.Wrap(err, "failed to read snapshot import source")
 	}

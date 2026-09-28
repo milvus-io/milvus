@@ -402,6 +402,9 @@ enum ImportJobState {
 
 // Immutable, coordinator-expanded input for typed snapshot jobs.
 message SnapshotImportSource {
+  // Version 9 is a coordinator-only Pending marker, never a worker file.
+  // The metadata URI and layout are stored in job options. Expansion
+  // atomically replaces this marker with executable segment descriptors.
   uint32 version = 1;
   string manifest_path = 2;
   uint64 source_commit_timestamp = 3;
@@ -416,10 +419,6 @@ message SnapshotImportSource {
   // Versions 5-8 use a task-shared L0 inventory instead of fields 4/5.
   string source_channel = 7;
   int64 source_partition_id = 8;
-  // Version 9 is a coordinator-only Pending input, never a worker file.
-  // Encoded data.SnapshotMetadata captured once before broadcast; bytes avoid
-  // a proto dependency cycle. Expansion atomically replaces this descriptor.
-  bytes snapshot_metadata = 9;
 }
 
 // Stored once per source scope in the job after Pending preparation.

@@ -23,7 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
@@ -59,28 +58,19 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 	return err
 }
 
-// Bind the two WAL arrays exactly once, before file IDs are allocated. All
-// subsequent grouping and persistence operate on the complete internal file.
-// createImportJobFromAck validates the resulting plan and persists any binding
-// or validation error as a terminal job instead of retrying the ACK forever.
-func bindSnapshotImportSources(msgFiles []*msgpb.ImportFile, sources []*internalpb.SnapshotImportSource) ([]*internalpb.ImportFile, error) {
+// Snapshot WAL bodies contain one empty file and coordinator-owned reference
+// options. Reconstruct only the Pending marker, without source I/O or a second
+// positional array. ACK validates the complete reference before persisting it.
+func importFilesFromMessage(msgFiles []*msgpb.ImportFile, options importutilv2.Options) []*internalpb.ImportFile {
 	files := lo.Map(msgFiles, func(file *msgpb.ImportFile, _ int) *internalpb.ImportFile {
-		// ID ranges arrive separately via ImportIDRange after preimport. Ignore
+		// ID ranges arrive separately via UpdateImport after preimport. Ignore
 		// the legacy range on ImportMsg, as required by secondary-first upgrades.
 		return &internalpb.ImportFile{Id: file.GetId(), Paths: file.GetPaths()}
 	})
-	if len(sources) != 0 {
-		if len(sources) != len(files) {
-			return files, merr.WrapErrServiceInternalMsg("snapshot WAL descriptor/file cardinality mismatch")
-		}
-		for i, source := range sources {
-			if source == nil {
-				return files, merr.WrapErrServiceInternalMsg("snapshot WAL contains a nil descriptor")
-			}
-			files[i].SnapshotSource = proto.Clone(source).(*internalpb.SnapshotImportSource)
-		}
+	if importutilv2.IsSnapshotSource(options) && len(files) == 1 && len(files[0].GetPaths()) == 0 {
+		files[0].SnapshotSource = &internalpb.SnapshotImportSource{Version: importutilv2.SnapshotPreparationVersion}
 	}
-	return files, nil
+	return files
 }
 
 // validateImportRequest validates the import request before broadcasting.
@@ -283,13 +273,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if err := importutilv2.ValidateSnapshotImportPlan(files, options, nil); err != nil {
 		return 0, false, err
 	}
-	header := &message.ImportMessageHeader{CommitByCoordinator: true}
-	for _, file := range files {
-		if source := file.GetSnapshotSource(); source != nil {
-			header.SnapshotSources = append(header.SnapshotSources, source)
-		}
-	}
-	// Snapshot preparation is frozen in the header. Empty legacy paths make
+	// Snapshot preparation is pinned by body options. Empty legacy paths make
 	// old coordinators reject it instead of treating metadata as row data.
 	msgFiles = lo.Map(files, func(file *internalpb.ImportFile, _ int) *msgpb.ImportFile {
 		return &msgpb.ImportFile{
@@ -325,7 +309,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
-		WithHeader(header).
+		WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
 		WithBody(&msgpb.ImportMsg{
 			Base: &commonpb.MsgBase{
 				MsgType:   commonpb.MsgType_Import,
@@ -350,7 +334,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 		WithIdempotencyKey(message.NewCollectionScopedIdempotencyKey(collectionID, idempotencyKey)).
 		WithBroadcast(vchannels).
 		MustBuildBroadcast()
-	if len(header.GetSnapshotSources()) != 0 {
+	if importutilv2.IsSnapshotSource(options) {
 		if err := validateSnapshotImportMessageSize(msg); err != nil {
 			return 0, false, err
 		}
@@ -381,8 +365,8 @@ func (s *Server) broadcastImport(ctx context.Context,
 }
 
 func validateSnapshotImportMessageSize(msg message.BroadcastMutableMessage) error {
-	// Count the serialized header properties (base64), not just proto.Size of
-	// the descriptors. The portable ceiling leaves headroom in the default
+	// Count the complete encoded reference message, including schema/options
+	// and header properties. The portable ceiling leaves headroom in the default
 	// catalog/RPC envelopes. Also respect smaller configured WAL limits, using
 	// the shared selector so mq.type=default is resolved exactly as at startup.
 	limit := 512 * 1024

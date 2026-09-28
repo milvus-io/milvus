@@ -147,15 +147,13 @@ func TestSnapshotPreparationDescriptor(t *testing.T) {
 		{Key: SnapshotSourceURI, Value: "s3://source/root/snapshots/1/metadata/2.json"},
 		{Key: SnapshotLayout, Value: "referenced"},
 	}
-	for _, mode := range []string{"valid", "missing_payload", "missing_uri", "missing_layout", "paths", "manifest", "timestamp", "partition", "channel", "source_partition", "inline_l0", "oversized", "worker_metadata", "pending_l0"} {
+	for _, mode := range []string{"valid", "missing_uri", "missing_layout", "paths", "manifest", "timestamp", "partition", "channel", "source_partition", "inline_l0", "pending_l0"} {
 		t.Run(mode, func(t *testing.T) {
-			source := &internalpb.SnapshotImportSource{Version: SnapshotPreparationVersion, SnapshotMetadata: []byte{1}}
+			source := &internalpb.SnapshotImportSource{Version: SnapshotPreparationVersion}
 			files := []*internalpb.ImportFile{{SnapshotSource: source}}
 			input := append(Options(nil), options...)
 			var l0 []*internalpb.SnapshotImportL0Source
 			switch mode {
-			case "missing_payload":
-				source.SnapshotMetadata = nil
 			case "missing_uri":
 				input = append(input[:2:2], input[3:]...)
 			case "missing_layout":
@@ -174,11 +172,6 @@ func TestSnapshotPreparationDescriptor(t *testing.T) {
 				source.SourcePartitionId = 1
 			case "inline_l0":
 				source.LegacyL0Deltalogs = []string{"delete"}
-			case "oversized":
-				source.SnapshotMetadata = make([]byte, SnapshotSourcePlanMaxBytes)
-			case "worker_metadata":
-				source.Version = 1
-				source.ManifestPath = packed.MarshalManifestPath("root/segment", 1)
 			case "pending_l0":
 				l0 = []*internalpb.SnapshotImportL0Source{{SourceChannel: "channel", SourcePartitionId: 1}}
 			}

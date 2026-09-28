@@ -35,10 +35,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
 
-// SnapshotSourcePlanMaxBytes bounds the replicated source inventory.
-// Leave room for schema, options, IDs and encoding overhead in the WAL and
-// catalog envelopes. This is not a claim about a backend's configured limit;
-// the producer checks the complete encoded message separately.
+// SnapshotSourcePlanMaxBytes bounds the expanded source inventory in the
+// catalog, leaving room for schema, options, IDs and encoding overhead.
+// The producer separately checks the encoded WAL reference message.
 const SnapshotSourcePlanMaxBytes = 256 * 1024
 
 // SnapshotPreparationVersion is a Pending-only descriptor. It cannot be sent
@@ -114,15 +113,12 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		source := files[0].GetSnapshotSource()
 		uri, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotSourceURI, options)
 		layout, _ := funcutil.GetAttrByKeyFromRepeatedKV(SnapshotLayout, options)
-		if len(source.GetSnapshotMetadata()) == 0 || uri == "" || layout == "" ||
+		if uri == "" || layout == "" ||
 			len(files[0].GetPaths()) != 0 || source.GetManifestPath() != "" ||
 			source.GetSourceCommitTimestamp() != 0 || source.GetTargetPartitionId() != 0 ||
 			source.GetSourceChannel() != "" || source.GetSourcePartitionId() != 0 ||
 			len(source.GetLegacyL0Deltalogs())+len(source.GetManifestL0Deltalogs()) != 0 {
 			return merr.WrapErrServiceInternalMsg("invalid snapshot preparation descriptor")
-		}
-		if proto.Size(files[0]) > SnapshotSourcePlanMaxBytes {
-			return merr.WrapErrImportFailedMsg("snapshot preparation input exceeds 256 KiB")
 		}
 		return nil
 	}
@@ -134,9 +130,6 @@ func ValidateSnapshotImportFiles(files []*internalpb.ImportFile, options Options
 		source := file.GetSnapshotSource()
 		if source != nil && (source.GetVersion() < 1 || source.GetVersion() > 8) {
 			return merr.Wrapf(merr.ErrServiceUnimplemented, "unsupported snapshot import source version %d", source.GetVersion())
-		}
-		if len(source.GetSnapshotMetadata()) != 0 {
-			return merr.WrapErrServiceInternalMsg("expanded snapshot source still contains preparation metadata")
 		}
 		// Development versions persisted L0 paths in every segment descriptor.
 		// Do not migrate or replay those tasks: all L0 must now be task-shared.

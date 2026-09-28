@@ -206,7 +206,7 @@ func newReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 					ctx, cm, schema, storageConfig, source.GetManifestPath(), tsStart, tsEnd, bufferSize, encryption, source, snapshotDeleteBudget, validate,
 				)
 			}
-			// DataCoord broadcasts captured metadata, then expands and persists
+			// DataCoord broadcasts a metadata URI, then expands and persists
 			// exact StorageV3 manifests during Pending preparation before dispatch.
 			// Do not consult storage_version: snapshot metadata is the source of
 			// truth and ValidateSnapshotSourceOptions rejects that ambiguity.

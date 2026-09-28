@@ -40,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	mocks2 "github.com/milvus-io/milvus/internal/mocks"
-	mock_streaming "github.com/milvus-io/milvus/internal/mocks/distributed/mock_streaming"
 	snapshotstorage "github.com/milvus-io/milvus/internal/snapshotio/storage"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/storagev2/packed"
@@ -56,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -153,18 +153,16 @@ func TestBroadcastSnapshotImportMappedPartitions(t *testing.T) {
 	transport := mockey.Mock((*mockBroadcastAPIImpl).Broadcast).To(func(_ *mockBroadcastAPIImpl, _ context.Context, msg message.BroadcastMutableMessage) (*types.BroadcastAppendResult, error) {
 		called = true
 		decoded := message.MustAsBroadcastImportMessageV1(msg)
+		require.True(t, decoded.Header().GetCommitByCoordinator())
 		require.Equal(t, []int64{200, 100}, decoded.MustBody().GetPartitionIDs())
 		var options importutilv2.Options
 		for key, value := range decoded.MustBody().GetOptions() {
 			options = append(options, &commonpb.KeyValuePair{Key: key, Value: value})
 		}
-		files, err := bindSnapshotImportSources(decoded.MustBody().GetFiles(), decoded.Header().GetSnapshotSources())
-		require.NoError(t, err)
+		files := importFilesFromMessage(decoded.MustBody().GetFiles(), options)
 		require.NoError(t, importutilv2.ValidateSnapshotImportPlan(files, options, nil))
 		require.True(t, importutilv2.IsSnapshotPreparation(files))
-		captured := &datapb.SnapshotMetadata{}
-		require.NoError(t, proto.Unmarshal(files[0].SnapshotSource.SnapshotMetadata, captured))
-		require.Equal(t, snapshot.Collection.Partitions, captured.Collection.Partitions)
+		require.Equal(t, "s3://source/root/snapshots/1/metadata/2.json", decoded.MustBody().Options[importutilv2.SnapshotSourceURI])
 		return &types.BroadcastAppendResult{}, nil
 	}).Build()
 	defer transport.UnPatch()

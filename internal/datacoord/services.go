@@ -2137,10 +2137,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 
 	body := result.Message.MustBody()
 	options := funcutil.Map2KeyValuePair(body.GetOptions())
-	// Keep binding and validation together: only the WAL header can reveal a
-	// descriptor/file mismatch. Preserve that cause and persist a Failed job
-	// below; returning it would retry the same malformed durable ACK forever.
-	files, sourceErr := bindSnapshotImportSources(body.GetFiles(), result.Message.Header().GetSnapshotSources())
+	files := importFilesFromMessage(body.GetFiles(), options)
 	if body.Schema != nil {
 		body.Schema.DbName = body.DbName
 	}
@@ -2153,14 +2150,14 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 		}
 	}
 
-	mlog.Info(ctx, "creating import job from ack callback",
-		mlog.Int("fileNum", len(files)),
-		mlog.Any("files", files),
-		mlog.Any("options", importutilv2.RedactOptions(options)))
+	mlog.Info(ctx, "creating import job from ack callback", append(importFilesLogFields(files),
+		mlog.FieldJobID(body.GetJobID()),
+		mlog.FieldCollectionID(body.GetCollectionID()),
+		mlog.Any("options", importutilv2.RedactOptions(options)))...)
 
-	if sourceErr == nil {
-		sourceErr = importutilv2.ValidateSnapshotImportPlan(files, options, nil)
-	}
+	// Persist malformed durable input as a Failed job rather than retrying the
+	// same ACK forever. This validation is pure: source reads belong to Pending.
+	sourceErr := importutilv2.ValidateSnapshotImportPlan(files, options, nil)
 	timeoutTs, err := importutilv2.GetTimeoutTs(options)
 	if err != nil {
 		if sourceErr == nil && !importutilv2.IsSnapshotSource(options) {
@@ -2261,13 +2258,28 @@ func (s *Server) createImportJobFromAck(ctx context.Context, result message.Broa
 	}
 
 	resp.JobID = fmt.Sprint(job.GetJobID())
-	mlog.Info(context.TODO(), "add import job done",
-		mlog.Int64("jobID", job.GetJobID()),
-		mlog.Int("fileNum", len(files)),
-		mlog.Any("files", files),
+	mlog.Info(ctx, "add import job done", append(importFilesLogFields(files),
+		mlog.FieldJobID(job.GetJobID()),
+		mlog.FieldCollectionID(job.GetCollectionID()),
 		mlog.Strings("readyChannels", vchannels),
-	)
+	)...)
 	return resp, nil
+}
+
+func importFilesLogFields(files []*internalpb.ImportFile) []mlog.Field {
+	fields := []mlog.Field{mlog.Int("fileNum", len(files))}
+	var versions []uint32
+	for _, file := range files {
+		if source := file.GetSnapshotSource(); source != nil {
+			versions = append(versions, source.GetVersion())
+		}
+	}
+	if len(versions) != 0 {
+		// ACK logs run before source validation. Keep snapshot diagnostics
+		// bounded rather than serializing source descriptors.
+		return append(fields, mlog.Uint32s("snapshotSourceVersions", versions))
+	}
+	return append(fields, mlog.Any("files", files))
 }
 
 func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImportProgressRequest) (*internalpb.GetImportProgressResponse, error) {

@@ -1,7 +1,7 @@
 # MEP: Snapshot-Sourced StorageV3 Backup Import
 
 - **Created:** 2026-09-02
-- **Updated:** 2026-09-22
+- **Updated:** 2026-09-28
 - **Status:** Proposed
 - **Feature DRI:** @weiliu1031
 - **Primary Approver:** TBD
@@ -14,7 +14,9 @@
 
 The implementation follows backup Import's physical FieldID semantics and
 existing target routing/default-filling rules (sections 10 and 11), not
-name-based field mapping. Create captures root metadata; bounded Pending
+name-based field mapping. Create records the root metadata URI and layout,
+without embedding metadata in WAL. Callers must keep source objects unchanged
+and readable throughout import. Bounded Pending
 preparation atomically publishes a complete plan, and DataNode performs the
 physical data/L0/LOB checks.
 
@@ -104,7 +106,7 @@ returns records or whether those records survive the requested timestamp range.
 | Snapshot with invalid applicable L0 input | Explicit failure, never fallback to the baseline path |
 
 Every newly admitted snapshot job first persists a coordinator-only version-9
-descriptor containing the captured top-level metadata. It has no runnable
+marker with the metadata URI and layout in internal options. It has no runnable
 files. Pending preparation atomically replaces it with the following expanded
 representation before either worker phase is scheduled. Existing expanded jobs
 do not repeat preparation.
@@ -321,9 +323,9 @@ rule only applies to new snapshot Import requests: shared snapshot readers,
 bare object references inside snapshots and already-expanded persisted tasks
 keep their existing representation. Callers that used bare metadata keys must
 switch to complete URIs, such as the location returned by DescribeSnapshot.
-The coordinator-owned `_snapshot_source_uri` option is rejected in public
-requests; after validation DataCoord persists the original URI in that option
-alongside the expanded immutable source inventory.
+The coordinator-owned `_snapshot_source_uri` and
+`_snapshot_layout` options are rejected in public requests; after validation
+DataCoord persists the original URI and layout with the job.
 
 DataCoord resolves metadata, manifests and L0 using a source-only chunk manager
 and storage config. Each PreImport or Import task execution lazily resolves the
@@ -368,14 +370,14 @@ under the collection broadcast lock: drop/recreate races fail retriably, never
 redirecting prepared files to a replacement partition. Source partition/channel
 IDs remain unchanged throughout L0 matching, including collection-wide deletes.
 
-The WAL/ACK carries captured source partitions, mapping options and the ordered
+The WAL/ACK carries the metadata URI, mapping options and the ordered
 target partition IDs. Pending preparation binds each file's destination in
 `SnapshotImportSource.target_partition_id`, persisted with catalog files and
 file statistics. Section 1.1
 defines the mapped descriptor versions and required fields. Older consumers
 reject the newer version instead of ignoring routing. Lost mapping options,
 destination IDs or external storage context fail closed. CDC transport preserves
-the descriptor along with the existing replicated target partition IDs; no new
+the reference along with the existing replicated target partition IDs; no new
 name lookup occurs on replay.
 
 Both task constructors split file groups by destination without increasing their
@@ -387,7 +389,7 @@ partition row-routing path. All tasks stay in one Import job and retain its
 auto/manual commit, abort and retry behavior; no per-partition child jobs are added.
 
 Tests cover parsing/admission, both snapshot layouts, L0 source scope, external
-source descriptors, WAL/CDC descriptor preservation, catalog round trips, both
+source descriptors, WAL/CDC reference preservation, catalog round trips, both
 task constructors, destination segment allocation and worker mismatch rejection.
 The Go SDK E2E `TestImportStorageV3SnapshotSourcePartitionMapping` imports three
 source partitions into three permuted targets in one manually committed job and
@@ -454,13 +456,14 @@ Proxy Import validation
   - resolve default/name, partition mapping, or partition-key destinations
           |
           v
-DataCoord Create: capture top-level metadata only
+DataCoord Create: read top-level metadata once
   - validate URI, layout, schema, encryption and partition mapping
-  - WAL -> ACK -> persist version-9 Pending descriptor
+  - WAL body options = URI + layout (no metadata payload)
+  - ACK persists version-9 Pending marker without source I/O
           |
           v
 DataCoord bounded background Pending preparation
-  - read segment metadata from captured references, never reread the root object
+  - reread and validate root metadata, then read its segment references
   - validate layout, paths, schema presence, source encryption, and segment types
   - select StorageV3 L1/L2 data segments
   - match captured L0 inputs by source channel and partition scope
@@ -552,19 +555,21 @@ public source kind:
 5. Validate schema presence, source/target collection eligibility, and source
    encryption. Do not compare source and target schemas for equality; worker
    readers validate physical columns as described in section 11.
-6. Validate complete mapping coverage when requested. Capture the original
-   top-level metadata (excluding unused index/build metadata), source URI and
-   layout in a coordinator-only version-9 descriptor and internal options.
+6. Validate complete mapping coverage when requested.
+   Store the source URI and layout in coordinator-owned body options.
    Recheck target name/ID bindings under the broadcast lock. Broadcast one
-   empty-path body file paired with this descriptor; ACK persists the Pending
-   job. The captured metadata is immutable input, not a request to reread the
-   root object later. Source segment metadata must remain immutable/available under
-   the existing snapshot storage contract.
+   empty-path body file; ACK reconstructs a version-9 Pending marker, validates
+   the reference without source I/O and persists the job. No metadata payload
+   or parallel header descriptor array is used.
 7. The Pending checker starts bounded background preparation (at most four
    concurrent jobs, one attempt per job). The global checker loop performs no
-   source I/O and continues scheduling ordinary jobs. Read segment metadata using
+   source I/O and continues scheduling ordinary jobs. Reopen the root object
+   through the same source-storage contract and pass the parsed object to
    `ReadSnapshotFromMetadata(..., true)` and collect data segments from every
-   source partition in the captured snapshot.
+   source partition. A missing, unreadable or invalid root object fails the
+   job explicitly. In-place source modification is unsupported and is not
+   detected when the replacement remains valid. Use the exact manifest versions
+   recorded in the snapshot, never resolve latest.
 8. Exclude L0 from the data-file list. Reject any data segments
    whose storage version is not StorageV3 or whose manifests are missing or
    non-exact.
@@ -604,8 +609,9 @@ public source kind:
     fail the job; allocator/catalog failures retain the preparation input and
     retry. Cancellation, job timeout, terminal state and checker shutdown stop
     preparation; a late result cannot revive a failed job. Recovery restarts an
-    unfinished preparation from captured input or reuses an already published
-    plan. There is no partially expanded plan and no second WAL broadcast.
+    unfinished preparation by rereading and validating the recorded reference,
+    or reuses an already published plan. There is no partially expanded plan
+    and no second WAL broadcast.
 
 Determine applicability before skipping valid empty markers or filtering
 delete timestamps. A missing identity needed to decide scope, a failed L0
@@ -652,7 +658,6 @@ message SnapshotImportSource {
   int64 target_partition_id = 6; // Required for versions 3/4/7/8.
   string source_channel = 7; // Required for versions 5-8.
   int64 source_partition_id = 8;
-  bytes snapshot_metadata = 9; // Version 9 only; never sent to DataNode.
 }
 
 message SnapshotImportL0Source {
@@ -662,8 +667,8 @@ message SnapshotImportL0Source {
   repeated string manifest_l0_paths = 4; // Exact versioned L0 manifests.
 }
 
-// Added to internal.ImportFile; existing fields 1-3 remain unchanged.
-SnapshotImportSource snapshot_source = 4;
+// Added to internal.ImportFile, alongside the existing ID-range fields.
+SnapshotImportSource snapshot_source = 5;
 ```
 
 Only validated legacy delete paths and exact V3 L0 manifests enter the shared
@@ -686,42 +691,59 @@ decoding behavior, while manifest inventories use the packed V2 decoder.
 Segment-local manifest deletes also use this helper via `readDeleteV3`.
 No new file-format detector is introduced.
 
-The WAL Import body uses external `msgpb.ImportFile`, not internal
-`ImportFile`. Adding the internal field alone would lose it before job
-persistence. To avoid a public `milvus-proto` dependency change, add
-`repeated internal.SnapshotImportSource snapshot_sources = 1` to the existing
-`messagespb.ImportMessageHeader`. L0 inventories are not carried by the WAL
-header or ACK request: Pending preparation derives them from the captured
-metadata and atomically persists them in `datapb.ImportJob.snapshot_l0_sources`,
+The WAL Import body uses existing `msgpb.ImportMsg.options` to carry
+`_snapshot_source_uri` and `_snapshot_layout`. Public callers cannot supply
+these reserved options.
+`ImportMessageHeader` retains the standard `commit_by_coordinator` flag but
+carries no snapshot metadata; no public `milvus-proto` dependency change is
+required. L0 inventories are not carried by the WAL or ACK request: Pending
+preparation derives them from validated metadata and atomically persists
+them in `datapb.ImportJob.snapshot_l0_sources`,
 one inventory per source scope. Explicit empty entries cover data scopes
 without partition-local deletes. A missing
-entry is an error, not permission to ignore L0. `messages.proto` already
-imports `internal.proto`.
+entry is an error, not permission to ignore L0.
 
-For a newly created snapshot job, the producer places one version-9 descriptor
-in the header paired with one empty-path body file. The full metadata payload
-is protobuf-encoded `SnapshotMetadata`; bytes avoid a proto dependency cycle.
-Workers explicitly reject version 9. Existing versions 1-8 and expanded baseline
-jobs remain executable, but cannot contain preparation bytes. File IDs are
-allocated by the ACK callback, so pairing uses the original array index at this
-boundary only; preparation allocates new IDs for the expanded files. The callback validates cardinality, source kind, descriptor
-version, and absence of legacy paths, then copies each descriptor into the
-same internal file whose ID it allocates. All subsequent persistence,
+For a newly created snapshot job, ACK recognizes the single empty-path body
+file and reconstructs only the coordinator version-9 marker. It validates the
+URI/layout before persisting Pending; malformed durable references are
+persisted as Failed instead of retrying ACK forever. File IDs are allocated by
+ACK, then preparation allocates new IDs for expanded files. Workers explicitly
+reject version 9. Existing expanded versions 1-8 and baseline jobs remain
+executable. All subsequent persistence,
 PreImport statistics, regrouping, Import tasks, and retries carry that internal
-file together with the job inventory; they must never reconstruct files from paths alone or rejoin parallel
-arrays. Broadcast and CDC must preserve header/body ordering until this binding.
+file together with the job inventory; they must never reconstruct files from
+paths alone. There is no positional pairing of header and body arrays.
+
+The caller must retain the unchanged root metadata, segment metadata and data
+objects until preparation/retries and imports in all participating clusters
+finish. A reference is not a durable copy: replay on a cluster that has not
+prepared its plan still needs the source. After local plan publication, that
+job does not reopen the root metadata. In-place replacement or modification of
+source objects is unsupported; Import does not compare content across reads or
+clusters. Format, schema, path, manifest and delete validation remain in place,
+but a valid replacement may go undetected. The importer does not create a source
+copy, acquire a retention lease or manage source GC.
+`external_spec` does not guarantee either cluster's permissions. For replicated
+manual imports, the orchestrator must verify readiness in every cluster before
+issuing CommitImport; source read failure must not be treated as readiness.
+CommitImport checks job readiness, not whether clusters read identical inputs,
+so it does not replace the caller's source-immutability obligation.
+
+Development-version WAL/Pending jobs that embedded metadata are not a
+compatibility target; resubmit those imports when upgrading. Fields
+introduced and removed only in this unmerged PR are removed without `reserved`.
 
 For an expanded baseline job under section 1.1, each file retains its exact
-manifest in `paths[0]`. Existing baseline WAL records and persisted jobs keep
-their existing conversion/execution. New jobs select this representation only
+manifest in `paths[0]`. Existing expanded baseline jobs keep their execution.
+New jobs select this representation only
 after preparation. Descriptor presence in runnable files follows the complete
 activation rule, not L0 presence alone.
 
-Empty legacy `paths` are intentional. If an older consumer drops the new
-header or protobuf field, the baseline snapshot reader rejects the resulting
+Empty legacy `paths` are intentional. If an older consumer ignores the internal
+reference options or protobuf field, the baseline snapshot reader rejects the resulting
 zero-path file. Leaving a usable manifest in `paths[0]` would instead allow an
 old DataNode to ignore L0 inputs and successfully import deleted rows. Keep
-body-file cardinality nonzero so loss of the header cannot become an empty,
+body-file cardinality nonzero so loss of the source context cannot become an empty,
 successful job. Compatibility tests must exercise both old ACK and old worker
 behavior, not just unknown-field round trips.
 
@@ -925,8 +947,8 @@ accounting may include the exact delete objects read by each file, but must not
 claim this repeated-read count is the snapshot's unique physical size.
 
 Keep the existing data-file count limit and account descriptor growth
-incrementally while building an L0 source plan. Bound both captured metadata
-and the asynchronously expanded plan, so excessive expansion is rejected
+incrementally while building an L0 source plan. Bound the asynchronously
+expanded plan, so excessive expansion is rejected
 before publishing it. Validate the final encoded
 WAL message, including header/properties and encoding overhead, before calling
 Broadcast, not after durable broadcast-task creation. Use the active backend's
@@ -934,8 +956,7 @@ message-size admission where available; a portable explicit snapshot-plan
 limit is required otherwise. Catalog persistence and task RPC envelopes also
 need to fit within their supported limits.
 
-The implementation caps both the captured preparation descriptor and the
-expanded source inventory at **256 KiB**, with
+The implementation caps the expanded source inventory at **256 KiB**, with
 incremental accounting for descriptors and scope-level references, and a final
 protobuf-size check. It does not charge the same L0 list once per segment.
 Task RPCs carry one merged list regardless of their file count; different
@@ -955,8 +976,12 @@ first-version admission bounds, not advertised maximum sizes of the backends.
 Do not use `pulsar.maxMessageSize` as a universal limit or silently split the
 plan into independently visible Import jobs.
 
-Oversized captured metadata fails before broadcast; oversized expanded plans
-fail during Pending preparation. Deferred inventory/delete-map exhaustion fails
+Top-level metadata content does not contribute to the WAL message size; only
+its URI and the import options are carried. Oversized encoded reference messages
+fail before broadcast; oversized expanded plans fail during Pending preparation.
+The root object is still read in full for parsing; this is not a
+streaming-metadata or bounded-metadata-memory implementation.
+Deferred inventory/delete-map exhaustion fails
 the affected task/job without accepting a partial map. Neither limit is a reason to omit
 L0, downgrade to the baseline reader, or inflate output quota statistics. The
 numeric bounds leave headroom under the default catalog and task RPC limits,
@@ -1219,7 +1244,7 @@ configuration.
 7. Existing manual commit and abort behavior remains unchanged.
 8. A source error does not create or mutate collection, partition, or index
    definitions.
-9. WAL replay and CDC transport preserve captured preparation input and source
+9. WAL replay and CDC transport preserve the metadata URI and source
    storage context. After expansion, file regrouping and task retries preserve
    the descriptors and inventories, including explicit empty scopes. No
    consumer may interpret a missing field as permission to omit L0.
@@ -1316,7 +1341,7 @@ not claimed as verified by this design or its planned plaintext L0 tests.
   separate feature with its existing enablement rules.
 - No public protobuf field or enum is added.
 - Previously persisted development-version tasks containing per-segment inline
-  L0 paths are rejected during WAL binding/plan validation and by both worker
+  L0 paths are rejected during persisted-plan validation and by both worker
   phases before storage IO. Recreate the Import job from a supported snapshot;
   recovery does not migrate those tasks. Versions 1-4 remain supported when
   inline L0 fields are empty, including commit-time, external-storage and
@@ -1324,8 +1349,10 @@ not claimed as verified by this design or its planned plaintext L0 tests.
   still supports V1/V2 delete files: physical log format is independent of
   snapshot timestamp completeness and task protocol compatibility.
 - `source_type=snapshot` is opt-in.
-- Internal protobuf additions are append-only: `ImportFile.snapshot_source`,
-  the Import WAL header descriptors, and `SnapshotImportSource.target_partition_id`.
+- Internal worker protocol additions include `ImportFile.snapshot_source`
+  and `SnapshotImportSource.target_partition_id`; the WAL header carries only
+  the standard coordinator commit flag, not snapshot metadata.
+  Unshipped metadata-payload fields from earlier revisions of this PR are removed.
   Regenerate Go protobufs with `make generated-proto-without-cpp`; do not edit
   generated files manually.
 - Upgrade DataCoord, DataNode, and participating CDC consumers before submitting
@@ -1365,7 +1392,7 @@ writer from selecting its configured output format.
 
 Rejected for the first version. The existing file carrier and key-value
 options can express one metadata source without a public wire change. Internal
-WAL/task descriptors are still required to preserve captured and expanded inputs. A
+WAL references and task descriptors are still required to preserve source URIs and expanded plans. A
 typed public source union should be considered only when additional source
 kinds require stable SDK-level contracts.
 
@@ -1458,16 +1485,17 @@ dependencies with mockey:
   them through both layouts and export. Re-exporting an old snapshot must not
   fabricate omitted values. Import uses the captured values, including the
   known missing-commitTs limitation.
-- Serialize Import header/body, attach descriptors in ACK order, assign file
-  IDs, persist/reload, regroup files, and construct both task types. Test
-  mismatched cardinality, unknown versions, and both old ACK and old DataNode
+- Serialize the Import body reference, reconstruct its Pending marker, assign
+  file IDs, persist/reload, regroup files, and construct both task types. Test
+  malformed references, unknown versions, and both old ACK and old DataNode
   consumers dropping the new fields. Lost context must never succeed.
 - Regroup an activated job so one task contains only files with empty L0
   lists. It must retain descriptors, source effective timestamps, and new-path
   admission. Test the same behavior with valid empty markers or all delete
   timestamps outside the requested range; none authorizes a baseline fallback.
-- Verify CDC message handling preserves descriptors and source timestamps
-  while remapping target routing. A protobuf round trip alone is insufficient.
+- Verify CDC message handling preserves URI/options while remapping
+  target routing. Expanded plans preserve source timestamps. A protobuf round
+  trip alone is insufficient.
 - Cover the timestamp table in section 12.1 for Int64 and VarChar PKs, multiple
   deletes per PK, segment/L0 overlap, and time-range boundaries. Verify range
   filtering occurs before taking the maximum delete timestamp.
@@ -1500,17 +1528,20 @@ dependencies with mockey:
   rows, including zero-row auto/manual commit and abort. Delete-map accounting
   must not inflate output disk quota or row size.
 - Verify Create performs one metadata read and no segment/physical object I/O
-  with 400 and 1024 segments in both layouts. Preserve captured bytes through
-  actual WAL/CDC message transformation; reject Pending descriptors in workers.
-- Remove the root metadata object after capture and prepare from persisted
-  input. Cover catalog-save and allocation failures, retries, superseded plans,
+  with 400 and 1024 segments in both layouts. Preserve the source URI/options through
+  actual WAL/CDC message transformation, without embedding metadata; reject
+  Pending descriptors in workers.
+- Delete or corrupt the root metadata after Create: Pending must fail
+  before publishing any files. Missing reference options must fail before source
+  I/O. Unchanged sources survive recovery and preparation
+  retries. Cover catalog-save and allocation failures, superseded plans,
   cancellation/timeout, terminal-state races and shutdown. Four blocked source
   reads must not stop ordinary Import scheduling or start duplicate attempts.
 - Count exact V3 L0 manifest resolution once per task, including URI/key aliases.
   Reject outside-root/foreign-bucket paths, missing LOBs, corrupt manifests and
   deferred inventory exhaustion before returning a usable reader/delete map.
-- Exercise oversized capture/expanded plans against the selected admission
-  bounds. Capture and encoded-message bounds reject before Broadcast; expanded
+- Exercise large metadata, oversized encoded references and expanded plans.
+  Large metadata alone must not inflate WAL; encoded-message bounds reject before Broadcast; expanded
   inventory bounds reject before task creation. Catalog and task RPC envelopes
   also need backend validation; no partial plan is valid.
 
@@ -1627,7 +1658,7 @@ cross-database CMEK support.
 - The delete map exceeds its budget or cancellation arrives while admission
   is waiting for memory.
 - A restart/replay/regroup loses or attaches the wrong source descriptor.
-- An old consumer drops the header or the internal file extension.
+- An old consumer ignores reference options or the internal file extension.
 - An activated job's regrouped task has no local L0 references and incorrectly
   attempts to switch to baseline execution.
 
@@ -1647,7 +1678,8 @@ Before claiming the narrowed extension is ready:
    the accepted missing-commitTs limitation. Missing/corrupt delete input never
    becomes an empty delete set.
 3. WAL/ACK, persistence, regrouping, restart/retry, and CDC preserve the same
-   complete source input. Unknown or lost descriptors fail closed.
+   recorded source reference and complete expanded plan. Unknown or lost source
+   context fails closed; source retention/availability remains required.
 4. Delete-map and source-plan limits are explicit, cancelable where waiting is
    involved, and validated against actual transport/storage limits. Repeated
    I/O remains an acknowledged bounded cost, not a claimed optimization.
@@ -1666,8 +1698,8 @@ gate. The public Import request reuses its existing options and file fields.
    independently testable producer fix. Snapshot/export/restore regression
    requirements remain; restore-L0 is not enabled and persisted baseline
    Import jobs are not migrated.
-2. Internal source descriptors and the WAL header carrier preserve the typed
-   contracts in section 1.1. Version 9 captures preparation input at Create;
+2. Internal source descriptors and WAL body reference options preserve the typed
+   contracts in section 1.1. Version 9 marks URI-referenced Pending input;
    versions 1-8 and baseline files describe the expanded worker plan.
 3. DataCoord expansion fixes the job-wide execution contract, validates scoped
    inputs, preserves captured timestamps, and bounds the plan before task creation. Explicit

@@ -2474,7 +2474,7 @@ func TestGenSnapshot_IncludesV3ManifestOnlySegment(t *testing.T) {
 
 func TestGenSnapshotDependencyErrors(t *testing.T) {
 	type snapshotBroker struct{ broker.Broker }
-	for _, stage := range []string{"describe", "partitions", "seek", "empty_channel", "decompress", "compact_delta", "success"} {
+	for _, stage := range []string{"describe", "partitions", "empty_positions", "empty_channel", "decompress", "compact_delta", "success"} {
 		t.Run(stage, func(t *testing.T) {
 			wantErr := merr.ErrServiceNotReady
 			errFor := func(name string) error {
@@ -2496,8 +2496,10 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 			if stage == "empty_channel" {
 				position.ChannelName = ""
 			}
-			seek := mockey.Mock((*ServerHandler).GetSnapshotSeekPositions).Return([]*msgpb.MsgPosition{position}, uint64(100), errFor("seek")).Build()
-			defer seek.UnPatch()
+			positions := []*msgpb.MsgPosition{position}
+			if stage == "empty_positions" {
+				positions = nil
+			}
 			indexes := mockey.Mock((*indexMeta).GetIndexesForCollection).Return([]*model.Index(nil)).Build()
 			defer indexes.UnPatch()
 			segment := NewSegmentInfo(&datapb.SegmentInfo{
@@ -2514,14 +2516,14 @@ func TestGenSnapshotDependencyErrors(t *testing.T) {
 			indexFiles := mockey.Mock(uncompressIndexFiles).Return([]*indexpb.IndexFilePathInfo(nil)).Build()
 			defer indexFiles.UnPatch()
 
-			snapshot, err := handler.GenSnapshot(context.Background(), 2)
+			snapshot, err := handler.GenSnapshot(context.Background(), 2, positions)
 			switch stage {
 			case "compact_delta", "success":
 				// Preserve the existing best-effort compact-to lookup behavior.
 				require.NoError(t, err)
 				require.Len(t, snapshot.Segments, 1)
 				require.Contains(t, snapshot.Segments[0].JsonKeyIndexFiles, int64(101))
-			case "empty_channel":
+			case "empty_positions", "empty_channel":
 				require.ErrorIs(t, err, merr.ErrServiceInternal)
 				require.Nil(t, snapshot)
 			default:
