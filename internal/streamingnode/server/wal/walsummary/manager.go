@@ -79,6 +79,7 @@ type Manager struct {
 	latestCoveredTimeTick uint64
 	readableThrough       uint64
 	readableChanged       chan struct{}
+	transformNotifiers    map[string]*transformNotifier
 	restoredTimeTick      uint64
 	terminalErr           error
 	gcFrontiers           map[string]uint64
@@ -147,7 +148,10 @@ func (m *Manager) ObserveMessage(ctx context.Context, msg message.ImmutableMessa
 	if msg.VChannel() != "" && !funcutil.IsControlChannel(msg.VChannel()) && (idempotency != nil || entry != nil) && msg.TimeTick() > m.restoredTimeTick && msg.TimeTick() > m.durableFrontiers[msg.VChannel()] {
 		m.stageRecordLocked(msg, idempotency, insert, entry)
 	}
-	m.advanceReadableLocked(msg.TimeTick())
+	if msg.TimeTick() > m.readableThrough {
+		m.advanceReadableLocked(msg.TimeTick())
+		m.notifyTransformMessageLocked(msg)
+	}
 	m.refreshLastAckedLocked()
 	overThreshold := m.cfg.FlushMaxBytes > 0 && m.pendingBytes >= m.cfg.FlushMaxBytes
 	m.mu.Unlock()
