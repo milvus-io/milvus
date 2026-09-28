@@ -10,8 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Use the installed CMake metadata as well as the build-time switch. Clang may
-# link its runtime statically, so looking for libtsan in ldd output is not enough.
+# Use installed CMake metadata so launchers also work without the original
+# build environment or compiler installation.
 milvus_sanitizer_env() {
     local prefix=$1 marker mode="none"
     for marker in "${prefix}/lib/milvus-sanitizer" "${prefix}/lib64/milvus-sanitizer"; do
@@ -64,9 +64,13 @@ milvus_sanitizer_env() {
         fi
         export OMP_TOOL=enabled
         export OMP_TOOL_LIBRARIES="${prefix}/lib/libarcher.so"
+        if [[ ! -x "${prefix}/lib/llvm-symbolizer" ]]; then
+            echo "ERROR: installed LLVM symbolizer is missing" >&2
+            return 1
+        fi
         # Upstream Archer excludes uninstrumented runtime internals. Native
         # positive/negative probes guard against accidentally hiding application races.
-        export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}ignore_noninstrumented_modules=1:allow_addr2line=1"
+        export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}ignore_noninstrumented_modules=1:external_symbolizer_path=${prefix}/lib/llvm-symbolizer"
     fi
     # A detected race must fail the runner; user options may add symbolizer paths.
     export TSAN_OPTIONS="${TSAN_OPTIONS:+${TSAN_OPTIONS}:}halt_on_error=1:exitcode=66"

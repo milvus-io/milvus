@@ -43,9 +43,6 @@ COPY --chown=milvus:milvus --chmod=774 ./configs/ /milvus/configs/
 
 COPY --chown=milvus:milvus --chmod=774 ./lib/ /milvus/lib/
 
-# Preserve symbolized TSan reports in runtime images without LLVM tools.
-RUN if [ -n "${MILVUS_ARCHER_LIB}" ]; then apt-get update && apt-get install -y --no-install-recommends binutils && rm -rf /var/lib/apt/lists/*; fi
-
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:${MILVUS_JEMALLOC_LIB}

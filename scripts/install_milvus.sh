@@ -34,6 +34,10 @@ for metadata in milvus-archer tsan-dependencies.json; do
         cp "$PWD/internal/core/output/lib/$metadata" "$LIBRARY_PATH/"
     fi
 done
+if [[ -d "$PWD/internal/core/output/lib/tsan-symbolizer" ]]; then
+    cp -r "$PWD/internal/core/output/lib/tsan-symbolizer" "$LIBRARY_PATH/"
+    cp "$PWD/internal/core/output/lib/llvm-symbolizer" "$LIBRARY_PATH/"
+fi
 
 for LIB_PATH in $(ldd ./bin/milvus | grep -E '(asan|tsan|atomic)' | awk '{print $3}'); do
     cp "$LIB_PATH" "$LIBRARY_PATH" 2>/dev/null
