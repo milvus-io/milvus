@@ -70,6 +70,8 @@ func TestMinioObjectStorageCopyObjectCrossBucket(t *testing.T) {
 		size          int64
 		threshold     string
 		provider      string
+		address       string
+		useIAM        bool
 		sameBucket    bool
 		wantMultipart bool
 		statErr       error
@@ -96,6 +98,13 @@ func TestMinioObjectStorageCopyObjectCrossBucket(t *testing.T) {
 		{name: "gcp_exemption", size: 6 * 1024 * 1024 * 1024, provider: objectstorage.CloudProviderGCP},
 		{name: "gcp_large_threshold", size: 6 * 1024 * 1024 * 1024, threshold: "10737418240", provider: objectstorage.CloudProviderGCP},
 		{name: "gcp_custom_threshold", size: 2_000_000_000, threshold: "1", provider: objectstorage.CloudProviderGCP},
+		{name: "gcp_inferred_default", size: 2_000_000_000, address: "storage.googleapis.com"},
+		{name: "gcp_inferred_aws", size: 2_000_000_000, provider: objectstorage.CloudProviderAWS, address: "storage.googleapis.com:443"},
+		{name: "gcp_inferred_iam", size: 2_000_000_000, provider: objectstorage.CloudProviderAWS, address: "storage.googleapis.com", useIAM: true},
+		{name: "gcp_inferred_custom_threshold", size: 2_000_000_000, threshold: "1", address: "storage.googleapis.com"},
+		{name: "gcp_inferred_above_five_gib", size: 6 * 1024 * 1024 * 1024, address: "storage.googleapis.com"},
+		{name: "aliyun_inferred", size: 2_000_000_000, provider: objectstorage.CloudProviderAWS, address: "oss-cn-hangzhou.aliyuncs.com", wantMultipart: true},
+		{name: "explicit_aliyun_over_gcp_endpoint", size: 2_000_000_000, provider: objectstorage.CloudProviderAliyun, address: "storage.googleapis.com", wantMultipart: true},
 		{name: "stat_failure", size: 2_000_000_000, statErr: context.Canceled},
 		{name: "single_copy_failure", size: 1_000_000_000, copyErr: context.Canceled},
 		{name: "multipart_failure", size: 2_000_000_000, wantMultipart: true, copyErr: context.Canceled},
@@ -131,8 +140,20 @@ func TestMinioObjectStorageCopyObjectCrossBucket(t *testing.T) {
 				}).Build()
 			defer mockCompose.UnPatch()
 
-			objectStorage := &MinioObjectStorage{Client: &minio.Client{}, cloudProvider: tc.provider}
-			err := objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", dstBucket, "dst-object")
+			address := tc.address
+			if address == "" {
+				address = "localhost:9000"
+			}
+			config := objectstorage.Config{
+				Address: address, CloudProvider: tc.provider, UseIAM: tc.useIAM,
+				BucketName: "src-bucket", SkipBucketCheck: true,
+				AccessKeyID: "access-key", SecretAccessKeyID: "secret-key",
+			}
+			originalConfig := config
+			objectStorage, err := newMinioObjectStorageWithConfig(context.Background(), &config)
+			require.NoError(t, err)
+			assert.Equal(t, originalConfig, config, "client construction must not change shared configuration")
+			err = objectStorage.CopyObjectCrossBucket(context.Background(), "src-bucket", "src-object", dstBucket, "dst-object")
 			if tc.statErr != nil {
 				require.ErrorIs(t, err, tc.statErr)
 				assert.Zero(t, copyCalls+composeCalls)
