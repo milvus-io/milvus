@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -173,6 +174,9 @@ def verify_runtime(lib_dir):
     ]:
         if not (lib_dir / name).is_file():
             raise ValueError(f"Missing LLVM runtime: {name}")
+    for name in ["llvm-symbolizer", "tsan-symbolizer/llvm-symbolizer"]:
+        if not os.access(lib_dir / name, os.X_OK):
+            raise ValueError(f"Missing LLVM symbolizer: {name}")
     env = {**os.environ, "LD_LIBRARY_PATH": str(lib_dir.resolve())}
     paths = {path.resolve() for path in lib_dir.glob("*.so*")}
     binary = lib_dir.parent / "bin/milvus"
@@ -187,16 +191,59 @@ def verify_runtime(lib_dir):
     print(f"Verified LLVM/Archer runtime closure: {len(paths)} ELF files")
 
 
+def package_symbolizer(lib_dir):
+    """Keep the symbolizer's system-library dependencies separate from Core's."""
+    root = Path(os.environ.get("MILVUS_LLVM_ROOT", "/usr/lib/llvm-20"))
+    binary = root / "bin/llvm-symbolizer"
+    destination = lib_dir / "tsan-symbolizer"
+    destination.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(binary.resolve(), destination / "llvm-symbolizer")
+    environment = {**os.environ, "LD_LIBRARY_PATH": "", "LD_PRELOAD": ""}
+    dependencies = subprocess.check_output(
+        ["ldd", str(binary)], text=True, env=environment
+    )
+    if "not found" in dependencies:
+        raise ValueError(f"Incomplete LLVM symbolizer installation:\n{dependencies}")
+    for name, path in re.findall(r"(?m)^\s*(\S+) => (/\S+)", dependencies):
+        # Use the destination image's glibc and loader as one matched pair.
+        if name in {
+            "libc.so.6",
+            "libm.so.6",
+            "libpthread.so.0",
+            "libdl.so.2",
+            "librt.so.1",
+            "libresolv.so.2",
+        }:
+            continue
+        shutil.copy2(path, destination / name)
+    wrapper = lib_dir / "llvm-symbolizer"
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        "# Keep Core Conan libraries out of the symbolizer subprocess.\n"
+        'symbolizer_dir="${0%/*}/tsan-symbolizer"\n'
+        "unset LD_PRELOAD\n"
+        'export LD_LIBRARY_PATH="$symbolizer_dir"\n'
+        'exec "$symbolizer_dir/llvm-symbolizer" "$@"\n'
+    )
+    wrapper.chmod(0o755)
+    subprocess.run([str(wrapper.resolve()), "--version"], env=environment, check=True)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["profile", "verify", "verify-runtime"])
+    parser.add_argument(
+        "command", choices=["profile", "verify", "verify-runtime", "package-symbolizer"]
+    )
     parser.add_argument("lib_dir", type=Path, nargs="?")
     args = parser.parse_args()
     if args.command == "profile":
         print(profile(), end="")
     elif args.lib_dir is None:
-        parser.error("verify requires a library directory")
+        parser.error(f"{args.command} requires a library directory")
     elif args.command == "verify-runtime":
         verify_runtime(args.lib_dir)
+    elif args.command == "package-symbolizer":
+        package_symbolizer(args.lib_dir)
     else:
         verify(args.lib_dir)

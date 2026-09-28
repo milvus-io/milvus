@@ -17,8 +17,9 @@ milvus_tsan_toolchain() {
     local runtime
     runtime="$("$CC" -print-file-name="libclang_rt.tsan-$(uname -m).so")"
     if [[ ! -f "$runtime" || ! -f "${MILVUS_LLVM_ROOT}/lib/libarcher.so" ||
-          ! -f "${MILVUS_LLVM_ROOT}/lib/libomp.so" ]]; then
-        echo "ERROR: LLVM TSan runtime, libomp or Archer is missing" >&2
+          ! -f "${MILVUS_LLVM_ROOT}/lib/libomp.so" ||
+          ! -x "${MILVUS_LLVM_ROOT}/bin/llvm-symbolizer" ]]; then
+        echo "ERROR: LLVM TSan runtime, libomp, Archer or llvm-symbolizer is missing" >&2
         return 1
     fi
     export MILVUS_TSAN_RUNTIME="$runtime"

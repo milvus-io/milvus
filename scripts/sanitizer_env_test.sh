@@ -74,6 +74,8 @@ done
         exit 1
     fi
     touch "${test_root}/tsan/lib/libarcher.so" "${test_root}/tsan/lib/libomp.so.5"
+    touch "${test_root}/tsan/lib/llvm-symbolizer"
+    chmod +x "${test_root}/tsan/lib/llvm-symbolizer"
     milvus_sanitizer_env "${test_root}/tsan"
     [[ "${OMP_TOOL}" == enabled ]]
     [[ "${OMP_TOOL_LIBRARIES}" == "${test_root}/tsan/lib/libarcher.so" ]]

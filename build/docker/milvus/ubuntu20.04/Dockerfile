@@ -59,9 +59,6 @@ RUN uv --no-cache pip install --python python3.12 --system --break-system-packag
         /milvus/lib/pyudf/milvus_pyudf_runtime-*.whl && \
     rm -rf /milvus/lib/pyudf
 
-# Preserve symbolized TSan reports in runtime images without LLVM tools.
-RUN if [ -n "${MILVUS_ARCHER_LIB}" ]; then apt-get update && apt-get install -y --no-install-recommends binutils && rm -rf /var/lib/apt/lists/*; fi
-
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
 ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:${MILVUS_JEMALLOC_LIB}
