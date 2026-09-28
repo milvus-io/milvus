@@ -62,7 +62,7 @@ fi
 if [[ "${MILVUS_ENABLE_TSAN}" == "ON" ]]; then
     BUILD_ARGS="${BUILD_ARGS} --build-arg MILVUS_JEMALLOC_LIB="
     if [[ -f "${toplevel}/lib/milvus-archer" ]]; then
-        BUILD_ARGS="${BUILD_ARGS} --build-arg MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so --build-arg MILVUS_TSAN_OPTIONS=${TSAN_OPTIONS}"
+        BUILD_ARGS="${BUILD_ARGS} --build-arg MILVUS_ARCHER_LIB=/milvus/lib/libarcher.so --build-arg MILVUS_TSAN_OPTIONS=halt_on_error=1:exitcode=66:ignore_noninstrumented_modules=1:external_symbolizer_path=/milvus/lib/llvm-symbolizer"
     fi
 fi
 

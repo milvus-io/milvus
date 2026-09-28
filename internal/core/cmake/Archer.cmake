@@ -21,8 +21,9 @@ if(NOT tsan_runtime_result EQUAL 0)
     message(FATAL_ERROR "Cannot locate the LLVM TSan runtime")
 endif()
 set(MILVUS_ARCHER_LIBRARY "${MILVUS_LLVM_ROOT}/lib/libarcher.so")
+set(MILVUS_LLVM_SYMBOLIZER "${MILVUS_LLVM_ROOT}/bin/llvm-symbolizer")
 get_filename_component(MILVUS_OPENMP_LIBRARY "${MILVUS_LLVM_ROOT}/lib/libomp.so" REALPATH)
-foreach(library MILVUS_TSAN_RUNTIME MILVUS_ARCHER_LIBRARY MILVUS_OPENMP_LIBRARY)
+foreach(library MILVUS_TSAN_RUNTIME MILVUS_ARCHER_LIBRARY MILVUS_OPENMP_LIBRARY MILVUS_LLVM_SYMBOLIZER)
     if(NOT EXISTS "${${library}}")
         message(FATAL_ERROR "Missing ${library}: ${${library}}")
     endif()
@@ -45,3 +46,17 @@ install(FILES "${MILVUS_OPENMP_LIBRARY}" DESTINATION lib RENAME libomp.so.5)
 install(FILES "${MILVUS_OPENMP_LIBRARY}" DESTINATION lib RENAME libomp.so)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/milvus-archer" "llvm-20\n")
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/milvus-archer" DESTINATION lib)
+
+# A system addr2line can recognize functions while losing Clang DWARF line tables.
+# Package the matching LLVM symbolizer and isolate its dependencies from Conan.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+install(CODE "
+    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E env
+        \"MILVUS_LLVM_ROOT=${MILVUS_LLVM_ROOT}\"
+        \"${Python3_EXECUTABLE}\" \"${CMAKE_CURRENT_LIST_DIR}/../milvus_tsan.py\"
+        package-symbolizer \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib\"
+        RESULT_VARIABLE symbolizer_result)
+    if(NOT symbolizer_result EQUAL 0)
+        message(FATAL_ERROR \"Cannot package the LLVM symbolizer\")
+    endif()
+")

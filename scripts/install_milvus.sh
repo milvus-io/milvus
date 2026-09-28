@@ -35,6 +35,10 @@ for metadata in milvus-archer tsan-dependencies.json; do
         cp "$PWD/internal/core/output/lib/$metadata" "$LIBRARY_PATH/"
     fi
 done
+if [[ -d "$PWD/internal/core/output/lib/tsan-symbolizer" ]]; then
+    cp -r "$PWD/internal/core/output/lib/tsan-symbolizer" "$LIBRARY_PATH/"
+    cp "$PWD/internal/core/output/lib/llvm-symbolizer" "$LIBRARY_PATH/"
+fi
 
 PYUDF_WHEEL_DIR="$PWD/cmake_build/runtime/pyudf/wheels"
 PYUDF_RUNTIME_DIR="$LIBRARY_PATH/pyudf"
