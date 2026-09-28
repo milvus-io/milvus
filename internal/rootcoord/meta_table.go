@@ -658,15 +658,34 @@ func (mt *MetaTable) AddCollection(ctx context.Context, coll *model.Collection) 
 }
 
 func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, ts Timestamp) error {
+	dbName, collectionName, dropped, err := mt.markCollectionDropping(ctx, collectionID, ts)
+	if err != nil || !dropped {
+		return err
+	}
+
+	// Grant cleanup scans the catalog by prefix and can be much slower than the
+	// metadata update above. Keep it synchronous so the caller's collection
+	// resource lock remains held, but do not serialize unrelated DDL metadata
+	// operations on ddLock while the scan is running.
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, dbName, collectionName); err != nil {
+		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
+			mlog.String("dbName", dbName), mlog.String("collectionName", collectionName), mlog.Err(err))
+	}
+
+	return nil
+}
+
+func (mt *MetaTable) markCollectionDropping(ctx context.Context, collectionID UniqueID, ts Timestamp) (string, string, bool, error) {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
 
 	coll, ok := mt.collID2Meta[collectionID]
 	if !ok {
-		return nil
+		return "", "", false, nil
 	}
 	if coll.State == pb.CollectionState_CollectionDropping {
-		return nil
+		return "", "", false, nil
 	}
 
 	// Resolve the database before persisting the Dropping state. Once the
@@ -675,7 +694,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	// and channel stats are updated.
 	db, err := mt.getDatabaseByIDInternal(ctx, normalizeCollectionDBID(coll.DBID), typeutil.MaxTimestamp)
 	if err != nil {
-		return merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
+		return "", "", false, merr.Wrapf(err, "dbID not found for collection:%d", collectionID)
 	}
 
 	clone := coll.Clone()
@@ -684,7 +703,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 
 	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
 	if err := mt.catalog.AlterCollection(ctx1, coll, clone, metastore.MODIFY, ts, false); err != nil {
-		return err
+		return "", "", false, err
 	}
 	mt.collID2Meta[collectionID] = clone
 	for _, fileResourceID := range coll.FileResourceIds {
@@ -714,14 +733,7 @@ func (mt *MetaTable) DropCollection(ctx context.Context, collectionID UniqueID, 
 	mlog.Info(ctx, "drop collection from meta table", mlog.Int64("collection", collectionID),
 		mlog.String("state", coll.State.String()), mlog.Uint64("ts", ts))
 
-	// Delete all grants referencing this collection immediately so they don't
-	// linger until the tombstone sweeper runs (which can take minutes).
-	if err := mt.catalog.DeleteGrantByCollectionName(ctx1, util.DefaultTenant, db.Name, coll.Name); err != nil {
-		mlog.Warn(ctx, "failed to delete grants for dropped collection, skipping",
-			mlog.String("dbName", db.Name), mlog.String("collectionName", coll.Name), mlog.Err(err))
-	}
-
-	return nil
+	return db.Name, coll.Name, true, nil
 }
 
 func (mt *MetaTable) removeIfNameMatchedInternal(ctx context.Context, collectionID UniqueID, name string) {
