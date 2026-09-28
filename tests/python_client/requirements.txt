@@ -53,7 +53,7 @@ tenacity==8.2.3
 rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.6
-deepdiff==8.6.1
+deepdiff==8.6.2
 
 # for test result analyzer
 prettytable==3.8.0
