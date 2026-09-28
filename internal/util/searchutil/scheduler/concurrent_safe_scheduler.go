@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/lifetime"
-	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 )
@@ -40,8 +39,6 @@ func newScheduler(policy schedulePolicy) Scheduler {
 		gpuPool:          conc.NewPool[any](paramtable.Get().QueryNodeCfg.MaxGpuReadConcurrency.GetAsInt(), conc.WithPreAlloc(true)),
 		schedulerCounter: schedulerCounter{},
 		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
-
-		policyOwnsQueueCapacity: policy.OwnsQueueCapacity(),
 	}
 }
 
@@ -69,8 +66,6 @@ type scheduler struct {
 	execChan    chan Task
 	pool        *conc.Pool[any]
 	gpuPool     *conc.Pool[any]
-
-	policyOwnsQueueCapacity bool
 
 	// wg is the waitgroup for internal worker goroutine
 	wg sync.WaitGroup
@@ -202,9 +197,7 @@ func (s *scheduler) schedule() {
 
 // consumeRecvChan consume the recv chan as much as possible.
 func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
-	// Check the dynamic wait task limit.
-	maxWaitTaskNum := paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.GetAsInt64()
-	if !s.handleAddTaskRequest(req, maxWaitTaskNum, now) {
+	if !s.handleAddTaskRequest(req, now) {
 		return
 	}
 
@@ -215,7 +208,7 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 			if !ok {
 				return
 			}
-			if !s.handleAddTaskRequest(req, maxWaitTaskNum, now) {
+			if !s.handleAddTaskRequest(req, now) {
 				return
 			}
 		default:
@@ -226,54 +219,31 @@ func (s *scheduler) consumeRecvChan(req addTaskReq, limit int, now time.Time) {
 
 // HandleAddTaskRequest handle a add task request.
 // Return true if the process can be continued.
-func (s *scheduler) handleAddTaskRequest(req addTaskReq, maxWaitTaskNum int64, now time.Time) bool {
-	if s.policyOwnsQueueCapacity {
-		// Independent queues enforce their own limits in Push.
-		maxWaitTaskNum = 0
-	}
-	if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
+func (s *scheduler) handleAddTaskRequest(req addTaskReq, now time.Time) bool {
+	admissionErr := s.policy.CheckAdmission(req.task, s.GetWaitingTaskTotal())
+	if admissionErr != nil {
 		s.cleanupExpiredTasks(now)
+		admissionErr = s.policy.CheckAdmission(req.task, s.GetWaitingTaskTotal())
 	}
 
 	if err := req.task.Context().Err(); err != nil {
 		mlog.Warn(context.TODO(), "task canceled before enqueue", mlog.Err(err))
 		req.err <- err
-	} else if maxWaitTaskNum > 0 && s.GetWaitingTaskTotal() >= maxWaitTaskNum {
-		err := merr.WrapErrTooManyRequests(
-			int32(maxWaitTaskNum),
-			fmt.Sprintf("limit by %s", paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.Key),
-		)
-		req.err <- err
+	} else if admissionErr != nil {
+		req.err <- admissionErr
 	} else {
 		// Push the task into the policy to schedule and update the counter of the ready queue.
 		queued := newQueuedTask(req.task, now)
 		nq := queued.NQ()
 		newTaskAdded, err := s.policy.Push(queued)
-		if s.policyOwnsQueueCapacity && errors.Is(err, merr.ErrServiceTooManyRequests) {
-			// Reclaim actually expired tasks and retry once, without advancing
-			// deadlines or changing the legacy shared-limit admission path.
-			for _, expired := range s.policy.Cleanup(now) {
-				s.updateWaitingTaskCounter(-1, -expired.NQ())
-				s.recordReadTaskQueueDuration(expired, now, readTaskQueueOutcomeExpired)
-				expired.Done(cleanupTaskError(expired))
-			}
-			if queued.cleanupReady(time.Now()) {
-				err = cleanupTaskError(queued)
-			} else {
-				newTaskAdded, err = s.policy.Push(queued)
-			}
-		}
 		if err == nil {
 			s.updateWaitingTaskCounter(int64(newTaskAdded), nq)
 		}
 		req.err <- err
-		if s.policyOwnsQueueCapacity && errors.Is(err, merr.ErrServiceTooManyRequests) {
-			return false
-		}
 	}
 
-	// Continue processing if the queue isn't reach the max limit.
-	return maxWaitTaskNum <= 0 || s.GetWaitingTaskTotal() < maxWaitTaskNum
+	// Yield when this task's queue is full so the scheduler can hand off work.
+	return s.policy.CheckAdmission(req.task, s.GetWaitingTaskTotal()) == nil
 }
 
 // produceExecChan produce task from scheduler into exec chan as much as possible
@@ -395,9 +365,7 @@ func (s *scheduler) setupExecListener(lastWaitingTask *queuedTask, now time.Time
 }
 
 func (s *scheduler) cleanupExpiredTasks(now time.Time) {
-	deadlineAdvance := paramtable.Get().QueryNodeCfg.SchedulePolicyTaskDeadlineAdvance.GetAsDurationByParse()
-	cleanupTime := now.Add(deadlineAdvance)
-	tasks := s.policy.Cleanup(cleanupTime)
+	tasks := s.policy.Cleanup(now)
 	for _, task := range tasks {
 		s.updateWaitingTaskCounter(-1, -task.NQ())
 		s.recordReadTaskQueueDuration(task, now, readTaskQueueOutcomeExpired)

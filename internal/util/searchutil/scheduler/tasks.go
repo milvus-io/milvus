@@ -76,18 +76,19 @@ type ClearResult struct {
 
 // schedulePolicy is the policy of scheduler.
 type schedulePolicy interface {
-	// OwnsQueueCapacity bypasses the scheduler's shared queue limit when Push
-	// enforces independent queue limits. This capability is fixed at creation.
-	OwnsQueueCapacity() bool
+	// CheckAdmission checks capacity for task without changing the queue.
+	// waitingTotal includes the scheduler's staged task; policies with independent
+	// lanes can use their own queue lengths instead.
+	CheckAdmission(task Task, waitingTotal int64) error
 
-	// Cleanup removes queued tasks whose context deadline has been reached.
+	// Cleanup removes canceled or expired tasks, applying the policy's deadline advance.
 	// Removed tasks are returned to scheduler for error notification.
 	Cleanup(now time.Time) []*queuedTask
 
 	// Remove removes queued tasks matched by filter.
 	Remove(filter TaskFilter, now time.Time) []*queuedTask
 
-	// Push add a new task into scheduler.
+	// Push adds a task after CheckAdmission succeeds on the scheduling goroutine.
 	// Return the count of new task added (task may be chunked or merged)
 	// 0 and an error will be returned if scheduler reaches some limit.
 	Push(task *queuedTask) (int, error)

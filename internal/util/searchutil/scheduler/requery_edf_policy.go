@@ -28,30 +28,25 @@ func newRequeryEDFPolicy() *requeryEDFPolicy {
 	}
 }
 
-func (p *requeryEDFPolicy) OwnsQueueCapacity() bool {
-	return true
-}
-
-func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
-	task.schedulingDeadline, _ = task.Context().Deadline()
+func (p *requeryEDFPolicy) CheckAdmission(task Task, _ int64) error {
 	cfg := &paramtable.Get().QueryNodeCfg
 	if contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel {
 		if p.requeryCapacity > 0 && int64(p.requery.len()) >= p.requeryCapacity {
-			return 0, merr.WrapErrTooManyRequests(
+			return merr.WrapErrTooManyRequests(
 				int32(p.requeryCapacity),
 				fmt.Sprintf("limit by %s", cfg.RequeryUnsolvedQueueSize.Key),
 			)
 		}
+		return nil
+	}
+	return p.regular.CheckAdmission(task, int64(p.regular.Len()))
+}
+
+func (p *requeryEDFPolicy) Push(task *queuedTask) (int, error) {
+	task.schedulingDeadline, _ = task.Context().Deadline()
+	if contextutil.GetQueryLabel(task.Context()) == metrics.ReQueryLabel {
 		p.requery.push(task)
 		return 1, nil
-	}
-
-	regularCapacity := cfg.MaxUnsolvedQueueSize.GetAsInt64()
-	if regularCapacity > 0 && int64(p.regular.Len()) >= regularCapacity {
-		return 0, merr.WrapErrTooManyRequests(
-			int32(regularCapacity),
-			fmt.Sprintf("limit by %s", cfg.MaxUnsolvedQueueSize.Key),
-		)
 	}
 	return p.regular.Push(task)
 }
@@ -98,7 +93,8 @@ func edfRegularFirst(regular, requery *queuedTask) bool {
 }
 
 func (p *requeryEDFPolicy) Cleanup(now time.Time) []*queuedTask {
-	return append(p.regular.Cleanup(now), p.requery.cleanup(now)...)
+	// EDF only reclaims tasks whose actual deadline has passed.
+	return append(p.regular.queue.cleanup(now), p.requery.cleanup(now)...)
 }
 
 func (p *requeryEDFPolicy) Remove(filter TaskFilter, now time.Time) []*queuedTask {

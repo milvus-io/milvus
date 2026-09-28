@@ -93,15 +93,18 @@ func TestRequeryEDFIndependentCapacity(t *testing.T) {
 	t.Cleanup(func() { paramtable.Get().Reset(cfg.MaxUnsolvedQueueSize.Key) })
 	p := newRequeryEDFPolicy()
 	now := time.Now()
-	_, err := p.Push(edfTestTask(t, now.Add(time.Minute), false))
+	regular := edfTestTask(t, now.Add(time.Minute), false)
+	require.NoError(t, p.CheckAdmission(regular.Task, 0))
+	_, err := p.Push(regular)
 	require.NoError(t, err)
-	_, err = p.Push(edfTestTask(t, now.Add(time.Minute), false))
-	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
+	require.ErrorIs(t, p.CheckAdmission(regular.Task, 1), merr.ErrServiceTooManyRequests)
 	for i := int64(0); i < p.requeryCapacity; i++ {
-		_, err = p.Push(edfTestTask(t, now.Add(time.Minute), true))
+		requery := edfTestTask(t, now.Add(time.Minute), true)
+		require.NoError(t, p.CheckAdmission(requery.Task, int64(p.Len())))
+		_, err = p.Push(requery)
 		require.NoError(t, err)
 	}
-	_, err = p.Push(edfTestTask(t, now.Add(time.Minute), true))
+	err = p.CheckAdmission(edfTestTask(t, now.Add(time.Minute), true).Task, int64(p.Len()))
 	require.ErrorIs(t, err, merr.ErrServiceTooManyRequests)
 	require.EqualValues(t, 1025, p.Len())
 	require.NoError(t, paramtable.Get().Save(cfg.RequeryUnsolvedQueueSize.Key, "2048"))
@@ -129,15 +132,14 @@ func newEDFTestScheduler(t *testing.T) *scheduler {
 	paramtable.Init()
 	s, ok := NewScheduler(schedulePolicyNameRequeryEDF).(*scheduler)
 	require.True(t, ok, "EDF must use the generic scheduler")
-	require.True(t, s.policyOwnsQueueCapacity)
+	require.IsType(t, &requeryEDFPolicy{}, s.policy)
 	t.Cleanup(s.Stop)
 	return s
 }
 
 func admitEDFTestTask(s *scheduler, task Task, now time.Time) (bool, error) {
 	errCh := make(chan error, 1)
-	keepConsuming := s.handleAddTaskRequest(addTaskReq{task: task, err: errCh},
-		paramtable.Get().QueryNodeCfg.MaxUnsolvedQueueSize.GetAsInt64(), now)
+	keepConsuming := s.handleAddTaskRequest(addTaskReq{task: task, err: errCh}, now)
 	return keepConsuming, <-errCh
 }
 
@@ -149,7 +151,7 @@ func TestRequeryEDFAdmissionUsesIndependentCapacity(t *testing.T) {
 	now := time.Now()
 	keepConsuming, err := admitEDFTestTask(s, edfTestTask(t, time.Time{}, false).Task, now)
 	require.NoError(t, err)
-	require.True(t, keepConsuming)
+	require.False(t, keepConsuming, "filling the target lane yields to the scheduler")
 	_, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, true).Task, now)
 	require.NoError(t, err, "a full regular queue must not reject requery")
 	keepConsuming, err = admitEDFTestTask(s, edfTestTask(t, time.Time{}, false).Task, now)
