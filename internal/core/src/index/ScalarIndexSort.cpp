@@ -28,6 +28,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "Meta.h"
@@ -44,6 +45,7 @@
 #include "glog/logging.h"
 #include "index/ScalarIndex.h"
 #include "index/ScalarIndexSort.h"
+#include "index/SortedInt64Lookup.h"
 #include "storage/LocalFileIOPool.h"
 #include "storage/EntryStreamUtils.h"
 #include "index/Utils.h"
@@ -507,6 +509,15 @@ const TargetBitmap
 ScalarIndexSort<T>::In(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     TargetBitmap bitset(Count());
+
+    if constexpr (std::is_same_v<T, int64_t>) {
+        detail::VisitSortedInt64Matches(
+            begin(), end(), n, values, [&](int32_t row) {
+                bitset[row] = true;
+            });
+        return bitset;
+    }
+
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
@@ -531,6 +542,15 @@ ScalarIndexSort<T>::NotIn(const size_t n, const T* values) {
     AssertInfo(is_built_, "index has not been built");
     // NotIn must keep null rows false, so start from the validity bitmap.
     auto bitset = valid_bitset_.clone();
+
+    if constexpr (std::is_same_v<T, int64_t>) {
+        detail::VisitSortedInt64Matches(
+            begin(), end(), n, values, [&](int32_t row) {
+                bitset[row] = false;
+            });
+        return bitset;
+    }
+
     for (size_t i = 0; i < n; ++i) {
         const auto target = IndexStructure<T>(*(values + i));
         auto lb = std::lower_bound(begin(), end(), target);
