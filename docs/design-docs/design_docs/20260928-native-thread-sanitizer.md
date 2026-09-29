@@ -40,25 +40,12 @@ These are commands for the Linux build environment with LLVM 20 installed.
 `MILVUS_LLVM_ROOT` defaults to `/usr/lib/llvm-20`; the build scripts select its
 Clang drivers and fail if the compiler-rt, libomp or Archer library is absent.
 The native/cgo links use `-shared-libsan` so DSOs and the Go executable share
-one LLVM TSan runtime. The C++ ABI remains `libstdc++11`. With a TSan-capable
-Milvus Dev CLI client and server, the remote development workflow is:
-
-```bash
-milvus-dev-cli build local . -b master --tsan --debug
-milvus-dev-cli cpp-ut local . -b master --tsan -j 1 -t bitset_test
-```
-
-The worker runs the CMake smoke fixture before the build, isolates native and
-Conan caches from ordinary/ASan builds, and verifies installed dependency
-instrumentation. TSan worker compiler parallelism defaults to eight jobs;
-test sharding is a separate setting. A local `USE_TSAN` environment variable
-does not automatically forward the option to a remote job.
+one LLVM TSan runtime. The C++ ABI remains `libstdc++11`.
 
 The direct Core script accepts `-T ON`. Direct CMake users pass
 `-DUSE_TSAN=ON` along with their existing Conan toolchain, install prefix and
-other configuration arguments. No CLI-specific configuration is needed inside
-CMake. Use a separate worktree/build/install tree and Cargo cache from ordinary
-or ASan builds, including when using remote build caches. CMake rejects changing
+other configuration arguments. Use a separate worktree/build/install tree and
+Cargo cache from ordinary or ASan builds. CMake rejects changing
 to or from TSan in a build/install tree already marked with another mode.
 For direct CMake invocation, first prepare the parser prerequisite with
 `USE_TSAN=ON bash scripts/build_plan_parser.sh`; CMake cannot change an already
@@ -86,8 +73,7 @@ host profile selects Clang 20 and C++20 for Core and these six packages,
 retains the default compiler identity for other packages and build tools and makes sanitizer flags part of
 package IDs. A scoped Conan hook preserves the flags that the Folly recipe
 otherwise overwrites. The generated dependency manifest verifies native symbols
-and records package revisions and library hashes; the worker validates it again
-after cache restore.
+and records package revisions and library hashes.
 
 OpenBLAS uses its pthread backend in the TSan profile. Its default GCC/Fortran
 OpenMP backend would introduce `libgomp` alongside LLVM `libomp`; pthread BLAS
@@ -133,9 +119,8 @@ and `TEST_TIMEOUT` for the available resources. The installation script copies
 the dynamically linked TSan runtime with the other runtime libraries.
 `build/build_image.sh` disables jemalloc preloading when packaging a TSan build.
 CMake also installs `libomp.so.5`, `libarcher.so`, the shared compiler-rt and a
-`milvus-archer` marker. Launchers and the Dev CLI image activate OMPT through
-`OMP_TOOL=enabled` and an absolute `OMP_TOOL_LIBRARIES` path. Native caches use
-an LLVM/Archer-specific namespace and require these artifacts.
+`milvus-archer` marker. Launchers activate OMPT through `OMP_TOOL=enabled` and
+an absolute `OMP_TOOL_LIBRARIES` path.
 
 Archer's upstream configuration uses `ignore_noninstrumented_modules=1` to
 exclude runtime internals. This reduces coverage of accesses originating in
@@ -171,9 +156,9 @@ implicitly enabling ASan solely for Debug builds.
 No API, protobuf, persisted data format or database configuration changes are
 introduced. These artifacts are for diagnostic use and add substantial runtime
 and memory overhead. Returning to ordinary artifacts requires a separate clean
-build/install tree. Automated CI scheduling and Dev CLI distribution are
-separate integration work; this change supplies the repository-owned build,
-runtime and smoke-test entry points.
+build/install tree. Automated CI scheduling is separate integration work;
+this change supplies the repository-owned build, runtime and smoke-test
+entry points.
 
 ## Test Plan
 
@@ -215,7 +200,7 @@ different per-node locks. This finding is not fixed or suppressed by the build
 option. A successful sanitizer build does not imply that all existing workloads
 run without sanitizer findings.
 
-The same controls show that the worker's uninstrumented `libgomp` can also
+The same controls show that uninstrumented `libgomp` can also
 report races for correctly locked OpenMP accesses. The LLVM/Archer profile replaces those diagnostic synchronization wrappers
 with upstream OMPT annotations. The earlier HNSW finding remains a separate
 algorithm issue; this integration does not suppress it.
