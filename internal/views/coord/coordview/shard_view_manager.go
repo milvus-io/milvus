@@ -471,6 +471,11 @@ func (m *ShardViewManager) makeOnSyncResponse(version qviews.QueryViewVersion, t
 
 		_, exists := m.views[version]
 		completed := !exists || syncResponseCompletesTarget(target.State(), resp.State())
+		// Ready is only the end of preparation: retain QN monitoring for
+		// asynchronous Poison reports and re-push on reconnect until teardown.
+		if _, qn := target.WorkNode().(qviews.QueryNode); qn && exists && target.State() == qviews.QueryViewStatePreparing && resp.State() == qviews.QueryViewStateReady {
+			completed = false
+		}
 		m.submitDirtyEvent(event)
 		m.mu.Unlock()
 		return completed

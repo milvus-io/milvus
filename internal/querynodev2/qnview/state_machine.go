@@ -39,8 +39,9 @@ type QNQueryViewStateMachine struct {
 	assignedSegments map[int64]map[int64]struct{}
 
 	// Counters for O(1) completion check.
-	totalSegments int
-	readyCount    int
+	totalSegments    int
+	readyCount       int
+	poisonedSegments map[int64]*viewpb.PoisonedSegment
 
 	pendingReport  *viewpb.QueryViewOfShard
 	pendingRelease bool
@@ -168,6 +169,25 @@ func (sm *QNQueryViewStateMachine) OnUnrecoverable() {
 	sm.pendingReport = sm.buildReport()
 }
 
+// OnSegmentPoisoned keeps a Ready view available for historical MVCCs, while
+// reporting the sticky failure to Coord. Preparing views cannot become Ready.
+func (sm *QNQueryViewStateMachine) OnSegmentPoisoned(poison *viewpb.PoisonedSegment) {
+	if sm.state != qviews.QueryViewStatePreparing && sm.state != qviews.QueryViewStateReady && sm.state != qviews.QueryViewStateUnrecoverable {
+		return
+	}
+	if sm.poisonedSegments == nil {
+		sm.poisonedSegments = make(map[int64]*viewpb.PoisonedSegment)
+	}
+	if sm.poisonedSegments[poison.SegmentId] != nil {
+		return
+	}
+	sm.poisonedSegments[poison.SegmentId] = proto.Clone(poison).(*viewpb.PoisonedSegment)
+	if sm.state == qviews.QueryViewStatePreparing {
+		sm.state = qviews.QueryViewStateUnrecoverable
+	}
+	sm.pendingReport = sm.buildReport()
+}
+
 // ConsumeReport returns the view to report to the Coordinator and clears the flag.
 // Returns nil if no report is needed.
 func (sm *QNQueryViewStateMachine) ConsumeReport() *viewpb.QueryViewOfShard {
@@ -246,6 +266,10 @@ func (sm *QNQueryViewStateMachine) buildReport() *viewpb.QueryViewOfShard {
 	meta.State = viewpb.QueryViewState(sm.state)
 
 	qnView := proto.Clone(sm.qnView).(*viewpb.QueryViewOfQueryNode)
+	qnView.PoisonedSegments = nil
+	for _, poison := range sm.poisonedSegments {
+		qnView.PoisonedSegments = append(qnView.PoisonedSegments, proto.Clone(poison).(*viewpb.PoisonedSegment))
+	}
 	// Populate ReadySegmentIds from tracked sets.
 	for _, p := range qnView.Partitions {
 		p.ReadySegmentIds = sm.readySegmentSlice(p.PartitionId)

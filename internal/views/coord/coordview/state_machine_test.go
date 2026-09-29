@@ -756,14 +756,18 @@ func TestRecovery_Preparing(t *testing.T) {
 	assertPendingSyncState(t, sm, qviews.QueryViewStateUp)
 }
 
-// TestRecovery_Up: no pending, waits for events.
+// TestRecovery_Up: restore QN monitoring for live Poison reports.
 func TestRecovery_Up(t *testing.T) {
 	view := buildTestView(1)
 	view.Meta.State = viewpb.QueryViewState_QueryViewStateUp
 
 	sm := RecoverCoordQueryViewStateMachine(view)
 	assert.Equal(t, qviews.QueryViewStateUp, sm.State())
-	assertNoPending(t, sm)
+	assertNoPendingPersist(t, sm)
+	monitoring := consumePendingSyncForTest(sm)
+	require.Len(t, monitoring, 1)
+	assert.IsType(t, &qviews.QueryViewAtQueryNode{}, monitoring[0])
+	assert.Equal(t, qviews.QueryViewStatePreparing, monitoring[0].State())
 
 	// Can receive EnterDown
 	sm.EnterDown()
@@ -1479,7 +1483,8 @@ func TestCompleteLifecycle_UpThenRecovery(t *testing.T) {
 
 	sm := RecoverCoordQueryViewStateMachine(view)
 	assert.Equal(t, qviews.QueryViewStateUp, sm.State())
-	assertNoPending(t, sm)
+	assertNoPendingPersist(t, sm)
+	require.Len(t, consumePendingSyncForTest(sm), 2)
 
 	// EnterDown
 	sm.EnterDown()

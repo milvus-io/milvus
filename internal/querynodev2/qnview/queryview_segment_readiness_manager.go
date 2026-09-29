@@ -23,9 +23,10 @@ type QueryViewSegmentReadinessManager struct {
 	collections  QueryViewCollectionRuntimeManager
 	catchupTasks chan segmentCatchupTask
 
-	mu       sync.Mutex
-	views    map[qviews.QueryViewKey]*transformViewRef
-	segments map[int64]*transformSegmentState
+	mu         sync.Mutex
+	generation uint64
+	views      map[qviews.QueryViewKey]*transformViewRef
+	segments   map[int64]*transformSegmentState
 }
 
 func NewQueryViewSegmentReadinessManagerWithScheduler(
@@ -81,6 +82,7 @@ type transformViewRef struct {
 	collectionGuard        CollectionRuntimeGuard
 	segments               map[int64]int64
 	onUnrecoverable        func()
+	onPoisoned             func(*viewpb.PoisonedSegment)
 	unrecoverable          bool
 	physicalAcquirePending bool
 	pendingReleases        []ReleaseSegments
@@ -88,6 +90,9 @@ type transformViewRef struct {
 
 type transformSegmentState struct {
 	state         transformSegmentLoadState
+	generation    uint64
+	poison        *viewpb.PoisonedSegment
+	poisonErr     error
 	segment       TransformSegment
 	reg           TransformRegistration
 	catchupCancel context.CancelFunc
@@ -223,6 +228,7 @@ func (m *QueryViewSegmentReadinessManager) recordPendingAcquire(req AcquireSegme
 		transformGuard:  guard,
 		segments:        segmentPartitions,
 		onUnrecoverable: req.OnUnrecoverable,
+		onPoisoned:      req.OnPoisoned,
 	}
 	m.views[req.Key] = ref
 	for segmentID, partitionID := range segmentPartitions {
@@ -290,6 +296,16 @@ func (m *QueryViewSegmentReadinessManager) activateAcquire(req AcquireSegments, 
 			onReady:         req.OnReady,
 			onUnrecoverable: req.OnUnrecoverable,
 		}
+		if state.poison != nil {
+			poison := state.poison
+			go func() {
+				if req.OnPoisoned != nil {
+					req.OnPoisoned(poison)
+				}
+				m.notifyUnrecoverable(req.Key, req.OnUnrecoverable)
+			}()
+			continue
+		}
 		if state.state == transformSegmentLoaded {
 			readyNow = append(readyNow, waiter)
 			delete(state.waiters, req.Key)
@@ -346,6 +362,8 @@ func (m *QueryViewSegmentReadinessManager) markPhysicalLoaded(segment TransformS
 		return true, segmentCatchupTask{}
 	}
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // owned by state; canceled on completion, failure or detach
+	m.generation++
+	state.generation = m.generation
 	state.segment = segment
 	state.state = transformSegmentCatchingUp
 	state.catchupCancel = cancel
@@ -356,7 +374,7 @@ func (m *QueryViewSegmentReadinessManager) registerAndCatchup(task segmentCatchu
 	if task.ctx.Err() != nil {
 		return
 	}
-	reg, err := m.buffer.RegisterSegment(task.ctx, task.segment)
+	reg, err := m.buffer.RegisterSegment(task.ctx, &observedTransformSegment{TransformSegment: task.segment, manager: m, state: task.state})
 	if err != nil {
 		m.failSegment(task.segment.ID(), task.state, err)
 		return
@@ -396,6 +414,10 @@ func (m *QueryViewSegmentReadinessManager) markSegmentReady(task segmentCatchupT
 	state.catchupCancel()
 	state.catchupCancel = nil
 	state.state = transformSegmentLoaded
+	if state.poison != nil {
+		// Poison publication owns failure notification for the waiting views.
+		return nil
+	}
 	waiters := make([]transformSegmentWaiter, 0, len(state.waiters))
 	for key, waiter := range state.waiters {
 		if m.views[key] == nil {

@@ -86,6 +86,9 @@ func (s *qnShardView) applyOneLocked(av *handler.ApplyView) {
 				OnReady: func(readySegments map[int64][]int64) {
 					s.notifySegmentsReady(key.QueryViewVersion, readySegments)
 				},
+				OnPoisoned: func(poison *viewpb.PoisonedSegment) {
+					s.notifySegmentPoisoned(key.QueryViewVersion, entry, poison)
+				},
 				OnUnrecoverable: func() {
 					s.notifyUnrecoverable(key.QueryViewVersion)
 				},
@@ -259,4 +262,15 @@ func (s *qnShardView) releaseQueryResourceLocked(version qviews.QueryViewVersion
 			s.notifyDropped(version)
 		},
 	})
+}
+
+func (s *qnShardView) notifySegmentPoisoned(version qviews.QueryViewVersion, expected *qnViewEntry, poison *viewpb.PoisonedSegment) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.views[version]
+	if entry != expected {
+		return
+	}
+	entry.sm.OnSegmentPoisoned(poison)
+	s.consumeReportAndCleanup(entry.View.QueryViewKey(), entry)
 }
