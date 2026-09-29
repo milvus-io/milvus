@@ -51,7 +51,7 @@ func (t *resourceBuildTask) finish(runtime *QueryRuntime, err error) {
 	t.mu.Lock()
 	if t.finished {
 		t.mu.Unlock()
-		closeRuntime(runtime)
+		runtime.Close()
 		return
 	}
 	t.runtime = runtime

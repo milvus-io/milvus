@@ -8,6 +8,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+// BuildSubSearchRequests expands an advanced search for both planning and
+// execution. Each result owns its mutable fields independently of the parent.
+func BuildSubSearchRequests(req *internalpb.SearchRequest) ([]*internalpb.SearchRequest, error) {
+	if len(req.GetSubReqs()) == 0 {
+		return nil, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
+	}
+	parent := proto.Clone(req).(*internalpb.SearchRequest)
+	parent.SubReqs = nil
+	requests := make([]*internalpb.SearchRequest, len(req.GetSubReqs()))
+	for i, sub := range req.GetSubReqs() {
+		request, err := BuildSubSearchRequest(parent, sub)
+		if err != nil {
+			return nil, err
+		}
+		requests[i] = request
+	}
+	return requests, nil
+}
+
 // BuildSubSearchRequest expands one advanced-search sub-request into a regular
 // SearchRequest while preserving the execution context carried by its parent.
 func BuildSubSearchRequest(parent *internalpb.SearchRequest, sub *internalpb.SubSearchRequest) (*internalpb.SearchRequest, error) {
