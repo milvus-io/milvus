@@ -100,6 +100,8 @@ func TestScannerAdaptorStopsOnCorruptedChunk(t *testing.T) {
 	l := mock_walimpls.NewMockWALImpls(t)
 	l.EXPECT().Channel().Return(types.PChannelInfo{AccessMode: types.AccessModeRO})
 	l.EXPECT().Read(mock.Anything, mock.Anything).Return(innerScanner, nil).Once()
+	// The catchup scanner reports the backend it reads from once it opens.
+	l.EXPECT().WALName().Return(message.WALNameTest).Maybe()
 
 	s := newScannerAdaptor("scanner", l,
 		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(walimplstest.NewTestMessageID(0)), IgnorePauseConsumption: true},
