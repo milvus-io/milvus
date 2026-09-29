@@ -27,7 +27,9 @@ import (
 )
 
 const (
-	maxSupportedPolicyActions = 8
+	maxSupportedPolicyActions       = 8
+	maxJSONEscapeBytesPerByte int64 = int64(len(`\u0000`))
+	maxJSONNumberLength             = len(`-1.7976931348623157e+308`)
 
 	// MaxTransportIdentifierLength is the absolute safety bound for RLS
 	// locator and identifier strings before an internal request is cloned.
@@ -58,6 +60,26 @@ func ValidateRequestTarget(dbName, collectionName string) error {
 		return err
 	}
 	return validateTransportIdentifier("collection name", collectionName)
+}
+
+// ValidatePolicyRoles rejects the deprecated role-scoped policy contract.
+// RLS principals, rather than Milvus RBAC roles, are the only runtime policy identity.
+func ValidatePolicyRoles(roles []string) error {
+	if len(roles) > 0 {
+		return merr.WrapErrParameterInvalidMsg("role-scoped RLS policies are not supported; roles must be empty")
+	}
+	return nil
+}
+
+// ValidatePolicyActionCount bounds the raw action list before conversion.
+func ValidatePolicyActionCount(actionCount int) error {
+	if actionCount == 0 {
+		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
+	}
+	if actionCount > maxSupportedPolicyActions {
+		return merr.WrapErrParameterInvalidMsg("RLS policy actions exceeds max count %d", maxSupportedPolicyActions)
+	}
+	return nil
 }
 
 // ValidatePolicyName validates the required policy name without applying the
@@ -108,11 +130,8 @@ func validatePolicy(policyName string, policyType PolicyType, actions []PolicyAc
 	default:
 		return merr.WrapErrParameterInvalidMsg("invalid RLS policy type: %s", policyType.String())
 	}
-	if len(actions) == 0 {
-		return merr.WrapErrParameterInvalidMsg("RLS policy actions is empty")
-	}
-	if len(actions) > maxSupportedPolicyActions {
-		return merr.WrapErrParameterInvalidMsg("RLS policy actions exceeds max count %d", maxSupportedPolicyActions)
+	if err := ValidatePolicyActionCount(len(actions)); err != nil {
+		return err
 	}
 	usingExprEmpty := strings.TrimSpace(usingExpr) == ""
 	checkExprEmpty := strings.TrimSpace(checkExpr) == ""
@@ -186,6 +205,38 @@ func ValidatePrincipalName(principalName string) error {
 		return merr.WrapErrParameterInvalidMsg("RLS principal name is empty")
 	}
 	return validateTransportIdentifier("principal name", principalName)
+}
+
+func validatePrincipalTagsJSONTransportSize(payload string, maxTags int) error {
+	maxPayloadBytes := maxPrincipalTagsJSONLength(maxTags)
+	if int64(len(payload)) > maxPayloadBytes {
+		return merr.WrapErrParameterTooLarge(fmt.Sprintf(
+			"RLS principal tags JSON exceeds transport max length %d",
+			maxPayloadBytes,
+		))
+	}
+	return nil
+}
+
+func maxPrincipalTagsJSONLength(maxTags int) int64 {
+	maxTagKeyLength := int64(paramtable.Get().ProxyCfg.RLSMaxTagKeyLength.GetAsInt())
+	maxTagValueLength := int64(paramtable.Get().ProxyCfg.RLSMaxTagValueLength.GetAsInt())
+	if maxTagKeyLength > math.MaxInt64/maxJSONEscapeBytesPerByte ||
+		maxTagValueLength > (math.MaxInt64-2)/maxJSONEscapeBytesPerByte {
+		return math.MaxInt64
+	}
+
+	maxKeyBytes := maxTagKeyLength * maxJSONEscapeBytesPerByte
+	maxValueBytes := max(maxTagValueLength*maxJSONEscapeBytesPerByte+2, int64(maxJSONNumberLength))
+	// Two key quotes, one colon, and one conservative comma per member.
+	if maxKeyBytes > math.MaxInt64-maxValueBytes-4 {
+		return math.MaxInt64
+	}
+	maxMemberBytes := maxKeyBytes + maxValueBytes + 4
+	if int64(maxTags) > (math.MaxInt64-2)/maxMemberBytes {
+		return math.MaxInt64
+	}
+	return 2 + int64(maxTags)*maxMemberBytes // object braces plus members
 }
 
 // ValidatePrincipalNameWithLimit validates a principal name for create or update.
