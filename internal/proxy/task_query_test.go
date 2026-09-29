@@ -365,7 +365,6 @@ func TestQueryTask_all(t *testing.T) {
 		assert.Equal(t, enqueTs, qt.GetMvccTimestamp())
 	})
 }
-
 func Test_translateToOutputFieldIDs(t *testing.T) {
 	type testCases struct {
 		name          string

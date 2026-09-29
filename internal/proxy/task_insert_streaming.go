@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
@@ -15,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/v2/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v2/util/merr"
-	"github.com/milvus-io/milvus/pkg/v2/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
 )
 
@@ -24,18 +22,10 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert streaming %d", it.ID()))
-
-	collectionName := it.insertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
+	collID := it.collectionID
 	log := log.Ctx(ctx)
-	if err != nil {
-		log.Warn("fail to get collection id", zap.Error(err))
-		return err
-	}
 	it.insertMsg.CollectionID = collID
 
-	getCacheDur := tr.RecordSpan()
 	channelNames, err := it.chMgr.getVChannels(collID)
 	if err != nil {
 		log.Warn("get vChannels failed", zap.Int64("collectionID", collID), zap.Error(err))
@@ -48,8 +38,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		zap.Int64("collectionID", collID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", it.ID()),
-		zap.Bool("is_parition_key", it.partitionKeys != nil),
-		zap.Duration("get cache duration", getCacheDur))
+		zap.Bool("is_parition_key", it.partitionKeys != nil))
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {

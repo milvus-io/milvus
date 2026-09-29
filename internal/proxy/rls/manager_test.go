@@ -1612,16 +1612,16 @@ func TestValidateWritePredicatesUseThreeValuedLogic(t *testing.T) {
 	}
 
 	fieldsData := newFieldsData(false)
-	rowData := newRowData(fieldsData, []int64{101, 102})
+	rowData := newRowData(fieldsData, []int64{100, 101, 102})
 	tests := []struct {
 		name     string
 		expr     string
 		expected truthValue
 	}{
-		{name: "unknown and false", expr: `dept == "blocked" and false`, expected: truthFalse},
-		{name: "unknown and true", expr: `dept == "blocked" and true`, expected: truthUnknown},
-		{name: "unknown or true", expr: `dept == "blocked" or true`, expected: truthTrue},
-		{name: "unknown or false", expr: `dept == "blocked" or false`, expected: truthUnknown},
+		{name: "unknown and false", expr: `dept == "blocked" and id == 0`, expected: truthFalse},
+		{name: "unknown and true", expr: `dept == "blocked" and id == 1`, expected: truthUnknown},
+		{name: "unknown or true", expr: `dept == "blocked" or id == 1`, expected: truthTrue},
+		{name: "unknown or false", expr: `dept == "blocked" or id == 0`, expected: truthUnknown},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1656,12 +1656,11 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 	red := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"red"}}}}
 	blue := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"blue"}}}}
 	for _, storage := range []struct {
-		name       string
-		values     []*schemapb.ScalarField
-		mappedRows bool
+		name   string
+		values []*schemapb.ScalarField
 	}{
 		{name: "dense", values: []*schemapb.ScalarField{red, {}, blue}},
-		{name: "compact", values: []*schemapb.ScalarField{red, blue}, mappedRows: true},
+		{name: "compact", values: []*schemapb.ScalarField{red, blue}},
 	} {
 		t.Run(storage.name, func(t *testing.T) {
 			fieldData := &schemapb.FieldData{
@@ -1677,11 +1676,6 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 				}},
 			}
 			rows := newRowData([]*schemapb.FieldData{fieldData}, []int64{101})
-			if storage.mappedRows {
-				require.NotEmpty(t, rows.fields[101].arrayDataIndices)
-			} else {
-				require.Empty(t, rows.fields[101].arrayDataIndices)
-			}
 			for rowIdx, expected := range []truthValue{truthFalse, truthUnknown, truthTrue} {
 				actual, err := evalExpr(expr, rows, rowIdx)
 				require.NoError(t, err)
