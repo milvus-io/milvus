@@ -106,8 +106,7 @@ func (r *Runtime) Truncate(minDataVersion qviews.DataVersion) {
 		r.truncateDataVersion = minDataVersion
 		r.hasTruncateDataVersion = true
 	}
-	segmentsToRelease := make([]*growingSegment, 0)
-	r.collectSegmentsToReleaseLocked(&segmentsToRelease)
+	segmentsToRelease := r.collectSegmentsToReleaseLocked()
 	r.mu.Unlock()
 	for _, segment := range segmentsToRelease {
 		segment.release()
@@ -128,17 +127,19 @@ func (r *Runtime) removeSegmentMetadataLocked(segmentID int64) {
 	}
 }
 
-func (r *Runtime) collectSegmentsToReleaseLocked(segmentsToRelease *[]*growingSegment) {
+func (r *Runtime) collectSegmentsToReleaseLocked() []*growingSegment {
 	if !r.hasTruncateDataVersion {
-		return
+		return nil
 	}
+	var segmentsToRelease []*growingSegment
 	appliedGrowingTimeTick := r.appliedGrowingTimeTick.Load()
 	for segmentID, segment := range r.segments {
 		if segment.shouldReleaseAt(r.truncateDataVersion, appliedGrowingTimeTick) {
-			*segmentsToRelease = append(*segmentsToRelease, segment)
+			segmentsToRelease = append(segmentsToRelease, segment)
 			r.removeSegmentMetadataLocked(segmentID)
 		}
 	}
+	return segmentsToRelease
 }
 
 func (r *Runtime) Close() {

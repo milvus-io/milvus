@@ -55,7 +55,7 @@ func (o globalOptimizer) OptimizeSearch(ctx context.Context, req *internalpb.Sea
 	if req.GetIsAdvanced() {
 		return o.optimizeAdvancedSearch(ctx, req)
 	}
-	return o.optimizeSearch(ctx, req)
+	return optimizer.SearchOptimization{}, o.optimizeRequests(ctx, []*internalpb.SearchRequest{req})
 }
 
 // IDFRequest/IDFResult batch all BM25 subqueries against one aggregate state.
@@ -69,18 +69,9 @@ type IDFResult struct {
 }
 
 func (o globalOptimizer) optimizeAdvancedSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
-	if len(req.GetSubReqs()) == 0 {
-		return optimizer.SearchOptimization{}, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
-	}
-	parent := proto.Clone(req).(*internalpb.SearchRequest)
-	parent.SubReqs = nil
-	requests := make([]*internalpb.SearchRequest, len(req.GetSubReqs()))
-	for i, sub := range req.GetSubReqs() {
-		request, err := sharedviewquery.BuildSubSearchRequest(parent, sub)
-		if err != nil {
-			return optimizer.SearchOptimization{}, err
-		}
-		requests[i] = request
+	requests, err := sharedviewquery.BuildSubSearchRequests(req)
+	if err != nil {
+		return optimizer.SearchOptimization{}, err
 	}
 	if err := o.optimizeRequests(ctx, requests); err != nil {
 		return optimizer.SearchOptimization{}, err
@@ -91,10 +82,6 @@ func (o globalOptimizer) optimizeAdvancedSearch(ctx context.Context, req *intern
 		}
 	}
 	return optimizer.SearchOptimization{}, nil
-}
-
-func (o globalOptimizer) optimizeSearch(ctx context.Context, req *internalpb.SearchRequest) (optimizer.SearchOptimization, error) {
-	return optimizer.SearchOptimization{}, o.optimizeRequests(ctx, []*internalpb.SearchRequest{req})
 }
 
 func (globalOptimizer) OptimizeRetrieve(context.Context, *internalpb.RetrieveRequest) error {

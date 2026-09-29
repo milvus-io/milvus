@@ -6,7 +6,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -49,25 +48,14 @@ func (s *Server) SearchOnView(ctx context.Context, req *viewpb.SearchOnViewReque
 
 func (s *Server) executeAdvancedSearch(ctx context.Context, req *viewpb.SearchOnViewRequest) (*internalpb.SearchResults, error) {
 	legacyReq := req.GetLegacyReq()
-	if len(legacyReq.GetSubReqs()) == 0 {
-		return nil, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
-	}
-
-	subRequests := make([]*internalpb.SearchRequest, len(legacyReq.GetSubReqs()))
-	parent := proto.Clone(legacyReq).(*internalpb.SearchRequest)
-	parent.SubReqs = nil
-	for index, subReq := range legacyReq.GetSubReqs() {
-		searchReq, err := BuildSubSearchRequest(parent, subReq)
-		if err != nil {
-			return nil, err
-		}
-		subRequests[index] = searchReq
+	subRequests, err := BuildSubSearchRequests(legacyReq)
+	if err != nil {
+		return nil, err
 	}
 
 	results := make([]*internalpb.SearchResults, len(subRequests))
 	group, groupCtx := errgroup.WithContext(ctx)
 	for index := range subRequests {
-		index := index
 		group.Go(func() error {
 			if legacyReq.GetSubReqs()[index].GetSkip() {
 				results[index] = emptySearchResults(subRequests[index])

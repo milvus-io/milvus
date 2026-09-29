@@ -54,12 +54,12 @@ func (queryTaskRunner) Query(ctx context.Context, collection *segcore.CCollectio
 
 func buildGrowingSearchTaskInputs(collection *segcore.CCollection, selected []segcore.CSegment, req *querypb.SearchRequest) (*segments.Collection, []segments.Segment, error) {
 	legacyReq := req.GetReq()
-	return buildGrowingTaskInputs(collection, selected, legacyReq.GetCollectionID(), partitionIDFromSearchRequest(legacyReq), firstDMLChannel(req.GetDmlChannels()))
+	return buildGrowingTaskInputs(collection, selected, legacyReq.GetCollectionID(), singlePartitionID(legacyReq.GetPartitionIDs()), firstDMLChannel(req.GetDmlChannels()))
 }
 
 func buildGrowingQueryTaskInputs(collection *segcore.CCollection, selected []segcore.CSegment, req *querypb.QueryRequest) (*segments.Collection, []segments.Segment, error) {
 	legacyReq := req.GetReq()
-	return buildGrowingTaskInputs(collection, selected, legacyReq.GetCollectionID(), partitionIDFromQueryRequest(legacyReq), firstDMLChannel(req.GetDmlChannels()))
+	return buildGrowingTaskInputs(collection, selected, legacyReq.GetCollectionID(), singlePartitionID(legacyReq.GetPartitionIDs()), firstDMLChannel(req.GetDmlChannels()))
 }
 
 // TODO(#40451): remove these legacy QueryNode collection/segment wrappers when
@@ -87,16 +87,9 @@ func firstDMLChannel(channels []string) string {
 	return channels[0]
 }
 
-func partitionIDFromSearchRequest(req *internalpb.SearchRequest) int64 {
-	if len(req.GetPartitionIDs()) == 1 {
-		return req.GetPartitionIDs()[0]
-	}
-	return 0
-}
-
-func partitionIDFromQueryRequest(req *internalpb.RetrieveRequest) int64 {
-	if len(req.GetPartitionIDs()) == 1 {
-		return req.GetPartitionIDs()[0]
+func singlePartitionID(partitionIDs []int64) int64 {
+	if len(partitionIDs) == 1 {
+		return partitionIDs[0]
 	}
 	return 0
 }

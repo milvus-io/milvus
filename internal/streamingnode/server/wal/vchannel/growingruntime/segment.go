@@ -178,16 +178,7 @@ func (s *growingSegment) ensureCSegment(timetick uint64) error {
 	if s.segment != nil {
 		return nil
 	}
-	segment, err := segcore.CreateCSegment(&segcore.CreateCSegmentRequest{
-		Collection:  s.collection,
-		SegmentID:   s.segmentID,
-		SegmentType: segcore.SegmentTypeGrowing,
-	})
-	if err != nil {
-		return err
-	}
-	s.segment = segment
-	return nil
+	return s.ensureCSegmentLocked()
 }
 
 func (s *growingSegment) applySnapshotInsert(ctx context.Context, raw message.ImmutableMessage) error {

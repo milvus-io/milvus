@@ -28,10 +28,7 @@ func (cm *QueryMVCCManager) GetQueryMVCCOfVChannel(vchannel string) QueryVChanne
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	if mvcc, ok := cm.vchannelMVCCs[vchannel]; ok {
-		return mvcc
-	}
-	return QueryVChannelMVCC{}
+	return cm.vchannelMVCCs[vchannel]
 }
 
 // ApplyRecoveryBarrier initializes or advances the recovered query MVCC baseline
@@ -94,13 +91,7 @@ func (cm *QueryMVCCManager) UpdateMVCC(msg message.MutableMessage) {
 			return
 		}
 		mvcc.GrowingTimetick = tt
-	case message.MessageTypeDelete:
-		if tt <= mvcc.TransformingTimetick {
-			return
-		}
-		mvcc.TransformingTimetick = tt
-		mvcc.GrowingTimetick = max(mvcc.GrowingTimetick, mvcc.TransformingTimetick)
-	case message.MessageTypeCommitTxn:
+	case message.MessageTypeDelete, message.MessageTypeCommitTxn:
 		if tt <= mvcc.TransformingTimetick {
 			return
 		}
@@ -152,11 +143,4 @@ type QueryVChannelMVCC struct {
 	GrowingTimetick      uint64
 	TransformingTimetick uint64
 	Confirmed            bool
-}
-
-func max(a, b uint64) uint64 {
-	if a >= b {
-		return a
-	}
-	return b
 }
