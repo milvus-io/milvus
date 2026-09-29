@@ -13,6 +13,12 @@ import (
 )
 
 func (h *SNQueryViewHandler) AcquireUpView(ctx context.Context, shardID qviews.ShardID, version qviews.QueryViewVersion) (*QueryViewLease, error) {
+	return h.acquireUpView(ctx, shardID, version, true)
+}
+
+// Query execution only needs a reference and metadata; planning also needs an
+// owned topology snapshot. Both acquisitions use the same serving lease rules.
+func (h *SNQueryViewHandler) acquireUpView(ctx context.Context, shardID qviews.ShardID, version qviews.QueryViewVersion, withTopology bool) (*QueryViewLease, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -24,10 +30,10 @@ func (h *SNQueryViewHandler) AcquireUpView(ctx context.Context, shardID qviews.S
 	if shard == nil {
 		return nil, viewerror.NewViewNotFound("query view %s is not found", shardID.String())
 	}
-	return shard.acquireUpView(ctx, version)
+	return shard.acquireUpView(ctx, version, withTopology)
 }
 
-func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryViewVersion) (*QueryViewLease, error) {
+func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryViewVersion, withTopology bool) (*QueryViewLease, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -44,20 +50,25 @@ func (s *snShardView) acquireUpView(ctx context.Context, version qviews.QueryVie
 	if entry.sm.State() != qviews.QueryViewStateUp {
 		return nil, viewerror.NewViewInvalidated("query view %s is not up, current state is %s", version.String(), entry.sm.State().String())
 	}
-	return s.newQueryViewLeaseLocked(version, entry), nil
+	return s.newQueryViewLeaseLocked(version, entry, withTopology), nil
 }
 
 // Caller holds the shard mutex.
-func (s *snShardView) newQueryViewLeaseLocked(version qviews.QueryViewVersion, entry *snViewEntry) *QueryViewLease {
+func (s *snShardView) newQueryViewLeaseLocked(version qviews.QueryViewVersion, entry *snViewEntry, withTopology bool) *QueryViewLease {
 	entry.queryRefs++
 	s.renewServingLeaseLocked(entry)
 	// A pending Down command must not appear as the locally leased state.
-	view := entry.sm.buildReport()
+	meta := proto.Clone(entry.sm.meta).(*viewpb.QueryViewMeta)
+	meta.State = viewpb.QueryViewState(entry.sm.coordVisibleState())
+	var view *viewpb.QueryViewOfShard
+	if withTopology {
+		view = entry.sm.buildReport()
+	}
 	var once sync.Once
 	released := false
 	return &QueryViewLease{
 		Version: version,
-		Meta:    proto.Clone(view.GetMeta()).(*viewpb.QueryViewMeta),
+		Meta:    meta,
 		View:    view,
 		Renew: func() {
 			s.mu.Lock()

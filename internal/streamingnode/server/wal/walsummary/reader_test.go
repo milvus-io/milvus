@@ -44,13 +44,17 @@ func TestBoundedReadAcrossStorageStates(t *testing.T) {
 	b, err := m.ReadTransform(ctx, "v1", 0, 400, ReadLimits{})
 	require.NoError(t, err)
 	require.Len(t, b.Entries, 3)
-	// Results are caller-owned even when sourced from the hot tail.
-	b.Entries[2].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0] = -1
+	// Results are caller-owned across durable, sealed and pending storage.
+	for _, entry := range b.Entries {
+		entry.GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0] = -1
+	}
 	require.NoError(t, m.writeChunk(ctx, sc))
 	b, err = m.ReadTransform(ctx, "v1", 0, 400, ReadLimits{})
 	require.NoError(t, err)
 	require.Len(t, b.Entries, 3)
-	require.Equal(t, int64(300), b.Entries[2].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0])
+	for i, want := range []int64{100, 200, 300} {
+		require.Equal(t, want, b.Entries[i].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data[0])
+	}
 	// No record for this VChannel is still a proven interval, including barriers.
 	b, err = m.ReadTransform(ctx, "v2", 0, 900, ReadLimits{})
 	require.NoError(t, err)
@@ -66,6 +70,30 @@ func TestBoundedReadAcrossStorageStates(t *testing.T) {
 	case <-b.Changed:
 	default:
 		t.Fatal("barrier must notify readers")
+	}
+}
+
+func TestReadTransformCachedResultsAreCallerOwned(t *testing.T) {
+	ctx := context.Background()
+	m, _ := newTransformTestManagerWithStore(t)
+	m.chunkIndex.cache.capacity = 1 << 20
+	var released bool
+	flushTransform(t, m, "v1", 100, &released)
+	chunk := m.chunkIndex.chunks[0]
+	require.NotNil(t, chunk.payload, "writes populate the cache")
+	for _, cold := range []bool{false, true, false} {
+		if cold {
+			m.chunkIndex.cache.mu.Lock()
+			m.chunkIndex.cache.evictLocked(chunk)
+			m.chunkIndex.cache.mu.Unlock()
+		}
+		batch, err := m.ReadTransform(ctx, "v1", 0, 100, ReadLimits{})
+		require.NoError(t, err)
+		require.Len(t, batch.Entries, 1)
+		ids := batch.Entries[0].GetDelete().Blocks[0].PrimaryKeys.GetIntId().Data
+		require.Equal(t, []int64{100}, ids)
+		ids[0] = -1
+		require.NotNil(t, chunk.payload, "reads populate the cache")
 	}
 }
 

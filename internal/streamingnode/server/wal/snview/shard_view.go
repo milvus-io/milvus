@@ -404,7 +404,7 @@ func (s *snShardView) acquireLatestUpView(ctx context.Context) (*QueryViewLease,
 	if selected == nil {
 		return nil, viewerror.NewViewNotFound("latest up query view %s is not found", s.shardID.String())
 	}
-	return s.newQueryViewLeaseLocked(selectedVersion, selected), nil
+	return s.newQueryViewLeaseLocked(selectedVersion, selected, true), nil
 }
 
 func (s *snShardView) releaseQueryViewLease(version qviews.QueryViewVersion) {

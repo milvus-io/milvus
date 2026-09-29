@@ -1,8 +1,6 @@
 package walview
 
 import (
-	"google.golang.org/protobuf/proto"
-
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/util/function"
@@ -12,7 +10,8 @@ import (
 // retain text-only WAL inserts before its asynchronous pack writer materializes
 // function outputs; querying that snapshot must not depend on writer timing.
 func MaterializeInsertRequest(schema *schemapb.CollectionSchema, insert SegmentInsertMessage) (*msgpb.InsertRequest, error) {
-	request := proto.Clone(insert.Message.MustBody()).(*msgpb.InsertRequest)
+	// MustBody decodes a fresh request, so materialization already owns it.
+	request := insert.Message.MustBody()
 	request.PartitionID = insert.Assignment.GetPartitionId()
 	request.SegmentID = insert.Assignment.GetSegmentAssignment().GetSegmentId()
 	outputs, err := function.EmbeddingOutputFieldIDs(schema)
