@@ -317,12 +317,7 @@ func (r *QueryRuntime) drainReady() {
 func (r *QueryRuntime) takeDrainBatch() ([]walview.VChannelResourceEvent, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.state == queryRuntimeClosed {
-		r.drainScheduled = false
-		r.cond.Broadcast()
-		return nil, false
-	}
-	if len(r.pending) == 0 {
+	if r.state == queryRuntimeClosed || len(r.pending) == 0 {
 		r.drainScheduled = false
 		r.cond.Broadcast()
 		return nil, false

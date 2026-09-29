@@ -88,8 +88,7 @@ func (r *Runtime) markGrowingTimeTick(timetick uint64) {
 		r.mu.Unlock()
 		return
 	}
-	segmentsToRelease := make([]*growingSegment, 0)
-	r.collectSegmentsToReleaseLocked(&segmentsToRelease)
+	segmentsToRelease := r.collectSegmentsToReleaseLocked()
 	r.mvccCond.Broadcast()
 	r.mu.Unlock()
 	for _, segment := range segmentsToRelease {

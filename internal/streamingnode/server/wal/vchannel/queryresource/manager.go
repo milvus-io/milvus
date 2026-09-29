@@ -137,7 +137,7 @@ func (m *Manager) Release(req snview.ReleaseResource) {
 	}
 	m.mu.Unlock()
 	cancelTask(task)
-	closeRuntime(runtime)
+	runtime.Close()
 	if hasAdvance && advanceRuntime != nil {
 		m.scheduler.Submit(resourceReleaseTask{runtime: advanceRuntime, version: advance, onDropped: req.OnDropped})
 	} else {
@@ -190,7 +190,7 @@ func (m *Manager) Close() {
 	if task != nil {
 		_, _ = task.Result()
 	}
-	closeRuntime(runtime)
+	runtime.Close()
 }
 
 func (m *Manager) ObserveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
@@ -265,7 +265,7 @@ func (m *Manager) startBuildLocked(meta *viewpb.QueryViewMeta, build ViewBuilder
 		}
 		// Close outside the owner/manager locks, also waking a producer blocked on
 		// the failed runtime's full event queue before the next snapshot capture.
-		closeRuntime(runtime)
+		runtime.Close()
 		m.mu.Lock()
 		if m.runtime == runtime {
 			m.runtime = nil
@@ -339,7 +339,7 @@ func (m *Manager) finishBuild(task *scheduledBuild) {
 	m.mu.Lock()
 	if m.task != task {
 		m.mu.Unlock()
-		closeRuntime(runtime)
+		runtime.Close()
 		return
 	}
 	m.task = nil
@@ -366,8 +366,8 @@ func (m *Manager) finishBuild(task *scheduledBuild) {
 	m.mu.Unlock()
 
 	cancelTask(task)
-	closeRuntime(runtime)
-	closeRuntime(failedRuntime)
+	runtime.Close()
+	failedRuntime.Close()
 	for _, callback := range unrecoverable {
 		m.submitCallback(callback)
 	}
