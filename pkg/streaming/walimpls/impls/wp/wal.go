@@ -90,8 +90,13 @@ func (w *walImpl) Truncate(ctx context.Context, id message.MessageID) error {
 }
 
 func (w *walImpl) Close() {
-	closeWriterErr := w.p.Close(context.Background())
-	if closeWriterErr != nil {
-		w.Log().Warn(context.TODO(), "close woodpecker writer err", mlog.Err(closeWriterErr))
+	ctx := context.Background()
+	if w.p != nil {
+		if err := w.p.Close(ctx); err != nil {
+			w.Log().Warn(ctx, "close woodpecker writer err", mlog.Err(err))
+		}
+	}
+	if err := w.l.Close(ctx); err != nil {
+		w.Log().Warn(ctx, "close woodpecker log handle err", mlog.Err(err))
 	}
 }
