@@ -696,10 +696,7 @@ func appendIdempotencySections(
 	sections *ChunkSections,
 ) error {
 	inserts := &streamingpb.VChannelSummaryInsertSection{
-		Records: make([]*streamingpb.VChannelSummaryInsertRecord, 0, len(sections.Inserts)),
-	}
-	for _, record := range sections.Inserts {
-		inserts.Records = append(inserts.Records, proto.Clone(record).(*streamingpb.VChannelSummaryInsertRecord))
+		Records: sections.Inserts,
 	}
 	ref, err := appendSection(buf, inserts, len(inserts.Records))
 	if err != nil {
@@ -711,10 +708,7 @@ func appendIdempotencySections(
 		return nil
 	}
 	keys := &streamingpb.VChannelSummaryIdempotencySection{
-		Records: make([]*streamingpb.VChannelSummaryIdempotencyRecord, 0, len(sections.Idempotency)),
-	}
-	for _, record := range sections.Idempotency {
-		keys.Records = append(keys.Records, proto.Clone(record).(*streamingpb.VChannelSummaryIdempotencyRecord))
+		Records: sections.Idempotency,
 	}
 	if ref, err = appendSection(buf, keys, len(keys.Records)); err != nil {
 		return err
@@ -1113,11 +1107,15 @@ func unmarshalTransformSection(
 	if uint64(len(section.GetRecords())) != ref.GetRecordCount() {
 		return nil, storeCorruptedf("transform section record count mismatch for vchannel %s", vchannel)
 	}
-	records := make([]*streamingpb.VChannelSummaryTransformRecord, 0, len(section.GetRecords()))
-	for _, record := range section.GetRecords() {
-		records = append(records, cloneTransformRecord(record))
+	// Decoded records belong to this reader; neither sorting nor returning them
+	// can mutate the shared encoded chunk cache.
+	records := section.GetRecords()
+	if len(records) > 1 {
+		sort.SliceStable(records, func(i, j int) bool {
+			return records[i].GetTimeTick() < records[j].GetTimeTick()
+		})
 	}
-	return sortedTransformRecords(records), nil
+	return records, nil
 }
 
 func sortedTransformRecords(records []*streamingpb.VChannelSummaryTransformRecord) []*streamingpb.VChannelSummaryTransformRecord {
@@ -1130,13 +1128,6 @@ func sortedTransformRecords(records []*streamingpb.VChannelSummaryTransformRecor
 		return sorted[i].GetTimeTick() < sorted[j].GetTimeTick()
 	})
 	return sorted
-}
-
-func cloneTransformRecord(record *streamingpb.VChannelSummaryTransformRecord) *streamingpb.VChannelSummaryTransformRecord {
-	if record == nil {
-		return nil
-	}
-	return proto.Clone(record).(*streamingpb.VChannelSummaryTransformRecord)
 }
 
 func transformRecordTimetickRange(records []*streamingpb.VChannelSummaryTransformRecord) (uint64, uint64) {

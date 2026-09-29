@@ -22,7 +22,7 @@ func (h *SNQueryViewHandler) AcquireSearchSegmentTasks(
 	if req.GetIgnoreGrowing() {
 		return NewSNSearchSegmentTasks(nil), nil
 	}
-	lease, err := h.AcquireUpView(ctx, shardID, version)
+	lease, err := h.acquireUpView(ctx, shardID, version, false)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +73,7 @@ func (h *SNQueryViewHandler) AcquireQuerySegmentTasks(
 	mvcc *viewpb.QueryPlanMVCC,
 	req *internalpb.RetrieveRequest,
 ) (viewquery.QuerySegmentTasks, error) {
-	lease, err := h.AcquireUpView(ctx, shardID, version)
+	lease, err := h.acquireUpView(ctx, shardID, version, false)
 	if err != nil {
 		return nil, err
 	}

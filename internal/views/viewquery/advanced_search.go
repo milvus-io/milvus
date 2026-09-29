@@ -14,11 +14,9 @@ func BuildSubSearchRequests(req *internalpb.SearchRequest) ([]*internalpb.Search
 	if len(req.GetSubReqs()) == 0 {
 		return nil, merr.WrapErrServiceInternalMsg("advanced search request has no sub-requests")
 	}
-	parent := proto.Clone(req).(*internalpb.SearchRequest)
-	parent.SubReqs = nil
 	requests := make([]*internalpb.SearchRequest, len(req.GetSubReqs()))
 	for i, sub := range req.GetSubReqs() {
-		request, err := BuildSubSearchRequest(parent, sub)
+		request, err := BuildSubSearchRequest(req, sub)
 		if err != nil {
 			return nil, err
 		}
@@ -37,26 +35,44 @@ func BuildSubSearchRequest(parent *internalpb.SearchRequest, sub *internalpb.Sub
 		return nil, merr.WrapErrServiceInternalMsg("advanced search contains a nil sub-request")
 	}
 
-	req := proto.Clone(parent).(*internalpb.SearchRequest)
-	req.PartitionIDs = append([]int64(nil), sub.GetPartitionIDs()...)
-	req.Dsl = sub.GetDsl()
-	req.PlaceholderGroup = append([]byte(nil), sub.GetPlaceholderGroup()...)
-	req.DslType = sub.GetDslType()
-	req.SerializedExprPlan = append([]byte(nil), sub.GetSerializedExprPlan()...)
-	req.Nq = sub.GetNq()
-	req.Topk = sub.GetTopk()
-	req.Offset = sub.GetOffset()
-	req.MetricType = sub.GetMetricType()
-	req.IgnoreGrowing = sub.GetIgnoreGrowing()
-	req.GroupByFieldId = sub.GetGroupByFieldId()
-	req.GroupSize = sub.GetGroupSize()
-	req.FieldId = sub.GetFieldId()
-	req.AnalyzerName = sub.GetAnalyzerName()
-	req.SearchType = sub.GetSearchType()
-	req.PkFilter = common.PkFilterNoPkFilter
-	req.SubReqs = nil
-	req.IsAdvanced = false
-	return req, nil
+	// Assemble only fields used by this sub-search before cloning. In particular,
+	// never copy the parent's SubReqs or payloads that the sub-request replaces.
+	req := &internalpb.SearchRequest{
+		Base:                    parent.GetBase(),
+		ReqID:                   parent.GetReqID(),
+		DbID:                    parent.GetDbID(),
+		CollectionID:            parent.GetCollectionID(),
+		OutputFieldsId:          parent.GetOutputFieldsId(),
+		MvccTimestamp:           parent.GetMvccTimestamp(),
+		GuaranteeTimestamp:      parent.GetGuaranteeTimestamp(),
+		TimeoutTimestamp:        parent.GetTimeoutTimestamp(),
+		Username:                parent.GetUsername(),
+		ConsistencyLevel:        parent.GetConsistencyLevel(),
+		IsTopkReduce:            parent.GetIsTopkReduce(),
+		IsRecallEvaluation:      parent.GetIsRecallEvaluation(),
+		IsIterator:              parent.GetIsIterator(),
+		CollectionTtlTimestamps: parent.GetCollectionTtlTimestamps(),
+		EntityTtlPhysicalTime:   parent.GetEntityTtlPhysicalTime(),
+		GroupByFieldIds:         parent.GetGroupByFieldIds(),
+		PartitionIDs:            sub.GetPartitionIDs(),
+		Dsl:                     sub.GetDsl(),
+		PlaceholderGroup:        sub.GetPlaceholderGroup(),
+		DslType:                 sub.GetDslType(),
+		SerializedExprPlan:      sub.GetSerializedExprPlan(),
+		Nq:                      sub.GetNq(),
+		Topk:                    sub.GetTopk(),
+		Offset:                  sub.GetOffset(),
+		MetricType:              sub.GetMetricType(),
+		IgnoreGrowing:           sub.GetIgnoreGrowing(),
+		GroupByFieldId:          sub.GetGroupByFieldId(),
+		GroupSize:               sub.GetGroupSize(),
+		FieldId:                 sub.GetFieldId(),
+		AnalyzerName:            sub.GetAnalyzerName(),
+		SearchType:              sub.GetSearchType(),
+		PkFilter:                common.PkFilterNoPkFilter,
+	}
+	req.ProtoReflect().SetUnknown(parent.ProtoReflect().GetUnknown())
+	return proto.Clone(req).(*internalpb.SearchRequest), nil
 }
 
 // UpdateSubSearchRequest writes optimizer-owned fields back to the advanced

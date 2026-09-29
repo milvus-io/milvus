@@ -52,6 +52,11 @@ new acquisition even if the timer callback has been delayed. A request already
 holding a call reference can finish deriving handles. The timed lease and
 reference count are both required to be exhausted before normal Down.
 
+Phase 2's internal lease acquisition copies only metadata, without snapshotting
+the QN/SN topology. Phase 1 and the public snapshot acquisition APIs still return
+an owned full view. Both paths share the same state checks, reference accounting,
+renewal and release logic; omitting the unused topology changes no lease behavior.
+
 ## Reference ownership and completion
 
 Phase 1 holds a call reference until plan generation returns. Phase 2 holds one
