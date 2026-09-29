@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -973,6 +974,89 @@ func TestLocalSegmentReopenInjectsDiskIndexLoadParams(t *testing.T) {
 	numLoadThread, ok := getParam(captured.GetIndexInfos()[0].GetIndexParams(), indexparams.NumLoadThreadKey)
 	assert.True(t, ok, "num_load_thread must be injected into DISKANN index params on Reopen")
 	assert.NotEmpty(t, numLoadThread)
+}
+
+func TestBuildIndexLoadParamsMatchesActualLoadPreparation(t *testing.T) {
+	paramtable.Init()
+	params := paramtable.Get()
+
+	oldEnable := params.KnowhereConfig.Enable.GetValue()
+	loadParamKey := params.KnowhereConfig.IndexParam.KeyPrefix + "HNSW.load.issue_51720"
+	oldLoadParam := params.GetWithDefault(loadParamKey, "")
+	t.Cleanup(func() {
+		require.NoError(t, params.Save(params.KnowhereConfig.Enable.Key, oldEnable))
+		if oldLoadParam == "" {
+			params.Remove(loadParamKey)
+			return
+		}
+		require.NoError(t, params.Save(loadParamKey, oldLoadParam))
+	})
+	require.NoError(t, params.Save(params.KnowhereConfig.Enable.Key, "true"))
+	require.NoError(t, params.Save(loadParamKey, "prepared"))
+
+	tests := []struct {
+		name       string
+		indexInfo  *querypb.FieldIndexInfo
+		assertions func(t *testing.T, prepared map[string]string)
+	}{
+		{
+			name: "DISKANN runtime params",
+			indexInfo: &querypb.FieldIndexInfo{
+				NumRows: 5000,
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "DISKANN"},
+					{Key: common.DimKey, Value: "128"},
+				},
+			},
+			assertions: func(t *testing.T, prepared map[string]string) {
+				assert.NotEmpty(t, prepared[indexparams.NumLoadThreadKey])
+				assert.NotEmpty(t, prepared[indexparams.SearchCacheBudgetKey])
+				assert.NotEmpty(t, prepared[indexparams.BeamWidthKey])
+			},
+		},
+		{
+			name: "BITMAP offset cache param",
+			indexInfo: &querypb.FieldIndexInfo{
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "BITMAP"},
+				},
+			},
+			assertions: func(t *testing.T, prepared map[string]string) {
+				assert.Equal(t, params.QueryNodeCfg.IndexOffsetCacheEnabled.GetValue(), prepared[common.IndexOffsetCacheEnabledKey])
+			},
+		},
+		{
+			name: "Knowhere load-stage param",
+			indexInfo: &querypb.FieldIndexInfo{
+				IndexParams: []*commonpb.KeyValuePair{
+					{Key: common.IndexTypeKey, Value: "HNSW"},
+				},
+			},
+			assertions: func(t *testing.T, prepared map[string]string) {
+				assert.Equal(t, "prepared", prepared["issue_51720"])
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			original := funcutil.KeyValuePair2Map(test.indexInfo.GetIndexParams())
+			prepared, err := buildIndexLoadParams(test.indexInfo)
+			require.NoError(t, err)
+
+			// The builder must not mutate metadata owned by QueryCoord. Resource
+			// estimation applies mmap/warmup changes only to the returned map.
+			assert.Equal(t, original, funcutil.KeyValuePair2Map(test.indexInfo.GetIndexParams()))
+
+			actualLoadInfo := &querypb.FieldIndexInfo{
+				NumRows:     test.indexInfo.GetNumRows(),
+				IndexParams: funcutil.Map2KeyValuePair(original),
+			}
+			require.NoError(t, prepareIndexLoadParams([]*querypb.FieldIndexInfo{actualLoadInfo}))
+			assert.Equal(t, prepared, funcutil.KeyValuePair2Map(actualLoadInfo.GetIndexParams()))
+			test.assertions(t, prepared)
+		})
+	}
 }
 
 // TestBaseSegment_SkipGrowingBF tests that skipGrowingBF bypasses PK candidate checks.
