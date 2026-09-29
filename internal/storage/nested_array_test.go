@@ -19,10 +19,7 @@ package storage
 import (
 	"testing"
 
-	"github.com/apache/arrow/go/v17/arrow/array"
-	"github.com/apache/arrow/go/v17/arrow/memory"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 )
@@ -108,110 +105,15 @@ func TestStorageV2V3NestedArraySize(t *testing.T) {
 	require.Equal(t, 14, quadrupleData.GetMemorySize())
 }
 
-func TestStorageV2V3NestedArraySerdeRoundTrip(t *testing.T) {
-	original := nestedArrayData(
-		schemapb.DataType_Array,
-		nestedArrayData(
-			schemapb.DataType_Int32,
-			nestedArrayIntData(1, 2),
-			nestedArrayIntData(3, 4, 5),
-		),
-	)
-
-	field := &schemapb.FieldSchema{
-		FieldID:     100,
-		Name:        "nested",
-		DataType:    schemapb.DataType_Array,
-		ElementType: schemapb.DataType_Array,
-		TypeSchema: &schemapb.TypeSchema{
-			Kind: &schemapb.TypeSchema_ArrayElement{
-				ArrayElement: &schemapb.TypeSchema{
-					Kind: &schemapb.TypeSchema_ArrayElement{
-						ArrayElement: &schemapb.TypeSchema{
-							Kind: &schemapb.TypeSchema_ArrayElement{
-								ArrayElement: &schemapb.TypeSchema{
-									Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
+func TestStorageRejectsNestedArrayBeyondTwoLevels(t *testing.T) {
+	for _, depth := range []int{3, 4} {
+		node := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32}}
+		for range depth {
+			node = &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: node}}
+		}
+		field := &schemapb.FieldSchema{FieldID: 100, Name: "nested", DataType: schemapb.DataType_Array,
+			ElementType: schemapb.DataType_Array, TypeSchema: node}
+		_, err := ArrowTypeForField(field)
+		require.ErrorContains(t, err, "exactly two list levels")
 	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
-	arrowSchema, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
-	defer builder.Release()
-
-	require.NoError(t, BuildRecord(builder, &InsertData{Data: map[FieldID]FieldData{
-		field.GetFieldID(): &ArrayFieldData{Data: []*schemapb.ScalarField{original}},
-	}}, schema))
-	record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{field.GetFieldID(): 0})
-	defer record.Release()
-
-	got, err := RecordToInsertData(record, schema, nil)
-	require.NoError(t, err)
-	require.True(t, proto.Equal(original, got.Data[field.GetFieldID()].(*ArrayFieldData).Data[0]))
-}
-
-func TestStorageV2V3QuadrupleNestedArraySerdeRoundTrip(t *testing.T) {
-	original := nestedArrayData(
-		schemapb.DataType_Array,
-		nestedArrayData(
-			schemapb.DataType_Array,
-			nestedArrayData(
-				schemapb.DataType_Int32,
-				nestedArrayIntData(1, 2),
-				nestedArrayIntData(),
-				nestedArrayIntData(3),
-			),
-		),
-	)
-
-	field := &schemapb.FieldSchema{
-		FieldID:     100,
-		Name:        "nested_4d",
-		DataType:    schemapb.DataType_Array,
-		ElementType: schemapb.DataType_Array,
-		TypeSchema: &schemapb.TypeSchema{
-			Kind: &schemapb.TypeSchema_ArrayElement{
-				ArrayElement: &schemapb.TypeSchema{
-					Kind: &schemapb.TypeSchema_ArrayElement{
-						ArrayElement: &schemapb.TypeSchema{
-							Kind: &schemapb.TypeSchema_ArrayElement{
-								ArrayElement: &schemapb.TypeSchema{
-									Kind: &schemapb.TypeSchema_ArrayElement{
-										ArrayElement: &schemapb.TypeSchema{
-											Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{field}}
-	arrowSchema, err := ConvertToArrowSchema(schema, true)
-	require.NoError(t, err)
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, arrowSchema)
-	defer builder.Release()
-
-	require.NoError(t, BuildRecord(builder, &InsertData{Data: map[FieldID]FieldData{
-		field.GetFieldID(): &ArrayFieldData{Data: []*schemapb.ScalarField{original}},
-	}}, schema))
-	record := NewSimpleArrowRecord(builder.NewRecord(), map[FieldID]int{field.GetFieldID(): 0})
-	defer record.Release()
-
-	got, err := RecordToInsertData(record, schema, nil)
-	require.NoError(t, err)
-	roundTripped := got.Data[field.GetFieldID()].(*ArrayFieldData).Data[0]
-	require.True(t, proto.Equal(original, roundTripped))
-	require.Equal(t, schemapb.DataType_Array, roundTripped.GetArrayData().GetElementType())
-	require.Equal(t, schemapb.DataType_Array, roundTripped.GetArrayData().GetData()[0].GetArrayData().GetElementType())
-	require.Equal(t, schemapb.DataType_Int32, roundTripped.GetArrayData().GetData()[0].GetArrayData().GetData()[0].GetArrayData().GetElementType())
 }

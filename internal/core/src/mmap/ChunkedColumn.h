@@ -704,7 +704,9 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     explicit ChunkedArrayColumn(std::shared_ptr<CacheSlot<Chunk>> slot,
                                 const FieldMeta& field_meta)
         : ChunkedColumnBase(std::move(slot), field_meta),
-          is_nested_array_(field_meta.is_nested_array()) {
+          is_nested_array_(field_meta.is_native_list_array()),
+          has_nullable_element_(field_meta.has_nullable_array_element()),
+          field_name_(field_meta.get_name().get()) {
     }
 
     void
@@ -713,6 +715,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                 const int64_t* offsets,
                 int64_t count) const override {
         if (is_nested_array_) {
+            RejectNullableElements();
             ThrowInfo(ErrorCode::Unsupported,
                       "legacy ArrayView API does not support nested ARRAY");
         }
@@ -747,6 +750,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                std::optional<std::pair<int64_t, int64_t>> offset_len =
                    std::nullopt) const override {
         if (is_nested_array_) {
+            RejectNullableElements();
             ThrowInfo(ErrorCode::Unsupported,
                       "legacy ArrayViews API does not support nested ARRAY");
         }
@@ -764,6 +768,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                         std::nullopt) const override {
         AssertInfo(is_nested_array_,
                    "ArrayValueViews requires a recursive ARRAY field");
+        RejectNullableElements();
         auto ca = SemiInlineGet(
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto* chunk =
@@ -781,6 +786,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
                         int64_t chunk_id,
                         const FixedVector<int32_t>& offsets) const override {
         if (is_nested_array_) {
+            RejectNullableElements();
             ThrowInfo(
                 ErrorCode::Unsupported,
                 "legacy ArrayViewsByOffsets API does not support nested ARRAY");
@@ -800,6 +806,7 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
         AssertInfo(is_nested_array_,
                    "ArrayValueViewsByOffsets requires a recursive ARRAY "
                    "field");
+        RejectNullableElements();
         auto ca = SemiInlineGet(
             slot_->PinCells(op_ctx, {static_cast<cid_t>(chunk_id)}));
         auto* chunk =
@@ -814,7 +821,27 @@ class ChunkedArrayColumn : public ChunkedColumnBase {
     }
 
  private:
+    void
+    ValidateArrayViewTarget(TargetType target_type) const override {
+        if (target_type == TargetType::ArrayView ||
+            target_type == TargetType::ArrayValueView) {
+            RejectNullableElements();
+        }
+    }
+
+    void
+    RejectNullableElements() const {
+        if (has_nullable_element_) {
+            ThrowInfo(ErrorCode::NotImplemented,
+                      "expressions on element-nullable array field {} are "
+                      "not supported yet",
+                      field_name_);
+        }
+    }
+
     bool is_nested_array_{false};
+    bool has_nullable_element_{false};
+    std::string field_name_;
 };
 
 class ChunkedVectorArrayColumn : public ChunkedColumnBase {

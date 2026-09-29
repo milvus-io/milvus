@@ -377,11 +377,55 @@ StructElementOffsetsSealed::ElementBitsetToRowBitsetAny(
                            row_result);
 }
 
+namespace {
+
+// Number of elements in one native-list ARRAY row as produced by
+// ArrayValueView::output_data: scalar levels are dense (a null element keeps
+// its slot), and a null row has no payload.
+int32_t
+NativeListProtoRowLength(const ScalarFieldProto& row,
+                         const FieldMeta& field_meta) {
+    switch (row.data_case()) {
+        case ScalarFieldProto::DATA_NOT_SET:
+            return 0;
+        case ScalarFieldProto::kArrayData:
+            return row.array_data().data_size();
+        case ScalarFieldProto::kBoolData:
+            return row.bool_data().data_size();
+        case ScalarFieldProto::kIntData:
+            return row.int_data().data_size();
+        case ScalarFieldProto::kLongData:
+            return row.long_data().data_size();
+        case ScalarFieldProto::kFloatData:
+            return row.float_data().data_size();
+        case ScalarFieldProto::kDoubleData:
+            return row.double_data().data_size();
+        case ScalarFieldProto::kStringData:
+            return row.string_data().data_size();
+        default:
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "unexpected proto case {} for native-list ARRAY field {}",
+                      static_cast<int>(row.data_case()),
+                      field_meta.get_name().get());
+    }
+}
+
+}  // namespace
+
 std::shared_ptr<StructElementOffsetsSealed>
 StructElementOffsetsSealed::BuildFromColumn(
     const ChunkedColumnInterface& column,
     const FieldMeta& field_meta,
     int64_t row_count) {
+    if ((field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+         field_meta.is_element_nullable()) ||
+        field_meta.has_nullable_array_element()) {
+        ThrowInfo(
+            ErrorCode::NotImplemented,
+            "struct element offsets on element-nullable array field {} are "
+            "not supported yet",
+            field_meta.get_name().get());
+    }
     if (row_count == 0) {
         LOG_INFO(
             "StructElementOffsetsSealed::BuildFromColumn: empty segment for "
@@ -435,11 +479,34 @@ StructElementOffsetsSealed::BuildFromColumn(
                 append_array_length(array_len);
             }
         }
-    } else if (field_meta.is_nested_array()) {
-        // TODO(local-format): Recursive ARRAY offset construction still uses
-        // the Raw Chunk contract. Migrate this to ArrayValueViews or Scan/Take
-        // before declaring recursive ARRAY supported by Vortex local format;
-        // the initial integration intentionally leaves this capability gap.
+    } else if (field_meta.is_native_list_array() &&
+               column.GetLocalFormat() ==
+                   ChunkedColumnInterface::LocalFormat::Vortex) {
+        // VortexColumn has no Chunk access. Read the row lengths through the
+        // output path, which serves every native-list field, in bounded
+        // batches.
+        constexpr int64_t kBatchRows = 8192;
+        std::vector<int64_t> offsets;
+        std::vector<int32_t> lengths;
+        for (int64_t start = 0; start < row_count; start += kBatchRows) {
+            const auto count = std::min(kBatchRows, row_count - start);
+            offsets.resize(count);
+            for (int64_t i = 0; i < count; ++i) {
+                offsets[i] = start + i;
+            }
+            lengths.assign(count, 0);
+            column.BulkArrayValueAt(
+                op_ctx_ptr,
+                [&](ScalarFieldProto&& row, size_t i) {
+                    lengths[i] = NativeListProtoRowLength(row, field_meta);
+                },
+                offsets.data(),
+                count);
+            for (const auto length : lengths) {
+                append_array_length(length);
+            }
+        }
+    } else if (field_meta.is_native_list_array()) {
         for (int64_t chunk_id = 0; chunk_id < num_chunks; ++chunk_id) {
             auto pinned_chunk = column.GetChunk(op_ctx_ptr, chunk_id);
             auto* array_chunk =

@@ -22,20 +22,78 @@
 #include <vector>
 
 #include "arrow/array/array_binary.h"
+#include "arrow/array/array_nested.h"
+#include "arrow/array/concatenate.h"
 #include "common/ArrayValue.h"
 #include "common/ChunkWriter.h"
 #include "common/ColumnarArrayChunk.h"
 #include "common/EasyAssert.h"
 #include "storage/MmapManager.h"
+#include "storage/Util.h"
 
 namespace milvus {
 namespace {
+
+size_t
+LeafPrefixSize(size_t count, bool nullable) {
+    if (!nullable) {
+        return 0;
+    }
+    const auto bitmap_bytes = (count + 7) / 8;
+    return (bitmap_bytes + alignof(uint64_t) - 1) & ~(alignof(uint64_t) - 1);
+}
+
+void
+ValidateArrowBufferElements(const std::shared_ptr<arrow::Buffer>& buffer,
+                            uint64_t first,
+                            uint64_t count,
+                            size_t width,
+                            const char* description) {
+    if (count == 0) {
+        return;
+    }
+    if (buffer == nullptr || buffer->size() < 0 ||
+        first > static_cast<uint64_t>(buffer->size()) / width ||
+        count > static_cast<uint64_t>(buffer->size()) / width - first) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array {} buffer is shorter than the declared range",
+                  description);
+    }
+}
+
+void
+ValidateArrowValidityBitmap(const arrow::Array& array) {
+    const auto& data = array.data();
+    if (array.offset() < 0 || array.length() < 0 ||
+        array.offset() >
+            std::numeric_limits<int64_t>::max() - array.length()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array validity range is invalid");
+    }
+    if (data->buffers.empty()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array has no validity buffer slot");
+    }
+    const auto& bitmap = data->buffers[0];
+    if (bitmap == nullptr) {
+        if (data->null_count > 0) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array has nulls without a validity bitmap");
+        }
+        return;
+    }
+    const auto bits = static_cast<uint64_t>(array.offset()) +
+                      static_cast<uint64_t>(array.length());
+    ValidateArrowBufferElements(
+        bitmap, 0, bits / 8 + (bits % 8 != 0), 1, "validity");
+}
 
 struct ColumnarArrayBuildNode {
     ArrayOffsets offsets;
     // Serialized with the existing Chunk/Arrow convention: one bit per row,
     // where 1 means valid and 0 means null.
     std::vector<uint8_t> validity_bitmap;
+    std::vector<uint8_t> leaf_validity_bitmap;
     std::unique_ptr<ColumnarArrayBuildNode> array_child;
     DataType leaf_type{DataType::NONE};
     std::vector<char> fixed_data;
@@ -176,7 +234,19 @@ CopyLeafRow(ColumnarArrayBuildNode& node,
             }
             return element_offset;
         case DataType::INT8:
+            for (auto value : row.int_data().data()) {
+                node.fixed_data[element_offset++] = static_cast<int8_t>(value);
+            }
+            return element_offset;
         case DataType::INT16:
+            for (auto value : row.int_data().data()) {
+                const auto narrow = static_cast<int16_t>(value);
+                std::memcpy(
+                    node.fixed_data.data() + element_offset++ * sizeof(narrow),
+                    &narrow,
+                    sizeof(narrow));
+            }
+            return element_offset;
         case DataType::INT32:
             return CopyFixedValues(
                 node.fixed_data, element_offset, row.int_data().data());
@@ -210,7 +280,9 @@ GetLeafFixedWidth(DataType data_type) {
         case DataType::BOOL:
             return sizeof(uint8_t);
         case DataType::INT8:
+            return sizeof(int8_t);
         case DataType::INT16:
+            return sizeof(int16_t);
         case DataType::INT32:
             return sizeof(int32_t);
         case DataType::INT64:
@@ -254,8 +326,10 @@ CopyLeafRow(ColumnarArrayBuildNode& node,
 }
 
 void
-FinalizeStringLeaf(ColumnarArrayBuildNode& node) {
-    const auto offsets_bytes = node.string_offsets.size() * sizeof(uint32_t);
+FinalizeStringLeaf(ColumnarArrayBuildNode& node, bool nullable) {
+    const auto offsets_bytes =
+        node.string_offsets.size() * sizeof(uint32_t) +
+        LeafPrefixSize(node.string_offsets.size() - 1, nullable);
     AssertInfo(offsets_bytes <=
                    static_cast<size_t>(std::numeric_limits<uint32_t>::max()),
                "columnar array string offsets exceed uint32 range");
@@ -269,7 +343,12 @@ FinalizeStringLeaf(ColumnarArrayBuildNode& node) {
 
 std::unique_ptr<ColumnarArrayBuildNode>
 BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
-                       const proto::schema::TypeSchema& type) {
+                       const proto::schema::TypeSchema& type,
+                       std::span<const uint8_t> row_validity = {}) {
+    AssertInfo(row_validity.empty() || row_validity.size() == rows.size(),
+               "array row validity length {} does not match {} rows",
+               row_validity.size(),
+               rows.size());
     auto node = std::make_unique<ColumnarArrayBuildNode>();
     if (type.nullable()) {
         node->validity_bitmap.resize((rows.size() + 7) / 8, 0);
@@ -280,10 +359,40 @@ BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
         AssertInfo(
             rows[i] != nullptr, "nested ARRAY row {} must not be null", i);
         const auto valid =
-            rows[i]->data_case() != ScalarFieldProto::DATA_NOT_SET;
+            row_validity.empty()
+                ? rows[i]->data_case() != ScalarFieldProto::DATA_NOT_SET
+                : row_validity[i] != 0;
         AssertInfo(type.nullable() || valid,
                    "non-nullable nested ARRAY node contains null row {}",
                    i);
+        AssertInfo(
+            !valid || rows[i]->data_case() != ScalarFieldProto::DATA_NOT_SET,
+            "valid array row {} has no typed payload",
+            i);
+        if (!valid && !row_validity.empty()) {
+            const auto element_type = GetColumnarArrayElementType(type);
+            if (element_type == DataType::ARRAY) {
+                AssertInfo(
+                    rows[i]->data_case() == ScalarFieldProto::kArrayData &&
+                        rows[i]->array_data().data_size() == 0 &&
+                        rows[i]->array_data().element_type() ==
+                            static_cast<proto::schema::DataType>(
+                                GetColumnarArrayElementType(
+                                    type.array_element())) &&
+                        rows[i]->valid_data_size() == 0,
+                    "null nested ARRAY row {} must have a typed empty "
+                    "placeholder",
+                    i);
+            } else {
+                AssertInfo(
+                    rows[i]->data_case() != ScalarFieldProto::DATA_NOT_SET &&
+                        GetLeafElementCount(*rows[i], element_type) == 0 &&
+                        rows[i]->valid_data_size() == 0,
+                    "null nested ARRAY row {} must have a typed empty "
+                    "placeholder",
+                    i);
+            }
+        }
         if (type.nullable() && valid) {
             node->validity_bitmap[i >> 3] |=
                 static_cast<uint8_t>(1U << (i & 0x07));
@@ -295,8 +404,11 @@ BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
         const auto expected_element_type = static_cast<proto::schema::DataType>(
             GetColumnarArrayElementType(child_type));
         size_t child_count = 0;
-        for (const auto* row : rows) {
-            if (row->data_case() == ScalarFieldProto::DATA_NOT_SET) {
+        for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
+            const auto* row = rows[row_index];
+            if ((row_validity.empty() &&
+                 row->data_case() == ScalarFieldProto::DATA_NOT_SET) ||
+                (!row_validity.empty() && !row_validity[row_index])) {
                 node->offsets.push_back(child_count);
                 continue;
             }
@@ -316,16 +428,35 @@ BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
         }
 
         std::vector<const ScalarFieldProto*> child_rows;
+        std::vector<uint8_t> child_validity;
         child_rows.reserve(child_count);
-        for (const auto* row : rows) {
-            if (row->data_case() == ScalarFieldProto::DATA_NOT_SET) {
+        child_validity.reserve(child_count);
+        for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
+            const auto* row = rows[row_index];
+            if ((row_validity.empty() &&
+                 row->data_case() == ScalarFieldProto::DATA_NOT_SET) ||
+                (!row_validity.empty() && !row_validity[row_index])) {
                 continue;
             }
+            AssertInfo(
+                child_type.nullable()
+                    ? row->valid_data_size() == row->array_data().data_size()
+                    : row->valid_data_size() == 0,
+                "nested array row {} has invalid element validity length",
+                row_index);
+            int child_index = 0;
             for (const auto& child_row : row->array_data().data()) {
+                AssertInfo(
+                    child_type.nullable() ||
+                        child_row.data_case() != ScalarFieldProto::DATA_NOT_SET,
+                    "non-nullable nested ARRAY node contains null row");
                 child_rows.push_back(&child_row);
+                child_validity.push_back(
+                    child_type.nullable() ? row->valid_data(child_index++) : 1);
             }
         }
-        node->array_child = BuildNodeFromProtoRows(child_rows, child_type);
+        node->array_child =
+            BuildNodeFromProtoRows(child_rows, child_type, child_validity);
         return node;
     }
 
@@ -348,6 +479,11 @@ BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
         }
     }
 
+    const bool leaf_nullable = type.array_element().nullable();
+    if (leaf_nullable) {
+        node->leaf_validity_bitmap.resize((child_count + 7) / 8, 0);
+    }
+
     if (is_string_leaf) {
         node->string_offsets.reserve(child_count + 1);
         node->string_offsets.push_back(0);
@@ -362,7 +498,22 @@ BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
     }
 
     size_t element_offset = 0;
-    for (const auto* row : rows) {
+    for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
+        const auto* row = rows[row_index];
+        const auto count = GetLeafElementCount(*row, node->leaf_type);
+        AssertInfo(leaf_nullable ? row->valid_data_size() == count
+                                 : row->valid_data_size() == 0,
+                   "array row {} has invalid leaf validity length",
+                   row_index);
+        if (leaf_nullable) {
+            for (size_t i = 0; i < count; ++i) {
+                if (row->valid_data(static_cast<int>(i))) {
+                    const auto index = element_offset + i;
+                    node->leaf_validity_bitmap[index >> 3] |=
+                        static_cast<uint8_t>(1U << (index & 7));
+                }
+            }
+        }
         element_offset =
             CopyLeafRow(*node, *row, node->leaf_type, element_offset);
     }
@@ -373,7 +524,7 @@ BuildNodeFromProtoRows(const std::vector<const ScalarFieldProto*>& rows,
                child_count);
 
     if (is_string_leaf) {
-        FinalizeStringLeaf(*node);
+        FinalizeStringLeaf(*node, leaf_nullable);
     }
 
     return node;
@@ -472,9 +623,22 @@ BuildNodeFromViews(const std::vector<ArrayValueView>& rows,
         node->fixed_data.resize(child_count * width);
     }
 
+    if (type.array_element().nullable()) {
+        node->leaf_validity_bitmap.resize((child_count + 7) / 8, 0);
+    }
+
     size_t element_offset = 0;
     for (size_t row_index = 0; row_index < rows.size(); ++row_index) {
         if (valid_data.empty() || valid_data[row_index] != 0) {
+            if (type.array_element().nullable()) {
+                for (size_t i = 0; i < rows[row_index].size(); ++i) {
+                    if (rows[row_index].is_valid(i)) {
+                        const auto index = element_offset + i;
+                        node->leaf_validity_bitmap[index >> 3] |=
+                            static_cast<uint8_t>(1U << (index & 7));
+                    }
+                }
+            }
             element_offset = CopyLeafRow(
                 *node, rows[row_index], node->leaf_type, element_offset);
         }
@@ -486,9 +650,198 @@ BuildNodeFromViews(const std::vector<ArrayValueView>& rows,
                child_count);
 
     if (is_string_leaf) {
-        FinalizeStringLeaf(*node);
+        FinalizeStringLeaf(*node, type.array_element().nullable());
     }
 
+    return node;
+}
+
+std::unique_ptr<ColumnarArrayBuildNode>
+BuildNodeFromArrow(const arrow::ListArray& rows,
+                   const proto::schema::TypeSchema& type) {
+    auto node = std::make_unique<ColumnarArrayBuildNode>();
+    ValidateArrowValidityBitmap(rows);
+    const auto row_count = static_cast<size_t>(rows.length());
+    if (rows.data()->buffers.size() < 2) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array list has no offsets buffer");
+    }
+    ValidateArrowBufferElements(rows.data()->buffers[1],
+                                static_cast<uint64_t>(rows.offset()),
+                                static_cast<uint64_t>(row_count) + 1,
+                                sizeof(int32_t),
+                                "list offsets");
+    const auto& child = rows.values();
+    if (child == nullptr || child->length() < 0) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array list has no valid child values");
+    }
+    if (type.nullable()) {
+        node->validity_bitmap.resize((row_count + 7) / 8, 0);
+    }
+    const auto base = rows.value_offset(0);
+    if (base < 0 || base > child->length()) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array list starting offset exceeds child values");
+    }
+    int64_t previous = base;
+    node->offsets.reserve(row_count + 1);
+    for (size_t i = 0; i <= row_count; ++i) {
+        const int64_t current = rows.value_offset(static_cast<int64_t>(i));
+        if (current < previous || current > child->length()) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array list offset {} is outside child values",
+                      i);
+        }
+        const auto offset = current - base;
+        node->offsets.push_back(static_cast<ArrayOffset>(offset));
+        previous = current;
+        if (i == row_count) {
+            continue;
+        }
+        const bool valid = !rows.IsNull(static_cast<int64_t>(i));
+        if (!type.nullable() && !valid) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "non-nullable array contains null row {}",
+                      i);
+        }
+        const int64_t next = rows.value_offset(static_cast<int64_t>(i + 1));
+        if (!valid && next != current) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "null array row {} has a non-empty child range",
+                      i);
+        }
+        if (type.nullable() && valid) {
+            node->validity_bitmap[i >> 3] |=
+                static_cast<uint8_t>(1U << (i & 7));
+        }
+    }
+
+    auto values = child->Slice(base, previous - base);
+    const auto element_type = GetColumnarArrayElementType(type);
+    if (element_type == DataType::ARRAY) {
+        auto nested = std::dynamic_pointer_cast<arrow::ListArray>(values);
+        if (nested == nullptr) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "nested ARRAY requires Arrow list children, got {}",
+                      values->type()->ToString());
+        }
+        node->array_child = BuildNodeFromArrow(*nested, type.array_element());
+        return node;
+    }
+
+    node->leaf_type = element_type;
+    if (!values->type()->Equals(GetArrowDataType(element_type))) {
+        ThrowInfo(ErrorCode::DataFormatBroken,
+                  "array leaf type {} does not match schema {}",
+                  values->type()->ToString(),
+                  element_type);
+    }
+    ValidateArrowValidityBitmap(*values);
+    const auto child_count = static_cast<size_t>(values->length());
+    const bool leaf_nullable = type.array_element().nullable();
+    if (leaf_nullable) {
+        node->leaf_validity_bitmap.resize((child_count + 7) / 8, 0);
+    }
+    for (size_t i = 0; i < child_count; ++i) {
+        const bool valid = !values->IsNull(static_cast<int64_t>(i));
+        if (!leaf_nullable && !valid) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "non-nullable array leaf contains null element {}",
+                      i);
+        }
+        if (leaf_nullable && valid) {
+            node->leaf_validity_bitmap[i >> 3] |=
+                static_cast<uint8_t>(1U << (i & 7));
+        }
+    }
+    if (IsStringDataType(element_type)) {
+        const auto& strings = static_cast<const arrow::StringArray&>(*values);
+        if (strings.data()->buffers.size() < 3) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array string leaf has incomplete buffers");
+        }
+        ValidateArrowBufferElements(strings.data()->buffers[1],
+                                    static_cast<uint64_t>(strings.offset()),
+                                    static_cast<uint64_t>(child_count) + 1,
+                                    sizeof(int32_t),
+                                    "string offsets");
+        const auto& string_buffer = strings.data()->buffers[2];
+        int64_t previous_string_offset = 0;
+        for (size_t i = 0; i <= child_count; ++i) {
+            const int64_t string_offset =
+                strings.value_offset(static_cast<int64_t>(i));
+            if (string_offset < previous_string_offset ||
+                (string_buffer == nullptr ? string_offset != 0
+                                          : string_offset >
+                                                string_buffer->size())) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "array string offset {} exceeds data buffer",
+                          i);
+            }
+            previous_string_offset = string_offset;
+        }
+        node->string_offsets.reserve(child_count + 1);
+        node->string_offsets.push_back(0);
+        for (size_t i = 0; i < child_count; ++i) {
+            if (!strings.IsNull(static_cast<int64_t>(i)) &&
+                strings.value_offset(static_cast<int64_t>(i + 1)) >
+                    strings.value_offset(static_cast<int64_t>(i))) {
+                node->string_data.append(
+                    strings.GetView(static_cast<int64_t>(i)));
+            }
+            if (node->string_data.size() >
+                std::numeric_limits<uint32_t>::max()) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "array string leaf exceeds uint32 offset range");
+            }
+            node->string_offsets.push_back(
+                static_cast<uint32_t>(node->string_data.size()));
+        }
+        FinalizeStringLeaf(*node, leaf_nullable);
+    } else if (element_type == DataType::BOOL) {
+        const auto& booleans = static_cast<const arrow::BooleanArray&>(*values);
+        if (booleans.data()->buffers.size() < 2) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array bool leaf has no values buffer");
+        }
+        const auto bits = static_cast<uint64_t>(booleans.offset()) +
+                          static_cast<uint64_t>(child_count);
+        ValidateArrowBufferElements(booleans.data()->buffers[1],
+                                    0,
+                                    bits / 8 + (bits % 8 != 0),
+                                    1,
+                                    "bool values");
+        node->fixed_data.resize(child_count);
+        for (size_t i = 0; i < child_count; ++i) {
+            node->fixed_data[i] = !booleans.IsNull(static_cast<int64_t>(i)) &&
+                                  booleans.Value(static_cast<int64_t>(i));
+        }
+    } else {
+        const auto width = GetLeafFixedWidth(element_type);
+        if (child_count > std::numeric_limits<size_t>::max() / width) {
+            ThrowInfo(ErrorCode::DataFormatBroken,
+                      "array fixed leaf size overflow");
+        }
+        const auto bytes = child_count * width;
+        if (bytes != 0) {
+            if (values->data()->buffers.size() < 2) {
+                ThrowInfo(ErrorCode::DataFormatBroken,
+                          "array fixed leaf has no values buffer");
+            }
+            const auto& buffer = values->data()->buffers[1];
+            ValidateArrowBufferElements(
+                buffer,
+                static_cast<uint64_t>(values->offset()),
+                static_cast<uint64_t>(child_count),
+                width,
+                "fixed leaf values");
+            node->fixed_data.resize(bytes);
+            std::memcpy(node->fixed_data.data(),
+                        buffer->data() + values->offset() * width,
+                        bytes);
+        }
+    }
     return node;
 }
 
@@ -543,11 +896,13 @@ ColumnarArrayChildByteSize(const ColumnarArrayBuildNode& node,
         return ColumnarArrayNodeByteSize(*node.array_child,
                                          type.array_element());
     }
-    if (IsStringDataType(node.leaf_type)) {
-        return node.string_offsets.size() * sizeof(uint32_t) +
-               node.string_data.size();
-    }
-    return node.fixed_data.size();
+    const auto leaf_rows = node.offsets.back();
+    const auto prefix =
+        LeafPrefixSize(leaf_rows, type.array_element().nullable());
+    return prefix + (IsStringDataType(node.leaf_type)
+                         ? node.string_offsets.size() * sizeof(uint32_t) +
+                               node.string_data.size()
+                         : node.fixed_data.size());
 }
 
 size_t
@@ -567,6 +922,16 @@ WriteColumnarArrayChild(const ColumnarArrayBuildNode& node,
     if (node.array_child != nullptr) {
         WriteColumnarArrayNode(*node.array_child, type.array_element(), target);
         return;
+    }
+    if (type.array_element().nullable()) {
+        if (!node.leaf_validity_bitmap.empty()) {
+            target->write(node.leaf_validity_bitmap.data(),
+                          node.leaf_validity_bitmap.size());
+        }
+        const auto padding = LeafPrefixSize(node.offsets.back(), true) -
+                             node.leaf_validity_bitmap.size();
+        std::array<char, alignof(uint64_t)> zeros{};
+        target->write(zeros.data(), padding);
     }
     if (IsStringDataType(node.leaf_type)) {
         target->write(node.string_offsets.data(),
@@ -589,7 +954,7 @@ WriteColumnarArrayNode(const ColumnarArrayBuildNode& node,
     //   [validity bitmap, when nullable][alignment padding, when needed]
     //   [offsets: row_count + 1][recursively serialized child]
     const auto row_count = node.offsets.size() - 1;
-    if (type.nullable()) {
+    if (type.nullable() && !node.validity_bitmap.empty()) {
         target->write(node.validity_bitmap.data(), node.validity_bitmap.size());
     }
     WriteAlignmentPadding(
@@ -689,7 +1054,6 @@ CreateMmapColumnarArrayChunkFromValues(
 }
 
 struct ColumnarArrayChunkWriter::Impl {
-    std::vector<ScalarFieldProto> parsed_rows;
     std::unique_ptr<ColumnarArrayBuildNode> root;
     size_t serialized_size{0};
 };
@@ -715,41 +1079,30 @@ ColumnarArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
         "columnar array row count {} exceeds int64 range",
         row_nums_);
 
-    impl_->parsed_rows.clear();
-    impl_->parsed_rows.reserve(row_nums_);
+    arrow::ArrayVector lists;
+    lists.reserve(array_vec.size());
     for (const auto& data : array_vec) {
-        auto array = std::dynamic_pointer_cast<arrow::BinaryArray>(data);
+        auto canonical = storage::CanonicalizeArrowVariants(data);
+        auto array = std::dynamic_pointer_cast<arrow::ListArray>(canonical);
         AssertInfo(array != nullptr,
-                   "ColumnarArrayChunkWriter expects arrow::BinaryArray, got "
-                   "type id {}; upstream normalizer must coerce to BINARY",
+                   "ColumnarArrayChunkWriter expects Arrow ListArray, got "
+                   "type id {}",
                    data ? static_cast<int>(data->type_id()) : -1);
-        AssertInfo(nullable_ || array->null_count() == 0,
-                   "non-nullable nested ARRAY column contains {} null rows",
-                   array->null_count());
-        for (int64_t i = 0; i < array->length(); ++i) {
-            ScalarFieldProto row;
-            if (!array->IsNull(i)) {
-                const auto value = array->GetView(i);
-                AssertInfo(row.ParseFromArray(value.data(), value.size()),
-                           "failed to parse columnar array row {}",
-                           i);
-                AssertInfo(
-                    row.data_case() != ScalarFieldProto::DATA_NOT_SET,
-                    "valid columnar array row {} has no ScalarField payload",
-                    i);
-            }
-            impl_->parsed_rows.emplace_back(std::move(row));
+        lists.push_back(std::move(array));
+    }
+    AssertInfo(!lists.empty(), "ColumnarArrayChunkWriter requires an array");
+    std::shared_ptr<arrow::Array> combined = lists.front();
+    if (lists.size() > 1) {
+        auto result = arrow::Concatenate(lists);
+        if (!result.ok()) {
+            ThrowInfo(storage::ArrowStatusToErrorCode(result),
+                      "failed to concatenate array chunks: {}",
+                      result.status().ToString());
         }
+        combined = *result;
     }
-
-    std::vector<const ScalarFieldProto*> rows;
-    rows.reserve(impl_->parsed_rows.size());
-    for (const auto& row : impl_->parsed_rows) {
-        rows.push_back(&row);
-    }
-    impl_->root = BuildColumnarArrayNode(rows, type_);
-    impl_->parsed_rows.clear();
-    impl_->parsed_rows.shrink_to_fit();
+    impl_->root = BuildNodeFromArrow(
+        static_cast<const arrow::ListArray&>(*combined), type_);
     impl_->serialized_size =
         ColumnarArraySerializedByteSize(*impl_->root, type_);
     return {impl_->serialized_size, row_nums_};
@@ -793,6 +1146,29 @@ CreateArrayValueStorageFromProto(
     storage->child = array_detail::CreateColumnarArrayChildChunk(
         storage->type, storage->length, data, child_size, nullptr);
     return storage;
+}
+
+std::vector<ScalarFieldProto>
+ArrowListToScalarFieldProto(const arrow::ListArray& rows,
+                            const proto::schema::TypeSchema& type) {
+    ColumnarArrayChunk::ValidateArrayType(type);
+    auto root = BuildNodeFromArrow(rows, type);
+    const auto size = ColumnarArraySerializedByteSize(*root, type);
+    std::vector<char> buffer(size);
+    auto target = std::make_shared<BorrowedArrayChunkTarget>(
+        buffer.data(), buffer.size());
+    WriteColumnarArrayNode(*root, type, target);
+    char padding[MMAP_ARRAY_PADDING] = {};
+    target->write(padding, MMAP_ARRAY_PADDING);
+    auto array_type =
+        std::make_shared<const proto::schema::TypeSchema>(type);
+    ColumnarArrayChunk chunk(rows.length(), buffer.data(), size, array_type);
+    std::vector<ScalarFieldProto> result;
+    result.reserve(rows.length());
+    for (int64_t row = 0; row < rows.length(); ++row) {
+        result.push_back(chunk.View(row).output_data());
+    }
+    return result;
 }
 
 }  // namespace milvus

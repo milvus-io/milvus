@@ -3049,8 +3049,9 @@ func TestTaskSearch_reduceGroupBySearchResultData(t *testing.T) {
 			expectedIDs:    []int64{1, 3, 5, 7, 9, 1, 3, 5, 7, 9},
 			expectedScores: []float32{-10, -8, -6, -4, -2, -10, -8, -6, -4, -2},
 			expectedGroupByValues: &schemapb.FieldData{
-				Type:    schemapb.DataType_Int64,
-				FieldId: 1,
+				Type:      schemapb.DataType_Int64,
+				FieldId:   1,
+				ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
 				Field: &schemapb.FieldData_Scalars{
 					Scalars: &schemapb.ScalarField{
 						ValidData: []bool{true, true, true, true, false, true, true, true, true, false},
@@ -6954,6 +6955,17 @@ func TestSearchTask_ArrayOfVectorSimpleSearch(t *testing.T) {
 	const rangeParams = `{"nprobe": 10, "radius": 0.2}`
 	const plainParams = `{"nprobe": 10}`
 
+	t.Run("element-nullable vector array rejects both placeholder kinds", func(t *testing.T) {
+		schema.StructArrayFields[0].Fields[0].ElementNullable = true
+		defer func() { schema.StructArrayFields[0].Fields[0].ElementNullable = false }()
+		task := makeTask("emb_vec", commonpb.PlaceholderType_EmbListFloatVector, plainParams, false, false)
+		task.schema = mustNewSchemaInfo(schema)
+		require.ErrorContains(t, task.initSearchRequest(ctx), "embedding-list search is not supported for element-nullable vector array")
+		task = makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, plainParams, false, false)
+		task.schema = mustNewSchemaInfo(schema)
+		require.ErrorContains(t, task.initSearchRequest(ctx), "search on element-nullable vector array field emb_vec is not supported yet")
+	})
+
 	t.Run("element-level range search should succeed", func(t *testing.T) {
 		task := makeTask("emb_vec", commonpb.PlaceholderType_FloatVector, rangeParams, false, false)
 		err := task.initSearchRequest(ctx)
@@ -7149,6 +7161,17 @@ func TestSearchTask_ArrayOfVectorHybridSearch(t *testing.T) {
 			hybridSubSpec{annsField: "emb_text_vec", metricType: metric.L2, phType: commonpb.PlaceholderType_FloatVector},
 		)
 	}
+
+	t.Run("hybrid element-nullable vector array rejects both placeholder kinds", func(t *testing.T) {
+		schema.StructArrayFields[0].Fields[0].ElementNullable = true
+		defer func() { schema.StructArrayFields[0].Fields[0].ElementNullable = false }()
+		qt := buildHybridTask("emb_vec", "", false, "")
+		qt.schema = mustNewSchemaInfo(schema)
+		require.ErrorContains(t, qt.initAdvancedSearchRequest(ctx), "embedding-list search is not supported for element-nullable vector array")
+		qt = buildElementHybridTask("emb_vec", "", false, "")
+		qt.schema = mustNewSchemaInfo(schema)
+		require.ErrorContains(t, qt.initAdvancedSearchRequest(ctx), "search on element-nullable vector array field emb_vec is not supported yet")
+	})
 
 	t.Run("hybrid with ArrayOfVector EmbList metric plain topK should succeed", func(t *testing.T) {
 		qt := buildHybridTaskWithMetric("emb_vec", metric.MaxSimCosine, commonpb.PlaceholderType_EmbListFloatVector, "", false, "")

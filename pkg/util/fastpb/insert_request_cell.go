@@ -91,11 +91,9 @@ func classifyScalarCell(cell *schemapb.ScalarField) (scalarCellPlan, bool) {
 	if cell == nil {
 		return scalarCellPlan{kind: scalarCellEmpty}, true
 	}
-	// ValidData (field 17) has no producer anywhere in this repo yet, but proto
-	// reflection recognizes it now, so GetUnknown() no longer catches it: a cell
-	// carrying it would silently lose that data through the arithmetic path,
-	// which only writes the oneof value. Fall back to the protobuf path, which
-	// writes every recognized field, until this one earns explicit handling.
+	// ValidData (field 17) carries element validity of an element-nullable Array
+	// row. The arithmetic path only writes the oneof value and would drop it, so
+	// fall back to the protobuf path, which writes every recognized field.
 	if len(cell.GetValidData()) != 0 {
 		return scalarCellPlan{}, false
 	}

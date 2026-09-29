@@ -513,9 +513,11 @@ class ThreadSafeChunkVector : public ChunkVectorBase<Type> {
             auto& src = chunk[chunk_offset];
             return VectorArrayView(const_cast<char*>(src.data()),
                                    src.dim(),
-                                   src.physical_length(),
+                                   src.length(),
                                    src.byte_size(),
-                                   src.get_element_type());
+                                   src.get_element_type(),
+                                   src.element_validity_view(),
+                                   src.is_element_nullable());
         } else if constexpr (std::is_same_v<Json, Type>) {
             return Json(chunk[chunk_offset].c_str(),
                         chunk[chunk_offset].size());

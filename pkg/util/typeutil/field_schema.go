@@ -178,6 +178,48 @@ func IsNestedArrayTypeSchema(typeSchema *schemapb.TypeSchema) bool {
 	return ok
 }
 
+// GetNestedArrayLeafType returns the scalar leaf type of a nested Array field.
+// The caller must validate the field schema before using the result.
+func GetNestedArrayLeafType(field *schemapb.FieldSchema) schemapb.DataType {
+	if !IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return schemapb.DataType_None
+	}
+	return field.GetTypeSchema().GetArrayElement().GetArrayElement().GetLeafType()
+}
+
+// GetNestedArrayLeafNullable returns the leaf nullability of a nested Array field.
+// The caller must validate the field schema before using the result.
+func GetNestedArrayLeafNullable(field *schemapb.FieldSchema) bool {
+	if !IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+		return false
+	}
+	return field.GetTypeSchema().GetArrayElement().GetArrayElement().GetNullable()
+}
+
+// IsNativeListArrayField reports whether an Array / ArrayOfVector field is
+// persisted in the native Arrow list format instead of the legacy format.
+//
+// Legacy formats are kept only for the field kinds that exist in released
+// 2.6/3.0 clusters: a single-level element-non-nullable scalar Array (one
+// proto-encoded ScalarField per row in an Arrow Binary column) and a
+// single-level element-non-nullable ArrayOfVector (list<FixedSizeBinary>).
+//
+// Every other Array kind uses the native format, regardless of row-level
+// nullability:
+//   - element-nullable scalar Array: list<T>
+//   - element-nullable ArrayOfVector: list<Binary>
+//   - nested scalar Array (type_schema with Array<Array<T>>): list<list<T>>
+func IsNativeListArrayField(field *schemapb.FieldSchema) bool {
+	switch field.GetDataType() {
+	case schemapb.DataType_Array:
+		return field.GetElementNullable() || IsNestedArrayTypeSchema(field.GetTypeSchema())
+	case schemapb.DataType_ArrayOfVector:
+		return field.GetElementNullable()
+	default:
+		return false
+	}
+}
+
 // ValidateFieldTypeSchema validates the wire representation of nested Arrays.
 // Non-nested fields use only data_type/element_type. Nested Arrays use
 // data_type=Array, element_type=Array, and a recursive type_schema.

@@ -2709,22 +2709,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	if err != nil {
 		rsp.Status = merr.Status(err)
 	}
-	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, nil
-}
-
-func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
-	resultData := result.GetResults()
-	if resultData == nil {
-		return
-	}
-	for _, field := range resultData.GetFieldsData() {
-		typeutil.ProjectFieldDataValidDataForLegacy(field)
-	}
-	for _, field := range resultData.GetGroupByFieldValues() {
-		typeutil.ProjectFieldDataValidDataForLegacy(field)
-	}
-	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
@@ -2964,7 +2949,6 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	if err2 != nil {
 		rsp.Status = merr.Status(err2)
 	}
-	projectSearchResultValidDataForLegacy(rsp)
 	return rsp, err
 }
 
@@ -3884,9 +3868,6 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	method := "Query"
 
 	res, storageCost, err := node.query(ctx, qt, sp)
-	for _, field := range res.GetFieldsData() {
-		typeutil.ProjectFieldDataValidDataForLegacy(field)
-	}
 
 	if Params.QueryNodeCfg.StorageUsageTrackingEnabled.GetAsBool() {
 		metrics.ProxyScannedRemoteMB.WithLabelValues(

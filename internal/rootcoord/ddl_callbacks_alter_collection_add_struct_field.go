@@ -80,6 +80,9 @@ func (c *Core) broadcastAlterCollectionForAddStructField(ctx context.Context, re
 	if err := validateSchemaEvolution(coll, schema); err != nil {
 		return err
 	}
+	if err := typeutil.ValidateExternalCollectionResolvedSchema(schema); err != nil {
+		return err
+	}
 
 	cacheExpirations, err := c.getCacheExpireForCollection(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -153,6 +156,9 @@ func normalizeAndCheckAddedStructField(structArrayField *schemapb.StructArrayFie
 			return merr.WrapErrParameterInvalidMsg("add struct field operation does not support external field mapping, field name = %s", originalName)
 		}
 		field.Nullable = true
+		if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
+			field.TypeSchema.Nullable = true
+		}
 	}
 	return nil
 }

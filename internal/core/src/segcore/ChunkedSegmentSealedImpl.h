@@ -238,6 +238,20 @@ class ChunkedSegmentSealedImpl : public SegmentSealed {
 
     std::shared_ptr<const IStructElementOffsets>
     GetStructElementOffsets(FieldId field_id) const override {
+        const auto schema = get_schema_snapshot();
+        if (!schema->has_field(field_id)) {
+            return nullptr;
+        }
+        const auto& field_meta = schema->operator[](field_id);
+        if (field_meta.has_nullable_array_element() ||
+            (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+             field_meta.is_element_nullable())) {
+            ThrowInfo(
+                ErrorCode::NotImplemented,
+                "struct element offsets on element-nullable array field {} "
+                "are not supported yet",
+                field_meta.get_name().get());
+        }
         auto runtime = CaptureRuntimeResourceState();
         auto it = runtime->struct_element_offsets_map.find(field_id);
         if (it != runtime->struct_element_offsets_map.end()) {

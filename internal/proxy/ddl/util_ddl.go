@@ -353,10 +353,6 @@ func validateNestedArrayTypeParams(collectionName string, fieldName string, type
 	if typeSchema == nil {
 		return 0, merr.WrapErrParameterMissingMsg("type_schema should be specified for nested array field %s", fieldName)
 	}
-	if typeSchema.GetNullable() {
-		return 0, merr.WrapErrParameterInvalidMsg("nullable nested array elements are not supported for field %s", fieldName)
-	}
-
 	switch kind := typeSchema.GetKind().(type) {
 	case *schemapb.TypeSchema_ArrayElement:
 		if kind.ArrayElement == nil {
@@ -443,18 +439,17 @@ func validateArrayFieldSchema(collectionName string, field *schemapb.FieldSchema
 	return nil
 }
 
-func validateElementNullable(field *schemapb.FieldSchema) error {
+func validateElementNullable(field *schemapb.FieldSchema, inStruct bool) error {
 	if !field.GetElementNullable() {
 		return nil
 	}
 	if field.GetDataType() != schemapb.DataType_Array && field.GetDataType() != schemapb.DataType_ArrayOfVector {
 		return merr.WrapErrParameterInvalidMsg("element_nullable is only valid for Array and ArrayOfVector fields, field name = %s", field.GetName())
 	}
-	if typeutil.IsNestedArrayTypeSchema(field.GetTypeSchema()) {
-		return merr.WrapErrParameterInvalidMsg("element_nullable is not supported for nested Array field %s", field.GetName())
+	if !inStruct {
+		return merr.WrapErrParameterInvalidMsg("element_nullable is only supported for Array and ArrayOfVector sub-fields of a struct array field, field name = %s", field.GetName())
 	}
-	// TODO: temporarily disable element nullable until all parts ready
-	return merr.WrapErrParameterInvalidMsg("element_nullable is not supported yet, field name = %s", field.GetName())
+	return nil
 }
 
 func validateFieldType(schema *schemapb.CollectionSchema) error {
@@ -555,7 +550,7 @@ func ValidateField(field *schemapb.FieldSchema, schema *schemapb.CollectionSchem
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
-	if err := validateElementNullable(field); err != nil {
+	if err := validateElementNullable(field, false); err != nil {
 		return err
 	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
@@ -616,7 +611,7 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 	if err := validateFieldName(field.Name); err != nil {
 		return err
 	}
-	if err := validateElementNullable(field); err != nil {
+	if err := validateElementNullable(field, true); err != nil {
 		return err
 	}
 	if err := typeutil.ValidateFieldTypeSchema(field); err != nil {
@@ -628,6 +623,10 @@ func ValidateFieldsInStruct(field *schemapb.FieldSchema, schema *schemapb.Collec
 			return merr.WrapErrParameterInvalidMsg(
 				"nested array field %s supports exactly one nested array level",
 				field.GetName())
+		}
+		if field.GetTypeSchema().GetArrayElement().GetNullable() != field.GetElementNullable() {
+			return merr.WrapErrParameterInvalidMsg("nested array field %s type_schema inner nullable=%t must match element_nullable=%t",
+				field.GetName(), field.GetTypeSchema().GetArrayElement().GetNullable(), field.GetElementNullable())
 		}
 	}
 
@@ -730,6 +729,11 @@ func validateStructArrayField(structArrayField *schemapb.StructArrayFieldSchema,
 				return merr.WrapErrParameterInvalidMsg("sub-field in non-nullable struct cannot be nullable individually, set nullable on the struct instead: structName=%s, subFieldName=%s",
 					structArrayField.Name, subField.Name)
 			}
+		}
+	}
+	for _, subField := range structArrayField.Fields {
+		if typeutil.IsNestedArrayTypeSchema(subField.GetTypeSchema()) {
+			subField.TypeSchema.Nullable = subField.GetNullable()
 		}
 	}
 

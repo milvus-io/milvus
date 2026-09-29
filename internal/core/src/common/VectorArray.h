@@ -294,6 +294,26 @@ class VectorArray : public milvus::VectorTrait {
         return physical_length_;
     }
 
+    int
+    length() const {
+        return length_;
+    }
+
+    bool
+    is_element_nullable() const {
+        return element_nullable_;
+    }
+
+    TargetBitmapView
+    element_validity_view() const {
+        return element_nullable_
+                   ? TargetBitmapView(
+                         const_cast<void*>(static_cast<const void*>(
+                             element_valid_data_.data())),
+                         length_)
+                   : TargetBitmapView();
+    }
+
     size_t
     byte_size() const {
         return size_;

@@ -26,6 +26,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storagev2/packed"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
@@ -43,6 +45,9 @@ func ArrowFieldsToProto(rec arrow.Record, fieldSchemaMap map[int64]*schemapb.Fie
 		field := rec.Schema().Field(i)
 		md := field.Metadata
 		fidStr, ok := md.GetValue("milvus.field_id")
+		if !ok {
+			fidStr, ok = md.GetValue(packed.ArrowFieldIdMetadataKey)
+		}
 		if !ok {
 			continue
 		}
@@ -298,15 +303,28 @@ func arrowColumnToFieldData(col arrow.Array, schema *schemapb.FieldSchema, numRo
 		fd.Field = fieldsData
 
 	case schemapb.DataType_Array:
-		arr := col.(*array.Binary)
 		data := make([]*schemapb.ScalarField, numRows)
-		for j := 0; j < numRows; j++ {
-			sf := &schemapb.ScalarField{}
-			if err := proto.Unmarshal(arr.Value(j), sf); err != nil {
-				return nil, merr.WrapErrServiceInternalMsg("failed to unmarshal Array element at row %d for field %q: %s",
-					j, schema.GetName(), err)
+		if typeutil.IsNativeListArrayField(schema) {
+			for j := 0; j < numRows; j++ {
+				row, err := storage.DeserializeNativeArrayRow(col, j, schema)
+				if err != nil {
+					return nil, merr.Wrapf(err, "deserialize Array element at row %d for field %q", j, schema.GetName())
+				}
+				data[j] = row
 			}
-			data[j] = sf
+		} else {
+			arr, ok := col.(*array.Binary)
+			if !ok {
+				return nil, merr.WrapErrDataIntegrityMsg("expected Binary Array column, got %T", col)
+			}
+			for j := 0; j < numRows; j++ {
+				sf := &schemapb.ScalarField{}
+				if err := proto.Unmarshal(arr.Value(j), sf); err != nil {
+					return nil, merr.WrapErrServiceInternalMsg("failed to unmarshal Array element at row %d for field %q: %s",
+						j, schema.GetName(), err)
+				}
+				data[j] = sf
+			}
 		}
 		fd.Field = &schemapb.FieldData_Scalars{
 			Scalars: &schemapb.ScalarField{
@@ -455,29 +473,75 @@ func compactBytesVector(arr *array.FixedSizeBinary, numRows int) []byte {
 	return data
 }
 
-// arrowListToVectorArray converts an Arrow List(FixedSizeBinary) column into
-// a proto VectorField_VectorArray.  Each list element is a single vector.
+// arrowListToVectorArray converts an Arrow List(FixedSizeBinary) or List(Binary)
+// column into a proto VectorField_VectorArray. Each list element is one vector.
 func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRows int) (*schemapb.FieldData_Vectors, error) {
-	listArr := col.(*array.List)
+	listArr, ok := col.(*array.List)
+	if !ok {
+		return nil, merr.WrapErrDataIntegrityMsg("expected ArrayOfVector List, got %T", col)
+	}
 	elemType := schema.GetElementType()
 	dim, _ := typeutil.GetDim(schema)
 
 	vectors := make([]*schemapb.VectorField, numRows)
 	for j := 0; j < numRows; j++ {
 		if !listArr.IsValid(j) {
-			vectors[j] = &schemapb.VectorField{Dim: dim}
+			start, end := listArr.ValueOffsets(j)
+			if start != end {
+				return nil, merr.WrapErrDataIntegrityMsg("null ArrayOfVector row %d owns %d child values", j, end-start)
+			}
+			placeholder, err := typeutil.NewEmptyArrayOfVectorRow(dim, elemType)
+			if err != nil {
+				return nil, err
+			}
+			vectors[j] = placeholder
 			continue
 		}
 		start, end := listArr.ValueOffsets(j)
-		innerArr := listArr.ListValues().(*array.FixedSizeBinary)
+		innerArr := listArr.ListValues()
+		var vectorAt func(int) []byte
+		if schema.GetElementNullable() {
+			binaryArr, ok := innerArr.(*array.Binary)
+			if !ok {
+				return nil, merr.WrapErrDataIntegrityMsg("expected Binary ArrayOfVector child, got %T", innerArr)
+			}
+			vectorAt = binaryArr.Value
+		} else {
+			fixedArr, ok := innerArr.(*array.FixedSizeBinary)
+			if !ok {
+				return nil, merr.WrapErrDataIntegrityMsg("expected FixedSizeBinary ArrayOfVector child, got %T", innerArr)
+			}
+			vectorAt = fixedArr.Value
+		}
 
 		vf := &schemapb.VectorField{Dim: dim}
 		length := int(end - start)
+		if !schema.GetElementNullable() {
+			for k := int(start); k < int(end); k++ {
+				if innerArr.IsNull(k) {
+					return nil, merr.WrapErrDataIntegrityMsg("non-element-nullable ArrayOfVector contains null child at %d", k-int(start))
+				}
+			}
+		}
+		if schema.GetElementNullable() {
+			valid := make([]bool, length)
+			for k := int(start); k < int(end); k++ {
+				valid[k-int(start)] = innerArr.IsValid(k)
+			}
+			typeutil.SetVectorArrayElementValidData(vf, valid)
+		}
 		switch elemType {
 		case schemapb.DataType_FloatVector:
 			floatData := make([]float32, 0, length*int(dim))
 			for k := int(start); k < int(end); k++ {
-				floatData = append(floatData, arrow.Float32Traits.CastFromBytes(innerArr.Value(k))...)
+				if innerArr.IsNull(k) {
+					continue
+				}
+				bytes := vectorAt(k)
+				if len(bytes) != int(dim)*4 {
+					return nil, merr.WrapErrDataIntegrityMsg("ArrayOfVector child byte width %d, expected %d", len(bytes), int(dim)*4)
+				}
+				floatData = append(floatData, arrow.Float32Traits.CastFromBytes(bytes)...)
 			}
 			vf.Data = &schemapb.VectorField_FloatVector{
 				FloatVector: &schemapb.FloatArray{Data: floatData},
@@ -486,10 +550,22 @@ func arrowListToVectorArray(col arrow.Array, schema *schemapb.FieldSchema, numRo
 			schemapb.DataType_Float16Vector,
 			schemapb.DataType_BFloat16Vector,
 			schemapb.DataType_Int8Vector:
-			byteWidth := innerArr.DataType().(*arrow.FixedSizeBinaryType).ByteWidth
+			byteWidth := int(dim)
+			if elemType == schemapb.DataType_BinaryVector {
+				byteWidth /= 8
+			} else if elemType == schemapb.DataType_Float16Vector || elemType == schemapb.DataType_BFloat16Vector {
+				byteWidth *= 2
+			}
 			raw := make([]byte, 0, length*byteWidth)
 			for k := int(start); k < int(end); k++ {
-				raw = append(raw, innerArr.Value(k)...)
+				if innerArr.IsNull(k) {
+					continue
+				}
+				bytes := vectorAt(k)
+				if len(bytes) != byteWidth {
+					return nil, merr.WrapErrDataIntegrityMsg("ArrayOfVector child byte width %d, expected %d", len(bytes), byteWidth)
+				}
+				raw = append(raw, bytes...)
 			}
 			switch elemType {
 			case schemapb.DataType_BinaryVector:

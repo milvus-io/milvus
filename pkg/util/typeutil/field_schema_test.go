@@ -225,3 +225,32 @@ func TestIsNestedArrayTypeSchema(t *testing.T) {
 	require.True(t, IsNestedArrayTypeSchema(array(array(leaf(schemapb.DataType_Int64)))))
 	require.True(t, IsNestedArrayTypeSchema(array(array(array(leaf(schemapb.DataType_Int64))))))
 }
+
+func TestNativeListArrayFieldAndNestedLeaf(t *testing.T) {
+	nested := &schemapb.TypeSchema{Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+		Kind: &schemapb.TypeSchema_ArrayElement{ArrayElement: &schemapb.TypeSchema{
+			Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int16}, Nullable: true,
+		}},
+	}}}
+	tests := []struct {
+		name  string
+		field *schemapb.FieldSchema
+		want  bool
+	}{
+		{"scalar", &schemapb.FieldSchema{DataType: schemapb.DataType_Int64}, false},
+		{"legacy scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64}, false},
+		{"nullable scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64, ElementNullable: true}, true},
+		{"nested scalar array", &schemapb.FieldSchema{DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Array, TypeSchema: nested}, true},
+		{"legacy vector array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector}, false},
+		{"nullable vector array", &schemapb.FieldSchema{DataType: schemapb.DataType_ArrayOfVector, ElementType: schemapb.DataType_FloatVector, ElementNullable: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsNativeListArrayField(tt.field))
+		})
+	}
+	require.Equal(t, schemapb.DataType_Int16, GetNestedArrayLeafType(tests[3].field))
+	require.True(t, GetNestedArrayLeafNullable(tests[3].field))
+	require.Equal(t, schemapb.DataType_None, GetNestedArrayLeafType(tests[1].field))
+	require.False(t, GetNestedArrayLeafNullable(tests[1].field))
+}

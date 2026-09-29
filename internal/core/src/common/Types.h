@@ -283,7 +283,8 @@ GetArrowDataTypeForVectorArray(DataType elem_type, int dim) {
     // We must have dim to create the correct fixed_size_binary type
     switch (elem_type) {
         case DataType::VECTOR_FLOAT:
-            return arrow::list(arrow::fixed_size_binary(dim * sizeof(float)));
+            return arrow::list(
+                arrow::fixed_size_binary(dim * sizeof(float)));
         case DataType::VECTOR_BINARY:
             return arrow::list(arrow::fixed_size_binary((dim + 7) / 8));
         case DataType::VECTOR_FLOAT16:

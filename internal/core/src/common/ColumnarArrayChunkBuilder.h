@@ -19,6 +19,9 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <vector>
+
+#include "arrow/array/array_nested.h"
 
 #include "common/Types.h"
 #include "pb/schema.pb.h"
@@ -28,6 +31,12 @@ namespace milvus {
 
 class ArrayValue;
 class ColumnarArrayChunk;
+
+// Materialize Arrow native-list rows using the same validity and placeholder
+// rules as ColumnarArrayChunk::OutputRange.
+std::vector<ScalarFieldProto>
+ArrowListToScalarFieldProto(const arrow::ListArray& rows,
+                            const proto::schema::TypeSchema& type);
 
 // Builds one immutable columnar recursive ARRAY block directly in growing mmap
 // storage. The returned Chunk tree is a read-only view over the allocation;

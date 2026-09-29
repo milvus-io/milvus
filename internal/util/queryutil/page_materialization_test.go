@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 // legacyPageOracle deliberately keeps the pre-change two-operator composition.
@@ -269,6 +270,13 @@ func TestPageMaterializationIndependentPayloadOracle(t *testing.T) {
 					// The old merge carries the full source dimension even after slicing.
 					want.FieldsData[5].GetVectors().Dim = sparseDim
 					want.FieldsData[5].GetVectors().GetSparseFloatVector().Dim = sparseDim
+				}
+				// Merged output carries row validity in both FieldData.valid_data
+				// and the field-specific location.
+				for _, field := range want.GetFieldsData() {
+					if validData := typeutil.GetFieldDataValidData(field); len(validData) > 0 {
+						typeutil.SetFieldDataValidData(field, validData)
+					}
 				}
 				require.True(t, proto.Equal(want.GetIds(), got.GetIds()))
 				require.Len(t, got.GetFieldsData(), len(want.GetFieldsData()))

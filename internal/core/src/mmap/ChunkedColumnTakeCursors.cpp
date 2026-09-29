@@ -518,6 +518,7 @@ class RawTakeResult final : public ChunkedColumnInterface::TakeResult {
 ChunkedColumnInterface::TakeResultPtr
 ChunkedColumnInterface::Take(milvus::OpContext* op_ctx,
                              TakeOptions options) const {
+    ValidateArrayViewTarget(options.target_type);
     AssertInfo(options.offsets.size >= 0,
                "take offset count must be non-negative, got {}",
                options.offsets.size);
