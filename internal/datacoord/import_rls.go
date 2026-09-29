@@ -40,18 +40,14 @@ func (s *Server) getImportRLSMetadata(
 	ctx context.Context,
 	req *rootcoordpb.GetRLSMetadataRequest,
 	description string,
-) (*rootcoordpb.GetRLSMetadataResponse, error, error) {
+) (*rootcoordpb.GetRLSMetadataResponse, error) {
 	rpcCtx, cancel := context.WithTimeout(ctx, importRLSMetadataTimeout)
 	defer cancel()
 	resp, err := s.mixCoord.GetRLSMetadata(rpcCtx, req)
 	if err = merr.CheckRPCCall(resp, err); err == nil {
-		return resp, nil, nil
+		return resp, nil
 	}
-	err = rls.WrapMetadataRefreshError(err, "failed to get %s for import", description)
-	if merr.IsRetryableErr(err) {
-		return nil, nil, err
-	}
-	return nil, err, nil
+	return nil, rls.WrapMetadataRefreshError(err, "failed to get %s for import", description)
 }
 
 // resolveImportRLSPredicate reads one ordered metadata snapshot and returns a
@@ -61,62 +57,58 @@ func (s *Server) getImportRLSMetadata(
 // reads under the broadcaster's collection-lock contract. Metadata read
 // failures are retriable; the returned policy error is deterministic for this
 // snapshot.
-func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.ImportRequestInternal) (
-	predicate []byte,
-	terminalErr error,
-	retryErr error,
-) {
+func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.ImportRequestInternal) ([]byte, error) {
 	properties := in.GetSchema().GetProperties()
 	enabled, err := common.IsRLSEnabled(properties...)
 	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties"), nil
+		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties")
 	}
 	force, err := common.IsRLSForce(properties...)
 	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties"), nil
+		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties")
 	}
 	if !enabled {
-		return nil, nil, nil
+		return nil, nil
 	}
 	if !paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
-		return nil, nil, merr.WrapErrServiceUnavailable(
+		return nil, merr.WrapErrServiceUnavailable(
 			"RLS import enforcement is unavailable until the cluster upgrade completes")
 	}
 	if in.GetSkipRls() {
 		if force {
 			return nil, merr.WrapErrPrivilegeNotPermitted(
 				"import operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
-				in.GetSchema().GetName()), nil
+				in.GetSchema().GetName())
 		}
-		return nil, nil, nil
+		return nil, nil
 	}
 	if importutilv2.IsL0Import(in.GetOptions()) {
-		return nil, merr.WrapErrOperationNotSupportedMsg("RLS-protected L0 import is not supported"), nil
+		return nil, merr.WrapErrOperationNotSupportedMsg("RLS-protected L0 import is not supported")
 	}
 	principalName, _, err := rls.ResolveRuntimePrincipal(true, in.GetRlsPrincipal(), "import")
 	if err != nil {
-		return nil, err, nil
+		return nil, err
 	}
 	if s.mixCoord == nil {
-		return nil, nil, merr.WrapErrServiceUnavailable("mixcoord is unavailable")
+		return nil, merr.WrapErrServiceUnavailable("mixcoord is unavailable")
 	}
 
-	policyResp, terminalErr, retryErr := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+	policyResp, err := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
 		Base:         commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
 		CollectionId: in.GetCollectionID(),
 		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES,
 	}, "RLS policies")
-	if terminalErr != nil || retryErr != nil {
-		return nil, terminalErr, retryErr
+	if err != nil {
+		return nil, err
 	}
 	if policyResp.GetCollectionId() != in.GetCollectionID() {
 		return nil, merr.WrapErrDataIntegrityMsg(
 			"RLS policy metadata collection id mismatch: expected %d, received %d",
-			in.GetCollectionID(), policyResp.GetCollectionId()), nil
+			in.GetCollectionID(), policyResp.GetCollectionId())
 	}
 	policyMap, err := rls.RowPoliciesFromInfo(in.GetCollectionID(), policyResp.GetPolicies())
 	if err != nil {
-		return nil, err, nil
+		return nil, err
 	}
 	policies := make([]*rlsutil.RowPolicy, 0, len(policyMap))
 	for _, policy := range policyMap {
@@ -125,20 +117,17 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 
 	schema, err := typeutil.CreateSchemaHelper(in.GetSchema())
 	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "create schema helper for RLS import check"), nil
+		return nil, merr.WrapErrDataIntegrity(err, "create schema helper for RLS import check")
 	}
 	loadPrincipalTags := func() (map[string]rlsutil.TagValue, error) {
-		principalResp, terminalErr, retryErr := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+		principalResp, err := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
 			Base:          commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
 			CollectionId:  in.GetCollectionID(),
 			Kind:          rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
 			PrincipalName: principalName,
 		}, "RLS principal tags")
-		if terminalErr != nil {
-			return nil, terminalErr
-		}
-		if retryErr != nil {
-			return nil, retryErr
+		if err != nil {
+			return nil, err
 		}
 		if principalResp.GetCollectionId() != in.GetCollectionID() {
 			return nil, merr.WrapErrDataIntegrityMsg(
@@ -172,17 +161,14 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 		paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt(),
 	)
 	if err != nil {
-		if merr.IsRetryableErr(err) {
-			return nil, nil, err
-		}
-		return nil, err, nil
+		return nil, err
 	}
 	if expr == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	serialized, err := proto.Marshal(expr)
 	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "marshal RLS import check predicate"), nil
+		return nil, merr.WrapErrDataIntegrity(err, "marshal RLS import check predicate")
 	}
-	return serialized, nil, nil
+	return serialized, nil
 }

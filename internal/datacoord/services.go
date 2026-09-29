@@ -2152,19 +2152,18 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
 	var rlsPredicate []byte
-	var terminalFailure error
+	var rlsErr error
 	if !l0ImportDisabled {
-		var retryErr error
-		rlsPredicate, terminalFailure, retryErr = s.resolveImportRLSPredicate(ctx, in)
-		if retryErr != nil {
-			resp.Status = merr.Status(retryErr)
+		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)
+		if merr.IsRetryableErr(rlsErr) {
+			resp.Status = merr.Status(rlsErr)
 			return resp, nil
 		}
 	}
 
 	files := in.GetFiles()
 	isBackup := importutilv2.IsBackup(in.GetOptions())
-	if isBackup && !l0ImportDisabled && terminalFailure == nil {
+	if isBackup && !l0ImportDisabled && rlsErr == nil {
 		files, err = ListBinlogImportRequestFiles(ctx, s.meta.chunkManager, files, in.GetOptions())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -2230,11 +2229,11 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 		UpdateJobReason("l0 import is disabled (dataCoord.import.enableL0Import=false); fold L0 deletes " +
 			"into data segment deltalogs before restore, or set the config to true on this cluster " +
 			"to re-enable the legacy L0 import")(job)
-	} else if terminalFailure != nil {
+	} else if rlsErr != nil {
 		mlog.Warn(ctx, "RLS import check could not be prepared, creating the job in Failed state",
-			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()), mlog.Err(terminalFailure))
+			mlog.Int64("jobID", jobID), mlog.Int64("collectionID", in.GetCollectionID()), mlog.Err(rlsErr))
 		UpdateJobState(internalpb.ImportJobState_Failed)(job)
-		UpdateJobReason(terminalFailure.Error())(job)
+		UpdateJobReason(rlsErr.Error())(job)
 	}
 	err = s.importMeta.AddJob(ctx, job)
 	if err != nil {

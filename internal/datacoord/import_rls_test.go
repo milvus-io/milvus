@@ -85,9 +85,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			}},
 		}, nil).Once()
 
-		serialized, terminalErr, retryErr := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
-		require.NoError(t, terminalErr)
-		require.NoError(t, retryErr)
+		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		require.NoError(t, err)
 		require.NotEmpty(t, serialized)
 
 		predicate := &planpb.Expr{}
@@ -112,10 +111,10 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			return ok
 		}), mock.Anything).Return(nil, status.Error(codes.Unavailable, "unavailable")).Once()
 
-		serialized, terminalErr, retryErr := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
 		require.Empty(t, serialized)
-		require.NoError(t, terminalErr)
-		require.Error(t, retryErr)
+		require.Error(t, err)
+		require.True(t, merr.IsRetryableErr(err))
 	})
 
 	t.Run("metadata storage failure is retried", func(t *testing.T) {
@@ -124,11 +123,11 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			Status: merr.Status(merr.WrapErrIoFailedReason("etcd read failed")),
 		}, nil).Once()
 
-		serialized, terminalErr, retryErr := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
 		require.Empty(t, serialized)
-		require.NoError(t, terminalErr)
-		require.ErrorIs(t, retryErr, merr.ErrServiceUnavailable)
-		require.ErrorIs(t, retryErr, merr.ErrIoFailed)
+		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, err, merr.ErrIoFailed)
+		require.True(t, merr.IsRetryableErr(err))
 	})
 
 	t.Run("metadata integrity failure is terminal", func(t *testing.T) {
@@ -137,20 +136,19 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			Status: merr.Status(merr.WrapErrDataIntegrityMsg("corrupt RLS metadata")),
 		}, nil).Once()
 
-		serialized, terminalErr, retryErr := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
 		require.Empty(t, serialized)
-		require.ErrorIs(t, terminalErr, merr.ErrDataIntegrity)
-		require.NoError(t, retryErr)
+		require.ErrorIs(t, err, merr.ErrDataIntegrity)
+		require.False(t, merr.IsRetryableErr(err))
 	})
 
 	t.Run("authorized skip avoids metadata", func(t *testing.T) {
 		skipped := proto.Clone(request).(*internalpb.ImportRequestInternal)
 		skipped.SkipRls = true
 
-		serialized, terminalErr, retryErr := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
+		serialized, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
 		require.Empty(t, serialized)
-		require.NoError(t, terminalErr)
-		require.NoError(t, retryErr)
+		require.NoError(t, err)
 	})
 
 	t.Run("force rejects stale authorized skip", func(t *testing.T) {
@@ -159,10 +157,9 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		skipped.Schema.Properties = append(skipped.Schema.Properties,
 			&commonpb.KeyValuePair{Key: common.RLSForceKey, Value: "true"})
 
-		serialized, terminalErr, retryErr := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
+		serialized, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
 		require.Empty(t, serialized)
-		require.ErrorIs(t, terminalErr, merr.ErrPrivilegeNotPermitted)
-		require.NoError(t, retryErr)
+		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 	})
 
 	t.Run("principal-only predicate skips tag lookup", func(t *testing.T) {
@@ -182,10 +179,9 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			}},
 		}, nil).Once()
 
-		serialized, terminalErr, retryErr := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
 		require.NotEmpty(t, serialized)
-		require.NoError(t, terminalErr)
-		require.NoError(t, retryErr)
+		require.NoError(t, err)
 	})
 }
 
@@ -195,7 +191,7 @@ func TestResolveImportRLSPredicateRejectsBeforeClusterUpgrade(t *testing.T) {
 	oldGate := gate.SwapTempValue("false")
 	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
 
-	_, terminalErr, retryErr := (&Server{}).resolveImportRLSPredicate(context.Background(), &internalpb.ImportRequestInternal{
+	_, err := (&Server{}).resolveImportRLSPredicate(context.Background(), &internalpb.ImportRequestInternal{
 		CollectionID: 10,
 		Schema: &schemapb.CollectionSchema{
 			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
@@ -203,6 +199,6 @@ func TestResolveImportRLSPredicateRejectsBeforeClusterUpgrade(t *testing.T) {
 		RlsPrincipal: "alice",
 		SkipRls:      true,
 	})
-	require.NoError(t, terminalErr)
-	require.ErrorIs(t, retryErr, merr.ErrServiceUnavailable)
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
+	require.True(t, merr.IsRetryableErr(err))
 }
