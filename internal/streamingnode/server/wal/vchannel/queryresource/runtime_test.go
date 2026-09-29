@@ -9,6 +9,8 @@ import (
 	"github.com/bytedance/mockey"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/messageack"
+	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/utility"
 	"github.com/milvus-io/milvus/internal/streamingnode/server/wal/walview"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
@@ -88,18 +90,53 @@ func TestQueryRuntimeInitialBatchAndReadyEventsUseSameConsumer(t *testing.T) {
 	runtime.Close()
 }
 
-func TestQueryRuntimeOwnsQueuedImmutableMessage(t *testing.T) {
-	module := &messageRecordingModule{}
-	runtime := NewQueryRuntime(module)
-	raw := message.CreateTestTimeTickSyncMessage(t, 1, 20, walimplstest.NewTestMessageID(10)).
-		IntoImmutableMessage(walimplstest.NewTestMessageID(11))
-	owner := message.NewOwnedImmutableMessage(raw, nil)
-	queued := owner.Message()
-	require.True(t, runtime.ObserveEvent(context.Background(), walview.VChannelResourceEvent{Message: queued}))
-	owner.Release()
-	require.NoError(t, runtime.Initialize(context.Background(), testWALView(1, "ch", qviews.DataVersion{})))
-	require.Equal(t, uint64(20), module.timeTick)
-	runtime.Close()
+func TestManagerQueuedMessageDoesNotRetainAck(t *testing.T) {
+	id := walimplstest.NewTestMessageID(10)
+	insert := message.CreateTestInsertMessage(t, 1, 2, 20, id).IntoImmutableMessage(id)
+	txnContext := message.TxnContext{TxnID: 1}
+	begin := message.NewBeginTxnMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.BeginTxnMessageHeader{}).WithBody(&message.BeginTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(10).
+		WithLastConfirmed(id).IntoImmutableMessage(id)
+	commit := message.NewCommitTxnMessageBuilderV2().WithVChannel("v1").
+		WithHeader(&message.CommitTxnMessageHeader{}).WithBody(&message.CommitTxnMessageBody{}).
+		MustBuildMutable().WithTxnContext(txnContext).WithTimeTick(30).
+		WithLastConfirmed(id).IntoImmutableMessage(walimplstest.NewTestMessageID(11))
+	builder := message.NewImmutableTxnMessageBuilder(message.MustAsImmutableBeginTxnMessageV2(begin))
+	builder.Add(insert)
+	txn, err := builder.Build(message.MustAsImmutableCommitTxnMessageV2(commit))
+	require.NoError(t, err)
+
+	for _, raw := range []message.ImmutableMessage{insert, txn} {
+		t.Run(raw.MessageType().String(), func(t *testing.T) {
+			module := &messageRecordingModule{}
+			runtime := NewQueryRuntime(module)
+			defer runtime.Close()
+			manager := &Manager{runtime: runtime}
+			tracker := messageack.NewTracker(utility.WALCheckpoint{}, nil, nil)
+			owner := tracker.Track(raw)
+			defer owner.Release()
+			manager.ObserveEvent(context.Background(), walview.VChannelResourceEvent{Message: owner.Message()})
+			require.Len(t, runtime.pending, 1)
+			queued := runtime.pending[0].Message
+			require.Same(t, raw, queued)
+			owner.Release()
+			require.Zero(t, tracker.Pending(), "query backlog must not retain persistence Ack")
+			require.Equal(t, raw.TimeTick(), tracker.CompletedPoint().TimeTick)
+
+			// Payload decoding and txn commit timestamps remain valid after Ack.
+			count := 0
+			require.NoError(t, walview.ForEachSegmentInsertMessage(queued, 1, func(selected walview.SegmentInsertMessage) error {
+				count++
+				require.Equal(t, raw.TimeTick(), selected.TimeTick)
+				require.Equal(t, uint64(2), selected.Message.MustBody().GetNumRows())
+				return nil
+			}))
+			require.Equal(t, 1, count)
+			require.NoError(t, runtime.Initialize(context.Background(), testWALView(1, "v1", qviews.DataVersion{})))
+			require.Equal(t, raw.TimeTick(), module.timeTick)
+		})
+	}
 }
 
 func testWALView(collectionID int64, vchannel string, version qviews.DataVersion) walview.VChannelWALView {

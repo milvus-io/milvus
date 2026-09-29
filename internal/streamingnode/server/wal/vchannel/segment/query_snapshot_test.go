@@ -29,6 +29,8 @@ func TestQuerySnapshotUsesDurableBaseAndAllUnpublishedChunks(t *testing.T) {
 	require.Equal(t, uint64(10), snapshot.Assignment.GetCheckpointTimeTick())
 	require.Equal(t, uint64(5), snapshot.Assignment.GetStat().GetModifiedRows())
 	require.Len(t, snapshot.Data.InsertMessages, 2)
+	require.Same(t, first.Message(), snapshot.Data.InsertMessages[0])
+	require.Same(t, second.Message(), snapshot.Data.InsertMessages[1])
 	first.Release()
 	second.Release()
 	require.Equal(t, int32(2), released.Load())

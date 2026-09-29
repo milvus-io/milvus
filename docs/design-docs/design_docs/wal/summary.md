@@ -634,6 +634,12 @@ records are transferred directly to the delivery batch. Pending/sealed records
 are shared with the writer and are cloned only when selected for delivery.
 Encoding immutable sealed insert/idempotency records borrows their fields for
 synchronous marshaling; it does not create another decoded copy first.
+Sections and the footer are encoded into the chunk buffer's available capacity
+with `MarshalAppend`, without a separate encoded section buffer. Size is computed
+immediately before encoding and reused only while the message remains immutable.
+Buffer length is committed only after successful encoding. Growth may still move
+the chunk buffer; section offsets, lengths and the checksum over the actual footer
+bytes retain the same storage format.
 
 There are two cache admission paths:
 
