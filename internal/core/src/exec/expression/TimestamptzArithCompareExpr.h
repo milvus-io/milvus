@@ -27,6 +27,14 @@ class PhyTimestamptzArithCompareExpr : public SegmentExpr {
         return true;
     }
 
+    FilterSourceInfo
+    DescribeFilterSource() const override {
+        return DescribeColumnFilterSource(
+            proto::plan::Expr::kTimestamptzArithCompareExpr,
+            expr_->compare_op_,
+            expr_->arith_op_);
+    }
+
     PhyTimestamptzArithCompareExpr(
         const std::vector<std::shared_ptr<Expr>>& input,
         const std::shared_ptr<const milvus::expr::TimestamptzArithCompareExpr>&
