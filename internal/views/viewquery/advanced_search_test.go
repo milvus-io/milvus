@@ -11,7 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/internal/views/viewerror"
@@ -81,10 +83,15 @@ func TestBuildSubSearchRequestsIsolation(t *testing.T) {
 		SerializedExprPlan: []byte{3},
 	}
 	parent := &internalpb.SearchRequest{
-		OutputFieldsId: []int64{4},
-		IsAdvanced:     true,
-		SubReqs:        []*internalpb.SubSearchRequest{sub, sub},
+		Base:            &commonpb.MsgBase{MsgID: 10},
+		OutputFieldsId:  []int64{4},
+		GroupByFieldIds: []int64{5},
+		IsAdvanced:      true,
+		SubReqs:         []*internalpb.SubSearchRequest{sub, sub},
 	}
+	// Unknown fields must survive projection and remain caller-owned too.
+	parent.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
+	before := proto.Clone(parent)
 	requests, err := BuildSubSearchRequests(parent)
 	require.NoError(t, err)
 	require.Len(t, requests, 2)
@@ -96,6 +103,13 @@ func TestBuildSubSearchRequestsIsolation(t *testing.T) {
 	requests[0].PlaceholderGroup[0] = 20
 	requests[0].SerializedExprPlan[0] = 30
 	requests[0].OutputFieldsId[0] = 40
+	requests[0].Base.MsgID = 100
+	requests[0].GroupByFieldIds[0] = 50
+	requests[0].ProtoReflect().GetUnknown()[2] = 2
+	assert.True(t, proto.Equal(before, parent))
+	assert.Equal(t, int64(10), requests[1].GetBase().GetMsgID())
+	assert.Equal(t, []int64{5}, requests[1].GetGroupByFieldIds())
+	assert.Equal(t, []byte{0xa0, 0x06, 0x01}, []byte(requests[1].ProtoReflect().GetUnknown()))
 	assert.Equal(t, []int64{1}, sub.GetPartitionIDs())
 	assert.Equal(t, []byte{2}, sub.GetPlaceholderGroup())
 	assert.Equal(t, []byte{3}, sub.GetSerializedExprPlan())

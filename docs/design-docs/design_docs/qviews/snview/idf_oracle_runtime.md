@@ -40,8 +40,10 @@ unbounded queue of decoded segment statistics. Growing
 statistics come from persisted stats and snapshot inserts and remain in memory.
 RecoveryStorage may capture WAL inserts before its asynchronous pack writer has
 materialized BM25 outputs. Both the growing search segment and IDF recovery fill
-missing function outputs on a private request copy, preserving existing outputs
-and never mutating retained WAL bodies. They use the existing local runner
+missing function outputs on a privately decoded request, preserving existing outputs
+and never mutating retained WAL bodies. Each `MustBody` call already decodes an
+independent request, so materialization does not clone that body again.
+They use the existing local runner
 fallback, with managed runners when available.
 Only loaded BM25 output fields contribute. Live events buffered during build are
 applied before readiness. Partial initialization is never published.

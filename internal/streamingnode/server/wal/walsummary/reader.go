@@ -123,7 +123,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 	batch.CoveredThrough = after
 
 	var rows, bytes uint64
-	appendEntry := func(entry *streamingpb.TransformLogEntry) bool {
+	appendEntry := func(entry *streamingpb.TransformLogEntry, shared bool) bool {
 		if entry == nil || entry.GetTimeTick() <= after || entry.GetTimeTick() > target {
 			return true
 		}
@@ -131,7 +131,10 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if len(batch.Entries) > 0 && ((limits.MaxRows > 0 && rows+n > limits.MaxRows) || (limits.MaxBytes > 0 && bytes+size > limits.MaxBytes)) {
 			return false
 		}
-		batch.Entries = append(batch.Entries, proto.Clone(entry).(*streamingpb.TransformLogEntry))
+		if shared {
+			entry = proto.Clone(entry).(*streamingpb.TransformLogEntry)
+		}
+		batch.Entries = append(batch.Entries, entry)
 		batch.CoveredThrough = entry.GetTimeTick()
 		rows += n
 		bytes += size
@@ -165,7 +168,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			return TransformBatch{}, err
 		}
 		for _, record := range records {
-			if !appendEntry(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}) {
+			if !appendEntry(&streamingpb.TransformLogEntry{TimeTick: record.GetTimeTick(), Entry: &streamingpb.TransformLogEntry_Delete{Delete: record.GetDelete()}}, false) {
 				return batch, nil
 			}
 		}
@@ -175,7 +178,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 			if err := ctx.Err(); err != nil {
 				return TransformBatch{}, err
 			}
-			if !appendEntry(record.entry) {
+			if !appendEntry(record.entry, true) {
 				return batch, nil
 			}
 		}
@@ -184,7 +187,7 @@ func (m *Manager) ReadTransform(ctx context.Context, vchannel string, after, thr
 		if err := ctx.Err(); err != nil {
 			return TransformBatch{}, err
 		}
-		if record.vchannel == vchannel && !appendEntry(record.entry) {
+		if record.vchannel == vchannel && !appendEntry(record.entry, true) {
 			return batch, nil
 		}
 	}

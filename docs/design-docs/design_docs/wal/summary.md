@@ -629,6 +629,12 @@ buffer. Section decoding produces caller-owned records. Keeping encoded bytes
 avoids another permanent decoded representation and provides an explicit buffer
 budget; it does not eliminate per-page section decoding.
 
+Decoded transform sections are sorted in their private slice and their selected
+records are transferred directly to the delivery batch. Pending/sealed records
+are shared with the writer and are cloned only when selected for delivery.
+Encoding immutable sealed insert/idempotency records borrows their fields for
+synchronous marshaling; it does not create another decoded copy first.
+
 There are two cache admission paths:
 
 - **Read:** a cache miss loads and validates the object against the captured

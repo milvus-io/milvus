@@ -48,6 +48,8 @@ func TestMaterializeInsertPreservesWALAndExistingOutputs(t *testing.T) {
 	materialized, err := MaterializeInsertRequest(schema, inputFor(output))
 	require.NoError(t, err)
 	require.True(t, proto.Equal(output, materialized))
+	materialized.FieldsData[1].GetVectors().GetSparseFloatVector().Contents[0][0] ^= 1
+	require.False(t, proto.Equal(output, materialized), "each materialization owns its decoded fields")
 	require.Zero(t, patch.Times())
 	_, err = MaterializeInsertRequest(schema, input)
 	require.ErrorIs(t, err, context.Canceled)
