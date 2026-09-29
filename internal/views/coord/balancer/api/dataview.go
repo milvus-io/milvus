@@ -5,6 +5,7 @@ import "github.com/milvus-io/milvus/internal/views/qviews"
 // CollectionDataView is the native (non-proto) DataView of one collection.
 type CollectionDataView struct {
 	CollectionID int64
+	TotalRows    int64
 	DataVersion  qviews.DataVersion
 	Shards       []*ShardDataView
 	shardIndex   map[string]*ShardDataView
@@ -43,6 +44,7 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 	if coll.shardIndex != nil {
 		return coll
 	}
+	coll.TotalRows = 0
 	coll.shardIndex = make(map[string]*ShardDataView, len(coll.Shards))
 	coll.segments = make(map[int64]*SegmentDataView)
 	for _, shard := range coll.Shards {
@@ -62,6 +64,7 @@ func PrepareCollectionDataView(coll *CollectionDataView) *CollectionDataView {
 				segment.PartitionID = partition.PartitionID
 				coll.segments[segment.SegmentID] = segment
 				shard.TotalRows += segment.RowNum
+				coll.TotalRows += segment.RowNum
 				shard.SegmentCount++
 			}
 		}

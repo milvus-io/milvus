@@ -35,10 +35,10 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 	require.Equal(t, DefaultBalanceConfig(), c.GetBalanceConfig())
 	require.True(t, b.queue.takePending().empty(), "identical defaults do not request a full pass")
 	pinned := newPlanningContext(c)
-	key := p.QueryViewCfg.BalancerStickinessWeight.Key
+	key := p.QueryViewCfg.BalancerMovePrice.Key
 	require.NoError(t, p.Save(key, "3"))
-	require.Equal(t, 3.0, c.GetBalanceConfig().StickinessWeight)
-	require.Equal(t, 1.0, pinned.GetBalanceConfig().StickinessWeight, "an existing batch retains its config")
+	require.Equal(t, 3.0, c.GetBalanceConfig().MovePrice)
+	require.Equal(t, 0.02, pinned.GetBalanceConfig().MovePrice, "an existing batch retains its config")
 	require.True(t, b.queue.takePending().full)
 	previous := c.GetBalanceConfig()
 	require.NoError(t, p.Save(key, "3"))
@@ -51,7 +51,7 @@ func TestBalanceConfigSourcePublicationAndValidation(t *testing.T) {
 		require.True(t, b.queue.takePending().empty())
 	}
 	require.NoError(t, p.Save(key, "3"))
-	for _, key := range []string{p.QueryViewCfg.BalancerStickyRowsScale.Key, p.QueryViewCfg.BalancerTargetRowsPerShardNode.Key} {
+	for _, key := range []string{p.QueryViewCfg.BalancerAbsoluteToleranceRows.Key, p.QueryViewCfg.BalancerTargetRowsPerShardNode.Key} {
 		for _, value := range []string{"0", "-1", "1.5", "9223372036854775808"} {
 			require.NoError(t, p.Save(key, value))
 			require.Same(t, previous, c.GetBalanceConfig())
@@ -126,9 +126,9 @@ func TestBalanceConfigConcurrentUpdates(t *testing.T) {
 	defer stop()
 	var wg sync.WaitGroup
 	for key, value := range map[string]string{
-		p.QueryViewCfg.BalancerNodeLoadWeight.Key:         "2",
-		p.QueryViewCfg.BalancerFanoutWeight.Key:           "4",
-		p.QueryViewCfg.BalancerStickyRowsScale.Key:        "5000",
+		p.QueryViewCfg.BalancerGlobalWeight.Key:           "2",
+		p.QueryViewCfg.BalancerFanoutPenaltyWeight.Key:    "4",
+		p.QueryViewCfg.BalancerAbsoluteToleranceRows.Key:  "5000",
 		p.QueryViewCfg.BalancerTargetRowsPerShardNode.Key: "6000",
 	} {
 		wg.Add(1)
@@ -143,9 +143,9 @@ func TestBalanceConfigConcurrentUpdates(t *testing.T) {
 	got, valid := readBalanceConfig(p)
 	require.True(t, valid)
 	require.Equal(t, got, c.GetBalanceConfig())
-	require.Equal(t, 2.0, got.NodeLoadWeight)
-	require.Equal(t, 4.0, got.FanoutWeight)
-	require.Equal(t, int64(5000), got.StickyRowsScale)
+	require.Equal(t, 2.0, got.GlobalWeight)
+	require.Equal(t, 4.0, got.FanoutPenaltyWeight)
+	require.Equal(t, int64(5000), got.AbsoluteToleranceRows)
 	require.Equal(t, int64(6000), got.TargetRowsPerShardNode)
 }
 
@@ -155,11 +155,12 @@ func TestBalanceConfigRejectsZeroAndOverflowWeightSum(t *testing.T) {
 	b := NewDefaultBalancer(c, nil, nil)
 	stop := b.watchBalanceConfig(t.Context(), p)
 	defer stop()
-	keys := []string{p.QueryViewCfg.BalancerStickinessWeight.Key, p.QueryViewCfg.BalancerNodeLoadWeight.Key, p.QueryViewCfg.BalancerFanoutWeight.Key}
-	require.NoError(t, p.Save(keys[0], "0"))
-	require.NoError(t, p.Save(keys[1], "0"))
+	keys := []string{p.QueryViewCfg.BalancerShardWeight.Key, p.QueryViewCfg.BalancerCollectionWeight.Key, p.QueryViewCfg.BalancerGlobalWeight.Key, p.QueryViewCfg.BalancerFanoutPenaltyWeight.Key}
+	for _, key := range keys[:3] {
+		require.NoError(t, p.Save(key, "0"))
+	}
 	previous := c.GetBalanceConfig()
-	require.NoError(t, p.Save(keys[2], "0"))
+	require.NoError(t, p.Save(keys[3], "0"))
 	require.Same(t, previous, c.GetBalanceConfig())
 	require.NoError(t, p.Save(keys[0], "1.7e308"))
 	previous = c.GetBalanceConfig()

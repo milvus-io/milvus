@@ -595,25 +595,50 @@ queryView:
     # larger values reduce scan overhead.
     # Event-triggered reconciliation continues independently, even when autoBalance is false.
     reconcileInterval: 1m
-    # The three weights are relative, finite, and nonnegative; at least one must be positive.
-    # Increasing all weights proportionally leaves their relative scoring influence unchanged.
-    # Higher stickiness favors loaded/preparing segment reuse and reduces movement/reloading;
-    # lower stickiness gives row-load balance and fanout more influence.
-    stickinessWeight: 1
-    # Higher values favor nodes with fewer projected rows, potentially increasing movement
-    # or fanout; lower values give resource reuse and fewer nodes per shard more influence.
-    nodeLoadWeight: 1
-    # Higher values discourage opening more nodes beyond the free fanout allowance, potentially
-    # accepting less even row loads; lower values allow wider spreading when other scores favor it.
-    fanoutWeight: 1
-    # Positive rows; movement penalty = min(segmentRows / stickyRowsScale, 1).
-    # Larger values reduce the penalty for moving a given segment; smaller values increase it
-    # until saturation. Only affects the stickiness score.
-    stickyRowsScale: 1000000
-    # Positive rows; free fanout = ceil(shardRows / targetRowsPerShardNode), capped by eligible
-    # nodes and segment count. Larger values favor fewer nodes per shard; smaller values allow
-    # more nodes before the fanout penalty applies. A soft scoring allowance, not a capacity limit.
+    # Positive concentration scale in rows for preferred shard fanout and the collection
+    # concentration floor. Increase to favor fewer participants; decrease to favor spreading.
+    # Not a capacity limit.
     targetRowsPerShardNode: 100000
+    scoring:
+      # Weight of RG load-band improvement. Increase to favor reducing aggregate row skew over
+      # local concentration and loading cost.
+      globalWeight: 1
+      # Weight of excess shard rows on one node. Increase to spread large shards more strongly;
+      # small shards within their preferred footprint receive no spreading reward.
+      shardWeight: 1
+      # Weight of excess collection-replica rows on one node. Increase to distribute large
+      # collections made of many small shards more evenly.
+      collectionWeight: 1
+      # Weight of net excess shard fanout. Increase to favor consolidation and fewer query
+      # participants; decrease to permit wider spreading.
+      fanoutPenaltyWeight: 1
+      # Row-equivalent cost per row whose node changes. Increase to reduce movement; decrease to
+      # accept smaller placement improvements, even when destination resources already exist.
+      movePrice: 0.02
+      # Additional row-equivalent cost per row needing a compatible destination load. Increase
+      # to favor protected ready-resource reuse; decrease to favor balance despite additional
+      # loading.
+      loadPrice: 0.08
+      # Fractional RG load tolerance, in [0,1). Increase to accept more relative skew and reduce
+      # movement; decrease to pursue closer row balance.
+      relativeTolerance: 0.1
+      # Fractional allowance above shard and collection concentration targets. Increase to
+      # retain more concentrated layouts; decrease to spread large data more strongly.
+      localTolerance: 0.1
+      # Fractional growth/shrink margin for preferred fanout, in [0,1). Increase to reduce
+      # fanout changes near size boundaries; decrease to react sooner to data growth and
+      # shrinkage.
+      fanoutHysteresis: 0.1
+      # Positive minimum RG tolerance in rows. Increase to keep tiny shards concentrated at low
+      # total volume; decrease to rebalance smaller absolute load differences.
+      absoluteToleranceRows: 100000
+      # Positive minimum net optional gain in row-equivalent units. Increase to reject marginal
+      # moves; decrease to accept smaller improvements.
+      minGainRows: 1
+      # Positive maximum optional candidate evaluations per shard pass. Increase to search more
+      # candidates at higher CPU cost; decrease to yield earlier and continue on a later
+      # reconcile. Mandatory placement is not capped.
+      maxCandidateEvaluations: 100000
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:

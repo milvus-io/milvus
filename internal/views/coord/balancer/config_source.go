@@ -21,9 +21,16 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 		item *paramtable.ParamItem
 		dest *float64
 	}{
-		{&p.BalancerStickinessWeight, &value.StickinessWeight},
-		{&p.BalancerNodeLoadWeight, &value.NodeLoadWeight},
-		{&p.BalancerFanoutWeight, &value.FanoutWeight},
+		{&p.BalancerGlobalWeight, &value.GlobalWeight},
+		{&p.BalancerShardWeight, &value.ShardWeight},
+		{&p.BalancerCollectionWeight, &value.CollectionWeight},
+		{&p.BalancerFanoutPenaltyWeight, &value.FanoutPenaltyWeight},
+		{&p.BalancerMovePrice, &value.MovePrice},
+		{&p.BalancerLoadPrice, &value.LoadPrice},
+		{&p.BalancerRelativeTolerance, &value.RelativeTolerance},
+		{&p.BalancerLocalTolerance, &value.LocalTolerance},
+		{&p.BalancerFanoutHysteresis, &value.FanoutHysteresis},
+		{&p.BalancerMinGainRows, &value.MinGainRows},
 	} {
 		parsed, err := strconv.ParseFloat(field.item.GetValue(), 64)
 		if err != nil {
@@ -35,8 +42,9 @@ func readBalanceConfig(params *paramtable.ComponentParam) (*BalanceConfig, bool)
 		item *paramtable.ParamItem
 		dest *int64
 	}{
-		{&p.BalancerStickyRowsScale, &value.StickyRowsScale},
+		{&p.BalancerAbsoluteToleranceRows, &value.AbsoluteToleranceRows},
 		{&p.BalancerTargetRowsPerShardNode, &value.TargetRowsPerShardNode},
+		{&p.BalancerMaxCandidateEvaluations, &value.MaxCandidateEvaluations},
 	} {
 		parsed, err := strconv.ParseInt(field.item.GetValue(), 10, 64)
 		if err != nil {
@@ -71,11 +79,23 @@ func (b *DefaultBalancer) watchBalanceConfig(ctx context.Context, params *paramt
 	}
 	p := &params.QueryViewCfg
 	keys := []string{
-		p.BalancerAutoBalance.Key, p.BalancerReconcileInterval.Key,
-		p.BalancerStickinessWeight.Key, p.BalancerNodeLoadWeight.Key,
-		p.BalancerFanoutWeight.Key, p.BalancerStickyRowsScale.Key,
+		p.BalancerAutoBalance.Key,
+		p.BalancerReconcileInterval.Key,
+		p.BalancerGlobalWeight.Key,
+		p.BalancerShardWeight.Key,
+		p.BalancerCollectionWeight.Key,
+		p.BalancerFanoutPenaltyWeight.Key,
+		p.BalancerMovePrice.Key,
+		p.BalancerLoadPrice.Key,
+		p.BalancerRelativeTolerance.Key,
+		p.BalancerLocalTolerance.Key,
+		p.BalancerFanoutHysteresis.Key,
+		p.BalancerAbsoluteToleranceRows.Key,
 		p.BalancerTargetRowsPerShardNode.Key,
+		p.BalancerMinGainRows.Key,
+		p.BalancerMaxCandidateEvaluations.Key,
 	}
+
 	var mu sync.Mutex
 	refresh := func() {
 		mu.Lock()

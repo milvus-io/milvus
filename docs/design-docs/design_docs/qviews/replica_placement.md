@@ -388,7 +388,7 @@ The view and cache component implementation introduces neither new RPCs nor
 replica node lists. Targets are retained as immutable layout objects without
 additional persisted generations or discovery revisions.
 
-## 9. Interaction with the Next Scoring Policy
+## 9. Interaction with Incremental Scoring
 
 [Incremental Score-Based Balancing](balancer_scoring.md) preserves this policy's
 per-collection/RG quotas, stable ownership, shortage suspension, and eventual

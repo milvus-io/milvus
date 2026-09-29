@@ -85,6 +85,24 @@ func (m *layoutManager) prepare(p *planningContext, dirty []qviews.ShardID) []qv
 			}
 		}
 	}
+	if publisher, ok := p.Reader.(interface {
+		PublishReplicaActivity(int64, map[int64]bool) bool
+	}); ok {
+		changed := false
+		for id, c := range collections {
+			active := make(map[int64]bool)
+			if c.LoadConfig() != nil {
+				for _, r := range c.LoadConfig().Replicas {
+					active[r.ReplicaID] = len(p.targets[r.ReplicaID]) > 0
+				}
+			}
+			changed = publisher.PublishReplicaActivity(id, active) || changed
+		}
+		if changed {
+			p.refreshTargetInputs()
+		}
+	}
+
 	// A newly Up survivor can unblock a suspended sibling's drain immediately.
 	initial := len(dirty)
 	for _, id := range dirty[:initial] {

@@ -1,10 +1,12 @@
 # Incremental Score-Based Balancing
 
-**Status: selected design direction; not implemented.** The implementation
-baseline is documented in [Balancer Design](balancer_design.md). This document
-defines the next scoring, target-accounting, and candidate-acceptance policy.
-Existing configuration values still control the baseline implementation; new
-weights, tolerances, and budgets require calibration before defaults are chosen.
+**Status: first implementation in this branch.** Incremental scoring, selected
+target accounting, protected partial-resource reuse evidence, dynamic scoring
+configuration, and per-shard search continuations are implemented. Production
+runtime wiring and the concrete QV SegmentManager remain outside this PR.
+Fair bounded batch discovery, migration/loading budgets, and execution throttles
+remain follow-up work. [Balancer Design](balancer_design.md) records the previous
+normalized-score baseline and shared controller contracts.
 
 Related contracts: [Balancer Cache](balancer_cache.md),
 [Replica Placement](replica_placement.md),
@@ -160,13 +162,42 @@ cannot depend on economic benefit. Choose the best legal required placement;
 avoid including unrelated optional moves that failed their own acceptance test.
 An unchanged assignment can still require a new QueryView for version changes.
 
-Weights and cost prices are finite and nonnegative, Q is positive, and the
-selected profile must enable the required objectives. New parameter names,
-defaults, and migration from the baseline configuration remain implementation
-and calibration work. Do not silently reinterpret existing keys or install the
-previously discussed 1/20/10 weight tuple as part of this documentation change.
+Weights and cost prices are finite and nonnegative, Q is positive, and at least
+one objective weight must be positive. All four objectives are enabled by
+default. A zero weight explicitly disables that objective; the Optional RG guard
+remains in force. Configuration is pinned once per batch, with invalid updates
+retaining the last valid complete profile. The new row-equivalent parameters do
+not reinterpret the old normalized-score keys.
 
-### 3.5 Quantitative Example
+### 3.5 Configuration
+
+The following keys are relative to `queryView.balancer.scoring`:
+
+| Key | Default | Adjustment effect |
+|---|---:|---|
+| `globalWeight` | `1` | Higher values favor reducing RG row skew |
+| `shardWeight` | `1` | Higher values favor spreading rows of a large shard |
+| `collectionWeight` | `1` | Higher values favor spreading a collection replica, including many small shards |
+| `fanoutPenaltyWeight` | `1` | Higher values penalize nodes beyond preferred shard fanout more strongly |
+| `movePrice` | `0.02` | Higher values require greater benefit before changing an assignment, even with reuse |
+| `loadPrice` | `0.08` | Higher values discourage destinations without confirmed compatible resources |
+| `relativeTolerance` | `0.1` | Higher values widen the RG balance band relative to mean demand |
+| `absoluteToleranceRows` | `100000` | Higher values tolerate more absolute skew, avoiding low-volume scattering |
+| `localTolerance` | `0.1` | Higher values tolerate greater shard and collection-replica concentration |
+| `fanoutHysteresis` | `0.1` | Higher values require larger row changes before adjusting preferred fanout |
+| `minGainRows` | `1` | Higher values suppress small net improvements |
+| `maxCandidateEvaluations` | `100000` | Lower values yield Optional search earlier and schedule continuations |
+
+`queryView.balancer.targetRowsPerShardNode` remains Q, default `100000` rows.
+Increasing it favors concentration and raises the collection-replica floor.
+`autoBalance` remains true and `reconcileInterval` remains `1m`.
+The retired `stickinessWeight`, `nodeLoadWeight`, `fanoutWeight`, and
+`stickyRowsScale` keys have no aliases: their old units cannot map directly to
+this objective. ParamTable comments and `configs/milvus.yaml` describe each
+setting's effect. These initial defaults pass deterministic placement scenarios;
+production workload calibration is still required.
+
+### 3.6 Quantitative Example
 
 Consider node loads 3M/3M/0, demand 6M, mu=2M, and delta=0.2M. Each segment has
 1M rows. For illustration only, take wG=1 and combined migration cost 0.1M per
@@ -183,8 +214,9 @@ its actual benefit exceeds its cost. With zero tolerance, the RG gain for moving
 x rows from a to b is x*(L[a]-L[b]-x)/mu. A price gamma*x then gives the explicit
 threshold L[a]-L[b] > x + gamma*mu. With a band, evaluate the two affected node
 penalties directly. Positive migration cost can stop improvement near a band
-boundary; this rule does not guarantee reaching the exact band. These numbers
-are analytical examples, not validated defaults or execution-test results.
+boundary; this rule does not guarantee reaching the exact band. The arithmetic is unit-tested; a policy event-sequence test with the
+default profile also verifies 3M/3M/0 to 2M/2M/2M recovery. This is not a
+claim that every segment size or replica layout can reach the band.
 
 ## 4. Incremental Candidate Construction
 
@@ -202,20 +234,25 @@ For optional work, search bounded candidates:
 
 Evaluate whole-shard/consolidation candidates as complete changes within one
 shard view, so a temporary search prefix's fanout does not block a beneficial
-final candidate. Preserve deterministic tie-breaking, preferring fewer moved
-rows, fewer additional loaded rows, and stable IDs for equivalent gains.
+final candidate. The first implementation traverses whole-shard and source-node groups,
+then individual segments, with sorted destination IDs. Segment order is descending
+rows, then ascending SegmentID. It accepts strictly positive net gains in this
+deterministic order; it does not globally rank all possible moves. Movement and
+loading prices discourage expensive candidates.
 
 Keep Must before Optional, descending shard rows within the selected classes,
 and shared projected loads. Merge accepted changes into one final QueryView per
-changed shard. Plan the complete bounded batch before applying it. Speculative
-candidates never update cache facts. Healthy accepted Preparing targets remain
+changed shard. Plan the complete selected batch before applying it. Per-shard Optional
+search is bounded; collection batch size is not yet bounded. Speculative
+segment candidates never update cache facts. Healthy accepted Preparing targets remain
 stable while loading, unless topology or intent requires replacement.
 
 Cross-shard/collection exchanges may escape local optima, but are follow-up
 work: multiple QueryViews do not apply atomically, and an exchange needs explicit
 partial-application tracking. Replica target ownership changes likewise require
-a separate quota-preserving layout decision. The first implementation must report
-these constrained stalls rather than claim global optimality or infeasibility.
+a separate quota-preserving layout decision. A no-op result means no acceptable candidate was found in the searched
+neighborhood, not proof of global optimality or infeasibility. Dedicated
+constrained-stall telemetry remains follow-up work.
 
 ## 5. Target Load, Residency, and Reuse
 
@@ -281,25 +318,35 @@ estimate must still fall back to correct loading. Lost nodes, incompatible
 materializations, and resources already being released receive no guaranteed
 reuse credit. Whole-view failure must not poison every successful segment.
 
-### 5.2 Current Implementation Gap
+### 5.2 Published Evidence and Integration Boundary
 
 The existing QN state machine preserves ready segment IDs when reporting
 Unrecoverable and does not immediately request Release. Coord defers Dropping
 until replacement or release, and QN ApplyViews processes new Preparing before
 old teardown within the batch. These are useful lifecycle foundations.
 
-However, ShardStats.Resources currently indexes only whole Up/Ready views.
-Although merged segment statistics can retain Ready segments from an
-Unrecoverable view, allocate.reusableResources rebuilds positive reuse evidence
-from that narrower index. Partial success from failed Preparing is therefore
-not fully credited unless another qualifying view holds the resource.
+ShardStats now publishes separate `UpPlacement` and `PreparingPlacement`, with
+assignment and exact per-view row facts. `Resources` indexes confirmed individual
+ready segments from Preparing/Unrecoverable views as well as whole Up/Ready
+views. Dropping, Dropped, and Down views supply no reuse credit. Exact
+DataVersion, LoadInfoVersion, PartitionID, and SegmentID matching remains
+required; matching SegmentID alone is insufficient.
 
-Extend the index to confirmed individual ready resources from relevant
-Preparing/Unrecoverable views while references remain protected. Retain exact
-compatibility checks; matching SegmentID alone across DataVersions is
-insufficient evidence. The current branch only defines the injected QV
-SegmentManager interface, so concrete resource sharing and handover still need
-integration verification. This design does not claim that they are already wired.
+Cache publication selects the target and maintains node/shard and
+collection-replica/node contributions. `PublishReplicaActivity` synchronizes
+layout suspension without reserving speculative assignments or changing
+LoadConfigStore. RG demand is maintained as row totals bucketed by the number of
+replicas requested per collection/RG. For N eligible nodes, each bucket contributes
+`rows * min(replicas, N)`; partial planning does not scan other collections.
+Topology/config/DataView publication refreshes affected targets. Node changes
+currently revisit resident shards of affected RG collections on the writer path.
+This is not a constant-time topology update.
+
+The branch defines the injected QV SegmentManager interface but has no concrete
+implementation. Its Acquire contract now explicitly requires reference
+registration before returning and retention of successful resources until Release.
+Actual physical sharing and handover still require resource-manager integration
+verification; the scorer's reuse estimate is not that guarantee.
 
 ## 6. Partial Scopes, Budgets, and Scenarios
 
@@ -353,15 +400,18 @@ objective; invalidated/failed work must be evaluated again. Disjoint replica
 quotas can impose unavoidable skew, such as two full replicas on three nodes
 with a 2+1 split.
 
-Implement in stages:
+Delivery stages:
 
-1. Per-view target accounting, protected per-segment reuse evidence, objective
-   deltas, incremental single-shard candidates, and final gain acceptance.
-2. Fair bounded discovery, continuations, and migration/loading budgets.
+1. Implemented: per-view target accounting, protected per-segment reuse evidence,
+   objective deltas, incremental single-shard candidates, final gain acceptance,
+   and resumable per-shard Optional search. A continuation has its own plan field;
+   it does not become an allocation failure or retry backoff.
+2. Follow-up: fair bounded batch discovery, migration/loading budgets, and
+   execution concurrency throttles.
 3. Calibration using reproducible event sequences; add multi-view exchanges or
    layout-owner exchanges only if constrained stalls justify their complexity.
 
-Required checks include:
+The full verification matrix, including follow-up integration and scale checks, is:
 
 - Objective arithmetic, net opening/closing fanout, deterministic ties, zero
   demand/rows, large row counts, and unchanged-plan rejection.
@@ -379,11 +429,27 @@ Required checks include:
   bounded candidate search, and explicit final-view materialization costs.
 
 Measure RG/local skew, fanout, moved and newly loaded rows, convergence passes,
-recovery latency, and planning CPU/allocations. No new default weights or strict
-convergence-to-band claim may be inferred from the illustrative example.
+recovery latency, and planning CPU/allocations. The initial defaults are listed above; they do not provide a strict
+convergence-to-band guarantee.
 
 Key implementation packages: `internal/views/coord/balancer/` (policy/scoring,
 planning, layout, and controller), its `cache/` and `api/` subpackages,
 `internal/views/coord/coordview/` (per-view facts and lifecycle publication),
 `internal/querynodev2/qnview/` (handler/reference interface), and
 `internal/dataview/` (immutable membership and matching row footprints).
+
+### 7.1 Cost of the First Implementation
+
+Each batch pins O(M) node entries. Desired row summaries and selected target
+contributions are maintained on publication. Each selected shard scans/copies node scalars in O(M), sorts its S
+segments and builds exact-compatible reuse evidence across its N target nodes,
+then evaluates candidate deltas. A one-segment delta touches at most two nodes;
+a whole-shard or source-node candidate also scans its member segments. Thus the
+candidate-count limit is not a CPU-time limit. The full candidate sweep includes
+O(S * N) member work; complete changed-view materialization is O(S), even when
+the search cursor resumes a small slice. Cross-collection load is read from node
+and RG summaries, without scanning unselected segment membership.
+
+Target aggregates count logical replica placements, not deduplicated physical
+memory. The existing Up/Pending index remains lifecycle evidence; it is not an
+exact physical-residency meter or a destination-loading throttle.

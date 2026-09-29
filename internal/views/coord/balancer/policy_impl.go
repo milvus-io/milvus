@@ -14,6 +14,8 @@ import (
 type DefaultBalancePolicy struct {
 	mu      sync.Mutex
 	layouts layoutManager
+	fanouts map[qviews.ShardID]int
+	search  map[qviews.ShardID]*searchCursor
 }
 
 // NewDefaultBalancePolicy creates the standard balance policy.
@@ -40,6 +42,11 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	}
 	snap := newPlanningContext(reader)
 	dirty = p.layouts.prepare(snap, dirty)
+	if p.fanouts == nil {
+		p.fanouts = make(map[qviews.ShardID]int)
+		p.search = make(map[qviews.ShardID]*searchCursor)
+	}
+	snap.fanouts, snap.search = p.fanouts, p.search
 
 	var mandatory, optional []balanceCandidate
 	seen := make(map[qviews.ShardID]struct{}, len(dirty))
@@ -75,29 +82,37 @@ func (p *DefaultBalancePolicy) Plan(reader balancercache.Reader, dirty []qviews.
 	projectedRows := initialProjectedRows(snap.NodesMap())
 	for _, shardID := range plan.Releases {
 		projectedRows = withoutRows(projectedRows, currentShardRows(snap, shardID))
+		snap.acceptRows(shardID, nil)
+		delete(p.fanouts, shardID)
+		delete(p.search, shardID)
 	}
 
 	for _, candidate := range mandatory {
 		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
-		result := allocate(snap, candidate.shardID, baseRows)
+		result := allocate(snap, candidate.shardID, baseRows, false)
 		if result == nil {
 			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
 		}
+		snap.acceptRows(candidate.shardID, result.rowsByNode)
 		plan.Prepares[candidate.shardID] = result.builder
 		projectedRows = withRows(baseRows, result.rowsByNode)
 	}
 
 	for _, candidate := range optional {
 		baseRows := withoutRows(projectedRows, currentShardRows(snap, candidate.shardID))
-		result := allocate(snap, candidate.shardID, baseRows)
+		result := allocate(snap, candidate.shardID, baseRows, true)
 		if result == nil {
 			plan.Retries = append(plan.Retries, candidate.shardID)
 			continue
 		}
+		if result.more {
+			plan.Continues = append(plan.Continues, candidate.shardID)
+		}
 		if assignmentsEqual(currentSegmentNodes(snap, candidate.shardID), result.assignments) {
 			continue
 		}
+		snap.acceptRows(candidate.shardID, result.rowsByNode)
 		plan.Prepares[candidate.shardID] = result.builder
 		projectedRows = withRows(baseRows, result.rowsByNode)
 	}
@@ -114,7 +129,7 @@ func initialProjectedRows(nodes map[int64]*BalanceNode) map[int64]int64 {
 		if node == nil {
 			continue
 		}
-		rows := node.UpRowCount + node.PendingRowCount
+		rows := node.TargetRowCount
 		if rows < 0 {
 			rows = 0
 		}

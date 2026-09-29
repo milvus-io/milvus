@@ -12,8 +12,9 @@ import (
 // (e.g., avoid two shards contending for the same target node via a shared
 // predicted-load tracker maintained internally during Plan).
 //
-// Implementations may retain target layouts across calls, but must not mutate
-// cache facts or apply views. The default policy serializes its planning calls.
+// Implementations may retain target layouts and publish layout activity selectors,
+// but must not mutate returned objects, reserve speculative segment rows, or apply
+// views. The default policy serializes its planning calls.
 type BalancePolicy interface {
 	Plan(reader balancercache.Reader, dirty []qviews.ShardID) *BalancePlan
 }
@@ -26,6 +27,8 @@ type BalancePolicy interface {
 // A shard listed in neither Prepares nor Releases is implicitly a no-op for
 // this batch.
 type BalancePlan struct {
+	// Continues contains unfinished bounded searches, not allocation failures.
+	Continues []qviews.ShardID
 	// Retries could not be allocated because desired inputs or eligible nodes were unavailable.
 	Retries []qviews.ShardID
 	// Prepares lists shards that should receive a new Preparing view.

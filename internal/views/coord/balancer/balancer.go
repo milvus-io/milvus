@@ -218,6 +218,9 @@ func (b *DefaultBalancer) apply(ctx context.Context, plan *BalancePlan) error {
 			b.Trigger(TriggerScope{DirtyShards: []qviews.ShardID{shardID}})
 		}
 	}
+	if len(plan.Continues) > 0 {
+		b.Trigger(TriggerScope{DirtyShards: plan.Continues})
+	}
 	if len(plan.Retries) > 0 {
 		b.Trigger(TriggerScope{DirtyShards: plan.Retries})
 		errs = append(errs, merr.WrapErrServiceUnavailableMsg("balance inputs are not ready for %d shards", len(plan.Retries)))

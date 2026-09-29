@@ -44,11 +44,19 @@ func publishTestData(c *balancercache.Cache, collection int64, version qviews.Da
 
 // Background load belongs to a real contribution outside the selected balance scope.
 func publishBackgroundRows(c *balancercache.Cache, rows map[int64]int64) {
-	stats := &coordview.ShardStats{Segments: make(map[int64]*coordview.SegmentStats)}
+	cfg := cfgFor(999, 9990, []int64{1}, nil)
+	c.PublishLoadConfig(999, cfg, 1)
+	segments := make(map[int64]*SegmentDataView)
+	var ids []int64
+	var placements []testSegmentPlacement
 	for node, count := range rows {
-		stats.Segments[node] = &coordview.SegmentStats{SegmentID: node, PartitionID: 1, RowNum: count, HasRowNum: true, Nodes: map[int64]coordview.SegmentState{node: coordview.SegmentStateUp}}
+		ids = append(ids, node)
+		segments[node] = &SegmentDataView{SegmentID: node, PartitionID: 1, RowNum: count}
+		placements = append(placements, placement(node, 1, node, coordview.SegmentStateUp))
 	}
-	c.PublishShard(cacheShard(999, 9990), stats)
+	version := qviews.DataVersion{StreamingVersion: 1}
+	publishTestData(c, 999, version, segments, shardDataView(cacheShard(999, 9990).VChannel, 1, ids...))
+	c.PublishShard(cacheShard(999, 9990), withSegmentRows(upStats(version, placements...), rows))
 }
 
 // withSegmentRows attaches retained exact-version footprints before publication.
@@ -56,6 +64,20 @@ func withSegmentRows(stats *coordview.ShardStats, rows map[int64]int64) *coordvi
 	for id, count := range rows {
 		stats.Segments[id].RowNum = count
 		stats.Segments[id].HasRowNum = true
+	}
+	for _, view := range []*coordview.ViewPlacement{stats.UpPlacement, stats.PreparingPlacement} {
+		if view == nil {
+			continue
+		}
+		view.Rows = make(map[int64]int64)
+		view.UnknownRows = nil
+		for id, node := range view.Assignments {
+			if segment := stats.Segments[id]; segment.HasRowNum {
+				view.Rows[node] += segment.RowNum
+			} else {
+				view.UnknownRows = append(view.UnknownRows, id)
+			}
+		}
 	}
 	return stats
 }

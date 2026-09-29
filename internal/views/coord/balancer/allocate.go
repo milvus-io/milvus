@@ -1,9 +1,10 @@
 package balancer
 
 import (
+	"maps"
+	"math"
 	"sort"
 
-	"github.com/milvus-io/milvus/internal/views/coord/coordview"
 	"github.com/milvus-io/milvus/internal/views/coord/loadmgr"
 	"github.com/milvus-io/milvus/internal/views/qviews"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
@@ -13,6 +14,7 @@ type allocationResult struct {
 	builder     *qviews.QueryViewAtCoordBuilder
 	assignments map[int64]int64
 	rowsByNode  map[int64]int64
+	more        bool
 }
 
 // allocate produces a complete candidate for shardID against the supplied
@@ -25,162 +27,100 @@ type allocationResult struct {
 //
 // This is the Phase 2 "allocation" step; Phase 1 classification and Phase 3
 // exact assignment-change emission live in classify.go / policy_impl.go.
-func allocate(
-	snap balanceInput,
-	shardID qviews.ShardID,
-	baseRows map[int64]int64,
-) *allocationResult {
-	desired := snap.ConfigForShard(shardID)
-	if desired == nil {
+func allocate(p *planningContext, shardID qviews.ShardID, baseRows map[int64]int64, optional bool) *allocationResult {
+	desired := p.ConfigForShard(shardID)
+	shard := p.DataViewForShard(shardID)
+	if desired == nil || shard == nil {
 		return nil
 	}
-	replica := findReplica(desired, shardID.ReplicaID)
-	if replica == nil {
-		return nil
-	}
-	shardDV := snap.DataViewForShard(shardID)
-	if shardDV == nil {
-		return nil
-	}
-
-	// Collect segments with their owning partitionID, and sort largest-first.
-	type segEntry struct {
-		segmentID   int64
-		partitionID int64
-		load        int64
-		segment     *SegmentDataView
-	}
-	entries := make([]segEntry, 0, shardDV.SegmentCount)
-	for _, p := range shardDV.Partitions {
-		for _, segment := range p.Segments {
-			entries = append(entries, segEntry{
-				segmentID:   segment.SegmentID,
-				partitionID: p.PartitionID,
-				load:        segment.RowNum,
-				segment:     segment,
-			})
-		}
+	entries := make([]*SegmentDataView, 0, shard.SegmentCount)
+	for _, part := range shard.Partitions {
+		entries = append(entries, part.Segments...)
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].load != entries[j].load {
-			return entries[i].load > entries[j].load
+		if entries[i].RowNum != entries[j].RowNum {
+			return entries[i].RowNum > entries[j].RowNum
 		}
-		return entries[i].segmentID < entries[j].segmentID
+		return entries[i].SegmentID < entries[j].SegmentID
 	})
-
-	// Current per-node segment states for stickiness / avoidance lookup.
-	current := currentSegmentStates(snap, shardID)
-	candidates := snap.CandidateNodes(replica.ResourceGroup)
-	if target, ok := snap.TargetNodes(shardID); ok {
-		candidates = target
-	}
-	ctx := newAllocationContext(snap.NodesMap(), replica.ResourceGroup, baseRows, shardTotalLoad(snap, shardID), shardDV.SegmentCount, snap.GetBalanceConfig(), candidates)
-	if len(ctx.eligible) == 0 && len(entries) > 0 {
+	ctx := newAllocationContext(p, shardID, baseRows, entries)
+	if len(entries) > 0 && len(ctx.nodes) == 0 {
 		return nil
 	}
-
-	// Fresh assignments map: nodeID → partitionID → []segmentID.
-	assignments := make(map[int64]map[int64][]int64)
-	flatAssignments := make(map[int64]int64, len(entries))
-
-	for _, e := range entries {
-		segInfo := e.segment
-		states := current[e.segmentID]
-		if planning, ok := snap.(*planningContext); ok {
-			states = reusableResources(planning, shardID, segInfo, ctx.eligible, states)
+	original := currentSegmentNodes(p, shardID)
+	eligible := make(map[int64]bool, len(ctx.nodes))
+	for _, node := range ctx.nodes {
+		eligible[node] = true
+	}
+	for _, segment := range entries {
+		if node, exists := original[segment.SegmentID]; exists && eligible[node] {
+			ctx.assign([]*SegmentDataView{segment}, node)
 		}
-		nodeID, ok := pickNode(ctx, segInfo, states)
-		if !ok {
+	}
+	for _, segment := range entries {
+		if _, placed := ctx.assignments[segment.SegmentID]; placed {
+			continue
+		}
+		if optional {
 			return nil
 		}
-		if _, exists := assignments[nodeID]; !exists {
-			assignments[nodeID] = make(map[int64][]int64)
-		}
-		assignments[nodeID][e.partitionID] = append(assignments[nodeID][e.partitionID], e.segmentID)
-		flatAssignments[e.segmentID] = nodeID
-		ctx.assign(nodeID, segmentRows(segInfo))
-	}
-
-	dataVersion, _ := snap.DataVersionForCollection(desired.CollectionID)
-	builder := qviews.NewQueryViewAtCoordBuilder(
-		replica.ReplicaID,
-		syntheticDataView(desired, dataVersion, shardDV),
-		shardID.VChannel,
-	)
-	builder.SetAssignments(assignments)
-	builder.SetLoadInfoVersion(snap.ConfigVersion(desired.CollectionID))
-	return &allocationResult{
-		builder:     builder,
-		assignments: flatAssignments,
-		rowsByNode:  ctx.assignedRows,
-	}
-}
-
-func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64, current map[int64]coordview.SegmentState) map[int64]coordview.SegmentState {
-	c := p.collectionForShard(id)
-	if c == nil || c.DataView() == nil {
-		return current
-	}
-	key := coordview.ResourceKey{SegmentID: segment.SegmentID, PartitionID: segment.PartitionID, DataVersion: c.DataView().DataVersion, LoadInfoVersion: c.ConfigVersion()}
-	states := make(map[int64]coordview.SegmentState)
-	for node, state := range current {
-		if state == coordview.SegmentStateUnrecoverable {
-			states[node] = state
-		}
-	}
-	for _, node := range nodes {
-		if n := c.PlacementNode(node); n != nil && n.HasResource(key) {
-			states[node] = coordview.SegmentStateReady
-		}
-	}
-	return states
-}
-
-type segmentNodeStates map[int64]map[int64]coordview.SegmentState
-
-// currentSegmentStates returns segmentID -> nodeID -> SegmentState from the
-// shard's immutable merged stats. The returned node maps are read-only.
-// Empty when no placement is tracked.
-func currentSegmentStates(snap balanceInput, shardID qviews.ShardID) segmentNodeStates {
-	stats := snap.GetShardStats(shardID)
-	if stats == nil {
-		return nil
-	}
-	out := make(segmentNodeStates, len(stats.Segments))
-	for segmentID, segment := range stats.Segments {
-		out[segmentID] = segment.Nodes
-	}
-	return out
-}
-
-// currentSegmentNodes returns segmentID -> best node from the shard's merged
-// states. The best node follows
-// the same state priority as ShardStats: Up > Ready > Preparing >
-// Unrecoverable.
-func currentSegmentNodes(snap balanceInput, shardID qviews.ShardID) map[int64]int64 {
-	return bestSegmentNodes(currentSegmentStates(snap, shardID))
-}
-
-func bestSegmentNodes(states segmentNodeStates) map[int64]int64 {
-	out := make(map[int64]int64, len(states))
-	for segmentID, nodeStates := range states {
-		var (
-			bestNode  int64
-			bestState coordview.SegmentState
-			found     bool
-		)
-		for nodeID, state := range nodeStates {
-			if !found || state > bestState || (state == bestState && nodeID < bestNode) {
-				bestNode = nodeID
-				bestState = state
-				found = true
+		best, bestGain := ctx.nodes[0], -math.MaxFloat64
+		for _, node := range ctx.nodes {
+			gain, _ := ctx.evaluate([]*SegmentDataView{segment}, node)
+			if gain > bestGain+scoreEpsilon {
+				best, bestGain = node, gain
 			}
 		}
-		if found {
-			out[segmentID] = bestNode
+		ctx.assign([]*SegmentDataView{segment}, best)
+	}
+	more := false
+	if optional {
+		before := ctx.score()
+		baseline := maps.Clone(ctx.assignments)
+		cursor := p.search[shardID]
+		if cursor == nil {
+			cursor = &searchCursor{}
+			p.search[shardID] = cursor
+		}
+		more = ctx.optimize(entries, cursor)
+		after := ctx.score()
+		if after.global > before.global+scoreEpsilon || before.energy(ctx.config)-after.energy(ctx.config)-ctx.migrationCost(baseline) <= ctx.config.MinGainRows {
+			ctx.assignments = baseline
+			clear(ctx.rows)
+			clear(ctx.counts)
+			ctx.opened = 0
+			for _, segment := range entries {
+				node := baseline[segment.SegmentID]
+				ctx.rows[node] += segment.RowNum
+				if ctx.counts[node] == 0 {
+					ctx.opened++
+				}
+				ctx.counts[node]++
+			}
 		}
 	}
-	return out
+	assignments := make(map[int64]map[int64][]int64)
+	for _, segment := range entries {
+		node := ctx.assignments[segment.SegmentID]
+		if assignments[node] == nil {
+			assignments[node] = make(map[int64][]int64)
+		}
+		assignments[node][segment.PartitionID] = append(assignments[node][segment.PartitionID], segment.SegmentID)
+	}
+	dataVersion, _ := p.DataVersionForCollection(desired.CollectionID)
+	builder := qviews.NewQueryViewAtCoordBuilder(shardID.ReplicaID, syntheticDataView(desired, dataVersion, shard), shardID.VChannel)
+	builder.SetAssignments(assignments)
+	builder.SetLoadInfoVersion(p.ConfigVersion(desired.CollectionID))
+	return &allocationResult{builder: builder, assignments: ctx.assignments, rowsByNode: ctx.rows, more: more}
+}
+
+// currentSegmentNodes returns the selected intended placement, preferring a
+// valid Preparing target over the serving Up view. The result is immutable.
+func currentSegmentNodes(snap balanceInput, shardID qviews.ShardID) map[int64]int64 {
+	if shard := snap.ShardEntry(shardID); shard != nil && shard.Target() != nil {
+		return shard.Target().Assignments
+	}
+	return nil
 }
 
 // findReplica returns the ReplicaAssignment whose ReplicaID matches.

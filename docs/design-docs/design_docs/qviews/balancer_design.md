@@ -1,15 +1,11 @@
 # Balancer & CollectionLoadManager Design
 
-**Implementation baseline and next design:** Sections 1–10 describe the current
-cache-backed, normalized-score implementation and its verification baseline.
-[Incremental Score-Based Balancing](balancer_scoring.md) defines the selected
-next policy: incremental candidates, RG/local/fanout penalty deltas, migration
-cost and gain acceptance, separate target-load accounting, and reuse of partial
-Prepare success. It supersedes the baseline planning/accounting rules for that
-future implementation. It has not changed production code or configuration
-defaults. In particular, the baseline [optional emission](#33-phase-3-candidate-emission)
-and [Up/Pending prediction](#42-within-batch-prediction) rules below are not the
-new policy's acceptance or target-load contracts.
+**Current policy:** [Incremental Score-Based Balancing](balancer_scoring.md)
+is implemented in this branch and is authoritative for scoring, target load,
+candidate acceptance, and scoring configuration. The normalized-score formulas,
+Up/Pending prediction, and their verification cases below are the historical
+baseline, retained for comparison. Shared lifecycle, cache, scope, and controller
+contracts continue to apply unless superseded by the current policy.
 
 > Reconcile reads the resident cache. QueryNode replica placement first repairs
 > balanced, stable collection/RG node targets, then plans shards as one batch.
@@ -123,11 +119,10 @@ does not read ParamTable directly.
 |---|---|---|
 | `queryView.balancer.autoBalance` | `true` | Enables MayOptimize on both event-triggered and periodic reconciles; mandatory placement, recovery, replica isolation, and releases continue when false. |
 | `queryView.balancer.reconcileInterval` | `1m` | Positive duration between periodic reconciles. Lower values increase optimization/check frequency and CPU overhead; higher values reduce scans. Event-triggered work is independent. |
-| `queryView.balancer.stickinessWeight` | `1` | Higher values favor loaded/preparing resource reuse and reduce movement; lower values give load balance and fanout more influence. |
-| `queryView.balancer.nodeLoadWeight` | `1` | Higher values favor nodes with fewer projected rows, potentially increasing movement or fanout; lower values favor the other scores. |
-| `queryView.balancer.fanoutWeight` | `1` | Higher values discourage extra nodes beyond the free allowance, potentially accepting less even row loads; lower values permit wider spreading when other scores favor it. |
-| `queryView.balancer.stickyRowsScale` | `1000000` | Positive rows at which movement penalty saturates. Increasing reduces the penalty for a given segment; decreasing increases it up to saturation. |
 | `queryView.balancer.targetRowsPerShardNode` | `100000` | Positive rows used to derive free shard fanout. Increasing favors fewer nodes; decreasing increases the free allowance. Not a node capacity limit. |
+
+The row-equivalent scoring parameters and retired keys are listed in
+[the current configuration table](balancer_scoring.md#35-configuration).
 
 All settings are owned by `ComponentParam.QueryViewCfg`, defined in
 `pkg/util/paramtable/query_view_param.go`. The `queryView` namespace is included
@@ -428,7 +423,7 @@ ledger hydration is required.
 
 ## 3. Policy Planning
 
-This section records the implemented algorithm. The replacement policy and its
+This section records the historical normalized-score algorithm. The replacement policy and its
 quantitative example are in [Incremental Score-Based Balancing](balancer_scoring.md#3-placement-objective).
 
 The default policy first repairs/reuses collection/RG layouts as described in
@@ -843,10 +838,10 @@ task.
 
 ## 9. Future Considerations
 
-The next policy is specified in [Incremental Score-Based Balancing](balancer_scoring.md),
-including target accounting, partial-resource reuse, fair partial scopes, and
-migration/loading budgets. Its configuration remains to be calibrated; the
-current `queryView.balancer.*` settings above retain their existing semantics.
+The first [incremental scoring implementation](balancer_scoring.md) includes
+target accounting, partial-resource reuse evidence, gain acceptance, and
+per-shard search continuations. Fair bounded batch discovery and migration/loading
+budgets remain follow-up work. Defaults require further production calibration.
 
 Further work beyond that first policy implementation includes bounded
 cross-shard exchanges with partial-application tracking, quota-preserving layout
@@ -856,7 +851,7 @@ resources merely because their Preparing view failed.
 
 ## 10. Verification
 
-The checks below describe the baseline. The next policy's acceptance,
+The checks below describe the baseline. The current policy's acceptance,
 accounting, failure-reuse, and scale checks are listed in
 [its verification section](balancer_scoring.md#7-guarantees-delivery-and-verification).
 

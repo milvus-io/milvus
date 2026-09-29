@@ -16,11 +16,13 @@ func TestConfigPublicationValidationAndOwnership(t *testing.T) {
 	c.SetNotifier(func(api.TriggerScope) { notifications++ })
 	original := c.GetBalanceConfig()
 	for _, mutate := range []func(*api.BalanceConfig){
-		func(v *api.BalanceConfig) { v.NodeLoadWeight = math.NaN() },
-		func(v *api.BalanceConfig) { v.FanoutWeight = math.Inf(1) },
-		func(v *api.BalanceConfig) { v.StickinessWeight = -1 },
-		func(v *api.BalanceConfig) { v.NodeLoadWeight, v.FanoutWeight, v.StickinessWeight = 0, 0, 0 },
-		func(v *api.BalanceConfig) { v.StickyRowsScale = 0 },
+		func(v *api.BalanceConfig) { v.GlobalWeight = math.NaN() },
+		func(v *api.BalanceConfig) { v.FanoutPenaltyWeight = math.Inf(1) },
+		func(v *api.BalanceConfig) { v.MovePrice = -1 },
+		func(v *api.BalanceConfig) {
+			v.GlobalWeight, v.FanoutPenaltyWeight, v.ShardWeight, v.CollectionWeight = 0, 0, 0, 0
+		},
+		func(v *api.BalanceConfig) { v.AbsoluteToleranceRows = 0 },
 		func(v *api.BalanceConfig) { v.TargetRowsPerShardNode = -1 },
 		func(v *api.BalanceConfig) { v.TickerInterval = 0 },
 	} {
@@ -34,12 +36,12 @@ func TestConfigPublicationValidationAndOwnership(t *testing.T) {
 	value.TickerInterval += time.Minute
 	require.True(t, c.UpdateBalanceConfig(&value))
 	require.Zero(t, notifications)
-	value.NodeLoadWeight = 2
+	value.GlobalWeight = 2
 	require.True(t, c.UpdateBalanceConfig(&value))
 	require.Equal(t, 1, notifications)
-	value.NodeLoadWeight = 100
-	require.Equal(t, 2.0, c.GetBalanceConfig().NodeLoadWeight)
-	require.Equal(t, 1.0, original.NodeLoadWeight)
+	value.GlobalWeight = 100
+	require.Equal(t, 2.0, c.GetBalanceConfig().GlobalWeight)
+	require.Equal(t, 1.0, original.GlobalWeight)
 	require.True(t, c.UpdateBalanceConfig(nil))
 	require.Equal(t, original, c.GetBalanceConfig())
 	require.False(t, c.UpdateBalanceConfig(nil))

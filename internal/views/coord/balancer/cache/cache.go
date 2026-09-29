@@ -32,6 +32,8 @@ type CollectionEntry struct {
 	data          *api.CollectionDataView
 	shards        immutableIndex[*ShardEntry]
 	placements    immutableIndex[*PlacementNode]
+	suspended     immutableIndex[bool]
+	targetLoads   immutableIndex[targetLoad]
 }
 
 func (c *CollectionEntry) ID() int64                         { return c.id }
@@ -48,6 +50,8 @@ type ShardEntry struct {
 	id                                     qviews.ShardID
 	stats                                  *coordview.ShardStats
 	rows                                   ShardRowStats
+	target                                 *coordview.ViewPlacement
+	targetRows                             map[int64]int64
 	upNodes, preparingNodes, residentNodes []int64
 }
 
@@ -63,6 +67,7 @@ type nodeContribution struct {
 type NodeEntry struct {
 	info          api.BalanceNode
 	contributions immutableIndex[nodeContribution]
+	targets       immutableIndex[targetContribution]
 }
 
 func (n *NodeEntry) Info() *api.BalanceNode { return &n.info }
@@ -78,6 +83,7 @@ func (n *NodeEntry) RangeShards(fn func(qviews.ShardID) bool) {
 type ResourceGroupEntry struct {
 	nodes       immutableIndex[int64]
 	collections immutableIndex[int64]
+	demand      immutableIndex[demandBucket]
 }
 
 func (r *ResourceGroupEntry) RangeNodes(fn func(int64) bool)       { r.nodes.each(fn) }
@@ -314,7 +320,7 @@ func (c *Cache) groupLocked(name string) ResourceGroupEntry {
 }
 
 func (c *Cache) storeGroupLocked(name string, group ResourceGroupEntry) {
-	if group.nodes.len() == 0 && group.collections.len() == 0 {
+	if group.nodes.len() == 0 && group.collections.len() == 0 && group.demand.len() == 0 {
 		delete(c.groups, name)
 	} else {
 		c.groups[name] = &group
@@ -327,6 +333,7 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	slot := c.lockCollection(id)
 	defer c.finishCollection(id, slot)
 	next := *slot.value.Load()
+	previous := next
 	if next.config == cfg && next.configVersion == version {
 		return
 	}
@@ -352,6 +359,8 @@ func (c *Cache) PublishLoadConfig(id int64, cfg *loadmgr.LoadConfig, version uin
 	}
 	c.mu.Unlock()
 	next.config, next.configVersion = cfg, version
+	c.replaceDemand(&previous, &next)
+	c.refreshTargets(&next, slot.rows)
 	slot.value.Store(&next)
 	c.changed(api.TriggerScope{DirtyCollections: []int64{id}})
 }
@@ -366,6 +375,7 @@ func (c *Cache) PublishDataView(id int64, data *api.CollectionDataView) {
 		return
 	}
 	previous := next.data
+	previousEntry := next
 	next.data = data
 	if data != nil {
 		for _, shard := range data.Shards {
@@ -394,6 +404,8 @@ func (c *Cache) PublishDataView(id int64, data *api.CollectionDataView) {
 		updated.rows = rows
 		next.shards = next.shards.set(shardKey(shardID), &updated)
 	}
+	c.replaceDemand(&previousEntry, &next)
+	c.refreshTargets(&next, slot.rows)
 	slot.value.Store(&next)
 	c.changed(api.TriggerScope{DirtyCollections: []int64{id}})
 }
@@ -449,6 +461,7 @@ func (c *Cache) PublishShard(id qviews.ShardID, stats *coordview.ShardStats) {
 		replacement = &ShardEntry{id: id, stats: stats, rows: rows, upNodes: stats.UpNodes, preparingNodes: stats.PreparingNodes, residentNodes: stats.ResidentNodes}
 	}
 	next.replacePlacements(id, old, replacement)
+	c.replaceTarget(&next, id, old, replacement, slot.rows)
 	if stats == nil {
 		if old != nil {
 			slot.replicaUses[id.ReplicaID]--
@@ -546,7 +559,6 @@ func (c *Cache) replaceNodeContribution(nodeID int64, id qviews.ShardID, rows No
 
 func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	slot := c.lockNode(id)
-	defer c.finishNode(id, slot)
 	next := *slot.value.Load()
 	old := next.info
 	if info == nil {
@@ -556,6 +568,7 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 		next.info.Alive, next.info.Stopping, next.info.ResourceGroup = info.Alive, info.Stopping, info.ResourceGroup
 	}
 	if old == next.info {
+		c.finishNode(id, slot)
 		return
 	}
 	c.mu.Lock()
@@ -569,6 +582,7 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 	c.storeGroupLocked(next.info.ResourceGroup, group)
 	c.mu.Unlock()
 	slot.value.Store(&next)
+	c.finishNode(id, slot)
 	scope := api.TriggerScope{DirtyNodes: []int64{id}}
 	{
 		seen := make(map[int64]struct{})
@@ -580,6 +594,14 @@ func (c *Cache) PublishNode(id int64, info *api.NodeInfo) {
 		for id := range seen {
 			scope.DirtyCollections = append(scope.DirtyCollections, id)
 		}
+	}
+	// Release the node writer lock before taking any collection writer lock.
+	for _, collectionID := range scope.DirtyCollections {
+		s := c.lockCollection(collectionID)
+		entry := *s.value.Load()
+		c.refreshTargets(&entry, s.rows)
+		s.value.Store(&entry)
+		c.finishCollection(collectionID, s)
 	}
 	c.changed(scope)
 }
@@ -626,7 +648,7 @@ func (c *Cache) lockNode(id int64) *nodeSlot {
 
 func (c *Cache) finishNode(id int64, slot *nodeSlot) {
 	entry := slot.value.Load()
-	if !entry.info.Alive && entry.contributions.len() == 0 {
+	if !entry.info.Alive && entry.contributions.len() == 0 && entry.targets.len() == 0 {
 		c.mu.Lock()
 		delete(c.nodes, id)
 		c.mu.Unlock()

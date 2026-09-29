@@ -223,9 +223,9 @@ Violating any contract leaves the corresponding view stuck (Preparing/UpRecoveri
 | `querynodev2/qnview` | `QNQueryViewHandler`, `QNQueryViewStateMachine`, `SegmentManager` interface |
 | `streamingnode/server/wal/snview` | `SNQueryViewHandler`, `SNQueryViewStateMachine`, `StreamingNodeResourceManager` interface, pchannel-bound `metastore.StreamingNodeCataLog` usage |
 
-## 7. Planned Partial Resource Handover
+## 7. Partial Resource Handover
 
-The [next Balancer policy](balancer_scoring.md#51-failure-does-not-erase-partial-success)
+The [Balancer policy](balancer_scoring.md#51-failure-does-not-erase-partial-success)
 requires reuse of confirmed successful segments even when their Preparing view
 fails. Invalidating a target-load contribution is not a resource Release.
 

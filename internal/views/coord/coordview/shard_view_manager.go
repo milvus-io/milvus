@@ -219,19 +219,22 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 				stats.UpVersion = &version
 				stats.UpLoadInfoVersion = sm.View().GetMeta().GetLoadInfoVersion()
 				stats.UpNodes = viewNodeIDs(sm.View())
+				stats.UpPlacement = viewPlacement(sm)
 			}
 		case qviews.QueryViewStatePreparing, qviews.QueryViewStateReady:
 			if stats.PreparingVersion == nil || version.GT(*stats.PreparingVersion) {
 				stats.PreparingVersion = &version
 				stats.PreparingNodes = viewNodeIDs(sm.View())
+				stats.PreparingPlacement = viewPlacement(sm)
 			}
 		}
 
 		fillSegments(stats.Segments, sm.View().GetQueryNode(), baseState, sm.QNReadySegments())
-		// Down/Dropping resources may already be on a release path. Preparing
-		// resources do not imply that concurrent acquisitions can be coalesced.
-		if (sm.State() == qviews.QueryViewStateUp || sm.State() == qviews.QueryViewStateReady) && sm.View().GetMeta().GetLoadInfoVersion() != 0 {
+		// A failed view still protects successfully loaded segments until
+		// replacement acquires them. Never infer readiness for unfinished loads.
+		if sm.State() != qviews.QueryViewStateDown && sm.View().GetMeta().GetLoadInfoVersion() != 0 {
 			for _, node := range sm.View().GetQueryNode() {
+				ready := segmentSet(sm.QNReadySegments()[node.GetNodeId()])
 				resources := stats.Resources[node.GetNodeId()]
 				if resources == nil {
 					resources = make(map[ResourceKey]struct{})
@@ -239,6 +242,9 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 				}
 				for _, partition := range node.GetPartitions() {
 					for _, id := range partition.GetSegmentIds() {
+						if sm.State() != qviews.QueryViewStateUp && sm.State() != qviews.QueryViewStateReady && !ready[id] {
+							continue
+						}
 						resources[ResourceKey{PartitionID: partition.GetPartitionId(), SegmentID: id, DataVersion: version.DataVersion, LoadInfoVersion: sm.View().GetMeta().GetLoadInfoVersion()}] = struct{}{}
 					}
 				}
@@ -252,6 +258,25 @@ func (m *ShardViewManager) statsLocked() *ShardStats {
 
 	m.fillShardRows(stats)
 	return stats
+}
+
+func viewPlacement(sm *CoordQueryViewStateMachine) *ViewPlacement {
+	p := &ViewPlacement{Assignments: make(map[int64]int64), Rows: make(map[int64]int64)}
+	for _, node := range sm.View().GetQueryNode() {
+		for _, part := range node.GetPartitions() {
+			for _, id := range part.GetSegmentIds() {
+				p.Assignments[id] = node.GetNodeId()
+				if sm.Ref() != nil {
+					if stats, ok := sm.Ref().Stats(id); ok {
+						p.Rows[node.GetNodeId()] += stats.RowNum
+						continue
+					}
+				}
+				p.UnknownRows = append(p.UnknownRows, id)
+			}
+		}
+	}
+	return p
 }
 
 func viewNodeIDs(view *viewpb.QueryViewOfShard) []int64 {

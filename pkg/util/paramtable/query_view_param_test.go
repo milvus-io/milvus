@@ -32,13 +32,21 @@ func TestQueryViewConfiguration(t *testing.T) {
 	p := &params.QueryViewCfg
 	require.Equal(t, time.Minute, p.BalancerReconcileInterval.GetAsDurationByParse())
 	defaults := map[string]string{
-		"autoBalance":            "true",
-		"reconcileInterval":      "1m",
-		"stickinessWeight":       "1",
-		"nodeLoadWeight":         "1",
-		"fanoutWeight":           "1",
-		"stickyRowsScale":        "1000000",
-		"targetRowsPerShardNode": "100000",
+		"autoBalance":                     "true",
+		"reconcileInterval":               "1m",
+		"targetRowsPerShardNode":          "100000",
+		"scoring.globalWeight":            "1",
+		"scoring.shardWeight":             "1",
+		"scoring.collectionWeight":        "1",
+		"scoring.fanoutPenaltyWeight":     "1",
+		"scoring.movePrice":               "0.02",
+		"scoring.loadPrice":               "0.08",
+		"scoring.relativeTolerance":       "0.1",
+		"scoring.localTolerance":          "0.1",
+		"scoring.fanoutHysteresis":        "0.1",
+		"scoring.absoluteToleranceRows":   "100000",
+		"scoring.minGainRows":             "1",
+		"scoring.maxCandidateEvaluations": "100000",
 	}
 	// Projections contain configured source/overlay values, not unset defaults.
 	for key, value := range defaults {
@@ -47,7 +55,7 @@ func TestQueryViewConfiguration(t *testing.T) {
 	for _, component := range []string{"querycoord", "querynode", "streamingnode", "proxy"} {
 		projected := params.GetComponentConfigurations(component, "queryview")
 		for key, want := range defaults {
-			require.Equal(t, want, projected[strings.ToLower("queryviewbalancer"+key)], component+": "+key)
+			require.Equal(t, want, projected[strings.ToLower(strings.ReplaceAll("queryviewbalancer"+key, ".", ""))], component+": "+key)
 		}
 	}
 	require.Empty(t, params.GetComponentConfigurations("querycoord", "queryCoord.queryView"))

@@ -16,15 +16,23 @@
 
 package paramtable
 
-// queryViewConfig contains the shared QueryView subsystem configuration.
+// queryViewConfig owns the refreshable QueryView placement profile.
 type queryViewConfig struct {
-	BalancerAutoBalance            ParamItem `refreshable:"true"`
-	BalancerReconcileInterval      ParamItem `refreshable:"true"`
-	BalancerStickinessWeight       ParamItem `refreshable:"true"`
-	BalancerNodeLoadWeight         ParamItem `refreshable:"true"`
-	BalancerFanoutWeight           ParamItem `refreshable:"true"`
-	BalancerStickyRowsScale        ParamItem `refreshable:"true"`
-	BalancerTargetRowsPerShardNode ParamItem `refreshable:"true"`
+	BalancerAutoBalance             ParamItem `refreshable:"true"`
+	BalancerReconcileInterval       ParamItem `refreshable:"true"`
+	BalancerGlobalWeight            ParamItem `refreshable:"true"`
+	BalancerShardWeight             ParamItem `refreshable:"true"`
+	BalancerCollectionWeight        ParamItem `refreshable:"true"`
+	BalancerFanoutPenaltyWeight     ParamItem `refreshable:"true"`
+	BalancerMovePrice               ParamItem `refreshable:"true"`
+	BalancerLoadPrice               ParamItem `refreshable:"true"`
+	BalancerRelativeTolerance       ParamItem `refreshable:"true"`
+	BalancerLocalTolerance          ParamItem `refreshable:"true"`
+	BalancerFanoutHysteresis        ParamItem `refreshable:"true"`
+	BalancerAbsoluteToleranceRows   ParamItem `refreshable:"true"`
+	BalancerTargetRowsPerShardNode  ParamItem `refreshable:"true"`
+	BalancerMinGainRows             ParamItem `refreshable:"true"`
+	BalancerMaxCandidateEvaluations ParamItem `refreshable:"true"`
 }
 
 func (p *queryViewConfig) init(base *BaseTable) {
@@ -33,61 +41,119 @@ func (p *queryViewConfig) init(base *BaseTable) {
 		Version:      "3.0.0",
 		DefaultValue: "true",
 		Export:       true,
-		Doc:          "Enables optional QueryView placement optimization on both event-triggered and periodic reconciles; does not disable reconciliation. Disable to reduce background segment movement; mandatory recovery, view updates, replica isolation, and releases continue. Independent of queryCoord.autoBalance.",
+		Doc:          "Enables optional placement optimization. Disable to stop optional movement; mandatory recovery, version updates and releases continue independently of queryCoord.autoBalance.",
 	}
 	p.BalancerAutoBalance.Init(base.mgr)
-
 	p.BalancerReconcileInterval = ParamItem{
 		Key:          "queryView.balancer.reconcileInterval",
 		Version:      "3.0.0",
 		DefaultValue: "1m",
 		Export:       true,
-		Doc:          "Positive duration with a unit between periodic QueryView reconciles (e.g. 500ms, 10s, 1m). Decrease for more frequent optimization and lifecycle checks at higher coordinator CPU cost; increase to reduce scan overhead. Event-triggered reconciliation continues independently, even when autoBalance is false.",
+		Doc:          "Positive duration with a unit between periodic reconciles. Decrease for faster convergence and more coordinator work; increase to reduce scan frequency. Events reconcile independently.",
 	}
 	p.BalancerReconcileInterval.Init(base.mgr)
-
-	p.BalancerStickinessWeight = ParamItem{
-		Key:          "queryView.balancer.stickinessWeight",
+	p.BalancerGlobalWeight = ParamItem{
+		Key:          "queryView.balancer.scoring.globalWeight",
 		Version:      "3.0.0",
 		DefaultValue: "1",
 		Export:       true,
-		Doc:          "Relative weight for reusing loaded or preparing segments. Increase to discourage movement and repeated loading; decrease to favor row-load balance or lower fanout. Must be finite and nonnegative; at least one scoring weight must be positive.",
+		Doc:          "Weight of RG load-band improvement. Increase to favor reducing aggregate row skew over local concentration and loading cost.",
 	}
-	p.BalancerStickinessWeight.Init(base.mgr)
-
-	p.BalancerNodeLoadWeight = ParamItem{
-		Key:          "queryView.balancer.nodeLoadWeight",
+	p.BalancerGlobalWeight.Init(base.mgr)
+	p.BalancerShardWeight = ParamItem{
+		Key:          "queryView.balancer.scoring.shardWeight",
 		Version:      "3.0.0",
 		DefaultValue: "1",
 		Export:       true,
-		Doc:          "Relative weight for preferring nodes with fewer projected rows. Increase to favor row-load balance, potentially causing more segment movement or shard fanout; decrease to favor resource reuse or lower fanout. Must be finite and nonnegative; at least one scoring weight must be positive.",
+		Doc:          "Weight of excess shard rows on one node. Increase to spread large shards more strongly; small shards within their preferred footprint receive no spreading reward.",
 	}
-	p.BalancerNodeLoadWeight.Init(base.mgr)
-
-	p.BalancerFanoutWeight = ParamItem{
-		Key:          "queryView.balancer.fanoutWeight",
+	p.BalancerShardWeight.Init(base.mgr)
+	p.BalancerCollectionWeight = ParamItem{
+		Key:          "queryView.balancer.scoring.collectionWeight",
 		Version:      "3.0.0",
 		DefaultValue: "1",
 		Export:       true,
-		Doc:          "Relative weight for avoiding additional nodes beyond the shard free fanout allowance. Increase to favor fewer nodes per shard, potentially accepting less even row loads; decrease to allow wider spreading when other scores favor it. Must be finite and nonnegative; at least one scoring weight must be positive.",
+		Doc:          "Weight of excess collection-replica rows on one node. Increase to distribute large collections made of many small shards more evenly.",
 	}
-	p.BalancerFanoutWeight.Init(base.mgr)
-
-	p.BalancerStickyRowsScale = ParamItem{
-		Key:          "queryView.balancer.stickyRowsScale",
+	p.BalancerCollectionWeight.Init(base.mgr)
+	p.BalancerFanoutPenaltyWeight = ParamItem{
+		Key:          "queryView.balancer.scoring.fanoutPenaltyWeight",
 		Version:      "3.0.0",
-		DefaultValue: "1000000",
+		DefaultValue: "1",
 		Export:       true,
-		Doc:          "Positive row count at which movement penalty saturates: min(segmentRows / stickyRowsScale, 1). Increase to reduce the penalty for moving a given segment; decrease to discourage movement until the penalty saturates. Only affects the stickiness score.",
+		Doc:          "Weight of net excess shard fanout. Increase to favor consolidation and fewer query participants; decrease to permit wider spreading.",
 	}
-	p.BalancerStickyRowsScale.Init(base.mgr)
-
+	p.BalancerFanoutPenaltyWeight.Init(base.mgr)
+	p.BalancerMovePrice = ParamItem{
+		Key:          "queryView.balancer.scoring.movePrice",
+		Version:      "3.0.0",
+		DefaultValue: "0.02",
+		Export:       true,
+		Doc:          "Row-equivalent cost per row whose node changes. Increase to reduce movement; decrease to accept smaller placement improvements, even when destination resources already exist.",
+	}
+	p.BalancerMovePrice.Init(base.mgr)
+	p.BalancerLoadPrice = ParamItem{
+		Key:          "queryView.balancer.scoring.loadPrice",
+		Version:      "3.0.0",
+		DefaultValue: "0.08",
+		Export:       true,
+		Doc:          "Additional row-equivalent cost per row needing a compatible destination load. Increase to favor protected ready-resource reuse; decrease to favor balance despite additional loading.",
+	}
+	p.BalancerLoadPrice.Init(base.mgr)
+	p.BalancerRelativeTolerance = ParamItem{
+		Key:          "queryView.balancer.scoring.relativeTolerance",
+		Version:      "3.0.0",
+		DefaultValue: "0.1",
+		Export:       true,
+		Doc:          "Fractional RG load tolerance, in [0,1). Increase to accept more relative skew and reduce movement; decrease to pursue closer row balance.",
+	}
+	p.BalancerRelativeTolerance.Init(base.mgr)
+	p.BalancerLocalTolerance = ParamItem{
+		Key:          "queryView.balancer.scoring.localTolerance",
+		Version:      "3.0.0",
+		DefaultValue: "0.1",
+		Export:       true,
+		Doc:          "Fractional allowance above shard and collection concentration targets. Increase to retain more concentrated layouts; decrease to spread large data more strongly.",
+	}
+	p.BalancerLocalTolerance.Init(base.mgr)
+	p.BalancerFanoutHysteresis = ParamItem{
+		Key:          "queryView.balancer.scoring.fanoutHysteresis",
+		Version:      "3.0.0",
+		DefaultValue: "0.1",
+		Export:       true,
+		Doc:          "Fractional growth/shrink margin for preferred fanout, in [0,1). Increase to reduce fanout changes near size boundaries; decrease to react sooner to data growth and shrinkage.",
+	}
+	p.BalancerFanoutHysteresis.Init(base.mgr)
+	p.BalancerAbsoluteToleranceRows = ParamItem{
+		Key:          "queryView.balancer.scoring.absoluteToleranceRows",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Export:       true,
+		Doc:          "Positive minimum RG tolerance in rows. Increase to keep tiny shards concentrated at low total volume; decrease to rebalance smaller absolute load differences.",
+	}
+	p.BalancerAbsoluteToleranceRows.Init(base.mgr)
 	p.BalancerTargetRowsPerShardNode = ParamItem{
 		Key:          "queryView.balancer.targetRowsPerShardNode",
 		Version:      "3.0.0",
 		DefaultValue: "100000",
 		Export:       true,
-		Doc:          "Positive rows used to derive the free fanout allowance: ceil(shardRows / targetRowsPerShardNode), capped by eligible nodes and segment count. Increase to favor concentrating each shard on fewer nodes; decrease to allow more nodes before the fanout penalty applies. This is a soft scoring allowance, not a node capacity limit.",
+		Doc:          "Positive concentration scale in rows for preferred shard fanout and the collection concentration floor. Increase to favor fewer participants; decrease to favor spreading. Not a capacity limit.",
 	}
 	p.BalancerTargetRowsPerShardNode.Init(base.mgr)
+	p.BalancerMinGainRows = ParamItem{
+		Key:          "queryView.balancer.scoring.minGainRows",
+		Version:      "3.0.0",
+		DefaultValue: "1",
+		Export:       true,
+		Doc:          "Positive minimum net optional gain in row-equivalent units. Increase to reject marginal moves; decrease to accept smaller improvements.",
+	}
+	p.BalancerMinGainRows.Init(base.mgr)
+	p.BalancerMaxCandidateEvaluations = ParamItem{
+		Key:          "queryView.balancer.scoring.maxCandidateEvaluations",
+		Version:      "3.0.0",
+		DefaultValue: "100000",
+		Export:       true,
+		Doc:          "Positive maximum optional candidate evaluations per shard pass. Increase to search more candidates at higher CPU cost; decrease to yield earlier and continue on a later reconcile. Mandatory placement is not capped.",
+	}
+	p.BalancerMaxCandidateEvaluations.Init(base.mgr)
 }

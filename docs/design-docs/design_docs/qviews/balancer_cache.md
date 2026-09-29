@@ -1,13 +1,14 @@
 # Balancer Cache
 
-This document describes the implemented cache. The next policy's additional
-target-load and partial-resource reuse contracts are specified in
-[Incremental Score-Based Balancing](balancer_scoring.md#5-target-load-residency-and-reuse)
-and are not implemented by the current Up/Pending aggregates.
+This document describes the implemented cache, including selected target-load
+and partial-resource reuse contracts used by
+[Incremental Score-Based Balancing](balancer_scoring.md#5-target-load-residency-and-reuse).
+Up/Pending statistics remain separate lifecycle facts; scoring uses selected
+target contributions.
 
 The resident `cache.Cache` replaces the runtime `BalancerSnapshot` and
 `SnapshotBuilder` path. Tests publish inputs directly into the cache and assert
-planning behavior; no snapshot-era implementation is retained. Batch ordering and logical row accounting remain unchanged.
+planning behavior; no snapshot-era implementation is retained. Batch ordering remains unchanged.
 [Replica placement](replica_placement.md) adds balanced target node sets,
 suspension and compatible cross-replica resource reuse. Production runtime
 wiring and RPC changes are outside this work.
@@ -194,8 +195,8 @@ The total and the contribution subtracted from it must come from the same
 pinned NodeEntry, not a separately read ShardEntry:
 
 ```text
-base[n]       = pinnedNode[n].UpRowCount + pinnedNode[n].PendingRowCount
-old[n, s]     = pinnedNode[n].Contribution(s).TotalRows
+base[n]       = pinnedNode[n].TargetRowCount
+old[n, s]     = pinnedNode[n].TargetContribution(s)
 projected[n]  = base[n] + acceptedDelta[n]
 
 candidateBase[n] = projected[n] - old[n, s]
@@ -212,19 +213,18 @@ historical nodes outside the desired RG. Independently reading a newer shard
 contribution and subtracting it from an older node total is not valid;
 clamping a negative result would not repair that inconsistency.
 
-Candidate segment placement, partial assigned rows, opened-node tracking, and
-the following score reference remain policy calculations:
+Collection-replica totals follow the same rule: subtract a shard's target
+contribution from the same pinned CollectionEntry, then apply accepted
+collection deltas. Node and collection references may come from different
+publication instants; each aggregate/subtraction pair remains internally valid.
 
-```text
-ReferenceRows =
-    (sum(candidateBase over eligible nodes) + desiredShard.TotalRows) / N
-```
-
-Earlier accepted candidates change this value for later shards. A cached
-static RG total cannot replace it. It is computed once per candidate and held
-fixed while placing that candidate's segments. No predicted value is written
-back into the cache. Apply begins after the whole batch has been planned, so
-Preparing publications cannot be counted again as this batch's predictions.
+Candidate placement and changed-node objective deltas remain policy-local. The RG
+mean is desired active demand divided by eligible node count, pinned for the
+batch. Earlier accepted moves change projected loads but do not change desired
+demand. No speculative segment assignment is published. Apply starts only after
+planning the selected batch. Layout suspension selectors are published before
+candidate acceptance; when changed, planning refreshes its target inputs before
+starting any prediction.
 
 The first version does not lazily introduce new node baselines after accepting
 candidates; doing so would require rebasing all earlier accepted replacements.
@@ -463,34 +463,32 @@ planner comparison.
 
 See [Replica Placement](replica_placement.md). Collection entries additionally maintain immutable per-node replica footprints and reference-counted ready-resource indexes. Shard statistics retain Up/Preparing node footprints and resident nodes through durable deletion. Node loss, stopping, addition and RG changes all invalidate the affected RG collections. Actual row accounting remains logical per-shard accounting; it is not physical resource deduplication. Desired target layouts are owned by the default policy, never published as actual cache facts.
 
-## Planned target and reuse accounting
+## Selected target and reuse accounting
 
-[The next policy](balancer_scoring.md#5-target-load-residency-and-reuse) requires
-separate intended placement, resource occupancy, and confirmed reuse information.
-These are additions to this implemented cache contract:
+The cache selects one intended placement per shard: an eligible accepted
+Preparing target, otherwise the applicable Up target. Suspended/removed replicas
+and ineligible nodes contribute no intended rows. Node entries publish target
+totals and matching shard contributions; collection entries publish selected
+shard contributions and collection-replica/node totals. Accepted replacement
+replaces the old contribution, rather than adding Up and Preparing together.
 
-- Publish per-view row contributions and derive one selected intended target
-  per shard, preferring a valid accepted Preparing over the applicable Up view.
-  Replace this contribution on acceptance/failure/release instead of adding Up
-  and Preparing as two final copies. Keep unplaced required demand explicit.
-- Maintain node, collection-replica/node, and shard/node target totals plus RG
-  demand. A target-selection publisher combines lifecycle facts with desired
-  config, node eligibility, and retained layout selectors. Layout-derived
-  active/release decisions remain distinct from actual resource facts;
-  speculative candidates do not reserve cache load. Total and contribution
-  reads retain the same object-version consistency contract.
-- Keep resource references and confirmed partial readiness when a Preparing
-  view fails. Target invalidation does not request resource release. Extend
-  exact-compatible reuse evidence to protected individual ready segments from
-  relevant Preparing/Unrecoverable views. The current Resources index includes
-  only whole Up/Ready views and does not yet satisfy that contract.
-- Remove reuse credit when protection/readiness is lost, a node disappears,
-  requirements are incompatible, or cleanup has begun without a protected
-  handover. Occupancy persists according to resource lifecycle, independently
-  of whether its former target remains valid.
+`PublishReplicaActivity` publishes the retained layout's active selectors.
+It does not publish speculative assignments or change desired LoadConfig.
+Demand buckets aggregate collection rows by desired replica count per RG. With
+N eligible nodes a bucket contributes `rows * min(replicas, N)`; unplaced demand
+is included and excess suspended replicas are excluded without scanning all
+collection segments during reconcile.
 
-Source publication, recovery/readiness gating, immutable Get, and copy-on-write
-remain required. Reconcile must not rebuild these aggregates by scanning every
-collection's segments. Concrete resource residency and handover guarantees
-require the resource-manager integration described in
-[QueryViewHandler](query_view_handler.md#7-planned-partial-resource-handover).
+Per-view publication, LoadConfig, DataView, and node eligibility changes refresh
+selected targets synchronously. Node changes revisit affected RG collections;
+this shifts aggregation to publication but does not make topology updates O(1).
+Failed Preparing removes that target or falls back to Up. It does not release
+resources. The Resources index retains confirmed individual ready segments in
+Preparing/Unrecoverable until teardown, in addition to whole Up/Ready resources.
+Compatibility matching remains exact; lost/ineligible nodes receive no score
+credit. These logical indexes are not an exact physical memory accounting API.
+
+Source publication, readiness gating, immutable Get, and copy-on-write remain
+required. Concrete sharing and reference handover still require the resource
+manager integration described in
+[QueryViewHandler](query_view_handler.md#7-partial-resource-handover).

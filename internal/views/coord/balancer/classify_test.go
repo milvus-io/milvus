@@ -89,11 +89,34 @@ func testShardStats(
 			stats.Resources[p.nodeID][coordview.ResourceKey{SegmentID: p.segmentID, PartitionID: p.partitionID, DataVersion: upVersion.DataVersion, LoadInfoVersion: loadInfoVersion}] = struct{}{}
 		}
 	}
+	if upVersion != nil {
+		stats.UpPlacement = &coordview.ViewPlacement{Assignments: make(map[int64]int64), Rows: make(map[int64]int64)}
+		for _, p := range placements {
+			if p.state == coordview.SegmentStateUp {
+				stats.UpPlacement.Assignments[p.segmentID] = p.nodeID
+				stats.UpPlacement.UnknownRows = append(stats.UpPlacement.UnknownRows, p.segmentID)
+			}
+		}
+	}
+
 	return stats
 }
 
 func withPreparingVersion(stats *coordview.ShardStats, version *qviews.QueryViewVersion) *coordview.ShardStats {
 	stats.PreparingVersion = version
+	stats.PreparingPlacement = &coordview.ViewPlacement{Assignments: make(map[int64]int64), Rows: make(map[int64]int64)}
+	for id, segment := range stats.Segments {
+		for node, state := range segment.Nodes {
+			if state == coordview.SegmentStatePreparing || state == coordview.SegmentStateReady {
+				stats.PreparingPlacement.Assignments[id] = node
+				if segment.HasRowNum {
+					stats.PreparingPlacement.Rows[node] += segment.RowNum
+				} else {
+					stats.PreparingPlacement.UnknownRows = append(stats.PreparingPlacement.UnknownRows, id)
+				}
+			}
+		}
+	}
 	return stats
 }
 

@@ -27,8 +27,8 @@ const (
 	actionMust
 
 	// actionMayOptimize: the current placement is valid; the Policy may
-	// emit a migration when the complete steady-state candidate differs
-	// from the current assignment.
+	// emit a migration when a changed candidate passes the net-gain and
+	// non-worsening RG-load checks.
 	actionMayOptimize
 )
 

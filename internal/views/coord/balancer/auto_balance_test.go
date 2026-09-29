@@ -17,7 +17,8 @@ func optionalBalanceFixture() (*balancercache.Cache, qviews.ShardID) {
 	publishBackgroundRows(c, map[int64]int64{1: 10000})
 	value := DefaultBalanceConfig()
 	value.AutoBalance = false
-	value.StickinessWeight, value.FanoutWeight = 0, 0
+	value.AbsoluteToleranceRows = 1
+	value.MovePrice, value.FanoutPenaltyWeight = 0, 0
 	c.UpdateBalanceConfig(value)
 	return c, id
 }
@@ -70,6 +71,7 @@ func TestAutoBalanceDisabledStillConvergesReplicaIsolation(t *testing.T) {
 	c := replicaCache(2, 2)
 	value := DefaultBalanceConfig()
 	value.AutoBalance = false
+	value.AbsoluteToleranceRows = 1
 	c.UpdateBalanceConfig(value)
 	a, b := cacheShard(1, 10), cacheShard(1, 11)
 	for _, id := range []qviews.ShardID{a, b} {

@@ -156,6 +156,9 @@ func TestDefaultBalancePolicy_PredictedLoadCoordinatesAcrossShards(t *testing.T)
 	shardB := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v1"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
+	profile := DefaultBalanceConfig()
+	profile.AbsoluteToleranceRows = 1
+	c.UpdateBalanceConfig(profile)
 	publishTestData(c, collectionID, qviews.DataVersion{StreamingVersion: 1}, map[int64]*SegmentDataView{
 		101: {SegmentID: 101, PartitionID: 1, RowNum: 600},
 		201: {SegmentID: 201, PartitionID: 1, RowNum: 600},
@@ -181,7 +184,9 @@ func TestDefaultBalancePolicy_ReusedShardRowsAreNotDoubleCounted(t *testing.T) {
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
 	config := policyTestConfig()
-	config.StickinessWeight = 10
+	config.AbsoluteToleranceRows = 1
+	config.CollectionWeight = 0
+	config.MovePrice = 10
 	c.UpdateBalanceConfig(config)
 	publishTestData(c, collectionID, desiredVersion, map[int64]*SegmentDataView{
 		101: {SegmentID: 101, PartitionID: 1, RowNum: 100_000},
@@ -263,6 +268,9 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
 	cfg := cfgFor(collectionID, replicaID, []int64{1}, nil)
 	c := newTestCache(cfg)
+	profile := DefaultBalanceConfig()
+	profile.AbsoluteToleranceRows = 1
+	c.UpdateBalanceConfig(profile)
 	publishTestData(c, collectionID, version, map[int64]*SegmentDataView{
 		101: {SegmentID: 101, PartitionID: 1, RowNum: 10},
 	}, shardDataView("by-dev-rootcoord-dml_0_1v0", 1, 101))
@@ -280,7 +288,7 @@ func TestDefaultBalancePolicy_OptionalOptimizationAcceptedWhenWorthCost(t *testi
 	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])
 }
 
-func TestDefaultBalancePolicy_OptionalChangedAssignmentEmitsWithoutPlanLevelThreshold(t *testing.T) {
+func TestDefaultBalancePolicy_OptionalWithinToleranceStaysPut(t *testing.T) {
 	const collectionID, replicaID int64 = 1, 10
 	version := qviews.DataVersion{StreamingVersion: 1}
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
@@ -299,8 +307,7 @@ func TestDefaultBalancePolicy_OptionalChangedAssignmentEmitsWithoutPlanLevelThre
 
 	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shardID})
 
-	require.Contains(t, plan.Prepares, shardID)
-	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])
+	require.Empty(t, plan.Prepares, "assignment changes within tolerance do not justify movement")
 }
 
 func TestDefaultBalancePolicy_LowBenefitScaleOutDoesNotOpenBeyondFanoutBudget(t *testing.T) {
@@ -367,7 +374,7 @@ func TestDefaultBalancePolicy_HighBenefitScaleOutUsesNewNodeWithinFanoutBudget(t
 	assert.Contains(t, distinctAssignmentNodes(assignments), int64(3))
 }
 
-func TestDefaultBalancePolicy_SaturatedStickinessIsMaximumOptionalMoveCost(t *testing.T) {
+func TestDefaultBalancePolicy_LargeSegmentMovesWhenGainPaysItsCost(t *testing.T) {
 	const collectionID, replicaID int64 = 1, 10
 	version := qviews.DataVersion{StreamingVersion: 1}
 	shardID := qviews.ShardID{ReplicaID: replicaID, VChannel: "by-dev-rootcoord-dml_0_1v0"}
@@ -390,8 +397,8 @@ func TestDefaultBalancePolicy_SaturatedStickinessIsMaximumOptionalMoveCost(t *te
 
 	plan := NewDefaultBalancePolicy().Plan(c, []qviews.ShardID{shardID})
 
-	assert.NotContains(t, plan.Prepares, shardID,
-		"a segment at StickyRowsScale pays the full default movement cost")
+	require.Contains(t, plan.Prepares, shardID)
+	assert.Equal(t, int64(2), assignmentsFromBuilder(plan.Prepares[shardID])[101])
 }
 
 func TestDefaultBalancePolicy_DefaultFanoutBudgetRejectsPureLoadOnlyOverflow(t *testing.T) {
@@ -549,7 +556,9 @@ func TestDefaultBalancePolicy_MandatorySameAssignmentStillEmits(t *testing.T) {
 
 func TestDefaultBalancePolicy_MandatoryPrecedesLargerOptionalShard(t *testing.T) {
 	config := DefaultBalanceConfig()
-	config.StickinessWeight, config.FanoutWeight = 0, 0
+	config.AbsoluteToleranceRows = 1
+	config.CollectionWeight = 0
+	config.MovePrice, config.FanoutPenaltyWeight = 0, 0
 	c := balancercache.New(config)
 	mandatory, optional := cacheShard(1, 10), cacheShard(2, 20)
 	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)
@@ -574,7 +583,9 @@ func TestDefaultBalancePolicy_MandatoryPrecedesLargerOptionalShard(t *testing.T)
 
 func TestDefaultBalancePolicy_LargerShardPrecedesSmallerShard(t *testing.T) {
 	config := DefaultBalanceConfig()
-	config.StickinessWeight, config.FanoutWeight = 0, 0
+	config.AbsoluteToleranceRows = 1
+	config.CollectionWeight = 0
+	config.MovePrice, config.FanoutPenaltyWeight = 0, 0
 	c := balancercache.New(config)
 	small, large := cacheShard(1, 10), cacheShard(2, 20)
 	c.PublishLoadConfig(1, cfgFor(1, 10, nil, nil), 1)

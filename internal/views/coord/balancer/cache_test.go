@@ -28,7 +28,15 @@ func cacheData(collection int64, channel string, rows ...int64) *CollectionDataV
 }
 
 func cacheStats(segment, node, rows int64, state coordview.SegmentState, known bool) *coordview.ShardStats {
-	return &coordview.ShardStats{Segments: map[int64]*coordview.SegmentStats{segment: {SegmentID: segment, PartitionID: 1, RowNum: rows, HasRowNum: known, Nodes: map[int64]coordview.SegmentState{node: state}}}}
+	stats := testShardStats(ver(1, 0, 1), 1, placement(segment, 1, node, state))
+	stats.Segments[segment].RowNum, stats.Segments[segment].HasRowNum = rows, known
+	if state == coordview.SegmentStatePreparing || state == coordview.SegmentStateReady {
+		withPreparingVersion(stats, ver(1, 0, 2))
+	}
+	if known {
+		withSegmentRows(stats, map[int64]int64{segment: rows})
+	}
+	return stats
 }
 
 func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
@@ -44,6 +52,14 @@ func TestPlanningPinsNodeContributionAlongsideTotal(t *testing.T) {
 	require.Equal(t, int64(40), p.GetShardStats(shard).Segments[1000].RowNum)
 	require.Equal(t, int64(100), p.CurrentRows(shard)[1])
 	require.Zero(t, withoutRows(initialProjectedRows(p.nodes), p.CurrentRows(shard))[1])
+	// The collection has a newer contribution than the pinned node. Each
+	// objective must subtract the contribution from its own aggregate version.
+	p.targets[10] = []int64{1}
+	p.fanouts = make(map[qviews.ShardID]int)
+	ctx := newAllocationContext(p, shard, map[int64]int64{1: 0}, []*SegmentDataView{{SegmentID: 1000, PartitionID: 1, RowNum: 100}})
+	require.Zero(t, ctx.collectionBase[1])
+	p.acceptRows(shard, map[int64]int64{1: 50})
+	require.Equal(t, int64(10), p.replicaDelta[10][1])
 	old := p.GetCollection(1)
 	c.PublishDataView(1, cacheData(1, shard.VChannel, 200))
 	require.Same(t, old, p.GetCollection(1))
@@ -147,6 +163,7 @@ func TestPlanningContextPinsAbsenceAndResolvesReplicaBinding(t *testing.T) {
 	require.Equal(t, uint64(1), fresh.ConfigVersion(1))
 	// A channel without an encoded collection ID resolves through its replica.
 	short := qviews.ShardID{ReplicaID: 10, VChannel: "short-channel"}
+	c.PublishNode(1, &NodeInfo{NodeID: 1, Alive: true, ResourceGroup: "rg1"})
 	c.PublishShard(short, cacheStats(100, 1, 42, coordview.SegmentStateUp, true))
 	next := newPlanningContext(c)
 	require.Equal(t, int64(1), next.ConfigForShard(short).CollectionID)

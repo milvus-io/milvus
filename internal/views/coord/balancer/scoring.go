@@ -5,285 +5,283 @@ import (
 	"sort"
 
 	"github.com/milvus-io/milvus/internal/views/coord/coordview"
+	"github.com/milvus-io/milvus/internal/views/qviews"
 )
 
-func reusableState(state coordview.SegmentState) bool {
-	switch state {
-	case coordview.SegmentStateUp, coordview.SegmentStateReady, coordview.SegmentStatePreparing:
-		return true
-	default:
-		return false
-	}
+const scoreEpsilon = 1e-9
+
+type searchCursor struct{ next, remaining int }
+
+type placementScore struct{ global, local, fanout float64 }
+
+func (s placementScore) energy(c *BalanceConfig) float64 {
+	return c.GlobalWeight*s.global + s.local + c.FanoutPenaltyWeight*s.fanout
 }
 
-func stickinessScore(
-	nodeID int64,
-	rows int64,
-	currentStates map[int64]coordview.SegmentState,
-	eligible map[int64]struct{},
-	cfg *BalanceConfig,
-) float64 {
-	if len(currentStates) == 0 {
-		return 1
-	}
-
-	hasEligibleReusableCopy := false
-	for currentNodeID, state := range currentStates {
-		if _, ok := eligible[currentNodeID]; ok && reusableState(state) {
-			hasEligibleReusableCopy = true
-			break
-		}
-	}
-	if !hasEligibleReusableCopy {
-		return 1
-	}
-
-	if state, ok := currentStates[nodeID]; ok && reusableState(state) {
-		return 1
-	}
-
-	scale := int64(0)
-	if cfg != nil {
-		scale = cfg.StickyRowsScale
-	}
-	if scale <= 0 {
+// Squaring distance after conversion avoids integer multiplication overflow.
+func bandPenalty(rows, mean, tolerance float64) float64 {
+	if mean <= 0 {
 		return 0
 	}
-	if rows < 0 {
-		rows = 0
-	}
-	penalty := math.Min(float64(rows)/float64(scale), 1)
-	return 1 - penalty
+	distance := math.Max(0, math.Abs(rows-mean)-tolerance)
+	return distance * (distance / (2 * mean))
 }
 
-func nodeLoadScore(referenceRows, projectedRows float64) float64 {
-	if referenceRows <= 0 {
-		return 1
-	}
-	if projectedRows < 0 {
-		projectedRows = 0
-	}
-	return referenceRows / (referenceRows + projectedRows)
-}
-
-func fanoutScore(nodeID int64, opened map[int64]struct{}, budget int) float64 {
-	if _, ok := opened[nodeID]; ok {
-		return 1
-	}
-	if len(opened) < budget {
-		return 1
-	}
-	return 0
-}
-
-func placementIntent(stickiness, nodeLoad, fanout float64, cfg *BalanceConfig) float64 {
-	if cfg == nil {
+func concentrationPenalty(rows, limit float64) float64 {
+	if limit <= 0 {
 		return 0
 	}
-	weightSum := cfg.StickinessWeight + cfg.NodeLoadWeight + cfg.FanoutWeight
-	if weightSum <= 0 {
-		return 0
-	}
-	return (cfg.StickinessWeight*stickiness +
-		cfg.NodeLoadWeight*nodeLoad +
-		cfg.FanoutWeight*fanout) / weightSum
+	excess := math.Max(0, rows-limit)
+	return excess * (excess / (2 * limit))
 }
 
-// This file implements Phase 2 node selection: given a segment and a set of
-// candidate nodes, filter by hard constraints then pick the highest-scoring
-// node via weighted soft constraints.
+func calculateFanoutBudget(nodes, segments int, rows, scale int64) int {
+	if nodes == 0 || segments == 0 {
+		return 0
+	}
+	count := 1
+	if rows > 0 {
+		count = int(1 + (rows-1)/scale)
+	}
+	return min(nodes, segments, count)
+}
 
-const scoreEpsilon = 1e-12
+func preferredFanout(previous, nodes, segments int, rows int64, cfg *BalanceConfig) int {
+	cap := min(nodes, segments)
+	if cap == 0 {
+		return 0
+	}
+	if previous == 0 {
+		return calculateFanoutBudget(nodes, segments, rows, cfg.TargetRowsPerShardNode)
+	}
+	result := min(previous, cap)
+	scale, size := float64(cfg.TargetRowsPerShardNode), float64(rows)
+	for result < cap && size > float64(result)*scale*(1+cfg.FanoutHysteresis) {
+		result++
+	}
+	for result > 1 && size < float64(result-1)*scale*(1-cfg.FanoutHysteresis) {
+		result--
+	}
+	return result
+}
 
 type allocationContext struct {
-	nodes         map[int64]*BalanceNode
-	eligible      []int64
-	eligibleSet   map[int64]struct{}
-	baseRows      map[int64]int64
-	assignedRows  map[int64]int64
-	openedNodes   map[int64]struct{}
-	referenceRows float64
-	fanoutBudget  int
-	config        *BalanceConfig
+	opened                                       int
+	config                                       *BalanceConfig
+	nodes                                        []int64
+	base, collectionBase                         map[int64]int64
+	rows                                         map[int64]int64
+	counts                                       map[int64]int
+	assignments                                  map[int64]int64
+	segments                                     map[int64]*SegmentDataView
+	reusable                                     map[int64]map[int64]bool
+	mean, tolerance, shardLimit, collectionLimit float64
+	fanout                                       int
 }
 
-func newAllocationContext(
-	nodes map[int64]*BalanceNode,
-	resourceGroup string,
-	baseRows map[int64]int64,
-	shardRows int64,
-	segmentCount int,
-	cfg *BalanceConfig,
-	candidates ...[]int64,
-) *allocationContext {
-	if cfg == nil {
-		cfg = DefaultBalanceConfig()
+func newAllocationContext(p *planningContext, id qviews.ShardID, base map[int64]int64, entries []*SegmentDataView) *allocationContext {
+	c := p.collectionForShard(id)
+	replica := findReplica(c.LoadConfig(), id.ReplicaID)
+	nodes, _ := p.TargetNodes(id)
+	eligible := make([]int64, 0, len(nodes))
+	for _, node := range nodes {
+		if info := p.nodes[node]; info != nil && info.Alive && !info.Stopping && info.ResourceGroup == replica.ResourceGroup {
+			eligible = append(eligible, node)
+		}
 	}
+	nodes = eligible
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i] < nodes[j] })
+	cfg := p.GetBalanceConfig()
 	ctx := &allocationContext{
-		nodes:        nodes,
-		eligibleSet:  make(map[int64]struct{}),
-		baseRows:     make(map[int64]int64),
-		assignedRows: make(map[int64]int64),
-		openedNodes:  make(map[int64]struct{}),
-		config:       cfg,
+		config: cfg, nodes: nodes, base: base, collectionBase: make(map[int64]int64),
+		rows: make(map[int64]int64), counts: make(map[int64]int), assignments: make(map[int64]int64),
+		segments: make(map[int64]*SegmentDataView), reusable: make(map[int64]map[int64]bool),
 	}
-
-	var totalBaseRows int64
-	ids := []int64(nil)
-	if len(candidates) > 0 {
-		ids = candidates[0]
-	} else {
-		ids = candidateNodeIDs(nodes, resourceGroup)
+	rgNodes := p.CandidateNodes(replica.ResourceGroup)
+	if group := p.GetResourceGroup(replica.ResourceGroup); group != nil && len(rgNodes) > 0 {
+		ctx.mean = float64(group.Demand(len(rgNodes))) / float64(len(rgNodes))
 	}
-	for _, nodeID := range ids {
-		node := nodes[nodeID]
-		if !passHardConstraints(node, nil) {
-			continue
+	ctx.tolerance = math.Max(float64(cfg.AbsoluteToleranceRows), cfg.RelativeTolerance*ctx.mean)
+	shard := p.DataViewForShard(id)
+	ctx.fanout = preferredFanout(p.fanouts[id], len(nodes), len(entries), shard.TotalRows, cfg)
+	p.fanouts[id] = ctx.fanout
+	if ctx.fanout > 0 {
+		ctx.shardLimit = (1 + cfg.LocalTolerance) * float64(shard.TotalRows) / float64(ctx.fanout)
+	}
+	collectionRows := float64(c.DataView().TotalRows)
+	if len(nodes) > 0 {
+		ctx.collectionLimit = (1 + cfg.LocalTolerance) * math.Max(float64(cfg.TargetRowsPerShardNode), collectionRows/float64(len(nodes)))
+	}
+	var old map[int64]int64
+	if entry := c.GetShard(id); entry != nil {
+		old = entry.TargetRows()
+	}
+	for _, n := range nodes {
+		ctx.collectionBase[n] = c.ReplicaRows(id.ReplicaID, n) + p.replicaDelta[id.ReplicaID][n] - old[n]
+	}
+	for _, segment := range entries {
+		ctx.segments[segment.SegmentID] = segment
+		ready := make(map[int64]bool)
+		for node := range reusableResources(p, id, segment, nodes) {
+			ready[node] = true
 		}
-		rows := baseRows[nodeID]
-		if rows < 0 {
-			rows = 0
-		}
-		ctx.eligible = append(ctx.eligible, nodeID)
-		ctx.eligibleSet[nodeID] = struct{}{}
-		ctx.baseRows[nodeID] = rows
-		totalBaseRows += rows
+		ctx.reusable[segment.SegmentID] = ready
 	}
-
-	if shardRows < 0 {
-		shardRows = 0
-	}
-	if len(ctx.eligible) > 0 {
-		ctx.referenceRows = float64(totalBaseRows+shardRows) / float64(len(ctx.eligible))
-	}
-	ctx.fanoutBudget = calculateFanoutBudget(len(ctx.eligible), segmentCount, shardRows, cfg.TargetRowsPerShardNode)
 	return ctx
 }
 
-func calculateFanoutBudget(eligibleNodes, segmentCount int, shardRows, targetRows int64) int {
-	if eligibleNodes <= 0 || segmentCount <= 0 {
-		return 0
+func (ctx *allocationContext) nodeScore(node int64, rows int64) placementScore {
+	r := float64(rows)
+	return placementScore{
+		global: bandPenalty(float64(ctx.base[node])+r, ctx.mean, ctx.tolerance),
+		local: ctx.config.ShardWeight*concentrationPenalty(r, ctx.shardLimit) +
+			ctx.config.CollectionWeight*concentrationPenalty(float64(ctx.collectionBase[node])+r, ctx.collectionLimit),
 	}
-	if shardRows < 0 {
-		shardRows = 0
-	}
-	desired := 1
-	if targetRows > 0 && shardRows > 0 {
-		desired = int(1 + (shardRows-1)/targetRows)
-	}
-	return min(eligibleNodes, segmentCount, desired)
 }
 
-func (ctx *allocationContext) projectedRows(nodeID int64, segmentRows int64) int64 {
-	if segmentRows < 0 {
-		segmentRows = 0
+func (ctx *allocationContext) score() placementScore {
+	var score placementScore
+	for _, n := range ctx.nodes {
+		s := ctx.nodeScore(n, ctx.rows[n])
+		score.global += s.global
+		score.local += s.local
 	}
-	return ctx.baseRows[nodeID] + ctx.assignedRows[nodeID] + segmentRows
+
+	score.fanout = float64(max(0, ctx.opened-ctx.fanout)) * float64(ctx.config.TargetRowsPerShardNode)
+	return score
 }
 
-func (ctx *allocationContext) assign(nodeID int64, rows int64) {
-	if rows < 0 {
-		rows = 0
-	}
-	ctx.assignedRows[nodeID] += rows
-	ctx.openedNodes[nodeID] = struct{}{}
-}
-
-func pickNode(
-	ctx *allocationContext,
-	seg *SegmentDataView,
-	currentStates map[int64]coordview.SegmentState,
-) (int64, bool) {
-	var (
-		best  nodeCandidate
-		found bool
-	)
-	rows := segmentRows(seg)
-	for _, nodeID := range ctx.eligible {
-		projectedRows := ctx.projectedRows(nodeID, rows)
-		stickiness := stickinessScore(nodeID, rows, currentStates, ctx.eligibleSet, ctx.config)
-		candidate := nodeCandidate{
-			nodeID:        nodeID,
-			intent:        placementIntent(stickiness, nodeLoadScore(ctx.referenceRows, float64(projectedRows)), fanoutScore(nodeID, ctx.openedNodes, ctx.fanoutBudget), ctx.config),
-			reusable:      reusableCopyOnNode(nodeID, currentStates),
-			opened:        nodeIsOpened(nodeID, ctx.openedNodes),
-			projectedRows: projectedRows,
-		}
-		if !found || candidate.betterThan(best) {
-			best = candidate
-			found = true
-		}
-	}
-	return best.nodeID, found
-}
-
-type nodeCandidate struct {
-	nodeID        int64
-	intent        float64
-	reusable      bool
-	opened        bool
-	projectedRows int64
-}
-
-func (candidate nodeCandidate) betterThan(other nodeCandidate) bool {
-	if candidate.intent > other.intent+scoreEpsilon {
-		return true
-	}
-	if math.Abs(candidate.intent-other.intent) > scoreEpsilon {
-		return false
-	}
-	if candidate.reusable != other.reusable {
-		return candidate.reusable
-	}
-	if candidate.opened != other.opened {
-		return candidate.opened
-	}
-	if candidate.projectedRows != other.projectedRows {
-		return candidate.projectedRows < other.projectedRows
-	}
-	return candidate.nodeID < other.nodeID
-}
-
-func reusableCopyOnNode(nodeID int64, states map[int64]coordview.SegmentState) bool {
-	state, ok := states[nodeID]
-	return ok && reusableState(state)
-}
-
-func nodeIsOpened(nodeID int64, opened map[int64]struct{}) bool {
-	_, ok := opened[nodeID]
-	return ok
-}
-
-func candidateNodeIDs(predicted map[int64]*BalanceNode, resourceGroup string) []int64 {
-	ids := make([]int64, 0, len(predicted))
-	for nodeID, node := range predicted {
-		if node == nil || node.ResourceGroup != resourceGroup {
+// evaluate calculates exact marginal penalties on changed nodes. It never
+// mutates assignments or bills temporary search prefixes as actual loading.
+func (ctx *allocationContext) evaluate(segments []*SegmentDataView, destination int64) (float64, float64) {
+	rows := make(map[int64]int64)
+	counts := make(map[int64]int)
+	var cost float64
+	for _, segment := range segments {
+		old, exists := ctx.assignments[segment.SegmentID]
+		if exists && old == destination {
 			continue
 		}
-		ids = append(ids, nodeID)
+		if exists {
+			rows[old] -= segment.RowNum
+			counts[old]--
+			cost += ctx.config.MovePrice * float64(segment.RowNum)
+		}
+		rows[destination] += segment.RowNum
+		counts[destination]++
+		if !ctx.reusable[segment.SegmentID][destination] {
+			cost += ctx.config.LoadPrice * float64(segment.RowNum)
+		}
 	}
-	sort.Slice(ids, func(i, j int) bool {
-		return ids[i] < ids[j]
-	})
-	return ids
+	var global, local float64
+	for node, delta := range rows {
+		before, after := ctx.nodeScore(node, ctx.rows[node]), ctx.nodeScore(node, ctx.rows[node]+delta)
+		global += before.global - after.global
+		local += before.local - after.local
+	}
+	afterOpened := ctx.opened
+	for node, delta := range counts {
+		if ctx.counts[node] > 0 && ctx.counts[node]+delta == 0 {
+			afterOpened--
+		}
+		if ctx.counts[node] == 0 && ctx.counts[node]+delta > 0 {
+			afterOpened++
+		}
+	}
+	fanout := float64(max(0, ctx.opened-ctx.fanout)-max(0, afterOpened-ctx.fanout)) * float64(ctx.config.TargetRowsPerShardNode)
+	return ctx.config.GlobalWeight*global + local + ctx.config.FanoutPenaltyWeight*fanout - cost, global
 }
 
-// passHardConstraints returns true iff the node can accept the segment. The
-// checks match the row-count balancer's Phase 2 hard rules:
-//
-//   - Node alive and not in graceful shutdown
-//
-// Row count is a relative balance signal, not an admission-control capacity.
-func passHardConstraints(node *BalanceNode, _ *SegmentDataView) bool {
-	if !node.Alive || node.Stopping {
+func (ctx *allocationContext) assign(segments []*SegmentDataView, node int64) {
+	for _, segment := range segments {
+		if previous, ok := ctx.assignments[segment.SegmentID]; ok {
+			ctx.rows[previous] -= segment.RowNum
+			ctx.counts[previous]--
+			if ctx.counts[previous] == 0 {
+				ctx.opened--
+			}
+		}
+		ctx.assignments[segment.SegmentID] = node
+		ctx.rows[node] += segment.RowNum
+		if ctx.counts[node] == 0 {
+			ctx.opened++
+		}
+		ctx.counts[node]++
+	}
+}
+
+// Search cycles over compound and individual candidates without starving the
+// tail when its work budget is smaller than the candidate space.
+func (ctx *allocationContext) optimize(entries []*SegmentDataView, cursor *searchCursor) bool {
+	if len(entries) == 0 || len(ctx.nodes) == 0 {
 		return false
 	}
-	return true
+	groups := [][]*SegmentDataView{entries}
+	byNode := make(map[int64][]*SegmentDataView)
+	for _, segment := range entries {
+		node := ctx.assignments[segment.SegmentID]
+		byNode[node] = append(byNode[node], segment)
+	}
+	for _, node := range ctx.nodes {
+		if group := byNode[node]; len(group) > 0 {
+			groups = append(groups, group)
+		}
+	}
+
+	total := (len(groups) + len(entries)) * len(ctx.nodes)
+	if cursor.remaining <= 0 || cursor.remaining > total {
+		cursor.remaining = total
+	}
+	cursor.next %= total
+	limit := min(cursor.remaining, int(ctx.config.MaxCandidateEvaluations))
+	for i := 0; i < limit; i++ {
+		index := cursor.next
+		group, destination := index/len(ctx.nodes), ctx.nodes[index%len(ctx.nodes)]
+		var segments []*SegmentDataView
+		if group < len(groups) {
+			segments = groups[group]
+		} else {
+			segments = entries[group-len(groups) : group-len(groups)+1]
+		}
+		gain, global := ctx.evaluate(segments, destination)
+		if global >= -scoreEpsilon && gain > ctx.config.MinGainRows {
+			ctx.assign(segments, destination)
+		}
+		cursor.next = (cursor.next + 1) % total
+	}
+	cursor.remaining -= limit
+	return cursor.remaining > 0
 }
 
-func segmentRows(seg *SegmentDataView) int64 {
-	if seg == nil {
-		return 0
+func (ctx *allocationContext) migrationCost(original map[int64]int64) float64 {
+	var cost float64
+	for segment, node := range ctx.assignments {
+		if old, exists := original[segment]; exists && old == node {
+			continue
+		}
+		rows := float64(ctx.segments[segment].RowNum)
+		if _, exists := original[segment]; exists {
+			cost += ctx.config.MovePrice * rows
+		}
+		if !ctx.reusable[segment][node] {
+			cost += ctx.config.LoadPrice * rows
+		}
 	}
-	return seg.RowNum
+	return cost
+}
+
+// reusableResources only credits confirmed, protected, exact-compatible loads.
+func reusableResources(p *planningContext, id qviews.ShardID, segment *SegmentDataView, nodes []int64) map[int64]coordview.SegmentState {
+	c := p.collectionForShard(id)
+	states := make(map[int64]coordview.SegmentState)
+	if c == nil || c.DataView() == nil {
+		return states
+	}
+	key := coordview.ResourceKey{PartitionID: segment.PartitionID, SegmentID: segment.SegmentID, DataVersion: c.DataView().DataVersion, LoadInfoVersion: c.ConfigVersion()}
+	for _, n := range nodes {
+		if resources := c.PlacementNode(n); resources != nil && resources.HasResource(key) {
+			states[n] = coordview.SegmentStateReady
+		}
+	}
+	return states
 }

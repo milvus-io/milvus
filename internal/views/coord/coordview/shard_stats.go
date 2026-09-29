@@ -11,6 +11,9 @@ import (
 // consistent with each other: segment placements reflect exactly the views whose
 // state is reported.
 type ShardStats struct {
+	// Per-view placements are independent of merged physical resource progress.
+	UpPlacement        *ViewPlacement
+	PreparingPlacement *ViewPlacement
 	// Exact view footprints, including empty partitions and retained Dropping
 	// references. ResidentNodes disappear only after durable view removal.
 	UpNodes        []int64
@@ -41,6 +44,14 @@ type ShardStats struct {
 	// receive Down and the loaded segments are still more reusable than
 	// Preparing placements. Dropping and Dropped views are excluded.
 	Segments map[int64]*SegmentStats
+}
+
+// ViewPlacement is immutable after publication. Unknown rows can be completed
+// from the cache's retained footprint without confusing known zero with absent.
+type ViewPlacement struct {
+	Assignments map[int64]int64
+	Rows        map[int64]int64
+	UnknownRows []int64
 }
 
 // ResourceKey identifies a compatible loading requirement within a collection.

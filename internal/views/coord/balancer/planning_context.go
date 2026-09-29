@@ -26,12 +26,16 @@ type balanceInput interface {
 
 type planningContext struct {
 	balancercache.Reader
-	collections map[int64]*balancercache.CollectionEntry
-	nodeEntries map[int64]*balancercache.NodeEntry
-	nodes       map[int64]*BalanceNode
-	groups      map[string][]int64
-	config      *BalanceConfig
-	targets     map[int64][]int64
+	collections  map[int64]*balancercache.CollectionEntry
+	nodeEntries  map[int64]*balancercache.NodeEntry
+	nodes        map[int64]*BalanceNode
+	groups       map[string][]int64
+	groupEntries map[string]*balancercache.ResourceGroupEntry
+	config       *BalanceConfig
+	targets      map[int64][]int64
+	replicaDelta map[int64]map[int64]int64
+	fanouts      map[qviews.ShardID]int
+	search       map[qviews.ShardID]*searchCursor
 }
 
 func newPlanningContext(reader balancercache.Reader) *planningContext {
@@ -40,6 +44,8 @@ func newPlanningContext(reader balancercache.Reader) *planningContext {
 	}
 	p := &planningContext{Reader: reader, collections: make(map[int64]*balancercache.CollectionEntry), nodeEntries: make(map[int64]*balancercache.NodeEntry), nodes: make(map[int64]*BalanceNode), groups: make(map[string][]int64), config: reader.GetBalanceConfig()}
 	p.targets = make(map[int64][]int64)
+	p.groupEntries = make(map[string]*balancercache.ResourceGroupEntry)
+	p.replicaDelta = make(map[int64]map[int64]int64)
 	if p.config == nil {
 		p.config = DefaultBalanceConfig()
 	}
@@ -74,6 +80,15 @@ func (p *planningContext) GetCollection(id int64) *balancercache.CollectionEntry
 	collection := p.Reader.GetCollection(id)
 	p.collections[id] = collection
 	return collection
+}
+
+func (p *planningContext) GetResourceGroup(name string) *balancercache.ResourceGroupEntry {
+	if group, ok := p.groupEntries[name]; ok {
+		return group
+	}
+	group := p.Reader.GetResourceGroup(name)
+	p.groupEntries[name] = group
+	return group
 }
 func (p *planningContext) GetNode(id int64) *balancercache.NodeEntry { return p.nodeEntries[id] }
 func (p *planningContext) GetBalanceConfig() *BalanceConfig          { return p.config }
@@ -146,8 +161,7 @@ func (p *planningContext) CandidateNodes(name string) []int64 {
 func (p *planningContext) CurrentRows(id qviews.ShardID) map[int64]int64 {
 	rows := make(map[int64]int64)
 	for nodeID, node := range p.nodeEntries {
-		contribution := node.Contribution(id)
-		if total := contribution.UpRowCount + contribution.PendingRowCount; total != 0 {
+		if total := node.TargetContribution(id); total != 0 {
 			rows[nodeID] = total
 		}
 	}
@@ -192,4 +206,35 @@ func resolveCacheScope(reader balancercache.Reader, pending triggerBatch) []qvie
 		shards = append(shards, id)
 	}
 	return shards
+}
+
+// Refresh after publishing layout selectors, before accepting any candidate.
+func (p *planningContext) refreshTargetInputs() {
+	p.groups = make(map[string][]int64)
+	p.groupEntries = make(map[string]*balancercache.ResourceGroupEntry)
+	p.collections = make(map[int64]*balancercache.CollectionEntry)
+	p.nodeEntries = make(map[int64]*balancercache.NodeEntry)
+	p.nodes = make(map[int64]*BalanceNode)
+	p.RangeNodeIDs(func(id int64) bool {
+		if n := p.Reader.GetNode(id); n != nil {
+			p.nodeEntries[id], p.nodes[id] = n, n.Info()
+		}
+		return true
+	})
+}
+
+func (p *planningContext) acceptRows(id qviews.ShardID, rows map[int64]int64) {
+	delta := p.replicaDelta[id.ReplicaID]
+	if delta == nil {
+		delta = make(map[int64]int64)
+		p.replicaDelta[id.ReplicaID] = delta
+	}
+	if entry := p.ShardEntry(id); entry != nil {
+		for node, count := range entry.TargetRows() {
+			delta[node] -= count
+		}
+	}
+	for node, count := range rows {
+		delta[node] += count
+	}
 }
