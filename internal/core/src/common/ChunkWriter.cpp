@@ -318,51 +318,79 @@ ArrayChunkWriter::write_to_target(const arrow::ArrayVector& array_vec,
 std::pair<size_t, size_t>
 VectorArrayChunkWriter::calculate_size(const arrow::ArrayVector& array_vec) {
     size_t total_rows = 0;
-    size_t total_size = 0;
-
+    size_t physical_count = 0;
+    size_t logical_count = 0;
+    const auto width = vector_bytes_per_element(element_type_, dim_);
     for (const auto& array_data : array_vec) {
-        total_rows += array_data->length();
         auto list_array =
-            std::static_pointer_cast<arrow::ListArray>(array_data);
+            std::dynamic_pointer_cast<arrow::ListArray>(array_data);
+        AssertInfo(list_array != nullptr,
+                   "VECTOR_ARRAY field {} expects ListArray, got {}",
+                   field_name_,
+                   array_data->type()->ToString());
+        total_rows += list_array->length();
         AssertInfo(nullable_ || list_array->null_count() == 0,
-                   "VECTOR_ARRAY does not support null rows");
-
-        switch (element_type_) {
-            case milvus::DataType::VECTOR_FLOAT:
-            case milvus::DataType::VECTOR_BINARY:
-            case milvus::DataType::VECTOR_FLOAT16:
-            case milvus::DataType::VECTOR_BFLOAT16:
-            case milvus::DataType::VECTOR_INT8: {
-                auto binary_values =
-                    std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
-                        list_array->values());
-                int byte_width = binary_values->byte_width();
-                const int32_t* list_offsets = list_array->raw_value_offsets();
-                int64_t actual_values_count = 0;
-                for (int64_t i = 0; i < list_array->length(); ++i) {
-                    if (nullable_ && list_array->IsNull(i)) {
-                        continue;
-                    }
-                    actual_values_count +=
-                        list_offsets[i + 1] - list_offsets[i];
-                }
-                total_size += actual_values_count * byte_width;
-                break;
+                   "VECTOR_ARRAY field {} does not support null rows",
+                   field_name_);
+        const auto values = list_array->values();
+        auto binary = element_nullable_
+                          ? std::dynamic_pointer_cast<arrow::BinaryArray>(values)
+                          : nullptr;
+        auto fixed = !element_nullable_
+                         ? std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
+                               values)
+                         : nullptr;
+        AssertInfo(binary != nullptr || fixed != nullptr,
+                   "VECTOR_ARRAY field {} expects list<{}>, got {}",
+                   field_name_,
+                   element_nullable_ ? "Binary" : "FixedSizeBinary",
+                   array_data->type()->ToString());
+        AssertInfo(binary != nullptr || fixed->byte_width() == width,
+                   "VECTOR_ARRAY field {} expects vector width {}, got {}",
+                   field_name_,
+                   width,
+                   fixed == nullptr ? 0 : fixed->byte_width());
+        for (int64_t row = 0; row < list_array->length(); ++row) {
+            if (list_array->IsNull(row)) {
+                continue;
             }
-            default:
-                ThrowInfo(DataTypeInvalid,
-                          "Invalid element type {} for VectorArray",
-                          static_cast<int>(element_type_));
+            const auto start = list_array->value_offset(row);
+            const auto end = list_array->value_offset(row + 1);
+            logical_count += end - start;
+            for (int64_t item = start; item < end; ++item) {
+                if (values->IsNull(item)) {
+                    AssertInfo(element_nullable_,
+                               "VECTOR_ARRAY field {} has null vector in "
+                               "non-element-nullable row {}",
+                               field_name_,
+                               row);
+                    continue;
+                }
+                if (binary != nullptr) {
+                    AssertInfo(binary->GetView(item).size() == width,
+                               "VECTOR_ARRAY field {} vector in row {} has "
+                               "width {}, expected {}",
+                               field_name_,
+                               row,
+                               binary->GetView(item).size(),
+                               width);
+                }
+                ++physical_count;
+            }
         }
     }
-
     row_nums_ = total_rows;
-
-    if (nullable_) {
-        total_size += (total_rows + 7) / 8;
+    size_t total_size = physical_count * width +
+                        (nullable_ ? (total_rows + 7) / 8 : 0) +
+                        sizeof(uint32_t) * (row_nums_ * 2 + 1) +
+                        MMAP_ARRAY_PADDING;
+    if (element_nullable_) {
+        total_size += sizeof(uint32_t) * row_nums_ +
+                      (logical_count + 7) / 8;
     }
-    // Add space for logical-row offset and length arrays.
-    total_size += sizeof(uint32_t) * (row_nums_ * 2 + 1) + MMAP_ARRAY_PADDING;
+    AssertInfo(total_size <= std::numeric_limits<uint32_t>::max(),
+               "VECTOR_ARRAY field {} chunk exceeds uint32 offsets",
+               field_name_);
     return {total_size, total_rows};
 }
 
@@ -373,7 +401,10 @@ VectorArrayChunkWriter::write_to_target(
     std::vector<uint32_t> offsets_lens;
     offsets_lens.reserve(row_nums_ * 2 + 1);
     std::vector<const uint8_t*> vector_data_ptrs;
-    std::vector<size_t> data_sizes;
+    std::vector<uint32_t> logical_lengths;
+    std::vector<uint8_t> element_validity;
+    size_t logical_count = 0;
+    const auto width = vector_bytes_per_element(element_type_, dim_);
 
     if (nullable_) {
         std::vector<std::tuple<const uint8_t*, int64_t, int64_t>> null_bitmaps;
@@ -385,44 +416,70 @@ VectorArrayChunkWriter::write_to_target(
         write_null_bit_maps(null_bitmaps, target);
     }
 
-    uint32_t current_offset =
-        (nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0) +
-        sizeof(uint32_t) * (row_nums_ * 2 + 1);
-
     for (const auto& array_data : array_vec) {
         auto list_array =
-            std::static_pointer_cast<arrow::ListArray>(array_data);
-        auto binary_values =
-            std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
-                list_array->values());
-        const int32_t* list_offsets = list_array->raw_value_offsets();
-        int byte_width = binary_values->byte_width();
-
-        // Generate offsets and lengths for each row
-        // Each list contains multiple vectors, each stored as a fixed-size binary chunk
+            std::dynamic_pointer_cast<arrow::ListArray>(array_data);
+        AssertInfo(list_array != nullptr,
+                   "VECTOR_ARRAY field {} expects ListArray, got {}",
+                   field_name_,
+                   array_data->type()->ToString());
+        auto binary_values = element_nullable_
+                                 ? std::dynamic_pointer_cast<arrow::BinaryArray>(
+                                       list_array->values())
+                                 : nullptr;
+        auto fixed_values = !element_nullable_
+                                ? std::dynamic_pointer_cast<
+                                      arrow::FixedSizeBinaryArray>(
+                                      list_array->values())
+                                : nullptr;
+        AssertInfo(binary_values != nullptr || fixed_values != nullptr,
+                   "VECTOR_ARRAY field {} expects list<{}>, got {}",
+                   field_name_,
+                   element_nullable_ ? "Binary" : "FixedSizeBinary",
+                   array_data->type()->ToString());
         for (int64_t i = 0; i < list_array->length(); i++) {
-            if (nullable_ && list_array->IsNull(i)) {
-                offsets_lens.push_back(current_offset);
+            if (list_array->IsNull(i)) {
                 offsets_lens.push_back(0);
+                offsets_lens.push_back(0);
+                if (element_nullable_) logical_lengths.push_back(0);
                 continue;
             }
-            auto start_idx = list_offsets[i];
-            auto end_idx = list_offsets[i + 1];
-            auto vector_count = end_idx - start_idx;
-            auto byte_size = static_cast<uint32_t>(vector_count * byte_width);
-
-            offsets_lens.push_back(current_offset);
-            offsets_lens.push_back(static_cast<uint32_t>(vector_count));
-
-            for (int32_t j = start_idx; j < end_idx; ++j) {
-                vector_data_ptrs.push_back(binary_values->GetValue(j));
-                data_sizes.push_back(byte_width);
+            auto start_idx = list_array->value_offset(i);
+            auto end_idx = list_array->value_offset(i + 1);
+            uint32_t physical_count = 0;
+            if (element_nullable_) {
+                logical_lengths.push_back(end_idx - start_idx);
             }
-
-            current_offset += byte_size;
+            for (int32_t j = start_idx; j < end_idx; ++j) {
+                const bool valid = list_array->values()->IsValid(j);
+                if (element_nullable_) {
+                    element_validity.push_back(valid ? 1 : 0);
+                    ++logical_count;
+                }
+                if (valid) {
+                    vector_data_ptrs.push_back(
+                        binary_values != nullptr
+                            ? reinterpret_cast<const uint8_t*>(
+                                  binary_values->GetView(j).data())
+                            : fixed_values->GetValue(j));
+                    ++physical_count;
+                }
+            }
+            offsets_lens.push_back(0);
+            offsets_lens.push_back(physical_count);
         }
     }
-
+    const uint32_t prefix_size =
+        (nullable_ ? static_cast<uint32_t>((row_nums_ + 7) / 8) : 0) +
+        sizeof(uint32_t) * (row_nums_ * 2 + 1) +
+        (element_nullable_ ? sizeof(uint32_t) * row_nums_ +
+                                 (logical_count + 7) / 8
+                           : 0);
+    uint32_t current_offset = prefix_size;
+    for (size_t row = 0; row < row_nums_; ++row) {
+        offsets_lens[row * 2] = current_offset;
+        current_offset += offsets_lens[row * 2 + 1] * width;
+    }
     offsets_lens.push_back(current_offset);
 
     // Write offset and length arrays
@@ -432,11 +489,21 @@ VectorArrayChunkWriter::write_to_target(
     }
     target->write(&offsets_lens.back(), sizeof(uint32_t));  // final offset
 
-    for (size_t i = 0; i < vector_data_ptrs.size(); i++) {
-        target->write(vector_data_ptrs[i], data_sizes[i]);
+    if (element_nullable_) {
+        target->write(logical_lengths.data(),
+                      logical_lengths.size() * sizeof(uint32_t));
+        std::vector<uint8_t> bitmap((logical_count + 7) / 8, 0);
+        for (size_t i = 0; i < logical_count; ++i) {
+            if (element_validity[i]) bitmap[i >> 3] |= uint8_t{1} << (i & 7);
+        }
+        target->write(bitmap.data(), bitmap.size());
     }
 
-    char padding[MMAP_ARRAY_PADDING];
+    for (const auto* ptr : vector_data_ptrs) {
+        target->write(ptr, width);
+    }
+
+    char padding[MMAP_ARRAY_PADDING] = {};
     target->write(padding, MMAP_ARRAY_PADDING);
 }
 
@@ -606,7 +673,7 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<GeometryChunkWriter>(nullable);
         }
         case milvus::DataType::ARRAY:
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 return std::make_shared<ColumnarArrayChunkWriter>(
                     field_meta.get_array_type_schema());
             }
@@ -616,7 +683,11 @@ create_chunk_writer(const FieldMeta& field_meta) {
             return std::make_shared<SparseFloatVectorChunkWriter>(nullable);
         case milvus::DataType::VECTOR_ARRAY:
             return std::make_shared<VectorArrayChunkWriter>(
-                dim, field_meta.get_element_type(), nullable);
+                dim,
+                field_meta.get_element_type(),
+                nullable,
+                field_meta.is_element_nullable(),
+                field_meta.get_name().get());
         default:
             ThrowInfo(Unsupported, "Unsupported data type");
     }
@@ -751,7 +822,7 @@ make_chunk(const FieldMeta& field_meta,
                 row_nums, data, size, nullable, chunk_mmap_guard);
         }
         case milvus::DataType::ARRAY:
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 return std::make_unique<ColumnarArrayChunk>(
                     row_nums,
                     data,
@@ -777,7 +848,8 @@ make_chunk(const FieldMeta& field_meta,
                 size,
                 field_meta.get_element_type(),
                 chunk_mmap_guard,
-                nullable);
+                nullable,
+                field_meta.is_element_nullable());
         default:
             ThrowInfo(DataTypeInvalid, "Unsupported data type");
     }

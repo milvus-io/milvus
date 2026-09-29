@@ -174,7 +174,7 @@ func (s *StructArraySuite) TestNullableScalarRows() {
 
 	for _, fieldData := range column.FieldData().GetStructArrays().GetFields() {
 		s.Equal([]bool{true, false, true}, getFieldDataValidData(fieldData))
-		s.Nil(fieldData.GetValidData())
+		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
 		s.Equal(2, len(fieldData.GetScalars().GetArrayData().GetData()))
 	}
 }
@@ -237,7 +237,7 @@ func (s *StructArraySuite) TestNullableCompactSlice() {
 	s.NotNil(value)
 	for _, fieldData := range sliced.FieldData().GetStructArrays().GetFields() {
 		s.Equal([]bool{false, true}, getFieldDataValidData(fieldData))
-		s.Nil(fieldData.GetValidData())
+		s.Equal([]bool{false, true}, fieldData.GetValidData())
 	}
 }
 
@@ -329,7 +329,7 @@ func (s *StructArraySuite) TestNullableVectorRows() {
 	s.Require().Len(fields, 2)
 	for _, fieldData := range fields {
 		s.Equal([]bool{true, false, true}, getFieldDataValidData(fieldData))
-		s.Nil(fieldData.GetValidData())
+		s.Equal([]bool{true, false, true}, fieldData.GetValidData())
 	}
 	s.Len(fields[0].GetScalars().GetArrayData().GetData(), 2)
 	s.Len(fields[1].GetVectors().GetVectorArray().GetData(), 2)
@@ -557,7 +557,7 @@ func (s *StructArraySuite) TestParseNullableStructArrayEmptySlice() {
 	for _, fieldData := range parsed.FieldData().GetStructArrays().GetFields() {
 		s.NotNil(getFieldDataValidData(fieldData))
 		s.Empty(getFieldDataValidData(fieldData))
-		s.Nil(fieldData.GetValidData())
+		s.Empty(fieldData.GetValidData())
 	}
 }
 
@@ -570,7 +570,7 @@ func (s *StructArraySuite) TestParseNullableStructArrayEmptyRows() {
 	for _, fieldData := range source.FieldData().GetStructArrays().GetFields() {
 		s.NotNil(getFieldDataValidData(fieldData))
 		s.Empty(getFieldDataValidData(fieldData))
-		s.Nil(fieldData.GetValidData())
+		s.Empty(fieldData.GetValidData())
 	}
 
 	parsed, err := FieldDataColumn(source.FieldData(), 0, -1)

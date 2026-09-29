@@ -82,6 +82,67 @@ GenerateColumnGroupPattern(const SchemaPtr& schema) {
     return pattern;
 }
 
+// Write caller-provided Arrow batches through the storage V3 writer. Tests for
+// native lists use this instead of the retiring growing-segment flush path.
+inline int64_t
+WriteRecordBatchesToV3(
+    const SchemaPtr& schema,
+    const std::string& base_path,
+    const std::vector<std::shared_ptr<arrow::RecordBatch>>& batches,
+    const std::string& column_group_pattern) {
+    std::filesystem::create_directories(base_path);
+    auto loon_schema = schema->ConvertToLoonArrowSchema();
+    milvus_storage::api::Properties props;
+    milvus_storage::api::SetValue(props,
+                                  PROPERTY_FS_STORAGE_TYPE,
+                                  LOON_FS_TYPE_LOCAL);
+    milvus_storage::api::SetValue(
+        props, PROPERTY_FS_ROOT_PATH, kLoonLocalFSRootPath);
+    milvus_storage::api::SetValue(props,
+                                  PROPERTY_WRITER_POLICY,
+                                  LOON_COLUMN_GROUP_POLICY_SCHEMA_BASED);
+    milvus_storage::api::SetValue(props,
+                                  PROPERTY_WRITER_SCHEMA_BASE_PATTERNS,
+                                  column_group_pattern.c_str());
+    milvus_storage::api::SetValue(
+        props, PROPERTY_WRITER_FORMAT, LOON_FORMAT_PARQUET);
+    auto policy_result =
+        milvus_storage::api::ColumnGroupPolicy::create_column_group_policy(
+            props, loon_schema);
+    AssertInfo(policy_result.ok(),
+               "failed to create column group policy: {}",
+               policy_result.status().ToString());
+    auto policy = std::move(policy_result).ValueOrDie();
+    auto writer = milvus_storage::api::Writer::create(
+        base_path, loon_schema, std::move(policy), props);
+    for (const auto& batch : batches) {
+        AssertInfo(batch->schema()->Equals(loon_schema),
+                   "storage V3 test batch schema mismatch");
+        auto status = writer->write(batch);
+        AssertInfo(status.ok(),
+                   "failed to write storage V3 test batch: {}",
+                   status.ToString());
+    }
+    auto close_result = writer->close();
+    AssertInfo(close_result.ok(),
+               "failed to close storage V3 test writer: {}",
+               close_result.status().ToString());
+    auto column_groups = std::move(close_result).ValueOrDie();
+    auto transaction_result =
+        milvus_storage::api::transaction::Transaction::Open(
+            milvus::segcore::GetDefaultArrowFileSystem(), base_path);
+    AssertInfo(transaction_result.ok(),
+               "failed to open storage V3 test transaction: {}",
+               transaction_result.status().ToString());
+    auto transaction = std::move(transaction_result).ValueOrDie();
+    transaction->AppendFiles(*column_groups);
+    auto commit_result = transaction->Commit();
+    AssertInfo(commit_result.ok(),
+               "failed to commit storage V3 test segment: {}",
+               commit_result.status().ToString());
+    return commit_result.ValueOrDie();
+}
+
 // Generates V3 segment data using real milvus-storage APIs.
 // Writes actual Parquet files + manifest to base_path.
 class V3SegmentTestData {

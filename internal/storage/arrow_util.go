@@ -262,7 +262,6 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 			return uint64(len(val)), nil
 		}
 	case *array.ListBuilder:
-		// Handle ListBuilder for ArrayOfVector type
 		la, ok := a.(*array.List)
 		if !ok {
 			return 0, merr.WrapErrServiceInternalMsg("invalid value type %T, expect %T", a.DataType(), builder.Type())
@@ -273,73 +272,49 @@ func appendValueAt(builder array.Builder, a arrow.Array, idx int, field *schemap
 		}
 
 		start, end := la.ValueOffsets(idx)
-		b.Append(true)
-
-		valuesArray := la.ListValues()
-		var totalSize uint64
-		valueBuilder := b.ValueBuilder()
-		switch vb := valueBuilder.(type) {
-		case *array.FixedSizeBinaryBuilder:
+		values := la.ListValues()
+		isVectorArray := field != nil && field.GetDataType() == schemapb.DataType_ArrayOfVector
+		if isVectorArray {
 			if field.GetElementNullable() {
-				return 0, merr.WrapErrServiceInternalMsg("element-nullable ArrayOfVector requires Binary child storage")
-			}
-			fixedArray, ok := valuesArray.(*array.FixedSizeBinary)
-			if !ok {
-				return 0, merr.WrapErrDataIntegrityMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
-			}
-			byteWidth := uint64(vb.Type().(*arrow.FixedSizeBinaryType).ByteWidth)
-			vb.Reserve(int(end - start))
-			for i := start; i < end; i++ {
-				if fixedArray.IsNull(int(i)) {
-					return 0, merr.WrapErrDataIntegrityMsg(
-						"non-element-nullable ArrayOfVector contains null child at logical element %d",
-						i-start,
-					)
+				if _, ok := values.(*array.Binary); !ok {
+					return 0, merr.WrapErrDataIntegrityMsg("element-nullable ArrayOfVector requires Binary child, got %T", values)
 				}
-				val := fixedArray.Value(int(i))
-				vb.Append(val)
-				totalSize += byteWidth
+				if appendDefault.arrayOfVectorByteWidth <= 0 {
+					return 0, merr.WrapErrServiceInternalMsg("missing ArrayOfVector child byte width")
+				}
+			} else if _, ok := values.(*array.FixedSizeBinary); !ok {
+				return 0, merr.WrapErrDataIntegrityMsg("non-element-nullable ArrayOfVector requires FixedSizeBinary child, got %T", values)
 			}
-		case *array.BinaryBuilder:
-			binaryArray, ok := valuesArray.(*array.Binary)
-			if !ok {
-				return 0, merr.WrapErrDataIntegrityMsg("invalid value type %T, expect %T", valuesArray.DataType(), vb.Type())
-			}
-			if !field.GetElementNullable() {
-				return 0, merr.WrapErrServiceInternalMsg("non-element-nullable ArrayOfVector requires FixedSizeBinary child storage")
-			}
-			byteWidth := appendDefault.arrayOfVectorByteWidth
-			if byteWidth <= 0 {
-				return 0, merr.WrapErrServiceInternalMsg("missing cached byte width for ArrayOfVector field %s", field.GetName())
-			}
-			// Binary children consume an int32 offset and one validity bit even when null.
-			childCount := end - start
-			totalSize += uint64(childCount) * uint64(arrow.Int32SizeBytes)
-			totalSize += uint64(bitutil.BytesForBits(childCount))
-			vb.Reserve(int(end - start))
 			for i := start; i < end; i++ {
-				idx := int(i)
-				if binaryArray.IsNull(idx) {
-					vb.AppendNull()
+				if values.IsNull(int(i)) {
+					if !field.GetElementNullable() {
+						return 0, merr.WrapErrDataIntegrityMsg("non-element-nullable ArrayOfVector contains null child at logical element %d", i-start)
+					}
 					continue
 				}
-				val := binaryArray.Value(idx)
-				if len(val) != byteWidth {
-					return 0, merr.WrapErrDataIntegrityMsg(
-						"ArrayOfVector child at logical element %d has byte width %d, expected %d",
-						i-start,
-						len(val),
-						byteWidth,
-					)
+				if field.GetElementNullable() && len(values.(*array.Binary).Value(int(i))) != appendDefault.arrayOfVectorByteWidth {
+					return 0, merr.WrapErrDataIntegrityMsg("ArrayOfVector child at logical element %d has invalid byte width", i-start)
 				}
-				vb.Append(val)
-				totalSize += uint64(byteWidth)
 			}
-		default:
-			return 0, merr.WrapErrServiceInternalMsg("unsupported value builder type in ListBuilder: %T", valueBuilder)
 		}
-
-		return totalSize, nil
+		b.Append(true)
+		childBuilder := b.ValueBuilder()
+		childBuilder.Reserve(int(end - start))
+		size := uint64(arrow.Int32SizeBytes)
+		for i := start; i < end; i++ {
+			childSize, err := appendValueAt(childBuilder, values, int(i), nil, appendValueDefault{})
+			if err != nil {
+				return 0, err
+			}
+			size += childSize
+		}
+		if isVectorArray {
+			size -= uint64(arrow.Int32SizeBytes)
+			if field.GetElementNullable() {
+				size += uint64(end-start)*uint64(arrow.Int32SizeBytes) + uint64(bitutil.BytesForBits(end-start))
+			}
+		}
+		return size, nil
 	default:
 		return 0, merr.WrapErrServiceInternalMsg("unsupported builder type: %T", builder)
 	}
@@ -354,13 +329,10 @@ func GenerateEmptyArrayFromSchema(schema *schemapb.FieldSchema, numRows int) (ar
 	if !schema.GetNullable() {
 		return nil, merr.WrapErrServiceInternalMsg("missing field data %s", schema.Name)
 	}
-	dim, _ := typeutil.GetDim(schema)
-
-	elementType := schemapb.DataType_None
-	if schema.GetDataType() == schemapb.DataType_ArrayOfVector {
-		elementType = schema.GetElementType()
+	arrowType, err := ArrowTypeForField(schema)
+	if err != nil {
+		return nil, err
 	}
-	arrowType := serdeMap[schema.GetDataType()].arrowType(int(dim), elementType, schema.GetElementNullable())
 	if schema.GetDataType() == schemapb.DataType_Text {
 		arrowType = arrow.BinaryTypes.Binary
 	} else if schema.GetNullable() && isNullableDenseVectorArrowType(schema.GetDataType()) {
@@ -622,7 +594,10 @@ func newRecordBuilder(schema *schemapb.CollectionSchema, useFieldID bool) *Recor
 			// so the builder must use binary type to match what the reader returns.
 			builders[i] = array.NewBinaryBuilder(allocator, arrow.BinaryTypes.Binary)
 		} else {
-			arrowType := serdeMap[field.DataType].arrowType(int(dim), elementType, field.GetElementNullable())
+			arrowType, err := ArrowTypeForField(field)
+			if err != nil {
+				panic(err)
+			}
 			builders[i] = array.NewBuilder(allocator, arrowType)
 		}
 		arrowFields[i] = newRecordBuilderArrowField(field, builders[i].Type(), dim, elementType, useFieldID)

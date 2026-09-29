@@ -49,6 +49,68 @@ TEST(FieldDataOwnershipTest, VectorArrayTakesOwnershipOfDecodedBuffer) {
     }
 }
 
+TEST(FieldDataOwnershipTest, NativeListArrayPreservesElementValidity) {
+    proto::schema::TypeSchema type;
+    type.set_nullable(true);
+    type.mutable_array_element()->set_leaf_type(proto::schema::Int64);
+    type.mutable_array_element()->set_nullable(true);
+    arrow::ListBuilder builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::Int64Builder>());
+    auto* values = static_cast<arrow::Int64Builder*>(builder.value_builder());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(7).ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append().ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+
+    FieldData<ArrayValue> data(type, true);
+    data.FillFieldData(array);
+    ASSERT_EQ(data.Length(), 3);
+    const auto* rows = static_cast<const ArrayValue*>(data.Data());
+    auto first = rows[0].output_data();
+    ASSERT_EQ(first.long_data().data_size(), 2);
+    ASSERT_EQ(first.valid_data_size(), 2);
+    EXPECT_EQ(first.long_data().data(0), 7);
+    EXPECT_EQ(first.long_data().data(1), 0);
+    EXPECT_FALSE(first.valid_data(1));
+    EXPECT_FALSE(data.is_valid(1));
+    EXPECT_EQ(rows[2].size(), 0);
+
+    proto::schema::TypeSchema wrong_type = type;
+    wrong_type.mutable_array_element()->set_leaf_type(proto::schema::Float);
+    FieldData<ArrayValue> wrong(wrong_type, true);
+    EXPECT_ANY_THROW(wrong.FillFieldData(array));
+}
+
+TEST(FieldDataOwnershipTest, BinaryVectorListKeepsCompactPayload) {
+    arrow::ListBuilder builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::BinaryBuilder>());
+    auto* values = static_cast<arrow::BinaryBuilder*>(builder.value_builder());
+    const float vector[] = {1.0F, 2.0F};
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    ASSERT_TRUE(values->Append(
+        reinterpret_cast<const uint8_t*>(vector), sizeof(vector)).ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+
+    FieldData<VectorArray> data(2, DataType::VECTOR_FLOAT);
+    data.FillFieldData(array);
+    ASSERT_EQ(data.Length(), 1);
+    const auto* rows = static_cast<const VectorArray*>(data.Data());
+    EXPECT_EQ(rows[0].length(), 2);
+    EXPECT_EQ(rows[0].physical_length(), 1);
+    auto proto = rows[0].output_data();
+    ASSERT_EQ(proto.valid_data_size(), 2);
+    EXPECT_FALSE(proto.valid_data(0));
+    EXPECT_TRUE(proto.valid_data(1));
+    EXPECT_EQ(proto.float_vector().data_size(), 2);
+}
+
 TEST(FieldDataOwnershipTest, ScalarArraysSurviveSlicedArrowBatches) {
     for (bool nullable : {false, true}) {
         for (int capacity : {0, 32}) {

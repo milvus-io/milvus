@@ -2931,6 +2931,64 @@ TEST(SearchResultExport, FillOutputFieldsOrderedPinnedMatchesUnpinned) {
 }
 
 TEST(SearchResultExport,
+     FillOutputFieldsOrdered_WritesRowValidityToBothLocations) {
+    using namespace milvus;
+    using namespace milvus::segcore;
+
+    auto schema = std::make_shared<Schema>();
+    auto pk_fid = schema->AddDebugField("pk", DataType::INT64);
+    schema->set_primary_field_id(pk_fid);
+    auto nullable_fid =
+        schema->AddDebugField("nullable_i64", DataType::INT64, true);
+    auto vec_fid = schema->AddDebugField(
+        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+
+    auto raw_data = DataGen(schema, 100, /*seed=*/1);
+    auto raw_valid = raw_data.get_col_valid(nullable_fid);
+    // Pick one null and one valid row so a swapped or constant mask fails.
+    ASSERT_FALSE(raw_valid[99]);
+    ASSERT_TRUE(raw_valid[0]);
+    auto segment = CreateSealedWithFieldDataLoaded(schema, raw_data);
+
+    auto plan_bytes = BuildSimpleVectorSearchPlan(vec_fid, /*topk=*/2);
+    auto plan = milvus::query::CreateSearchPlanByExpr(
+        schema, plan_bytes.data(), plan_bytes.size());
+    plan->target_entries_.push_back(nullable_fid);
+
+    SearchResult sr;
+    AttachSealedRequestLease(sr, segment.get());
+    std::vector<CSearchResult> c_results = {
+        reinterpret_cast<CSearchResult>(&sr)};
+    int32_t seg_indices[] = {0, 0};
+    int64_t seg_offsets[] = {0, 99};
+
+    CProto c_proto{};
+    auto status =
+        FillOutputFieldsOrdered(c_results.data(),
+                                c_results.size(),
+                                reinterpret_cast<CSearchPlan>(plan.get()),
+                                seg_indices,
+                                seg_offsets,
+                                /*total_rows=*/2,
+                                &c_proto,
+                                nullptr);
+    ASSERT_EQ(status.error_code, 0) << status.error_msg;
+    milvus::proto::schema::SearchResultData result_data;
+    ASSERT_TRUE(
+        result_data.ParseFromArray(c_proto.proto_blob, c_proto.proto_size));
+    free(const_cast<void*>(c_proto.proto_blob));
+
+    ASSERT_EQ(result_data.fields_data_size(), 1);
+    const auto& field_data = result_data.fields_data(0);
+    ASSERT_EQ(field_data.scalars().valid_data_size(), 2);
+    ASSERT_EQ(field_data.valid_data_size(), 2);
+    EXPECT_TRUE(field_data.valid_data(0));
+    EXPECT_FALSE(field_data.valid_data(1));
+    EXPECT_TRUE(field_data.scalars().valid_data(0));
+    EXPECT_FALSE(field_data.scalars().valid_data(1));
+}
+
+TEST(SearchResultExport,
      FillOutputFieldsOrdered_CancellationReturnsFollyCancel) {
     using namespace milvus;
     using namespace milvus::segcore;

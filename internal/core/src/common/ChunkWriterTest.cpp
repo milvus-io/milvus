@@ -454,6 +454,71 @@ TEST(VectorArrayChunkWriterTest, NullableRowsRoundTripThroughChunkViews) {
     EXPECT_EQ(chunk.View(2).length(), 0);
 }
 
+TEST(VectorArrayChunkWriterTest, ElementNullableCompactBinaryList) {
+    constexpr int dim = 2;
+    arrow::ListBuilder builder(
+        arrow::default_memory_pool(),
+        std::make_shared<arrow::BinaryBuilder>());
+    auto* values = static_cast<arrow::BinaryBuilder*>(builder.value_builder());
+    const float first[] = {1.0F, 2.0F};
+    const float second[] = {3.0F, 4.0F};
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(reinterpret_cast<const uint8_t*>(first),
+                               sizeof(first)).ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    ASSERT_TRUE(values->Append(reinterpret_cast<const uint8_t*>(second),
+                               sizeof(second)).ok());
+    ASSERT_TRUE(builder.AppendNull().ok());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->AppendNull().ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+
+    VectorArrayChunkWriter writer(dim, DataType::VECTOR_FLOAT, true, true,
+                                  "profile[embeddings]");
+    auto [size, rows] = writer.calculate_size({array});
+    auto target = std::make_shared<MemChunkTarget>(size);
+    writer.write_to_target({array}, target);
+    VectorArrayChunk chunk(dim, rows, target->release(), size,
+                           DataType::VECTOR_FLOAT, nullptr, true, true);
+    auto [views, valid] = chunk.Views();
+    ASSERT_EQ(views.size(), 4);
+    EXPECT_TRUE(valid[0]);
+    EXPECT_FALSE(valid[1]);
+    EXPECT_TRUE(valid[2]);
+    EXPECT_TRUE(valid[3]);
+    EXPECT_EQ(views[0].length(), 3);
+    EXPECT_EQ(views[0].physical_length(), 2);
+    auto proto = views[0].output_data();
+    ASSERT_EQ(proto.valid_data_size(), 3);
+    EXPECT_TRUE(proto.valid_data(0));
+    EXPECT_FALSE(proto.valid_data(1));
+    EXPECT_TRUE(proto.valid_data(2));
+    EXPECT_EQ(proto.float_vector().data_size(), 4);
+    EXPECT_EQ(views[2].length(), 0);
+    EXPECT_EQ(views[3].length(), 1);
+    EXPECT_EQ(views[3].physical_length(), 0);
+    EXPECT_FALSE(views[3].output_data().valid_data(0));
+    EXPECT_EQ(chunk.Offsets()[4], 2);  // physical vectors only
+}
+
+TEST(VectorArrayChunkWriterTest, RejectsWrongElementTypeAndWidth) {
+    arrow::ListBuilder builder(arrow::default_memory_pool(),
+                               std::make_shared<arrow::BinaryBuilder>());
+    auto* values = static_cast<arrow::BinaryBuilder*>(builder.value_builder());
+    ASSERT_TRUE(builder.Append().ok());
+    ASSERT_TRUE(values->Append(std::string("short")).ok());
+    std::shared_ptr<arrow::Array> array;
+    ASSERT_TRUE(builder.Finish(&array).ok());
+    VectorArrayChunkWriter old_writer(2, DataType::VECTOR_FLOAT, false,
+                                      false, "old");
+    EXPECT_ANY_THROW(old_writer.calculate_size({array}));
+    VectorArrayChunkWriter new_writer(2, DataType::VECTOR_FLOAT, false,
+                                      true, "new");
+    EXPECT_ANY_THROW(new_writer.calculate_size({array}));
+}
+
 // Instantiate parameterized tests for all vector types
 INSTANTIATE_TEST_SUITE_P(
     VectorTypes,

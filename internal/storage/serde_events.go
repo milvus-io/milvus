@@ -203,7 +203,13 @@ func valueDeserializer(r Record, v []*Value, fields []*schemapb.FieldSchema, sho
 					elementType = f.GetElementType()
 				}
 
-				d, err := serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy, f.GetElementNullable())
+				var d any
+				var err error
+				if dt == schemapb.DataType_Array && typeutil.IsNativeListArrayField(f) {
+					d, err = DeserializeNativeArrayRow(r.Column(j), i, f)
+				} else {
+					d, err = serdeMap[dt].deserialize(r.Column(j), i, elementType, dim, shouldCopy, f.GetElementNullable())
+				}
 				if err != nil {
 					return merr.Wrapf(err, "deserialize error on type %s", dt)
 				}
@@ -430,9 +436,11 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 	}
 
 	types := make(map[FieldID]schemapb.DataType, len(allFieldsSchema))
+	fieldsByID := make(map[FieldID]*schemapb.FieldSchema, len(allFieldsSchema))
 	textRefFields := make(map[FieldID]struct{})
 	for _, f := range allFieldsSchema {
 		types[f.FieldID] = f.DataType
+		fieldsByID[f.FieldID] = f
 	}
 	for _, vv := range v {
 		m := vv.Value.(map[FieldID]any)
@@ -495,7 +503,13 @@ func ValueSerializer(v []*Value, schema *schemapb.CollectionSchema) (Record, err
 			}
 
 			config := arrayOfVectorConfigs[fid]
-			if err := typeEntry.serialize(builders[fid], e, config.elementType, config.dim, config.elementNullable); err != nil {
+			var err error
+			if field := fieldsByID[fid]; field.GetDataType() == schemapb.DataType_Array && typeutil.IsNativeListArrayField(field) {
+				err = SerializeNativeArrayRow(builders[fid], e, field)
+			} else {
+				err = typeEntry.serialize(builders[fid], e, config.elementType, config.dim, config.elementNullable)
+			}
+			if err != nil {
 				return nil, merr.Wrapf(err, "serialize error on type %s", types[fid])
 			}
 		}

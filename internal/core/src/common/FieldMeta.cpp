@@ -36,12 +36,34 @@ struct TypeSchemaTypes {
     DataType element_type;
 };
 
+bool
+IsSupportedArrayLeafType(DataType leaf_type) {
+    switch (leaf_type) {
+        case DataType::BOOL:
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+        case DataType::VARCHAR:
+            return true;
+        default:
+            return false;
+    }
+}
+
 TypeSchemaTypes
 ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
-                       const std::string& field_name) {
+                       const std::string& field_name,
+                       int depth) {
     if (type_schema.has_array_element()) {
+        AssertInfo(depth < 2,
+                   "type_schema exceeds two ARRAY levels for field {}",
+                   field_name);
         const auto child =
-            ValidateTypeSchemaNode(type_schema.array_element(), field_name);
+            ValidateTypeSchemaNode(type_schema.array_element(), field_name,
+                                   depth + 1);
         return {DataType::ARRAY, child.data_type};
     }
 
@@ -60,27 +82,75 @@ ValidateTypeSchemaNode(const proto::schema::TypeSchema& type_schema,
                "type_schema leaf_type ARRAY must use array_element for field "
                "{}",
                field_name);
-    switch (leaf_type) {
-        case DataType::BOOL:
-        case DataType::INT8:
-        case DataType::INT16:
-        case DataType::INT32:
-        case DataType::INT64:
-        case DataType::FLOAT:
-        case DataType::DOUBLE:
-        case DataType::VARCHAR:
-            break;
-        default:
-            ThrowInfo(DataTypeInvalid,
-                      "type_schema leaf_type {} is not supported for ARRAY "
-                      "field {}",
-                      leaf_type,
-                      field_name);
-    }
+    AssertInfo(depth == 2,
+               "type_schema must have exactly two ARRAY levels for field {}",
+               field_name);
+    AssertInfo(IsSupportedArrayLeafType(leaf_type),
+               "type_schema leaf_type {} is not supported for ARRAY field {}",
+               leaf_type,
+               field_name);
     return {leaf_type, DataType::NONE};
 }
 
 }  // namespace
+
+void
+FieldMeta::ValidateNestedTypeSchema(
+    const proto::schema::TypeSchema& type_schema,
+    const std::string& field_name) {
+    const auto schema_types =
+        ValidateTypeSchemaNode(type_schema, field_name, 0);
+    AssertInfo(schema_types.data_type == DataType::ARRAY &&
+                   schema_types.element_type == DataType::ARRAY,
+               "type_schema is only supported for nested ARRAY field {}",
+               field_name);
+}
+
+void
+FieldMeta::ValidateArrayLeafType(DataType leaf_type,
+                                 const std::string& field_name) {
+    AssertInfo(IsSupportedArrayLeafType(leaf_type),
+               "element_nullable ARRAY leaf type {} is not supported for "
+               "field {}",
+               leaf_type,
+               field_name);
+}
+
+std::shared_ptr<arrow::DataType>
+GetArrowDataType(const FieldMeta& field_meta) {
+    if (field_meta.get_data_type() == DataType::VECTOR_ARRAY) {
+        if (field_meta.is_element_nullable()) {
+            return arrow::list(arrow::field("item", arrow::binary(), true));
+        }
+        return GetArrowDataTypeForVectorArray(field_meta.get_element_type(),
+                                              field_meta.get_dim());
+    }
+    if (field_meta.get_data_type() == DataType::ARRAY &&
+        field_meta.is_native_list_array()) {
+        const auto& root = field_meta.get_array_type_schema();
+        const auto& element = root.array_element();
+        if (element.has_array_element()) {
+            const auto& leaf = element.array_element();
+            return arrow::list(
+                arrow::field("item",
+                             arrow::list(arrow::field(
+                                 "item",
+                                 GetArrowDataType(DataType(leaf.leaf_type())),
+                                 leaf.nullable())),
+                             element.nullable()));
+        }
+        return arrow::list(
+            arrow::field("item",
+                         GetArrowDataType(DataType(element.leaf_type())),
+                         element.nullable()));
+    }
+    const auto data_type = field_meta.get_data_type();
+    const int dim =
+        IsVectorDataType(data_type) && !IsSparseFloatVectorDataType(data_type)
+            ? field_meta.get_dim()
+            : 1;
+    return GetArrowDataType(data_type, dim);
+}
 
 TokenizerParams
 ParseTokenizerParams(const TypeParams& params) {
@@ -140,7 +210,7 @@ FieldMeta::ToProto() const {
     if (element_type_ != DataType::NONE) {
         proto.set_element_type(ToProtoDataType(element_type_));
     }
-    if (type_schema_.has_value()) {
+    if (is_nested_array() && type_schema_.has_value()) {
         *proto.mutable_type_schema() = *type_schema_;
     }
 
@@ -182,7 +252,11 @@ FieldMeta::ToProto() const {
             add_type_param(key, value);
         }
     } else if (IsArrayDataType(type_)) {
-        // element_type already populated above
+        for (const auto& [key, value] : array_type_params_) {
+            if (key != LOCAL_FORMAT_KEY) {
+                add_type_param(key, value);
+            }
+        }
     }
 
     if (local_format_ != LOCAL_FORMAT_RAW) {
@@ -221,12 +295,7 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                name.get());
 
     if (schema_proto.has_type_schema()) {
-        const auto schema_types =
-            ValidateTypeSchemaNode(schema_proto.type_schema(), name.get());
-        AssertInfo(schema_types.data_type == DataType::ARRAY &&
-                       schema_types.element_type == DataType::ARRAY,
-                   "type_schema is only supported for nested ARRAY field {}",
-                   name.get());
+        ValidateNestedTypeSchema(schema_proto.type_schema(), name.get());
     }
 
     if (data_type == DataType::VECTOR_ARRAY) {
@@ -357,7 +426,8 @@ FieldMeta::ParseFrom(const milvus::proto::schema::FieldSchema& schema_proto) {
                          default_value,
                          external_field_mapping,
                          local_format(),
-                         std::move(type_schema)};
+                         std::move(type_schema),
+                         std::move(type_map)};
     }
 
     return FieldMeta{name,

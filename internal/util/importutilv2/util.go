@@ -22,9 +22,40 @@ import (
 
 	"github.com/samber/lo"
 
+	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
+
+// ValidateImportSchema rejects array formats that bulk import cannot read yet.
+// Call it before accepting an import job so every file format, including
+// binlog backup imports, receives the same error.
+func ValidateImportSchema(schema *schemapb.CollectionSchema) error {
+	check := func(field *schemapb.FieldSchema, name string) error {
+		if typeutil.IsNativeListArrayField(field) {
+			return merr.WrapErrParameterInvalidMsg("bulk import of element-nullable or nested Array field %s is not supported yet", name)
+		}
+		return nil
+	}
+	for _, field := range schema.GetFields() {
+		if err := check(field, field.GetName()); err != nil {
+			return err
+		}
+	}
+	for _, structField := range schema.GetStructArrayFields() {
+		for _, field := range structField.GetFields() {
+			name, err := typeutil.ExtractStructFieldName(field.GetName())
+			if err != nil {
+				return err
+			}
+			if err := check(field, structField.GetName()+"."+name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 const (
 	JSONFileExt    = ".json"

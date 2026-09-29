@@ -1194,7 +1194,7 @@ func TestCreateFieldDataRangeView(t *testing.T) {
 		assert.True(t, &longData[1] == &view[0].GetScalars().GetLongData().Data[0])
 		assert.True(t, &jsonData[1] == &view[1].GetScalars().GetJsonData().Data[0])
 		assert.True(t, &floatData[2] == &view[2].GetVectors().GetFloatVector().Data[0])
-		assert.Nil(t, view[2].GetValidData())
+		assert.True(t, &validData[1] == &view[2].ValidData[0])
 		assert.True(t, &validData[1] == &view[2].GetVectors().ValidData[0])
 	})
 
@@ -1260,7 +1260,7 @@ func TestCreateFieldDataRangeView(t *testing.T) {
 		view, ok := CreateFieldDataRangeView(src, 1, 2, dataStarts, dataEnds)
 		require.True(t, ok)
 		assert.Nil(t, view[0].GetVectors().GetData())
-		assert.Nil(t, view[0].GetValidData())
+		assert.Equal(t, []bool{false}, view[0].GetValidData())
 		assert.Equal(t, []bool{false}, GetFieldDataValidData(view[0]))
 	})
 
@@ -6337,6 +6337,69 @@ func TestNormalizeAndValidateExternalCollectionSchema(t *testing.T) {
 				"field %s nullable was flipped despite validation failure", f.GetName())
 		}
 	})
+}
+
+func TestExternalCollectionRejectsElementNullableArrays(t *testing.T) {
+	for _, validate := range []struct {
+		name string
+		fn   func(*schemapb.CollectionSchema) error
+	}{
+		{"normalize", NormalizeAndValidateExternalCollectionSchema},
+		{"resolved", ValidateExternalCollectionResolvedSchema},
+	} {
+		for _, dataType := range []schemapb.DataType{schemapb.DataType_Array, schemapb.DataType_ArrayOfVector} {
+			for _, elementNullable := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/element_nullable=%t", validate.name, dataType, elementNullable), func(t *testing.T) {
+					elementType := schemapb.DataType_Int64
+					if dataType == schemapb.DataType_ArrayOfVector {
+						elementType = schemapb.DataType_FloatVector
+					}
+					schema := &schemapb.CollectionSchema{
+						Name: "external", ExternalSource: "s3://bucket/path", ExternalSpec: `{"format":"parquet"}`,
+						Fields: []*schemapb.FieldSchema{{
+							Name: "arr", DataType: dataType, ElementType: elementType,
+							ElementNullable: elementNullable, ExternalField: "arr_col",
+						}},
+					}
+					err := validate.fn(schema)
+					if !elementNullable {
+						require.NoError(t, err)
+						return
+					}
+					require.ErrorIs(t, err, merr.ErrParameterInvalid)
+					require.Contains(t, err.Error(), "element-nullable")
+					require.Contains(t, err.Error(), "arr")
+					require.Contains(t, err.Error(), "not supported yet")
+				})
+			}
+		}
+	}
+}
+
+func TestExternalCollectionResolvedSchemaRejectsStructFields(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name:           "external",
+		ExternalSource: "s3://bucket/path",
+		ExternalSpec:   `{"format":"parquet"}`,
+		Fields: []*schemapb.FieldSchema{{
+			Name: "mapped", DataType: schemapb.DataType_Int64, ExternalField: "mapped",
+		}},
+		StructArrayFields: []*schemapb.StructArrayFieldSchema{{
+			Name: "s",
+			Fields: []*schemapb.FieldSchema{{
+				Name: "s[arr]", DataType: schemapb.DataType_Array,
+				ElementType: schemapb.DataType_Int64, ElementNullable: true,
+			}},
+		}},
+	}
+	err := ValidateExternalCollectionResolvedSchema(schema)
+	require.ErrorIs(t, err, merr.ErrParameterInvalid)
+	require.Contains(t, err.Error(), "does not support struct fields")
+
+	schema.ExternalSource = ""
+	schema.ExternalSpec = ""
+	schema.Fields[0].ExternalField = ""
+	require.NoError(t, ValidateExternalCollectionResolvedSchema(schema))
 }
 
 func TestValidateMilvusTableSchemaIdentity(t *testing.T) {
