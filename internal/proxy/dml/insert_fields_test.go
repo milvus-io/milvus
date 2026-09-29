@@ -737,3 +737,107 @@ func Test_UpsertTaskCheckPrimaryFieldData(t *testing.T) {
 		}
 	}
 }
+
+func TestFillFieldIDBySchema(t *testing.T) {
+	t.Run("column count mismatch", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{}
+		schema := mustNewSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "TestFillFieldIDBySchema",
+			},
+		}
+		// Validation should fail due to column count mismatch
+		assert.Error(t, validateFieldDataColumns(columns, schema))
+	})
+
+	t.Run("successful validation and fill", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "TestFillFieldIDBySchema",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := mustNewSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "TestFillFieldIDBySchema",
+			},
+		}
+		// Validation should succeed
+		assert.NoError(t, validateFieldDataColumns(columns, schema))
+		// Fill properties should succeed
+		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
+		assert.Equal(t, "TestFillFieldIDBySchema", columns[0].FieldName)
+		assert.Equal(t, schemapb.DataType_Int64, columns[0].Type)
+		assert.Equal(t, int64(1), columns[0].FieldId)
+	})
+
+	t.Run("nested array fills array element type", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:        "nested",
+					FieldID:     2,
+					DataType:    schemapb.DataType_Array,
+					ElementType: schemapb.DataType_Array,
+					TypeSchema: &schemapb.TypeSchema{
+						Kind: &schemapb.TypeSchema_ArrayElement{
+							ArrayElement: &schemapb.TypeSchema{
+								Kind: &schemapb.TypeSchema_ArrayElement{
+									ArrayElement: &schemapb.TypeSchema{
+										Kind: &schemapb.TypeSchema_LeafType{LeafType: schemapb.DataType_Int32},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		schema := mustNewSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "nested",
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_ArrayData{
+							ArrayData: &schemapb.ArrayArray{},
+						},
+					},
+				},
+			},
+		}
+
+		assert.NoError(t, validateFieldDataColumns(columns, schema))
+		assert.NoError(t, fillFieldPropertiesOnly(columns, schema))
+		assert.Equal(t, int64(2), columns[0].GetFieldId())
+		assert.Equal(t, schemapb.DataType_Array, columns[0].GetType())
+		assert.Equal(t, schemapb.DataType_Array, columns[0].GetScalars().GetArrayData().GetElementType())
+	})
+
+	t.Run("field not in schema", func(t *testing.T) {
+		collSchema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "FieldA",
+					DataType: schemapb.DataType_Int64,
+					FieldID:  1,
+				},
+			},
+		}
+		schema := mustNewSchemaInfo(collSchema)
+		columns := []*schemapb.FieldData{
+			{
+				FieldName: "FieldB",
+			},
+		}
+		// Validation should fail because FieldB is not in schema
+		err := validateFieldDataColumns(columns, schema)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not exist in collection schema")
+	})
+}

@@ -517,7 +517,6 @@ func TestUpsertTask_Function(t *testing.T) {
 }
 
 func TestUpsertTaskForSchemaMismatch(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	mockCache := NewMockCache(t)
 	ctx := context.Background()
 
@@ -1184,7 +1183,6 @@ func TestRepackInsertDataForStreamingServiceCASMetadata(t *testing.T) {
 }
 
 func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	mockCache := newTestCache()
@@ -1224,7 +1222,6 @@ func TestRepackInsertDataForStreamingServiceProducesSingleMessageWithCASMetadata
 }
 
 func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	mockCache := newTestCache()
 	partitionPatch := mockey.Mock((*metacache.MetaCache).GetPartitionID).Return(int64(200), nil).Build()
 	defer partitionPatch.UnPatch()
@@ -1294,7 +1291,6 @@ func TestRepackInsertDataForStreamingServiceSwitchesCASChunkOwner(t *testing.T) 
 }
 
 func TestRepackInsertDataByPartitionForStreamingServiceRejectsMisalignedSource(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	task := partialUpdateCASRealPackTestTask(t, []int64{10}, []int64{10}, nil)
@@ -1420,7 +1416,6 @@ func TestRepackInsertDataWithPartitionKeyForStreamingServiceCASMetadata(t *testi
 }
 
 func TestRepackInsertDataWithPartitionKeyForStreamingServiceProducesSingleMessageWithCASMetadata(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	oldSplitChunkProxy := paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue("false")
 	t.Cleanup(func() { paramtable.Get().ProxyCfg.SplitChunkProxy.SwapTempValue(oldSplitChunkProxy) })
 	mockCache := NewMockCache(t)
@@ -1812,7 +1807,6 @@ func TestPartialUpdateAppendPacksMessagesAndAttachesCASMetadata(t *testing.T) {
 }
 
 func TestPartialUpdateRetriesAfterCASConflict(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.req.FieldOps[0].Op = schemapb.FieldPartialUpdateOp_REPLACE
 	task.node.(*mockUpsertNode).tsoAllocator = &mockTsoAllocator{}
@@ -2011,7 +2005,6 @@ func TestUnwrapPartialUpdateAppendErrorRejectsMixedOutcome(t *testing.T) {
 }
 
 func TestPartialUpdateQueryAccumulatesStorageCost(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	schema := createTestSchema()
 	upsertData := []*schemapb.FieldData{
 		partialUpdateCASPKFieldData([]int64{1}),
@@ -2067,7 +2060,6 @@ func TestPartialUpdateQueryAccumulatesStorageCost(t *testing.T) {
 }
 
 func TestPartialUpdateRetryRestoresOriginalFieldsBeforeQuery(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	task := createTestUpdateTask()
 	task.req.PartialUpdate = true
 	task.result = &milvuspb.MutationResult{}
@@ -2106,7 +2098,6 @@ func TestPartialUpdateRetryRestoresOriginalFieldsBeforeQuery(t *testing.T) {
 }
 
 func TestPartialUpdateRetryRefreshesMutationResultCounts(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	task := createTestUpdateTask()
 	task.req.PartialUpdate = true
 	task.result = &milvuspb.MutationResult{
@@ -2148,7 +2139,6 @@ func TestPartialUpdateRetryRefreshesMutationResultCounts(t *testing.T) {
 }
 
 func TestPartialUpdateRetryResolvesTermBeforeQuery(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{20, 10, 30}, []int64{20})
 	task.result = &milvuspb.MutationResult{}
 	task.node.(*mockUpsertNode).tsoAllocator = &mockTsoAllocator{}
@@ -2445,7 +2435,6 @@ func TestAttachPartialUpdateCASAcceptsEveryBuilderMarkedInsertChunk(t *testing.T
 }
 
 func TestRetrieveByPKs_Success(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	for _, partitionKeyMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("partitionKeyMode=%t", partitionKeyMode), func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20}, []int64{10, 20}, nil)
@@ -2497,7 +2486,6 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 }
 
 func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	const beginTS = uint64(200)
 	var captured *dql.QueryTask
 
@@ -2543,7 +2531,6 @@ func TestRetrieveByPKsUsesStrongQueryForFullAutoID(t *testing.T) {
 }
 
 func TestQueryPreExecuteFullAutoIDPreservesRequestOrder(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	logs := captureProxyLogs(t)
 	primaryField := &schemapb.FieldSchema{
 		FieldID:      100,
@@ -2621,7 +2608,6 @@ func TestQueryPreExecuteFullAutoIDRejectsMalformedResults(t *testing.T) {
 }
 
 func TestUpsertModeNormalizesFieldOpsForAutoID(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_collection",
 		Fields: []*schemapb.FieldSchema{
@@ -2804,7 +2790,6 @@ func TestInsertPreExecuteKeepsFullPayloadValidation(t *testing.T) {
 }
 
 func TestPartialUpdateAutoIDPreservesOmittedFields(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	for _, mode := range []string{"required", "nullable", "default"} {
 		t.Run(mode, func(t *testing.T) {
 			logs := captureProxyLogs(t)
@@ -2970,7 +2955,6 @@ func TestPrepareUpsertFullAutoIDAllocationFailures(t *testing.T) {
 }
 
 func TestPrepareUpsertFullAutoIDPreparesMixedRows(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	primaryField := &schemapb.FieldSchema{
 		FieldID: 100, Name: "id", IsPrimaryKey: true, AutoID: true, DataType: schemapb.DataType_Int64,
 	}
@@ -3273,7 +3257,6 @@ func TestPrepareUpsertFullAutoIDRejectsAllocatedIDCollision(t *testing.T) {
 }
 
 func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
 	task.partitionKeyMode = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -3309,7 +3292,6 @@ func TestRetrieveByPKsStrongReadBindsActualSnapshots(t *testing.T) {
 }
 
 func TestRetrieveByPKsStrongReadRejectsMissingProofBeforeMerge(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	for _, scenario := range []string{"missing", "zero", "query_error"} {
 		t.Run(scenario, func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10, 20, 30}, []int64{10, 20, 30}, nil)
@@ -3834,7 +3816,6 @@ func TestUpdateTask_PreExecute_QueryPreExecuteError(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_MixLogic(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	// Schema for the test collection
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_merge_collection",
@@ -4176,7 +4157,6 @@ func TestPartialUpdateAutoIDMixedCommitRetry(t *testing.T) {
 }
 
 func TestPartialUpdateAutoIDDestinationSnapshotFromQueryRPC(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	for _, scenario := range []struct {
 		name      string
 		namespace bool
@@ -4762,7 +4742,6 @@ func TestPartialUpdateMissingPKInsertError(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	// Schema for the test collection
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_merge_collection",
@@ -4854,7 +4833,6 @@ func TestUpsertTask_queryPreExecute_PureInsert(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	// Schema for the test collection
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_merge_collection",
@@ -4945,7 +4923,6 @@ func TestUpsertTask_queryPreExecute_PureUpdate(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_StructWholeReplace(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_struct_partial_update",
 		Fields: []*schemapb.FieldSchema{
@@ -5872,7 +5849,6 @@ func TestUpsertTask_NoDuplicatePK(t *testing.T) {
 // 3. Columns a and b have 10 rows of data, column c has FieldData but empty data array
 // 4. Verifies both nullable and non-nullable scenarios for column c
 func TestUpsertTask_queryPreExecute_EmptyDataArray(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	numRows := 10
 	dim := 128
 
@@ -6384,7 +6360,6 @@ func TestInsertPreExecutePreservesAutoIDPrimaryKeyForPartialUpdate(t *testing.T)
 }
 
 func TestUpsertTask_queryPreExecute_NullableFields(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	dim := int64(4)
 
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
@@ -6671,7 +6646,6 @@ func TestUpsertTask_GenNullableFieldData(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	// Schema with a non-nullable field that has DefaultValue
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_default_value_upsert",
@@ -6767,7 +6741,6 @@ func TestUpsertTask_queryPreExecute_DefaultValueWithValidData(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	// Schema with a non-nullable field that has DefaultValue
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name: "test_default_value_error",
@@ -6849,7 +6822,6 @@ func TestUpsertTask_queryPreExecute_DefaultValueError(t *testing.T) {
 }
 
 func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	// Schema with dynamic field enabled, simulating a collection with id + value + $meta
 	schema := mustNewSchemaInfo(&schemapb.CollectionSchema{
 		Name:               "test_dynamic_validdata",
@@ -7156,7 +7128,6 @@ func TestUpsertTask_queryPreExecute_DynamicFieldValidData(t *testing.T) {
 }
 
 func TestRetrieveByPKsStopsBeforeQueryOnPartitionError(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	for _, name := range []string{"invalid_name", "lookup_error"} {
 		t.Run(name, func(t *testing.T) {
 			task := createTestUpdateTask()
@@ -7186,7 +7157,6 @@ func TestRetrieveByPKsStopsBeforeQueryOnPartitionError(t *testing.T) {
 }
 
 func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
 	task.partitionKeyMode = true
 	fakeWAL := newPartialUpdateCASTestWAL(t, 9)
@@ -7220,7 +7190,6 @@ func TestPartialUpdateRetryStrongReadRejectsMissingSnapshot(t *testing.T) {
 }
 
 func TestPartialUpdateRetryPreparationErrorsDoNotAppend(t *testing.T) {
-	t.Skip("TODO: depends on root Proxy/queryTask private; rewrite with QueryRunner mock")
 	for _, stage := range []string{"functions", "terms", "query", "insert", "delete"} {
 		t.Run(stage, func(t *testing.T) {
 			task, _, _ := partialUpdateCASTestTask(t, true, []int64{10}, []int64{10}, nil)
