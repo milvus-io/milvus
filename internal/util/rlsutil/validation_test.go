@@ -57,7 +57,7 @@ func TestValidatePayloadBounds(t *testing.T) {
 	})
 
 	t.Run("raw principal tags transport bytes", func(t *testing.T) {
-		params := paramtable.Get().ProxyCfg
+		params := &paramtable.Get().ProxyCfg
 		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagsPerPrincipal.Key, "1"))
 		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagKeyLength.Key, "1"))
 		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagValueLength.Key, "1"))
