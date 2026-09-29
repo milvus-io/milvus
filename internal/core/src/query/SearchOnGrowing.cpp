@@ -165,6 +165,37 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 const BitsetView& bitset,
                 milvus::OpContext* op_context,
                 SearchResult& search_result) {
+    const auto* segment_ptr = &segment;
+    auto register_vector_search_provider = [&] {
+        if (!search_result.allow_filtered_vector_search_ ||
+            !CanUseStrictGroupSearch(info, num_queries) ||
+            !search_result.vector_iterators_.has_value()) {
+            return;
+        }
+        search_result.SetVectorSearchProvider(
+            bitset,
+            [segment_ptr,
+             phase1_search_info = info,
+             query_data,
+             query_offsets,
+             num_queries,
+             timestamp,
+             op_context](const BitsetView& combined_filter,
+                         int64_t remaining_topk,
+                         SearchResult& filtered_result) {
+                SearchOnGrowing(
+                    *segment_ptr,
+                    StrictGroupSearchInfo(phase1_search_info, remaining_topk),
+                    query_data,
+                    query_offsets,
+                    num_queries,
+                    timestamp,
+                    combined_filter,
+                    op_context,
+                    filtered_result);
+            });
+    };
+
     auto schema = segment.get_schema_snapshot();
     auto& record = segment.get_insert_record();
 
@@ -270,14 +301,16 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
                 AssertInfo(data_type != DataType::VECTOR_ARRAY,
                            "vector array(embedding list) is not supported for "
                            "growing segment indexing search");
-                return FloatSegmentIndexSearch(segment,
-                                               info,
-                                               query_data,
-                                               num_queries,
-                                               timestamp,
-                                               bitset,
-                                               op_context,
-                                               search_result);
+                FloatSegmentIndexSearch(segment,
+                                        info,
+                                        query_data,
+                                        num_queries,
+                                        timestamp,
+                                        bitset,
+                                        op_context,
+                                        search_result);
+                register_vector_search_provider();
+                return;
             }
             FillEmptySearchResult(search_result, num_queries, info.topk_);
             return;
@@ -523,6 +556,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
         search_result.unity_topK_ = topk;
         search_result.total_nq_ = num_queries;
     }
+    register_vector_search_provider();
 }
 
 }  // namespace milvus::query

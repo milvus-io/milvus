@@ -266,7 +266,19 @@ SearchGroupBy(milvus::OpContext* op_ctx,
               std::vector<int64_t>& seg_offsets,
               std::vector<float>& distances,
               std::vector<size_t>& topk_per_nq_prefix_sum,
-              std::vector<int32_t>* element_indices) {
+              std::vector<int32_t>* element_indices,
+              SearchResult* search_result) {
+    if (TryStrictGroupFilteredSearch(op_ctx,
+                                     iterators,
+                                     search_info,
+                                     segment,
+                                     search_result,
+                                     composite_group_by_values,
+                                     seg_offsets,
+                                     distances,
+                                     topk_per_nq_prefix_sum)) {
+        return;
+    }
     // Get field IDs for group by
     AssertInfo(!search_info.group_by_field_ids_.empty(),
                "group_by_field_ids must be set for group by search");
