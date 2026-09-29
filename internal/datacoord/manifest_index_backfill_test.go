@@ -37,6 +37,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 )
 
+func indexManifestPublished(t *testing.T, indexMeta *indexMeta, buildID int64) bool {
+	t.Helper()
+	record, ok := indexMeta.GetIndexJob(buildID)
+	require.True(t, ok)
+	return record.ManifestPublished
+}
+
 func withManifestIndexBackfillEnabled(t *testing.T, enabled bool) {
 	t.Helper()
 	key := Params.DataCoordCfg.ManifestIndexBackfillEnabled.Key
@@ -121,7 +128,7 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
 	require.Len(t, persisted, 1)
-	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 
 	// Model the real upgrade boundary: provenance must be reconstructed from
 	// the catalog source, not inherited from the process that finished the
@@ -129,7 +136,9 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	m = bootMetaForRestart(t, catalog, restartCollID)
 	_, ok := m.indexMeta.GetIndexJob(restartBuildID)
 	require.True(t, ok)
-	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	beforePublication, ok := m.indexMeta.segmentBuildInfo.Get(restartBuildID)
+	require.True(t, ok)
+	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 
 	// Backfill follows the new exclusive placement and therefore runs only in
 	// manifest-publication mode.
@@ -151,7 +160,8 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	assert.Empty(t, persisted, "the manifest pointer and row deletion must commit together")
 	_, ok = m.indexMeta.GetIndexJob(restartBuildID)
 	assert.True(t, ok, "backfill changes durable placement, not the live DataCoord view")
-	assert.True(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	assert.True(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
+	assert.False(t, beforePublication.ManifestPublished, "publication must not mutate a reader's snapshot")
 
 	// Convergence is process-local immediately; a second tick creates no new
 	// revision and reports no remaining catalog row.
@@ -166,7 +176,7 @@ func TestManifestIndexBackfillMovesCatalogRowAtomically(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, commonpb.IndexState_Finished, recovered.IndexState)
 	assert.Equal(t, []string{"0", "1"}, recovered.IndexFileKeys)
-	assert.True(t, restarted.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	assert.True(t, indexManifestPublished(t, restarted.indexMeta, restartBuildID))
 	_, pending := newManifestIndexBackfillInspector(ctx, restarted).scan(ctx)
 	assert.Zero(t, pending)
 }
@@ -262,13 +272,12 @@ func TestManifestIndexBackfillScansOnlyHealthyNonL0StorageV3(t *testing.T) {
 }
 
 func TestManifestIndexBackfillSkipsTaskOnlyAndManifestOnlyRecords(t *testing.T) {
-	indexMeta := &indexMeta{}
 	base := &model.SegmentIndex{
 		BuildID:       1,
 		IndexState:    commonpb.IndexState_Finished,
 		IndexFileKeys: []string{"0"},
 	}
-	assert.True(t, segmentIndexNeedsManifestBackfill(indexMeta, base))
+	assert.True(t, segmentIndexNeedsManifestBackfill(base))
 
 	for name, mutate := range map[string]func(*model.SegmentIndex){
 		"deleted":       func(index *model.SegmentIndex) { index.IsDeleted = true },
@@ -279,12 +288,12 @@ func TestManifestIndexBackfillSkipsTaskOnlyAndManifestOnlyRecords(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			candidate := model.CloneSegmentIndex(base)
 			mutate(candidate)
-			assert.False(t, segmentIndexNeedsManifestBackfill(indexMeta, candidate))
+			assert.False(t, segmentIndexNeedsManifestBackfill(candidate))
 		})
 	}
 
-	indexMeta.segmentIndexCatalogAbsent.Upsert(base.BuildID)
-	assert.False(t, segmentIndexNeedsManifestBackfill(indexMeta, base),
+	base.ManifestPublished = true
+	assert.False(t, segmentIndexNeedsManifestBackfill(base),
 		"a manifest-resident record has no catalog row to migrate")
 }
 
@@ -363,7 +372,7 @@ func TestManifestIndexBackfillCatalogFailureKeepsRowAndPointer(t *testing.T) {
 	persisted, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
 	require.Len(t, persisted, 1)
-	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 	_, pending := inspector.scan(ctx)
 	assert.Equal(t, 1, pending)
 
@@ -427,7 +436,7 @@ func TestBackfillMutationRejectsMismatchedSegmentIdentity(t *testing.T) {
 	persisted, listErr := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, listErr)
 	assert.Len(t, persisted, 1)
-	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 }
 
 func TestBackfillMutationRejectsUnsupportedShapes(t *testing.T) {

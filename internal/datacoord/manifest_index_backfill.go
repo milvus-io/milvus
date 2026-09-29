@@ -195,7 +195,7 @@ func (i *manifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 			return nil, 0
 		}
 		for _, segIdx := range i.meta.indexMeta.GetSegmentIndexes(segment.GetCollectionID(), segment.GetID()) {
-			if !segmentIndexNeedsManifestBackfill(i.meta.indexMeta, segIdx) {
+			if !segmentIndexNeedsManifestBackfill(segIdx) {
 				continue
 			}
 			candidates = append(candidates, manifestIndexBackfillCandidate{segment: segment, record: segIdx})
@@ -243,11 +243,11 @@ func (i *manifestIndexBackfillInspector) scan(ctx context.Context) ([]segmentMan
 	return work, pending
 }
 
-func segmentIndexNeedsManifestBackfill(indexMeta *indexMeta, segIdx *model.SegmentIndex) bool {
+func segmentIndexNeedsManifestBackfill(segIdx *model.SegmentIndex) bool {
 	return segIdx != nil && !segIdx.IsDeleted &&
 		segIdx.IndexState == commonpb.IndexState_Finished &&
 		len(segIdx.IndexFileKeys) > 0 &&
-		!indexMeta.isSegmentIndexCatalogAbsent(segIdx.BuildID)
+		!segIdx.ManifestPublished
 }
 
 func countManifestIndexBackfillRecords(work []segmentManifestIndexBackfill) int {
@@ -309,7 +309,7 @@ func (i *manifestIndexBackfillInspector) backfillIndex(ctx context.Context, segm
 		return merr.WrapErrSegmentNotFound(segmentID)
 	}
 	segIdx, ok := i.meta.indexMeta.GetIndexJob(buildID)
-	if !ok || !segmentIndexNeedsManifestBackfill(i.meta.indexMeta, segIdx) ||
+	if !ok || !segmentIndexNeedsManifestBackfill(segIdx) ||
 		!i.meta.indexMeta.IsIndexExist(segIdx.CollectionID, segIdx.IndexID) {
 		return errSegmentIndexBackfillSkipped
 	}
