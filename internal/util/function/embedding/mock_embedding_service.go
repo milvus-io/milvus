@@ -259,7 +259,11 @@ func CreateTEIEmbeddingServer(dim int) *httptest.Server {
 		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
 		json.Unmarshal(body, &req)
-		embs := mockEmbedding[float32](req.Inputs, dim)
+		embeddingDim := dim
+		if req.Dimensions != 0 {
+			embeddingDim = req.Dimensions
+		}
+		embs := mockEmbedding[float32](req.Inputs, embeddingDim)
 		w.WriteHeader(http.StatusOK)
 		data, _ := json.Marshal(embs)
 		w.Write(data)
