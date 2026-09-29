@@ -645,6 +645,9 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.NoError(err)
 	body, err := msg.Body(ctx)
 	s.NoError(err)
+	version, ok := mockBroadcastAPI.capturedMsg.Properties().Get(importRLSContextVersionProperty)
+	s.True(ok)
+	s.Equal(importRLSContextVersion, version)
 	s.Equal("alice", body.GetOptions()[importutilv2.RLSPrincipal])
 	_, hasSkipRLS := body.GetOptions()[importutilv2.SkipRLS]
 	s.False(hasSkipRLS)
@@ -1796,6 +1799,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 				importutilv2.SkipRLS:      "true",
 			},
 		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		WithBroadcast([]string{"vchannel1"}).
 		MustBuildBroadcast().
 		OverwriteBroadcastHeader(1)
@@ -1816,7 +1820,7 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.True(t, skipRLS)
 }
 
-func TestImportAckCallback_IgnoresMalformedLegacyRLSOptions(t *testing.T) {
+func TestImportAckCallback_IgnoresUntrustedLegacyRLSOptions(t *testing.T) {
 	defer mockey.UnPatchAll()
 
 	patch := mockey.Mock((*Server).createImportJobFromAck).To(
@@ -1829,26 +1833,27 @@ func TestImportAckCallback_IgnoresMalformedLegacyRLSOptions(t *testing.T) {
 			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
 		}).Build()
 
-	broadcastMsg := message.NewImportMessageBuilderV1().
-		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{
-			CollectionID: 100,
-			JobID:        1,
-			Options: map[string]string{
-				importutilv2.RLSPrincipal: "legacy",
-				importutilv2.SkipRLS:      "not-a-bool",
-			},
-		}).
-		WithBroadcast([]string{"vchannel1"}).
-		MustBuildBroadcast().
-		OverwriteBroadcastHeader(1)
-
 	callbacks := &DDLCallbacks{Server: &Server{}}
-	err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
-		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
-		Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
-	})
+	for _, skipRLS := range []string{"true", "not-a-bool"} {
+		broadcastMsg := message.NewImportMessageBuilderV1().
+			WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
+			WithBody(&msgpb.ImportMsg{
+				CollectionID: 100,
+				JobID:        1,
+				Options: map[string]string{
+					importutilv2.RLSPrincipal: "legacy",
+					importutilv2.SkipRLS:      skipRLS,
+				},
+			}).
+			WithBroadcast([]string{"vchannel1"}).
+			MustBuildBroadcast().
+			OverwriteBroadcastHeader(1)
 
-	require.NoError(t, err)
-	require.Equal(t, 1, patch.Times())
+		err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+			Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+			Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
+		})
+		require.NoError(t, err)
+	}
+	require.Equal(t, 2, patch.Times())
 }

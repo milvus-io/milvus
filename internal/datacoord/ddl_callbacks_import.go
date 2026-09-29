@@ -39,17 +39,31 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/replicateutil"
 )
 
+const (
+	importRLSContextVersionProperty = "_irv"
+	importRLSContextVersion         = "1"
+)
+
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
 	options := funcutil.Map2KeyValuePair(body.GetOptions())
-	rlsPrincipal, skipRLS, err := importutilv2.GetRLSOptions(options)
-	if err != nil {
-		// RLS options were not reserved before RLS support. An older Proxy may
-		// therefore have persisted arbitrary values under these keys. Keep the
-		// strict parser for new requests, but recover legacy WAL messages as
-		// ordinary imports instead of retrying this ACK forever.
-		mlog.Warn(ctx, "ignore malformed RLS options in legacy import message", mlog.Err(err))
+	version, trustedRLSContext := result.Message.Properties().Get(importRLSContextVersionProperty)
+	trustedRLSContext = trustedRLSContext && version == importRLSContextVersion
+	var rlsPrincipal string
+	var skipRLS bool
+	var err error
+	if trustedRLSContext {
+		rlsPrincipal, skipRLS, err = importutilv2.GetRLSOptions(options)
+	}
+	if !trustedRLSContext || err != nil {
+		// Import options predate RLS and were client-controlled. Only a message
+		// marked after DataCoord sanitizes the options may carry authorized RLS
+		// context. Malformed marked context also fails closed without wedging the
+		// indefinitely retried ACK callback.
+		if err != nil {
+			mlog.Warn(ctx, "ignore malformed RLS context in import message", mlog.Err(err))
+		}
 		rlsPrincipal, skipRLS = "", false
 		options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
 			return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
@@ -345,6 +359,7 @@ func (s *Server) broadcastImport(ctx context.Context,
 			Schema:         schema,
 			JobID:          jobID,
 		}).
+		WithProperty(importRLSContextVersionProperty, importRLSContextVersion).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off
 		// the collection it was bound to: a retry naming the renamed collection still

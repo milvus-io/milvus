@@ -397,6 +397,56 @@ func TestCompilePolicyExprCachesTagVariableDataTypes(t *testing.T) {
 	}
 }
 
+func TestManagerReusesOnlyStaticCompiledPredicates(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+
+	t.Run("static", func(t *testing.T) {
+		helper := newManagerTestSchemaHelper(t)
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "static",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept == "sales"`,
+		}}}))
+
+		first, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		second, err := manager.resolveUsingPredicate(ctx, 100, "bob", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		require.Same(t, first, second)
+
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "static",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `dept == "engineering"`,
+		}}}))
+		updated, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		require.NotSame(t, first, updated)
+		require.NoError(t, ValidateRowsByPredicate(ctx, managerTestFieldsData("engineering"), 1, updated, "query", "using"))
+	})
+
+	t.Run("principal template", func(t *testing.T) {
+		helper := newManagerTestPrincipalSchemaHelper(t)
+		require.True(t, setPolicySnapshotForTest(manager, 100, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+			PolicyName: "principal",
+			PolicyType: rlsutil.PolicyTypePermissive,
+			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+			UsingExpr:  `owner == $current_principal`,
+		}}}))
+
+		alice, err := manager.resolveUsingPredicate(ctx, 100, "alice", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		bob, err := manager.resolveUsingPredicate(ctx, 100, "bob", rlsutil.PolicyActionQuery, helper)
+		require.NoError(t, err)
+		require.NotSame(t, alice, bob)
+		require.NoError(t, ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "alice", "us"), 1, alice, "query", "using"))
+		require.ErrorIs(t, ValidateRowsByPredicate(ctx, managerTestPrincipalFieldsData("sales", "bob", "us"), 1, alice, "query", "using"), merr.ErrPrivilegeNotPermitted)
+	})
+}
+
 func TestManagerRejectsInexactDoubleToFloatTag(t *testing.T) {
 	ctx := context.Background()
 	schema := &schemapb.CollectionSchema{

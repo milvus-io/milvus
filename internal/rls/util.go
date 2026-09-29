@@ -33,13 +33,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
 type compiledExpression struct {
-	permissive  []*compiledPolicyExpression
-	restrictive []*compiledPolicyExpression
-	needsTags   bool
+	permissive        []*compiledPolicyExpression
+	restrictive       []*compiledPolicyExpression
+	needsTags         bool
+	staticOptimized   *planpb.Expr
+	staticUnoptimized *planpb.Expr
 }
 
 type compiledPolicyExpression struct {
@@ -67,6 +70,20 @@ func compiledExpressionNeedsTags(e *compiledExpression) bool {
 
 func (e *compiledPolicyExpression) isStatic() bool {
 	return e != nil && !e.needsPrincipal && len(e.tagVariables) == 0
+}
+
+func (e *compiledExpression) isStatic() bool {
+	if e == nil {
+		return false
+	}
+	for _, policies := range [...][]*compiledPolicyExpression{e.permissive, e.restrictive} {
+		for _, policy := range policies {
+			if !policy.isStatic() {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type policyExprTemplate struct {
@@ -162,6 +179,17 @@ func compileExprTemplates(schemaHelper *typeutil.SchemaHelper, templates []polic
 		return nil, nil
 	}
 	compiled.needsTags = compiledExpressionNeedsTags(compiled)
+	if compiled.isStatic() {
+		var err error
+		compiled.staticUnoptimized, err = compiled.instantiate("", nil, false)
+		if err != nil {
+			return nil, err
+		}
+		compiled.staticOptimized, err = compiled.instantiate("", nil, true)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return compiled, nil
 }
 
@@ -253,6 +281,17 @@ func (e *compiledExpression) Instantiate(principalName string, principalTags map
 	if e == nil {
 		return nil, nil
 	}
+	optimizeEnabled := paramtable.Get().CommonCfg.EnabledOptimizeExpr.GetAsBool()
+	if e.staticUnoptimized != nil {
+		if optimizeEnabled {
+			return e.staticOptimized, nil
+		}
+		return e.staticUnoptimized, nil
+	}
+	return e.instantiate(principalName, principalTags, optimizeEnabled)
+}
+
+func (e *compiledExpression) instantiate(principalName string, principalTags map[string]rlsutil.TagValue, optimizeEnabled bool) (*planpb.Expr, error) {
 	if len(e.permissive) == 0 {
 		if len(e.restrictive) > 0 {
 			return alwaysFalsePredicate(), nil
@@ -280,7 +319,7 @@ func (e *compiledExpression) Instantiate(principalName string, principalTags map
 	if len(restrictiveExprs) > 0 {
 		finalExpr = combinePredicate(finalExpr, combinePredicates(restrictiveExprs, planpb.BinaryExpr_LogicalAnd), planpb.BinaryExpr_LogicalAnd)
 	}
-	return rewriter.RewriteExpr(finalExpr), nil
+	return rewriter.RewriteExprWithConfig(finalExpr, optimizeEnabled), nil
 }
 
 func instantiatePolicyExprs(
@@ -551,6 +590,9 @@ func ResolveRuntimePrincipal(rlsEnabled bool, principalName string, operation st
 }
 
 func MergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
+	if rlsPredicate != nil {
+		rlsPredicate = proto.Clone(rlsPredicate).(*planpb.Expr)
+	}
 	return mergePredicateToPlan(plan, rlsPredicate, mergePredicate)
 }
 
