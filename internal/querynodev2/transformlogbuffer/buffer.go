@@ -204,7 +204,9 @@ func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) error {
 			mlog.Int64("subscriptionID", event.SubscriptionID),
 			mlog.Uint64("timeTick", event.Entry.GetTimeTick()),
 		)
-		h.buffer.onEntry(event.Entry)
+		if err := h.buffer.onEntry(event.Entry); err != nil {
+			return err
+		}
 	}
 	if event.SyncUp != nil {
 		mlog.Debug(context.TODO(), "querynode transform log buffer received sync-up",
@@ -213,7 +215,7 @@ func (h bufEventHandler) Handle(event wal.TransformLogStreamEvent) error {
 			mlog.Int64("subscriptionID", event.SubscriptionID),
 			mlog.Uint64("timeTick", event.SyncUp.TimeTick),
 		)
-		h.buffer.onSyncUp(event.SyncUp.TimeTick)
+		return h.buffer.onSyncUp(event.SyncUp.TimeTick)
 	}
 	return nil
 }
@@ -432,7 +434,7 @@ func (b *vchannelBuffer) drainRegistration(ctx context.Context, reg *registratio
 				mlog.FieldSegmentID(reg.segment.ID()),
 				mlog.Uint64("timeTick", entry.GetTimeTick()),
 			)
-			if err := reg.segment.ApplyTransform(ctx, entry); err != nil {
+			if err := reg.applyEntry(entry); err != nil {
 				return err
 			}
 			if entry.GetTimeTick() > reg.drainedTo {
@@ -448,8 +450,11 @@ func (b *vchannelBuffer) nextCatchupBatch(reg *registration) ([]*streamingpb.Tra
 	if b.err != nil {
 		return nil, false, nil, b.err
 	}
+	if err := reg.ctx.Err(); err != nil {
+		return nil, false, nil, err
+	}
 	if b.pending[reg.segment.ID()] != reg {
-		return nil, true, nil, nil
+		return nil, false, nil, context.Canceled
 	}
 	batch := make([]*streamingpb.TransformLogEntry, 0)
 	for _, entry := range b.entries {
@@ -476,6 +481,9 @@ func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint
 	defer b.mu.Unlock()
 	waitLogged := false
 	for {
+		if b.err != nil {
+			return b.err
+		}
 		if timetick <= b.retentionStart || b.visibleTimeTick >= timetick {
 			if waitLogged {
 				mlog.Debug(ctx, "querynode transform log buffer wait visible done",
@@ -487,9 +495,6 @@ func (b *vchannelBuffer) waitTransformVisible(ctx context.Context, timetick uint
 				)
 			}
 			return nil
-		}
-		if b.err != nil {
-			return b.err
 		}
 		if !waitLogged {
 			waitLogged = true
@@ -530,7 +535,9 @@ func (b *vchannelBuffer) unregister(reg *registration) {
 func (b *vchannelBuffer) removeRegistration(reg *registration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	delete(b.pending, reg.segment.ID())
+	if b.pending[reg.segment.ID()] == reg {
+		delete(b.pending, reg.segment.ID())
+	}
 	if b.live[reg.segment.ID()] == reg {
 		delete(b.live, reg.segment.ID())
 	}
@@ -593,8 +600,13 @@ func (b *vchannelBuffer) trimLocked() {
 	b.retentionStart = minStart
 }
 
-func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
+func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) error {
 	b.mu.Lock()
+	if b.err != nil {
+		err := b.err
+		b.mu.Unlock()
+		return err
+	}
 	if entry.GetTimeTick() > b.retentionStart {
 		b.entries = append(b.entries, entry)
 	}
@@ -611,13 +623,19 @@ func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 			mlog.FieldSegmentID(reg.segment.ID()),
 			mlog.Uint64("timeTick", entry.GetTimeTick()),
 		)
-		if err := reg.segment.ApplyTransform(context.Background(), entry); err != nil {
+		// A failed segment publishes Poison before this shared frontier advances.
+		// Unregistered instances may return cancellation; other segments continue.
+		if err := reg.applyEntry(entry); err != nil && reg.ctx.Err() == nil {
 			b.fail(err)
-			return
+			return err
 		}
 	}
 
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err != nil {
+		return b.err
+	}
 	if entry.GetTimeTick() > b.visibleTimeTick {
 		b.visibleTimeTick = entry.GetTimeTick()
 		mlog.Debug(context.TODO(), "querynode transform log buffer advanced visible timetick",
@@ -627,11 +645,15 @@ func (b *vchannelBuffer) onEntry(entry *streamingpb.TransformLogEntry) {
 		)
 		b.notifyVisibilityLocked()
 	}
-	b.mu.Unlock()
+	return nil
 }
 
-func (b *vchannelBuffer) onSyncUp(timeTick uint64) {
+func (b *vchannelBuffer) onSyncUp(timeTick uint64) error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.err != nil {
+		return b.err
+	}
 	if timeTick > b.visibleTimeTick {
 		b.visibleTimeTick = timeTick
 	}
@@ -644,7 +666,7 @@ func (b *vchannelBuffer) onSyncUp(timeTick uint64) {
 		mlog.Uint64("visibleTimeTick", b.visibleTimeTick),
 	)
 	b.notifyVisibilityLocked()
-	b.mu.Unlock()
+	return nil
 }
 
 func (b *vchannelBuffer) fail(err error) {
@@ -681,6 +703,8 @@ type registration struct {
 	drainedTo  uint64
 	ctx        context.Context
 	cancel     context.CancelFunc
+	applyMu    sync.Mutex
+	poisoned   bool
 	done       chan struct{}
 	err        error
 	errMu      sync.Mutex
@@ -689,7 +713,7 @@ type registration struct {
 }
 
 func newRegistration(buffer *vchannelBuffer, segment qnview.TransformSegment) *registration {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // registration owns cancellation through Unregister
 	return &registration{
 		buffer:    buffer,
 		segment:   segment,
@@ -734,7 +758,34 @@ func (r *registration) Unregister() {
 	r.once.Do(func() {
 		r.cancel()
 		r.buffer.unregister(r)
+		// Cancellation cannot interrupt an already running native Delete.
+		// Wait without the buffer lock before allowing the owner to free it.
+		r.applyMu.Lock()
+		r.applyMu.Unlock() //nolint:staticcheck // synchronization barrier: wait for native Apply before release
 	})
+}
+
+func (r *registration) applyEntry(entry *streamingpb.TransformLogEntry) error {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	if err := r.ctx.Err(); err != nil {
+		return err
+	}
+	if r.poisoned {
+		return nil
+	}
+	if err := r.segment.ApplyTransform(r.ctx, entry); err != nil {
+		r.poisoned = true
+		if observer, ok := r.segment.(qnview.TransformFailureObserver); ok {
+			observer.OnTransformFailed(entry.GetTimeTick(), err)
+		} else {
+			// Legacy consumers without a Poison observer must fail closed.
+			return err
+		}
+		mlog.Warn(r.ctx, "segment poisoned after ApplyTransform failure",
+			mlog.FieldSegmentID(r.segment.ID()), mlog.Uint64("timeTick", entry.GetTimeTick()), mlog.Err(err))
+	}
+	return nil
 }
 
 func (r *registration) finish(err error) {

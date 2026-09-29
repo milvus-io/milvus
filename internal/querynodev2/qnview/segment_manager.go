@@ -28,6 +28,10 @@ type AcquireSegments struct {
 	// OnUnrecoverable is called when a fatal error prevents segment loading.
 	// Must NOT be called synchronously during Acquire.
 	OnUnrecoverable func()
+
+	// OnPoisoned reports a sticky instance failure, including after Ready.
+	// Like the other callbacks, it must not run synchronously during Acquire.
+	OnPoisoned func(*viewpb.PoisonedSegment)
 }
 
 // ReleaseSegments describes a segment release request for a query view.

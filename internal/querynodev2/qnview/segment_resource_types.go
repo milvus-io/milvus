@@ -74,6 +74,12 @@ type TransformSegment interface {
 	Release(ctx context.Context) error
 }
 
+// TransformFailureObserver publishes the failed MVCC boundary synchronously,
+// before the buffer advances visibility. Reporting must not block consumption.
+type TransformFailureObserver interface {
+	OnTransformFailed(timetick uint64, err error)
+}
+
 // WrappedTransformSegment decorates a TransformSegment without changing its
 // physical identity.
 type WrappedTransformSegment interface {

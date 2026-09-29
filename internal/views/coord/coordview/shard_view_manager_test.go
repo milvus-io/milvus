@@ -511,9 +511,9 @@ func TestSyncResponseCompletesCurrentNodeSync(t *testing.T) {
 	require.NoError(t, mgr.AddPreparing(context.Background(), b))
 
 	// Preparing is synced to QN and SN. Each node completes that specific sync
-	// when it reports Ready; the view itself is not removed yet.
+	// when SN reports Ready; QN remains monitored for live Poison reports.
 	done := simulateNodeResponse(t, s, testQN1, ver1, qviews.QueryViewStateReady)
-	assert.True(t, done, "QN Ready should complete its Preparing sync")
+	assert.False(t, done, "QN Ready must retain monitoring for Poison reports")
 
 	done = simulateNodeResponse(t, s, testSN, ver1, qviews.QueryViewStateReady)
 	assert.True(t, done, "SN Ready should complete its Preparing sync")

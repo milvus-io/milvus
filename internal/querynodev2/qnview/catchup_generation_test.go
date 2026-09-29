@@ -50,7 +50,7 @@ func TestCatchupCallbackKeepsReplacementGeneration(t *testing.T) {
 			}).Build())
 			patchLifetime(t, mockey.Mock((*fakeTransformLogBuffer).Acquire).Return(instantTransformGuard{}, nil).Build())
 			patchLifetime(t, mockey.Mock((*fakeTransformLogBuffer).RegisterSegment).To(func(_ *fakeTransformLogBuffer, _ context.Context, s TransformSegment) (TransformRegistration, error) {
-				if s == oldSegment {
+				if UnwrapTransformSegment(s) == oldSegment {
 					if stage == "registration-failure" {
 						close(oldEntered)
 						<-finishOld
@@ -135,7 +135,7 @@ func TestFailedSegmentWaitsForItsOwnQueryHandles(t *testing.T) {
 	oldSegment := &fakeTransformSegment{id: 1000, partitionID: 10}
 	newSegment := &fakeTransformSegment{id: 1000, partitionID: 10}
 	patchLifetime(t, mockey.Mock((*fakeTransformSegment).Release).To(func(s *fakeTransformSegment, _ context.Context) error {
-		if s == oldSegment {
+		if UnwrapTransformSegment(s) == oldSegment {
 			oldReleased.Store(true)
 		} else {
 			newReleased.Store(true)

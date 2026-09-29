@@ -34,7 +34,8 @@ type CoordQueryViewStateMachine struct {
 
 	// Per-QN ready segment IDs reported during Preparing.
 	// Used by Balancer/Manager for progress tracking and decision-making.
-	qnReadySegments map[int64][]int64
+	qnReadySegments    map[int64][]int64
+	qnPoisonedSegments map[int64]map[int64]bool
 
 	// Pending external effects, atomically drained through ShardViewManager by
 	// the Coordinator flush scheduler.
@@ -79,7 +80,7 @@ func NewCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryVie
 //
 // Recovery behavior by persisted state:
 //   - Preparing:     re-push Preparing to all nodes.
-//   - Up:            no pending (wait for events).
+//   - Up:            re-push Preparing to QNs to restore Poison monitoring.
 //   - Down:          re-push Down to SN.
 //   - Unrecoverable: stays Unrecoverable, waits for Manager to call EnterDropping.
 func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQueryViewStateMachine {
@@ -100,8 +101,12 @@ func RecoverCoordQueryViewStateMachine(view *viewpb.QueryViewOfShard) *CoordQuer
 		// Already persisted; re-push to all nodes.
 		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStatePreparing)
 	case qviews.QueryViewStateUp:
-		// Active view; no re-push needed. Up is persisted precisely to
-		// avoid unnecessary Coord↔node communication on recovery.
+		// Restore QN monitoring so live Poison reports survive Coord restart.
+		for _, target := range sm.syncViewsForState(qviews.QueryViewStatePreparing) {
+			if _, ok := target.(*qviews.QueryViewAtQueryNode); ok {
+				sm.pending.Sync = append(sm.pending.Sync, target)
+			}
+		}
 	case qviews.QueryViewStateDown:
 		// Re-push Down to SN.
 		sm.pending.Sync = sm.syncViewsForState(qviews.QueryViewStateDown)
@@ -137,6 +142,20 @@ func (sm *CoordQueryViewStateMachine) QNReadySegments() map[int64][]int64 {
 // OnNodeStateReported is called when a work node (SN or QN) reports its
 // current state for this view via SyncQueryView response.
 func (sm *CoordQueryViewStateMachine) OnNodeStateReported(report qviews.QueryViewAtWorkNode) {
+	if qn, ok := report.(*qviews.QueryViewAtQueryNode); ok && len(qn.ViewOfQueryNode().GetPoisonedSegments()) > 0 {
+		if _, assigned := sm.qnStates[qn.NodeID()]; assigned {
+			if sm.qnPoisonedSegments == nil {
+				sm.qnPoisonedSegments = make(map[int64]map[int64]bool)
+			}
+			if sm.qnPoisonedSegments[qn.NodeID()] == nil {
+				sm.qnPoisonedSegments[qn.NodeID()] = make(map[int64]bool)
+			}
+			for _, poison := range qn.ViewOfQueryNode().GetPoisonedSegments() {
+				sm.qnPoisonedSegments[qn.NodeID()][poison.GetSegmentId()] = true
+			}
+			sm.EnterUnrecoverable()
+		}
+	}
 	sm.updateNodeState(report)
 
 	switch sm.state {
@@ -359,7 +378,11 @@ func (sm *CoordQueryViewStateMachine) updateQNReadySegments(nodeID int64, report
 	}
 	var readySegs []int64
 	for _, p := range qnReport.ViewOfQueryNode().Partitions {
-		readySegs = append(readySegs, p.ReadySegmentIds...)
+		for _, id := range p.ReadySegmentIds {
+			if !sm.qnPoisonedSegments[nodeID][id] {
+				readySegs = append(readySegs, id)
+			}
+		}
 	}
 	sm.qnReadySegments[nodeID] = readySegs
 }

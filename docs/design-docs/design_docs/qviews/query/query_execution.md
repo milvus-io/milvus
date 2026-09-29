@@ -270,6 +270,12 @@ broadcast. A later segment-level internal optimization must keep the same task
 provider contract and must only expose a single TransformBuffer visibility
 frontier to the query path.
 
+After shared Transform visibility is reached, QN validates the selected pinned
+instances against their first failed ApplyTransform TimeTick. A Poisoned
+instance rejects transforming MVCC at or beyond that boundary; older MVCCs
+remain queryable. Validation failure releases every acquired handle and the
+view lease. Segments pruned out of the request do not fail that query.
+
 ## 8. Local Optimizer
 
 LocalOptimizer belongs inside the task provider flow. It runs after the provider
