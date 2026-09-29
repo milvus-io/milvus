@@ -35,6 +35,8 @@ class OffsetExpressionCallback final {
 
     PreparedOffsetExpressionEvaluator prepared_;
     int64_t row_count_;
+    // Opt-in diagnostic only; never enable while measuring search latency.
+    bool debug_trace_offsets_{false};
 };
 
 }  // namespace milvus::exec

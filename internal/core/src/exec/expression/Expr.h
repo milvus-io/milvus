@@ -208,8 +208,11 @@ class Expr : public std::enable_shared_from_this<Expr> {
         expr_type_ = type;
     }
 
-    virtual std::optional<FieldId>
-    OffsetSamplingField() const;
+    // Metadata-only proof that all source leaves can evaluate offsets from
+    // one physical scalar cell. Unknown leaves/index paths return nullptr.
+    // This is an IO-budget check, not a predicate support or policy registry.
+    virtual std::shared_ptr<const ChunkedColumnInterface>
+    OffsetSamplingColumn() const;
 
     virtual bool
     ConsiderAnnFusing(AnnFilterFusingRequest request);
@@ -361,8 +364,8 @@ class SegmentExpr : public Expr {
         proto::plan::OpType operation = proto::plan::Invalid,
         proto::plan::ArithOpType arith_operation = proto::plan::Unknown) const;
 
-    std::optional<FieldId>
-    OffsetSamplingField() const override;
+    std::shared_ptr<const ChunkedColumnInterface>
+    OffsetSamplingColumn() const override;
 
     SegmentExpr(const std::vector<ExprPtr>&& input,
                 const std::string& name,

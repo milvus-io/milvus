@@ -1025,29 +1025,37 @@ SegmentExpr::DescribeColumnFilterSource(
         field_type_, expr_type, operation, arith_operation, exec_path_, kind};
 }
 
-std::optional<FieldId>
-Expr::OffsetSamplingField() const {
+std::shared_ptr<const ChunkedColumnInterface>
+Expr::OffsetSamplingColumn() const {
+    std::shared_ptr<const ChunkedColumnInterface> source;
     for (const auto& input : inputs_) {
-        if (const auto field = input->OffsetSamplingField()) {
-            return field;
+        auto column = input->OffsetSamplingColumn();
+        if (!column || !column->OffsetSamplingStorageIdentity()) {
+            return nullptr;
         }
+        if (source && source->OffsetSamplingStorageIdentity() !=
+                          column->OffsetSamplingStorageIdentity()) {
+            return nullptr;
+        }
+        source = std::move(column);
     }
-    return std::nullopt;
+    // In particular, an unknown source leaf is not a zero-IO constant.
+    return source;
 }
 
-std::optional<FieldId>
-SegmentExpr::OffsetSamplingField() const {
-    if (segment_->HasFieldData(field_id_)) {
-        return field_id_;
+std::shared_ptr<const ChunkedColumnInterface>
+SegmentExpr::OffsetSamplingColumn() const {
+    // Do not call EnsureExecPathDetermined: it can pin an index merely to
+    // discover the path. Index/statistics/PK lookups do not yet provide a
+    // single-cell locality contract, even if raw data is also available.
+    if (segment_->type() != SegmentType::Sealed || is_pk_field_ ||
+        segment_->HasIndex(field_id_) || segment_->HasJsonIndex(field_id_) ||
+        CanUseJsonStatsAtInit() || CanUseNgramIndex() ||
+        !segment_->HasFieldData(field_id_)) {
+        return nullptr;
     }
-    EnsureExecPathDetermined();
-    // A sealed scalar index can be the only loaded representation of a
-    // column. One index chunk still supplies the entity-offset sampling span.
-    if (segment_->type() == SegmentType::Sealed &&
-        exec_path_ == ExprExecPath::ScalarIndex && pinned_index_.size() == 1) {
-        return field_id_;
-    }
-    return std::nullopt;
+    auto column = segment_->CaptureOffsetColumn(field_id_);
+    return column && column->OffsetSamplingStorageIdentity() ? column : nullptr;
 }
 
 bool

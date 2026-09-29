@@ -18,7 +18,6 @@ namespace milvus::exec {
 // escapes; no dense bitmap or sampled-row cache is created.
 std::optional<double>
 SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
-                        FieldId field_id,
                         ExecContext* exec_context);
 
 // SQL predicate truth for at most 64 input offsets.  A lane is accepted only

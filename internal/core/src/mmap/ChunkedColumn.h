@@ -406,6 +406,11 @@ class ChunkedColumnBase : public ChunkedColumnInterface {
         return GetNumRowsUntilChunk()[chunk_id];
     }
 
+    const void*
+    OffsetSamplingStorageIdentity() const override {
+        return slot_.get();
+    }
+
     const std::vector<int64_t>&
     GetNumRowsUntilChunk() const override {
         auto meta = static_cast<milvus::segcore::storagev1translator::CTMeta*>(

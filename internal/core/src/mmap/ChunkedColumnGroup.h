@@ -210,6 +210,13 @@ class ChunkedColumnGroup {
 
 class ProxyChunkColumn : public ChunkedColumnInterface {
  public:
+    const void*
+    OffsetSamplingStorageIdentity() const override {
+        // Each group owns one cache slot. V3 projected readers have distinct
+        // groups even when their logical column-group names are identical.
+        return group_.get();
+    }
+
     explicit ProxyChunkColumn(std::shared_ptr<ChunkedColumnGroup> group,
                               FieldId field_id,
                               const FieldMeta& field_meta)

@@ -33,6 +33,16 @@ class ChunkedColumnInterface {
  public:
     virtual ~ChunkedColumnInterface() = default;
 
+    // Metadata only: equal non-null identities guarantee that the same chunk
+    // number and row boundaries address the same physical cache cell. Logical
+    // group names or matching chunk counts are not sufficient. The identity
+    // remains valid while this column is retained; querying it must not pin IO.
+    // Unknown storage implementations conservatively do not support sampling.
+    virtual const void*
+    OffsetSamplingStorageIdentity() const {
+        return nullptr;
+    }
+
     // Check if this column is part of a multi-field column group.
     // Used to guard DropFieldData from breaking shared storage.
     virtual bool

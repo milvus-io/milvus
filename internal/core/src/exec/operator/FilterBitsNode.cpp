@@ -124,18 +124,20 @@ PhyFilterBitsNode::PhyFilterBitsNode(
             !info.search_params_.contains("radius") &&
             !info.global_refine_enable_) {
             auto& root = exprs_->exprs().front();
-            const bool considered = (request != AnnFilterFusingRequest::Auto ||
-                                     AnnFusingPolicy::Instance().available()) &&
-                                    root->ConsiderAnnFusing(request);
+            // Prove locality from storage metadata before policy description
+            // can prepare/pin an index. Unknown locality leaves AUTO baseline;
+            // debug forcing still bypasses policy and sampling as before.
+            const bool considered =
+                (request != AnnFilterFusingRequest::Auto ||
+                 (AnnFusingPolicy::Instance().available() &&
+                  root->OffsetSamplingColumn() != nullptr)) &&
+                root->ConsiderAnnFusing(request);
             bool chosen = considered;
             std::optional<double> ratio;
             if (considered && request == AnnFilterFusingRequest::Auto) {
-                if (const auto field = root->OffsetSamplingField()) {
-                    // Actual whole-expression evaluation, not a disposable
-                    // capability probe. Baseline's scan cursor stays untouched.
-                    ratio = SampleOffsetFilterRatio(
-                        filter->filter(), *field, exec_context);
-                }
+                // Actual whole-expression evaluation, not a disposable
+                // capability probe. Baseline's scan cursor stays untouched.
+                ratio = SampleOffsetFilterRatio(filter->filter(), exec_context);
                 chosen = ratio && AnnFusingPolicy::Instance().Choose(
                                       {sizeof(MilvusAnnFusingSampleV4),
                                        ratio.value_or(1),

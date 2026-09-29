@@ -4,6 +4,7 @@
 #include "exec/expression/OffsetExpressionEvaluator.h"
 
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <random>
 #include <utility>
@@ -180,9 +181,14 @@ PreparedOffsetExpressionEvaluator::CreateWorkspace() const {
 
 std::optional<double>
 SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
-                        FieldId field_id,
                         ExecContext* exec_context) {
+    const auto started = std::chrono::steady_clock::now();
     auto* query = exec_context->get_query_context();
+    const auto* op = query->get_op_context();
+    const auto cold_before =
+        op ? op->storage_usage.scanned_cold_bytes.load() : 0;
+    const auto total_before =
+        op ? op->storage_usage.scanned_total_bytes.load() : 0;
     const auto params = query->get_search_info().search_params_;
     // A whole-query debug ratio must never replace this expression's sample.
     const int requested = params.value("ann_fusing_sample_rows", 20);
@@ -197,24 +203,25 @@ SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
     // scalar chunk boundaries, not client parquet row groups.
     std::mt19937_64 random(static_cast<uint64_t>(segment->get_segment_id()) ^
                            query->get_query_timestamp());
-    int64_t chunk = 0, first = 0, rows = active;
-    const bool index_only = !segment->HasFieldData(field_id);
-    if (index_only) {
-        // Do not pretend a missing raw column has chunk metadata. A single
-        // sealed scalar index covers the segment's original entity offsets,
-        // including NULL positions; index Count() may exclude NULLs.
-        if (segment->type() != SegmentType::Sealed || !segment->HasIndex(field_id)) {
-            return std::nullopt;
-        }
-        const auto pinned = segment->PinIndex(query->get_op_context(), field_id);
-        if (pinned.size() != 1) return std::nullopt;
-    } else {
-        const auto chunks = segment->num_chunk_data(field_id);
-        if (chunks <= 0) return std::nullopt;
-        chunk = std::uniform_int_distribution<int64_t>(0, chunks - 1)(random);
-        first = segment->num_rows_until_chunk(field_id, chunk);
-        rows = std::min<int64_t>(segment->chunk_size(field_id, chunk), active - first);
+    PreparedOffsetExpressionEvaluator prepared(expression, exec_context, true);
+    auto workspace = prepared.CreateWorkspace();
+    if (!workspace->SupportsOffsetInput()) {
+        return std::nullopt;
     }
+    // Check the actual sampling workspace as well as the caller's preflight.
+    // A single scalar index covering a segment is NOT a physical chunk.
+    auto column = workspace->expr_set().exprs().front()->OffsetSamplingColumn();
+    if (!column || column->num_chunks() <= 0 || column->NumRows() < active) {
+        LOG_DEBUG(
+            "ann_fusing sample unavailable: single-cell locality unknown");
+        return std::nullopt;
+    }
+    const auto last_chunk = column->GetChunkIDByOffset(active - 1).first;
+    const auto chunk =
+        std::uniform_int_distribution<int64_t>(0, last_chunk)(random);
+    const auto first = column->GetNumRowsUntilChunk(chunk);
+    const auto rows =
+        std::min<int64_t>(column->chunk_row_nums(chunk), active - first);
     if (first < 0 || rows <= 0) {
         return std::nullopt;
     }
@@ -229,12 +236,9 @@ SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
             offsets.push_back(offset);
         }
     }
-    PreparedOffsetExpressionEvaluator prepared(expression, exec_context, true);
-    auto workspace = prepared.CreateWorkspace();
-    if (!workspace->SupportsOffsetInput()) {
-        return std::nullopt;
-    }
+    const auto prepared_at = std::chrono::steady_clock::now();
     auto result = workspace->EvalOffsets(offsets);
+    const auto evaluated_at = std::chrono::steady_clock::now();
     TargetBitmapView truth(result->GetRawData(), result->size());
     TargetBitmapView valid(result->GetValidRawData(), result->size());
     size_t accepted = 0;
@@ -243,15 +247,25 @@ SampleOffsetFilterRatio(const expr::TypedExprPtr& expression,
     }
     const double ratio = 1.0 - static_cast<double>(accepted) / count;
     LOG_DEBUG(
-        "ann_fusing sample source=chunk field={} chunk={} rows={} "
-        "chunk_first={} chunk_rows={} filter_ratio={} index_only={}",
-        field_id.get(),
+        "ann_fusing sample source=single_cell storage={} chunk={} rows={} "
+        "chunk_first={} chunk_rows={} requested_rows={} filter_ratio={} "
+        "prepare_us={} eval_us={} storage_cold_bytes={} storage_total_bytes={}",
+        column->OffsetSamplingStorageIdentity(),
         chunk,
         count,
         first,
         rows,
+        requested,
         ratio,
-        index_only);
+        std::chrono::duration<double, std::micro>(prepared_at - started)
+            .count(),
+        std::chrono::duration<double, std::micro>(evaluated_at - prepared_at)
+            .count(),
+        op ? op->storage_usage.scanned_cold_bytes.load() - cold_before : 0,
+        op ? op->storage_usage.scanned_total_bytes.load() - total_before : 0);
+    // Storage counters are cache-layer accounting, NOT physical disk bytes or
+    // OS-page residency. Concurrent work sharing OpContext can contribute;
+    // diagnostic experiments must isolate requests and measure OS IO separately.
     return ratio;
 }
 

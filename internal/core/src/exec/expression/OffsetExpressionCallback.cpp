@@ -4,6 +4,7 @@
 #include "exec/expression/OffsetExpressionCallback.h"
 
 #include <limits>
+#include <sstream>
 #include <utility>
 
 #include "common/EasyAssert.h"
@@ -15,6 +16,7 @@ using Status = knowhere::CandidateEvalStatus;
 struct OffsetExpressionCallback::Worker {
     std::unique_ptr<OffsetExpressionWorkspace> workspace;
     int64_t row_count;
+    bool debug_trace_offsets;
 };
 
 OffsetExpressionCallback::OffsetExpressionCallback(
@@ -24,6 +26,12 @@ OffsetExpressionCallback::OffsetExpressionCallback(
     AssertInfo(
         row_count >= 0 && row_count <= std::numeric_limits<int32_t>::max(),
         "callback row count outside supported offset domain");
+    const auto params =
+        exec_context->get_query_context()->get_search_info().search_params_;
+    // A standalone evaluator/test may have no ANN search parameters at all.
+    debug_trace_offsets_ =
+        params.contains("debug_ann_fusing_trace_offsets") &&
+        params.value("debug_ann_fusing_trace_offsets", false);
 }
 
 knowhere::CandidateEvaluatorViewV1
@@ -53,7 +61,9 @@ OffsetExpressionCallback::CreateWorker(const void* context,
         if (!workspace->SupportsOffsetInput()) {
             return Status::Failed;
         }
-        *output = new Worker{std::move(workspace), factory.row_count_};
+        *output = new Worker{std::move(workspace),
+                             factory.row_count_,
+                             factory.debug_trace_offsets_};
         LOG_DEBUG("ann_fusing task workspace created");
         return Status::Success;
     } catch (...) {
@@ -96,6 +106,26 @@ OffsetExpressionCallback::EvalBatch(void* worker,
             state.workspace->EvalAcceptedBatch(row_ids, count, active_mask);
         LOG_DEBUG("ann_fusing callback batch count={} active={} accepted={}",
                   count, active_mask, *accepted_mask);
+        if (state.debug_trace_offsets) {
+            // Diagnostic graph-trace replay keeps original order/batch shape.
+            // Never read inactive lanes: callers need not initialize their IDs.
+            std::ostringstream offsets;
+            for (uint32_t lane = 0; lane < count; ++lane) {
+                if (lane != 0)
+                    offsets << ',';
+                offsets << ((active_mask & (uint64_t{1} << lane))
+                                ? row_ids[lane]
+                                : -1);
+            }
+            LOG_DEBUG(
+                "ann_fusing offset_trace worker={} count={} active={} "
+                "accepted={} ids=[{}]",
+                worker,
+                count,
+                active_mask,
+                *accepted_mask,
+                offsets.str());
+        }
         return Status::Success;
     } catch (...) {
         return Status::Failed;
