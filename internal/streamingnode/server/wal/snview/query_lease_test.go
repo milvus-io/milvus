@@ -42,6 +42,27 @@ func pushLeaseDown(h *SNQueryViewHandler, reports *reportCollector) {
 	h.ApplyViews([]handler.ApplyView{{View: newSNViewWithState(1, viewpb.QueryViewState_QueryViewStateDown), OnReport: reports.onReport}})
 }
 
+func TestExecutionLeaseDoesNotSnapshotTopology(t *testing.T) {
+	h, shard, entry, _, reports := leasedUpView(t, time.Minute)
+	version := newPreparingSNView(1).QueryViewKey().QueryViewVersion
+	lease, err := h.acquireUpView(context.Background(), shard.shardID, version, false)
+	require.NoError(t, err)
+	defer lease.Release()
+	require.Nil(t, lease.View)
+	require.Equal(t, shard.shardID.VChannel, lease.Meta.GetVchannel())
+	lease.Meta.Vchannel = "caller-owned"
+	require.Equal(t, shard.shardID.VChannel, entry.sm.meta.GetVchannel())
+	pushLeaseDown(h, reports)
+	full, err := h.AcquireUpView(context.Background(), shard.shardID, version)
+	require.NoError(t, err)
+	defer full.Release()
+	require.NotNil(t, full.View, "public snapshot API is preserved")
+	require.Equal(t, viewpb.QueryViewState_QueryViewStateUp, full.Meta.GetState())
+	require.Equal(t, viewpb.QueryViewState_QueryViewStateUp, full.View.GetMeta().GetState())
+	full.Meta.Vchannel = "separate-meta"
+	require.Equal(t, shard.shardID.VChannel, full.View.GetMeta().GetVchannel())
+}
+
 func TestServingLeaseRenewalAndDownCallbackReplacement(t *testing.T) {
 	h, shard, entry, cat, reports := leasedUpView(t, time.Minute)
 	// Deliver timer callbacks deterministically, including an early callback
@@ -269,7 +290,7 @@ func TestServingLeaseCancelledAndMissingAcquisitionDoesNotRenew(t *testing.T) {
 	version := newPreparingSNView(1).QueryViewKey().QueryViewVersion
 	_, err := h.AcquireUpView(ctx, shard.shardID, version)
 	require.ErrorIs(t, err, context.Canceled)
-	_, err = shard.acquireUpView(ctx, version)
+	_, err = shard.acquireUpView(ctx, version, false)
 	require.ErrorIs(t, err, context.Canceled)
 	_, err = shard.acquireLatestUpView(ctx)
 	require.ErrorIs(t, err, context.Canceled)

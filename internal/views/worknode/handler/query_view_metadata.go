@@ -33,14 +33,6 @@ func DecodeQueryViewPChannelFromIncomingContext(ctx context.Context) (types.PCha
 	return decodeQueryViewPChannelMetadata(md)
 }
 
-func DecodeQueryViewPChannelFromOutgoingContext(ctx context.Context) (types.PChannelInfo, error) {
-	md, ok := metadata.FromOutgoingContext(ctx)
-	if !ok {
-		return types.PChannelInfo{}, status.NewInvalidArgument("query view pchannel metadata is missing")
-	}
-	return decodeQueryViewPChannelMetadata(md)
-}
-
 func decodeQueryViewPChannelMetadata(md metadata.MD) (types.PChannelInfo, error) {
 	name := firstQueryViewMetadataValue(md, queryViewPChannelNameMetadataKey)
 	if name == "" {
