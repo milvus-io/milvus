@@ -33,12 +33,6 @@ func cancelTask(task *scheduledBuild) {
 	}
 }
 
-func closeRuntime(runtime *QueryRuntime) {
-	if runtime != nil {
-		runtime.Close()
-	}
-}
-
 type growingRuntimeModuleBuilder struct {
 	builder growingruntime.Builder
 }

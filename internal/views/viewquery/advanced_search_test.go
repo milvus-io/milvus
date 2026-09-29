@@ -74,6 +74,46 @@ func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	assert.True(t, sub.GetSkip())
 }
 
+func TestBuildSubSearchRequestsIsolation(t *testing.T) {
+	sub := &internalpb.SubSearchRequest{
+		PartitionIDs:       []int64{1},
+		PlaceholderGroup:   []byte{2},
+		SerializedExprPlan: []byte{3},
+	}
+	parent := &internalpb.SearchRequest{
+		OutputFieldsId: []int64{4},
+		IsAdvanced:     true,
+		SubReqs:        []*internalpb.SubSearchRequest{sub, sub},
+	}
+	requests, err := BuildSubSearchRequests(parent)
+	require.NoError(t, err)
+	require.Len(t, requests, 2)
+	for _, req := range requests {
+		assert.False(t, req.GetIsAdvanced())
+		assert.Nil(t, req.GetSubReqs())
+	}
+	requests[0].PartitionIDs[0] = 10
+	requests[0].PlaceholderGroup[0] = 20
+	requests[0].SerializedExprPlan[0] = 30
+	requests[0].OutputFieldsId[0] = 40
+	assert.Equal(t, []int64{1}, sub.GetPartitionIDs())
+	assert.Equal(t, []byte{2}, sub.GetPlaceholderGroup())
+	assert.Equal(t, []byte{3}, sub.GetSerializedExprPlan())
+	assert.Equal(t, []int64{4}, parent.GetOutputFieldsId())
+	assert.Equal(t, sub.GetPartitionIDs(), requests[1].GetPartitionIDs())
+	assert.Equal(t, sub.GetPlaceholderGroup(), requests[1].GetPlaceholderGroup())
+	assert.Equal(t, sub.GetSerializedExprPlan(), requests[1].GetSerializedExprPlan())
+	assert.Equal(t, parent.GetOutputFieldsId(), requests[1].GetOutputFieldsId())
+	require.Len(t, parent.GetSubReqs(), 2)
+	assert.True(t, parent.GetIsAdvanced())
+
+	for _, req := range []*internalpb.SearchRequest{nil, {}, {SubReqs: []*internalpb.SubSearchRequest{nil}}} {
+		requests, err := BuildSubSearchRequests(req)
+		require.ErrorIs(t, err, merr.ErrServiceInternal)
+		assert.Nil(t, requests)
+	}
+}
+
 func TestAssembleAdvancedSearchResults(t *testing.T) {
 	firstData := &schemapb.SearchResultData{NumQueries: 2, TopK: 3, Topks: []int64{1, 0}}
 	secondData := &schemapb.SearchResultData{NumQueries: 2, TopK: 4, Topks: []int64{0, 1}}

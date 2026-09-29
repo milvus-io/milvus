@@ -47,16 +47,6 @@ func (s bm25Stats) getOrCreate(fieldID int64) *storage.BM25Stats {
 	return stats
 }
 
-func (s bm25Stats) clone() bm25Stats {
-	cloned := make(bm25Stats, len(s))
-	for fieldID, stats := range s {
-		if stats != nil {
-			cloned[fieldID] = stats.Clone()
-		}
-	}
-	return cloned
-}
-
 func (s bm25Stats) merge(src bm25Stats) {
 	for fieldID, srcStats := range src {
 		if srcStats == nil {
@@ -105,10 +95,7 @@ func (s *growingStatsStore) registerSegment(segmentID int64, partitionID int64, 
 	}
 }
 
-func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stats bm25Stats) {
-	if segmentID == 0 {
-		return
-	}
+func (s *growingStatsStore) getOrCreateSegment(segmentID int64, partitionID int64) *growingSegmentStats {
 	segment := s.segments[segmentID]
 	if segment == nil {
 		segment = &growingSegmentStats{
@@ -117,6 +104,14 @@ func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stat
 		}
 		s.segments[segmentID] = segment
 	}
+	return segment
+}
+
+func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stats bm25Stats) {
+	if segmentID == 0 {
+		return
+	}
+	segment := s.getOrCreateSegment(segmentID, partitionID)
 	if segment.partitionID == 0 {
 		segment.partitionID = partitionID
 	}
@@ -130,14 +125,7 @@ func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (i
 	if err := collectGrowingInsertStats(stats, s.schema, insert); err != nil {
 		return 0, nil, err
 	}
-	segment := s.segments[segmentID]
-	if segment == nil {
-		segment = &growingSegmentStats{
-			partitionID: partitionID,
-			stats:       newBM25StatsFromSchema(s.schema, s.fieldIDs),
-		}
-		s.segments[segmentID] = segment
-	}
+	segment := s.getOrCreateSegment(segmentID, partitionID)
 	if segment.flushed {
 		return 0, nil, merr.WrapErrServiceInternalMsg("BM25 growing segment %d already flushed", segmentID)
 	}
@@ -171,19 +159,16 @@ func (s *growingStatsStore) markSealed(segmentID int64, sealedAt qviews.DataVers
 	if segmentID == 0 {
 		return
 	}
-	segment := s.segments[segmentID]
-	if segment == nil {
-		segment = &growingSegmentStats{stats: newBM25StatsFromSchema(s.schema, s.fieldIDs)}
-		s.segments[segmentID] = segment
-	}
+	segment := s.getOrCreateSegment(segmentID, 0)
 	if segment.sealedAt != nil && !segment.sealedAt.EQ(sealedAt) {
 		panic("conflicting sealed data version for BM25 growing segment")
 	}
-	value := sealedAt
-	segment.sealedAt = &value
+	segment.sealedAt = &sealedAt
 }
 
-func (s *growingStatsStore) snapshotForDataVersion(
+// selectForDataVersion returns membership and the statistics of changed segments.
+// Consume the borrowed statistics under the owner's lock, or during initialization.
+func (s *growingStatsStore) selectForDataVersion(
 	target qviews.DataVersion,
 	targetSealed map[int64]*datapb.StreamingNodeBM25Resource,
 	current map[int64]struct{},
@@ -198,7 +183,7 @@ func (s *growingStatsStore) snapshotForDataVersion(
 		}
 		_, currentlyVisible := current[segmentID]
 		if visible != currentlyVisible {
-			stats[segmentID] = segment.stats.clone()
+			stats[segmentID] = segment.stats
 		}
 	}
 	return next, stats
@@ -311,7 +296,7 @@ func newOracleRuntime(
 		return nil, err
 	}
 	var growingStats map[int64]bm25Stats
-	r.currentGrowing, growingStats = r.growingStore.snapshotForDataVersion(
+	r.currentGrowing, growingStats = r.growingStore.selectForDataVersion(
 		walView.SegmentSnapshot.DataVersion,
 		r.currentSealed,
 		nil,
@@ -456,7 +441,7 @@ func (r *oracleRuntime) ensureMaterialized(ctx context.Context) error {
 			r.materialization = call
 			go func() {
 				defer cancel()
-				r.materialize(call)
+				_ = r.materialize(call) // The deferred completion publishes the error to waiters.
 			}()
 		}
 		r.mu.Unlock()
@@ -479,11 +464,7 @@ func (r *oracleRuntime) ensureMaterialized(ctx context.Context) error {
 	}
 }
 
-func (r *oracleRuntime) materialize(call *materializationCall) {
-	var (
-		sealed    map[int64]*datapb.StreamingNodeBM25Resource
-		resultErr error
-	)
+func (r *oracleRuntime) materialize(call *materializationCall) (resultErr error) {
 	defer func() {
 		r.mu.Lock()
 		call.err = resultErr
@@ -502,59 +483,51 @@ func (r *oracleRuntime) materialize(call *materializationCall) {
 		r.loadInfoVersion,
 	)
 	if err != nil {
-		resultErr = merr.Wrapf(err, "get sealed BM25 resources for data version %s", call.target.String())
-		return
+		return merr.Wrapf(err, "get sealed BM25 resources for data version %s", call.target.String())
 	}
 	stats := newBM25StatsFromSchema(r.schema, r.fieldIDs)
-	sealed, err = r.indexResources(resources)
+	sealed, err := r.indexResources(resources)
 	if err != nil {
-		resultErr = err
-		return
+		return err
 	}
 	loaded, err := r.provider.loadSealedContributions(call.ctx, sealed, stats)
 	if err != nil {
-		resultErr = merr.Wrapf(err, "load sealed BM25 stats for data version %s", call.target.String())
-		return
+		return merr.Wrapf(err, "load sealed BM25 stats for data version %s", call.target.String())
 	}
 	for field, value := range loaded {
 		stats[field] = value
 	}
 	if r.barrier != nil {
 		if err := r.barrier(call.ctx); err != nil {
-			resultErr = err
-			return
+			return err
 		}
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.closed || r.materialization != call || r.currentStats != nil || !r.currentVersion.EQ(call.target) {
-		resultErr = call.ctx.Err()
-		if resultErr == nil {
-			resultErr = context.Canceled
+		if err := call.ctx.Err(); err != nil {
+			return err
 		}
-		r.mu.Unlock()
-		return
+		return context.Canceled
 	}
 	for id, segment := range r.growingStore.segments {
 		_, sealedHere := sealed[id]
 		if segment.sealedAt == nil && (segment.flushed || sealedHere) {
-			resultErr = merr.WrapErrServiceNotReadyMsg("BM25 segment %d final commit is pending", id)
-			r.mu.Unlock()
-			return
+			return merr.WrapErrServiceNotReadyMsg("BM25 segment %d final commit is pending", id)
 		}
 	}
-	growing, growingStats := r.growingStore.snapshotForDataVersion(call.target, sealed, nil)
+	growing, growingStats := r.growingStore.selectForDataVersion(call.target, sealed, nil)
 	for _, segmentStats := range growingStats {
 		stats.merge(segmentStats)
 	}
-	if resultErr = call.ctx.Err(); resultErr != nil {
-		r.mu.Unlock()
-		return
+	if err := call.ctx.Err(); err != nil {
+		return err
 	}
 	r.currentStats = stats
 	r.currentSealed = sealed
 	r.currentGrowing = growing
 	r.growingStore.cleanup(call.target, growing)
-	r.mu.Unlock()
+	return nil
 }
 
 func (r *oracleRuntime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
@@ -721,7 +694,7 @@ func (r *oracleRuntime) commitDiff(ctx context.Context, diff *idfDiff) error {
 			return nodescheduler.ErrDelay
 		}
 	}
-	nextGrowing, growingStats := r.growingStore.snapshotForDataVersion(diff.target, diff.nextSealed, r.currentGrowing)
+	nextGrowing, growingStats := r.growingStore.selectForDataVersion(diff.target, diff.nextSealed, r.currentGrowing)
 	for id := range r.currentGrowing {
 		if _, ok := nextGrowing[id]; !ok {
 			diff.negative.merge(growingStats[id])

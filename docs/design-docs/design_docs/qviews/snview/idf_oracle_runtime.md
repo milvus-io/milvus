@@ -91,6 +91,9 @@ or target advancement, rather than using an independent store mutex after
 releasing the Oracle lock. Live events, version preparation and lazy
 materialization can run on different goroutines; each observes consistent
 membership and statistics under this one lock.
+Version selection borrows growing statistics within that critical section (or
+exclusive initialization). Merging copies their counts into the aggregate or
+delta; no borrowed statistics escape the lock, so per-segment snapshots are unnecessary.
 
 One refresh executes at a time, keeping the sealed membership base stable. A WAL
 event barrier is enqueued under the vchannel owner lock after object reads and

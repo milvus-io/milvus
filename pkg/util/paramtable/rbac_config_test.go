@@ -19,10 +19,10 @@ package paramtable
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v2"
 
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -110,18 +110,16 @@ func TestRbacConfig_EmptyStringMeansEmptyGroup(t *testing.T) {
 // flip, hand edit, or regeneration with the wrong flags). The shipping yaml
 // must not contain these keys; defaults must come from Go source.
 func TestMilvusYamlHasNoRbacBuiltinPrivilegeKeys(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	assert.True(t, ok, "runtime.Caller failed")
-	// filepath.Dir(thisFile) is pkg/util/paramtable — 3 levels up is repo root
-	repoRoot := filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
-	yamlPath := filepath.Join(repoRoot, "configs", "milvus.yaml")
+	// Go tests run in the package directory. Resolve the shipping YAML from there
+	// so this check works with -trimpath and is independent of MILVUSCONF.
+	yamlPath := filepath.Join("..", "..", "..", "configs", "milvus.yaml")
 
 	raw, err := os.ReadFile(yamlPath)
-	assert.NoError(t, err, "reading %s", yamlPath)
+	require.NoError(t, err, "reading %s", yamlPath)
 
 	var tree map[string]interface{}
 	err = yaml.Unmarshal(raw, &tree)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	// Drill into common.security.rbac
 	common, _ := tree["common"].(map[interface{}]interface{})

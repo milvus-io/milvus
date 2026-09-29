@@ -386,16 +386,12 @@ func (m *BM25Stats) ValidateDelta(add, remove *BM25Stats) error {
 	if rows < 0 || tokens < 0 {
 		return merr.WrapErrDataIntegrityMsg("negative BM25 aggregate counts after replacement")
 	}
-	for key := range remove.rowsWithToken {
-		count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
-		if count < 0 || count > rows || count > math.MaxInt32 {
-			return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
-		}
-	}
-	for key := range add.rowsWithToken {
-		count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
-		if count < 0 || count > rows || count > math.MaxInt32 {
-			return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+	for _, delta := range []*BM25Stats{remove, add} {
+		for key := range delta.rowsWithToken {
+			count := int64(m.rowsWithToken[key]) + int64(add.rowsWithToken[key]) - int64(remove.rowsWithToken[key])
+			if count < 0 || count > rows || count > math.MaxInt32 {
+				return merr.WrapErrDataIntegrityMsg("invalid BM25 document frequency for token %d", key)
+			}
 		}
 	}
 	return nil
@@ -414,9 +410,7 @@ func (m *BM25Stats) ApplyDelta(add, remove *BM25Stats) {
 	}
 	if previousSize > 1024 && len(m.rowsWithToken)*2 < previousSize {
 		compact := make(map[uint32]int32, len(m.rowsWithToken))
-		for key, count := range m.rowsWithToken {
-			compact[key] = count
-		}
+		maps.Copy(compact, m.rowsWithToken)
 		m.rowsWithToken = compact
 	}
 }

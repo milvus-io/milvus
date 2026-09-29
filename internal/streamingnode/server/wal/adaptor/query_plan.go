@@ -95,7 +95,9 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			return nil, viewerror.NewUnknownError("query plan request misses legacy search request")
 		}
 		searchReq := proto.Clone(request.LegacySearchRequest).(*internalpb.SearchRequest)
-		fillSearchRequestPartitionIDs(searchReq, req.GetPartitionIds())
+		if len(searchReq.GetPartitionIDs()) == 0 && len(req.GetPartitionIds()) > 0 {
+			searchReq.PartitionIDs = append([]int64(nil), req.GetPartitionIds()...)
+		}
 		optimization, err := optimizer.OptimizeSearch(ctx, searchReq)
 		if err != nil {
 			return nil, err
@@ -109,7 +111,9 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 			return nil, viewerror.NewUnknownError("query plan request misses legacy retrieve request")
 		}
 		retrieveReq := proto.Clone(request.LegacyRetrieveRequest).(*internalpb.RetrieveRequest)
-		fillRetrieveRequestPartitionIDs(retrieveReq, req.GetPartitionIds())
+		if len(retrieveReq.GetPartitionIDs()) == 0 && len(req.GetPartitionIds()) > 0 {
+			retrieveReq.PartitionIDs = append([]int64(nil), req.GetPartitionIds()...)
+		}
 		if err := optimizer.OptimizeRetrieve(ctx, retrieveReq); err != nil {
 			return nil, err
 		}
@@ -134,20 +138,6 @@ func (w *walAdaptorImpl) GetQueryPlan(ctx context.Context, req *viewpb.GetQueryP
 	// Preserve a full inter-phase serving window after planning completes.
 	lease.Renew()
 	return plan, nil
-}
-
-func fillSearchRequestPartitionIDs(req *internalpb.SearchRequest, partitionIDs []int64) {
-	if req == nil || len(req.GetPartitionIDs()) > 0 || len(partitionIDs) == 0 {
-		return
-	}
-	req.PartitionIDs = append([]int64(nil), partitionIDs...)
-}
-
-func fillRetrieveRequestPartitionIDs(req *internalpb.RetrieveRequest, partitionIDs []int64) {
-	if req == nil || len(req.GetPartitionIDs()) > 0 || len(partitionIDs) == 0 {
-		return
-	}
-	req.PartitionIDs = append([]int64(nil), partitionIDs...)
 }
 
 func (w *walAdaptorImpl) GetMVCCTimestamp(ctx context.Context, req *viewpb.GetMVCCTimestampRequest) (*viewpb.GetMVCCTimestampResponse, error) {
