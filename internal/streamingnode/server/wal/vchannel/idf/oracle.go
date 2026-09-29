@@ -2,7 +2,6 @@ package idf
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"sync"
 
@@ -75,8 +74,10 @@ type growingSegmentStats struct {
 	sealedAt       *qviews.DataVersion
 }
 
+// growingStatsStore belongs to one oracleRuntime. After initialization, its
+// owner must hold oracleRuntime.mu for all access, including segment contents.
+// Membership cleanup and aggregate publication share the same critical section.
 type growingStatsStore struct {
-	mu       sync.RWMutex
 	schema   *schemapb.CollectionSchema
 	fieldIDs []int64
 	segments map[int64]*growingSegmentStats
@@ -94,8 +95,6 @@ func (s *growingStatsStore) registerSegment(segmentID int64, partitionID int64, 
 	if segmentID == 0 {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if _, ok := s.segments[segmentID]; ok {
 		return
 	}
@@ -110,8 +109,6 @@ func (s *growingStatsStore) appendStats(segmentID int64, partitionID int64, stat
 	if segmentID == 0 {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	segment := s.segments[segmentID]
 	if segment == nil {
 		segment = &growingSegmentStats{
@@ -133,8 +130,6 @@ func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (i
 	if err := collectGrowingInsertStats(stats, s.schema, insert); err != nil {
 		return 0, nil, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	segment := s.segments[segmentID]
 	if segment == nil {
 		segment = &growingSegmentStats{
@@ -157,8 +152,6 @@ func (s *growingStatsStore) appendInsert(insert walview.SegmentInsertMessage) (i
 }
 
 func (s *growingStatsStore) markFlushed(segmentID int64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	segment := s.segments[segmentID]
 	if segment == nil {
 		return
@@ -178,8 +171,6 @@ func (s *growingStatsStore) markSealed(segmentID int64, sealedAt qviews.DataVers
 	if segmentID == 0 {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	segment := s.segments[segmentID]
 	if segment == nil {
 		segment = &growingSegmentStats{stats: newBM25StatsFromSchema(s.schema, s.fieldIDs)}
@@ -197,8 +188,6 @@ func (s *growingStatsStore) snapshotForDataVersion(
 	targetSealed map[int64]*datapb.StreamingNodeBM25Resource,
 	current map[int64]struct{},
 ) (map[int64]struct{}, map[int64]bm25Stats) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
 	next := make(map[int64]struct{})
 	stats := make(map[int64]bm25Stats)
 	for segmentID, segment := range s.segments {
@@ -216,8 +205,6 @@ func (s *growingStatsStore) snapshotForDataVersion(
 }
 
 func (s *growingStatsStore) cleanup(currentDataVersion qviews.DataVersion, currentGrowing map[int64]struct{}) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	for segmentID, segment := range s.segments {
 		if _, ok := currentGrowing[segmentID]; ok {
 			continue
@@ -427,11 +414,11 @@ func (r *oracleRuntime) PrepareDataVersion(ctx context.Context, target qviews.Da
 		call := r.materialization
 		r.currentVersion = target
 		r.currentGrowing = nil
+		r.growingStore.cleanup(target, nil)
 		r.mu.Unlock()
 		if call != nil && !call.target.EQ(target) {
 			call.cancel()
 		}
-		r.growingStore.cleanup(target, nil)
 		return nil
 	}
 	r.mu.Unlock()
@@ -538,7 +525,6 @@ func (r *oracleRuntime) materialize(call *materializationCall) {
 			return
 		}
 	}
-	var currentGrowing map[int64]struct{}
 	r.mu.Lock()
 	if r.closed || r.materialization != call || r.currentStats != nil || !r.currentVersion.EQ(call.target) {
 		resultErr = call.ctx.Err()
@@ -567,11 +553,8 @@ func (r *oracleRuntime) materialize(call *materializationCall) {
 	r.currentStats = stats
 	r.currentSealed = sealed
 	r.currentGrowing = growing
-	// Cleanup only needs a stable segment membership snapshot.
-	currentGrowing = maps.Clone(growing)
+	r.growingStore.cleanup(call.target, growing)
 	r.mu.Unlock()
-
-	r.growingStore.cleanup(call.target, currentGrowing)
 }
 
 func (r *oracleRuntime) ApplyLiveEvent(ctx context.Context, event walview.VChannelResourceEvent) {
@@ -655,10 +638,8 @@ func (r *oracleRuntime) applySegmentSealed(segmentID int64, sealedAt qviews.Data
 	if _, exists := r.growingStore.segments[segmentID]; exists {
 		r.growingStore.markSealed(segmentID, sealedAt)
 	}
-	currentVersion := r.currentVersion
-	currentGrowing := maps.Clone(r.currentGrowing)
+	r.growingStore.cleanup(r.currentVersion, r.currentGrowing)
 	r.mu.Unlock()
-	r.growingStore.cleanup(currentVersion, currentGrowing)
 }
 
 func (r *oracleRuntime) Close() {
