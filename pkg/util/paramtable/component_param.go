@@ -4048,6 +4048,8 @@ type queryNodeConfig struct {
 
 	// schedule task policy.
 	SchedulePolicyName                    ParamItem `refreshable:"false"`
+	SchedulerDiagnosticsEnabled           ParamItem `refreshable:"false"`
+	SchedulerDiagnosticsLogEnabled        ParamItem `refreshable:"false"`
 	SchedulePolicyTaskQueueExpire         ParamItem `refreshable:"true"`
 	SchedulePolicyTaskDeadlineAdvance     ParamItem `refreshable:"true"`
 	SchedulePolicyEnableCrossUserGrouping ParamItem `refreshable:"true"`
@@ -5274,6 +5276,16 @@ user-task-polling:
 		Export: true,
 	}
 	p.SchedulePolicyName.Init(base.mgr)
+	p.SchedulerDiagnosticsEnabled = ParamItem{
+		Key: "queryNode.scheduler.diagnostics.enabled", Version: "3.0.0", DefaultValue: "false",
+		Doc: "Enable bounded scheduler/merge diagnostics at scheduler creation; restart to change.", Export: true,
+	}
+	p.SchedulerDiagnosticsEnabled.Init(base.mgr)
+	p.SchedulerDiagnosticsLogEnabled = ParamItem{
+		Key: "queryNode.scheduler.diagnostics.logEnabled", Version: "3.0.0", DefaultValue: "false",
+		Doc: "Emit one scheduler diagnostic summary per 30 seconds when diagnostics are enabled; restart to change.", Export: true,
+	}
+	p.SchedulerDiagnosticsLogEnabled.Init(base.mgr)
 	p.SchedulePolicyTaskQueueExpire = ParamItem{
 		Key:          "queryNode.scheduler.scheduleReadPolicy.taskQueueExpire",
 		Version:      "2.3.0",

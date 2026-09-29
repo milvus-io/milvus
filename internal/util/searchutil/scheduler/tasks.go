@@ -106,6 +106,15 @@ type queuedTask struct {
 	// schedulingDeadline is populated only by EDF and tracks the earliest
 	// merged request deadline; it does not change the task's cancellation context.
 	schedulingDeadline time.Time
+	diagnostics        *TaskDiagnostics
+}
+
+// Keep the original task identity on the diagnostics-off execution path.
+func (t *queuedTask) executionTask() Task {
+	if t.diagnostics != nil {
+		return t
+	}
+	return t.Task
 }
 
 func newQueuedTask(task Task, enqueueTime time.Time) *queuedTask {

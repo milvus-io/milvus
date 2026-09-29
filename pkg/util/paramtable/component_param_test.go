@@ -107,6 +107,16 @@ func TestComponentParam_RequeryEDFCapacity(t *testing.T) {
 	assert.Equal(t, "fifo", params.QueryNodeCfg.SchedulePolicyName.GetValue())
 }
 
+func TestComponentParamSchedulerDiagnostics(t *testing.T) {
+	params := &ComponentParam{}
+	params.Init(NewBaseTable(SkipRemote(true), SkipEnv(true)))
+	for _, item := range []*ParamItem{&params.QueryNodeCfg.SchedulerDiagnosticsEnabled, &params.QueryNodeCfg.SchedulerDiagnosticsLogEnabled} {
+		assert.False(t, item.GetAsBool())
+		assert.NoError(t, params.Save(item.Key, "true"))
+		assert.True(t, item.GetAsBool())
+	}
+}
+
 func TestComponentParam_DataCoordSnapshotExportCopyConcurrency(t *testing.T) {
 	Init()
 	params := Get()

@@ -168,35 +168,84 @@ func canMergeDeadline(task *queuedTask, other *queuedTask, maxDeadlineMergeGap t
 	if deadline.After(otherDeadline) {
 		deadline, otherDeadline = otherDeadline, deadline
 	}
-	return otherDeadline.Sub(deadline) <= maxDeadlineMergeGap
+	gap := otherDeadline.Sub(deadline)
+	if other.diagnostics != nil {
+		stats := &other.diagnostics.owner.candidateDDL
+		bucket := 4
+		switch {
+		case gap <= 10*time.Millisecond:
+			bucket = 0
+		case gap <= 25*time.Millisecond:
+			bucket = 1
+		case gap <= 50*time.Millisecond:
+			bucket = 2
+		case gap <= 100*time.Millisecond:
+			bucket = 3
+		}
+		stats[bucket].value++
+		stats[5].value += uint64(gap)
+	}
+	return gap <= maxDeadlineMergeGap
 }
 
 // tryMerge try to a new task to any task in queue.
 func (q *mergeTaskQueue) tryMerge(task *queuedTask, maxNQ int64, nqMergeRatio float64, maxDeadlineMergeGap time.Duration) bool {
+	diagnostics := task.diagnostics
+	if diagnostics != nil {
+		diagnostics.mergeAttempted = true
+	}
 	mergeTask := tryIntoMergeTask(task.Task)
 	if mergeTask == nil {
 		return false
 	}
 	// No need to perform any merge if task.nq is greater than maxNQ.
 	if mergeTask.NQ() >= maxNQ {
+		if diagnostics != nil {
+			diagnostics.owner.merge[mergeInputTooLarge].value++
+		}
 		return false
 	}
 	for i := len(q.tasks) - 1; i >= 0; i-- {
+		if diagnostics != nil {
+			diagnostics.scanned++
+		}
 		taskInQueue := q.tasks[i]
 		if !taskInQueue.valid() {
+			if diagnostics != nil {
+				diagnostics.owner.merge[mergeInvalid].value++
+			}
 			continue
 		}
 		if taskInQueue := tryIntoMergeTask(taskInQueue.Task); taskInQueue != nil {
 			// Try to merge it if limit of nq is enough.
-			if (canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) &&
-				canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap)) &&
-				taskInQueue.MergeWith(mergeTask) {
+			if !canMergeNQ(taskInQueue, mergeTask, maxNQ, nqMergeRatio) {
+				if diagnostics != nil {
+					diagnostics.owner.merge[mergeNQ].value++
+				}
+				continue
+			}
+			if !canMergeDeadline(q.tasks[i], task, maxDeadlineMergeGap) {
+				if diagnostics != nil {
+					diagnostics.owner.merge[mergeDeadline].value++
+					diagnostics.deadlineRejected = true
+				}
+				continue
+			}
+			if taskInQueue.MergeWith(mergeTask) {
+				if q.tasks[i].diagnostics != nil {
+					q.tasks[i].diagnostics.merge(diagnostics)
+				}
 				if deadline := task.schedulingDeadline; !deadline.IsZero() &&
 					(q.tasks[i].schedulingDeadline.IsZero() || deadline.Before(q.tasks[i].schedulingDeadline)) {
 					q.tasks[i].schedulingDeadline = deadline
 				}
 				return true
 			}
+			if diagnostics != nil {
+				diagnostics.owner.merge[mergeBusiness].value++
+			}
+		} else if diagnostics != nil {
+			diagnostics.owner.merge[mergeNotMergeable].value++
 		}
 	}
 	return false

@@ -1003,6 +1003,7 @@ var (
 
 // RegisterQueryNode registers QueryNode metrics
 func RegisterQueryNode(registry *prometheus.Registry) {
+	registerSchedulerDiagnostics(registry)
 	registry.MustRegister(QueryNodeNumCollections)
 	registry.MustRegister(QueryNodeNumPartitions)
 	registry.MustRegister(QueryNodeNumSegments)
