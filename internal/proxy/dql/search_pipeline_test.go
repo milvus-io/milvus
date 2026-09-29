@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
+	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
 	"github.com/milvus-io/milvus/internal/util/function/chain/types"
 	"github.com/milvus-io/milvus/internal/util/function/highlight"
@@ -3115,6 +3116,45 @@ func (s *SearchPipelineSuite) TestFilterFieldOperatorWithStructArrayFields() {
 	}
 }
 
+func (s *SearchPipelineSuite) TestRequerySkipsRuntimeRLS() {
+	node := &namespaceRequeryMockNode{}
+	mocker := mockey.Mock((*namespaceRequeryMockNode).ExecuteQuery).To(func(_ *namespaceRequeryMockNode, _ context.Context, task taskmodel.Task, _ trace.Span) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+		qt := task.(*QueryTask)
+		s.True(qt.skipRuntimeRLS)
+		return &milvuspb.QueryResults{Status: merr.Success()}, segcore.StorageCost{}, nil
+	}).Build()
+	defer mocker.UnPatch()
+
+	op := &requeryOperator{
+		traceCtx:           context.Background(),
+		primaryFieldSchema: &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+		node:               node,
+	}
+	_, _, err := op.requery(context.Background(), s.span, &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{1}}},
+	}, nil)
+	s.NoError(err)
+}
+
+func (s *SearchPipelineSuite) TestNewRequeryOperatorReusesRLSPredicate() {
+	pkField := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}
+	predicate := &planpb.Expr{Expr: &planpb.Expr_AlwaysTrueExpr{AlwaysTrueExpr: &planpb.AlwaysTrueExpr{}}}
+	task := &SearchTask{
+		ctx:           context.Background(),
+		SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{}},
+		request:       &milvuspb.SearchRequest{},
+		schema: &schemaInfo{
+			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
+			PkField:          pkField,
+		},
+		rlsPredicate: predicate,
+		tr:           timerecord.NewTimeRecorder("test"),
+	}
+
+	op, err := newRequeryOperator(task, nil)
+	s.NoError(err)
+	s.Same(predicate, op.(*requeryOperator).rlsPredicate)
+}
 func (s *SearchPipelineSuite) TestHybridSearchWithRequeryAndRerankByDataPipe() {
 	task := getHybridSearchTask("test_collection", [][]string{
 		{"1", "2"},

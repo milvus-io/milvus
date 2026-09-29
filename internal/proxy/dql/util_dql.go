@@ -319,27 +319,12 @@ func translateOutputFields(outputFields []string, schema *schemaInfo, removePkFi
 	return resultFieldNames, userOutputFields, userDynamicFields, aggregates, userRequestedPkFieldExplicitly, nil
 }
 
-func isPartitionKeyMode(ctx context.Context, metaCache Cache, dbName string, colName string) (bool, error) {
-	colSchema, err := metaCache.GetCollectionSchema(ctx, dbName, colName)
-	if err != nil {
-		return false, err
-	}
-
-	for _, fieldSchema := range colSchema.GetFields() {
-		if fieldSchema.IsPartitionKey {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, namespace *string) ([]string, error) {
+func assignNamespacePartitionKey(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, namespace *string) ([]string, error) {
 	if namespace == nil {
 		return nil, nil
 	}
 
-	return assignPartitionKeys(ctx, metaCache, dbName, collName, []*planpb.GenericValue{
+	return assignPartitionKeys(ctx, metaCache, dbName, collName, schema, []*planpb.GenericValue{
 		{Val: &planpb.GenericValue_StringVal{StringVal: *namespace}},
 	})
 }
@@ -396,18 +381,13 @@ func validateTextStorageV3Enabled(schema *schemapb.CollectionSchema) error {
 	return nil
 }
 
-func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+func assignPartitionKeys(ctx context.Context, metaCache Cache, dbName string, collName string, schema *schemapb.CollectionSchema, keys []*planpb.GenericValue) ([]string, error) {
 	partitionNames, err := metaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
 
-	schema, err := metaCache.GetCollectionSchema(ctx, dbName, collName)
-	if err != nil {
-		return nil, err
-	}
-
-	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema)
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}
@@ -589,6 +569,11 @@ func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) er
 		}
 	}
 	return nil
+}
+
+// FormatTimestamptzFields converts internal TIMESTAMPTZ values to query-result strings.
+func FormatTimestamptzFields(results []*schemapb.FieldData, colTimezone string) error {
+	return timestamptzUTC2IsoStr(results, colTimezone)
 }
 
 func validateNQLimit(limit int64) error {

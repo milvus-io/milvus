@@ -119,3 +119,32 @@ func TestSubSearchRequestFunctionChainsWireRoundTrip(t *testing.T) {
 	require.Len(t, roundTrip.GetFunctionChains(), 1)
 	assert.True(t, proto.Equal(chain, roundTrip.GetFunctionChains()[0]))
 }
+func TestConvertHybridSearchToSearchUsesTopLevelRLS(t *testing.T) {
+	searchReq := ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		RlsPrincipal: "top-level-principal",
+		SkipRls:      true,
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      false,
+			},
+		},
+	})
+
+	assert.Equal(t, "top-level-principal", searchReq.GetRlsPrincipal())
+	assert.True(t, searchReq.GetSkipRls())
+}
+
+func TestConvertHybridSearchToSearchDoesNotFallbackToNestedRLS(t *testing.T) {
+	searchReq := ConvertHybridSearchToSearch(&milvuspb.HybridSearchRequest{
+		Requests: []*milvuspb.SearchRequest{
+			{
+				RlsPrincipal: "nested-principal",
+				SkipRls:      true,
+			},
+		},
+	})
+
+	assert.Empty(t, searchReq.GetRlsPrincipal())
+	assert.False(t, searchReq.GetSkipRls())
+}
