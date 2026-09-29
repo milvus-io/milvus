@@ -88,6 +88,10 @@ func TestQueryNodeInfos_Codec(t *testing.T) {
 		SystemConfigurations: QueryNodeConfiguration{
 			SimdType: "avx2",
 		},
+		LocalStorage: &QueryNodeLocalStorageMetrics{
+			CapacityBytes: 1600,
+			UsedBytes:     2,
+		},
 	}
 	s, err := MarshalComponentInfos(infos1)
 	assert.Equal(t, nil, err)
