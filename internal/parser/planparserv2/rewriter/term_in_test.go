@@ -457,41 +457,74 @@ func TestRewrite_And_In_Intersection_Empty_ToFalse(t *testing.T) {
 	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
 }
 
-func TestRewrite_And_In_And_NotEqual_Remove(t *testing.T) {
+func TestRewrite_And_In_And_NotEqual_KeepsBothPredicates(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 5`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	term := expr.GetTermExpr()
+	binary := expr.GetBinaryExpr()
+	require.NotNil(t, binary)
+	require.Equal(t, planpb.BinaryExpr_LogicalAnd, binary.GetOp())
+	term := findTermExpr(expr)
 	require.NotNil(t, term)
-	require.Equal(t, 9, len(term.GetValues()))
+	require.Len(t, term.GetValues(), 10)
+	notEqual := findUnaryRangeExpr(expr, planpb.OpType_NotEqual)
+	require.NotNil(t, notEqual)
+	require.Equal(t, int64(5), notEqual.GetValue().GetInt64Val())
 }
 
-func TestRewrite_And_In_And_NotEqual_AllRemoved_ToFalse(t *testing.T) {
+func TestRewrite_And_In_And_NotEquals_KeepsInAndMergedNotIn(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
-	// in [10 values] and != each of them → false
+	// The != predicates may merge with each other, but must not consume the IN.
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] and Int64Field != 1 and Int64Field != 2 and Int64Field != 3 and Int64Field != 4 and Int64Field != 5 and Int64Field != 6 and Int64Field != 7 and Int64Field != 8 and Int64Field != 9 and Int64Field != 10`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysFalseExpr(expr))
+	binary := expr.GetBinaryExpr()
+	require.NotNil(t, binary)
+	require.Equal(t, planpb.BinaryExpr_LogicalAnd, binary.GetOp())
+	left, right := binary.GetLeft(), binary.GetRight()
+	if left.GetTermExpr() == nil {
+		left, right = right, left
+	}
+	require.NotNil(t, left.GetTermExpr())
+	require.Len(t, left.GetTermExpr().GetValues(), 10)
+	notIn := right.GetUnaryExpr()
+	require.NotNil(t, notIn)
+	require.Equal(t, planpb.UnaryExpr_Not, notIn.GetOp())
+	require.NotNil(t, notIn.GetChild().GetTermExpr())
+	require.Len(t, notIn.GetChild().GetTermExpr().GetValues(), 10)
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VInSet_ToTrue(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VInSet_KeepsBothPredicates(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 5`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
-		"OR(IN, !=) tautology should be rewritten to AlwaysTrueExpr")
+	binary := expr.GetBinaryExpr()
+	require.NotNil(t, binary)
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, binary.GetOp())
+	term := findTermExpr(expr)
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 10)
+	notEqual := findUnaryRangeExpr(expr, planpb.OpType_NotEqual)
+	require.NotNil(t, notEqual)
+	require.Equal(t, int64(5), notEqual.GetValue().GetInt64Val())
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VarChar_Tautology(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VarChar_KeepsBothPredicates(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `VarCharField in ["", "a", "b"] or VarCharField != ""`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	require.True(t, rewriter.IsAlwaysTrueExpr(expr),
-		"OR(IN, !=) tautology with VarChar should be rewritten to AlwaysTrueExpr")
+	binary := expr.GetBinaryExpr()
+	require.NotNil(t, binary)
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, binary.GetOp())
+	term := findTermExpr(expr)
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 3)
+	notEqual := findUnaryRangeExpr(expr, planpb.OpType_NotEqual)
+	require.NotNil(t, notEqual)
+	require.Equal(t, "", notEqual.GetValue().GetStringVal())
 }
 
 func TestRewrite_Or_In_Or_NotEqual_Nullable_KeepsOriginalPredicate(t *testing.T) {
@@ -604,15 +637,36 @@ func TestRewrite_NullableContradictions_UnderNot_DoNotBecomeAlwaysTrue(t *testin
 	}
 }
 
-func TestRewrite_Or_In_Or_NotEqual_VNotInSet_ToNotEqual(t *testing.T) {
+func TestRewrite_Or_In_Or_NotEqual_VNotInSet_KeepsBothPredicates(t *testing.T) {
 	helper := buildSchemaHelperForRewriteT(t)
 	expr, err := parser.ParseExpr(helper, `Int64Field in [1,2,3,4,5,6,7,8,9,10] or Int64Field != 20`, nil)
 	require.NoError(t, err)
 	require.NotNil(t, expr)
-	ure := expr.GetUnaryRangeExpr()
-	require.NotNil(t, ure)
-	require.Equal(t, planpb.OpType_NotEqual, ure.GetOp())
-	require.Equal(t, int64(20), ure.GetValue().GetInt64Val())
+	binary := expr.GetBinaryExpr()
+	require.NotNil(t, binary)
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, binary.GetOp())
+	term := findTermExpr(expr)
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 10)
+	notEqual := findUnaryRangeExpr(expr, planpb.OpType_NotEqual)
+	require.NotNil(t, notEqual)
+	require.Equal(t, int64(20), notEqual.GetValue().GetInt64Val())
+}
+
+func TestRewrite_Or_EqualsMergeToInWithoutCombiningNotEqual(t *testing.T) {
+	helper := buildSchemaHelperForRewriteT(t)
+	expr, err := parser.ParseExpr(helper, `Int64Field == 1 or Int64Field == 2 or Int64Field != 3`, nil)
+	require.NoError(t, err)
+	require.NotNil(t, expr)
+	binary := expr.GetBinaryExpr()
+	require.NotNil(t, binary)
+	require.Equal(t, planpb.BinaryExpr_LogicalOr, binary.GetOp())
+	term := findTermExpr(expr)
+	require.NotNil(t, term)
+	require.Len(t, term.GetValues(), 2)
+	notEqual := findUnaryRangeExpr(expr, planpb.OpType_NotEqual)
+	require.NotNil(t, notEqual)
+	require.Equal(t, int64(3), notEqual.GetValue().GetInt64Val())
 }
 
 // Test contradictory equals: (a == 1) AND (a == 2) → false

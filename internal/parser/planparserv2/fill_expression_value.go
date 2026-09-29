@@ -345,6 +345,12 @@ func fillExpressionValue(
 }
 
 func hasBoolValue(expr *planpb.Expr, target bool) bool {
+	if isAlwaysTrueExpr(expr) {
+		return target
+	}
+	if unary := expr.GetUnaryExpr(); unary != nil && unary.GetOp() == planpb.UnaryExpr_Not && isAlwaysTrueExpr(unary.GetChild()) {
+		return !target
+	}
 	value := expr.GetValueExpr().GetValue()
 	return IsBool(value) && value.GetBoolVal() == target
 }

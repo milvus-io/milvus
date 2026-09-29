@@ -186,6 +186,12 @@ func (v *visitor) combineAndInWithEqual(parts []*planpb.Expr) []*planpb.Expr {
 		if g.term == nil || len(g.eqIdxs) == 0 {
 			continue
 		}
+		// An empty intersection on a nullable field or missing path leaves
+		// multiple IN predicates intact. Checking only g.term (the last IN)
+		// must not consume the other sets and lose their constraints.
+		if len(g.termIdxs) != 1 {
+			continue
+		}
 		// Build set of eq values and check presence in term set.
 		termVals := g.term.GetValues()
 		eqUnique := []*planpb.GenericValue{}
@@ -591,183 +597,6 @@ func (v *visitor) combineAndInWithIn(parts []*planpb.Expr) []*planpb.Expr {
 			out = append(out, newAlwaysFalseExpr())
 		} else {
 			out = append(out, newTermExpr(g.col, inter))
-		}
-	}
-	for i := range parts {
-		if !used[i] {
-			out = append(out, parts[i])
-		}
-	}
-	return out
-}
-
-// AND: (a IN S) AND (a != d) -> remove d from S; empty -> false
-func (v *visitor) combineAndInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
-	type group struct {
-		col     *planpb.ColumnInfo
-		termIdx int
-		term    *planpb.TermExpr
-		neqIdxs []int
-		neqVals []*planpb.GenericValue
-	}
-	groups := map[string]*group{}
-	others := []int{}
-	for idx, e := range parts {
-		if te := e.GetTermExpr(); te != nil {
-			k, ok := termGroupKey(te)
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: te.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.term = te
-			g.termIdx = idx
-			continue
-		}
-		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: ue.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.neqIdxs = append(g.neqIdxs, idx)
-			g.neqVals = append(g.neqVals, ue.GetValue())
-			continue
-		}
-		others = append(others, idx)
-	}
-	used := make([]bool, len(parts))
-	out := make([]*planpb.Expr, 0, len(parts))
-	for _, i := range others {
-		out = append(out, parts[i])
-		used[i] = true
-	}
-	for _, g := range groups {
-		if g.term == nil || len(g.neqIdxs) == 0 {
-			continue
-		}
-		filtered := []*planpb.GenericValue{}
-		for _, tv := range g.term.GetValues() {
-			excluded := false
-			for _, dv := range g.neqVals {
-				if equalsGeneric(tv, dv) {
-					excluded = true
-					break
-				}
-			}
-			if !excluded {
-				filtered = append(filtered, tv)
-			}
-		}
-		if len(filtered) == 0 && !canFoldPredicateToBoolConstant(g.col) {
-			continue
-		}
-		used[g.termIdx] = true
-		for _, ni := range g.neqIdxs {
-			used[ni] = true
-		}
-		if len(filtered) == 0 {
-			out = append(out, newAlwaysFalseExpr())
-		} else {
-			out = append(out, newTermExpr(g.col, filtered))
-		}
-	}
-	for i := range parts {
-		if !used[i] {
-			out = append(out, parts[i])
-		}
-	}
-	return out
-}
-
-// OR: (a IN S) OR (a != d) -> if d ∈ S then true else (a != d)
-func (v *visitor) combineOrInWithNotEqual(parts []*planpb.Expr) []*planpb.Expr {
-	type group struct {
-		col     *planpb.ColumnInfo
-		termIdx int
-		term    *planpb.TermExpr
-		neqIdxs []int
-		neqVals []*planpb.GenericValue
-	}
-	groups := map[string]*group{}
-	others := []int{}
-	for idx, e := range parts {
-		if te := e.GetTermExpr(); te != nil {
-			k, ok := termGroupKey(te)
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: te.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.term = te
-			g.termIdx = idx
-			continue
-		}
-		if ue := e.GetUnaryRangeExpr(); ue != nil && ue.GetOp() == planpb.OpType_NotEqual && ue.GetValue() != nil && ue.GetColumnInfo() != nil {
-			k, ok := valueGroupKey(ue.GetColumnInfo(), ue.GetValue())
-			if !ok {
-				others = append(others, idx)
-				continue
-			}
-			g := groups[k]
-			if g == nil {
-				g = &group{col: ue.GetColumnInfo()}
-				groups[k] = g
-			}
-			g.neqIdxs = append(g.neqIdxs, idx)
-			g.neqVals = append(g.neqVals, ue.GetValue())
-			continue
-		}
-		others = append(others, idx)
-	}
-	used := make([]bool, len(parts))
-	out := make([]*planpb.Expr, 0, len(parts))
-	for _, i := range others {
-		out = append(out, parts[i])
-		used[i] = true
-	}
-	for _, g := range groups {
-		if g.term == nil || len(g.neqIdxs) == 0 {
-			continue
-		}
-		// if any neq value is inside IN set -> true
-		containsAny := false
-		for _, dv := range g.neqVals {
-			for _, tv := range g.term.GetValues() {
-				if equalsGeneric(tv, dv) {
-					containsAny = true
-					break
-				}
-			}
-			if containsAny {
-				break
-			}
-		}
-		if containsAny {
-			if !canFoldPredicateToBoolConstant(g.col) {
-				continue
-			}
-			used[g.termIdx] = true
-			for _, ni := range g.neqIdxs {
-				used[ni] = true
-			}
-			out = append(out, newAlwaysTrueExpr())
-		} else {
-			// drop the IN; keep != as-is
-			used[g.termIdx] = true
 		}
 	}
 	for i := range parts {
