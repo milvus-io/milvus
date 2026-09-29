@@ -535,25 +535,19 @@ func (suite *ServiceSuite) TestWatchDmChannels_Failed() {
 func (suite *ServiceSuite) TestWatchDmChannels_RebuildsUnserviceableDelegator() {
 	schema := mock_segcore.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	indexInfos := mock_segcore.GenTestIndexInfoList(suite.collectionID, schema)
-	infos := suite.genSegmentLoadInfos(schema, indexInfos)
-	segmentInfos := lo.SliceToMap(infos, func(info *querypb.SegmentLoadInfo) (int64, *datapb.SegmentInfo) {
-		return info.SegmentID, &datapb.SegmentInfo{
-			ID:            info.SegmentID,
-			CollectionID:  info.CollectionID,
-			PartitionID:   info.PartitionID,
-			InsertChannel: info.InsertChannel,
-			Binlogs:       info.BinlogPaths,
-			Statslogs:     info.Statslogs,
-			Deltalogs:     info.Deltalogs,
-			Level:         info.Level,
-		}
-	})
+	loadMeta := &querypb.LoadMetaInfo{MetricType: defaultMetricType}
+
+	// The watch that registered the stale delegator also referenced the
+	// collection, and the rebuild releases that reference, so take it here too.
+	suite.node.manager.Collection.PutOrRef(suite.collectionID, schema, nil, loadMeta)
 
 	stale := delegator.NewMockShardDelegator(suite.T())
 	stale.EXPECT().Serviceable().Return(false).Maybe()
 	stale.EXPECT().Close().Return().Once()
 	suite.node.delegators.Insert(suite.vchannel, stale)
 
+	// The channel carries no segments: this exercises the rebuild, and writing
+	// binlogs would tie the test to remote storage it does not need.
 	req := &querypb.WatchDmChannelsRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:  commonpb.MsgType_WatchDmChannels,
@@ -565,18 +559,13 @@ func (suite *ServiceSuite) TestWatchDmChannels_RebuildsUnserviceableDelegator() 
 		PartitionIDs: suite.partitionIDs,
 		Infos: []*datapb.VchannelInfo{
 			{
-				CollectionID:      suite.collectionID,
-				ChannelName:       suite.vchannel,
-				SeekPosition:      suite.position,
-				FlushedSegmentIds: suite.flushedSegmentIDs,
-				DroppedSegmentIds: suite.droppedSegmentIDs,
+				CollectionID: suite.collectionID,
+				ChannelName:  suite.vchannel,
+				SeekPosition: suite.position,
 			},
 		},
-		Schema: schema,
-		LoadMeta: &querypb.LoadMetaInfo{
-			MetricType: defaultMetricType,
-		},
-		SegmentInfos:  segmentInfos,
+		Schema:        schema,
+		LoadMeta:      loadMeta,
 		IndexInfoList: indexInfos,
 	}
 
