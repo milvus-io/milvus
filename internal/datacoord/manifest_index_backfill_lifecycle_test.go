@@ -96,9 +96,45 @@ func TestManifestIndexBackfillRevalidatesSelectedRecord(t *testing.T) {
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 			require.NoError(t, err)
 			assert.NotEmpty(t, rows)
-			assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 		})
 	}
+}
+
+func TestManifestIndexBackfillPublicationPreservesReplacement(t *testing.T) {
+	withSegmentIndexManifestWrites(t, false)
+	newFakeManifestStore(t)
+	ctx := context.TODO()
+	catalog := metastorekv.NewCatalog(NewMetaMemoryKV(), "", "")
+	m := bootMetaForRestart(t, catalog, restartCollID)
+	seedLegacyBackfillRecord(t, m, restartSegID, restartBuildID)
+	old, ok := m.indexMeta.segmentBuildInfo.Get(restartBuildID)
+	require.True(t, ok)
+	replacement := model.CloneSegmentIndex(old)
+	replacement.BuildID++
+	withSegmentIndexManifestWrites(t, true)
+
+	// The old build is staged and locked. A new build can still take over its
+	// (segment, index) slot under a different BuildID lock during manifest I/O.
+	var original func(string, SegmentManifestCommit) (string, error)
+	patch := mockey.Mock(commitManifestMutation).Origin(&original).To(
+		func(base string, commit SegmentManifestCommit) (string, error) {
+			if err := m.indexMeta.AddSegmentIndex(ctx, replacement); err != nil {
+				return "", err
+			}
+			return original(base, commit)
+		}).Build()
+	t.Cleanup(func() { patch.UnPatch() })
+	require.NoError(t, newManifestIndexBackfillInspector(ctx, m).backfillIndex(ctx, restartSegID, restartBuildID))
+
+	assert.False(t, old.ManifestPublished, "a reader's existing snapshot must remain unchanged")
+	assert.True(t, indexManifestPublished(t, m.indexMeta, old.BuildID))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, replacement.BuildID))
+	assert.Equal(t, replacement, m.indexMeta.GetSegmentIndexes(restartCollID, restartSegID)[restartIndexID])
+	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, replacement.BuildID, rows[0].BuildID)
 }
 
 func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
@@ -146,7 +182,7 @@ func TestManifestIndexBackfillFailureDuringManifestIO(t *testing.T) {
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
-			assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 			assert.False(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
 			if scenario == "write fails" {
 				assert.Equal(t, base, m.GetSegment(ctx, restartSegID).GetManifestPath())
@@ -362,7 +398,7 @@ func TestManifestIndexBackfillRealManifestRestart(t *testing.T) {
 				require.True(t, ok)
 				assert.Equal(t, record.IndexFileKeys, recovered.IndexFileKeys)
 				assert.Equal(t, layout, recovered.IndexStorePathVersion)
-				assert.True(t, restarted.indexMeta.isSegmentIndexCatalogAbsent(record.BuildID))
+				assert.True(t, indexManifestPublished(t, restarted.indexMeta, record.BuildID))
 			}
 			_, pending := newManifestIndexBackfillInspector(ctx, restarted).scan(ctx)
 			assert.Zero(t, pending)

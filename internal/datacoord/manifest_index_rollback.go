@@ -89,8 +89,10 @@ func (m *meta) rollbackSegmentIndexes(ctx context.Context, segmentID int64, cata
 	// in-memory build still protects files (including snapshot references).
 	// Restore those records too, after proving their absence in this source.
 	for _, buildID := range catalogAbsentBuilds {
-		if _, present := sources[buildID]; !present && m.indexMeta.isSegmentIndexCatalogAbsent(buildID) {
-			sources[buildID] = nil
+		if _, present := sources[buildID]; !present {
+			if record, ok := m.indexMeta.GetIndexJob(buildID); ok && record.ManifestPublished {
+				sources[buildID] = nil
+			}
 		}
 	}
 	if len(sources) == 0 {
@@ -154,7 +156,7 @@ func (m *meta) validateRollbackIndex(segment *SegmentInfo, mutation SegmentIndex
 	if entry.BuildID != record.BuildID || entry.IndexID != record.IndexID {
 		return merr.Wrapf(merr.ErrDataIntegrity, "rollback record disagrees with manifest index identity, buildID=%d", mutation.BuildID)
 	}
-	if !m.indexMeta.isSegmentIndexCatalogAbsent(record.BuildID) {
+	if !record.ManifestPublished {
 		return nil
 	}
 	if record.IndexState != commonpb.IndexState_Finished || len(record.IndexFileKeys) == 0 {
@@ -254,19 +256,22 @@ func (i *manifestIndexRollbackInspector) runOnce(ctx context.Context) {
 	}
 	absentBySegment := make(map[int64][]int64)
 	pendingRecords := 0
-	i.meta.indexMeta.segmentIndexCatalogAbsent.Range(func(buildID int64) bool {
+	for _, record := range i.meta.indexMeta.segmentBuildInfo.List() {
+		if ctx.Err() != nil {
+			return
+		}
+		if !record.ManifestPublished {
+			continue
+		}
 		pendingRecords++
-		if record, ok := i.meta.indexMeta.GetIndexJob(buildID); ok {
-			absentBySegment[record.SegmentID] = append(absentBySegment[record.SegmentID], buildID)
-			if _, present := seen[record.SegmentID]; !present {
-				if segment := i.meta.GetSegment(ctx, record.SegmentID); segment != nil {
-					segments = append(segments, segment)
-					seen[record.SegmentID] = struct{}{}
-				}
+		absentBySegment[record.SegmentID] = append(absentBySegment[record.SegmentID], record.BuildID)
+		if _, present := seen[record.SegmentID]; !present {
+			if segment := i.meta.GetSegment(ctx, record.SegmentID); segment != nil {
+				segments = append(segments, segment)
+				seen[record.SegmentID] = struct{}{}
 			}
 		}
-		return ctx.Err() == nil
-	})
+	}
 	if ctx.Err() != nil {
 		return
 	}

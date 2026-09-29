@@ -1713,7 +1713,7 @@ func (s *CopySegmentTaskSuite) TestSyncCopySegmentTask_IndexWritePlacementMatrix
 				final := m.GetSegment(ctx, segmentID).GetManifestPath()
 				s.Require().NoError(SyncCopySegmentTask(task, resp, copyMeta, m))
 				s.Equal(final, m.GetSegment(ctx, segmentID).GetManifestPath())
-				s.False(m.indexMeta.isSegmentIndexCatalogAbsent(buildID))
+				s.False(indexManifestPublished(s.T(), m.indexMeta, buildID))
 			}
 		})
 	}

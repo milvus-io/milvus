@@ -1,7 +1,7 @@
 # StorageV3 Manifest Index Backfill and Rollback
 
 - **Created:** 2026-09-01
-- **Updated:** 2026-09-18
+- **Updated:** 2026-09-29
 - **Status:** Under Review; design and implementation in one PR
 - **Component:** DataCoord, StorageV3
 - **Depends on:** [StorageV3 Manifest Index Publication](20260811-storagev3-manifest-index-publication.md),
@@ -60,21 +60,22 @@ Neither direction moves index files or changes artifact paths or build IDs.
 
 ## Durable-placement Provenance
 
-`indexMeta.segmentIndexCatalogAbsent` is a process-local set of build IDs whose
-records came from, or were successfully moved to, a manifest. Its negative
-shape is intentional:
+`model.SegmentIndex.ManifestPublished` is a process-local flag indicating that
+this build was recovered from, or successfully published to, a manifest and
+has no catalog row:
 
-- records loaded from `ListSegmentIndexes`, created in etcd, or rewritten into
-  etcd are absent from the set;
+- records loaded from `ListSegmentIndexes`, created in etcd, or successfully
+  rewritten into etcd have `ManifestPublished = false`;
 - records recovered from a manifest, installed by copy/restore as
-  manifest-resident, or published by foreground/backfill are present; and
-- record removal clears the entry.
+  manifest-resident, or published by foreground/backfill have it set to `true`;
+- superseded builds retain the flag until written back to etcd or removed,
+  even if their entry is no longer in the current manifest.
 
-Unknown therefore means "assume the catalog row exists." A missed bookkeeping
-update can cause one harmless idempotent publication/delete attempt, but cannot
-silently exempt a real etcd row forever. The set is not persisted because the
-durable source is re-derived exactly at each boot: etcd rows load first, and
-manifest reload inserts only build IDs that etcd did not already supply.
+The zero value conservatively means "assume the catalog row exists." The flag
+is cloned with the in-memory record but never serialized to protobuf. At boot,
+etcd rows load first, and manifest reload inserts only build IDs that etcd did
+not already supply. Placement changes install a cloned record only after the
+catalog transaction succeeds, preserving any newer build's current index slot.
 
 This provenance is also what lets a successful migration converge without a
 manifest read on every inspector tick. Removing the etcd row does not remove
@@ -147,9 +148,9 @@ segmentManifestLock(segmentID)
 
 The catalog refuses its chunked fallback whenever a `SegmentIndex` action is
 present, so the pointer/marker and row deletion cannot become visible
-separately. The record itself is not reinserted during install: it is already
-the authoritative in-memory object, and reinserting a scan-time pointer could
-overwrite a newer `(segment, index)` occupant.
+separately. Installation updates the locked record through a clone with
+`ManifestPublished = true`. It updates the `(segment, index)` slot only if the
+slot still belongs to that BuildID, preserving a newer occupant.
 
 Several selected records for the same segment are committed sequentially.
 Different segments use a bounded worker pool. This preserves the framework's
@@ -372,8 +373,9 @@ manifest commit framework for final publication:
 3. Under `segMu`, recheck source pointer, segment identity and retained state.
 4. Atomically publish the segment pointer/marker and PUT all selected
    `SegmentIndex` records with `catalog.Update`.
-5. Clear catalog-absent provenance only after the transaction succeeds. Preserve
-   current in-memory objects and the current `(segment, index)` build slot.
+5. Clear catalog-absent provenance only after the transaction succeeds. Install
+   cloned records with `ManifestPublished = false`, preserving the current
+   `(segment, index)` build slot.
 
 Include catalog-absent superseded builds still retained in memory, even when
 a replacement has removed their entry from the current manifest. Group these

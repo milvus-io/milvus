@@ -355,7 +355,6 @@ func (m *meta) reloadSegmentIndexesFromManifests(ctx context.Context) error {
 				// Definitions may have been dropped: keep their records so GC
 				// can still find and retire the manifest artifacts.
 				m.indexMeta.updateSegmentIndex(segIdx)
-				m.indexMeta.segmentIndexCatalogAbsent.Upsert(segIdx.BuildID)
 				m.indexMeta.addStoredIndexSizeMetric(segIdx.CollectionID, segIdx.IndexID,
 					float64(segIdx.IndexSerializedSize))
 				installed++
@@ -394,5 +393,6 @@ func segmentIndexFromManifest(segment *SegmentInfo, manifestIndex packed.Manifes
 		CurrentScalarIndexVersion: manifestIndex.CurrentScalarIndexVersion,
 		IndexType:                 manifestIndex.IndexType,
 		IndexStorePathVersion:     manifestIndex.IndexStorePathVersion,
+		ManifestPublished:         true,
 	}
 }

@@ -76,6 +76,9 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 			before := m.GetSegment(ctx, restartSegID)
 			record, ok := m.indexMeta.GetIndexJob(restartBuildID)
 			require.True(t, ok)
+			published, ok := m.indexMeta.segmentBuildInfo.Get(restartBuildID)
+			require.True(t, ok)
+			require.True(t, published.ManifestPublished)
 			inspector := newManifestIndexRollbackInspector(ctx, m, nil)
 			inspector.runOnce(ctx)
 			assert.False(t, inspector.ready, "completion requires a subsequent full scan")
@@ -87,8 +90,10 @@ func TestManifestIndexRollbackRoundTrip(t *testing.T) {
 			rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
+			assert.True(t, published.ManifestPublished, "rollback must not mutate a reader's snapshot")
+			record.ManifestPublished = false
 			assert.Equal(t, record, rows[0])
-			assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+			assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 			inspector.runOnce(ctx)
 			assert.True(t, inspector.ready)
 			assert.Equal(t, float64(1), testutil.ToFloat64(metrics.DataCoordManifestIndexRollbackReady))
@@ -198,7 +203,7 @@ func TestManifestIndexRollbackFailureAndRetry(t *testing.T) {
 			require.NoError(t, listErr)
 			assert.Empty(t, rows)
 			assert.True(t, m.GetSegment(ctx, restartSegID).GetManifestHasIndex())
-			assert.True(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+			assert.True(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 			if patch != nil {
 				patch.UnPatch()
 			}
@@ -232,6 +237,7 @@ func TestManifestIndexRollbackPreservesCatalogAndReplacement(t *testing.T) {
 				current.BuildID++
 			}
 			require.NoError(t, m.indexMeta.AddSegmentIndex(ctx, current))
+			current.ManifestPublished = false
 			n, err := m.rollbackSegmentIndexes(ctx, restartSegID)
 			require.NoError(t, err)
 			assert.Equal(t, 1, n)
@@ -314,6 +320,6 @@ func TestManifestIndexRollbackUnmarkedRecordsAndFairness(t *testing.T) {
 	rows, err := catalog.ListSegmentIndexes(ctx, restartCollID)
 	require.NoError(t, err)
 	assert.Len(t, rows, 2, "unmarked manifest-absent record also returns to etcd")
-	assert.False(t, m.indexMeta.isSegmentIndexCatalogAbsent(restartBuildID))
+	assert.False(t, indexManifestPublished(t, m.indexMeta, restartBuildID))
 	assert.False(t, inspector.ready, "the broken marked segment remains a blocker")
 }
