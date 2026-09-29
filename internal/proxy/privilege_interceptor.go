@@ -41,6 +41,38 @@ var (
 
 var roPrivileges, rwPrivileges, adminPrivileges map[string]struct{}
 
+type rbacSubject struct {
+	username  string
+	password  string
+	roleNames []string
+	bypass    bool
+}
+
+func authorizationDisabled() bool {
+	return !Params.CommonCfg.AuthorizationEnabled.GetAsBool()
+}
+
+func getCurrentUserRBACSubject(ctx context.Context) (rbacSubject, error) {
+	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+	if err != nil {
+		log.Ctx(ctx).Warn("GetCurUserFromContext fail", zap.Error(err))
+		return rbacSubject{}, err
+	}
+	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+		return rbacSubject{username: username, password: password, bypass: true}, nil
+	}
+	roleNames, err := GetRole(username)
+	if err != nil {
+		log.Ctx(ctx).Warn("GetRole fail", zap.String("username", username), zap.Error(err))
+		return rbacSubject{}, err
+	}
+	return rbacSubject{
+		username:  username,
+		password:  password,
+		roleNames: append(roleNames, util.RolePublic),
+	}, nil
+}
+
 // UnaryServerInterceptor returns a new unary server interceptors that performs per-request privilege access.
 func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterceptor {
 	privilege.InitPrivilegeGroups()
@@ -54,7 +86,7 @@ func UnaryServerInterceptor(privilegeFunc PrivilegeFunc) grpc.UnaryServerInterce
 }
 
 func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context, error) {
-	if !Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+	if authorizationDisabled() {
 		return ctx, nil
 	}
 	log := log.Ctx(ctx)
@@ -64,24 +96,19 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		log.RatedInfo(60, "GetPrivilegeExtObj err", zap.Error(err))
 		return ctx, nil
 	}
-	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
+	subject, err := getCurrentUserRBACSubject(ctx)
 	if err != nil {
-		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
 	}
-	if !Params.CommonCfg.RootShouldBindRole.GetAsBool() && username == util.UserRoot {
+	if subject.bypass {
 		return ctx, nil
 	}
-	roleNames, err := GetRole(username)
-	if err != nil {
-		log.Warn("GetRole fail", zap.String("username", username), zap.Error(err))
-		return ctx, err
-	}
-	roleNames = append(roleNames, util.RolePublic)
+	username, password, roleNames := subject.username, subject.password, subject.roleNames
+	ctx = SetRBACRolesToContext(ctx, roleNames)
 	objectType := privilegeExt.ObjectType.String()
 	objectNameIndex := privilegeExt.ObjectNameIndex
 	objectName := funcutil.GetObjectName(req, objectNameIndex)
-	dbName := GetCurDBNameFromContextOrDefault(ctx)
+	dbName := GetCurDBNameFromRequestOrContext(ctx, req)
 
 	// Resolve alias to actual collection name for RBAC checks
 	if Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() && objectType == commonpb.ObjectType_Collection.String() && objectNameIndex != 0 {
@@ -133,20 +160,9 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		zap.Int32("object_index", objectNameIndex), zap.String("object_name", objectName),
 		zap.Int32("object_indexs", objectNameIndexs), zap.Strings("object_names", objectNames))
 
-	e := privilege.GetEnforcer()
 	for _, roleName := range roleNames {
 		permitFunc := func(objectName string) (bool, error) {
-			object := funcutil.PolicyForResource(dbName, objectType, objectName)
-			isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
-			if cached {
-				return isPermit, nil
-			}
-			isPermit, err := e.Enforce(roleName, object, objectPrivilege)
-			if err != nil {
-				return false, err
-			}
-			privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
-			return isPermit, nil
+			return isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege)
 		}
 
 		if objectNameIndex != 0 {
@@ -209,6 +225,60 @@ func isSelectMyRoleGrants(req interface{}, roleNames []string) bool {
 	filterGrantEntity := selectGrantReq.GetEntity()
 	roleName := filterGrantEntity.GetRole().GetName()
 	return funcutil.SliceContain(roleNames, roleName)
+}
+
+func resolveRBACObjectName(ctx context.Context, dbName, objectType, objectName string) string {
+	if !Params.ProxyCfg.ResolveAliasForPrivilege.GetAsBool() || objectType != commonpb.ObjectType_Collection.String() || objectName == util.AnyWord || objectName == "" {
+		return objectName
+	}
+	actualName, err := resolveCollectionAlias(ctx, dbName, objectName)
+	if err != nil {
+		log.Ctx(ctx).RatedWarn(60, "failed to resolve collection alias for RBAC, using original name",
+			zap.String("objectName", objectName), zap.String("dbName", dbName), zap.Error(err))
+		return objectName
+	}
+	return actualName
+}
+
+func isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege string) (bool, error) {
+	object := funcutil.PolicyForResource(dbName, objectType, objectName)
+	isPermit, cached, version := privilege.GetResultCache(roleName, object, objectPrivilege)
+	if cached {
+		return isPermit, nil
+	}
+	isPermit, err := privilege.GetEnforcer().Enforce(roleName, object, objectPrivilege)
+	if err != nil {
+		return false, err
+	}
+	privilege.SetResultCache(roleName, object, objectPrivilege, isPermit, version)
+	return isPermit, nil
+}
+
+func isCurrentUserPermitted(ctx context.Context, dbName, objectType, objectName, objectPrivilege string) (bool, error) {
+	if authorizationDisabled() {
+		return true, nil
+	}
+	subject, err := getCurrentUserRBACSubject(ctx)
+	if err != nil {
+		return false, err
+	}
+	if subject.bypass {
+		return true, nil
+	}
+	if dbName == "" {
+		dbName = GetCurDBNameFromContextOrDefault(ctx)
+	}
+	objectName = resolveRBACObjectName(ctx, dbName, objectType, objectName)
+	for _, roleName := range subject.roleNames {
+		permitted, err := isRolePermitted(roleName, dbName, objectType, objectName, objectPrivilege)
+		if err != nil {
+			return false, err
+		}
+		if permitted {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // resolveCollectionAlias resolves an alias to its actual collection name

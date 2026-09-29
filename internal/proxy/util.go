@@ -62,6 +62,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v2/util/metric"
 	"github.com/milvus-io/milvus/pkg/v2/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v2/util/rbacutil"
+	"github.com/milvus-io/milvus/pkg/v2/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/timestamptz"
 	"github.com/milvus-io/milvus/pkg/v2/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v2/util/typeutil"
@@ -1481,6 +1482,18 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 		return util.DefaultDBName
 	}
 	return dbNameData[0]
+}
+
+// GetCurDBNameFromRequestOrContext returns the database carried by the
+// request, falling back to the connection context when the request omits it.
+// Privilege checks must authorize the same database that handlers operate on.
+func GetCurDBNameFromRequestOrContext(ctx context.Context, req interface{}) string {
+	if getter, ok := req.(requestutil.DBNameGetter); ok {
+		if dbName := getter.GetDbName(); dbName != "" {
+			return dbName
+		}
+	}
+	return GetCurDBNameFromContextOrDefault(ctx)
 }
 
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
