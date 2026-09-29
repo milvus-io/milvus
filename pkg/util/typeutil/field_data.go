@@ -39,6 +39,14 @@ func GetArrayElementValidData(row *schemapb.ScalarField) []bool {
 	return row.GetValidData()
 }
 
+// SetArrayElementValidData writes element validity carried by one scalar
+// Array row.
+func SetArrayElementValidData(row *schemapb.ScalarField, validData []bool) {
+	if row != nil {
+		row.ValidData = validData
+	}
+}
+
 // GetVectorArrayElementValidData returns element validity carried by one
 // ArrayOfVector row. Unlike GetFieldDataValidData, this bitmap is element-level.
 func GetVectorArrayElementValidData(row *schemapb.VectorField) []bool {

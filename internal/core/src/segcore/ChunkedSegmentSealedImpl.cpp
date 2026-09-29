@@ -60,6 +60,7 @@
 #include "cachinglayer/Translator.h"
 #include "common/Array.h"
 #include "common/StructElementOffsets.h"
+#include "common/ColumnarArrayChunkBuilder.h"
 #include "common/ArrowDataWrapper.h"
 #include "common/Channel.h"
 #include "common/FastMem.h"
@@ -285,8 +286,9 @@ TakeTargetType(const FieldMeta& field_meta) {
         case DataType::JSON:
             return TargetType::Json;
         case DataType::ARRAY:
-            return field_meta.is_nested_array() ? TargetType::ArrayValueView
-                                                : TargetType::ArrayView;
+            return field_meta.is_native_list_array()
+                       ? TargetType::ArrayValueView
+                       : TargetType::ArrayView;
         default:
             ThrowInfo(ErrorCode::Unsupported,
                       "data type {} does not support scalar Take",
@@ -1411,9 +1413,32 @@ ChunkedSegmentSealedImpl::GetStructElementOffsets(FieldId field_id) const {
     return GetStructElementOffsetsFromState(*CapturePublishedState(), field_id);
 }
 
+namespace {
+
+// Struct element offsets are not built from, or served for, element-nullable
+// array sub-fields yet.
+bool
+IsElementNullableArrayField(const FieldMeta& field_meta) {
+    return field_meta.has_nullable_array_element() ||
+           (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+            field_meta.is_element_nullable());
+}
+
+}  // namespace
+
 std::shared_ptr<const IStructElementOffsets>
 ChunkedSegmentSealedImpl::GetStructElementOffsetsFromState(
     const PublishedSegmentState& state, FieldId field_id) {
+    if (state.schema != nullptr && state.schema->has_field(field_id)) {
+        const auto& field_meta = (*state.schema)[field_id];
+        if (IsElementNullableArrayField(field_meta)) {
+            ThrowInfo(
+                ErrorCode::NotImplemented,
+                "struct element offsets on element-nullable array field {} "
+                "are not supported yet",
+                field_meta.get_name().get());
+        }
+    }
     if (state.runtime == nullptr) {
         return nullptr;
     }
@@ -1451,7 +1476,8 @@ ChunkedSegmentSealedImpl::PrepareStructElementOffsets(
                     continue;
                 }
                 const auto& meta = schema[candidate_id];
-                if (GetStructNameForArrayField(meta) != struct_name) {
+                if (GetStructNameForArrayField(meta) != struct_name ||
+                    IsElementNullableArrayField(meta)) {
                     continue;
                 }
                 const bool vector =
@@ -3575,7 +3601,7 @@ ChunkedSegmentSealedImpl::load_field_data_internal(
             storage::SortByPath(file_infos);
 
             const auto& field_meta = schema_snapshot->operator[](field_id);
-            if (field_meta.is_nested_array() &&
+            if (field_meta.is_native_list_array() &&
                 load_info.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "nested ARRAY field {} is supported only by Storage "
@@ -5615,7 +5641,7 @@ ChunkedSegmentSealedImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "raw Array* API does not support nested ARRAY field "
                           "{}; use protobuf retrieve output",
@@ -6731,8 +6757,10 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
     }
 
     std::optional<ChunkedColumnInterface::OwnedTakeData> taken_data;
+    // Native-list arrays are read through BulkArrayValueAt, which serves null
+    // elements; Vortex Take rejects them.
     const bool use_owned_take =
-        !field_meta.is_vector() &&
+        !field_meta.is_vector() && !field_meta.is_native_list_array() &&
         field_meta.get_data_type() != DataType::JSON && column->IsNullable() &&
         column->GetLocalFormat() == ChunkedColumnInterface::LocalFormat::Vortex;
     if (use_owned_take) {
@@ -6838,7 +6866,7 @@ ChunkedSegmentSealedImpl::get_raw_data_from_state(
                                       seg_offsets,
                                       count,
                                       dst,
-                                      field_meta.is_nested_array(),
+                                      field_meta.is_native_list_array(),
                                       taken);
             break;
         }
@@ -8851,7 +8879,7 @@ ChunkedSegmentSealedImpl::RegisterStructElementOffsetsForField(
     RuntimeResourceState& runtime,
     bool is_replace) {
     auto struct_name = GetStructNameForArrayField(field_meta);
-    if (!struct_name.has_value()) {
+    if (!struct_name.has_value() || IsElementNullableArrayField(field_meta)) {
         return;
     }
     auto& entry = runtime.struct_to_element_offsets[*struct_name];
@@ -10447,7 +10475,25 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             break;
         }
         case DataType::ARRAY: {
-            // NormalizeExternalArrow already converted List→Binary(protobuf).
+            if (field_meta.is_native_list_array()) {
+                auto typed = std::dynamic_pointer_cast<arrow::ListArray>(arr);
+                AssertInfo(
+                    typed != nullptr,
+                    "native-list ARRAY field {} expects ListArray, got {}",
+                    field_meta.get_name().get(),
+                    arr->type()->ToString());
+                auto rows = ArrowListToScalarFieldProto(
+                    *typed, field_meta.get_array_type_schema());
+                auto* obj = data_array->mutable_scalars()->mutable_array_data();
+                obj->set_element_type(
+                    static_cast<milvus::proto::schema::DataType>(
+                        field_meta.get_element_type()));
+                for (int64_t i = 0; i < size; ++i) {
+                    *obj->add_data() = rows[result_mapping[i]];
+                }
+                break;
+            }
+            // NormalizeExternalArrow already converted legacy List→Binary.
             auto obj = data_array->mutable_scalars()->mutable_array_data();
             // Same element_type carry-through as the chunked sealed path
             // above; without it the SDK rejects the response. Fix for #48619.
@@ -10596,13 +10642,30 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             break;
         }
         case DataType::VECTOR_ARRAY: {
-            // After normalize, arr is List<FixedSizeBinaryArray>.
-            auto outer_list = std::static_pointer_cast<arrow::ListArray>(arr);
+            auto outer_list = std::dynamic_pointer_cast<arrow::ListArray>(arr);
+            AssertInfo(outer_list != nullptr,
+                       "VECTOR_ARRAY field {} expects ListArray, got {}",
+                       field_meta.get_name().get(),
+                       arr->type()->ToString());
             auto inner_values =
-                std::static_pointer_cast<arrow::FixedSizeBinaryArray>(
+                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(
                     outer_list->values());
+            auto binary_values = std::dynamic_pointer_cast<arrow::BinaryArray>(
+                outer_list->values());
+            AssertInfo((field_meta.is_element_nullable() &&
+                        binary_values != nullptr) ||
+                           (!field_meta.is_element_nullable() &&
+                            inner_values != nullptr),
+                       "VECTOR_ARRAY field {} has unexpected Arrow type {}",
+                       field_meta.get_name().get(),
+                       arr->type()->ToString());
             int dim = field_meta.get_dim();
             auto element_type = field_meta.get_element_type();
+            const auto width = vector_bytes_per_element(element_type, dim);
+            AssertInfo(
+                inner_values == nullptr || inner_values->byte_width() == width,
+                "VECTOR_ARRAY field {} has unexpected vector width",
+                field_meta.get_name().get());
             auto* va = data_array->mutable_vectors()
                            ->mutable_vector_array()
                            ->mutable_data();
@@ -10610,14 +10673,52 @@ ChunkedSegmentSealedImpl::ArrowToDataArray(
             for (int64_t i = 0; i < size; i++) {
                 auto idx = result_mapping[i];
                 int64_t start = outer_list->value_offset(idx);
-                int64_t end = outer_list->value_offset(idx + 1);
+                int64_t end = outer_list->IsNull(idx)
+                                  ? start
+                                  : outer_list->value_offset(idx + 1);
                 int64_t num_vectors = end - start;
-                VectorArray vec_arr(inner_values->GetValue(start),
-                                    num_vectors,
-                                    dim,
-                                    element_type);
                 auto* vf = va->Add();
-                *vf = vec_arr.output_data();
+                if (binary_values != nullptr) {
+                    std::string compact;
+                    compact.reserve(num_vectors * width);
+                    std::vector<uint8_t> bitmap(
+                        (num_vectors + 7) / 8 + sizeof(uint64_t), 0);
+                    for (int64_t j = 0; j < num_vectors; ++j) {
+                        if (binary_values->IsNull(start + j))
+                            continue;
+                        const auto value = binary_values->GetView(start + j);
+                        AssertInfo(value.size() == width,
+                                   "VECTOR_ARRAY field {} vector width {} "
+                                   "does not match {}",
+                                   field_meta.get_name().get(),
+                                   value.size(),
+                                   width);
+                        bitmap[j >> 3] |= uint8_t{1} << (j & 7);
+                        compact.append(value.data(), value.size());
+                    }
+                    VectorArray vec_arr(
+                        compact.data(),
+                        num_vectors,
+                        dim,
+                        element_type,
+                        TargetBitmapView(bitmap.data(), num_vectors),
+                        true);
+                    *vf = vec_arr.output_data();
+                } else {
+                    for (int64_t j = start; j < end; ++j) {
+                        AssertInfo(inner_values->IsValid(j),
+                                   "non-element-nullable VECTOR_ARRAY field {} "
+                                   "contains null vector",
+                                   field_meta.get_name().get());
+                    }
+                    VectorArray vec_arr(num_vectors == 0
+                                            ? nullptr
+                                            : inner_values->GetValue(start),
+                                        num_vectors,
+                                        dim,
+                                        element_type);
+                    *vf = vec_arr.output_data();
+                }
             }
             break;
         }

@@ -82,7 +82,7 @@ func (c vecIndexChecker) StaticCheck(dataType schemapb.DataType, elementType sch
 			return merr.WrapErrParameterInvalidMsg("metric type %s not found or not supported, supported: %v", params[Metric], IntVectorMetrics)
 		}
 	} else if typeutil.IsArrayOfVectorType(dataType) {
-		if err := ValidateArrayOfVectorMetricType(elementType, params[Metric]); err != nil {
+		if err := ValidateArrayOfVectorMetricType(elementType, false, params[Metric]); err != nil {
 			return err
 		}
 	}

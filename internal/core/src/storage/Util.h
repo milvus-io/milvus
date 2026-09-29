@@ -100,6 +100,9 @@ std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type);
 
 std::shared_ptr<arrow::ArrayBuilder>
+CreateArrowBuilder(const FieldMeta& field_meta);
+
+std::shared_ptr<arrow::ArrayBuilder>
 CreateArrowBuilder(DataType data_type,
                    DataType element_type,
                    int dim,
@@ -120,6 +123,9 @@ CreateArrowScalarFromDefaultValue(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, bool nullable);
+
+std::shared_ptr<arrow::Schema>
+CreateArrowSchema(const FieldMeta& field_meta);
 
 std::shared_ptr<arrow::Schema>
 CreateArrowSchema(DataType data_type, int dim, bool nullable);

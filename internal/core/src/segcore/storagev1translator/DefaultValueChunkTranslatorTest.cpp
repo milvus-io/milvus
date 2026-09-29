@@ -27,6 +27,7 @@
 #include "common/Array.h"
 #include "common/Chunk.h"
 #include "common/FieldMeta.h"
+#include "common/ColumnarArrayChunk.h"
 #include "common/Json.h"
 #include "common/Span.h"
 #include "common/Types.h"
@@ -173,6 +174,31 @@ TEST_P(DefaultValueChunkTranslatorTest, TestInt64WithoutDefaultValue) {
     // All values should be marked as invalid (null)
     for (size_t i = 0; i < span.row_count(); ++i) {
         EXPECT_FALSE(fixed_chunk->isValid(i));
+    }
+}
+
+TEST_P(DefaultValueChunkTranslatorTest, NativeListNullBackfill) {
+    FieldMeta field_meta(FieldName("struct_array[values]"),
+                         FieldId(103),
+                         DataType::ARRAY,
+                         DataType::INT16,
+                         true,
+                         true,
+                         std::nullopt);
+    FieldDataInfo info(103, 5, getMmapDirPath());
+    auto translator = MakeDefaultValueChunkTranslatorForTest(
+        segment_id_, field_meta, info, GetParam(), true);
+    std::vector<cachinglayer::cid_t> cids = {0};
+    auto cells = translator->get_cells(nullptr, cids);
+    ASSERT_EQ(cells.size(), 1);
+    auto* chunk = dynamic_cast<ColumnarArrayChunk*>(cells[0].second.get());
+    ASSERT_NE(chunk, nullptr);
+    ASSERT_EQ(chunk->RowNums(), 5);
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_FALSE(chunk->is_valid(i));
+        EXPECT_EQ(chunk->offsets()[i], chunk->offsets()[i + 1]);
+        EXPECT_EQ(chunk->output_data(i).data_case(),
+                  ScalarFieldProto::DATA_NOT_SET);
     }
 }
 

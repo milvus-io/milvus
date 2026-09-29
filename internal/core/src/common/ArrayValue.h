@@ -198,6 +198,13 @@ class ArrayValueView {
         return element_type() == DataType::ARRAY;
     }
 
+    bool
+    is_valid(size_t index) const {
+        AssertInfo(
+            index < size(), "array element {} out of range {}", index, size());
+        return child_->isValid(static_cast<int>(begin_ + index));
+    }
+
     ArrayValueView
     array_at(size_t index) const {
         assert(type_ != nullptr && child_ != nullptr);

@@ -316,6 +316,9 @@ int32_t
 GetVectorArrayLength(const proto::schema::VectorField& vec_field,
                      DataType element_type,
                      int64_t dim) {
+    if (vec_field.valid_data_size() != 0) {
+        return vec_field.valid_data_size();
+    }
     switch (element_type) {
         case DataType::VECTOR_FLOAT:
             return vec_field.float_vector().data_size() / dim;
@@ -354,11 +357,10 @@ ExtractArrayLengthsFromFieldData(const std::vector<FieldDataPtr>& field_data,
                     continue;
                 }
                 auto source_index = data->IsNullable() ? physical_row++ : i;
-                array_lengths[offset + i] =
-                    raw_data[source_index].physical_length();
+                array_lengths[offset + i] = raw_data[source_index].length();
             }
         } else {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 auto* raw_data = static_cast<const ArrayValue*>(data->Data());
                 for (int64_t i = 0; i < num_rows; ++i) {
                     array_lengths[offset + i] =
@@ -446,7 +448,7 @@ ExtractArrayLengths(const proto::schema::FieldData& field_data,
     } else {
         // ARRAY: extract from scalars().array_data().data(i)
         const auto& array_data = field_data.scalars().array_data();
-        if (field_meta.is_nested_array()) {
+        if (field_meta.is_native_list_array()) {
             const auto has_valid_data = valid_data.size() == num_rows;
             for (int64_t i = 0; i < num_rows; ++i) {
                 if (has_valid_data && !valid_data[i]) {
@@ -563,6 +565,11 @@ SegmentGrowingImpl::InitializeStructElementOffsets() {
     std::unordered_map<std::string, std::vector<FieldId>> struct_fields;
 
     for (const auto& [field_id, field_meta] : schema->get_fields()) {
+        if (field_meta.has_nullable_array_element() ||
+            (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+             field_meta.is_element_nullable())) {
+            continue;
+        }
         auto struct_name = GetStructNameForArrayField(field_meta);
         if (struct_name.has_value()) {
             struct_fields[*struct_name].push_back(field_id);
@@ -1779,7 +1786,7 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
 
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
-            if (field_meta.is_nested_array() &&
+            if (field_meta.is_native_list_array() &&
                 infos.storage_version < STORAGE_V2) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "nested ARRAY field {} is supported only by Storage "
@@ -1808,7 +1815,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
             auto lack_num = info.row_count - total;
             std::optional<proto::schema::TypeSchema> array_type;
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.is_nested_array()) {
+                field_meta.get_data_type() == DataType::ARRAY &&
+                field_meta.is_native_list_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
             auto field_data = storage::CreateFieldDataFromDefaultValue(
@@ -1828,7 +1836,8 @@ SegmentGrowingImpl::load_field_data_internal(const LoadFieldDataInfo& infos) {
         if (!SystemProperty::Instance().IsSystem(field_id)) {
             const auto& field_meta = (*schema)[field_id];
             if (infos.storage_version >= STORAGE_V2 &&
-                field_meta.is_nested_array()) {
+                field_meta.get_data_type() == DataType::ARRAY &&
+                field_meta.is_native_list_array()) {
                 array_type = field_meta.get_array_type_schema();
             }
         }
@@ -2176,7 +2185,8 @@ SegmentGrowingImpl::load_column_group_data_internal(
                                 ? field.second.get_dim()
                                 : 1,
                             batch_num_rows,
-                            field.second.is_nested_array()
+                            field.second.is_native_list_array() &&
+                                    data_type == DataType::ARRAY
                                 ? std::make_optional(
                                       field.second.get_array_type_schema())
                                 : std::nullopt);
@@ -2288,7 +2298,13 @@ SegmentGrowingImpl::chunk_data_impl(milvus::OpContext* op_ctx,
                                     int64_t chunk_id) const {
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    if (field_meta.is_nested_array()) {
+    if (field_meta.is_native_list_array()) {
+        if (field_meta.has_nullable_array_element()) {
+            ThrowInfo(ErrorCode::NotImplemented,
+                      "expressions on element-nullable array field {} are "
+                      "not supported yet",
+                      field_meta.get_name().get());
+        }
         ThrowInfo(ErrorCode::Unsupported,
                   "Span API does not support nested ARRAY field {}",
                   field_id.get());
@@ -2409,9 +2425,15 @@ SegmentGrowingImpl::chunk_array_value_view_impl(
 
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    AssertInfo(field_meta.is_nested_array(),
+    AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_view_impl only supports recursive ARRAY "
                "fields");
+    if (field_meta.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are not "
+                  "supported yet",
+                  field_meta.get_name().get());
+    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -2567,9 +2589,11 @@ SegmentGrowingImpl::chunk_vector_array_view_impl(
                    logical_offset);
         views.emplace_back(const_cast<char*>(vector_array->data()),
                            vector_array->dim(),
-                           vector_array->physical_length(),
+                           vector_array->length(),
                            vector_array->byte_size(),
-                           vector_array->get_element_type());
+                           vector_array->get_element_type(),
+                           vector_array->element_validity_view(),
+                           vector_array->is_element_nullable());
     };
 
     if (nullable) {
@@ -2637,9 +2661,15 @@ SegmentGrowingImpl::chunk_array_value_views_by_offsets(
 
     auto schema = get_schema_snapshot();
     const auto& field_meta = (*schema)[field_id];
-    AssertInfo(field_meta.is_nested_array(),
+    AssertInfo(field_meta.is_native_list_array(),
                "chunk_array_value_views_by_offsets only supports recursive "
                "ARRAY fields");
+    if (field_meta.has_nullable_array_element()) {
+        ThrowInfo(ErrorCode::NotImplemented,
+                  "expressions on element-nullable array field {} are not "
+                  "supported yet",
+                  field_meta.get_name().get());
+    }
 
     const auto* array_data = insert_record_.get_data<ArrayValue>(field_id);
     const auto size_per_chunk = array_data->get_size_per_chunk();
@@ -3484,7 +3514,7 @@ SegmentGrowingImpl::bulk_subscript(milvus::OpContext* op_ctx,
             break;
         }
         case DataType::ARRAY: {
-            if (field_meta.is_nested_array()) {
+            if (field_meta.is_native_list_array()) {
                 ThrowInfo(ErrorCode::Unsupported,
                           "raw Array* API does not support nested ARRAY field "
                           "{}; use protobuf retrieve output",
@@ -4192,7 +4222,7 @@ SegmentGrowingImpl::LoadColumnGroup(
                         ? field.get_dim()
                         : 1,
                     rows_to_load,
-                    field.is_nested_array()
+                    field.is_native_list_array() && data_type == DataType::ARRAY
                         ? std::make_optional(field.get_array_type_schema())
                         : std::nullopt);
                 auto array = record_batch->column(i);
@@ -4364,6 +4394,11 @@ SegmentGrowingImpl::EnsureStructElementOffsetsForField(
 void
 SegmentGrowingImpl::EnsureStructElementOffsetsForField(
     const FieldMeta& field_meta, int64_t row_count, const Schema& schema) {
+    if (field_meta.has_nullable_array_element() ||
+        (field_meta.get_data_type() == DataType::VECTOR_ARRAY &&
+         field_meta.is_element_nullable())) {
+        return;
+    }
     auto struct_name = GetStructNameForArrayField(field_meta);
     if (!struct_name.has_value()) {
         return;

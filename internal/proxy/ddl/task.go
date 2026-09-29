@@ -540,6 +540,9 @@ func (t *CreateCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := validateNativeListArrayGrowingSourceFlush(t.schema, typeutil.GetAllFieldSchemas(t.schema)...); err != nil {
+		return err
+	}
 
 	// Transform struct field names to ensure global uniqueness
 	// This allows different structs to have fields with the same name
@@ -737,6 +740,9 @@ func (t *AddCollectionStructFieldTask) PreExecute(ctx context.Context) error {
 
 	t.structFieldSchema = proto.Clone(t.GetStructArrayFieldSchema()).(*schemapb.StructArrayFieldSchema)
 	if err := validateAddStructFieldRequest(t.oldSchema, t.structFieldSchema); err != nil {
+		return err
+	}
+	if err := validateNativeListArrayGrowingSourceFlush(t.oldSchema, t.structFieldSchema.GetFields()...); err != nil {
 		return err
 	}
 	if err := checkArrayFeatureGateStruct(t.structFieldSchema); err != nil {
@@ -3142,7 +3148,9 @@ func (t *LoadCollectionTask) Execute(ctx context.Context) (err error) {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
+			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -3409,7 +3417,9 @@ func (t *LoadPartitionsTask) Execute(ctx context.Context) error {
 	unindexedVecFields := make([]string, 0)
 	allFields := typeutil.GetAllFieldSchemas(collSchema.CollectionSchema)
 	for _, field := range allFields {
-		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) {
+		// Element-nullable vector arrays cannot be indexed but can be loaded for queries.
+		if typeutil.IsVectorType(field.GetDataType()) && loadFieldsSet.Contain(field.GetFieldID()) &&
+			(field.GetDataType() != schemapb.DataType_ArrayOfVector || !field.GetElementNullable()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}

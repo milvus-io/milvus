@@ -974,9 +974,10 @@ BuildRetrieveUserColumnBatch(const std::shared_ptr<RetrieveUserColumns>& holder,
         // already has Arrow's value-buffer layout is aliased rather than
         // copied. See FieldDataToArrow's contract: the holder is kept alive by
         // the returned arrays, and its storage must not be mutated after this.
-        ARROW_ASSIGN_OR_RAISE(auto converted,
-                              milvus::segcore::FieldDataToArrow(
-                                  name, field_data, total_rows, false, holder));
+        ARROW_ASSIGN_OR_RAISE(
+            auto converted,
+            milvus::segcore::FieldDataToArrow(
+                name, field_data, total_rows, false, holder, &field_meta));
         auto array = converted.second;
         // Plain arrow::field, NOT MilvusField: no per-field metadata.
         //

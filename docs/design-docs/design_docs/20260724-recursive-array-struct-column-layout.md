@@ -2,11 +2,12 @@
 
 ## Background
 
-This document covers only the in-memory representation of Array data in
-segcore. It does not cover the persistence format.
+This document covers the in-memory representation of nested scalar Array data
+in segcore and its Storage V2 Arrow representation. In this stage, nesting is
+limited to `Array<Array<scalar leaf>>` inside a `StructArrayField` sub-field.
 
-Segcore's current `Array`, `ArrayView`, and `ArrayChunk` implementations are
-all based on a model in which the leaf data immediately follows the Array.
+The legacy `Array`, `ArrayView`, and `ArrayChunk` model places leaf data
+immediately after the Array.
 For example, an `ArrayChunk` in a sealed segment has the following in-memory
 layout:
 
@@ -28,8 +29,8 @@ it cannot naturally represent `Array(Array(Int))`.
 
 ## Design
 
-An Array no longer interprets leaf data directly. It stores only its own
-logical offsets and null bitset, and points to a child column:
+For a native-list scalar Array, `ColumnarArrayChunk` represents each Array
+level by logical offsets and a null bitset, and points to a child column:
 
 ```text
 ArrayColumn
@@ -48,7 +49,9 @@ offsets.back() == child.row_count
 nullable => null_bitset.bit_count >= row_count
 ```
 
-When `offsets[i] == offsets[i+1]`, the row may be either empty or null. The two
+For a null list row or null inner list, `offsets[i] == offsets[i+1]` is
+required: a null list cannot own a non-empty child segment. When the offsets
+are equal, the row may be either empty or null. The two
 cases must be distinguished using `null_bitset[i]`. A non-nullable Array can
 omit this bitset; every nullable level of a nested Array has its own independent
 null bitset.
@@ -63,80 +66,96 @@ ArrayColumn
     ├── inner_offsets
     ├── inner_null_bitset
     └── Int32Column
+        ├── leaf_null_bitset  // when the leaf TypeSchema is nullable
+        └── values
 ```
+
+The outer bitset represents the whole field row, the inner bitset represents
+the inner Array at each outer position, and the leaf bitset represents each
+scalar value. A null leaf keeps a dense placeholder value; a null inner Array
+has an empty child range. The leaf column uses native widths, including
+`int8` and `int16` rather than proto's widened int32 values.
 
 An Array does not interpret the physical format of its child. Variable-length
 leaf types such as String continue to maintain their own byte offsets:
 
 ```text
 StringColumn
+├── leaf_null_bitset  // when nullable
 ├── byte_offsets
 └── chars
 ```
 
 Therefore, Array offsets are always expressed in logical child row numbers,
 not byte positions. Null semantics are stored independently in the null bitset
-at the same level.
+at the same level, including the leaf level.
 
-## Complex StructArray Projection Example
+## StructArray Projection Example
 
-A recursive ArrayColumn can also represent a multi-level StructArray after
-FieldID projection. Given:
+A `StructArrayField` can project a nested scalar Array sub-field by FieldID.
+For a Struct array with a scalar `label` sub-field and a
+`nested_values: Array<Array<Int32>>` sub-field, the projected columns are:
 
 ```text
-StructArray(
-    int,                                  <- FieldID 1
-    nested StructArray(
-        String,                           <- FieldID 2
-        Double                            <- FieldID 3
-    )
-)
+label: String                               <- FieldID 1
+nested_values: Array<Array<Int32>>          <- FieldID 2
 ```
 
-Let `S0` denote the logical offsets and null bitset of the outer StructArray,
-and `S1` denote those of the inner StructArray. The column for each FieldID can
-then be represented as:
+The outer offsets and row validity follow the parent Struct array. For the
+nested sub-field, a second Array level supplies inner offsets and validity;
+its scalar leaf has separate validity:
 
 ```text
 FieldID: 1
 └── ArrayColumn
-    ├── offsets -> S0.offsets
-    ├── null_bitset -> S0.null_bitset
-    └── IntColumn
+    ├── outer offsets and row null bitset
+    └── StringColumn
 
 FieldID: 2
 └── ArrayColumn
-    ├── offsets -> S0.offsets
-    ├── null_bitset -> S0.null_bitset
+    ├── outer offsets and row null bitset
     └── ArrayColumn
-        ├── offsets -> S1.offsets
-        ├── null_bitset -> S1.null_bitset
-        └── StringColumn
-            ├── byte_offsets
-            └── chars
-
-FieldID: 3
-└── ArrayColumn
-    ├── offsets -> S0.offsets
-    ├── null_bitset -> S0.null_bitset
-    └── ArrayColumn
-        ├── offsets -> S1.offsets
-        ├── null_bitset -> S1.null_bitset
-        └── DoubleColumn
+        ├── inner offsets and inner null bitset
+        └── Int32Column with leaf null bitset
 ```
 
-# Storage Layer Remains Unchanged
+## Storage Layer
 
-Currently, each Array row is represented by a `ScalarField` protobuf message.
-In Arrow, an Array is represented as binary bytes, so each row is serialized
-into bytes by protobuf and then written to Arrow.
-
-The Array format conversion pipeline on the write path is:
+Storage V2 writes nested scalar `Array<Array<T>>` as Arrow `list<list<T>>`,
+regardless of which of its three levels are nullable. Each list child field is
+named `item`. For example, a nullable row with nullable inner Arrays and
+nullable Int32 leaves has this schema:
 
 ```text
-ScalarField -> serialized ScalarField protobuf bytes -> Arrow -> Parquet/Vortex
+field: list<item: list<item: int32 nullable> nullable> nullable
 ```
 
-Because `ScalarField` is itself a nested representation, it can express Arrays
-with arbitrary nesting depth. Serialization is handled by protobuf itself, so
-the write path should not require any changes.
+The top-level Arrow field nullable flag equals `FieldSchema.nullable`; the
+first `item` nullable flag equals `FieldSchema.element_nullable`; the second
+`item` nullable flag equals the leaf `TypeSchema.nullable`. The TypeSchema root
+and second node must mirror the first two FieldSchema flags, respectively;
+the leaf flag is independent. Only nested Arrays carry this wire TypeSchema.
+For a single-level element-nullable scalar Array, `FieldMeta` synthesizes an
+internal TypeSchema for `ColumnarArrayChunk`/`ArrayValue`; it is not added to
+the field's wire schema.
+
+Proxy passes dense nested proto data to storage. For example,
+`[[1, null], null, []]` has this per-row shape:
+
+```text
+ScalarField{ArrayData: ArrayArray{ElementType: Int32, Data: [
+  ScalarField{IntData: [1, 0], valid_data: [true, false]},
+  ScalarField{IntData: []},  // null inner Array
+  ScalarField{IntData: []}   // non-null empty inner Array
+]}, valid_data: [true, false, true]}
+```
+
+The two empty payloads are distinguished by the parent validity. The row
+validity is duplicated in `FieldData.valid_data` and the outer
+`ScalarField.valid_data`; the per-row message above carries inner validity.
+Go storage converts this shape to Arrow lists with native-width scalar leaves;
+`ColumnarArrayChunk` builds directly from Arrow `ListArray` rather than
+deserializing proto Binary. Null list rows and null inner lists have repeated
+offsets and no child values. The legacy single-level scalar Array with
+non-nullable elements remains one proto-serialized `Binary` per row and loads
+through `ArrayChunk`.
