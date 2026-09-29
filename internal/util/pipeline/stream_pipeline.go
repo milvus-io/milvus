@@ -54,6 +54,8 @@ type streamPipeline struct {
 	closeOnce sync.Once
 
 	lastAccessTime          *atomic.Time
+	streamError             *atomic.Error
+	streamErrorHandler      func(error)
 	emptyTimeTickSlowdowner *emptyTimeTickSlowdowner
 	msgPackBatcher          MsgPackBatcher
 }
@@ -103,6 +105,9 @@ func (p *streamPipeline) work() {
 // Status returns the status of the pipeline, it will return "Healthy" if the input node
 // has received any msg in the last nodeTtInterval
 func (p *streamPipeline) Status() string {
+	if err := p.streamError.Load(); err != nil {
+		return fmt.Sprintf("stream terminated: %s", err.Error())
+	}
 	diff := time.Since(p.lastAccessTime.Load())
 	if diff > p.pipeline.nodeTtInterval {
 		return fmt.Sprintf("input node hasn't received any msg in the last %s", diff.String())
@@ -122,6 +127,12 @@ func (p *streamPipeline) ConsumeMsgStream(ctx context.Context, position *msgpb.M
 		VChannel: p.vChannel,
 		Pos:      position,
 		SubPos:   common.SubscriptionPositionUnknown,
+		OnStreamError: func(err error) {
+			p.streamError.Store(err)
+			if p.streamErrorHandler != nil {
+				p.streamErrorHandler(err)
+			}
+		},
 	})
 	if err != nil {
 		mlog.Error(ctx, "dispatcher register failed after retried", mlog.String("channel", position.ChannelName), mlog.Err(err))
@@ -188,6 +199,7 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client,
 		closeCh:                 make(chan struct{}),
 		closeWg:                 sync.WaitGroup{},
 		lastAccessTime:          atomic.NewTime(time.Now()),
+		streamError:             atomic.NewError(nil),
 		emptyTimeTickSlowdowner: newEmptyTimeTickSlowdowner(lastestMVCCTimeTickGetter, vChannel),
 	}
 
@@ -203,6 +215,12 @@ type StreamPipelineOption func(*streamPipeline)
 func WithMsgPackBatcher(batcher MsgPackBatcher) StreamPipelineOption {
 	return func(pipeline *streamPipeline) {
 		pipeline.msgPackBatcher = batcher
+	}
+}
+
+func WithStreamErrorHandler(handler func(error)) StreamPipelineOption {
+	return func(pipeline *streamPipeline) {
+		pipeline.streamErrorHandler = handler
 	}
 }
 

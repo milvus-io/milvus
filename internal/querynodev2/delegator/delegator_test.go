@@ -331,6 +331,20 @@ func (s *DelegatorSuite) TestBasicInfo() {
 	s.True(s.delegator.Serviceable())
 }
 
+func (s *DelegatorSuite) TestMarkStreamingUnavailable() {
+	sd := s.delegator.(*shardDelegator)
+	sd.Start()
+	notified := make(chan string, 1)
+	sd.leaderViewUpdatedCallback = func(channel string) {
+		notified <- channel
+	}
+
+	sd.MarkStreamingUnavailable(errors.New("terminal stream error"))
+	s.False(sd.Serviceable())
+	s.True(sd.Stopped())
+	s.Equal(s.vchannelName, <-notified)
+}
+
 // TestDelegatorStateChecks tests the state checking methods added/modified in the delegator
 func (s *DelegatorSuite) TestDelegatorStateChecks() {
 	sd := s.delegator.(*shardDelegator)
