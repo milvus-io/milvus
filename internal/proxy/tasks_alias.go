@@ -83,4 +83,5 @@ var (
 	GetPartitionIDs                          = dql.GetPartitionIDs
 	MarshalPlanWithMembershipFilterSizeLimit = dql.MarshalPlanWithMembershipFilterSizeLimit
 	NormalizeFP32ToFP16BF16VectorFieldData   = dql.NormalizeFP32ToFP16BF16VectorFieldData
+	FormatTimestamptzFields                  = dql.FormatTimestamptzFields
 )

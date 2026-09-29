@@ -571,6 +571,11 @@ func timestamptzUTC2IsoStr(results []*schemapb.FieldData, colTimezone string) er
 	return nil
 }
 
+// FormatTimestamptzFields converts internal TIMESTAMPTZ values to query-result strings.
+func FormatTimestamptzFields(results []*schemapb.FieldData, colTimezone string) error {
+	return timestamptzUTC2IsoStr(results, colTimezone)
+}
+
 func validateNQLimit(limit int64) error {
 	nqLimit := paramtable.Get().QuotaConfig.NQLimit.GetAsInt64()
 	if limit <= 0 || limit > nqLimit {

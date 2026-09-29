@@ -601,7 +601,7 @@ func TestUpsertUsingPolicyOnlyAppliesToExistingRows(t *testing.T) {
 			PolicyName: "upsert_allow_mixed",
 			PolicyType: rlsutil.PolicyTypePermissive,
 			Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
-			UsingExpr:  "id > 0",
+			UsingExpr:  "id == 1",
 			CheckExpr:  "true",
 		}})
 		resolvePredicates(task)

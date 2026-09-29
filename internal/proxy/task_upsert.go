@@ -252,7 +252,7 @@ func retrieveByPKs(ctx context.Context, t *upsertTask, ids *schemapb.IDs, output
 	}, t.GetMetaCache(), false)
 	qt.SetActualChannelsMvcc(channelReadTs)
 	qt.SetSkipRuntimeRLS(true)
-	qt.SetPreserveRawFields(true)
+	qt.SetPreserveRawFields(t.rlsEnabled && t.rlsUsingPredicate != nil)
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Upsert-retrieveByPKs")
 	defer func() {
 		sp.End()
@@ -464,6 +464,11 @@ func (it *upsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 		if err := rls.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, usingExpr, "upsert", "using"); err != nil {
 			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
 			return nil, err
+		}
+		if partialUpdate && usingExpr != nil {
+			if err := FormatTimestamptzFields(existFieldData, it.schema.SchemaHelper.GetTimezone()); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := generateFunctions(); err != nil {

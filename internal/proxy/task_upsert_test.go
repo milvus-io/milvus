@@ -2457,7 +2457,7 @@ func TestRetrieveByPKs_Success(t *testing.T) {
 			var setPreserveRawFields func(*queryTask, bool)
 			preserveRawFieldsPatch := mockey.Mock((*queryTask).SetPreserveRawFields).
 				To(func(task *queryTask, preserve bool) {
-					require.True(t, preserve)
+					require.False(t, preserve)
 					setPreserveRawFields(task, preserve)
 				}).Origin(&setPreserveRawFields).Build()
 			defer preserveRawFieldsPatch.UnPatch()

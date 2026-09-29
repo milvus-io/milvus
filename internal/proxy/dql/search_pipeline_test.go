@@ -3417,7 +3417,7 @@ func (s *SearchPipelineSuite) TestNewRequeryOperatorReusesRLSPredicate() {
 	predicate := &planpb.Expr{Expr: &planpb.Expr_AlwaysTrueExpr{AlwaysTrueExpr: &planpb.AlwaysTrueExpr{}}}
 	task := &SearchTask{
 		ctx:           context.Background(),
-		SearchRequest: &internalpb.SearchRequest{},
+		SearchRequest: &internalpb.SearchRequest{Base: &commonpb.MsgBase{}},
 		request:       &milvuspb.SearchRequest{},
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{pkField}},
