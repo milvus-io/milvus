@@ -66,11 +66,24 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 	terminalErr error,
 	retryErr error,
 ) {
-	enabled, err := common.IsRLSEnabled(in.GetSchema().GetProperties()...)
+	properties := in.GetSchema().GetProperties()
+	enabled, err := common.IsRLSEnabled(properties...)
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties"), nil
 	}
-	if !enabled || in.GetSkipRls() {
+	force, err := common.IsRLSForce(properties...)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties"), nil
+	}
+	if !enabled {
+		return nil, nil, nil
+	}
+	if in.GetSkipRls() {
+		if force {
+			return nil, merr.WrapErrPrivilegeNotPermitted(
+				"import operation denied by RLS: skip_rls is not allowed when rls.force is enabled on collection %s",
+				in.GetSchema().GetName()), nil
+		}
 		return nil, nil, nil
 	}
 	if importutilv2.IsL0Import(in.GetOptions()) {
@@ -106,49 +119,58 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 		policies = append(policies, policy)
 	}
 
-	principalResp, terminalErr, retryErr := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
-		Base:          commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
-		CollectionId:  in.GetCollectionID(),
-		Kind:          rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
-		PrincipalName: principalName,
-	}, "RLS principal tags")
-	if terminalErr != nil || retryErr != nil {
-		return nil, terminalErr, retryErr
-	}
-	if principalResp.GetCollectionId() != in.GetCollectionID() {
-		return nil, merr.WrapErrDataIntegrityMsg(
-			"RLS principal metadata collection id mismatch: expected %d, received %d",
-			in.GetCollectionID(), principalResp.GetCollectionId()), nil
-	}
-
-	tags := map[string]rlsutil.TagValue{}
-	principals := principalResp.GetPrincipals()
-	if len(principals) > 1 {
-		return nil, merr.WrapErrDataIntegrityMsg("duplicated RLS principal metadata for %q", principalName), nil
-	}
-	for _, principal := range principals {
-		if principal == nil || principal.GetPrincipalName() != principalName || principal.GetCollectionId() != in.GetCollectionID() {
-			return nil, merr.WrapErrDataIntegrityMsg("invalid RLS principal metadata returned for %q", principalName), nil
-		}
-		tags, err = rlsutil.TagsFromJSON(principal.GetTags())
-		if err != nil {
-			return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal %q tags", principalName), nil
-		}
-	}
-
 	schema, err := typeutil.CreateSchemaHelper(in.GetSchema())
 	if err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "create schema helper for RLS import check"), nil
 	}
+	loadPrincipalTags := func() (map[string]rlsutil.TagValue, error) {
+		principalResp, terminalErr, retryErr := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+			Base:          commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+			CollectionId:  in.GetCollectionID(),
+			Kind:          rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
+			PrincipalName: principalName,
+		}, "RLS principal tags")
+		if terminalErr != nil {
+			return nil, terminalErr
+		}
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		if principalResp.GetCollectionId() != in.GetCollectionID() {
+			return nil, merr.WrapErrDataIntegrityMsg(
+				"RLS principal metadata collection id mismatch: expected %d, received %d",
+				in.GetCollectionID(), principalResp.GetCollectionId())
+		}
+
+		tags := map[string]rlsutil.TagValue{}
+		principals := principalResp.GetPrincipals()
+		if len(principals) > 1 {
+			return nil, merr.WrapErrDataIntegrityMsg("duplicated RLS principal metadata for %q", principalName)
+		}
+		for _, principal := range principals {
+			if principal == nil || principal.GetPrincipalName() != principalName || principal.GetCollectionId() != in.GetCollectionID() {
+				return nil, merr.WrapErrDataIntegrityMsg("invalid RLS principal metadata returned for %q", principalName)
+			}
+			decodedTags, err := rlsutil.TagsFromJSON(principal.GetTags())
+			if err != nil {
+				return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal %q tags", principalName)
+			}
+			tags = decodedTags
+		}
+		return tags, nil
+	}
 	expr, err := rls.BuildCheckPredicate(
 		policies,
 		principalName,
-		tags,
+		loadPrincipalTags,
 		rlsutil.PolicyActionInsert,
 		schema,
 		paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt(),
 	)
 	if err != nil {
+		if merr.IsRetryableErr(err) {
+			return nil, nil, err
+		}
 		return nil, err, nil
 	}
 	if expr == nil {

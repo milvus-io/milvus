@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 // ResponseBase is the common milvus restful response struct.
@@ -47,8 +48,6 @@ type BulkImportOption struct {
 	Files [][]string `json:"files,omitempty"`
 	// optional params
 	PartitionName string `json:"partitionName,omitempty"`
-	RLSPrincipal  string `json:"rlsPrincipal,omitempty"`
-	SkipRLS       bool   `json:"skipRls,omitempty"`
 	APIKey        string `json:"-"`
 	// cloud extra params
 	ObjectURL string `json:"objectUrl,omitempty"`
@@ -70,13 +69,11 @@ func (opt *BulkImportOption) WithPartition(partitionName string) *BulkImportOpti
 }
 
 func (opt *BulkImportOption) WithRLSPrincipal(principal string) *BulkImportOption {
-	opt.RLSPrincipal = principal
-	return opt
+	return opt.WithOption("rls_principal", principal)
 }
 
 func (opt *BulkImportOption) WithSkipRLS(skip bool) *BulkImportOption {
-	opt.SkipRLS = skip
-	return opt
+	return opt.WithOption("skip_rls", strconv.FormatBool(skip))
 }
 
 func (opt *BulkImportOption) WithAPIKey(key string) *BulkImportOption {

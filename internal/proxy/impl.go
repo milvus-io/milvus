@@ -5149,9 +5149,7 @@ func convertToV2ImportRequest(req *milvuspb.ImportRequest) *internalpb.ImportReq
 		Files: []*internalpb.ImportFile{{
 			Paths: req.GetFiles(),
 		}},
-		Options:      req.GetOptions(),
-		RlsPrincipal: req.GetRlsPrincipal(),
-		SkipRls:      req.GetSkipRls(),
+		Options: req.GetOptions(),
 	}
 }
 

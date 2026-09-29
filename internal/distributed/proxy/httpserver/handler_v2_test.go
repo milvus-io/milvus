@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
@@ -5025,7 +5026,8 @@ func TestRESTV2ForwardsRLSFields(t *testing.T) {
 		Status: commonSuccessStatus, Results: &schemapb.SearchResultData{},
 	}, nil).Once()
 	mp.EXPECT().ImportV2(mock.Anything, mock.MatchedBy(func(req *internalpb.ImportRequest) bool {
-		return matchesRLS(req)
+		principal, skip, err := importutilv2.GetRLSOptions(req.GetOptions())
+		return err == nil && principal == "alice" && skip
 	})).Return(&internalpb.ImportResponse{Status: commonSuccessStatus, JobID: "1"}, nil).Once()
 
 	engine := initHTTPServerV2(mp, false)
@@ -5046,7 +5048,7 @@ func TestRESTV2ForwardsRLSFields(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	engine.ServeHTTP(w, httptest.NewRequest(http.MethodPost, versionalV2(ImportJobCategory, CreateAction),
-		strings.NewReader(`{"collectionName":"book","files":[["book.json"]],"rlsPrincipal":"alice","skipRls":true}`)))
+		strings.NewReader(`{"collectionName":"book","files":[["book.json"]],"options":{"rls_principal":"alice","skip_rls":"true"}}`)))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 }
 

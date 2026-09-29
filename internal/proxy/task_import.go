@@ -102,6 +102,10 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	if err := importutilv2.ValidateNoDuplicateKeys(req.GetOptions()); err != nil {
 		return err
 	}
+	rlsPrincipal, requestedSkipRLS, err := importutilv2.GetRLSOptions(req.GetOptions())
+	if err != nil {
+		return err
+	}
 
 	collectionID, err := it.GetMetaCache().GetCollectionID(ctx, req.GetDbName(), req.GetCollectionName())
 	if err != nil {
@@ -124,15 +128,15 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	req.CollectionName = canonicalCollectionName
 
 	rlsEnabled := colInfo.RlsEnabled
-	if rlsEnabled && req.GetSkipRls() {
-		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, req.GetSkipRls(),
+	if rlsEnabled && requestedSkipRLS {
+		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
 			canonicalDBName, canonicalCollectionName, "import")
 		if err != nil {
 			return err
 		}
 		it.skipRLS = !rlsEnabled
 	}
-	it.rlsPrincipal, _, err = rls.ResolveRuntimePrincipal(rlsEnabled, req.GetRlsPrincipal(), "import")
+	it.rlsPrincipal, _, err = rls.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
 	if err != nil {
 		return err
 	}

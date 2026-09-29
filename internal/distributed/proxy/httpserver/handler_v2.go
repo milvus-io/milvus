@@ -4029,7 +4029,6 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 }
 
 func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	importReq := anyReq.(*ImportReq)
 	var (
 		collectionGetter = anyReq.(requestutil.CollectionNameGetter)
 		partitionGetter  = anyReq.(requestutil.PartitionNameGetter)
@@ -4043,9 +4042,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		Files: lo.Map(filesGetter.GetFiles(), func(paths []string, _ int) *internalpb.ImportFile {
 			return &internalpb.ImportFile{Paths: paths}
 		}),
-		Options:      funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
-		RlsPrincipal: importReq.RlsPrincipal,
-		SkipRls:      importReq.SkipRls,
+		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
 	c.Set(ContextRequest, req)
 

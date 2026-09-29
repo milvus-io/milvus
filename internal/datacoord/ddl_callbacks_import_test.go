@@ -625,12 +625,16 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 		100,
 		[]int64{1},
 		[]*internalpb.ImportFile{{Id: 1, Paths: []string{"/test/file.json"}}},
-		[]*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		[]*commonpb.KeyValuePair{
+			{Key: "timeout", Value: "300s"},
+			{Key: importutilv2.RLSPrincipal, Value: "mallory"},
+			{Key: importutilv2.SkipRLS, Value: "true"},
+		},
 		1000,
 		[]string{"v1"},
 		"",
 		"alice",
-		true,
+		false,
 	)
 
 	s.NoError(err)
@@ -640,8 +644,9 @@ func (s *ImportCallbacksSuite) TestBroadcastImport_SuccessWithValidInput() {
 	s.NoError(err)
 	body, err := msg.Body(ctx)
 	s.NoError(err)
-	s.Equal("alice", body.GetRlsPrincipal())
-	s.True(body.GetSkipRls())
+	s.Equal("alice", body.GetOptions()[importutilv2.RLSPrincipal])
+	_, hasSkipRLS := body.GetOptions()[importutilv2.SkipRLS]
+	s.False(hasSkipRLS)
 	s.Equal("canonical_collection", body.GetCollectionName())
 	s.Equal(int32(2), body.GetSchema().GetVersion())
 }
@@ -1782,7 +1787,14 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	const cchannel = "by-dev-rootcoord-dml_0_vcchan"
 	broadcastMsg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{}).
-		WithBody(&msgpb.ImportMsg{CollectionID: 100, JobID: 1, RlsPrincipal: "alice", SkipRls: true}).
+		WithBody(&msgpb.ImportMsg{
+			CollectionID: 100,
+			JobID:        1,
+			Options: map[string]string{
+				importutilv2.RLSPrincipal: "alice",
+				importutilv2.SkipRLS:      "true",
+			},
+		}).
 		WithBroadcast([]string{"vchannel1"}).
 		MustBuildBroadcast().
 		OverwriteBroadcastHeader(1)

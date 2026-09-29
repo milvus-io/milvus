@@ -289,15 +289,15 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileID
 		if err != nil {
 			return err
 		}
+		if err = t.validateRLSRows(data, rowNum); err != nil {
+			return err
+		}
 		if !importutilv2.IsBackup(t.req.GetOptions()) {
 			err = RunEmbeddingFunction(t, data)
 			if err != nil {
 				mlog.Warn(t.ctx, "run embedding function failed", WrapLogFields(t, mlog.Err(err))...)
 				return err
 			}
-		}
-		if err = t.validateRLSRows(data, rowNum); err != nil {
-			return err
 		}
 		hashedData, err := HashData(t, data)
 		if err != nil {

@@ -1930,13 +1930,15 @@ func TestProxy_ImportV2(t *testing.T) {
 }
 
 func TestConvertToV2ImportRequestPreservesRLSContext(t *testing.T) {
+	options := []*commonpb.KeyValuePair{
+		{Key: "rls_principal", Value: "alice"},
+		{Key: "skip_rls", Value: "true"},
+	}
 	req := convertToV2ImportRequest(&milvuspb.ImportRequest{
-		RlsPrincipal: "alice",
-		SkipRls:      true,
+		Options: options,
 	})
 
-	assert.Equal(t, "alice", req.GetRlsPrincipal())
-	assert.True(t, req.GetSkipRls())
+	assert.Equal(t, options, req.GetOptions())
 }
 
 func TestGetCollectionRateSubLabel(t *testing.T) {

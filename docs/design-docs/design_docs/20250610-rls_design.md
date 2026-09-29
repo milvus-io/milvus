@@ -33,10 +33,11 @@ collection and invalidates Proxy RLS state. These synchronization steps are
 performed by Milvus as part of the property transition; users do not manage
 Proxy caches directly.
 
-Every row-bearing request on an enabled collection must provide a non-blank
-top-level `rls_principal` or request `skip_rls=true`. Sub-searches inherit the
-top-level decision. A skip is allowed only when authorization is disabled or
-the authenticated Milvus user has `SkipRLS` on the collection.
+Every row-bearing request on an enabled collection must provide request-level
+RLS context. Most APIs use top-level `rls_principal` and `skip_rls`; bulk import
+carries the same values in its existing `options` map. Sub-searches inherit the
+top-level decision. A skip is allowed only when authorization is disabled or the
+authenticated Milvus user has `SkipRLS` on the collection.
 
 `rls.force=true` rejects `skip_rls=true` and is meaningful only while RLS is
 enabled.

@@ -132,7 +132,7 @@ func TestBroadcastService_ForwardImportToDataCoord(t *testing.T) {
 			len(req.ChannelNames) == 2 &&
 			len(req.Files) == 1 && req.Files[0].Paths[0] == "/path/to/file1.json" &&
 			req.JobID == 123 &&
-			req.GetRlsPrincipal() == "alice" && req.GetSkipRls()
+			req.GetRlsPrincipal() == "" && !req.GetSkipRls()
 	})).Return(&internalpb.ImportResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 		JobID:  "123",
@@ -152,14 +152,16 @@ func TestBroadcastService_ForwardImportToDataCoord(t *testing.T) {
 			Files: []*msgpb.ImportFile{
 				{Id: 1, Paths: []string{"/path/to/file1.json"}},
 			},
-			Options: map[string]string{"key": "value"},
+			Options: map[string]string{
+				"key":           "value",
+				"rls_principal": "alice",
+				"skip_rls":      "true",
+			},
 			Schema: &schemapb.CollectionSchema{
 				Name:        "test_collection",
 				Description: "test schema",
 			},
-			JobID:        123,
-			RlsPrincipal: "alice",
-			SkipRls:      true,
+			JobID: 123,
 		}).
 		WithBroadcast([]string{"v1", "v2"}).
 		MustBuildBroadcast()

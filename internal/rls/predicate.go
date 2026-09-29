@@ -209,12 +209,12 @@ func (m *manager) resolvePredicate(ctx context.Context, collectionID UniqueID, p
 }
 
 // BuildCheckPredicate compiles and instantiates a write CHECK predicate from
-// one authoritative metadata snapshot. It is used by asynchronous writers
-// that persist the resulting predicate instead of using the Proxy cache.
+// one authoritative metadata snapshot. It loads principal tags only when the
+// compiled predicate references them.
 func BuildCheckPredicate(
 	policies []*rlsutil.RowPolicy,
 	principalName string,
-	principalTags map[string]rlsutil.TagValue,
+	loadPrincipalTags func() (map[string]rlsutil.TagValue, error),
 	action rlsutil.PolicyAction,
 	schema *typeutil.SchemaHelper,
 	maxLength int,
@@ -238,6 +238,16 @@ func BuildCheckPredicate(
 	}
 	if compiled == nil {
 		return nil, denyNoApplicableRLSPolicy(action, checkExprKind)
+	}
+	var principalTags map[string]rlsutil.TagValue
+	if compiled.needsTags {
+		if loadPrincipalTags == nil {
+			return nil, merr.WrapErrServiceInternalMsg("RLS check predicate requires principal tags without a tag loader")
+		}
+		principalTags, err = loadPrincipalTags()
+		if err != nil {
+			return nil, err
+		}
 	}
 	expr, err := compiled.Instantiate(principalName, principalTags)
 	if err != nil {

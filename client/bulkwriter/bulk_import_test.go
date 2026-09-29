@@ -92,8 +92,10 @@ func (s *BulkImportSuite) TestBulkImportRLSOptions() {
 	s.JSONEq(`{
 		"collectionName": "hello_milvus",
 		"files": [["files/a.json"]],
-		"rlsPrincipal": "alice",
-		"skipRls": true
+		"options": {
+			"rls_principal": "alice",
+			"skip_rls": "true"
+		}
 	}`, string(request))
 }
 

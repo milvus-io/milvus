@@ -149,4 +149,39 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		require.NoError(t, terminalErr)
 		require.NoError(t, retryErr)
 	})
+
+	t.Run("force rejects stale authorized skip", func(t *testing.T) {
+		skipped := proto.Clone(request).(*internalpb.ImportRequestInternal)
+		skipped.SkipRls = true
+		skipped.Schema.Properties = append(skipped.Schema.Properties,
+			&commonpb.KeyValuePair{Key: common.RLSForceKey, Value: "true"})
+
+		serialized, terminalErr, retryErr := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
+		require.Empty(t, serialized)
+		require.ErrorIs(t, terminalErr, merr.ErrPrivilegeNotPermitted)
+		require.NoError(t, retryErr)
+	})
+
+	t.Run("principal-only predicate skips tag lookup", func(t *testing.T) {
+		mixCoord := internalmocks.NewMixCoord(t)
+		mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+			return req.GetCollectionId() == 10 && req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
+		})).Return(&rootcoordpb.GetRLSMetadataResponse{
+			Status:       merr.Success(),
+			CollectionId: 10,
+			Policies: []*rootcoordpb.RLSPolicyInfo{{
+				CollectionId: 10,
+				PolicyId:     20,
+				PolicyName:   "principal_check",
+				PolicyType:   milvuspb.RowPolicyType_RowPolicyTypePermissive,
+				Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert},
+				CheckExpr:    "tenant == $current_principal",
+			}},
+		}, nil).Once()
+
+		serialized, terminalErr, retryErr := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		require.NotEmpty(t, serialized)
+		require.NoError(t, terminalErr)
+		require.NoError(t, retryErr)
+	})
 }

@@ -42,6 +42,11 @@ import (
 // importV1AckCallback handles the ack callback for import messages.
 func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.BroadcastResultImportMessageV1) error {
 	body := result.Message.MustBody()
+	options := funcutil.Map2KeyValuePair(body.GetOptions())
+	rlsPrincipal, skipRLS, err := importutilv2.GetRLSOptions(options)
+	if err != nil {
+		return merr.WrapErrDataIntegrity(err, "decode persisted import RLS options")
+	}
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,
 	// matching the behavior in master where this was set before calling ImportV2.
@@ -80,11 +85,11 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 				Paths: file.GetPaths(),
 			}
 		}),
-		Options:       funcutil.Map2KeyValuePair(body.GetOptions()),
+		Options:       options,
 		DataTimestamp: result.GetMaxTimeTick(), // TODO: use per-vchannel TimeTick in future, must be supported for CDC.
 		JobID:         body.GetJobID(),
-		RlsPrincipal:  body.GetRlsPrincipal(),
-		SkipRls:       body.GetSkipRls(),
+		RlsPrincipal:  rlsPrincipal,
+		SkipRls:       skipRLS,
 	}, result.Message.Header().GetCommitByCoordinator())
 
 	err = merr.CheckRPCCall(importResp, err)
@@ -306,6 +311,15 @@ func (s *Server) broadcastImport(ctx context.Context,
 	if schema == nil || schema.GetName() == "" {
 		return 0, false, merr.WrapErrServiceInternalMsg("collection %d has no canonical schema", collectionID)
 	}
+	msgOptions := funcutil.KeyValuePair2Map(options)
+	delete(msgOptions, importutilv2.RLSPrincipal)
+	delete(msgOptions, importutilv2.SkipRLS)
+	if rlsPrincipal != "" {
+		msgOptions[importutilv2.RLSPrincipal] = rlsPrincipal
+	}
+	if skipRLS {
+		msgOptions[importutilv2.SkipRLS] = "true"
+	}
 	// Build import message without deprecated MsgBase
 	msg := message.NewImportMessageBuilderV1().
 		WithHeader(&message.ImportMessageHeader{CommitByCoordinator: true}).
@@ -318,12 +332,10 @@ func (s *Server) broadcastImport(ctx context.Context,
 			CollectionName: schema.GetName(),
 			CollectionID:   collectionID,
 			PartitionIDs:   partitionIDs,
-			Options:        funcutil.KeyValuePair2Map(options),
+			Options:        msgOptions,
 			Files:          msgFiles,
 			Schema:         schema,
 			JobID:          jobID,
-			RlsPrincipal:   rlsPrincipal,
-			SkipRls:        skipRLS,
 		}).
 		// Scoped to the collection by ID, so the same client key stays a distinct
 		// operation against another collection, and a rename does not move the key off

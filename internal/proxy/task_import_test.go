@@ -18,6 +18,7 @@ package proxy
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -559,8 +560,10 @@ func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
 					DbName:         "request_db",
 					CollectionName: "alias",
 					Files:          []*internalpb.ImportFile{{Paths: []string{"staging/file.json"}}},
-					RlsPrincipal:   "alice",
-					SkipRls:        test.skipRLS,
+					Options: []*commonpb.KeyValuePair{
+						{Key: "rls_principal", Value: "alice"},
+						{Key: "skip_rls", Value: strconv.FormatBool(test.skipRLS)},
+					},
 				},
 				resp: &internalpb.ImportResponse{},
 			}
