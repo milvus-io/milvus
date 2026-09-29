@@ -429,6 +429,8 @@ message ImportRequestInternal {
   repeated common.KeyValuePair options = 8;
   uint64 data_timestamp = 9;
   int64 jobID = 10;
+  string rls_principal = 11;
+  bool skip_rls = 12;
 }
 
 message ImportRequest {
@@ -437,6 +439,8 @@ message ImportRequest {
   string partition_name = 3;
   repeated ImportFile files = 4;
   repeated common.KeyValuePair options = 5;
+  string rls_principal = 6;
+  bool skip_rls = 7;
 }
 
 message ImportResponse {

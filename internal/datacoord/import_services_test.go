@@ -38,13 +38,16 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/distributed/streaming"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
+	internalmocks "github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/balance"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/balancer/channel"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster"
 	"github.com/milvus-io/milvus/internal/streamingcoord/server/broadcaster/broadcast"
+	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
 	"github.com/milvus-io/milvus/pkg/v3/util"
@@ -706,6 +709,136 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_InvalidTimeoutReturnsEr
 	s.NoError(err)
 	s.NotNil(resp)
 	s.True(errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+}
+
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSDenialCreatesFailedJob() {
+	ctx := context.Background()
+	mixCoord := internalmocks.NewMixCoord(s.T())
+	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
+	})).Return(&rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: 100,
+	}, nil).Once()
+	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS
+	})).Return(&rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: 100,
+	}, nil).Once()
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		ID:            100,
+		VChannelNames: []string{"v1"},
+	}, nil)
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
+		return job.GetState() == internalpb.ImportJobState_Failed &&
+			strings.Contains(job.GetReason(), "no applicable check policies")
+	})).Return(nil).Once()
+	allocator := allocator.NewMockAllocator(s.T())
+	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
+
+	server := &Server{
+		mixCoord:   mixCoord,
+		handler:    mockHandler,
+		importMeta: importMeta,
+		allocator:  allocator,
+	}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		ChannelNames:   []string{"v1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:       "test_collection",
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "tenant", DataType: schemapb.DataType_VarChar}},
+		},
+		Files:        []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
+		Options:      []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		RlsPrincipal: "alice",
+	}, false)
+
+	s.NoError(err)
+	s.NoError(merr.Error(resp.GetStatus()))
+	s.Equal("1000", resp.GetJobID())
+}
+
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSMetadataDiscoveryFailureIsRetryable() {
+	mixCoord := internalmocks.NewMixCoord(s.T())
+	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.Anything).
+		Return(nil, merr.WrapErrNodeNotFound(0, "mixcoord is unavailable")).Once()
+
+	server := &Server{mixCoord: mixCoord}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.createImportJobFromAck(context.Background(), &internalpb.ImportRequestInternal{
+		CollectionID: 100,
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+		},
+		Options:      []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		RlsPrincipal: "alice",
+	}, false)
+
+	s.NoError(err)
+	statusErr := merr.Error(resp.GetStatus())
+	s.ErrorIs(statusErr, merr.ErrServiceUnavailable)
+	s.True(merr.IsRetryableErr(statusErr))
+}
+
+func (s *ImportServicesSuite) TestCreateImportJobFromAck_PersistsRLSPredicate() {
+	ctx := context.Background()
+	mixCoord := internalmocks.NewMixCoord(s.T())
+	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES
+	})).Return(&rootcoordpb.GetRLSMetadataResponse{
+		Status:       merr.Success(),
+		CollectionId: 100,
+		Policies: []*rootcoordpb.RLSPolicyInfo{{
+			CollectionId: 100,
+			PolicyId:     1,
+			PolicyName:   "tenant_check",
+			PolicyType:   milvuspb.RowPolicyType_RowPolicyTypePermissive,
+			Actions:      []milvuspb.RowPolicyAction{milvuspb.RowPolicyAction_Insert},
+			CheckExpr:    `tenant == "acme"`,
+		}},
+	}, nil).Once()
+	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
+		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS
+	})).Return(&rootcoordpb.GetRLSMetadataResponse{Status: merr.Success(), CollectionId: 100}, nil).Once()
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
+		ID: 100, VChannelNames: []string{"v1"},
+	}, nil)
+	importMeta := NewMockImportMeta(s.T())
+	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
+		return job.GetState() == internalpb.ImportJobState_Pending && len(job.GetRlsCheckPredicate()) > 0
+	})).Return(nil).Once()
+	allocator := allocator.NewMockAllocator(s.T())
+	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)
+
+	server := &Server{mixCoord: mixCoord, handler: mockHandler, importMeta: importMeta, allocator: allocator}
+	server.stateCode.Store(commonpb.StateCode_Healthy)
+	resp, err := server.createImportJobFromAck(ctx, &internalpb.ImportRequestInternal{
+		CollectionID:   100,
+		CollectionName: "test_collection",
+		ChannelNames:   []string{"v1"},
+		Schema: &schemapb.CollectionSchema{
+			Name:       "test_collection",
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+			Fields:     []*schemapb.FieldSchema{{FieldID: 100, Name: "tenant", DataType: schemapb.DataType_VarChar}},
+		},
+		Files:        []*internalpb.ImportFile{{Paths: []string{"/test/file.json"}}},
+		Options:      []*commonpb.KeyValuePair{{Key: "timeout", Value: "300s"}},
+		RlsPrincipal: "alice",
+	}, false)
+
+	s.NoError(err)
+	s.NoError(merr.Error(resp.GetStatus()))
+	s.Equal("1000", resp.GetJobID())
 }
 
 func (s *ImportServicesSuite) TestCreateImportJobFromAck_AllocatorFailsReturnsError() {

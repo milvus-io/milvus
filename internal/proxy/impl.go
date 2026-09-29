@@ -51,8 +51,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
-	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
+	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -5149,7 +5149,9 @@ func convertToV2ImportRequest(req *milvuspb.ImportRequest) *internalpb.ImportReq
 		Files: []*internalpb.ImportFile{{
 			Paths: req.GetFiles(),
 		}},
-		Options: req.GetOptions(),
+		Options:      req.GetOptions(),
+		RlsPrincipal: req.GetRlsPrincipal(),
+		SkipRls:      req.GetSkipRls(),
 	}
 }
 

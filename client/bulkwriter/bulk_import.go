@@ -47,6 +47,8 @@ type BulkImportOption struct {
 	Files [][]string `json:"files,omitempty"`
 	// optional params
 	PartitionName string `json:"partitionName,omitempty"`
+	RLSPrincipal  string `json:"rlsPrincipal,omitempty"`
+	SkipRLS       bool   `json:"skipRls,omitempty"`
 	APIKey        string `json:"-"`
 	// cloud extra params
 	ObjectURL string `json:"objectUrl,omitempty"`
@@ -64,6 +66,16 @@ func (opt *BulkImportOption) GetRequest() ([]byte, error) {
 
 func (opt *BulkImportOption) WithPartition(partitionName string) *BulkImportOption {
 	opt.PartitionName = partitionName
+	return opt
+}
+
+func (opt *BulkImportOption) WithRLSPrincipal(principal string) *BulkImportOption {
+	opt.RLSPrincipal = principal
+	return opt
+}
+
+func (opt *BulkImportOption) WithSkipRLS(skip bool) *BulkImportOption {
+	opt.SkipRLS = skip
 	return opt
 }
 

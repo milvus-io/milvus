@@ -155,6 +155,7 @@ type ImportJob interface {
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetCommitByCoordinator() bool
+	GetRlsCheckPredicate() []byte
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

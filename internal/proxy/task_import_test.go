@@ -242,6 +242,8 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 		collectionID: 100,
 		partitionIDs: []int64{1, 2},
 		vchannels:    []string{"v1", "v2"},
+		rlsPrincipal: "alice",
+		skipRLS:      true,
 		schema: &schemaInfo{
 			CollectionSchema: &schemapb.CollectionSchema{
 				Name: "test_collection",
@@ -262,6 +264,8 @@ func (s *ImportTaskSuite) TestExecute_PassesCorrectRequestParameters() {
 	s.Equal([]string{"v1", "v2"}, capturedReq.ChannelNames)
 	s.Equal(uint64(0), capturedReq.DataTimestamp) // Must be 0 for proxy call
 	s.Equal(int64(0), capturedReq.JobID)          // Let DataCoord allocate
+	s.Equal("alice", capturedReq.GetRlsPrincipal())
+	s.True(capturedReq.GetSkipRls())
 }
 
 // --------------------------------
@@ -474,12 +478,15 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) 
 	mockCache := NewMockCache(t)
 	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).
 		Return(int64(100), nil).Maybe()
-	mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).
-		Return(&schemaInfo{
-			CollectionSchema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+	mockCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, int64(100)).
+		Return(&collectionInfo{
+			CollID: int64(100),
+			Schema: &schemaInfo{
+				CollectionSchema: &schemapb.CollectionSchema{
+					Name: "test_collection",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					},
 				},
 			},
 		}, nil).Maybe()
@@ -503,6 +510,67 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) 
 			Options:        options,
 		},
 		resp: &internalpb.ImportResponse{},
+	}
+}
+
+func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
+	paramtable.Init()
+	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false"))
+	t.Cleanup(func() {
+		require.NoError(t, paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key))
+	})
+
+	for _, test := range []struct {
+		name              string
+		rlsEnabled        bool
+		skipRLS           bool
+		expectedPrincipal string
+		expectedSkipRLS   bool
+	}{
+		{name: "principal is retained for enforcement", rlsEnabled: true, expectedPrincipal: "alice"},
+		{name: "authorized bypass is retained", rlsEnabled: true, skipRLS: true, expectedSkipRLS: true},
+		{name: "unchecked bypass on disabled collection is discarded", skipRLS: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const collectionID = int64(100)
+			cache := NewMockCache(t)
+			cache.EXPECT().GetCollectionID(mock.Anything, "request_db", "alias").Return(collectionID, nil)
+			cache.EXPECT().GetCollectionInfo(mock.Anything, "request_db", "alias", collectionID).Return(&collectionInfo{
+				CollID:     collectionID,
+				DBName:     "canonical_db",
+				RlsEnabled: test.rlsEnabled,
+				Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+					Name: "canonical_collection",
+					Fields: []*schemapb.FieldSchema{
+						{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+					},
+				}},
+			}, nil)
+			cache.EXPECT().GetPartitionID(mock.Anything, "canonical_db", "canonical_collection", mock.Anything).
+				Return(int64(200), nil)
+
+			channels := channelmgr.NewMockChannelsMgr(t)
+			channels.EXPECT().GetVChannels(collectionID).Return([]string{"v1"}, nil)
+			task := &importTask{
+				baseTask: baseTask{MetaCache: cache},
+				ctx:      context.Background(),
+				node:     &Proxy{chMgr: channels},
+				req: &internalpb.ImportRequest{
+					DbName:         "request_db",
+					CollectionName: "alias",
+					Files:          []*internalpb.ImportFile{{Paths: []string{"staging/file.json"}}},
+					RlsPrincipal:   "alice",
+					SkipRls:        test.skipRLS,
+				},
+				resp: &internalpb.ImportResponse{},
+			}
+
+			require.NoError(t, task.PreExecute(context.Background()))
+			assert.Equal(t, "canonical_db", task.req.GetDbName())
+			assert.Equal(t, "canonical_collection", task.req.GetCollectionName())
+			assert.Equal(t, test.expectedPrincipal, task.rlsPrincipal)
+			assert.Equal(t, test.expectedSkipRLS, task.skipRLS)
+		})
 	}
 }
 

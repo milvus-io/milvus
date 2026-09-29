@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
+	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -50,6 +51,8 @@ type importTask struct {
 	partitionIDs []int64
 	collectionID UniqueID
 	schema       *schemaInfo
+	rlsPrincipal string
+	skipRLS      bool // set only after the request-scoped bypass is authorized
 	resp         *internalpb.ImportResponse
 }
 
@@ -105,10 +108,36 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	it.collectionID = collectionID
-	schema, err := it.GetMetaCache().GetCollectionSchema(ctx, req.GetDbName(), req.GetCollectionName())
+	colInfo, err := it.GetMetaCache().GetCollectionInfo(ctx, req.GetDbName(), req.GetCollectionName(), collectionID)
 	if err != nil {
 		return err
 	}
+	if colInfo == nil || colInfo.Schema == nil || colInfo.Schema.CollectionSchema == nil {
+		return merr.WrapErrImportSysFailed("collection schema is unavailable")
+	}
+	canonicalDBName := colInfo.DBName
+	if canonicalDBName == "" {
+		canonicalDBName = req.GetDbName()
+	}
+	canonicalCollectionName := colInfo.Schema.GetName()
+	req.DbName = canonicalDBName
+	req.CollectionName = canonicalCollectionName
+
+	rlsEnabled := colInfo.RlsEnabled
+	if rlsEnabled && req.GetSkipRls() {
+		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, req.GetSkipRls(),
+			canonicalDBName, canonicalCollectionName, "import")
+		if err != nil {
+			return err
+		}
+		it.skipRLS = !rlsEnabled
+	}
+	it.rlsPrincipal, _, err = rls.ResolveRuntimePrincipal(rlsEnabled, req.GetRlsPrincipal(), "import")
+	if err != nil {
+		return err
+	}
+
+	schema := colInfo.Schema
 	if schema.CollectionSchema == nil || len(schema.GetFields()) == 0 {
 		return merr.WrapErrImportSysFailed("collection schema has no fields")
 	}
@@ -253,6 +282,8 @@ func (it *importTask) Execute(ctx context.Context) error {
 		Options:        it.req.GetOptions(),
 		DataTimestamp:  0, // DO NOT set - used to differentiate proxy call from ack callback
 		JobID:          0, // Let DataCoord allocate
+		RlsPrincipal:   it.rlsPrincipal,
+		SkipRls:        it.skipRLS,
 	}
 
 	resp, err := it.mixCoord.ImportV2(ctx, importReq)

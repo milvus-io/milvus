@@ -293,18 +293,29 @@ func TestMetadataRefreshErrorClassification(t *testing.T) {
 		status.Error(codes.DeadlineExceeded, "deadline exceeded"),
 		status.Error(codes.Unavailable, "unavailable"),
 	} {
-		wrapped := wrapMetadataRefreshError(err, "refresh failed")
+		wrapped := WrapMetadataRefreshError(err, "refresh failed")
 		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
 		require.True(t, merr.IsRetryableErr(wrapped))
 	}
 
 	typed := merr.WrapErrDataIntegrity(context.DeadlineExceeded, "corrupted metadata")
-	wrapped := wrapMetadataRefreshError(typed, "refresh failed")
+	wrapped := WrapMetadataRefreshError(typed, "refresh failed")
 	require.ErrorIs(t, wrapped, merr.ErrDataIntegrity)
 	require.False(t, merr.IsRetryableErr(wrapped))
 
+	for _, transient := range []error{
+		merr.WrapErrIoFailedMsg("etcd read failed"),
+		merr.WrapErrNodeNotFound(0, "mixcoord is unavailable"),
+		merr.WrapErrNodeNotMatch(1, 2, "mixcoord leader changed"),
+	} {
+		wrapped = WrapMetadataRefreshError(transient, "refresh failed")
+		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
+		require.ErrorIs(t, wrapped, transient)
+		require.True(t, merr.IsRetryableErr(wrapped))
+	}
+
 	raw := errors.New("raw dependency failure")
-	wrapped = wrapMetadataRefreshError(raw, "refresh failed")
+	wrapped = WrapMetadataRefreshError(raw, "refresh failed")
 	require.ErrorIs(t, wrapped, merr.ErrServiceInternal)
 	require.ErrorIs(t, wrapped, raw)
 	require.False(t, merr.IsRetryableErr(wrapped))

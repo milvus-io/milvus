@@ -19,8 +19,8 @@ passes it to Milvus. Policies may reference the principal and its tags.
 
 RLS fails closed when required metadata, a required tag, or an applicable
 permissive policy is unavailable. Sub-search principal overrides, atomic tag
-upsert-and-delete in one request, bulk import enforcement, and external
-collection refresh enforcement are outside the initial scope.
+upsert-and-delete in one request, and external collection refresh enforcement
+are outside the initial scope.
 
 ## Collection Switch
 
@@ -155,7 +155,9 @@ request plan with logical AND. For insert and the written side of upsert, Proxy
 compiles the restricted `check_expr` into the same plan expression nodes and
 evaluates those nodes directly against each input row's `FieldData`; this is a
 small RLS evaluator, not a second general SQL engine. Existing rows selected by
-upsert must also pass `using_expr`.
+upsert must also pass `using_expr`. Bulk import uses the insert semantics: its
+job persists the applicable `check_expr`, and DataNode validates every imported
+batch before routing or writing it.
 
 Local checks use SQL three-valued logic consistent with Segcore filtering.
 Comparisons involving NULL produce UNKNOWN, and only a final TRUE admits a row.

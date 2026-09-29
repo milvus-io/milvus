@@ -310,6 +310,8 @@ type ImportReq struct {
 	PartitionName  string            `json:"partitionName"`
 	Files          [][]string        `json:"files" binding:"required"`
 	Options        map[string]string `json:"options"`
+	RlsPrincipal   string            `json:"rlsPrincipal"`
+	SkipRls        bool              `json:"skipRls"`
 }
 
 const (
@@ -324,6 +326,8 @@ func (req *ImportReq) UnmarshalJSON(data []byte) error {
 		PartitionName  string             `json:"partitionName"`
 		Files          [][]string         `json:"files" binding:"required"`
 		Options        map[string]*string `json:"options"`
+		RlsPrincipal   string             `json:"rlsPrincipal"`
+		SkipRls        bool               `json:"skipRls"`
 	}
 	var decoded importReqAlias
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -350,6 +354,8 @@ func (req *ImportReq) UnmarshalJSON(data []byte) error {
 	req.PartitionName = decoded.PartitionName
 	req.Files = decoded.Files
 	req.Options = options
+	req.RlsPrincipal = decoded.RlsPrincipal
+	req.SkipRls = decoded.SkipRls
 	return nil
 }
 

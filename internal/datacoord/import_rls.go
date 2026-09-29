@@ -1,0 +1,162 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package datacoord
+
+import (
+	"context"
+	"time"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/milvus-io/milvus/internal/rls"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
+	"github.com/milvus-io/milvus/pkg/v3/common"
+	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/v3/util/merr"
+	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
+)
+
+const importRLSMetadataTimeout = 30 * time.Second
+
+func (s *Server) getImportRLSMetadata(
+	ctx context.Context,
+	req *rootcoordpb.GetRLSMetadataRequest,
+	description string,
+) (*rootcoordpb.GetRLSMetadataResponse, error, error) {
+	rpcCtx, cancel := context.WithTimeout(ctx, importRLSMetadataTimeout)
+	defer cancel()
+	resp, err := s.mixCoord.GetRLSMetadata(rpcCtx, req)
+	if err = merr.CheckRPCCall(resp, err); err == nil {
+		return resp, nil, nil
+	}
+	err = rls.WrapMetadataRefreshError(err, "failed to get %s for import", description)
+	if merr.IsRetryableErr(err) {
+		return nil, nil, err
+	}
+	return nil, err, nil
+}
+
+// resolveImportRLSPredicate reads one ordered metadata snapshot and returns a
+// predicate that can be persisted with the import job. The import ACK callback
+// holds the same exclusive canonical-collection resource key as every RLS
+// mutation, so no policy or principal update can run between the two metadata
+// reads under the broadcaster's collection-lock contract. Metadata read
+// failures are retriable; the returned policy error is deterministic for this
+// snapshot.
+func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.ImportRequestInternal) (
+	predicate []byte,
+	terminalErr error,
+	retryErr error,
+) {
+	enabled, err := common.IsRLSEnabled(in.GetSchema().GetProperties()...)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS collection properties"), nil
+	}
+	if !enabled || in.GetSkipRls() {
+		return nil, nil, nil
+	}
+	if importutilv2.IsL0Import(in.GetOptions()) {
+		return nil, merr.WrapErrOperationNotSupportedMsg("RLS-protected L0 import is not supported"), nil
+	}
+	principalName, _, err := rls.ResolveRuntimePrincipal(true, in.GetRlsPrincipal(), "import")
+	if err != nil {
+		return nil, err, nil
+	}
+	if s.mixCoord == nil {
+		return nil, nil, merr.WrapErrServiceUnavailable("mixcoord is unavailable")
+	}
+
+	policyResp, terminalErr, retryErr := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+		Base:         commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+		CollectionId: in.GetCollectionID(),
+		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES,
+	}, "RLS policies")
+	if terminalErr != nil || retryErr != nil {
+		return nil, terminalErr, retryErr
+	}
+	if policyResp.GetCollectionId() != in.GetCollectionID() {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"RLS policy metadata collection id mismatch: expected %d, received %d",
+			in.GetCollectionID(), policyResp.GetCollectionId()), nil
+	}
+	policyMap, err := rls.RowPoliciesFromInfo(in.GetCollectionID(), policyResp.GetPolicies())
+	if err != nil {
+		return nil, err, nil
+	}
+	policies := make([]*rlsutil.RowPolicy, 0, len(policyMap))
+	for _, policy := range policyMap {
+		policies = append(policies, policy)
+	}
+
+	principalResp, terminalErr, retryErr := s.getImportRLSMetadata(ctx, &rootcoordpb.GetRLSMetadataRequest{
+		Base:          commonpbutil.NewMsgBase(commonpbutil.WithSourceID(paramtable.GetNodeID())),
+		CollectionId:  in.GetCollectionID(),
+		Kind:          rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS,
+		PrincipalName: principalName,
+	}, "RLS principal tags")
+	if terminalErr != nil || retryErr != nil {
+		return nil, terminalErr, retryErr
+	}
+	if principalResp.GetCollectionId() != in.GetCollectionID() {
+		return nil, merr.WrapErrDataIntegrityMsg(
+			"RLS principal metadata collection id mismatch: expected %d, received %d",
+			in.GetCollectionID(), principalResp.GetCollectionId()), nil
+	}
+
+	tags := map[string]rlsutil.TagValue{}
+	principals := principalResp.GetPrincipals()
+	if len(principals) > 1 {
+		return nil, merr.WrapErrDataIntegrityMsg("duplicated RLS principal metadata for %q", principalName), nil
+	}
+	for _, principal := range principals {
+		if principal == nil || principal.GetPrincipalName() != principalName || principal.GetCollectionId() != in.GetCollectionID() {
+			return nil, merr.WrapErrDataIntegrityMsg("invalid RLS principal metadata returned for %q", principalName), nil
+		}
+		tags, err = rlsutil.TagsFromJSON(principal.GetTags())
+		if err != nil {
+			return nil, merr.WrapErrDataIntegrity(err, "decode RLS principal %q tags", principalName), nil
+		}
+	}
+
+	schema, err := typeutil.CreateSchemaHelper(in.GetSchema())
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "create schema helper for RLS import check"), nil
+	}
+	expr, err := rls.BuildCheckPredicate(
+		policies,
+		principalName,
+		tags,
+		rlsutil.PolicyActionInsert,
+		schema,
+		paramtable.Get().ProxyCfg.RLSMaxCombinedExpressionLength.GetAsInt(),
+	)
+	if err != nil {
+		return nil, err, nil
+	}
+	if expr == nil {
+		return nil, nil, nil
+	}
+	serialized, err := proto.Marshal(expr)
+	if err != nil {
+		return nil, merr.WrapErrDataIntegrity(err, "marshal RLS import check predicate"), nil
+	}
+	return serialized, nil, nil
+}

@@ -234,8 +234,15 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 }
 
 func TestImportUtil_AssembleRequest(t *testing.T) {
+	rlsPredicate := []byte("rls-predicate")
 	var job ImportJob = &importJob{
-		ImportJob: &datapb.ImportJob{JobID: 0, CollectionID: 1, PartitionIDs: []int64{2}, Vchannels: []string{"v0"}},
+		ImportJob: &datapb.ImportJob{
+			JobID:             0,
+			CollectionID:      1,
+			PartitionIDs:      []int64{2},
+			Vchannels:         []string{"v0"},
+			RlsCheckPredicate: rlsPredicate,
+		},
 	}
 	importMeta := NewMockImportMeta(t)
 	importMeta.EXPECT().GetJob(mock.Anything, mock.Anything).Return(job)
@@ -311,6 +318,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	assert.Equal(t, task.GetCollectionID(), importReq.GetCollectionID())
 	assert.Equal(t, job.GetPartitionIDs(), importReq.GetPartitionIDs())
 	assert.Equal(t, job.GetVchannels(), importReq.GetVchannels())
+	assert.Equal(t, rlsPredicate, importReq.GetRlsCheckPredicate())
 }
 
 func TestImportUtil_AssembleRequestWithDataTt(t *testing.T) {

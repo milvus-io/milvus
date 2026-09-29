@@ -36,7 +36,12 @@ type CoordClient interface {
 	GetRLSMetadata(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)
 }
 
-func wrapMetadataRefreshError(err error, format string, args ...any) error {
+// WrapMetadataRefreshError gives metadata RPC failures the same retry
+// classification for every RLS consumer.
+func WrapMetadataRefreshError(err error, format string, args ...any) error {
+	if errors.IsAny(err, merr.ErrIoFailed, merr.ErrNodeNotFound, merr.ErrNodeNotMatch) {
+		return merr.WrapErrServiceUnavailableErr(err, format, args...)
+	}
 	if merr.IsMilvusError(err) {
 		return merr.Wrapf(err, format, args...)
 	}
@@ -158,7 +163,7 @@ func (m *manager) refreshPoliciesAtGeneration(collectionID UniqueID, state *coll
 		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return wrapMetadataRefreshError(err, "failed to get RLS metadata")
+		return WrapMetadataRefreshError(err, "failed to get RLS metadata")
 	}
 	if resp.GetCollectionId() != collectionID {
 		return merr.WrapErrServiceInternalMsg("RLS metadata collection id mismatch: requested %d, received %d", collectionID, resp.GetCollectionId())
@@ -224,7 +229,7 @@ func (m *manager) ensurePrincipalTags(ctx context.Context, collectionID UniqueID
 			PrincipalName: principalName,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return nil, wrapMetadataRefreshError(err, "failed to get RLS principal %q tags", principalName)
+			return nil, WrapMetadataRefreshError(err, "failed to get RLS principal %q tags", principalName)
 		}
 		if resp.GetCollectionId() != collectionID {
 			return nil, merr.WrapErrServiceInternalMsg("RLS metadata collection id mismatch: requested %d, received %d", collectionID, resp.GetCollectionId())
@@ -324,4 +329,10 @@ func rowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolic
 		converted[convertedPolicy.GetPolicyName()] = convertedPolicy
 	}
 	return converted, nil
+}
+
+// RowPoliciesFromInfo validates and converts coordinator policy metadata for
+// consumers that compile an immutable RLS snapshot outside the Proxy cache.
+func RowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolicyInfo) (map[string]*rlsutil.RowPolicy, error) {
+	return rowPoliciesFromInfo(collectionID, policies)
 }

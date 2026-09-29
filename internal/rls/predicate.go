@@ -208,6 +208,53 @@ func (m *manager) resolvePredicate(ctx context.Context, collectionID UniqueID, p
 	return expr, nil
 }
 
+// BuildCheckPredicate compiles and instantiates a write CHECK predicate from
+// one authoritative metadata snapshot. It is used by asynchronous writers
+// that persist the resulting predicate instead of using the Proxy cache.
+func BuildCheckPredicate(
+	policies []*rlsutil.RowPolicy,
+	principalName string,
+	principalTags map[string]rlsutil.TagValue,
+	action rlsutil.PolicyAction,
+	schema *typeutil.SchemaHelper,
+	maxLength int,
+) (*planpb.Expr, error) {
+	policies = append([]*rlsutil.RowPolicy(nil), policies...)
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].GetPolicyName() < policies[j].GetPolicyName()
+	})
+	templates, combinedLength := preparePolicyExprTemplates(policies, action, checkExprKind)
+	if combinedLength > maxLength {
+		return nil, merr.WrapErrServiceQuotaExceededMsg("RLS combined expression exceeds max length %d", maxLength)
+	}
+
+	var timezone string
+	if schema != nil {
+		timezone = schema.GetTimezone()
+	}
+	compiled, err := compileExprTemplates(schema, templates, timezone, checkExprKind)
+	if err != nil {
+		return nil, err
+	}
+	if compiled == nil {
+		return nil, denyNoApplicableRLSPolicy(action, checkExprKind)
+	}
+	expr, err := compiled.Instantiate(principalName, principalTags)
+	if err != nil {
+		return nil, err
+	}
+	if expr == nil {
+		return nil, denyNoApplicableRLSPolicy(action, checkExprKind)
+	}
+	if err := ValidateStaticCheckPredicate(expr, rlsActionOperation(action)); err != nil {
+		return nil, err
+	}
+	if rewriter.IsAlwaysTrueExpr(expr) {
+		return nil, nil
+	}
+	return expr, nil
+}
+
 func (state *collectionState) getCompiledExpression(action rlsutil.PolicyAction, kind exprKind, schema *typeutil.SchemaHelper) (*compiledExpression, error) {
 	key := compiledKey{action: action, kind: kind}
 	var schemaVersion int32

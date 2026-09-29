@@ -110,6 +110,8 @@ func (s *broadcastServceImpl) forwardImportToDataCoord(ctx context.Context, msg 
 		Options:        funcutil.Map2KeyValuePair(body.GetOptions()),
 		DataTimestamp:  0, // Indicates this is from proxy, not from ack callback
 		JobID:          body.GetJobID(),
+		RlsPrincipal:   body.GetRlsPrincipal(),
+		SkipRls:        body.GetSkipRls(),
 	}
 
 	// Get MixCoordClient to call DataCoord.ImportV2
