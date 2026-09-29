@@ -41,6 +41,13 @@ that module is picked.
    - Proxy reduces all results and returns them to the user
 3. If a node failure or view invalidation occurs during the process, the query is canceled and retried directly.
 
+For hybrid search, Phase 1 builds independent mutable sub-requests for the
+optimizer. Once optimization succeeds, it transfers each temporary request's
+placeholder, serialized plan and partition slice back to its sub-request and
+clears those fields in the temporary request. No optimizer retains these slices
+after the transfer. Phase 2 expands independent sub-requests again for concurrent
+execution; the ownership transfer changes no RPC fields or query semantics.
+
 ### Advantages
 
 - StreamingNode logic is simplified; no need to migrate Load/Release and other QueryNode interfaces.

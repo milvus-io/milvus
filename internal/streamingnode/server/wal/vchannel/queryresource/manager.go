@@ -198,9 +198,8 @@ func (m *Manager) ObserveEvent(ctx context.Context, event walview.VChannelResour
 	runtime := m.runtime
 	m.mu.Unlock()
 	if runtime != nil {
-		if event.Message != nil {
-			event.Message = walview.CopyMessage(event.Message)
-		}
+		// A plain immutable message keeps its data alive without retaining a
+		// persistence Ack handle, so query consumption cannot delay completion.
 		runtime.ObserveEvent(ctx, event)
 	}
 }

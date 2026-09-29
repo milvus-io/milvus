@@ -77,17 +77,19 @@ func BuildSubSearchRequest(parent *internalpb.SearchRequest, sub *internalpb.Sub
 
 // UpdateSubSearchRequest writes optimizer-owned fields back to the advanced
 // request so Phase 2 observes the exact regular request optimized in Phase 1.
+// It consumes the optimized request's payload and partition slices. Callers must
+// relinquish other references to those slices when handing off the request.
 func UpdateSubSearchRequest(sub *internalpb.SubSearchRequest, optimized *internalpb.SearchRequest, skip bool) error {
 	if sub == nil || optimized == nil {
 		return merr.WrapErrServiceInternalMsg("cannot update advanced sub-search from a nil request")
 	}
 
 	sub.Dsl = optimized.GetDsl()
-	sub.PlaceholderGroup = append([]byte(nil), optimized.GetPlaceholderGroup()...)
+	sub.PlaceholderGroup, optimized.PlaceholderGroup = optimized.PlaceholderGroup, nil
 	sub.DslType = optimized.GetDslType()
-	sub.SerializedExprPlan = append([]byte(nil), optimized.GetSerializedExprPlan()...)
+	sub.SerializedExprPlan, optimized.SerializedExprPlan = optimized.SerializedExprPlan, nil
 	sub.Nq = optimized.GetNq()
-	sub.PartitionIDs = append([]int64(nil), optimized.GetPartitionIDs()...)
+	sub.PartitionIDs, optimized.PartitionIDs = optimized.PartitionIDs, nil
 	sub.Topk = optimized.GetTopk()
 	sub.Offset = optimized.GetOffset()
 	sub.MetricType = optimized.GetMetricType()

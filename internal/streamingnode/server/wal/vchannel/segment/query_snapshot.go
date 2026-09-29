@@ -22,9 +22,8 @@ func (info *SegmentView) VisibleSnapshot(vchannel string, dataVersion qviews.Dat
 		insertMessages = append(insertMessages, chunk.Messages()...)
 	}
 	insertMessages = append(insertMessages, info.pending.Messages()...)
-	for i, msg := range insertMessages {
-		insertMessages[i] = walview.CopyMessage(msg)
-	}
+	// Messages returns ordinary immutable references, independent of the
+	// persistence handles. Keep them alive without copying their payloads.
 	var schema *schemapb.CollectionSchema
 	if info.schema != nil {
 		schema = proto.Clone(info.schema).(*schemapb.CollectionSchema)

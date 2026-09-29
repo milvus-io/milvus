@@ -68,12 +68,31 @@ func TestBuildAndUpdateSubSearchRequest(t *testing.T) {
 	req.SerializedExprPlan = []byte{21}
 	req.PartitionIDs = []int64{22}
 	req.MetricType = metric.BM25
+	placeholder, plan, partitions := req.PlaceholderGroup, req.SerializedExprPlan, req.PartitionIDs
 	require.NoError(t, UpdateSubSearchRequest(sub, req, true))
+	assert.Same(t, &placeholder[0], &sub.PlaceholderGroup[0])
+	assert.Same(t, &plan[0], &sub.SerializedExprPlan[0])
+	assert.Same(t, &partitions[0], &sub.PartitionIDs[0])
+	assert.Nil(t, req.PlaceholderGroup)
+	assert.Nil(t, req.SerializedExprPlan)
+	assert.Nil(t, req.PartitionIDs)
 	assert.Equal(t, []byte{20}, sub.GetPlaceholderGroup())
 	assert.Equal(t, []byte{21}, sub.GetSerializedExprPlan())
 	assert.Equal(t, []int64{22}, sub.GetPartitionIDs())
 	assert.Equal(t, metric.BM25, sub.GetMetricType())
 	assert.True(t, sub.GetSkip())
+}
+
+func TestUpdateSubSearchRequestValidatesBeforeTransfer(t *testing.T) {
+	sub := &internalpb.SubSearchRequest{PlaceholderGroup: []byte{1}}
+	optimized := &internalpb.SearchRequest{PlaceholderGroup: []byte{2}, SerializedExprPlan: []byte{3}, PartitionIDs: []int64{4}}
+	before := proto.Clone(optimized)
+	require.ErrorIs(t, UpdateSubSearchRequest(nil, optimized, false), merr.ErrServiceInternal)
+	require.True(t, proto.Equal(before, optimized))
+	require.ErrorIs(t, UpdateSubSearchRequest(sub, nil, false), merr.ErrServiceInternal)
+	require.Equal(t, []byte{1}, sub.PlaceholderGroup)
+	require.NoError(t, UpdateSubSearchRequest(sub, &internalpb.SearchRequest{}, false))
+	require.Nil(t, sub.PlaceholderGroup)
 }
 
 func TestBuildSubSearchRequestsIsolation(t *testing.T) {

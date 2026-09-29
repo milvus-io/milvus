@@ -78,8 +78,12 @@ preparation. An already truncated start is an error, not an empty replay.
 Neither L0 completion nor a subscription's delivery cursor proves that retained
 QueryViews no longer need historical Delete data.
 
-QueryRuntime receives ordinary immutable copies and never retains Message Ack
-handles.
+QueryRuntime receives ordinary immutable message references and never retains
+Message Ack handles. Snapshot capture and live delivery share the original
+payloads, including complete transactions. Releasing persistence handles clears
+the recovery owner's references; Go references held by query work keep the
+immutable data alive without delaying Ack completion. Consumers must not mutate
+the shared messages; privately decoded bodies remain independently owned.
 
 ## 4. Startup Readiness
 
