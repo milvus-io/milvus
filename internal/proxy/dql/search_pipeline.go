@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/apache/arrow/go/v17/arrow/memory"
@@ -34,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/search_agg"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
 	"github.com/milvus-io/milvus/internal/util/function/chain"
@@ -1207,11 +1209,13 @@ func (op *rerankOperator) run(ctx context.Context, span trace.Span, inputs ...an
 
 type requeryOperator struct {
 	traceCtx         context.Context
+	rlsPredicate     *planpb.Expr
 	outputFieldNames []string
 
 	timestamp          uint64
 	dbName             string
 	collectionName     string
+	collectionID       int64
 	notReturnAllMeta   bool
 	partitionNames     []string
 	partitionIDs       []int64
@@ -1257,12 +1261,22 @@ func newRequeryOperator(t *SearchTask, _ map[string]any) (operator, error) {
 			return true
 		})
 	}
+	collectionName := t.rlsCollectionName
+	if collectionName == "" {
+		collectionName = t.request.GetCollectionName()
+	}
+	dbName := t.rlsDBName
+	if dbName == "" {
+		dbName = t.request.GetDbName()
+	}
 	return &requeryOperator{
 		traceCtx:           t.TraceCtx(),
+		rlsPredicate:       t.rlsPredicate,
 		outputFieldNames:   outputFieldNames.Collect(),
 		timestamp:          t.BeginTs(),
-		dbName:             t.request.GetDbName(),
-		collectionName:     t.request.GetCollectionName(),
+		dbName:             dbName,
+		collectionName:     collectionName,
+		collectionID:       t.GetCollectionID(),
 		primaryFieldSchema: pkField,
 		queryChannelsTs:    t.queryChannelsTs,
 		queryChannelsNode:  queryChannelsNode,
@@ -1294,6 +1308,10 @@ func (op *requeryOperator) run(ctx context.Context, span trace.Span, inputs ...a
 }
 
 func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *schemapb.IDs, outputFields []string) (*milvuspb.QueryResults, segcore.StorageCost, error) {
+	var queryParams []*commonpb.KeyValuePair
+	if op.collectionID > 0 {
+		queryParams = []*commonpb.KeyValuePair{{Key: CollectionID, Value: strconv.FormatInt(op.collectionID, 10)}}
+	}
 	queryReq := &milvuspb.QueryRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_Retrieve,
@@ -1301,6 +1319,7 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		},
 		DbName:                op.dbName,
 		CollectionName:        op.collectionName,
+		QueryParams:           queryParams,
 		ConsistencyLevel:      op.consistencyLevel,
 		NotReturnAllMeta:      op.notReturnAllMeta,
 		Expr:                  "",
@@ -1312,6 +1331,11 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 	}
 	plan := planparserv2.CreateRequeryPlan(op.primaryFieldSchema, ids)
 	plan.Namespace = op.planNamespace
+	// Reuse the exact top-level Search/HybridSearch predicate. queryTask must
+	// not resolve a separate Query-action policy for this internal retrieval.
+	if err := rls.AttachPredicateToRequeryPlan(plan, op.rlsPredicate); err != nil {
+		return nil, segcore.StorageCost{}, err
+	}
 	channelsMvcc := make(map[string]Timestamp)
 	for k, v := range op.queryChannelsTs {
 		channelsMvcc[k] = v
@@ -1344,6 +1368,8 @@ func (op *requeryOperator) requery(ctx context.Context, span trace.Span, ids *sc
 		preferredNodes: preferredNodes,
 		fastSkip:       true,
 		reQuery:        true,
+		node:           op.node,
+		skipRuntimeRLS: true,
 		chMgr:          op.node.ChMgr(),
 	}
 	queryRunner, ok := op.node.(taskmodel.QueryRunner)

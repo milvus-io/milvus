@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
@@ -349,6 +350,39 @@ func TestManagerTypedPrincipalTagMatching(t *testing.T) {
 			} else {
 				require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 			}
+		})
+	}
+}
+
+func TestCompilePolicyExprCachesTagVariableDataTypes(t *testing.T) {
+	helper, err := typeutil.CreateSchemaHelper(&schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 100, Name: "age", DataType: schemapb.DataType_Int64},
+		{FieldID: 101, Name: "scores", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Float},
+	}})
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		name     string
+		expr     string
+		expected schemapb.DataType
+	}{
+		{name: "scalar", expr: "age == $current_principal_tags['value']", expected: schemapb.DataType_Int64},
+		{name: "array element", expr: "array_contains(scores, $current_principal_tags['value'])", expected: schemapb.DataType_Float},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			templates, _ := preparePolicyExprTemplates([]*rlsutil.RowPolicy{{
+				PolicyName: "typed",
+				PolicyType: rlsutil.PolicyTypePermissive,
+				Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionQuery},
+				UsingExpr:  test.expr,
+			}}, rlsutil.PolicyActionQuery, usingExprKind)
+			compiled, err := compileExprTemplates(helper, templates, "")
+			require.NoError(t, err)
+			require.Len(t, compiled.permissive, 1)
+
+			policy := compiled.permissive[0]
+			variable := policy.tagVariables["value"]
+			require.Equal(t, []schemapb.DataType{test.expected}, policy.tagVariableDataTypes[variable])
 		})
 	}
 }
@@ -1080,6 +1114,39 @@ func TestResolvePredicateRequiresPrincipal(t *testing.T) {
 	require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 }
 
+func TestResolveUpsertPredicatesStayOnOneSnapshot(t *testing.T) {
+	ctx := context.Background()
+	manager := newManagerWithAlice()
+	helper := newManagerTestSchemaHelper(t)
+	const collectionID = UniqueID(100)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "old",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 1",
+		CheckExpr:  "id == 1",
+	}}}))
+	using, check, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+
+	require.True(t, setPolicySnapshotForTest(manager, collectionID, policySnapshot{Policies: []*rlsutil.RowPolicy{{
+		PolicyName: "new",
+		PolicyType: rlsutil.PolicyTypePermissive,
+		Actions:    []rlsutil.PolicyAction{rlsutil.PolicyActionUpsert},
+		UsingExpr:  "id == 2",
+		CheckExpr:  "id == 2",
+	}}}))
+	fields := managerTestFieldsDataWithID(1, "sales")
+	require.NoError(t, ValidateRowsByPredicate(ctx, fields, 1, using, "upsert", "using"))
+	require.NoError(t, ValidateRowsByPredicate(ctx, fields, 1, check, "upsert", "check"))
+
+	currentUsing, currentCheck, err := manager.resolveUpsertPredicates(ctx, collectionID, "alice", helper)
+	require.NoError(t, err)
+	require.Error(t, ValidateRowsByPredicate(ctx, fields, 1, currentUsing, "upsert", "using"))
+	require.Error(t, ValidateRowsByPredicate(ctx, fields, 1, currentCheck, "upsert", "check"))
+}
+
 func TestValidateCheckForWriteUsesSchemaTimezone(t *testing.T) {
 	ctx := context.Background()
 	const collectionID = int64(987654322)
@@ -1458,6 +1525,100 @@ func TestMergePredicateToPlan(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
 	assertPredicateMerged(t, searchPlan.GetVectorAnns().GetPredicates())
+
+	normalizedPlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age in [18, 21, 30]", nil, visitorArgs)
+	require.NoError(t, err)
+	normalizedRLS, err := planparserv2.ParseExpr(helper, "age in [21, 30, 40]", nil)
+	require.NoError(t, err)
+	expectedPlan := proto.Clone(normalizedPlan).(*planpb.PlanNode)
+	require.NoError(t, MergePredicateToPlan(expectedPlan, proto.Clone(normalizedRLS).(*planpb.Expr)))
+	userPredicate := normalizedPlan.GetQuery().GetPredicates()
+	userBefore := proto.Clone(userPredicate).(*planpb.Expr)
+	rlsBefore := proto.Clone(normalizedRLS).(*planpb.Expr)
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedPlan, normalizedRLS))
+	require.True(t, proto.Equal(expectedPlan.GetQuery().GetPredicates(), normalizedPlan.GetQuery().GetPredicates()))
+	require.True(t, proto.Equal(userBefore, userPredicate))
+	require.True(t, proto.Equal(rlsBefore, normalizedRLS))
+
+	// Requery IDs may be large. Attaching RLS must preserve the ID term without
+	// sorting, deduplicating, or intersecting it with a same-field policy.
+	requeryPlan := planparserv2.CreateRequeryPlan(schema.GetFields()[0], &schemapb.IDs{
+		IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{3, 1, 3}}},
+	})
+	requeryPredicate := requeryPlan.GetQuery().GetPredicates()
+	requeryRLS, err := planparserv2.ParseExpr(helper, "id in [1, 3]", nil)
+	require.NoError(t, err)
+	require.NoError(t, AttachPredicateToRequeryPlan(requeryPlan, requeryRLS))
+	mergedRequery := requeryPlan.GetQuery().GetPredicates().GetBinaryExpr()
+	require.NotNil(t, mergedRequery)
+	require.Same(t, requeryPredicate, mergedRequery.GetLeft())
+	require.Same(t, requeryRLS, mergedRequery.GetRight())
+	values := mergedRequery.GetLeft().GetTermExpr().GetValues()
+	require.Equal(t, []int64{3, 1, 3}, []int64{
+		values[0].GetInt64Val(), values[1].GetInt64Val(), values[2].GetInt64Val(),
+	})
+
+	randomSamplePlan, err := planparserv2.CreateRetrievePlanArgs(helper, "age > 18 && random_sample(0.5)", nil, visitorArgs)
+	require.NoError(t, err)
+	randomSample := randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr()
+	require.NotNil(t, randomSample)
+	expectedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePlan := proto.Clone(randomSamplePlan).(*planpb.PlanNode)
+	normalizedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates()
+	normalizedRandomSampleBefore := proto.Clone(normalizedRandomSamplePredicate).(*planpb.Expr)
+	rlsBefore = proto.Clone(rlsPredicate).(*planpb.Expr)
+	require.NoError(t, MergePredicateToPlan(expectedRandomSamplePlan, proto.Clone(rlsPredicate).(*planpb.Expr)))
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedRandomSamplePlan, rlsPredicate))
+	require.True(t, proto.Equal(expectedRandomSamplePlan, normalizedRandomSamplePlan))
+	require.NotSame(t, normalizedRandomSamplePredicate, normalizedRandomSamplePlan.GetQuery().GetPredicates())
+	require.True(t, proto.Equal(normalizedRandomSampleBefore, normalizedRandomSamplePredicate))
+	require.True(t, proto.Equal(rlsBefore, rlsPredicate))
+	mergedRandomSamplePredicate := normalizedRandomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr().GetPredicate().GetBinaryExpr()
+	require.NotNil(t, mergedRandomSamplePredicate)
+	require.True(t,
+		mergedRandomSamplePredicate.GetLeft() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate() ||
+			mergedRandomSamplePredicate.GetRight() == normalizedRandomSamplePredicate.GetRandomSampleExpr().GetPredicate(),
+	)
+	require.NoError(t, MergePredicateToPlan(randomSamplePlan, rlsPredicate))
+	require.Same(t, randomSample, randomSamplePlan.GetQuery().GetPredicates().GetRandomSampleExpr())
+	assert.InDelta(t, 0.5, randomSample.GetSampleFactor(), 0.0001)
+	assertPredicateMerged(t, randomSample.GetPredicate())
+
+	elementExpr := alwaysTruePredicate()
+	elementPredicate, err := planparserv2.ParseExpr(helper, "age > 18", nil)
+	require.NoError(t, err)
+	elementFilter := &planpb.ElementFilterExpr{
+		ElementExpr: elementExpr,
+		StructName:  "items",
+		Predicate:   elementPredicate,
+	}
+	searchPlan.GetVectorAnns().Predicates = &planpb.Expr{
+		Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: elementFilter},
+	}
+	expectedElementPlan := proto.Clone(searchPlan).(*planpb.PlanNode)
+	normalizedElementPlan := proto.Clone(searchPlan).(*planpb.PlanNode)
+	normalizedElementPredicate := normalizedElementPlan.GetVectorAnns().GetPredicates()
+	normalizedElementBefore := proto.Clone(normalizedElementPredicate).(*planpb.Expr)
+	rlsBefore = proto.Clone(rlsPredicate).(*planpb.Expr)
+	require.NoError(t, MergePredicateToPlan(expectedElementPlan, proto.Clone(rlsPredicate).(*planpb.Expr)))
+	require.NoError(t, MergeNormalizedPredicateToPlan(normalizedElementPlan, rlsPredicate))
+	require.True(t, proto.Equal(expectedElementPlan, normalizedElementPlan))
+	require.NotSame(t, normalizedElementPredicate, normalizedElementPlan.GetVectorAnns().GetPredicates())
+	require.True(t, proto.Equal(normalizedElementBefore, normalizedElementPredicate))
+	require.True(t, proto.Equal(rlsBefore, rlsPredicate))
+	mergedElementFilter := normalizedElementPlan.GetVectorAnns().GetPredicates().GetElementFilterExpr()
+	require.Same(t, normalizedElementPredicate.GetElementFilterExpr().GetElementExpr(), mergedElementFilter.GetElementExpr())
+	mergedElementPredicate := mergedElementFilter.GetPredicate().GetBinaryExpr()
+	require.NotNil(t, mergedElementPredicate)
+	require.True(t,
+		mergedElementPredicate.GetLeft() == normalizedElementPredicate.GetElementFilterExpr().GetPredicate() ||
+			mergedElementPredicate.GetRight() == normalizedElementPredicate.GetElementFilterExpr().GetPredicate(),
+	)
+	require.NoError(t, MergePredicateToPlan(searchPlan, rlsPredicate))
+	require.Same(t, elementFilter, searchPlan.GetVectorAnns().GetPredicates().GetElementFilterExpr())
+	require.Same(t, elementExpr, elementFilter.GetElementExpr())
+	assert.Equal(t, "items", elementFilter.GetStructName())
+	assertPredicateMerged(t, elementFilter.GetPredicate())
 }
 
 func assertPredicateMerged(t *testing.T, expr *planpb.Expr) {
@@ -1656,12 +1817,11 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 	red := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"red"}}}}
 	blue := &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: []string{"blue"}}}}
 	for _, storage := range []struct {
-		name       string
-		values     []*schemapb.ScalarField
-		mappedRows bool
+		name   string
+		values []*schemapb.ScalarField
 	}{
 		{name: "dense", values: []*schemapb.ScalarField{red, {}, blue}},
-		{name: "compact", values: []*schemapb.ScalarField{red, blue}, mappedRows: true},
+		{name: "compact", values: []*schemapb.ScalarField{red, blue}},
 	} {
 		t.Run(storage.name, func(t *testing.T) {
 			fieldData := &schemapb.FieldData{
@@ -1677,11 +1837,6 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 				}},
 			}
 			rows := newRowData([]*schemapb.FieldData{fieldData}, []int64{101})
-			if storage.mappedRows {
-				require.NotEmpty(t, rows.fields[101].arrayDataIndices)
-			} else {
-				require.Empty(t, rows.fields[101].arrayDataIndices)
-			}
 			for rowIdx, expected := range []truthValue{truthFalse, truthUnknown, truthTrue} {
 				actual, err := evalExpr(expr, rows, rowIdx)
 				require.NoError(t, err)
@@ -1689,6 +1844,187 @@ func TestNullableArrayUsesFieldSpecificValidData(t *testing.T) {
 			}
 			err := ValidateRowsByPredicate(context.Background(), []*schemapb.FieldData{fieldData}, 3, expr, "upsert", "check")
 			require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
+		})
+	}
+}
+
+func TestFieldReaderNullableScalarCursor(t *testing.T) {
+	column := &planpb.ColumnInfo{FieldId: 101}
+	for _, storage := range []struct {
+		name   string
+		values []string
+	}{
+		{name: "compact", values: []string{"first", "third"}},
+		{name: "full_size", values: []string{"first", "", "third"}},
+	} {
+		t.Run(storage.name, func(t *testing.T) {
+			rows := newRowData([]*schemapb.FieldData{{
+				FieldId:   101,
+				FieldName: "owner",
+				Type:      schemapb.DataType_VarChar,
+				ValidData: []bool{true, false, true},
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{
+					Data: &schemapb.ScalarField_StringData{StringData: &schemapb.StringArray{Data: storage.values}},
+				}},
+			}}, []int64{101})
+
+			for _, test := range []struct {
+				row      int
+				expected any
+			}{
+				{row: 0, expected: "first"},
+				{row: 0, expected: "first"},
+				{row: 2, expected: "third"},
+				{row: 1, expected: nil},
+				{row: 2, expected: "third"},
+			} {
+				value, err := rows.value(column, test.row)
+				require.NoError(t, err)
+				require.Equal(t, test.expected, value)
+			}
+		})
+	}
+}
+
+func TestArrayMatcherAcrossScalarTypes(t *testing.T) {
+	tests := []struct {
+		name        string
+		dataType    schemapb.DataType
+		array       *schemapb.ScalarField
+		nullTarget  *planpb.GenericValue
+		validTarget *planpb.GenericValue
+	}{
+		{
+			name:     "bool",
+			dataType: schemapb.DataType_Bool,
+			array: &schemapb.ScalarField{Data: &schemapb.ScalarField_BoolData{
+				BoolData: &schemapb.BoolArray{Data: []bool{true}},
+			}},
+			nullTarget:  &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: false}},
+			validTarget: &planpb.GenericValue{Val: &planpb.GenericValue_BoolVal{BoolVal: true}},
+		},
+		{
+			name:     "int",
+			dataType: schemapb.DataType_Int64,
+			array: &schemapb.ScalarField{Data: &schemapb.ScalarField_IntData{
+				IntData: &schemapb.IntArray{Data: []int32{7}},
+			}},
+			nullTarget:  &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
+			validTarget: &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 7}},
+		},
+		{
+			name:     "long",
+			dataType: schemapb.DataType_Int64,
+			array: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{
+				LongData: &schemapb.LongArray{Data: []int64{7}},
+			}},
+			nullTarget:  &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 0}},
+			validTarget: &planpb.GenericValue{Val: &planpb.GenericValue_Int64Val{Int64Val: 7}},
+		},
+		{
+			name:     "float",
+			dataType: schemapb.DataType_Float,
+			array: &schemapb.ScalarField{Data: &schemapb.ScalarField_FloatData{
+				FloatData: &schemapb.FloatArray{Data: []float32{1.5}},
+			}},
+			nullTarget:  &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: 0}},
+			validTarget: &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: 1.5}},
+		},
+		{
+			name:     "double",
+			dataType: schemapb.DataType_Double,
+			array: &schemapb.ScalarField{Data: &schemapb.ScalarField_DoubleData{
+				DoubleData: &schemapb.DoubleArray{Data: []float64{2.5}},
+			}},
+			nullTarget:  &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: 0}},
+			validTarget: &planpb.GenericValue{Val: &planpb.GenericValue_FloatVal{FloatVal: 2.5}},
+		},
+		{
+			name:     "string",
+			dataType: schemapb.DataType_VarChar,
+			array: &schemapb.ScalarField{Data: &schemapb.ScalarField_StringData{
+				StringData: &schemapb.StringArray{Data: []string{"present"}},
+			}},
+			nullTarget:  &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: ""}},
+			validTarget: &planpb.GenericValue{Val: &planpb.GenericValue_StringVal{StringVal: "present"}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			newMatcher := func(target *planpb.GenericValue) *arrayLiteralMatcher {
+				literals, err := newLiteralMatcher(test.dataType, []*planpb.GenericValue{target})
+				require.NoError(t, err)
+				return &arrayLiteralMatcher{literalMatcher: literals, op: planpb.JSONContainsExpr_Contains, seen: make([]uint32, len(literals.values))}
+			}
+
+			contains, err := newMatcher(test.nullTarget).matches(test.array)
+			require.NoError(t, err)
+			require.False(t, contains)
+
+			contains, err = newMatcher(test.validTarget).matches(test.array)
+			require.NoError(t, err)
+			require.True(t, contains)
+		})
+	}
+}
+
+func TestArrayContainsOperations(t *testing.T) {
+	schema := &schemapb.CollectionSchema{
+		Name: "rls_nullable_array_element_test",
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: 100, Name: "values", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		},
+	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+
+	tests := []struct {
+		expr     string
+		expected truthValue
+	}{
+		{expr: "array_contains(values, 0)", expected: truthFalse},
+		{expr: "array_contains(values, 7)", expected: truthTrue},
+		{expr: "array_contains_any(values, [0, 8])", expected: truthFalse},
+		{expr: "array_contains_any(values, [0, 7])", expected: truthTrue},
+		{expr: "array_contains_all(values, [7, 0])", expected: truthFalse},
+		{expr: "array_contains_all(values, [7])", expected: truthTrue},
+		{expr: "array_contains_all(values, [7, 7])", expected: truthTrue},
+		{expr: "array_contains_all(values, [])", expected: truthTrue},
+		{expr: "array_contains_any(values, [])", expected: truthFalse},
+	}
+	for _, storage := range []struct {
+		name   string
+		values []int64
+	}{
+		{name: "dense", values: []int64{7}},
+		{name: "compact", values: []int64{7}},
+	} {
+		t.Run(storage.name, func(t *testing.T) {
+			rows := newRowData([]*schemapb.FieldData{{
+				FieldId:   100,
+				FieldName: "values",
+				Type:      schemapb.DataType_Array,
+				Field: &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_ArrayData{ArrayData: &schemapb.ArrayArray{
+					ElementType: schemapb.DataType_Int64,
+					Data: []*schemapb.ScalarField{{
+						Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: storage.values}},
+					}},
+				}}}},
+			}}, []int64{100})
+
+			for _, test := range tests {
+				t.Run(test.expr, func(t *testing.T) {
+					expr, err := planparserv2.ParseExpr(helper, test.expr, nil)
+					require.NoError(t, err)
+					actual, err := evalExpr(expr, rows, 0)
+					require.NoError(t, err)
+					require.Equal(t, test.expected, actual)
+					if contains := expr.GetJsonContainsExpr(); contains != nil {
+						require.NotNil(t, rows.arrayMatchers[contains])
+					}
+				})
+			}
 		})
 	}
 }

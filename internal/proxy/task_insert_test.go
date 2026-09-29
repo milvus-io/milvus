@@ -85,8 +85,7 @@ func TestInsertTaskPreExecuteTextRequiresStorageV3(t *testing.T) {
 	schema := mustNewSchemaInfo(newTextSchemaForStorageV3Test(collectionName))
 	cache := NewMockCache(t)
 	cache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(int64(100), nil)
-	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{}, nil)
-	cache.EXPECT().GetCollectionSchema(mock.Anything, dbName, collectionName).Return(schema, nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, dbName, collectionName, int64(100)).Return(&collectionInfo{Schema: schema}, nil)
 	task := &insertTask{
 		ctx: context.Background(),
 		insertMsg: &BaseInsertTask{
@@ -477,12 +476,6 @@ func TestInsertTask_KeepUserPK_WhenAllowInsertAutoIDTrue(t *testing.T) {
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
 
-	cache.On("GetCollectionSchema",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(info, nil)
-
 	cache.On("GetCollectionInfo",
 		mock.Anything,
 		mock.Anything,
@@ -611,12 +604,6 @@ func TestInsertTask_Function(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
-
-	cache.On("GetCollectionSchema",
-		mock.Anything, // context.Context
-		mock.AnythingOfType("string"),
-		mock.AnythingOfType("string"),
-	).Return(info, nil)
 
 	cache.On("GetPartitionInfo",
 		mock.Anything, // context.Context

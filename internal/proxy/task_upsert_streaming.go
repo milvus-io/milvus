@@ -175,15 +175,10 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
-	collectionName := ut.upsertMsg.InsertMsg.CollectionName
-	collID, err := ut.GetMetaCache().GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
-	if err != nil {
-		return nil, err
-	}
+	collID := ut.collectionID
 	ut.upsertMsg.InsertMsg.CollectionID = collID
 	log := mlog.With(
 		mlog.FieldCollectionID(collID))
-	getCacheDur := tr.RecordSpan()
 
 	getMsgStreamDur := tr.RecordSpan()
 	channelNames, err := ut.chMgr.GetVChannels(collID)
@@ -200,7 +195,6 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		mlog.FieldCollectionID(collID),
 		mlog.Strings("virtual_channels", channelNames),
 		mlog.FieldTaskID(ut.ID()),
-		mlog.Duration("get cache duration", getCacheDur),
 		mlog.Duration("get msgStream duration", getMsgStreamDur))
 
 	// start to repack insert data
@@ -245,7 +239,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		ut.BeginTs(),
 		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
 		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
-		ut.req.GetDbName(),
+		ut.upsertMsg.DeleteMsg.GetDbName(),
 		ut.req.Namespace,
 		ut.schema.CollectionSchema,
 	)

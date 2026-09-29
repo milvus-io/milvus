@@ -41,6 +41,7 @@ type TaskNode interface {
 	ShardMgr() shardclient.ShardClientMgr
 	ChMgr() channelmgr.ChannelsMgr
 	TsoAllocator() TsoAllocator
+	ResolveRLSEnforcement(ctx context.Context, cache metacache.Cache, rlsEnabled, rlsForce, skipRLS bool, dbName, collectionName, operation string) (bool, error)
 }
 
 // QueryRunner executes a query task. Implemented by the proxy composition root;
