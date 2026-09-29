@@ -186,3 +186,47 @@ func (id reorderBufferTestMessageID) IntoProto() *commonpb.MessageID {
 func (id reorderBufferTestMessageID) String() string {
 	return id.Marshal()
 }
+
+// A message id is only unique inside its own WAL backend, so the buffer keys the
+// deduplication set by backend as well: during a WAL switch it holds messages
+// from two backends at once.
+func TestReOrderByTimeTickBufferDeduplicatesByWALAndMessageID(t *testing.T) {
+	buf := NewReOrderBuffer()
+
+	first := newWALNamedReorderBufferTestMessage(t, message.WALNameRocksmq, "same-id", 1)
+	second := newWALNamedReorderBufferTestMessage(t, message.WALNameKafka, "same-id", 2)
+	duplicate := newWALNamedReorderBufferTestMessage(t, message.WALNameRocksmq, "same-id", 3)
+
+	_, err := buf.Push(first)
+	require.NoError(t, err)
+	_, err = buf.Push(second)
+	require.NoError(t, err)
+	_, err = buf.Push(duplicate)
+	require.Error(t, err)
+	require.Equal(t, 2, buf.Len())
+
+	require.Len(t, buf.PopUtilTimeTick(2), 2)
+	_, err = buf.Push(duplicate)
+	require.NoError(t, err)
+	require.Equal(t, 1, buf.Len())
+}
+
+func newWALNamedReorderBufferTestMessage(
+	t *testing.T,
+	walName message.WALName,
+	marshaledID string,
+	timeTick uint64,
+) *mock_message.MockImmutableMessage {
+	t.Helper()
+	messageID := mock_message.NewMockMessageID(t)
+	messageID.EXPECT().WALName().Return(walName).Maybe()
+	messageID.EXPECT().Marshal().Return(marshaledID).Maybe()
+
+	msg := mock_message.NewMockImmutableMessage(t)
+	msg.EXPECT().EstimateSize().Return(1).Maybe()
+	msg.EXPECT().MessageID().Return(messageID).Maybe()
+	msg.EXPECT().TimeTick().Return(timeTick).Maybe()
+	msg.EXPECT().MessageType().Return(message.MessageTypeInsert).Maybe()
+	msg.EXPECT().Version().Return(message.VersionV2).Maybe()
+	return msg
+}
