@@ -166,6 +166,7 @@ minio:
   # The maximum number of objects requested per batch in minio ListObjects rpc, 
   # 0 means using oss client by default, decrease these configuration if ListObjects timeout
   listObjectsMaxKeys: 0
+  multipartCopyThreshold: 1073741824 # Object size threshold in bytes for switching from a single CopyObject request to multipart copy. Larger objects use multipart copy. Default is 1 GiB (1073741824 bytes). Must be a positive integer; invalid values fall back to the default. Single CopyObject requests remain capped at 5 GiB regardless of this threshold. Changes apply to subsequent copies, not copies already in progress. Does not apply to GCP or Azure.
 
 # Milvus supports four message queues (MQ): rocksmq (based on RocksDB), Pulsar, Kafka, and Woodpecker.
 # You can change the MQ by setting the mq.type field.
