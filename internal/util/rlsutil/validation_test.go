@@ -31,6 +31,10 @@ func TestValidatePayloadBounds(t *testing.T) {
 	paramtable.Init()
 
 	t.Run("policy action count", func(t *testing.T) {
+		require.ErrorIs(t, ValidatePolicyActionCount(0), merr.ErrParameterInvalid)
+		require.NoError(t, ValidatePolicyActionCount(maxSupportedPolicyActions))
+		require.ErrorIs(t, ValidatePolicyActionCount(maxSupportedPolicyActions+1), merr.ErrParameterInvalid)
+
 		actions := make([]PolicyAction, maxSupportedPolicyActions+1)
 		err := ValidatePolicy(
 			"policy",
@@ -42,9 +46,54 @@ func TestValidatePayloadBounds(t *testing.T) {
 		require.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
 
+	t.Run("deprecated policy roles", func(t *testing.T) {
+		require.NoError(t, ValidatePolicyRoles(nil))
+		require.ErrorIs(t, ValidatePolicyRoles([]string{"reader"}), merr.ErrParameterInvalid)
+	})
+
 	t.Run("raw tag key transport count", func(t *testing.T) {
 		_, err := ValidateAndDeduplicateTagKeys(make([]string, MaxTransportTagKeys+1))
 		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+	})
+
+	t.Run("raw principal tags transport bytes", func(t *testing.T) {
+		params := &paramtable.Get().ProxyCfg
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagsPerPrincipal.Key, "1"))
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagKeyLength.Key, "1"))
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxTagValueLength.Key, "1"))
+		require.NoError(t, paramtable.Get().Save(params.RLSMaxPrincipalCacheBytes.Key, "1"))
+		defer func() {
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxTagsPerPrincipal.Key))
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxTagKeyLength.Key))
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxTagValueLength.Key))
+			require.NoError(t, paramtable.Get().Reset(params.RLSMaxPrincipalCacheBytes.Key))
+		}()
+
+		maxPayloadBytes := maxPrincipalTagsJSONLength(1)
+		_, err := TagsFromJSONWithLimit(`{"k":"`+strings.Repeat("x", int(maxPayloadBytes))+`"}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		_, err = TagsFromJSONWithLimit(`{"k":`+strings.Repeat("1", int(maxPayloadBytes))+`}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterTooLarge)
+		tags, err := TagsFromJSONWithLimit(`{"k":`+strings.Repeat("1", maxJSONNumberLength+1)+`}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, TagValueKindDouble, tags["k"].Kind)
+		_, err = TagsFromJSONWithLimit(`{"kk":"x"}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+		_, err = TagsFromJSONWithLimit(`{"k":"xx"}`, 1)
+		require.ErrorIs(t, err, merr.ErrParameterInvalid)
+
+		storedTags, err := TagsFromJSON(`{"kk":"xx"}`)
+		require.NoError(t, err)
+		require.Equal(t, NewStringTagValue("xx"), storedTags["kk"])
+		_, err = TagsFromJSON(`{"k":` + strings.Repeat("1", maxJSONNumberLength+1) + `}`)
+		require.NoError(t, err)
+
+		tags, err = TagsFromJSONWithLimit(`{"k":-9223372036854775808}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, NewInt64TagValue(math.MinInt64), tags["k"])
+		tags, err = TagsFromJSONWithLimit(`{"k":-1.7976931348623157e+308}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, NewDoubleTagValue(-math.MaxFloat64), tags["k"])
 	})
 
 	t.Run("distinct tag key semantic count", func(t *testing.T) {
@@ -214,6 +263,17 @@ func TestValidatePayloadBounds(t *testing.T) {
 			_, err = TagsFromJSON(invalid)
 			require.ErrorIs(t, err, merr.ErrParameterInvalid)
 		}
+	})
+
+	t.Run("bounded JSON tag payload", func(t *testing.T) {
+		tags, err := TagsFromJSONWithLimit(`{"tenant":"acme"}`, 1)
+		require.NoError(t, err)
+		require.Equal(t, map[string]TagValue{"tenant": NewStringTagValue("acme")}, tags)
+
+		_, err = TagsFromJSONWithLimit(`{"tenant":"acme","level":3}`, 1)
+		require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
+		_, err = TagsFromJSONWithLimit(`{"tenant":"acme","tenant":"other"}`, 1)
+		require.ErrorIs(t, err, merr.ErrServiceQuotaExceeded)
 	})
 
 	t.Run("transport identifier bounds", func(t *testing.T) {
