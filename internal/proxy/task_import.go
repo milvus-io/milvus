@@ -128,6 +128,11 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 	req.CollectionName = canonicalCollectionName
 
 	rlsEnabled := colInfo.RlsEnabled
+	// Keep this before skip authorization: an old DataCoord cannot re-check a
+	// concurrent rls.force transition before it creates the import job.
+	if rlsEnabled && !Params.ProxyCfg.RLSImportEnforcementEnabled.GetAsBool() {
+		return merr.WrapErrServiceUnavailable("RLS import enforcement is unavailable until the cluster upgrade completes")
+	}
 	if rlsEnabled && requestedSkipRLS {
 		rlsEnabled, err = resolveRLSEnforcement(ctx, it.GetMetaCache(), rlsEnabled, colInfo.RlsForce, requestedSkipRLS,
 			canonicalDBName, canonicalCollectionName, "import")

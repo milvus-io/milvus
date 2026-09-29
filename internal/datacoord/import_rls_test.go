@@ -41,6 +41,9 @@ import (
 
 func TestResolveImportRLSPredicate(t *testing.T) {
 	paramtable.Init()
+	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("true")
+	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
 	schema := &schemapb.CollectionSchema{
 		Name:       "test",
 		Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
@@ -184,4 +187,22 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		require.NoError(t, terminalErr)
 		require.NoError(t, retryErr)
 	})
+}
+
+func TestResolveImportRLSPredicateRejectsBeforeClusterUpgrade(t *testing.T) {
+	paramtable.Init()
+	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("false")
+	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
+
+	_, terminalErr, retryErr := (&Server{}).resolveImportRLSPredicate(context.Background(), &internalpb.ImportRequestInternal{
+		CollectionID: 10,
+		Schema: &schemapb.CollectionSchema{
+			Properties: []*commonpb.KeyValuePair{{Key: common.RLSEnabledKey, Value: "true"}},
+		},
+		RlsPrincipal: "alice",
+		SkipRls:      true,
+	})
+	require.NoError(t, terminalErr)
+	require.ErrorIs(t, retryErr, merr.ErrServiceUnavailable)
 }

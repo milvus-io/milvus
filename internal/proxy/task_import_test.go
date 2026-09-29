@@ -516,6 +516,9 @@ func newImportTaskForPreExecute(t *testing.T, options []*commonpb.KeyValuePair) 
 
 func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
 	paramtable.Init()
+	gate := &Params.ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("true")
+	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
 	require.NoError(t, paramtable.Get().Save(Params.CommonCfg.AuthorizationEnabled.Key, "false"))
 	t.Cleanup(func() {
 		require.NoError(t, paramtable.Get().Reset(Params.CommonCfg.AuthorizationEnabled.Key))
@@ -575,6 +578,39 @@ func TestImportTask_PreExecutePinsIdentityAndRLSContext(t *testing.T) {
 			assert.Equal(t, test.expectedSkipRLS, task.skipRLS)
 		})
 	}
+}
+
+func TestImportTask_PreExecuteRejectsRLSBeforeClusterUpgrade(t *testing.T) {
+	paramtable.Init()
+	gate := &Params.ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("false")
+	t.Cleanup(func() { gate.SwapTempValue(oldGate) })
+
+	cache := NewMockCache(t)
+	cache.EXPECT().GetCollectionID(mock.Anything, "test_db", "test_collection").Return(int64(100), nil)
+	cache.EXPECT().GetCollectionInfo(mock.Anything, "test_db", "test_collection", int64(100)).Return(&collectionInfo{
+		CollID:     100,
+		RlsEnabled: true,
+		Schema: &schemaInfo{CollectionSchema: &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			Fields: []*schemapb.FieldSchema{{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true}},
+		}},
+	}, nil)
+	task := &importTask{
+		baseTask: baseTask{MetaCache: cache},
+		ctx:      context.Background(),
+		req: &internalpb.ImportRequest{
+			DbName:         "test_db",
+			CollectionName: "test_collection",
+			Options: []*commonpb.KeyValuePair{
+				{Key: "rls_principal", Value: "alice"},
+				{Key: "skip_rls", Value: "true"},
+			},
+		},
+	}
+
+	err := task.PreExecute(context.Background())
+	require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 }
 
 // TestImportTask_PreExecuteRequiresImportBinlogPrivilege drives the gate through

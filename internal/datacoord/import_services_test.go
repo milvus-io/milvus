@@ -64,6 +64,10 @@ type ImportServicesSuite struct {
 }
 
 func (s *ImportServicesSuite) SetupTest() {
+	paramtable.Init()
+	gate := &paramtable.Get().ProxyCfg.RLSImportEnforcementEnabled
+	oldGate := gate.SwapTempValue("true")
+	s.T().Cleanup(func() { gate.SwapTempValue(oldGate) })
 	previous := streaming.WAL()
 	streaming.SetupNoopWALForTest()
 	s.T().Cleanup(func() { streaming.SetWALForTest(previous) })
@@ -343,6 +347,10 @@ func (s *ImportServicesSuite) TestImportV2_SuccessReturnsJobID() {
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema: &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			DbName: "test_db",
+		},
 	}, nil).Times(2)
 
 	server := &Server{
@@ -450,6 +458,10 @@ func (s *ImportServicesSuite) setupImportV2DuplicateBroadcast(importMeta ImportM
 	mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(100)).Return(&milvuspb.DescribeCollectionResponse{
 		DbName:         "test_db",
 		CollectionName: "test_collection",
+		Schema: &schemapb.CollectionSchema{
+			Name:   "test_collection",
+			DbName: "test_db",
+		},
 	}, nil).Maybe()
 
 	server := &Server{
@@ -720,13 +732,6 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_RLSDenialCreatesFailedJ
 		Status:       merr.Success(),
 		CollectionId: 100,
 	}, nil).Once()
-	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
-		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS
-	})).Return(&rootcoordpb.GetRLSMetadataResponse{
-		Status:       merr.Success(),
-		CollectionId: 100,
-	}, nil).Once()
-
 	mockHandler := NewNMockHandler(s.T())
 	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 		ID:            100,
@@ -805,10 +810,6 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_PersistsRLSPredicate() 
 			CheckExpr:    `tenant == "acme"`,
 		}},
 	}, nil).Once()
-	mixCoord.EXPECT().GetRLSMetadata(mock.Anything, mock.MatchedBy(func(req *rootcoordpb.GetRLSMetadataRequest) bool {
-		return req.GetKind() == rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_PRINCIPALS
-	})).Return(&rootcoordpb.GetRLSMetadataResponse{Status: merr.Success(), CollectionId: 100}, nil).Once()
-
 	mockHandler := NewNMockHandler(s.T())
 	mockHandler.EXPECT().GetCollection(mock.Anything, int64(100)).Return(&collectionInfo{
 		ID: 100, VChannelNames: []string{"v1"},

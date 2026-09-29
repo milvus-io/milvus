@@ -244,6 +244,8 @@ recovery validation remains follow-up work.
 There is no previously released RLS metadata to migrate. RLS may be enabled
 only after all serving Proxy and RootCoord instances understand its API, WAL
 messages, dynamic property transition, and cache invalidation contract. A
+cluster-wide version gate rejects bulk imports into RLS-enabled collections
+until DataCoord and DataNode also support the persisted import predicate. A
 cluster with enabled collections must not roll back to a version that cannot
 enforce RLS.
 
