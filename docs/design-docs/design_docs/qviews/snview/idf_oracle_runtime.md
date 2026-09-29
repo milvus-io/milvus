@@ -84,6 +84,14 @@ into the positive delta. Unchanged resources require no stats reads. Growing
 contributions leaving the aggregate are subtracted from their in-memory stats.
 Reads occur outside the Oracle mutex and use bounded streaming buffers.
 
+After initialization, the Oracle mutex also owns all growing-statistics access,
+including segment membership, mutable segment statistics, flush/seal metadata,
+and cleanup. Cleanup runs in the same critical section as aggregate publication
+or target advancement, rather than using an independent store mutex after
+releasing the Oracle lock. Live events, version preparation and lazy
+materialization can run on different goroutines; each observes consistent
+membership and statistics under this one lock.
+
 One refresh executes at a time, keeping the sealed membership base stable. A WAL
 event barrier is enqueued under the vchannel owner lock after object reads and
 drained by the query dispatcher before commit. Commit reconciles
