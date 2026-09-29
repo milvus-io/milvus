@@ -1,4 +1,5 @@
 import random
+import time
 
 import numpy as np
 import pytest
@@ -516,8 +517,15 @@ class TestMilvusClientPartialUpdateValid(TestMilvusClientV2Base):
         assert baseline["indexed_ids"] == [0]
         assert baseline["element_keys"] == [(0, 0), (0, 1), (3, 0)]
 
-        compact_id = self.compact(client, collection_name)[0]
-        assert compact_id > 0
+        # Flush does not wait for SortCompaction; unsorted segments are not
+        # eligible for manual compaction, which returns -1 when no task is made.
+        deadline = time.monotonic() + 120
+        compact_id = -1
+        while compact_id == -1 and time.monotonic() < deadline:
+            compact_id = self.compact(client, collection_name, timeout=max(1, deadline - time.monotonic()))[0]
+            if compact_id == -1:
+                time.sleep(1)
+        assert compact_id > 0, "No manual compaction task was created within 120 seconds"
         assert self.wait_for_compaction_ready(client, compact_id, timeout=300)
         self.release_collection(client, collection_name)
         self.load_collection(client, collection_name)
