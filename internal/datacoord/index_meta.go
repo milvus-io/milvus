@@ -85,9 +85,12 @@ type indexMeta struct {
 	keyLock *lock.KeyLock[UniqueID]
 	// segmentID -> indexID -> segmentIndex
 	segmentIndexes *typeutil.ConcurrentMap[UniqueID, *typeutil.ConcurrentMap[UniqueID, *model.SegmentIndex]]
-	// Protect the current build slot across different BuildID locks. A restored
-	// superseded record may be retired while its replacement is being installed.
-	segmentIndexMapLock sync.Mutex
+	// Serialize updates to each segment's index map across per-BuildID keyLocks.
+	// Removing its last index must not unlink the map while another index is
+	// added to that segment. Different segments can update independently.
+	// These locks cover only memory updates and never acquire other meta locks.
+	segmentIndexMapLocksOnce sync.Once
+	segmentIndexMapLocks     *lock.KeyLock[UniqueID]
 }
 
 func newIndexTaskStats(s *model.SegmentIndex) *metricsinfo.IndexTaskStats {
@@ -274,9 +277,17 @@ func (m *indexMeta) updateCollectionIndex(index *model.Index) {
 	m.indexes[index.CollectionID][index.IndexID] = index
 }
 
+func (m *indexMeta) getSegmentIndexMapLocks() *lock.KeyLock[UniqueID] {
+	m.segmentIndexMapLocksOnce.Do(func() {
+		m.segmentIndexMapLocks = lock.NewKeyLock[UniqueID]()
+	})
+	return m.segmentIndexMapLocks
+}
+
 func (m *indexMeta) updateSegmentIndex(segIdx *model.SegmentIndex) {
-	m.segmentIndexMapLock.Lock()
-	defer m.segmentIndexMapLock.Unlock()
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segIdx.SegmentID)
+	defer locks.Unlock(segIdx.SegmentID)
 	indexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		indexes.Insert(segIdx.IndexID, segIdx)
@@ -319,8 +330,9 @@ func (m *indexMeta) alterSegmentIndexes(segIdxes []*model.SegmentIndex) error {
 func (m *indexMeta) updateSegmentIndexManifestPublished(segIdx *model.SegmentIndex, published bool) {
 	updated := model.CloneSegmentIndex(segIdx)
 	updated.ManifestPublished = published
-	m.segmentIndexMapLock.Lock()
-	defer m.segmentIndexMapLock.Unlock()
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(updated.SegmentID)
+	defer locks.Unlock(updated.SegmentID)
 	if indexes, ok := m.segmentIndexes.Get(updated.SegmentID); ok {
 		if current, exists := indexes.Get(updated.IndexID); exists && current.BuildID == updated.BuildID {
 			indexes.Insert(updated.IndexID, updated)
@@ -1295,10 +1307,11 @@ func (m *indexMeta) subtractStoredIndexSizeOnRemoval(segIdx *model.SegmentIndex)
 }
 
 // removeSegmentIndexRecordInMemory is the record half. It acquires only the
-// memory-map lock, which never covers I/O or acquires segMu/fieldIndexLock.
+// per-segment map lock, which never covers I/O or acquires segMu/fieldIndexLock.
 func (m *indexMeta) removeSegmentIndexRecordInMemory(segIdx *model.SegmentIndex) {
-	m.segmentIndexMapLock.Lock()
-	defer m.segmentIndexMapLock.Unlock()
+	locks := m.getSegmentIndexMapLocks()
+	locks.Lock(segIdx.SegmentID)
+	defer locks.Unlock(segIdx.SegmentID)
 	segIndexes, ok := m.segmentIndexes.Get(segIdx.SegmentID)
 	if ok {
 		if current, exists := segIndexes.Get(segIdx.IndexID); exists && current.BuildID == segIdx.BuildID {

@@ -410,9 +410,18 @@ never installs a stale record over a replacement build.
 
 Catalog reload selects the highest BuildID for each `(segment, index)` slot,
 independently of catalog key iteration order. Superseded records remain available
-by BuildID for GC. A short memory-map lock serializes current-slot installation
-and removal across different BuildID locks; removing an older record checks
-the slot's BuildID and preserves its replacement. This lock covers no I/O.
+by BuildID for GC. `segmentIndexMapLocks`, keyed by SegmentID, serializes updates
+to each segment's `indexID -> record` map across different per-BuildID `keyLock`s.
+Different segments can update their maps independently.
+Dropping an index and creating another on the same field assigns different index
+and build IDs, while GC retires the old record asynchronously. Without this lock,
+GC can observe an empty segment map, a creator can insert a new index into it,
+and GC can then unlink the entire map, losing the new index's in-memory mapping.
+The same critical section makes checking a slot's BuildID and updating or removing
+it indivisible with respect to other writers for that segment. These locks cover
+no I/O and never acquire `segMu` or `fieldIndexLock`; manifest publication may
+take the map lock while already holding `segMu`. They are separate from the
+segment manifest locks that serialize the full manifest transaction.
 
 Rollback includes retained Dropped segments, including snapshot-pinned parents.
 Snapshot references continue to pin the same build IDs and physical files.

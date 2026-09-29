@@ -161,10 +161,11 @@ type SegmentManifestCommit struct {
 // order is segmentManifestLocks[segmentID] -> indexMeta.keyLock -> segMu. No
 // caller may enter this protocol while holding segMu. Manifest I/O runs outside
 // segMu; the final catalog mutation is rebased onto the latest SegmentInfo and
-// catalog + memory publication stays in one segMu critical section. No lock is
-// ever acquired inside that section: the fieldIndexLock-guarded index gauge
-// update a staged SegmentIndex mutation defers runs only after segMu is
-// released (still under keyLock).
+// catalog + memory publication stays in one segMu critical section. Memory
+// installation may acquire indexMeta's per-segment map lock inside that section;
+// it never acquires segMu/fieldIndexLock or performs I/O while holding that lock.
+// The fieldIndexLock-guarded index gauge update a staged SegmentIndex mutation
+// defers runs only after segMu is released (still under keyLock).
 func (m *meta) CommitSegmentManifest(ctx context.Context, commit SegmentManifestCommit) error {
 	if commit.SegmentID == 0 {
 		return merr.WrapErrServiceInternalMsg("segment manifest commit requires a segment ID")
