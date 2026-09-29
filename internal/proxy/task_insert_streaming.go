@@ -21,7 +21,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/fastpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
-	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
@@ -35,19 +34,12 @@ func (it *insertTask) Execute(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Insert-Execute")
 	defer sp.End()
 
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy execute insert streaming %d", it.ID()))
-
-	collectionName := it.insertMsg.CollectionName
-	collID, err := it.GetMetaCache().GetCollectionID(it.ctx, it.insertMsg.GetDbName(), collectionName)
-	if err != nil {
-		mlog.Warn(ctx, "fail to get collection id", mlog.Err(err))
-		return err
-	}
+	collID := it.collectionID
 	it.insertMsg.CollectionID = collID
 
-	getCacheDur := tr.RecordSpan()
 	channelNames := it.vChannels
 	if len(channelNames) == 0 {
+		var err error
 		channelNames, err = it.chMgr.GetVChannels(collID)
 		if err != nil {
 			mlog.Warn(ctx, "get vChannels failed", mlog.FieldCollectionID(collID), mlog.Err(err))
@@ -61,8 +53,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 		mlog.FieldCollectionID(collID),
 		mlog.Strings("virtual_channels", channelNames),
 		mlog.FieldTaskID(it.ID()),
-		mlog.Bool("is_parition_key", it.partitionKeys != nil),
-		mlog.Duration("get cache duration", getCacheDur))
+		mlog.Bool("is_parition_key", it.partitionKeys != nil))
 
 	var ez *message.CipherConfig
 	if hookutil.IsClusterEncryptionEnabled() {
@@ -71,6 +62,7 @@ func (it *insertTask) Execute(ctx context.Context) error {
 
 	// start to repack insert data
 	var msgs []message.MutableMessage
+	var err error
 	idempotency := it.idempotentInsertDecoration()
 	if it.partitionKeys == nil {
 		msgs, err = repackInsertDataForStreamingService(it.TraceCtx(), it.GetMetaCache(), channelNames, it.insertMsg, it.result, ez, it.schemaVersion, nil, idempotency)

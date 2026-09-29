@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -267,7 +269,6 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			deprecateShardCaches(append(aliasName, collectionName)...)
 		}
 	}
-
 	switch msgType {
 	case commonpb.MsgType_DropCollection:
 		rls.MarkCollectionDropped(request.GetCollectionID())
@@ -2543,6 +2544,8 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		chMgr:           node.chMgr,
 		schemaTimestamp: request.SchemaTimestamp,
 		idempotencyKey:  GetIdempotencyKeyFromContext(ctx),
+		rlsPrincipal:    request.GetRlsPrincipal(),
+		skipRLS:         request.GetSkipRls(),
 	}
 
 	constructFailedResponse := func(err error) *milvuspb.MutationResult {
@@ -2890,30 +2893,18 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
-
-	// A search by primary keys is rewritten in place by handleIfSearchByPK:
-	// the IDs become a placeholder group of the non-null vectors, and the
-	// per-ID validity mask that re-expands the result lives only in that
-	// attempt. Hand every attempt its own copy so a later one still finds
-	// the IDs and produces the mask again, instead of treating the rewritten
-	// request as an ordinary search and dropping the null positions.
-	attemptRequest := func() *milvuspb.SearchRequest {
-		if request.GetIds() == nil {
-			return request
-		}
-		return proto.Clone(request).(*milvuspb.SearchRequest)
-	}
+	rlsSnapshot := &searchRLSSnapshot{}
 
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	isRecallEvaluation := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, attemptRequest(), optimizedSearch, false)
+		rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, attemptRequest(), optimizedSearch, false)
+			rsp, resultSizeInsufficient, isTopkReduce, isRecallEvaluation, err = node.search(ctx, request, optimizedSearch, false, rlsSnapshot)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2936,7 +2927,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		// search for ground truth and compute recall
 		if isRecallEvaluation && merr.Ok(rsp.GetStatus()) {
 			var rspGT *milvuspb.SearchResults
-			rspGT, _, _, _, err = node.search(ctx, attemptRequest(), false, true)
+			rspGT, _, _, _, err = node.search(ctx, request, false, true, rlsSnapshot)
 			metrics.ProxyRecallSearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.SearchLabel,
@@ -2979,7 +2970,7 @@ func projectSearchResultValidDataForLegacy(result *milvuspb.SearchResults) {
 	typeutil.ProjectFieldDataValidDataForLegacy(resultData.GetGroupByFieldValue())
 }
 
-func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool) (*milvuspb.SearchResults, bool, bool, bool, error) {
+func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, optimizedSearch bool, isRecallEvaluation bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.SearchLabel).
@@ -3005,8 +2996,13 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Search")
 	defer sp.End()
 
-	// Handle search by primary keys: transform IDs to vectors
-	validData, err := node.handleIfSearchByPK(ctx, request)
+	request, searchByPK, err := node.prepareSearchAttempt(ctx, request, rlsSnapshot)
+	if err != nil {
+		return &milvuspb.SearchResults{
+			Status: merr.Status(err),
+		}, false, false, false, nil
+	}
+	validData, rlsPredicate, err := node.transformSearchByPK(ctx, request, searchByPK)
 	if err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
@@ -3029,6 +3025,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 	}
 
 	qt := NewSearchTask(ctx, node, node.sched, request, optimizedSearch, isRecallEvaluation, tr)
+	if !rlsSnapshot.presetTask(qt) && searchByPK != nil {
+		qt.SetResolvedRLSPredicate(rlsPredicate)
+	}
 
 	succeeded := false
 	defer func() {
@@ -3078,7 +3077,11 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest, 
 		mlog.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	err = qt.WaitToFinish()
+	if ctx.Err() == nil {
+		rlsSnapshot.captureTask(qt)
+	}
+	if err != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
 			mlog.Int64("nq", qt.GetNq()),
@@ -3170,15 +3173,16 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	rsp := &milvuspb.SearchResults{
 		Status: merr.Success(),
 	}
+	rlsSnapshot := &searchRLSSnapshot{}
 	optimizedSearch := true
 	resultSizeInsufficient := false
 	isTopkReduce := false
 	err2 := retry.Handle(ctx, func() (bool, error) {
-		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
+		rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
 		if merr.Ok(rsp.GetStatus()) && optimizedSearch && resultSizeInsufficient && isTopkReduce && paramtable.Get().AutoIndexConfig.EnableResultLimitCheck.GetAsBool() {
 			// without optimize search
 			optimizedSearch = false
-			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch)
+			rsp, resultSizeInsufficient, isTopkReduce, err = node.hybridSearch(ctx, request, optimizedSearch, rlsSnapshot)
 			metrics.ProxyRetrySearchCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
 				metrics.HybridSearchLabel,
@@ -3222,7 +3226,7 @@ func (l *hybridSearchRequestExprLogger) String() string {
 	return builder.String()
 }
 
-func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool) (*milvuspb.SearchResults, bool, bool, error) {
+func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest, optimizedSearch bool, rlsSnapshot *searchRLSSnapshot) (*milvuspb.SearchResults, bool, bool, error) {
 	metrics.GetStats(ctx).
 		SetNodeID(paramtable.GetNodeID()).
 		SetInboundLabel(metrics.HybridSearchLabel).
@@ -3241,7 +3245,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
 	newSearchReq := ConvertHybridSearchToSearch(request)
+	newSearchReq = rlsSnapshot.pinRequest(newSearchReq)
 	qt := NewSearchTask(ctx, node, node.sched, newSearchReq, optimizedSearch, false, tr)
+	rlsSnapshot.presetTask(qt)
 
 	succeeded := false
 	defer func() {
@@ -3295,14 +3301,18 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		mlog.Uint64("timestamp", qt.Base.Timestamp),
 	)
 
-	if err := qt.WaitToFinish(); err != nil {
+	waitErr := qt.WaitToFinish()
+	if ctx.Err() == nil {
+		rlsSnapshot.captureTask(qt)
+	}
+	if waitErr != nil {
 		mlog.Warn(ctx,
 			rpcFailedToWaitToFinish(method),
-			mlog.Err(err),
+			mlog.Err(waitErr),
 		)
 
 		return &milvuspb.SearchResults{
-			Status: merr.Status(err),
+			Status: merr.Status(waitErr),
 		}, false, false, nil
 	}
 
@@ -3420,32 +3430,254 @@ func validateIDsType(pkField *schemapb.FieldSchema, ids *schemapb.IDs) error {
 	return nil
 }
 
-// After this function, the request will have PlaceholderGroup set, ready for normal search pipeline.
-// If the request is not search-by-IDs, this function does nothing.
-//
-// Returns validData ([]bool) indicating which IDs have valid vectors, and error if the transformation fails.
-func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) ([]bool, error) {
-	// Check if this is a search by PK request
+type searchByPKPreflight struct {
+	collectionInfo *collectionInfo
+	rlsPredicate   *planpb.Expr
+}
+
+type searchRLSSnapshot struct {
+	resolved       bool
+	collectionID   int64
+	dbName         string
+	collectionName string
+	predicate      *planpb.Expr
+	searchByPK     *searchByPKPreflight
+}
+
+func (snapshot *searchRLSSnapshot) captureTask(task *searchTask) {
+	if snapshot == nil || snapshot.resolved {
+		return
+	}
+	resolved := task.ResolvedRLSSnapshot()
+	if resolved == nil {
+		return
+	}
+	snapshot.resolved = true
+	snapshot.collectionID = resolved.CollectionID
+	snapshot.dbName = resolved.DBName
+	snapshot.collectionName = resolved.CollectionName
+	snapshot.predicate = resolved.Predicate
+}
+
+func (snapshot *searchRLSSnapshot) captureSearchByPK(request *milvuspb.SearchRequest, preflight *searchByPKPreflight) {
+	if snapshot == nil || snapshot.resolved || preflight == nil || preflight.collectionInfo == nil {
+		return
+	}
+	info := preflight.collectionInfo
+	dbName := info.DBName
+	if dbName == "" {
+		dbName = request.GetDbName()
+	}
+	snapshot.resolved = true
+	snapshot.collectionID = info.CollID
+	snapshot.dbName = dbName
+	snapshot.collectionName = info.Schema.GetName()
+	snapshot.predicate = preflight.rlsPredicate
+	snapshot.searchByPK = preflight
+}
+
+func (snapshot *searchRLSSnapshot) presetTask(task *searchTask) bool {
+	if snapshot == nil || !snapshot.resolved {
+		return false
+	}
+	task.SetResolvedRLSPredicate(snapshot.predicate)
+	return true
+}
+
+func (snapshot *searchRLSSnapshot) pinRequest(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	if snapshot == nil || !snapshot.resolved {
+		return request
+	}
+	pinned := copySearchRequestForAttempt(request)
+	pinned.DbName = snapshot.dbName
+	pinned.CollectionName = snapshot.collectionName
+	collectionID := strconv.FormatInt(snapshot.collectionID, 10)
+	if len(pinned.GetSubReqs()) == 0 {
+		pinned.SearchParams = pinSearchCollectionID(pinned.GetSearchParams(), collectionID)
+	} else {
+		for _, subRequest := range pinned.GetSubReqs() {
+			if subRequest == nil {
+				continue
+			}
+			subRequest.SearchParams = pinSearchCollectionID(subRequest.GetSearchParams(), collectionID)
+		}
+	}
+	return pinned
+}
+
+// copySearchRequestForAttempt isolates the fields mutated while preparing a
+// search attempt without copying immutable vector payloads.
+func copySearchRequestForAttempt(request *milvuspb.SearchRequest) *milvuspb.SearchRequest {
+	if request == nil {
+		return nil
+	}
+	copied := &milvuspb.SearchRequest{
+		Base:                  request.GetBase(),
+		DbName:                request.GetDbName(),
+		CollectionName:        request.GetCollectionName(),
+		PartitionNames:        request.GetPartitionNames(),
+		Dsl:                   request.GetDsl(),
+		SearchInput:           request.GetSearchInput(),
+		DslType:               request.GetDslType(),
+		OutputFields:          request.GetOutputFields(),
+		SearchParams:          slices.Clone(request.GetSearchParams()),
+		TravelTimestamp:       request.GetTravelTimestamp(),
+		GuaranteeTimestamp:    request.GetGuaranteeTimestamp(),
+		Nq:                    request.GetNq(),
+		NotReturnAllMeta:      request.GetNotReturnAllMeta(),
+		ConsistencyLevel:      request.GetConsistencyLevel(),
+		UseDefaultConsistency: request.GetUseDefaultConsistency(),
+		SearchByPrimaryKeys:   request.GetSearchByPrimaryKeys(),
+		ExprTemplateValues:    request.GetExprTemplateValues(),
+		FunctionScore:         request.GetFunctionScore(),
+		Namespace:             request.Namespace,
+		Highlighter:           request.GetHighlighter(),
+		SearchAggregation:     request.GetSearchAggregation(),
+		FunctionChains:        request.GetFunctionChains(),
+		RlsPrincipal:          request.GetRlsPrincipal(),
+		SkipRls:               request.GetSkipRls(),
+	}
+	for _, subRequest := range request.GetSubReqs() {
+		if subRequest == nil {
+			copied.SubReqs = append(copied.SubReqs, nil)
+			continue
+		}
+		copied.SubReqs = append(copied.SubReqs, &milvuspb.SubSearchRequest{
+			Dsl:                subRequest.GetDsl(),
+			PlaceholderGroup:   subRequest.GetPlaceholderGroup(),
+			DslType:            subRequest.GetDslType(),
+			SearchParams:       slices.Clone(subRequest.GetSearchParams()),
+			Nq:                 subRequest.GetNq(),
+			ExprTemplateValues: subRequest.GetExprTemplateValues(),
+			Namespace:          subRequest.Namespace,
+			FunctionChains:     subRequest.GetFunctionChains(),
+		})
+	}
+	return copied
+}
+
+func pinSearchCollectionID(params []*commonpb.KeyValuePair, collectionID string) []*commonpb.KeyValuePair {
+	found := false
+	for i, param := range params {
+		if param.GetKey() == CollectionID {
+			params[i] = &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID}
+			found = true
+		}
+	}
+	if !found {
+		params = append(params, &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID})
+	}
+	return params
+}
+
+func (node *Proxy) prepareSearchAttempt(ctx context.Context, request *milvuspb.SearchRequest, snapshot *searchRLSSnapshot) (*milvuspb.SearchRequest, *searchByPKPreflight, error) {
+	if snapshot != nil && snapshot.resolved {
+		request = snapshot.pinRequest(request)
+		if ids := request.GetIds(); ids != nil && typeutil.GetSizeOfIDs(ids) > 0 {
+			if snapshot.searchByPK == nil {
+				return request, nil, merr.WrapErrServiceInternalMsg("search-by-primary-key RLS snapshot is incomplete")
+			}
+			return request, snapshot.searchByPK, nil
+		}
+		return request, nil, nil
+	}
+
+	attempt, preflight, err := node.prepareSearchByPKAttempt(ctx, request)
+	if err == nil && preflight != nil {
+		snapshot.captureSearchByPK(attempt, preflight)
+	}
+	return attempt, preflight, err
+}
+
+func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.SearchRequest) (*searchByPKPreflight, error) {
 	ids := request.GetIds()
 	if ids == nil || typeutil.GetSizeOfIDs(ids) == 0 {
-		return nil, nil // Not search by PK, do nothing
+		return nil, nil
 	}
+	if len(request.GetSubReqs()) > 0 {
+		return nil, merr.WrapErrParameterInvalidMsg("search by IDs is not supported for hybrid search")
+	}
+
+	// Pin collection identity before validating request-sized ID input.
+	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx,
+		request.GetDbName(), request.GetCollectionName(), 0)
+	if err != nil {
+		return nil, err
+	}
+	if requestedCollectionID, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.SearchParams); ok {
+		requestedID, err := strconv.ParseInt(requestedCollectionID, 0, 64)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid("int value for collection_id", requestedCollectionID,
+				"value for collection id is invalid")
+		}
+		if requestedID != collectionInfo.CollID {
+			return nil, merr.WrapErrParameterInvalidMsg(
+				"collection id %d is not consistent with resolved collection %d", requestedID, collectionInfo.CollID)
+		}
+	}
+	canonicalDBName := collectionInfo.DBName
+	if canonicalDBName == "" {
+		canonicalDBName = request.GetDbName()
+	}
+	rlsEnabled, err := resolveRLSEnforcement(ctx, node.getMetaCache(), collectionInfo.RlsEnabled, collectionInfo.RlsForce, request.GetSkipRls(),
+		canonicalDBName, collectionInfo.Schema.GetName(), "search")
+	if err != nil {
+		return nil, err
+	}
+	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, request.GetRlsPrincipal(), "search")
+	if err != nil {
+		return nil, err
+	}
+	var rlsPredicate *planpb.Expr
+	if enforceRLS {
+		isIteratorStr, _ := funcutil.GetAttrByKeyFromRepeatedKV(IteratorField, request.GetSearchParams())
+		isIterator := isIteratorStr == "True" || isIteratorStr == "true"
+		rlsPredicate, err = rls.ResolveUsingPredicate(ctx, collectionInfo.CollID, principalName, rls.SearchAction(false, isIterator), collectionInfo.Schema.SchemaHelper)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &searchByPKPreflight{
+		collectionInfo: collectionInfo,
+		rlsPredicate:   rlsPredicate,
+	}, nil
+}
+
+func (node *Proxy) prepareSearchByPKAttempt(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchRequest, *searchByPKPreflight, error) {
+	preflight, err := node.preflightSearchByPK(ctx, request)
+	if err != nil || preflight == nil {
+		return request, preflight, err
+	}
+	return copySearchRequestForAttempt(request), preflight, nil
+}
+
+// transformSearchByPK rewrites an ID search after its non-mutating preflight.
+func (node *Proxy) transformSearchByPK(ctx context.Context, request *milvuspb.SearchRequest, preflight *searchByPKPreflight) ([]bool, *planpb.Expr, error) {
+	if preflight == nil {
+		return nil, nil, nil
+	}
+	ids := request.GetIds()
+	collectionInfo := preflight.collectionInfo
+
+	// Keep the internal Query and the final Search on the collection whose RLS
+	// policy was resolved during preflight, even if the input alias is repointed.
+	collectionID := strconv.FormatInt(collectionInfo.CollID, 10)
+	if _, ok := funcutil.TryGetAttrByKeyFromRepeatedKV(CollectionID, request.SearchParams); !ok {
+		request.SearchParams = append(request.SearchParams, &commonpb.KeyValuePair{Key: CollectionID, Value: collectionID})
+	}
+	if collectionInfo.DBName != "" {
+		request.DbName = collectionInfo.DBName
+	}
+	request.CollectionName = collectionInfo.Schema.GetName()
 
 	// Check for duplicate IDs (fail fast before query)
 	inputIDsCount := typeutil.GetSizeOfIDs(ids)
 	checker, err := typeutil.NewIDsChecker(ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if checker.Size() != inputIDsCount {
-		return nil, merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
-	}
-
-	// Get collection schema for validation and plan building
-	collectionInfo, err := node.GetMetaCache().GetCollectionInfo(ctx,
-		request.GetDbName(), request.GetCollectionName(), 0)
-	if err != nil {
-		return nil, err
+		return nil, nil, merr.WrapErrParameterInvalidMsg("duplicate IDs found in search request")
 	}
 
 	// Get anns_field from search params, or infer from schema if only one vector field exists
@@ -3453,11 +3685,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	if err != nil || annsFieldName == "" {
 		vecFields := typeutil.GetVectorFieldSchemas(collectionInfo.Schema.CollectionSchema)
 		if len(vecFields) == 0 {
-			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			return nil, nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"no vector field found in schema")
 		}
 		if enableMultipleVectorFields && len(vecFields) > 1 {
-			return nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
+			return nil, nil, merr.WrapErrParameterInvalid("valid anns_field in search_params", "missing",
 				"multiple vector fields exist, please specify anns_field in search_params")
 		}
 		annsFieldName = vecFields[0].Name
@@ -3467,11 +3699,11 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	if annField == nil {
 		// annsFieldName comes from the user's search request; a missing field is
 		// the user's input error.
-		return nil, merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema"))
+		return nil, nil, merr.WrapErrAsInputError(merr.WrapErrFieldNotFound(annsFieldName, "vector field not found in schema"))
 	}
 
 	if annField.GetDataType() == schemapb.DataType_ArrayOfVector {
-		return nil, merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
+		return nil, nil, merr.WrapErrParameterInvalidMsg("array of vector is not supported for search by IDs")
 	}
 
 	// Check if this is a BM25 function-based search
@@ -3482,13 +3714,13 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	if isBM25Search {
 		// BM25 search: fetch the input text field of the BM25 function
 		if len(bm25Function.InputFieldNames) == 0 {
-			return nil, merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
+			return nil, nil, merr.WrapErrParameterInvalidMsg("BM25 function has no input field")
 		}
 		fieldToFetch = bm25Function.InputFieldNames[0]
 	} else {
 		// Vector search: validate and fetch the vector field
 		if !typeutil.IsVectorType(annField.GetDataType()) {
-			return nil, merr.WrapErrParameterInvalidMsg("field (%s) to search is not of vector data type", annsFieldName)
+			return nil, nil, merr.WrapErrParameterInvalidMsg("field (%s) to search is not of vector data type", annsFieldName)
 		}
 		fieldToFetch = annsFieldName
 	}
@@ -3496,16 +3728,25 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// Get primary key field
 	pkField, err := collectionInfo.Schema.GetPkField()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Validate IDs type matches primary key type
 	if err := validateIDsType(pkField, ids); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Create requery plan using IDs (no expr parsing overhead)
 	plan := planparserv2.CreateRequeryPlan(pkField, ids)
+
+	// Search by primary keys uses an internal Query to fetch the input vectors.
+	// Apply the top-level Search policy pinned by the preflight, then prevent
+	// queryTask from applying a Query policy to the same internal retrieval.
+	if preflight.rlsPredicate != nil {
+		if err := rls.AttachPredicateToRequeryPlan(plan, preflight.rlsPredicate); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	// Build query request to fetch data by IDs
 	// For BM25: fetch text field; for vector search: fetch vector field
@@ -3513,6 +3754,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		Base:                  request.Base,
 		DbName:                request.DbName,
 		CollectionName:        request.CollectionName,
+		QueryParams:           []*commonpb.KeyValuePair{{Key: CollectionID, Value: collectionID}},
 		OutputFields:          []string{pkField.GetName(), fieldToFetch},
 		PartitionNames:        request.PartitionNames,
 		TravelTimestamp:       request.TravelTimestamp,
@@ -3532,15 +3774,16 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		ConsistencyLevel: request.ConsistencyLevel,
 		QueryLabel:       metrics.QueryLabel,
 	}, node.GetMetaCache(), paramtable.Get().ProxyCfg.MustUsePartitionKey.GetAsBool())
+	qt.SetSkipRuntimeRLS(true)
 
 	// Execute query
 	queryResult, _, err := node.query(ctx, qt, nil)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if !merr.Ok(queryResult.GetStatus()) {
-		return nil, merr.Error(queryResult.GetStatus())
+		return nil, nil, merr.Error(queryResult.GetStatus())
 	}
 
 	// Extract primary key field to check result count
@@ -3549,7 +3792,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	})
 
 	if pkFieldData == nil {
-		return nil, merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
+		return nil, nil, merr.WrapErrFieldNotFound(pkField.GetName(), "primary key field not found in query result")
 	}
 
 	// Check if the returned pk count matches the input IDs count
@@ -3584,7 +3827,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 			}
 		}
 
-		return nil, merr.WrapErrParameterInvalidMsg(
+		return nil, nil, merr.WrapErrParameterInvalidMsg(
 			fmt.Sprintf("some of the provided primary key IDs do not exist: missing IDs = %v", missingIDs))
 	}
 
@@ -3601,7 +3844,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	orderedFieldsData, err := PickFieldData(ids, pkOffset, queryResult.GetFieldsData(),
 		collectionInfo.Schema.CollectionSchema, collectionInfo.CollID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Extract the field data from query result
@@ -3611,7 +3854,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	})
 
 	if fieldData == nil {
-		return nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
+		return nil, nil, merr.WrapErrFieldNotFound(fieldToFetch, "field not found in query result")
 	}
 
 	// validData is per requested ID: one entry per row, in request order.
@@ -3650,7 +3893,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 	// For vector search: converts vector to vector placeholder
 	placeholderBytes, vectorCount, err := funcutil.FieldDataToPlaceholderGroupBytesWithCount(fieldData)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	request.Nq = int64(vectorCount)
@@ -3661,7 +3904,7 @@ func (node *Proxy) handleIfSearchByPK(ctx context.Context, request *milvuspb.Sea
 		PlaceholderGroup: placeholderBytes,
 	}
 
-	return validData, nil
+	return validData, preflight.rlsPredicate, nil
 }
 
 // Flush notify data nodes to persist the data of collection.

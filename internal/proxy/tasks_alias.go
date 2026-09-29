@@ -44,6 +44,7 @@ const (
 	GroupByFieldsKey       = dql.GroupByFieldsKey
 	GroupSizeKey           = dql.GroupSizeKey
 	IgnoreGrowingKey       = dql.IgnoreGrowingKey
+	IteratorField          = dql.IteratorField
 	LimitKey               = dql.LimitKey
 	MetricTypeKey          = dql.MetricTypeKey
 	NQKey                  = dql.NQKey
@@ -82,4 +83,5 @@ var (
 	GetPartitionIDs                          = dql.GetPartitionIDs
 	MarshalPlanWithMembershipFilterSizeLimit = dql.MarshalPlanWithMembershipFilterSizeLimit
 	NormalizeFP32ToFP16BF16VectorFieldData   = dql.NormalizeFP32ToFP16BF16VectorFieldData
+	FormatTimestamptzFields                  = dql.FormatTimestamptzFields
 )

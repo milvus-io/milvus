@@ -42,9 +42,10 @@ type compiledExpression struct {
 }
 
 type compiledPolicyExpression struct {
-	expr           *planpb.Expr
-	needsPrincipal bool
-	tagVariables   map[string]string
+	expr                 *planpb.Expr
+	needsPrincipal       bool
+	tagVariables         map[string]string
+	tagVariableDataTypes map[string][]schemapb.DataType
 }
 
 func compiledExpressionNeedsTags(e *compiledExpression) bool {
@@ -230,10 +231,20 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 			return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS using expression")
 		}
 	}
+	var tagVariableDataTypes map[string][]schemapb.DataType
+	if len(template.tagVariables) > 0 {
+		tagVariableDataTypes = make(map[string][]schemapb.DataType, len(template.tagVariables))
+		for _, variable := range template.tagVariables {
+			dataTypes := make([]schemapb.DataType, 0, 1)
+			collectRLSTemplateDataTypes(parsedExpr, variable, &dataTypes)
+			tagVariableDataTypes[variable] = dataTypes
+		}
+	}
 	return &compiledPolicyExpression{
-		expr:           parsedExpr,
-		needsPrincipal: template.needsPrincipal,
-		tagVariables:   template.tagVariables,
+		expr:                 parsedExpr,
+		needsPrincipal:       template.needsPrincipal,
+		tagVariables:         template.tagVariables,
+		tagVariableDataTypes: tagVariableDataTypes,
 	}, nil
 }
 
@@ -314,7 +325,7 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 		if !ok {
 			return nil, nil
 		}
-		normalizedTagValue, ok = normalizeRLSTagValue(e.expr, variable, tagValue)
+		normalizedTagValue, ok = normalizeRLSTagValue(e.tagVariableDataTypes[variable], tagValue)
 		if !ok {
 			return nil, nil
 		}
@@ -365,9 +376,7 @@ func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType 
 // every occurrence of a tag variable in an expression. Numeric conversions are
 // allowed only when they preserve the value exactly; otherwise the policy is
 // treated as not matching instead of risking an over-permissive comparison.
-func normalizeRLSTagValue(expr *planpb.Expr, variable string, value rlsutil.TagValue) (rlsutil.TagValue, bool) {
-	dataTypes := make([]schemapb.DataType, 0, 1)
-	collectRLSTemplateDataTypes(expr, variable, &dataTypes)
+func normalizeRLSTagValue(dataTypes []schemapb.DataType, value rlsutil.TagValue) (rlsutil.TagValue, bool) {
 	if len(dataTypes) == 0 {
 		return rlsutil.TagValue{}, false
 	}
@@ -541,6 +550,25 @@ func ResolveRuntimePrincipal(rlsEnabled bool, principalName string, operation st
 }
 
 func MergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
+	return mergePredicateToPlan(plan, rlsPredicate, mergePredicate)
+}
+
+// MergeNormalizedPredicateToPlan merges parser- and RLS-rewritten predicates
+// without walking either tree again. The caller must keep both inputs immutable
+// until the plan has been serialized.
+func MergeNormalizedPredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
+	return mergePredicateToPlan(plan, rlsPredicate, mergeNormalizedPredicate)
+}
+
+// AttachPredicateToRequeryPlan combines independently executable predicates
+// without rewriting either tree. Requery primary-key terms may be large.
+func AttachPredicateToRequeryPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
+	return mergePredicateToPlan(plan, rlsPredicate, func(userPredicate, rlsPredicate *planpb.Expr) *planpb.Expr {
+		return combinePredicate(userPredicate, rlsPredicate, planpb.BinaryExpr_LogicalAnd)
+	})
+}
+
+func mergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr, merge func(*planpb.Expr, *planpb.Expr) *planpb.Expr) error {
 	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
 		return nil
 	}
@@ -549,11 +577,11 @@ func MergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) erro
 	}
 	switch node := plan.GetNode().(type) {
 	case *planpb.PlanNode_Query:
-		node.Query.Predicates = mergePredicate(node.Query.GetPredicates(), rlsPredicate)
+		node.Query.Predicates = merge(node.Query.GetPredicates(), rlsPredicate)
 	case *planpb.PlanNode_VectorAnns:
-		node.VectorAnns.Predicates = mergePredicate(node.VectorAnns.GetPredicates(), rlsPredicate)
+		node.VectorAnns.Predicates = merge(node.VectorAnns.GetPredicates(), rlsPredicate)
 	case *planpb.PlanNode_Predicates:
-		node.Predicates = mergePredicate(node.Predicates, rlsPredicate)
+		node.Predicates = merge(node.Predicates, rlsPredicate)
 	default:
 		return merr.WrapErrServiceInternalMsg("failed to merge RLS predicate into unsupported plan node %T", node)
 	}
@@ -607,6 +635,14 @@ func mergePredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *plan
 	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
 		return userPredicate
 	}
+	switch wrapper := userPredicate.GetExpr().(type) {
+	case *planpb.Expr_RandomSampleExpr:
+		wrapper.RandomSampleExpr.Predicate = mergePredicate(wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate)
+		return userPredicate
+	case *planpb.Expr_ElementFilterExpr:
+		wrapper.ElementFilterExpr.Predicate = mergePredicate(wrapper.ElementFilterExpr.GetPredicate(), rlsPredicate)
+		return userPredicate
+	}
 	return rewriter.RewriteExpr(&planpb.Expr{
 		Expr: &planpb.Expr_BinaryExpr{
 			BinaryExpr: &planpb.BinaryExpr{
@@ -616,6 +652,37 @@ func mergePredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *plan
 			},
 		},
 	})
+}
+
+func mergeNormalizedPredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *planpb.Expr {
+	if userPredicate == nil || rewriter.IsAlwaysTrueExpr(userPredicate) {
+		return rlsPredicate
+	}
+	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
+		return userPredicate
+	}
+	switch wrapper := userPredicate.GetExpr().(type) {
+	case *planpb.Expr_RandomSampleExpr:
+		return &planpb.Expr{
+			Expr: &planpb.Expr_RandomSampleExpr{RandomSampleExpr: &planpb.RandomSampleExpr{
+				SampleFactor: wrapper.RandomSampleExpr.GetSampleFactor(),
+				Predicate: mergeNormalizedPredicate(
+					wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate),
+			}},
+			IsTemplate: userPredicate.GetIsTemplate(),
+		}
+	case *planpb.Expr_ElementFilterExpr:
+		return &planpb.Expr{
+			Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
+				ElementExpr: wrapper.ElementFilterExpr.GetElementExpr(),
+				StructName:  wrapper.ElementFilterExpr.GetStructName(),
+				Predicate: mergeNormalizedPredicate(
+					wrapper.ElementFilterExpr.GetPredicate(), rlsPredicate),
+			}},
+			IsTemplate: userPredicate.GetIsTemplate(),
+		}
+	}
+	return rewriter.MergeNormalizedAnd(userPredicate, rlsPredicate)
 }
 
 func alwaysTruePredicate() *planpb.Expr {
@@ -645,9 +712,30 @@ func ValidateCheckForWrite(ctx context.Context, collectionID UniqueID, principal
 	return validateCheckForWrite(ctx, defaultManager, collectionID, principalName, action, fieldsData, schemaHelper, rowNum, operation)
 }
 
+func ResolveCheckForWrite(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, schemaHelper *typeutil.SchemaHelper, operation string) (*planpb.Expr, error) {
+	checkExpr, err := defaultManager.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
+		return nil, err
+	}
+	return checkExpr, nil
+}
+
+func ValidateStaticCheckPredicate(checkExpr *planpb.Expr, operation string) error {
+	if checkExpr != nil && rewriter.IsAlwaysFalseExpr(checkExpr) {
+		return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS check expression", operation)
+	}
+	return nil
+}
+
 func validateCheckForWrite(ctx context.Context, m *manager, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, operation string) error {
 	checkExpr, err := m.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
 	if err != nil {
+		return err
+	}
+	if err := ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
 		return err
 	}
 	if checkExpr == nil {
@@ -746,13 +834,15 @@ func (value truthValue) or(other truthValue) truthValue {
 }
 
 type fieldReader struct {
-	field            *schemapb.FieldData
-	iter             func(int) any
-	scalarRows       int
-	scalarShapeValid bool
-	arrayRows        int
-	arrayShapeValid  bool
-	arrayDataIndices []int
+	field        *schemapb.FieldData
+	validData    []bool
+	dataLen      int
+	rowCount     int
+	shapeValid   bool
+	nextLogical  int
+	nextPhysical int
+	lastLogical  int
+	lastPhysical int
 }
 
 type rowData struct {
@@ -796,36 +886,19 @@ func newRowData(fieldsData []*schemapb.FieldData, referencedFieldIDs []int64) *r
 		if _, ok := referencedFields[fieldData.GetFieldId()]; !ok {
 			continue
 		}
-		reader := &fieldReader{field: fieldData}
+		reader := &fieldReader{field: fieldData, lastLogical: -1, lastPhysical: -1}
 		if isRLSScalarType(fieldData.GetType()) {
-			reader.iter = typeutil.GetDataIterator(fieldData)
-			dataLen := rlsScalarDataLen(fieldData)
-			reader.scalarRows = dataLen
-			reader.scalarShapeValid = true
-			if validData := typeutil.GetFieldDataValidData(fieldData); len(validData) > 0 {
-				reader.scalarRows = len(validData)
-				reader.scalarShapeValid = dataLen == len(validData) || dataLen == int(funcutil.CountValidRows(validData))
-			}
+			reader.dataLen = rlsScalarDataLen(fieldData)
 		} else if fieldData.GetType() == schemapb.DataType_Array {
-			validData := typeutil.GetFieldDataValidData(fieldData)
-			dataLen := len(fieldData.GetScalars().GetArrayData().GetData())
-			reader.arrayRows = dataLen
-			reader.arrayShapeValid = true
-			if len(validData) > 0 {
-				reader.arrayRows = len(validData)
-				validRows := int(funcutil.CountValidRows(validData))
-				reader.arrayShapeValid = dataLen == len(validData) || dataLen == validRows
-				if reader.arrayShapeValid && dataLen != len(validData) {
-					reader.arrayDataIndices = make([]int, len(validData))
-					compactIdx := 0
-					for rowIdx, valid := range validData {
-						if valid {
-							reader.arrayDataIndices[rowIdx] = compactIdx
-							compactIdx++
-						}
-					}
-				}
-			}
+			reader.dataLen = len(fieldData.GetScalars().GetArrayData().GetData())
+		}
+		reader.validData = typeutil.GetFieldDataValidData(fieldData)
+		reader.rowCount = reader.dataLen
+		reader.shapeValid = true
+		if len(reader.validData) > 0 {
+			reader.rowCount = len(reader.validData)
+			reader.shapeValid = reader.dataLen == len(reader.validData) ||
+				reader.dataLen == int(funcutil.CountValidRows(reader.validData))
 		}
 		data.fields[fieldData.GetFieldId()] = reader
 	}
@@ -841,16 +914,11 @@ func (d *rowData) validateRowCount(referencedFieldIDs []int64, expected int) err
 
 		var actual int
 		switch {
-		case isRLSScalarType(reader.field.GetType()):
-			if !reader.scalarShapeValid {
+		case isRLSScalarType(reader.field.GetType()), reader.field.GetType() == schemapb.DataType_Array:
+			if !reader.shapeValid {
 				return merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
 			}
-			actual = reader.scalarRows
-		case reader.field.GetType() == schemapb.DataType_Array:
-			if !reader.arrayShapeValid {
-				return merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
-			}
-			actual = reader.arrayRows
+			actual = reader.rowCount
 		default:
 			return merr.WrapErrServiceInternalMsg("RLS expression references unsupported field %s with type %s", reader.field.GetFieldName(), reader.field.GetType().String())
 		}
@@ -1012,6 +1080,42 @@ func (m *arrayLiteralMatcher) matches(arrayValue *schemapb.ScalarField, rowData 
 	})
 }
 
+// dataIndex maps a logical row to compact nullable storage with constant
+// memory. Production evaluation is monotonic; the reset keeps direct test and
+// diagnostic callers correct when they read rows out of order.
+func (r *fieldReader) dataIndex(rowIdx int) int {
+	if len(r.validData) == 0 {
+		return rowIdx
+	}
+	if r.dataLen == len(r.validData) {
+		if r.validData[rowIdx] {
+			return rowIdx
+		}
+		return -1
+	}
+	if rowIdx == r.lastLogical {
+		return r.lastPhysical
+	}
+	if rowIdx < r.nextLogical {
+		r.nextLogical = 0
+		r.nextPhysical = 0
+	}
+
+	physical := -1
+	for r.nextLogical <= rowIdx {
+		if r.validData[r.nextLogical] {
+			if r.nextLogical == rowIdx {
+				physical = r.nextPhysical
+			}
+			r.nextPhysical++
+		}
+		r.nextLogical++
+	}
+	r.lastLogical = rowIdx
+	r.lastPhysical = physical
+	return physical
+}
+
 func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
 	if column == nil {
 		return nil, merr.WrapErrServiceInternalMsg("RLS expression has empty column info")
@@ -1034,19 +1138,23 @@ func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
 		schemapb.DataType_Timestamptz,
 		schemapb.DataType_VarChar,
 		schemapb.DataType_Text:
-		if !reader.scalarShapeValid {
+		if !reader.shapeValid {
 			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
 		}
-		if rowIdx < 0 || rowIdx >= reader.scalarRows {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.field.GetFieldName(), reader.scalarRows)
+		if rowIdx < 0 || rowIdx >= reader.rowCount {
+			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.field.GetFieldName(), reader.rowCount)
 		}
-		return reader.iter(rowIdx), nil
+		dataIdx := reader.dataIndex(rowIdx)
+		if dataIdx < 0 {
+			return nil, nil
+		}
+		return rlsScalarValue(reader.field, dataIdx), nil
 	case schemapb.DataType_Array:
-		if !reader.arrayShapeValid {
+		if !reader.shapeValid {
 			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
 		}
-		if rowIdx < 0 || rowIdx >= reader.arrayRows {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.field.GetFieldName(), reader.arrayRows)
+		if rowIdx < 0 || rowIdx >= reader.rowCount {
+			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.field.GetFieldName(), reader.rowCount)
 		}
 		value, err := arrayValue(reader, rowIdx)
 		if err != nil || value == nil {
@@ -1094,6 +1202,27 @@ func rlsScalarDataLen(field *schemapb.FieldData) int {
 		return len(field.GetScalars().GetStringData().GetData())
 	default:
 		return 0
+	}
+}
+
+func rlsScalarValue(field *schemapb.FieldData, idx int) any {
+	switch field.GetType() {
+	case schemapb.DataType_Bool:
+		return field.GetScalars().GetBoolData().GetData()[idx]
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		return field.GetScalars().GetIntData().GetData()[idx]
+	case schemapb.DataType_Int64:
+		return field.GetScalars().GetLongData().GetData()[idx]
+	case schemapb.DataType_Float:
+		return field.GetScalars().GetFloatData().GetData()[idx]
+	case schemapb.DataType_Double:
+		return field.GetScalars().GetDoubleData().GetData()[idx]
+	case schemapb.DataType_Timestamptz:
+		return field.GetScalars().GetTimestamptzData().GetData()[idx]
+	case schemapb.DataType_VarChar, schemapb.DataType_Text:
+		return field.GetScalars().GetStringData().GetData()[idx]
+	default:
+		return nil
 	}
 }
 
@@ -1323,18 +1452,9 @@ func genericNumericValue(value *planpb.GenericValue) (float64, bool) {
 
 func arrayValue(reader *fieldReader, rowIdx int) (*schemapb.ScalarField, error) {
 	data := reader.field.GetScalars().GetArrayData().GetData()
-	dataIdx := rowIdx
-	validData := typeutil.GetFieldDataValidData(reader.field)
-	if len(validData) > 0 {
-		if rowIdx >= len(validData) {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds valid data length %d", rowIdx, len(validData))
-		}
-		if !validData[rowIdx] {
-			return nil, nil
-		}
-	}
-	if len(reader.arrayDataIndices) > 0 {
-		dataIdx = reader.arrayDataIndices[rowIdx]
+	dataIdx := reader.dataIndex(rowIdx)
+	if dataIdx < 0 {
+		return nil, nil
 	}
 	if dataIdx >= len(data) {
 		return nil, merr.WrapErrServiceInternalMsg("RLS row index %d maps outside data length %d", rowIdx, len(data))
