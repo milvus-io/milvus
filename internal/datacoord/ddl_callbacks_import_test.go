@@ -1819,10 +1819,13 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 func TestImportAckCallback_IgnoresMalformedLegacyRLSOptions(t *testing.T) {
 	defer mockey.UnPatchAll()
 
-	var request *internalpb.ImportRequestInternal
-	mockey.Mock((*Server).createImportJobFromAck).To(
+	patch := mockey.Mock((*Server).createImportJobFromAck).To(
 		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
-			request = in
+			assert.Empty(t, in.GetRlsPrincipal())
+			assert.False(t, in.GetSkipRls())
+			options := funcutil.KeyValuePair2Map(in.GetOptions())
+			assert.NotContains(t, options, importutilv2.RLSPrincipal)
+			assert.NotContains(t, options, importutilv2.SkipRLS)
 			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
 		}).Build()
 
@@ -1847,10 +1850,5 @@ func TestImportAckCallback_IgnoresMalformedLegacyRLSOptions(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.NotNil(t, request)
-	assert.Empty(t, request.GetRlsPrincipal())
-	assert.False(t, request.GetSkipRls())
-	options := funcutil.KeyValuePair2Map(request.GetOptions())
-	assert.NotContains(t, options, importutilv2.RLSPrincipal)
-	assert.NotContains(t, options, importutilv2.SkipRLS)
+	require.Equal(t, 1, patch.Times())
 }
