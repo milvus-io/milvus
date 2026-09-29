@@ -87,6 +87,34 @@ func TestImportTaskRLSPredicate(t *testing.T) {
 	}
 }
 
+func TestImportTaskRLSPredicateWithAutoIDVarCharPrimaryKey(t *testing.T) {
+	paramtable.Init()
+	schema := importRLSTestSchema()
+	schema.GetFields()[0].AutoID = true
+
+	manager := NewTaskManager()
+	syncMgr := syncmgr.NewMockSyncManager(t)
+	syncMgr.EXPECT().SyncDataWithChunkManager(mock.Anything, mock.Anything, mock.Anything).
+		Return(conc.Go(func() (struct{}, error) { return struct{}{}, nil }), nil).Once()
+	task := NewImportTask(importRLSTestRequest(t, schema, `pk == "100"`), manager, syncMgr, nil).(*ImportTask)
+
+	reader := importutilv2.NewMockReader(t)
+	var once sync.Once
+	reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
+		var data *storage.InsertData
+		once.Do(func() {
+			data = importRLSTestData()
+			delete(data.Data, 100)
+		})
+		if data != nil {
+			return data, nil
+		}
+		return nil, io.EOF
+	})
+
+	require.NoError(t, task.importFile(reader, nil))
+}
+
 func TestImportTaskCorruptRLSPredicateFailsDuringExecution(t *testing.T) {
 	paramtable.Init()
 	manager := NewTaskManager()
