@@ -176,7 +176,8 @@ func TestUnderlyingWALScannerAdaptorFollowsAlterWAL(t *testing.T) {
 				return nil, nil
 			}
 		},
-		nil)
+		nil,
+	)
 
 	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
@@ -319,7 +320,8 @@ func TestUnderlyingWALScannerAdaptorFollowsChainWithCleanRepeatedWAL(t *testing.
 		},
 		func(walName message.WALName) {
 			readerWALNames = append(readerWALNames, walName)
-		})
+		},
+	)
 
 	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 350
@@ -368,7 +370,8 @@ func TestUnderlyingWALScannerAdaptorStartAfterAlterWALMarker(t *testing.T) {
 			require.Equal(t, message.WALNameTest, walName)
 			return currentReadWAL, nil
 		},
-		nil)
+		nil,
+	)
 
 	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
@@ -391,7 +394,8 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALNameMismatches(t *testing.T) {
 		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
 			return nil, status.NewWALNameMismatchError(message.WALNameTest.String(), message.WALNameRocksmq.String())
 		},
-		nil)
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.Nil(t, next)
@@ -462,7 +466,8 @@ func TestUnderlyingWALScannerAdaptorWaitsForAlterWALTargetScanner(t *testing.T) 
 				return nil, merr.WrapErrMqTopicNotFound(channel.Name)
 			}
 			return targetWAL.Read(ctx, opt)
-		})
+		},
+	)
 
 	scanner, err := newUnderlyingWALScannerAdaptor(
 		mlog.With(),
@@ -585,7 +590,8 @@ func TestUnderlyingWALScannerAdaptorRejectsInvalidStartPosition(t *testing.T) {
 			t.Fatal("historical WAL opener must not be called for an invalid start position")
 			return nil, nil
 		},
-		nil)
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.Nil(t, next)
@@ -620,7 +626,8 @@ func TestUnderlyingWALScannerAdaptorFailsWhenWALExhaustsBeforeBoundary(t *testin
 		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
 			return historicalWAL, nil
 		},
-		nil)
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.Nil(t, next)
@@ -647,7 +654,8 @@ func TestUnderlyingWALScannerAdaptorRejectsInvalidAlterWALTarget(t *testing.T) {
 		func(context.Context, message.WALName, types.PChannelInfo) (walimpls.ROWALImpls, error) {
 			return historicalWAL, nil
 		},
-		nil)
+		nil,
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.Nil(t, next)
@@ -699,7 +707,8 @@ func TestUnderlyingWALScannerAdaptorReopensWALAfterReaderFailure(t *testing.T) {
 			}
 			return recoveredWAL, nil
 		},
-		nil)
+		nil,
+	)
 
 	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101
@@ -744,7 +753,8 @@ func TestUnderlyingWALScannerAdaptorRetriesWALOpenFailure(t *testing.T) {
 				return nil, nil
 			}
 		},
-		nil)
+		nil,
+	)
 
 	messages := runSwitchableScannerUntil(t, scanner, outputCh, func(msg message.ImmutableMessage) bool {
 		return msg.MessageType() == message.MessageTypeTimeTick && msg.TimeTick() == 101

@@ -39,7 +39,8 @@ func TestCatchupScannerUsesAdaptorForCurrentWALPosition(t *testing.T) {
 			openedWALNames <- walName
 			return readWAL, nil
 		},
-		nil)
+		nil,
+	)
 
 	catchup, ok := scanner.(*catchupScanner)
 	require.True(t, ok)
@@ -88,7 +89,8 @@ func TestCatchupScannerReplaysChainForOldGenerationPosition(t *testing.T) {
 			testWALs = testWALs[1:]
 			return opened, nil
 		},
-		nil)
+		nil,
+	)
 
 	catchup, ok := scanner.(*catchupScanner)
 	require.True(t, ok)
@@ -150,7 +152,8 @@ func TestCrossWALCatchupSwitchesToTailingWAB(t *testing.T) {
 		},
 		func(walName message.WALName) {
 			readerWALNames = append(readerWALNames, walName)
-		})
+		},
+	)
 
 	next, err := scanner.Do(context.Background())
 	require.NoError(t, err)

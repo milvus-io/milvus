@@ -319,6 +319,7 @@ func newScannerTestMessage(
 	return msg.WithTimeTick(timetick).WithLastConfirmedUseMessageID().
 		IntoImmutableMessage(walimplstest.NewTestMessageID(int64(timetick)))
 }
+
 func TestScannerAdaptorFailsWhenMigrationChainIsUnavailable(t *testing.T) {
 	resource.InitForTest(t)
 	channel := types.PChannelInfo{Name: "test-channel", AccessMode: types.AccessModeRO}
