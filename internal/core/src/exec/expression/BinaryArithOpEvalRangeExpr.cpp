@@ -47,12 +47,6 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
 
     auto input = context.get_offset_input();
     SetHasOffsetInput((input != nullptr));
-    // MOD cannot be pruned by SkipIndex. Keep other operators/layouts on
-    // their existing paths until their reader semantics are validated.
-    use_prepared_offset_reader_ =
-        input != nullptr && expr_->column_.data_type_ == DataType::INT64 &&
-        !expr_->column_.element_level_ &&
-        expr_->arith_op_type_ == proto::plan::ArithOpType::Mod;
     auto data_type = expr_->column_.data_type_;
     const bool is_nested_array =
         data_type == DataType::ARRAY &&

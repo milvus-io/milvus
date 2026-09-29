@@ -78,13 +78,16 @@ class OffsetColumnReader {
     // Flush pending loads BEFORE a cache miss can evict a backing owner.
     // Scratch is bounded, including for large iterative batches. Values and
     // validity retain caller order; predicate semantics stay entirely in Expr.
+    // Optional chunk IDs let the caller apply its existing SkipIndex decisions
+    // without resolving every offset a second time. The reader knows no ops.
     template <typename T>
     bool
     Gather(milvus::OpContext* context,
            const int32_t* rows,
            size_t count,
            T* values,
-           bool* valid) {
+           bool* valid,
+           size_t* chunk_ids = nullptr) {
         bool all_valid = true;
         std::array<const T*, kBatchRows> addresses;
         std::array<ValidityView, kBatchRows> validity;
@@ -104,6 +107,9 @@ class OffsetColumnReader {
             };
             for (size_t i = 0; i < n; ++i) {
                 const auto [chunk_id, offset] = Resolve(rows[base + i]);
+                if (chunk_ids != nullptr) {
+                    chunk_ids[base + i] = chunk_id;
+                }
                 ++reads_;
                 const auto* entry = Find(chunk_id);
                 // No pin copies per lane: consume borrowed addresses before

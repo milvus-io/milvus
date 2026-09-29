@@ -978,11 +978,13 @@ class SegmentExpr : public Expr {
             }
         }
 
-        // The prepared MOD path never uses SkipIndex. In particular, do not
-        // acquire its shared segment snapshot on every candidate batch.
-        if constexpr (std::is_same_v<T, int64_t>) {
-            if (use_prepared_offset_reader_ &&
-                segment_->type() == SegmentType::Sealed) {
+        // Prepare by physical source layout, not by predicate or search hint.
+        // Numeric elements of ARRAY/JSON are not scalar spans even when T is
+        // arithmetic; their existing view/element readers remain responsible.
+        if constexpr (std::is_arithmetic_v<T>) {
+            if (segment_->type() == SegmentType::Sealed &&
+                (IsNumericDataType(field_type_) ||
+                 field_type_ == DataType::TIMESTAMPTZ)) {
                 if (!offset_reader_attempted_) {
                     offset_reader_attempted_ = true;
                     auto column = segment_->CaptureOffsetColumn(field_id_);
@@ -992,12 +994,17 @@ class SegmentExpr : public Expr {
                     }
                 }
                 if (offset_reader_) {
+                    if (skip_func && !offset_reader_skip_index_) {
+                        offset_reader_skip_index_ = segment_->GetSkipIndex();
+                    }
                     // Bound scratch space even for large iterative input.
                     // Gather in input order, then reuse the SAME random
-                    // arithmetic kernel; do not switch to SIMD semantics.
-                    constexpr size_t kGatherRows = 64;
+                    // expression kernel; do not switch to SIMD semantics.
+                    constexpr size_t kGatherRows =
+                        OffsetColumnReader::kBatchRows;
                     std::array<T, kGatherRows> gathered;
                     std::array<bool, kGatherRows> validity;
+                    std::array<size_t, kGatherRows> chunks;
                     for (size_t i = 0; i < input->size(); i += kGatherRows) {
                         const auto count =
                             std::min(kGatherRows, input->size() - i);
@@ -1006,17 +1013,60 @@ class SegmentExpr : public Expr {
                             input->data() + i,
                             count,
                             gathered.data(),
-                            validity.data());
-                        evaluate_batch.template operator()<FilterType::random>(
-                            gathered.data(),
+                            validity.data(),
+                            skip_func ? chunks.data() : nullptr);
+                        uint64_t skipped = 0;
+                        if (skip_func) {
+                            // The original skip predicate belongs to this Expr.
+                            // Retain its snapshot and last chunk decision across
+                            // batches, without acquiring segment state per row.
+                            for (size_t j = 0; j < count; ++j) {
+                                if (offset_reader_skip_chunk_ != chunks[j]) {
+                                    offset_reader_skip_chunk_ = chunks[j];
+                                    offset_reader_skip_ =
+                                        skip_func(*offset_reader_skip_index_,
+                                                  field_id_,
+                                                  chunks[j]);
+                                }
+                                skipped |= uint64_t(offset_reader_skip_) << j;
+                            }
+                        }
+                        const auto valid =
                             all_valid
                                 ? ValidityView{}
-                                : ValidityView::FromExpanded(validity.data()),
-                            nullptr,
-                            count,
-                            res + i,
-                            valid_res + i,
-                            values...);
+                                : ValidityView::FromExpanded(validity.data());
+                        // Usually no chunk is skipped: one original batch call.
+                        // On skips, preserve logical positions and still drive
+                        // null-data callbacks so bitmap-input cursors advance.
+                        size_t first = 0;
+                        while (first < count) {
+                            const bool skip = (skipped >> first) & 1;
+                            size_t end = count;
+                            if (skipped != 0) {
+                                end = first + 1;
+                                while (end < count &&
+                                       bool((skipped >> end) & 1) == skip) {
+                                    ++end;
+                                }
+                            }
+                            const auto run_valid = valid.Subview(first);
+                            if (skip) {
+                                ApplyValidData(run_valid,
+                                               res + i + first,
+                                               valid_res + i + first,
+                                               end - first);
+                            }
+                            evaluate_batch
+                                .template operator()<FilterType::random>(
+                                    skip ? nullptr : gathered.data() + first,
+                                    run_valid,
+                                    nullptr,
+                                    end - first,
+                                    res + i + first,
+                                    valid_res + i + first,
+                                    values...);
+                            first = end;
+                        }
                     }
                     offset_reader_->EndBatch();
                     return input->size();
@@ -3156,11 +3206,13 @@ class SegmentExpr : public Expr {
     // Execution path determined once, preferably by PrefetchAsync() on the
     // prefetch pool. Direct callers that do not prefetch determine it lazily.
     ExprExecPath exec_path_{ExprExecPath::RawData};
-    // Enabled only by the INT64 MOD raw-offset path. Physical Expr objects
-    // belong to one worker; iterative and fusing reuse this same reader.
-    bool use_prepared_offset_reader_{false};
+    // Worker-local fixed-width offset source, shared by all original Expr ops.
+    // Search strategy stays in the plugin; no fusing/type+operator enable flag.
     bool offset_reader_attempted_{false};
     std::unique_ptr<OffsetColumnReader> offset_reader_;
+    std::shared_ptr<const SkipIndex> offset_reader_skip_index_;
+    size_t offset_reader_skip_chunk_{std::numeric_limits<size_t>::max()};
+    bool offset_reader_skip_{false};
     mutable std::once_flag determine_exec_path_once_;
     // Flag set by SetExecuteAllAtOnce() to enable move-based fast paths,
     // avoiding bitmap copies in ProcessIndexChunks/SliceCachedResult.
