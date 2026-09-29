@@ -14,6 +14,8 @@
 #include <google/protobuf/text_format.h>
 
 #include <cstdint>
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,6 +34,47 @@
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
+
+namespace {
+// QueryNode supplies a snapshot of server settings. These are Milvus-only
+// controls and must not be forwarded to the backend.
+void
+ParseStrictGroupSettings(SearchInfo& info) {
+    auto& params = info.search_params_;
+    if (auto it = params.find(kStrictGroupSkipRefine); it != params.end()) {
+        if (!it->is_boolean()) {
+            ThrowInfo(InvalidParameter,
+                      "strict group skip refine must be boolean");
+        }
+        info.strict_group_skip_refine_ = it->get<bool>();
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupPhase1CandidateWeight);
+        it != params.end()) {
+        if (!it->is_number_integer() ||
+            (it->is_number_unsigned() &&
+             it->get<uint64_t>() >
+                 static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) ||
+            it->get<int64_t>() < 0) {
+            ThrowInfo(InvalidParameter,
+                      "strict group phase-one candidate weight must be a "
+                      "nonnegative int64");
+        }
+        info.strict_group_phase1_candidate_weight_ = it->get<int64_t>();
+        params.erase(it);
+    }
+    if (auto it = params.find(kStrictGroupStrategy); it != params.end()) {
+        if (!it->is_string() || (*it != "original" && *it != "per_group")) {
+            ThrowInfo(InvalidParameter,
+                      "strict group strategy must be original or per_group");
+        }
+        info.strict_group_strategy_ = *it == "per_group"
+                                          ? StrictGroupStrategy::PerGroup
+                                          : StrictGroupStrategy::Original;
+        params.erase(it);
+    }
+}
+}  // namespace
 
 void
 ProtoParser::PlanOptionsFromProto(
@@ -64,6 +107,7 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         search_info.round_decimal_ = query_info_proto.round_decimal();
         search_info.search_params_ =
             nlohmann::json::parse(query_info_proto.search_params());
+        ParseStrictGroupSettings(search_info);
         search_info.materialized_view_involved =
             query_info_proto.materialized_view_involved();
         // currently, iterative filter does not support range search
