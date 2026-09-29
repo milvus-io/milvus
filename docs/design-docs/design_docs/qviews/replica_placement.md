@@ -1,5 +1,10 @@
 # QueryNode Replica Placement Algorithm
 
+This document describes the implemented node-layout policy. The selected
+[Incremental Score-Based Balancing](balancer_scoring.md) design changes segment
+placement within these targets and adds target-load/partial-resource accounting;
+it does not replace this quota or suspension algorithm.
+
 Node balance and stability take priority over loading cost. The implementation
 integrates with the [Balancer](balancer_design.md) and
 [Cache](balancer_cache.md). The current interfaces do not expose node capacity,
@@ -382,3 +387,25 @@ serializes Plan; the custom policy interface remains unchanged.
 The view and cache component implementation introduces neither new RPCs nor
 replica node lists. Targets are retained as immutable layout objects without
 additional persisted generations or discovery revisions.
+
+## 9. Interaction with the Next Scoring Policy
+
+[Incremental Score-Based Balancing](balancer_scoring.md) preserves this policy's
+per-collection/RG quotas, stable ownership, shortage suspension, and eventual
+physical isolation. RG-wide row scoring uses contributions across collections,
+but segment candidates must remain inside the selected replica target sets.
+Ordinary row changes still do not reelect node owners.
+
+Node-count balance does not imply exact row balance. For example, two full
+replicas on three disjoint nodes require a 2+1 allocation. The scorer must report
+constrained skew rather than violate isolation or repeatedly rotate owners.
+Quota-preserving owner exchanges are a separate possible follow-up, not an
+implicit fallback of the segment scorer.
+
+Target load, physical occupancy, and reusable resources have separate lifetimes.
+Suspension removes active demand without deleting desired LoadConfig or early
+releasing the last serving cover. The target-accounting publisher must observe
+layout-derived active/release decisions in addition to per-view facts. A failed
+Prepare's protected ready segments may remain reusable; invalidating that
+Prepare's target must not erase them. See the
+[partial-resource handover contract](balancer_scoring.md#51-failure-does-not-erase-partial-success).

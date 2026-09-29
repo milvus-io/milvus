@@ -222,3 +222,32 @@ Violating any contract leaves the corresponding view stuck (Preparing/UpRecoveri
 | `worknode/handler` | `ApplyView`, `QueryViewHandler` interface, `ViewSyncServer`, `pendingReports` |
 | `querynodev2/qnview` | `QNQueryViewHandler`, `QNQueryViewStateMachine`, `SegmentManager` interface |
 | `streamingnode/server/wal/snview` | `SNQueryViewHandler`, `SNQueryViewStateMachine`, `StreamingNodeResourceManager` interface, pchannel-bound `metastore.StreamingNodeCataLog` usage |
+
+## 7. Planned Partial Resource Handover
+
+The [next Balancer policy](balancer_scoring.md#51-failure-does-not-erase-partial-success)
+requires reuse of confirmed successful segments even when their Preparing view
+fails. Invalidating a target-load contribution is not a resource Release.
+
+The existing QN state machine retains previously ready segment IDs when it
+reports Unrecoverable; Release starts only after Coord requests teardown.
+ApplyViews processes new Preparing before old teardown within the same batch.
+The injected SegmentManager interface describes per-view reference counting,
+but this branch does not supply its concrete QV implementation.
+
+That implementation must establish the new view's compatible segment references
+before releasing the old view's references. Acquire must register references
+before returning, or provide an equivalent ordered handover. Loading and
+callbacks remain asynchronous. Calling Acquire first is insufficient if it
+defers reference registration until after Release can unload the resource.
+
+For A with S1/S2 ready and S3 failed, replacement B can retain S1/S2 on the same
+live node and load S3 elsewhere. Shared resources remain held by B when A is
+released; resources exclusive to A follow ordinary cleanup. Node loss,
+incompatibility, missing readiness, or an already-unprotected release path
+prevents guaranteed reuse. A reuse miss must fall back to correct loading.
+
+Verify partial-success failure reports, new-reference-before-old-release
+ordering, actual reference retention, cleanup when there is no replacement,
+and node loss. Handler call-order tests alone do not establish physical reuse.
+No RPC or production wiring change is made by this design update.

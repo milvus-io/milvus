@@ -1,5 +1,16 @@
 # Balancer & CollectionLoadManager Design
 
+**Implementation baseline and next design:** Sections 1–10 describe the current
+cache-backed, normalized-score implementation and its verification baseline.
+[Incremental Score-Based Balancing](balancer_scoring.md) defines the selected
+next policy: incremental candidates, RG/local/fanout penalty deltas, migration
+cost and gain acceptance, separate target-load accounting, and reuse of partial
+Prepare success. It supersedes the baseline planning/accounting rules for that
+future implementation. It has not changed production code or configuration
+defaults. In particular, the baseline [optional emission](#33-phase-3-candidate-emission)
+and [Up/Pending prediction](#42-within-batch-prediction) rules below are not the
+new policy's acceptance or target-load contracts.
+
 > Reconcile reads the resident cache. QueryNode replica placement first repairs
 > balanced, stable collection/RG node targets, then plans shards as one batch.
 > Node shortages suspend excess replicas without changing desired configuration.
@@ -417,6 +428,9 @@ ledger hydration is required.
 
 ## 3. Policy Planning
 
+This section records the implemented algorithm. The replacement policy and its
+quantitative example are in [Incremental Score-Based Balancing](balancer_scoring.md#3-placement-objective).
+
 The default policy first repairs/reuses collection/RG layouts as described in
 [Replica Placement](replica_placement.md), retaining targets across calls. It
 then organizes shard work into three phases and processes all dirty shards
@@ -829,12 +843,22 @@ task.
 
 ## 9. Future Considerations
 
-1. **Preparing timeout eviction**: Periodic reconcile can detect shards stuck in Preparing beyond a timeout → mark as Unrecoverable to release the slot.
-2. **Global optimization passes**: The current Policy uses deterministic per-shard greedy allocation with a shared steady-state row tracker. For batches where many shards need rebalancing simultaneously (e.g., scale-out), a second optimization pass could detect and resolve cross-shard conflicts (two shards both wanting the same lightly-loaded node).
-3. **Disk-based scoring**: Add `DiskUsage`/`DiskCapacity` back to `BalanceNode` and a disk-balance soft constraint once mmap / disk-index segments are in scope.
-4. **Rate limiting**: Cap concurrent Preparing views across all shards to prevent overwhelming the cluster during large-scale events.
+The next policy is specified in [Incremental Score-Based Balancing](balancer_scoring.md),
+including target accounting, partial-resource reuse, fair partial scopes, and
+migration/loading budgets. Its configuration remains to be calibrated; the
+current `queryView.balancer.*` settings above retain their existing semantics.
+
+Further work beyond that first policy implementation includes bounded
+cross-shard exchanges with partial-application tracking, quota-preserving layout
+owner exchanges, a separate timeout/maintenance contract, and capacity or
+non-row load metrics. A retry or timeout must not erase successfully loaded
+resources merely because their Preparing view failed.
 
 ## 10. Verification
+
+The checks below describe the baseline. The next policy's acceptance,
+accounting, failure-reuse, and scale checks are listed in
+[its verification section](balancer_scoring.md#7-guarantees-delivery-and-verification).
 
 ### 10.1 Score Invariants
 

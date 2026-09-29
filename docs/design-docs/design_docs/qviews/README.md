@@ -334,6 +334,14 @@ Get and maintains only its private predicted loads; it does not require a
 globally consistent snapshot. The cache and component publication hooks are implemented; production runtime
 wiring remains outside this PR.
 
+The selected next algorithm is documented in
+[Incremental Score-Based Balancing](balancer_scoring.md). It retains scoring
+and batch planning, but introduces incremental placement changes, explicit
+RG/local/fanout objectives, net migration-gain acceptance, and separate intended
+load and reusable-resource accounting. Confirmed partial resources survive a
+failed Prepare until reference handover or cleanup. This algorithm is a design
+update; the current normalized-score implementation and defaults are unchanged.
+
 ### 11.3 SyncQueryView RPC
 
 The sole RPC that unifies the synchronization layer behavior of StreamingNode

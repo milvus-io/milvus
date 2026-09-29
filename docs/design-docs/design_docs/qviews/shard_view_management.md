@@ -307,6 +307,14 @@ Callbacks for an already removed view stop tracking without creating new work.
 
 ### 4.7 AddPreparing
 
+The selected [next balancing policy](balancer_scoring.md#5-target-load-residency-and-reuse)
+adds per-view target contributions and protected partial-resource reuse to this
+existing lifecycle. Failed target invalidation must not discard ready segments
+or release their references. New target acceptance must publish synchronously;
+the replacement's node-side Acquire must protect shared references before old
+teardown can unload them. These accounting/resource contracts are planned
+extensions, not capabilities implied by the current merged row statistics.
+
 1. Validate the new DataVersion against all resident views.
 2. Preempt an existing Preparing or Ready view by entering Unrecoverable.
 3. Advance Unrecoverable views to Dropping so their Dropped sync can be batched

@@ -1,5 +1,10 @@
 # Balancer Cache
 
+This document describes the implemented cache. The next policy's additional
+target-load and partial-resource reuse contracts are specified in
+[Incremental Score-Based Balancing](balancer_scoring.md#5-target-load-residency-and-reuse)
+and are not implemented by the current Up/Pending aggregates.
+
 The resident `cache.Cache` replaces the runtime `BalancerSnapshot` and
 `SnapshotBuilder` path. Tests publish inputs directly into the cache and assert
 planning behavior; no snapshot-era implementation is retained. Batch ordering and logical row accounting remain unchanged.
@@ -456,4 +461,36 @@ planner comparison.
 
 ## Replica placement facts
 
-See [Replica Placement](replica_placement.md). Collection entries additionally maintain immutable per-node replica footprints and reference-counted ready-resource indexes. Shard statistics retain Up/Preparing node footprints and resident nodes through durable deletion. Node loss, stopping, addition and RG changes all invalidate the affected RG collections. Actual row accounting remains logical per-shard accounting; it is not physical resource deduplication. Desired target layouts are owned by the default policy, never published as cache facts.
+See [Replica Placement](replica_placement.md). Collection entries additionally maintain immutable per-node replica footprints and reference-counted ready-resource indexes. Shard statistics retain Up/Preparing node footprints and resident nodes through durable deletion. Node loss, stopping, addition and RG changes all invalidate the affected RG collections. Actual row accounting remains logical per-shard accounting; it is not physical resource deduplication. Desired target layouts are owned by the default policy, never published as actual cache facts.
+
+## Planned target and reuse accounting
+
+[The next policy](balancer_scoring.md#5-target-load-residency-and-reuse) requires
+separate intended placement, resource occupancy, and confirmed reuse information.
+These are additions to this implemented cache contract:
+
+- Publish per-view row contributions and derive one selected intended target
+  per shard, preferring a valid accepted Preparing over the applicable Up view.
+  Replace this contribution on acceptance/failure/release instead of adding Up
+  and Preparing as two final copies. Keep unplaced required demand explicit.
+- Maintain node, collection-replica/node, and shard/node target totals plus RG
+  demand. A target-selection publisher combines lifecycle facts with desired
+  config, node eligibility, and retained layout selectors. Layout-derived
+  active/release decisions remain distinct from actual resource facts;
+  speculative candidates do not reserve cache load. Total and contribution
+  reads retain the same object-version consistency contract.
+- Keep resource references and confirmed partial readiness when a Preparing
+  view fails. Target invalidation does not request resource release. Extend
+  exact-compatible reuse evidence to protected individual ready segments from
+  relevant Preparing/Unrecoverable views. The current Resources index includes
+  only whole Up/Ready views and does not yet satisfy that contract.
+- Remove reuse credit when protection/readiness is lost, a node disappears,
+  requirements are incompatible, or cleanup has begun without a protected
+  handover. Occupancy persists according to resource lifecycle, independently
+  of whether its former target remains valid.
+
+Source publication, recovery/readiness gating, immutable Get, and copy-on-write
+remain required. Reconcile must not rebuild these aggregates by scanning every
+collection's segments. Concrete resource residency and handover guarantees
+require the resource-manager integration described in
+[QueryViewHandler](query_view_handler.md#7-planned-partial-resource-handover).
