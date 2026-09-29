@@ -52,16 +52,10 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy insertExecute upsert %d", ut.ID()))
 	defer tr.Elapse("insert execute done when insertExecute")
 
-	collectionName := ut.upsertMsg.InsertMsg.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, ut.req.GetDbName(), collectionName)
-	if err != nil {
-		return nil, err
-	}
+	collID := ut.collectionID
 	ut.upsertMsg.InsertMsg.CollectionID = collID
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
-	getCacheDur := tr.RecordSpan()
-
 	getMsgStreamDur := tr.RecordSpan()
 	channelNames, err := ut.chMgr.getVChannels(collID)
 	if err != nil {
@@ -77,7 +71,6 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 		zap.Int64("collection_id", collID),
 		zap.Strings("virtual_channels", channelNames),
 		zap.Int64("task_id", ut.ID()),
-		zap.Duration("get cache duration", getCacheDur),
 		zap.Duration("get msgStream duration", getMsgStreamDur))
 
 	// start to repack insert data
@@ -96,12 +89,15 @@ func (ut *upsertTask) packInsertMessage(ctx context.Context, ez *message.CipherC
 }
 
 func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherConfig) ([]message.MutableMessage, error) {
-	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
-	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	if ut.upsertMsg.DeleteMsg.PrimaryKeys == nil {
 		// if primary keys are not set by queryPreExecute, use oldIDs to delete all given records
 		ut.upsertMsg.DeleteMsg.PrimaryKeys = ut.oldIDs
 	}
+	if typeutil.GetSizeOfIDs(ut.upsertMsg.DeleteMsg.PrimaryKeys) == 0 {
+		return nil, nil
+	}
+	tr := timerecord.NewTimeRecorder(fmt.Sprintf("proxy deleteExecute upsert %d", ut.ID()))
+	collID := ut.upsertMsg.DeleteMsg.CollectionID
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collID))
 	// hash primary keys to channels
@@ -118,7 +114,7 @@ func (ut *upsertTask) packDeleteMessage(ctx context.Context, ez *message.CipherC
 		ut.BeginTs(),
 		ut.upsertMsg.DeleteMsg.CollectionID, ut.upsertMsg.DeleteMsg.CollectionName,
 		ut.upsertMsg.DeleteMsg.PartitionID, ut.upsertMsg.DeleteMsg.PartitionName,
-		ut.req.GetDbName(),
+		ut.upsertMsg.DeleteMsg.GetDbName(),
 	)
 	if err != nil {
 		return nil, err

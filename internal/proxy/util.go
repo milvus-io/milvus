@@ -2532,18 +2532,13 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 	return channel2RowOffsets
 }
 
-func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
+func assignPartitionKeys(ctx context.Context, dbName string, collName string, schema *schemapb.CollectionSchema, keys []*planpb.GenericValue) ([]string, error) {
 	partitionNames, err := globalMetaCache.GetPartitionsIndex(ctx, dbName, collName)
 	if err != nil {
 		return nil, err
 	}
 
-	schema, err := globalMetaCache.GetCollectionSchema(ctx, dbName, collName)
-	if err != nil {
-		return nil, err
-	}
-
-	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema.CollectionSchema)
+	partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(schema)
 	if err != nil {
 		return nil, err
 	}

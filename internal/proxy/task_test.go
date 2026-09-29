@@ -513,7 +513,6 @@ func TestAlterCollection_AllowInsertAutoID_Validation(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
-
 func constructPlaceholderGroup(
 	nq, dim int,
 ) *commonpb.PlaceholderGroup {

@@ -1978,6 +1978,19 @@ func TestCore_getMetastorePrivilegeName(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, priv, util.AnyWord)
 
+	skipRLSPrivilege := util.MetaStore2API(commonpb.ObjectPrivilege_PrivilegeSkipRLS.String())
+	priv, err = c.getMetastorePrivilegeName(context.Background(), skipRLSPrivilege)
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ObjectPrivilege_PrivilegeSkipRLS.String(), priv)
+
+	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, skipRLSPrivilege).Return(false, nil)
+	err = c.isValidPrivilege(context.Background(), skipRLSPrivilege, commonpb.ObjectType_Collection.String())
+	assert.NoError(t, err)
+
+	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, skipRLSPrivilege).Return(false, nil)
+	err = c.isValidPrivilegeV2(context.Background(), skipRLSPrivilege)
+	assert.NoError(t, err)
+
 	meta.EXPECT().IsCustomPrivilegeGroup(mock.Anything, "unknown").Return(false, nil)
 	_, err = c.getMetastorePrivilegeName(context.Background(), "unknown")
 	assert.ErrorContains(t, err, "not found the privilege name [unknown] from metastore")

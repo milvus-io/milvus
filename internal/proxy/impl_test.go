@@ -1470,6 +1470,7 @@ func TestProxy_Delete(t *testing.T) {
 	schema := newSchemaInfo(collSchema)
 	basicInfo := &collectionInfo{
 		collID: collectionID,
+		schema: schema,
 	}
 	paramtable.Init()
 
@@ -1492,11 +1493,6 @@ func TestProxy_Delete(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(collectionID, nil)
-		cache.On("GetCollectionSchema",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(schema, nil)
 		cache.On("GetPartitionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
