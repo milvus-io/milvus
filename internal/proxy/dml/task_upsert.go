@@ -513,6 +513,14 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
 			return nil, err
 		}
+		if it.partitionKeyMode && usingExpr != nil {
+			// Query reduction keeps one row per PK, while partition-key upsert
+			// deletes that PK from every physical partition. Until internal
+			// retrieval preserves every (partition, PK) copy, a non-trivial USING
+			// predicate cannot authorize all rows that the delete will affect.
+			return nil, merr.WrapErrOperationNotSupportedMsg(
+				"RLS upsert with a USING predicate is not supported for partition-key collections")
+		}
 		if partialUpdate && usingExpr != nil {
 			if err := dql.FormatTimestamptzFields(existFieldData, it.schema.SchemaHelper.GetTimezone()); err != nil {
 				return nil, err

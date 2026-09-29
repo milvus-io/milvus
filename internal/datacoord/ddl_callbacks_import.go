@@ -45,7 +45,15 @@ func (c *DDLCallbacks) importV1AckCallback(ctx context.Context, result message.B
 	options := funcutil.Map2KeyValuePair(body.GetOptions())
 	rlsPrincipal, skipRLS, err := importutilv2.GetRLSOptions(options)
 	if err != nil {
-		return merr.WrapErrDataIntegrity(err, "decode persisted import RLS options")
+		// RLS options were not reserved before RLS support. An older Proxy may
+		// therefore have persisted arbitrary values under these keys. Keep the
+		// strict parser for new requests, but recover legacy WAL messages as
+		// ordinary imports instead of retrying this ACK forever.
+		mlog.Warn(ctx, "ignore malformed RLS options in legacy import message", mlog.Err(err))
+		rlsPrincipal, skipRLS = "", false
+		options = lo.Reject(options, func(option *commonpb.KeyValuePair, _ int) bool {
+			return option.GetKey() == importutilv2.RLSPrincipal || option.GetKey() == importutilv2.SkipRLS
+		})
 	}
 
 	// Ensure Schema.DbName is populated from the broadcast message's DbName,

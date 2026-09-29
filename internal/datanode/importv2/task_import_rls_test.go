@@ -124,7 +124,7 @@ func importRLSTestSchema() *schemapb.CollectionSchema {
 					{Key: common.DimKey, Value: "2"},
 				},
 			},
-			{FieldID: 102, Name: "tenant", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "tenant", DataType: schemapb.DataType_Int8},
 		},
 	}
 }
@@ -157,6 +157,6 @@ func importRLSTestData() *storage.InsertData {
 		common.RowIDField: &storage.Int64FieldData{Data: []int64{1}},
 		100:               &storage.StringFieldData{Data: []string{"one"}, DataType: schemapb.DataType_VarChar},
 		101:               &storage.FloatVectorFieldData{Data: []float32{0.1, 0.2}, Dim: 2},
-		102:               &storage.Int64FieldData{Data: []int64{7}},
+		102:               &storage.Int8FieldData{Data: []int8{7}},
 	}}
 }

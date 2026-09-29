@@ -343,20 +343,19 @@ func (t *ImportTask) validateRLSRows(data *storage.InsertData, rowNum int) error
 	if t.rlsPredicate == nil {
 		return nil
 	}
-	validationData := data
+	validationData := make(map[int64]rls.StorageFieldData, len(data.Data))
 	if len(t.rlsReferencedFieldIDs) > 0 {
-		validationData = &storage.InsertData{Data: make(map[int64]storage.FieldData, len(t.rlsReferencedFieldIDs))}
 		for _, fieldID := range t.rlsReferencedFieldIDs {
 			if field, ok := data.Data[fieldID]; ok {
-				validationData.Data[fieldID] = field
+				validationData[fieldID] = field
 			}
 		}
+	} else {
+		for fieldID, field := range data.Data {
+			validationData[fieldID] = field
+		}
 	}
-	record, err := storage.TransferInsertDataToInsertRecord(validationData)
-	if err != nil {
-		return merr.Wrap(err, "failed to convert import data for RLS validation")
-	}
-	return rls.ValidateRowsByPredicate(t.ctx, record.GetFieldsData(), rowNum, t.rlsPredicate, "import", "check")
+	return rls.ValidateInsertDataByPredicate(t.ctx, validationData, rowNum, t.rlsPredicate, "import", "check")
 }
 
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {

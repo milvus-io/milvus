@@ -67,6 +67,16 @@ func validateRows(ctx context.Context, fieldsData []*schemapb.FieldData, schemaH
 	return ValidateRowsByPredicate(ctx, fieldsData, rowNum, parsedExpr, operation, exprKind)
 }
 
+type testStorageFieldData struct {
+	data      any
+	dataType  schemapb.DataType
+	validData []bool
+}
+
+func (f *testStorageFieldData) GetDataRows() any               { return f.data }
+func (f *testStorageFieldData) GetDataType() schemapb.DataType { return f.dataType }
+func (f *testStorageFieldData) GetValidData() []bool           { return f.validData }
+
 func TestReferencedFieldIDs(t *testing.T) {
 	helper := newManagerTestPrincipalSchemaHelper(t)
 	expr, err := planparserv2.ParseExpr(helper, `dept in ["sales", "support"] and owner == "alice"`, nil)
@@ -2232,4 +2242,33 @@ func TestValidateRowsStopsOnCanceledContext(t *testing.T) {
 		Field:   &schemapb.FieldData_Scalars{Scalars: &schemapb.ScalarField{Data: &schemapb.ScalarField_LongData{LongData: &schemapb.LongArray{Data: []int64{18}}}}},
 	}}, 1, expr, "insert", "check")
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestValidateInsertDataByPredicateNarrowIntegers(t *testing.T) {
+	schema := &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+		{FieldID: 101, Name: "tiny", DataType: schemapb.DataType_Int8},
+		{FieldID: 102, Name: "small", DataType: schemapb.DataType_Int16},
+	}}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	require.NoError(t, err)
+	expr, err := planparserv2.ParseExpr(helper, `tiny == 7 and small == 300`, nil)
+	require.NoError(t, err)
+	data := map[int64]StorageFieldData{
+		101: &testStorageFieldData{data: []int8{7}, dataType: schemapb.DataType_Int8},
+		102: &testStorageFieldData{data: []int16{300}, dataType: schemapb.DataType_Int16},
+	}
+
+	require.NoError(t, ValidateInsertDataByPredicate(context.Background(), data, 1, expr, "import", "check"))
+	data[101].(*testStorageFieldData).data.([]int8)[0] = 8
+	require.ErrorIs(t, ValidateInsertDataByPredicate(context.Background(), data, 1, expr, "import", "check"), merr.ErrPrivilegeNotPermitted)
+
+	compact := map[int64]StorageFieldData{
+		101: &testStorageFieldData{data: []int8{7, 8}, dataType: schemapb.DataType_Int8, validData: []bool{true, false, true}},
+	}
+	rows := newInsertRowData(compact, []int64{101})
+	for row, expected := range []any{int8(7), nil, int8(8)} {
+		actual, err := rows.value(&planpb.ColumnInfo{FieldId: 101}, row)
+		require.NoError(t, err)
+		require.Equal(t, expected, actual)
+	}
 }

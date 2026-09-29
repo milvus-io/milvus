@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/types"
+	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
@@ -1813,4 +1814,43 @@ func TestImportAckCallback_DropsControlChannelFromJobChannels(t *testing.T) {
 	assert.Equal(t, uint64(200), dataTimestamp)
 	assert.Equal(t, "alice", rlsPrincipal)
 	assert.True(t, skipRLS)
+}
+
+func TestImportAckCallback_IgnoresMalformedLegacyRLSOptions(t *testing.T) {
+	defer mockey.UnPatchAll()
+
+	var request *internalpb.ImportRequestInternal
+	mockey.Mock((*Server).createImportJobFromAck).To(
+		func(_ *Server, _ context.Context, in *internalpb.ImportRequestInternal, _ bool) (*internalpb.ImportResponse, error) {
+			request = in
+			return &internalpb.ImportResponse{Status: merr.Success(), JobID: "1"}, nil
+		}).Build()
+
+	broadcastMsg := message.NewImportMessageBuilderV1().
+		WithHeader(&message.ImportMessageHeader{}).
+		WithBody(&msgpb.ImportMsg{
+			CollectionID: 100,
+			JobID:        1,
+			Options: map[string]string{
+				importutilv2.RLSPrincipal: "legacy",
+				importutilv2.SkipRLS:      "not-a-bool",
+			},
+		}).
+		WithBroadcast([]string{"vchannel1"}).
+		MustBuildBroadcast().
+		OverwriteBroadcastHeader(1)
+
+	callbacks := &DDLCallbacks{Server: &Server{}}
+	err := callbacks.importV1AckCallback(context.Background(), message.BroadcastResultImportMessageV1{
+		Message: message.MustAsSpecializedBroadcastMessage[*message.ImportMessageHeader, *msgpb.ImportMsg](broadcastMsg),
+		Results: map[string]*message.AppendResult{"vchannel1": {TimeTick: 100}},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, request)
+	assert.Empty(t, request.GetRlsPrincipal())
+	assert.False(t, request.GetSkipRls())
+	options := funcutil.KeyValuePair2Map(request.GetOptions())
+	assert.NotContains(t, options, importutilv2.RLSPrincipal)
+	assert.NotContains(t, options, importutilv2.SkipRLS)
 }

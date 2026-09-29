@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
@@ -763,6 +764,34 @@ func ValidateRowsByPredicate(ctx context.Context, fieldsData []*schemapb.FieldDa
 
 	referencedFieldIDs := ReferencedFieldIDs(parsedExpr)
 	rowData := newRowData(fieldsData, referencedFieldIDs)
+	return validateRowDataByPredicate(ctx, rowData, referencedFieldIDs, rowNum, parsedExpr, operation, exprKind)
+}
+
+// ValidateInsertDataByPredicate evaluates an RLS predicate directly against
+// import storage columns, avoiding a full protobuf copy of narrow integers.
+func ValidateInsertDataByPredicate(ctx context.Context, fieldsData map[int64]StorageFieldData, rowNum int, parsedExpr *planpb.Expr, operation string, exprKind string) error {
+	if parsedExpr == nil {
+		return nil
+	}
+	if rowNum < 0 {
+		return merr.WrapErrServiceInternalMsg("RLS row count must not be negative: %d", rowNum)
+	}
+	if len(fieldsData) == 0 {
+		if rowNum == 0 {
+			return nil
+		}
+		return merr.WrapErrServiceInternalMsg("RLS row count is %d but field data is empty", rowNum)
+	}
+	if rowNum == 0 {
+		return merr.WrapErrServiceInternalMsg("RLS row count is zero but field data is not empty")
+	}
+
+	referencedFieldIDs := ReferencedFieldIDs(parsedExpr)
+	rowData := newInsertRowData(fieldsData, referencedFieldIDs)
+	return validateRowDataByPredicate(ctx, rowData, referencedFieldIDs, rowNum, parsedExpr, operation, exprKind)
+}
+
+func validateRowDataByPredicate(ctx context.Context, rowData *rowData, referencedFieldIDs []int64, rowNum int, parsedExpr *planpb.Expr, operation string, exprKind string) error {
 	if err := rowData.validateRowCount(referencedFieldIDs, rowNum); err != nil {
 		return err
 	}
@@ -835,6 +864,9 @@ func (value truthValue) or(other truthValue) truthValue {
 
 type fieldReader struct {
 	field        *schemapb.FieldData
+	storageData  any
+	fieldName    string
+	dataType     schemapb.DataType
 	validData    []bool
 	dataLen      int
 	rowCount     int
@@ -843,6 +875,14 @@ type fieldReader struct {
 	nextPhysical int
 	lastLogical  int
 	lastPhysical int
+}
+
+// StorageFieldData is the zero-copy subset of storage.FieldData needed by the
+// import RLS evaluator.
+type StorageFieldData interface {
+	GetDataRows() any
+	GetDataType() schemapb.DataType
+	GetValidData() []bool
 }
 
 type rowData struct {
@@ -886,7 +926,13 @@ func newRowData(fieldsData []*schemapb.FieldData, referencedFieldIDs []int64) *r
 		if _, ok := referencedFields[fieldData.GetFieldId()]; !ok {
 			continue
 		}
-		reader := &fieldReader{field: fieldData, lastLogical: -1, lastPhysical: -1}
+		reader := &fieldReader{
+			field:        fieldData,
+			fieldName:    fieldData.GetFieldName(),
+			dataType:     fieldData.GetType(),
+			lastLogical:  -1,
+			lastPhysical: -1,
+		}
 		if isRLSScalarType(fieldData.GetType()) {
 			reader.dataLen = rlsScalarDataLen(fieldData)
 		} else if fieldData.GetType() == schemapb.DataType_Array {
@@ -905,6 +951,41 @@ func newRowData(fieldsData []*schemapb.FieldData, referencedFieldIDs []int64) *r
 	return data
 }
 
+func newInsertRowData(fieldsData map[int64]StorageFieldData, referencedFieldIDs []int64) *rowData {
+	referencedFields := make(map[int64]struct{}, len(referencedFieldIDs))
+	for _, fieldID := range referencedFieldIDs {
+		referencedFields[fieldID] = struct{}{}
+	}
+	data := &rowData{fields: make(map[int64]*fieldReader, len(referencedFields))}
+	for fieldID, fieldData := range fieldsData {
+		if fieldData == nil {
+			continue
+		}
+		if _, ok := referencedFields[fieldID]; !ok {
+			continue
+		}
+		storageData := fieldData.GetDataRows()
+		reader := &fieldReader{
+			storageData:  storageData,
+			fieldName:    strconv.FormatInt(fieldID, 10),
+			dataType:     fieldData.GetDataType(),
+			validData:    fieldData.GetValidData(),
+			dataLen:      rlsStorageDataLen(storageData),
+			lastLogical:  -1,
+			lastPhysical: -1,
+		}
+		reader.rowCount = reader.dataLen
+		reader.shapeValid = true
+		if len(reader.validData) > 0 {
+			reader.rowCount = len(reader.validData)
+			reader.shapeValid = reader.dataLen == len(reader.validData) ||
+				reader.dataLen == int(funcutil.CountValidRows(reader.validData))
+		}
+		data.fields[fieldID] = reader
+	}
+	return data
+}
+
 func (d *rowData) validateRowCount(referencedFieldIDs []int64, expected int) error {
 	for _, fieldID := range referencedFieldIDs {
 		reader, ok := d.fields[fieldID]
@@ -914,16 +995,16 @@ func (d *rowData) validateRowCount(referencedFieldIDs []int64, expected int) err
 
 		var actual int
 		switch {
-		case isRLSScalarType(reader.field.GetType()), reader.field.GetType() == schemapb.DataType_Array:
+		case isRLSScalarType(reader.dataType), reader.dataType == schemapb.DataType_Array:
 			if !reader.shapeValid {
-				return merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
+				return merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.fieldName)
 			}
 			actual = reader.rowCount
 		default:
-			return merr.WrapErrServiceInternalMsg("RLS expression references unsupported field %s with type %s", reader.field.GetFieldName(), reader.field.GetType().String())
+			return merr.WrapErrServiceInternalMsg("RLS expression references unsupported field %s with type %s", reader.fieldName, reader.dataType.String())
 		}
 		if actual != expected {
-			return merr.WrapErrServiceInternalMsg("RLS field %s row count %d does not match expected row count %d", reader.field.GetFieldName(), actual, expected)
+			return merr.WrapErrServiceInternalMsg("RLS field %s row count %d does not match expected row count %d", reader.fieldName, actual, expected)
 		}
 	}
 	return nil
@@ -1127,7 +1208,7 @@ func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
 	if !ok {
 		return nil, merr.WrapErrServiceInternalMsg("RLS expression references field id %d which is not present in row data", column.GetFieldId())
 	}
-	switch reader.field.GetType() {
+	switch reader.dataType {
 	case schemapb.DataType_Bool,
 		schemapb.DataType_Int8,
 		schemapb.DataType_Int16,
@@ -1139,22 +1220,40 @@ func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
 		schemapb.DataType_VarChar,
 		schemapb.DataType_Text:
 		if !reader.shapeValid {
-			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
+			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.fieldName)
 		}
 		if rowIdx < 0 || rowIdx >= reader.rowCount {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.field.GetFieldName(), reader.rowCount)
+			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.fieldName, reader.rowCount)
 		}
 		dataIdx := reader.dataIndex(rowIdx)
 		if dataIdx < 0 {
 			return nil, nil
 		}
+		if reader.storageData != nil {
+			value, ok := rlsStorageValue(reader.storageData, dataIdx)
+			if !ok {
+				return nil, merr.WrapErrServiceInternalMsg("RLS field %s has invalid storage data for type %s", reader.fieldName, reader.dataType.String())
+			}
+			return value, nil
+		}
 		return rlsScalarValue(reader.field, dataIdx), nil
 	case schemapb.DataType_Array:
 		if !reader.shapeValid {
-			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.field.GetFieldName())
+			return nil, merr.WrapErrServiceInternalMsg("RLS field %s has inconsistent data and validity lengths", reader.fieldName)
 		}
 		if rowIdx < 0 || rowIdx >= reader.rowCount {
-			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.field.GetFieldName(), reader.rowCount)
+			return nil, merr.WrapErrServiceInternalMsg("RLS row index %d exceeds field %s row count %d", rowIdx, reader.fieldName, reader.rowCount)
+		}
+		if reader.storageData != nil {
+			dataIdx := reader.dataIndex(rowIdx)
+			if dataIdx < 0 {
+				return nil, nil
+			}
+			value, ok := rlsStorageValue(reader.storageData, dataIdx)
+			if !ok {
+				return nil, merr.WrapErrServiceInternalMsg("RLS field %s has invalid storage data for type %s", reader.fieldName, reader.dataType.String())
+			}
+			return value, nil
 		}
 		value, err := arrayValue(reader, rowIdx)
 		if err != nil || value == nil {
@@ -1162,7 +1261,7 @@ func (d *rowData) value(column *planpb.ColumnInfo, rowIdx int) (any, error) {
 		}
 		return value, nil
 	default:
-		return nil, merr.WrapErrServiceInternalMsg("RLS expression references unsupported field %s with type %s", reader.field.GetFieldName(), reader.field.GetType().String())
+		return nil, merr.WrapErrServiceInternalMsg("RLS expression references unsupported field %s with type %s", reader.fieldName, reader.dataType.String())
 	}
 }
 
@@ -1223,6 +1322,56 @@ func rlsScalarValue(field *schemapb.FieldData, idx int) any {
 		return field.GetScalars().GetStringData().GetData()[idx]
 	default:
 		return nil
+	}
+}
+
+func rlsStorageDataLen(data any) int {
+	switch values := data.(type) {
+	case []bool:
+		return len(values)
+	case []int8:
+		return len(values)
+	case []int16:
+		return len(values)
+	case []int32:
+		return len(values)
+	case []int64:
+		return len(values)
+	case []float32:
+		return len(values)
+	case []float64:
+		return len(values)
+	case []string:
+		return len(values)
+	case []*schemapb.ScalarField:
+		return len(values)
+	default:
+		return 0
+	}
+}
+
+func rlsStorageValue(data any, idx int) (any, bool) {
+	switch values := data.(type) {
+	case []bool:
+		return values[idx], true
+	case []int8:
+		return values[idx], true
+	case []int16:
+		return values[idx], true
+	case []int32:
+		return values[idx], true
+	case []int64:
+		return values[idx], true
+	case []float32:
+		return values[idx], true
+	case []float64:
+		return values[idx], true
+	case []string:
+		return values[idx], true
+	case []*schemapb.ScalarField:
+		return values[idx], true
+	default:
+		return nil, false
 	}
 }
 
