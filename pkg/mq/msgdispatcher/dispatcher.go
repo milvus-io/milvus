@@ -260,6 +260,14 @@ func (d *Dispatcher) work() {
 					target.close()
 					return true
 				})
+				// The pullback end position will never arrive on a stream that is
+				// gone, and BlockUtilPullbackDone waits for a signal that only this
+				// loop sends, so release the builder before parking. Finish closes a
+				// channel, so it must happen at most once.
+				if !d.pullbackDone {
+					d.pullbackDoneNotifier.Finish(struct{}{})
+					d.pullbackDone = true
+				}
 				// Keep the dispatcher goroutine participating in the manager's
 				// pause/terminate handshake. Returning immediately would leave a
 				// later pause signal buffered with no worker to consume it, which can

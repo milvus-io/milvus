@@ -167,6 +167,49 @@ func TestDispatcher(t *testing.T) {
 		}
 		d.Handle(terminate)
 	})
+
+	// A dispatcher built for more than one target is waited on with
+	// BlockUtilPullbackDone before it is ever paused. A stream that terminates
+	// during pullback must release that wait, otherwise the builder blocks on a
+	// signal only the dispatcher's own worker could send, and that worker is
+	// parked waiting for the pause the blocked builder would have sent.
+	t.Run("terminal stream error releases a pullback waiter", func(t *testing.T) {
+		streamCh := make(chan *msgstream.ConsumeMsgPack)
+		close(streamCh)
+		inner := msgstream.NewMockMsgStream(t)
+		inner.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		inner.EXPECT().Chan().Return(streamCh).Maybe()
+		inner.EXPECT().Close().Return().Once()
+		stream := &testTerminalMsgStream{MsgStream: inner, err: errors.New("terminal stream error")}
+		factory := &msgstream.MockMqFactory{
+			NewMsgStreamFunc: func(context.Context) (msgstream.MsgStream, error) {
+				return stream, nil
+			},
+		}
+
+		d, err := NewDispatcher(ctx, factory, time.Now().UnixNano(), "mock_pchannel_pullback",
+			nil, common.SubscriptionPositionEarliest, 0, false)
+		assert.NoError(t, err)
+		d.AddTarget(newTarget(&StreamConfig{VChannel: "mock_vchannel_pullback_1"}, false))
+		d.AddTarget(newTarget(&StreamConfig{VChannel: "mock_vchannel_pullback_2"}, false))
+		d.Handle(start)
+
+		released := make(chan struct{})
+		go func() {
+			d.BlockUtilPullbackDone()
+			close(released)
+		}()
+		select {
+		case <-released:
+		case <-time.After(5 * time.Second):
+			t.Fatal("BlockUtilPullbackDone was not released after the stream terminated")
+		}
+
+		// The pause handshake still has to work, and the release must not fire twice.
+		d.Handle(pause)
+		d.Handle(resume)
+		d.Handle(terminate)
+	})
 }
 
 type testTerminalMsgStream struct {
