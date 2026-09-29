@@ -51,6 +51,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
+func TestGetLocalDiskUsage(t *testing.T) {
+	duf := &diskUsageFetcher{
+		usage: atomic.NewInt64(0),
+		err:   atomic.NewError(nil),
+	}
+	loader := &segmentLoader{duf: duf}
+	usage, err := loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Zero(t, usage)
+
+	duf.usage.Store(100)
+	loader.committedResource.DiskSize = 20
+	usage, err = loader.GetLocalDiskUsage()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(100), usage)
+
+	duf.err.Store(merr.WrapErrServiceInternalMsg("disk usage unavailable"))
+	_, err = loader.GetLocalDiskUsage()
+	assert.Error(t, err)
+}
+
 func TestSeparateLoadInfoV2LegacyStatsRoot(t *testing.T) {
 	paramtable.Init()
 	params := paramtable.Get()

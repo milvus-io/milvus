@@ -573,18 +573,17 @@ func (s *Server) queryNodeResourceSnapshot(ctx context.Context, nodes []*session
 			}
 			availableMemoryBytes, capacityMemoryBytes := memoryResourceFromMetrics(hardware.Memory, hardware.MemoryUsage)
 
-			availableDiskBytes, capacityDiskBytes, ok := diskResourceFromMetrics(hardware.Disk, hardware.DiskUsage)
-			if !ok {
-				mlog.Warn(ctx, "query node resource metrics missing disk capacity",
-					mlog.Int64("nodeID", node.ID()),
-					mlog.Float64("diskGB", hardware.Disk),
-					mlog.Float64("diskUsageGB", hardware.DiskUsage),
-				)
-				return merr.WrapErrServiceInternalMsg("query node resource metrics missing disk capacity, nodeID=%d", node.ID())
+			localStorage := nodeInfo.LocalStorage
+			if localStorage == nil || localStorage.CapacityBytes <= 0 || localStorage.UsedBytes < 0 {
+				return merr.WrapErrServiceInternalMsg("query node resource metrics missing local storage usage, nodeID=%d", node.ID())
 			}
+			usableLocalDiskBytes := usableResourceCapacity(autoscaleResourceUsage{diskBytes: localStorage.CapacityBytes}).diskBytes
 			statuses[index] = queryNodeResourceStatus{
-				available: autoscaleResourceUsage{memoryBytes: availableMemoryBytes, diskBytes: availableDiskBytes},
-				capacity:  autoscaleResourceUsage{memoryBytes: capacityMemoryBytes, diskBytes: capacityDiskBytes},
+				available: autoscaleResourceUsage{
+					memoryBytes: availableMemoryBytes,
+					diskBytes:   max(usableLocalDiskBytes-localStorage.UsedBytes, 0),
+				},
+				capacity: autoscaleResourceUsage{memoryBytes: capacityMemoryBytes, diskBytes: localStorage.CapacityBytes},
 			}
 			return nil
 		})
@@ -619,23 +618,6 @@ func memoryResourceFromMetrics(totalMemory, usedMemory uint64) (int64, int64) {
 	memoryCapacity := uint64ToInt64(totalMemory)
 	memoryLimit := usableResourceCapacity(autoscaleResourceUsage{memoryBytes: memoryCapacity}).memoryBytes
 	return memoryLimit - uint64ToInt64(usedMemory), memoryCapacity
-}
-
-func diskResourceFromMetrics(totalDiskGB, usedDiskGB float64) (int64, int64, bool) {
-	physicalDiskBytes := int64(totalDiskGB * 1e9)
-	if physicalDiskBytes <= 0 {
-		return 0, 0, false
-	}
-	diskCapacityBytes := physicalDiskBytes
-	diskLimit := usableResourceCapacity(autoscaleResourceUsage{diskBytes: diskCapacityBytes}).diskBytes
-	if diskLimit <= 0 {
-		return 0, diskCapacityBytes, true
-	}
-	usedDiskBytes := int64(usedDiskGB * 1e9)
-	if diskLimit <= usedDiskBytes {
-		return 0, diskCapacityBytes, true
-	}
-	return diskLimit - usedDiskBytes, diskCapacityBytes, true
 }
 
 func usableResourceCapacity(capacity autoscaleResourceUsage) autoscaleResourceUsage {
