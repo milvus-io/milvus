@@ -391,13 +391,20 @@ func TestScannerAdaptorWithoutOpenerKeepsReadingCurrentWALAfterAlterWAL(t *testi
 		return ok
 	})).Return(innerScanner, nil).Once()
 
+	// Inject the buffer: this is a read-write channel, so without one the scanner
+	// would wait for a TimeTick operator that this test never registers. Reading
+	// from it never catches up, which keeps the scanner in catchup mode.
+	wb := mock_wab.NewMockROWriteAheadBuffer(t)
+	wb.EXPECT().ReadFromExclusiveTimeTick(mock.Anything, mock.Anything).
+		Return(nil, errors.New("not caught up")).Maybe()
+
 	scanner := newScannerAdaptor(
 		"alter-wal-recovery",
 		currentWAL,
 		wal.ReadOption{DeliverPolicy: options.DeliverPolicyStartFrom(rmq.NewRmqID(1))},
 		metricsutil.NewScanMetrics(channel).NewScannerMetrics(),
 		func() {},
-		scannerConfig{},
+		scannerConfig{writeAheadBuffer: wb},
 	)
 
 	select {
