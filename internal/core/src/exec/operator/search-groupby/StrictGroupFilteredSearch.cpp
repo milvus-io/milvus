@@ -686,13 +686,15 @@ TrySingleFieldStrictGroup(
     std::vector<CompositeGroupKey>& groups,
     std::vector<int64_t>& offsets,
     std::vector<float>& distances,
-    std::vector<size_t>& prefix) {
+    std::vector<size_t>& prefix,
+    const segcore::SegmentReadSnapshot* snapshot) {
     auto getter = GetDataGetter<T>(op_ctx,
                                    segment,
                                    info.group_by_field_ids_.front(),
                                    std::nullopt,
                                    std::nullopt,
-                                   false);
+                                   false,
+                                   snapshot);
     StrictGroupPhase2Context context{
         op_ctx,
         segment,
@@ -735,7 +737,8 @@ TryStrictGroupFilteredSearch(
     std::vector<CompositeGroupKey>& groups,
     std::vector<int64_t>& offsets,
     std::vector<float>& distances,
-    std::vector<size_t>& prefix) {
+    std::vector<size_t>& prefix,
+    const segcore::SegmentReadSnapshot* snapshot) {
     Defer clear_search_provider([&] {
         if (result != nullptr) {
             result->ClearVectorSearchProvider();
@@ -756,7 +759,8 @@ TryStrictGroupFilteredSearch(
                                                    groups,
                                                    offsets,
                                                    distances,
-                                                   prefix);
+                                                   prefix,
+                                                   snapshot);
         case DataType::INT8:
             return TrySingleFieldStrictGroup<int8_t>(op_ctx,
                                                      iterators,
@@ -766,7 +770,8 @@ TryStrictGroupFilteredSearch(
                                                      groups,
                                                      offsets,
                                                      distances,
-                                                     prefix);
+                                                     prefix,
+                                                     snapshot);
         case DataType::INT16:
             return TrySingleFieldStrictGroup<int16_t>(op_ctx,
                                                       iterators,
@@ -776,7 +781,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::INT32:
             return TrySingleFieldStrictGroup<int32_t>(op_ctx,
                                                       iterators,
@@ -786,7 +792,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::INT64:
             return TrySingleFieldStrictGroup<int64_t>(op_ctx,
                                                       iterators,
@@ -796,7 +803,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::TIMESTAMPTZ:
             return TrySingleFieldStrictGroup<int64_t>(op_ctx,
                                                       iterators,
@@ -806,7 +814,8 @@ TryStrictGroupFilteredSearch(
                                                       groups,
                                                       offsets,
                                                       distances,
-                                                      prefix);
+                                                      prefix,
+                                                      snapshot);
         case DataType::VARCHAR:
             return TrySingleFieldStrictGroup<std::string>(op_ctx,
                                                           iterators,
@@ -816,7 +825,8 @@ TryStrictGroupFilteredSearch(
                                                           groups,
                                                           offsets,
                                                           distances,
-                                                          prefix);
+                                                          prefix,
+                                                          snapshot);
         default:
             return false;
     }

@@ -75,6 +75,9 @@ class PhySearchGroupByNode : public Operator {
 
  private:
     const milvus::segcore::SegmentInternalInterface* segment_;
+    // Request-scoped sealed read snapshot, captured once in the constructor
+    // like segment_ / search_info_; null for growing / non-pinned paths.
+    const milvus::segcore::SegmentReadSnapshot* snapshot_{nullptr};
     QueryContext* query_context_;
     bool is_finished_{false};
 
