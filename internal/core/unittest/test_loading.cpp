@@ -25,6 +25,7 @@
 #include "index/Meta.h"
 #include "knowhere/version.h"
 #include "knowhere/comp/index_param.h"
+#include "pb/cgo_msg.pb.h"
 #include "segcore/load_index_c.h"
 #include "storage/ThreadPools.h"
 
@@ -310,13 +311,16 @@ INSTANTIATE_TEST_SUITE_P(
              false})));
 
 TEST_P(IndexLoadTest, ResourceEstimate) {
-    milvus::segcore::LoadIndexInfo loadIndexInfo;
+    milvus::segcore::LoadIndexInfo loadIndexInfo{};
 
     loadIndexInfo.collection_id = 1;
     loadIndexInfo.partition_id = 2;
     loadIndexInfo.segment_id = 3;
-    loadIndexInfo.field_id = 4;
+    loadIndexInfo.field_id = 100;
     loadIndexInfo.field_type = data_type;
+    loadIndexInfo.element_type = data_type == milvus::DataType::ARRAY
+                                     ? milvus::DataType::INT64
+                                     : milvus::DataType::NONE;
     loadIndexInfo.enable_mmap = enable_mmap;
     loadIndexInfo.mmap_dir_path = "/tmp/mmap";
     loadIndexInfo.index_id = 5;
@@ -331,6 +335,7 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     loadIndexInfo.index_engine_version =
         knowhere::Version::GetCurrentVersion().VersionNumber();
     loadIndexInfo.index_size = 1024 * 1024 * 1024;  // 1G index size
+    loadIndexInfo.dim = 128;
 
     LoadResourceRequest request = EstimateLoadIndexResource(&loadIndexInfo);
     ASSERT_EQ(request.has_raw_data, expected.has_raw_data);
@@ -338,6 +343,114 @@ TEST_P(IndexLoadTest, ResourceEstimate) {
     ASSERT_EQ(request.final_disk_cost, expected.final_disk_cost);
     ASSERT_EQ(request.max_memory_cost, expected.max_memory_cost);
     ASSERT_EQ(request.max_disk_cost, expected.max_disk_cost);
+
+    milvus::proto::cgo::LoadIndexInfo info;
+    info.set_collectionid(loadIndexInfo.collection_id);
+    info.set_partitionid(loadIndexInfo.partition_id);
+    info.set_segmentid(loadIndexInfo.segment_id);
+    auto* field = info.mutable_field();
+    field->set_fieldid(loadIndexInfo.field_id);
+    field->set_name("value");
+    field->set_data_type(milvus::ToProtoDataType(data_type));
+    field->set_element_type(
+        milvus::ToProtoDataType(loadIndexInfo.element_type));
+    if (milvus::IsVectorDataType(data_type) &&
+        !milvus::IsSparseFloatVectorDataType(data_type)) {
+        auto* dim = field->add_type_params();
+        dim->set_key("dim");
+        dim->set_value(std::to_string(loadIndexInfo.dim));
+    } else if (milvus::IsStringDataType(data_type)) {
+        auto* max_length = field->add_type_params();
+        max_length->set_key("max_length");
+        max_length->set_value("65535");
+    }
+    info.set_enable_mmap(enable_mmap);
+    info.set_indexid(loadIndexInfo.index_id);
+    info.set_index_buildid(loadIndexInfo.index_build_id);
+    info.set_index_version(loadIndexInfo.index_version);
+    info.set_index_store_version(loadIndexInfo.index_store_version);
+    info.set_index_engine_version(loadIndexInfo.index_engine_version);
+    info.set_index_file_size(loadIndexInfo.index_size);
+    info.set_num_rows(loadIndexInfo.num_rows);
+    for (const auto& [key, value] : index_params) {
+        (*info.mutable_index_params())[key] = value;
+    }
+    // Resource estimation must succeed without reading index files.
+    info.add_index_files("/nonexistent/metadata-only-index");
+    auto serialized = info.SerializeAsString();
+    LoadResourceRequest serialized_request{};
+    auto status = EstimateLoadIndexResourceFromSerializedInfo(
+        reinterpret_cast<const uint8_t*>(serialized.data()),
+        serialized.size(),
+        &serialized_request);
+    const std::string error_message = status.error_msg;
+    if (status.error_code != milvus::Success) {
+        free(const_cast<char*>(status.error_msg));
+    }
+    ASSERT_EQ(status.error_code, milvus::Success) << error_message;
+    EXPECT_EQ(serialized_request.has_raw_data, request.has_raw_data);
+    EXPECT_EQ(serialized_request.final_memory_cost, request.final_memory_cost);
+    EXPECT_EQ(serialized_request.final_disk_cost, request.final_disk_cost);
+    EXPECT_EQ(serialized_request.max_memory_cost, request.max_memory_cost);
+    EXPECT_EQ(serialized_request.max_disk_cost, request.max_disk_cost);
+}
+
+TEST(IndexLoadTest, SerializedResourceEstimateRejectsInvalidInput) {
+    milvus::proto::cgo::LoadIndexInfo info;
+    auto* field = info.mutable_field();
+    field->set_fieldid(100);
+    field->set_name("value");
+    field->set_data_type(milvus::proto::schema::Int64);
+    auto missing_index_type = info.SerializeAsString();
+    (*info.mutable_index_params())["index_type"] = "INVERTED";
+    auto valid = info.SerializeAsString();
+    field->set_data_type(milvus::proto::schema::FloatVector);
+    auto missing_dimension = info.SerializeAsString();
+
+    struct TestCase {
+        const char* name;
+        std::string serialized;
+        bool null_output;
+        const char* error;
+    };
+    for (const auto& test : {
+             TestCase{"malformed protobuf",
+                      std::string(1, '\xff'),
+                      false,
+                      "failed to parse load index info"},
+             TestCase{
+                 "null output", valid, true, "load resource request is null"},
+             TestCase{"missing index type",
+                      missing_index_type,
+                      false,
+                      "Can't find index type"},
+             TestCase{"missing vector dimension",
+                      missing_dimension,
+                      false,
+                      "dim not found"},
+         }) {
+        SCOPED_TRACE(test.name);
+        LoadResourceRequest request{1, 2, 3, 4, true};
+        CStatus status{};
+        ASSERT_NO_THROW(
+            status = EstimateLoadIndexResourceFromSerializedInfo(
+                reinterpret_cast<const uint8_t*>(test.serialized.data()),
+                test.serialized.size(),
+                test.null_output ? nullptr : &request));
+        const std::string error_message = status.error_msg;
+        if (status.error_code != milvus::Success) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        EXPECT_EQ(status.error_code, milvus::UnexpectedError);
+        EXPECT_NE(error_message.find(test.error), std::string::npos)
+            << error_message;
+        // Failures must return CStatus without partially updating the result.
+        EXPECT_EQ(request.max_memory_cost, 1);
+        EXPECT_EQ(request.max_disk_cost, 2);
+        EXPECT_EQ(request.final_memory_cost, 3);
+        EXPECT_EQ(request.final_disk_cost, 4);
+        EXPECT_TRUE(request.has_raw_data);
+    }
 }
 
 TEST(IndexLoadTest, ScalarV3MmapTantivyUsesDownloadConcurrencyBound) {
@@ -372,6 +485,42 @@ TEST(IndexLoadTest, ScalarV3MmapTantivyUsesDownloadConcurrencyBound) {
         EXPECT_EQ(request.max_disk_cost, kIndexSize);
         EXPECT_EQ(request.final_memory_cost, kValidityBitmapBytes);
         EXPECT_EQ(request.final_disk_cost, kIndexSize);
+
+        milvus::proto::cgo::LoadIndexInfo info;
+        auto* field = info.mutable_field();
+        field->set_fieldid(100);
+        field->set_name("value");
+        field->set_data_type(milvus::proto::schema::VarChar);
+        auto* max_length = field->add_type_params();
+        max_length->set_key("max_length");
+        max_length->set_value("65535");
+        info.set_enable_mmap(true);
+        info.set_index_file_size(kIndexSize);
+        info.set_num_rows(kNumRows);
+        info.set_current_scalar_index_version(3);
+        (*info.mutable_index_params())["index_type"] = index_type;
+        // The explicit engine version must override the stale index param.
+        (*info.mutable_index_params())
+            [milvus::index::SCALAR_INDEX_ENGINE_VERSION] = "1";
+        (*info.mutable_index_params())["warmup"] = "disable";
+        info.add_index_files("/nonexistent/scalar-v3-index");
+        auto serialized = info.SerializeAsString();
+        LoadResourceRequest serialized_request{};
+        auto status = EstimateLoadIndexResourceFromSerializedInfo(
+            reinterpret_cast<const uint8_t*>(serialized.data()),
+            serialized.size(),
+            &serialized_request);
+        const std::string error_message = status.error_msg;
+        if (status.error_code != milvus::Success) {
+            free(const_cast<char*>(status.error_msg));
+        }
+        ASSERT_EQ(status.error_code, milvus::Success) << error_message;
+        EXPECT_EQ(serialized_request.max_memory_cost, request.max_memory_cost);
+        EXPECT_EQ(serialized_request.max_disk_cost, request.max_disk_cost);
+        EXPECT_EQ(serialized_request.final_memory_cost,
+                  request.final_memory_cost);
+        EXPECT_EQ(serialized_request.final_disk_cost, request.final_disk_cost);
+        EXPECT_EQ(serialized_request.has_raw_data, request.has_raw_data);
     }
 }
 

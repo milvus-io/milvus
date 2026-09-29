@@ -276,7 +276,7 @@ func packUnsubDmChannelRequest(task *ChannelTask, action Action) *querypb.UnsubD
 }
 
 // applyCollectionSettings applies collection-level mmap and warmup settings to all fields.
-// It combines applyCollectionMmapSetting and applyCollectionWarmupSetting into a single call.
+// It combines ApplyCollectionMmapSetting and applyCollectionWarmupSetting into a single call.
 func applyCollectionSettings(schema *schemapb.CollectionSchema,
 	collectionProperties []*commonpb.KeyValuePair,
 ) *schemapb.CollectionSchema {
@@ -284,12 +284,14 @@ func applyCollectionSettings(schema *schemapb.CollectionSchema,
 	schemaCloned := typeutil.Clone(schema)
 	schemaCloned.Properties = mergeCollectionProps(schemaCloned.Properties, collectionProperties)
 
-	schemaCloned = applyCollectionMmapSetting(schemaCloned, collectionProperties)
+	schemaCloned = ApplyCollectionMmapSetting(schemaCloned, collectionProperties)
 	schemaCloned = applyCollectionWarmupSetting(schemaCloned, collectionProperties)
 	return schemaCloned
 }
 
-func applyCollectionMmapSetting(schema *schemapb.CollectionSchema,
+// ApplyCollectionMmapSetting applies collection and struct mmap defaults in place,
+// preserving explicit field settings. Callers must pass an owned schema.
+func ApplyCollectionMmapSetting(schema *schemapb.CollectionSchema,
 	collectionProperties []*commonpb.KeyValuePair,
 ) *schemapb.CollectionSchema {
 	// field mmap enabled if collection-level mmap enabled or the field mmap enabled
