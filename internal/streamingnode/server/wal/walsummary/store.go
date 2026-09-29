@@ -664,13 +664,10 @@ func marshalChunk(
 	if err := validateChunkIndex(chunkIndexEntryFromFooter(footer, 0)); err != nil {
 		return nil, nil, err
 	}
-	footerPayload, err := marshalOptions.Marshal(footer)
+	footerPayload, err := marshalIntoBuffer(buf, footer)
 	if err != nil {
 		return nil, nil, merr.Wrap(err, "failed to marshal summary chunk footer")
 	}
-	// bytes.Buffer.Write never returns an error, so the trailer writes are
-	// unchecked.
-	buf.Write(footerPayload)
 	// Checksum the footer bytes exactly as written and carry it in the trailer,
 	// so verification never re-marshals the parsed footer — proto marshaling is
 	// not guaranteed byte-stable across library versions.
@@ -721,17 +718,34 @@ func appendIdempotencySections(
 // offset is absolute within the object so a reader can turn it straight into a
 // ranged read.
 func appendSection(buf *bytes.Buffer, section proto.Message, recordCount int) (*streamingpb.VChannelSummarySectionRef, error) {
-	payload, err := marshalOptions.Marshal(section)
+	offset := uint64(buf.Len())
+	payload, err := marshalIntoBuffer(buf, section)
 	if err != nil {
 		return nil, merr.WrapErrServiceInternalMsg("failed to marshal summary section: " + err.Error())
 	}
-	offset := uint64(buf.Len())
-	buf.Write(payload)
 	return &streamingpb.VChannelSummarySectionRef{
 		Offset:      offset,
 		Length:      uint64(len(payload)),
 		RecordCount: uint64(recordCount),
 	}, nil
+}
+
+// marshalIntoBuffer encodes immutable messages directly into the chunk buffer.
+// The returned bytes are borrowed and must be consumed before the next write.
+func marshalIntoBuffer(buf *bytes.Buffer, msg proto.Message) ([]byte, error) {
+	options := marshalOptions
+	buf.Grow(options.Size(msg))
+	// Nothing mutates the message between Size and MarshalAppend; reuse the
+	// computed sizes instead of traversing all nested records a second time.
+	options.UseCachedSize = true
+	payload, err := options.MarshalAppend(buf.AvailableBuffer(), msg)
+	if err != nil {
+		return nil, err
+	}
+	// AvailableBuffer points at the write position. Write commits the length;
+	// its source and destination are the same bytes, so no payload copy occurs.
+	buf.Write(payload)
+	return payload, nil
 }
 
 // unmarshalChunk decodes a whole chunk object back into per-vchannel sections.
