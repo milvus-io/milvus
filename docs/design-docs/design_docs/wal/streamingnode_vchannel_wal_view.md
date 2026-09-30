@@ -169,6 +169,15 @@ There is no second recovery checkpoint tied to this lifecycle classification.
    before accepting queries. Queries wait for their required Growing/Transform
    MVCC frontiers before using segment handles.
 
+For this bounded SN bootstrap, SyncUp(T) proves delivery through the captured
+snapshot boundary T. GrowingRuntime applies all collected Delete entries before
+publishing its base frontiers; SyncUp receipt alone does not complete resource
+preparation. The subsequent live-event barrier provides additional applied
+progress before reporting the view Ready. This is distinct from the planned QN
+use of unbounded SyncUp to establish catch-up to a sampled current tail. Neither
+path guarantees zero lag from new writes between readiness and Up. See
+[SyncUp's two roles](transform_log.md#3-entry-and-syncup-semantics).
+
 Later QueryViews on this VChannel reuse the runtime, without repeating initial
 TransformLog replay. They repeat the same commit check and applied-event barrier;
 an initialized runtime alone does not certify a new view's readiness. Their
@@ -188,14 +197,57 @@ Implementation references (relative to repository root):
 
 ## 8. Preparation Retry and Loaded Partition Scope
 
-An initialization timeout or transient resource-read failure keeps the view in
-Preparing. NodeScheduler retries with backoff even if no new WAL message arrives.
+An initialization timeout or resource-read failure classified as locally
+retryable keeps the view in Preparing. NodeScheduler retries with backoff even
+if no new WAL message arrives.
 Each failed attempt closes its partial modules and buffered events outside the
 owner/manager locks. The next attempt captures a fresh snapshot and installs a
 fresh QueryRuntime under the same VChannel lock. It never reuses partially
 prepared modules. A released/cancelled build cannot install a replacement or
 report Ready for a later acquisition. Truncated TransformLog history and explicit
 data-integrity failures report Unrecoverable; owner cancellation stops the build.
+
+### Preparation failure ownership
+
+The intended contract assigns recovery to the component capable of resolving
+the failure:
+
+- **Worknode:** recoverable failures that can be resolved locally, such as
+  temporary storage/network failures, incomplete segment commits and short-lived
+  admission pressure. Keep the view Preparing and retry with backoff without
+  requiring Coord to replace it. Retry must preserve atomic publication and
+  discard partial initial builds as described above.
+- **Coord:** failures that cannot be repaired by retrying the current view on
+  this node, including unavailable required history, corrupt required data, an
+  unsatisfiable DataVersion, or insufficient capacity requiring a different
+  placement/resource allocation. The node exposes an Unrecoverable view so Coord
+  can orchestrate replacement, reassignment or cleanup. Coord ownership does not
+  guarantee that a replacement can repair permanent data loss or corruption.
+
+Unrecoverable is relative to the current view and node assignment; it does not
+mean that the shard is permanently unrecoverable. A temporary full queue or
+service throttle is distinct from a resource requirement the node cannot meet.
+Cancellation caused by release, shutdown or WAL handoff ends local work; it is
+not a new preparation failure to retry indefinitely.
+
+**Implementation gap / TODO:** the current `retryablePreparationError` allowlist
+does not fully implement this ownership contract. Some transient object-storage
+failures reach it as non-retryable `ErrIoFailed` and can make a view Unrecoverable.
+Conversely, it treats gRPC `ResourceExhausted` as retryable without distinguishing
+temporary throttling from capacity that requires Coord intervention. Error
+classification must reflect whether this node can recover, rather than relying
+on a broad status code alone. This documentation update does not change the
+classifier.
+
+For Preparing, `OnUnrecoverable` reports the failure to Coord. SN recovery retains
+the existing UpRecovering exception: a local recovery failure preserves the Up
+record and does not directly report Unrecoverable; the query error path is
+expected to trigger replacement. Full Coord/Proxy orchestration is outside this
+extraction, so this existing path is not evidence that the final recovery
+ownership protocol is fully integrated. See the
+[state machine](../qviews/query_view_state_machine.md#24-uprecovering-streamingnode-only-proto-state).
+
+### Loaded partition scope
 
 Once load metadata is resolved, its partition list is authoritative for the
 runtime: an empty list means no loaded partitions. A nil list in a legacy,

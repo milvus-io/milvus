@@ -257,8 +257,20 @@ the crash-recovery path.
    DataVersion, using the per-Segment Flush `streaming_version` handoff metadata.
 4. Before reporting Ready, require no pending segment final commits and wait
    until the query runtime has applied the completed sealed notifications. This
-   check also applies when reusing a runtime; it is independent of asynchronous
-   BM25 refresh. See [WAL input view readiness](../wal/streamingnode_vchannel_wal_view.md#9-queryview-readiness-and-version-ordering).
+   check also applies when reusing a runtime. Then prepare the shared BM25
+   aggregate for this view's DataVersion before reporting Ready. An already
+   materialized Oracle must complete this preparation; an unmaterialized lazy
+   Oracle only advances its target until the first BM25 query. See
+   [WAL input view readiness](../wal/streamingnode_vchannel_wal_view.md#9-queryview-readiness-and-version-ordering)
+   and [IDF refresh](snview/idf_oracle_runtime.md#refresh-and-handoff).
+
+Locally recoverable preparation failures should remain Preparing and retry on
+the Worknode. Failures requiring a different view or node/resource assignment
+belong to Coord and make the current view Unrecoverable. This includes resource
+requirements the node cannot satisfy, not every temporary admission delay.
+The [failure ownership contract](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership)
+records the current classifier gaps; the intended policy is not fully realized
+by today's error allowlist.
 
 New acquisitions must not regress below the shared VChannel resource manager's
 highest accepted DataVersion, including across replicas. Such acquisitions report
@@ -271,7 +283,7 @@ their existing Up leases.
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
 | Ready | Resource preparation succeeded | Report Ready to Coord |
-| Unrecoverable | data_version expired (growing segments already flushed and released) | Report Unrecoverable to Coord |
+| Unrecoverable | Preparation classified as unrecoverable; see the failure-ownership policy and classifier gaps above | Report Unrecoverable to Coord |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release any prepared resources |
 
 **Possible Coord States (and this node's reaction):**
@@ -417,6 +429,10 @@ Coord and QueryNode never enter this state. For Coord-visible reporting, UpRecov
 
 ## 3. QueryNode State Machine
 
+The resource preparation steps below describe the target QN integration. Remote
+TransformLog consumption and its catch-up readiness wiring are not implemented
+by the current SN extraction.
+
 QueryNode is fully stateless with no persistence and no recovery process. It does NOT observe Up, Down, or Dropping states — it can serve queries as soon as it reaches Ready.
 
 QN stores the complete pending report proto at the moment a state/progress
@@ -438,15 +454,24 @@ later local progress does not retroactively mutate an already-pending report.
      derives all loading metadata directly from that Manifest; no Coordinator
      SegmentMeta watch is required for this Segment.
 2. Asynchronously load segments from object storage.
-3. Subscribe to the pure delete stream from SN.
-4. Mark each segment as ready progressively; report the latest accumulated
+3. Subscribe to the pure delete stream from SN, apply its ordered Entries and
+   establish catch-up using SyncUp and the required Transform MVCC boundary.
+   SyncUp also advances intervals without Deletes. Receipt while preceding
+   Deletes remain queued does not establish readiness; see
+   [SyncUp semantics](../wal/transform_log.md#3-entry-and-syncup-semantics).
+4. Mark segments ready only after base loading and the required Transform
+   catch-up/application are complete; report the latest accumulated
    ready subset to Coord via `ready_segment_ids` in responses.
+
+This catch-up gate prevents a newly serving view from exposing its historical
+replay backlog to queries. It is a point-in-time condition, not a guarantee of
+zero query waiting after later writes; per-query MVCC checks remain required.
 
 **Transitions:**
 
 | Target State | Trigger | Transition Behavior |
 |---|---|---|
-| Ready | All segments loaded successfully | Report Ready to Coord |
+| Ready | All segments loaded and required Transform catch-up applied | Report Ready to Coord |
 | Unrecoverable | Resource preparation failed (OOM, disk full, etc.) | Report Unrecoverable to Coord |
 | Dropped | Received Dropped push from Coord (Coord aborted this view) | Release loaded resources; disconnect delete stream |
 

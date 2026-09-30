@@ -705,6 +705,17 @@ been delivered. The GrowingRuntime caller rejects truncated history and applies
 the returned Delete entries before readiness. Later events use the VChannel
 live event path.
 
+SyncUp has two consumer-facing roles: extending Transform MVCC through intervals
+without Delete payloads, and supplying catch-up evidence for view preparation.
+For unbounded subscriptions it is emitted after delivering through the current
+read's sampled ReadableThrough, not an arbitrary frozen target from an earlier
+page. Ordered Delete application can continue advancing MVCC while a subscriber
+is still catching up. Consumers must finish applying the delivered prefix before
+using SyncUp for MVCC or readiness, and compare against their required boundary
+if the write-side MVCC is ahead of Summary. See
+[SyncUp semantics](transform_log.md#3-entry-and-syncup-semantics) for the full
+contract and [delivery conditions](transform_log.md#4-catch-up-and-live-delivery).
+
 Remote transport, QN continuous subscriptions and their view retention are
 planned consumers. Their protocol must not be treated as enabled merely because
 the local SN adaptor exists. The current WAL L0 materializer remains independent

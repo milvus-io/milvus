@@ -75,10 +75,37 @@ Pure Inserts do not produce transform entries. Other ordered messages may
 establish progress without producing payload records.
 
 `SyncUp(T)` means every Delete in the subscription's requested interval through
-T has been delivered successfully. It can advance through an empty interval,
-which lets query consumers advance visibility even when no Delete exists at T.
-It does not prove Summary persistence, completion of other WAL effects, or L0
-materialization. SyncUp and payload-free Barriers are not stored as records.
+T has been delivered successfully. It has two responsibilities:
+
+1. **Advance through intervals without Deletes.** Relevant DDL/publication
+   events, insert-only transaction commits and WAL recovery barriers can advance
+   query Transform MVCC without producing a Delete Entry. SyncUp supplies the
+   complete-prefix evidence needed to advance the consumer through those empty
+   intervals. Applicable PChannel-wide barriers align all affected subscriptions;
+   unrelated VChannel traffic does not require a broadcast.
+2. **Signal catch-up for view readiness.** An unbounded subscription reports
+   when delivery has reached the latest readable frontier sampled by its read.
+   After applying the preceding entries, a view can use this signal to establish
+   that it has caught up, rather than enter service with historical TransformLog
+   backlog and make its first queries pay that replay cost. QN readiness wiring
+   remains planned in this extraction.
+
+Delivery and application are distinct. A successful Handler call may only enqueue
+work. Consumers must apply the complete ordered prefix before advancing their
+applied MVCC or accepting SyncUp as a readiness signal. A whole Delete Entry at T,
+including every Delete child of a transaction, can itself advance applied MVCC
+to T after all preceding entries have been applied. Continuous Deletes therefore
+do not need an extra SyncUp after each Entry to make progress. SyncUp supplies
+empty-interval progress and catch-up evidence beyond that per-Entry progress.
+
+For example, applying Delete(200) in order already advances Delete visibility
+through 200; an earlier SyncUp(100) adds no later MVCC coverage. Conversely, if
+the last Delete is at 100 and a relevant barrier advances Transform MVCC to 200,
+SyncUp(200) supplies the missing coverage proof without inventing a Delete.
+
+SyncUp does not prove Summary persistence, completion of other WAL effects, or
+L0 materialization. In particular, it does not implement the deferred DDL
+visibility effects. SyncUp and payload-free Barriers are not stored as records.
 
 The adaptor derives progress from Summary's complete readable coverage, not the
 largest Delete TimeTick or a requested end position. Subscription delivery is
@@ -86,18 +113,38 @@ independent of the L1 safety bound used by the separate materializer.
 
 ## 4. Catch-Up And Live Delivery
 
-For each catch-up round:
+Each read captures readable coverage and a change token atomically, then returns
+a bounded batch through that coverage, capped by EndTimeTick when set. Deliver
+all entries in the batch before advancing the delivery cursor or sending SyncUp.
 
-1. capture a readable target and a change token from Summary;
-2. cap the target by EndTimeTick when set;
-3. read and deliver bounded batches after the cursor through that target;
-4. emit SyncUp only through the range actually covered and delivered;
-5. recheck Summary progress before waiting for a change.
+| Subscription | SyncUp condition after delivering the batch | Next action |
+|---|---|---|
+| Bounded | CoveredThrough reaches EndTimeTick | Send SyncUp and complete the subscription |
+| Unbounded | CoveredThrough reaches that read's sampled ReadableThrough | Send SyncUp and wait on the captured change token |
+| Either, with a page limit before the required boundary | No SyncUp for this page | Read the next page immediately |
 
 Snapshot capture and change registration must avoid lost wakeups. Moving data
 from pending to sealed to durable storage must not create subscription gaps or
-duplicates. A fixed catch-up target prevents a busy writer from postponing the
-initial SyncUp indefinitely.
+duplicates. A relevant change during I/O or delivery invalidates the captured token so
+the next wait can resume immediately; it does not invalidate the coverage just
+delivered. New writes after the read's snapshot therefore do not prevent that
+batch from sending SyncUp for its sampled frontier.
+
+The unbounded adaptor samples current coverage on each page. There is no
+requirement to freeze an older target across pages merely to force an early
+SyncUp. If sustained Delete backlog prevents the subscriber from reaching each
+sampled frontier, SyncUp may be delayed while ordered Entries continue advancing
+applied MVCC. That distinction is intentional: completing an arbitrary older
+prefix is not the same signal as catching up to the sampled tail.
+
+A SyncUp is a point-in-time catch-up observation, not a promise of zero lag at
+every later instant. ReadableThrough belongs to Summary's observed complete
+prefix, which can lag the write-side query MVCC. The consumer's readiness
+protocol must relate its applied frontier to the required query/recovery
+boundary; it must not equate receipt alone with being current. New writes, slow
+application and the interval between Ready and Up can still require per-query
+MVCC waiting. Catch-up avoids exposing historical replay backlog, not every
+possible future wait.
 
 A bounded subscription completes only after coverage reaches its EndTimeTick.
 If Summary has not reached that position, the subscription waits or reports an
@@ -119,6 +166,12 @@ coverage; after catch-up, A wakes for its own query-transform changes or an
 applicable global barrier. It reads and delivers the required Delete prefix
 before reporting SyncUp. QN must finish applying that prefix before advancing
 its local visibility; receipt of a notification is not query readiness.
+
+The planned QN view preparation uses this applied catch-up signal, together with
+segment loading and the required MVCC boundary, before reporting Ready. Loading
+the base segments or receiving a SyncUp while its preceding Deletes remain
+queued is insufficient. This consumer-side readiness integration is not yet
+implemented by the local adaptor.
 
 Notifications cover payload-free changes too: insert-only transaction commits,
 flush/import publication, relevant DDL and schema changes. Their classification
@@ -186,6 +239,10 @@ and [WAL input view](streamingnode_vchannel_wal_view.md) for snapshot handoff.
 5. Historical/live handoff and storage transitions lose no records.
 6. Subscription cursors do not advance L0 materialization or authorize GC.
 7. L0 materialization does not depend on this adaptor or on external subscribers.
+8. Applied MVCC and view readiness require ordered consumer application;
+   delivery progress alone is insufficient. Delete Entries can advance applied
+   MVCC before catch-up, while SyncUp additionally supplies empty-range progress
+   and the subscription's completion/catch-up signal.
 
 ## 8. TODO: DDL Visibility Entries (Outside This PR)
 

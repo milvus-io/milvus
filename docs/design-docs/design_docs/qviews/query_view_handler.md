@@ -141,8 +141,9 @@ second persistence retry mechanism above `ReliableWriteMetaKv`.
 **Full-view persistence invariant**: The SN-persisted Up view is the complete
 `QueryViewOfShard` pushed by Coord, not just `QueryViewOfStreamingNode`. The
 StreamingNode-local resource manager only consumes the SN portion. Retaining
-the complete topology keeps recovery metadata self-contained for later
-consumers without importing query execution in this change.
+the complete topology keeps recovery metadata self-contained. Phase 1 planning
+uses this topology; Phase 2 acquisition needs only metadata and a serving
+reference. See [Serving Lease](query_view_lease.md).
 
 SN-local persisted key format:
 
@@ -167,8 +168,14 @@ SN persists only the Up state. On crash recovery:
    reporting to Coord and retains persisted recovery metadata until Coord later
    pushes Dropped.
 
-The resource interface and state-machine failure wiring are part of this change;
-the concrete resource preparation implementation remains outside this scope.
+The concrete SN resource preparation path is wired through
+`PChannelRecoveryManager` and `VChannelRecoveryModule`: it builds or reuses the
+shared QueryRuntime, prepares Growing/BM25 resources, and performs local bounded
+TransformLog Delete replay during bootstrap. Every recovered view must pass the
+final-commit check and applied-event barrier before recovery completes. See
+[SN WAL input view](../wal/streamingnode_vchannel_wal_view.md) for the flow and
+[preparation failure ownership](../wal/streamingnode_vchannel_wal_view.md#preparation-failure-ownership)
+for the intended Worknode/Coord split and current classification limitations.
 
 ### 4.4 SN: handleCoordDropped and Persistence Cleanup
 
@@ -180,7 +187,7 @@ When Coord pushes Dropped, the SM enters Dropping. The persist behavior depends 
 | Unrecoverable | Delete (may have entered from UpRecovering, stale recovery info on disk) |
 | Preparing, Ready, Down | None (no persisted recovery info) |
 
-If future resource wiring drives UpRecovering to Unrecoverable, the state
+If resource preparation drives UpRecovering to Unrecoverable, the state
 machine retains persisted Up metadata until Coord's Dropped push; deletion is
 deferred to that Dropping transition.
 
