@@ -19,13 +19,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
 	"github.com/milvus-io/milvus/internal/proxy/metacache"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/reduce"
 	"github.com/milvus-io/milvus/internal/util/reduce/orderby"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/internal/util/shallowcopy"
 	"github.com/milvus-io/milvus/pkg/v3/common"
@@ -803,7 +804,7 @@ func (t *QueryTask) PreExecute(ctx context.Context) error {
 				return err
 			}
 		}
-		principalName, enforceRLS, err = rls.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
+		principalName, enforceRLS, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, t.request.GetRlsPrincipal(), "query")
 		if err != nil {
 			return err
 		}

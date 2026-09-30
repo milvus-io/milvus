@@ -53,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/messagespb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/viewpb"
 	"github.com/milvus-io/milvus/pkg/v3/streaming/util/message"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -2148,7 +2149,7 @@ func (s *Server) createImportJobFromAck(ctx context.Context, in *internalpb.Impo
 	// config flip between broadcast and ack) is terminally failed below instead
 	// of running ungated or returning an error (which would retry forever).
 	l0ImportDisabled := importutilv2.IsL0Import(in.GetOptions()) && !Params.DataCoordCfg.EnableL0Import.GetAsBool()
-	var rlsPredicate []byte
+	var rlsPredicate *planpb.Expr
 	var rlsErr error
 	if !l0ImportDisabled {
 		rlsPredicate, rlsErr = s.resolveImportRLSPredicate(ctx, in)

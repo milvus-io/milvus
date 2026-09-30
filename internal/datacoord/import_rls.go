@@ -20,13 +20,11 @@ import (
 	"context"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
-	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
@@ -47,7 +45,7 @@ func (s *Server) getImportRLSMetadata(
 	if err = merr.CheckRPCCall(resp, err); err == nil {
 		return resp, nil
 	}
-	return nil, rls.WrapMetadataRefreshError(err, "failed to get %s for import", description)
+	return nil, rlsutil.WrapMetadataRefreshError(err, "failed to get %s for import", description)
 }
 
 // resolveImportRLSPredicate reads one ordered metadata snapshot and returns a
@@ -57,7 +55,7 @@ func (s *Server) getImportRLSMetadata(
 // reads under the broadcaster's collection-lock contract. The ACK callback
 // persists any metadata read failure on a terminal failed job instead of
 // retrying the RPC while retaining that collection lock.
-func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.ImportRequestInternal) ([]byte, error) {
+func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.ImportRequestInternal) (*planpb.Expr, error) {
 	properties := in.GetSchema().GetProperties()
 	enabled, err := common.IsRLSEnabled(properties...)
 	if err != nil {
@@ -85,7 +83,7 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 	if importutilv2.IsL0Import(in.GetOptions()) {
 		return nil, merr.WrapErrOperationNotSupportedMsg("RLS-protected L0 import is not supported")
 	}
-	principalName, _, err := rls.ResolveRuntimePrincipal(true, in.GetRlsPrincipal(), "import")
+	principalName, _, err := rlsutil.ResolveRuntimePrincipal(true, in.GetRlsPrincipal(), "import")
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +104,7 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 			"RLS policy metadata collection id mismatch: expected %d, received %d",
 			in.GetCollectionID(), policyResp.GetCollectionId())
 	}
-	policyMap, err := rls.RowPoliciesFromInfo(in.GetCollectionID(), policyResp.GetPolicies())
+	policyMap, err := rlsutil.RowPoliciesFromInfo(in.GetCollectionID(), policyResp.GetPolicies())
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +150,7 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 		}
 		return tags, nil
 	}
-	expr, err := rls.BuildCheckPredicate(
+	expr, err := rlsutil.BuildCheckPredicate(
 		policies,
 		principalName,
 		loadPrincipalTags,
@@ -163,12 +161,5 @@ func (s *Server) resolveImportRLSPredicate(ctx context.Context, in *internalpb.I
 	if err != nil {
 		return nil, err
 	}
-	if expr == nil {
-		return nil, nil
-	}
-	serialized, err := proto.Marshal(expr)
-	if err != nil {
-		return nil, merr.WrapErrDataIntegrity(err, "marshal RLS import check predicate")
-	}
-	return serialized, nil
+	return expr, nil
 }

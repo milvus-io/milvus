@@ -25,16 +25,15 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/flushcommon/metacache"
 	"github.com/milvus-io/milvus/internal/flushcommon/syncmgr"
-	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/internal/util/importutilv2/importid"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -59,11 +58,10 @@ type ImportTask struct {
 	cm         storage.ChunkManager
 	metaCaches map[string]metacache.MetaCache
 
-	// The predicate is immutable job metadata. Decode it once when the worker
+	// The predicate is immutable job metadata. Validate it once when the worker
 	// receives the task instead of reparsing it for every imported batch.
-	rlsPredicate          *planpb.Expr
-	rlsReferencedFieldIDs []int64
-	rlsPredicateErr       error
+	rlsPredicate    *planpb.Expr
+	rlsPredicateErr error
 }
 
 func NewImportTask(req *datapb.ImportRequest,
@@ -72,7 +70,11 @@ func NewImportTask(req *datapb.ImportRequest,
 	cm storage.ChunkManager,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
-	rlsPredicate, rlsReferencedFieldIDs, rlsPredicateErr := decodeImportRLSPredicate(req.GetRlsCheckPredicate())
+	rlsPredicate := req.GetRlsCheckPredicate()
+	var rlsPredicateErr error
+	if rlsPredicate != nil && rlsPredicate.GetExpr() == nil {
+		rlsPredicateErr = merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
+	}
 	// During binlog import, even if the primary key's autoID is set to true,
 	// the primary key from the binlog should be used instead of being reassigned.
 	if importutilv2.IsBackup(req.GetOptions()) {
@@ -89,17 +91,16 @@ func NewImportTask(req *datapb.ImportRequest,
 			CollectionID: req.GetCollectionID(),
 			State:        datapb.ImportTaskStateV2_Pending,
 		},
-		ctx:                   ctx,
-		cancel:                cancel,
-		segmentsInfo:          make(map[int64]*datapb.ImportSegmentInfo),
-		req:                   req,
-		allocator:             alloc,
-		manager:               manager,
-		syncMgr:               syncMgr,
-		cm:                    cm,
-		rlsPredicate:          rlsPredicate,
-		rlsReferencedFieldIDs: rlsReferencedFieldIDs,
-		rlsPredicateErr:       rlsPredicateErr,
+		ctx:             ctx,
+		cancel:          cancel,
+		segmentsInfo:    make(map[int64]*datapb.ImportSegmentInfo),
+		req:             req,
+		allocator:       alloc,
+		manager:         manager,
+		syncMgr:         syncMgr,
+		cm:              cm,
+		rlsPredicate:    rlsPredicate,
+		rlsPredicateErr: rlsPredicateErr,
 	}
 	task.metaCaches = NewMetaCache(req)
 	return task
@@ -167,19 +168,18 @@ func (t *ImportTask) Clone() Task {
 	// cancels whatever the map entry carries; a derived context would make
 	// that cancellation a no-op on the work actually in flight.
 	return &ImportTask{
-		ImportTaskV2:          typeutil.Clone(t.ImportTaskV2),
-		ctx:                   t.ctx,
-		cancel:                t.cancel,
-		segmentsInfo:          infos,
-		req:                   t.req,
-		allocator:             t.allocator,
-		manager:               t.manager,
-		syncMgr:               t.syncMgr,
-		cm:                    t.cm,
-		metaCaches:            t.metaCaches,
-		rlsPredicate:          t.rlsPredicate,
-		rlsReferencedFieldIDs: append([]int64(nil), t.rlsReferencedFieldIDs...),
-		rlsPredicateErr:       t.rlsPredicateErr,
+		ImportTaskV2:    typeutil.Clone(t.ImportTaskV2),
+		ctx:             t.ctx,
+		cancel:          t.cancel,
+		segmentsInfo:    infos,
+		req:             t.req,
+		allocator:       t.allocator,
+		manager:         t.manager,
+		syncMgr:         t.syncMgr,
+		cm:              t.cm,
+		metaCaches:      t.metaCaches,
+		rlsPredicate:    t.rlsPredicate,
+		rlsPredicateErr: t.rlsPredicateErr,
 	}
 }
 
@@ -325,37 +325,11 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, cur *importid.FileID
 	return nil
 }
 
-func decodeImportRLSPredicate(data []byte) (*planpb.Expr, []int64, error) {
-	if len(data) == 0 {
-		return nil, nil, nil
-	}
-	predicate := &planpb.Expr{}
-	if err := proto.Unmarshal(data, predicate); err != nil {
-		return nil, nil, merr.WrapErrDataIntegrity(err, "failed to decode persisted import RLS predicate")
-	}
-	if predicate.GetExpr() == nil {
-		return nil, nil, merr.WrapErrDataIntegrityMsg("persisted import RLS predicate has no expression")
-	}
-	return predicate, rls.ReferencedFieldIDs(predicate), nil
-}
-
 func (t *ImportTask) validateRLSRows(data *storage.InsertData, rowNum int) error {
 	if t.rlsPredicate == nil {
 		return nil
 	}
-	validationData := make(map[int64]rls.StorageFieldData, len(data.Data))
-	if len(t.rlsReferencedFieldIDs) > 0 {
-		for _, fieldID := range t.rlsReferencedFieldIDs {
-			if field, ok := data.Data[fieldID]; ok {
-				validationData[fieldID] = field
-			}
-		}
-	} else {
-		for fieldID, field := range data.Data {
-			validationData[fieldID] = field
-		}
-	}
-	return rls.ValidateInsertDataByPredicate(t.ctx, validationData, rowNum, t.rlsPredicate, "import", "check")
+	return rlsutil.ValidateInsertDataByPredicate(t.ctx, data.Data, rowNum, t.rlsPredicate, "import", "check")
 }
 
 func (t *ImportTask) sync(hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {

@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/conc"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -62,7 +62,6 @@ func TestImportTaskRLSPredicate(t *testing.T) {
 			req := importRLSTestRequest(t, schema, test.expression)
 			task := NewImportTask(req, manager, syncMgr, nil).(*ImportTask)
 			require.NotNil(t, task.rlsPredicate)
-			require.Equal(t, []int64{102}, task.rlsReferencedFieldIDs)
 
 			reader := importutilv2.NewMockReader(t)
 			var once sync.Once
@@ -115,11 +114,11 @@ func TestImportTaskRLSPredicateWithAutoIDVarCharPrimaryKey(t *testing.T) {
 	require.NoError(t, task.importFile(reader, nil))
 }
 
-func TestImportTaskCorruptRLSPredicateFailsDuringExecution(t *testing.T) {
+func TestImportTaskEmptyRLSPredicateFailsDuringExecution(t *testing.T) {
 	paramtable.Init()
 	manager := NewTaskManager()
 	req := importRLSTestRequest(t, importRLSTestSchema(), "tenant == 7")
-	req.RlsCheckPredicate = []byte{0xff}
+	req.RlsCheckPredicate = &planpb.Expr{}
 	task := NewImportTask(req, manager, syncmgr.NewMockSyncManager(t), nil)
 	manager.Add(task)
 
@@ -128,7 +127,7 @@ func TestImportTaskCorruptRLSPredicateFailsDuringExecution(t *testing.T) {
 	_, err := futures[0].Await()
 	require.ErrorIs(t, err, merr.ErrDataIntegrity)
 	require.Equal(t, datapb.ImportTaskStateV2_Failed, manager.Get(req.GetTaskID()).GetState())
-	require.Contains(t, manager.Get(req.GetTaskID()).GetReason(), "failed to decode persisted import RLS predicate")
+	require.Contains(t, manager.Get(req.GetTaskID()).GetReason(), "persisted import RLS predicate has no expression")
 }
 
 func importRLSTestSchema() *schemapb.CollectionSchema {
@@ -163,8 +162,6 @@ func importRLSTestRequest(t *testing.T, schema *schemapb.CollectionSchema, expre
 	require.NoError(t, err)
 	predicate, err := planparserv2.ParseExpr(helper, expression, nil)
 	require.NoError(t, err)
-	predicateBytes, err := proto.Marshal(predicate)
-	require.NoError(t, err)
 	return &datapb.ImportRequest{
 		JobID:             10,
 		TaskID:            11,
@@ -176,7 +173,7 @@ func importRLSTestRequest(t *testing.T, schema *schemapb.CollectionSchema, expre
 		Ts:                1000,
 		IDRange:           &datapb.IDRange{Begin: 100, End: 200},
 		RequestSegments:   []*datapb.ImportRequestSegment{{SegmentID: 14, PartitionID: 13, Vchannel: "v0"}},
-		RlsCheckPredicate: predicateBytes,
+		RlsCheckPredicate: predicate,
 	}
 }
 

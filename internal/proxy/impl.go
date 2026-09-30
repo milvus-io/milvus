@@ -51,8 +51,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/proxy/privilege"
 	"github.com/milvus-io/milvus/internal/proxy/replicate"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/fileresource"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
@@ -3562,7 +3562,7 @@ func (node *Proxy) preflightSearchByPK(ctx context.Context, request *milvuspb.Se
 	if err != nil {
 		return nil, err
 	}
-	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, request.GetRlsPrincipal(), "search")
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, request.GetRlsPrincipal(), "search")
 	if err != nil {
 		return nil, err
 	}

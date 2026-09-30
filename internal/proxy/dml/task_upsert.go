@@ -33,8 +33,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
 	"github.com/milvus-io/milvus/internal/proxy/fieldvalidator"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/rls"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/internal/util/segcore"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/metrics"
@@ -326,7 +327,7 @@ func retrieveByPKs(ctx context.Context, t *UpsertTask, ids *schemapb.IDs, output
 // restores retry state, merges old fields, and prepares CAS proofs.
 func (it *UpsertTask) prepareUpsert(ctx context.Context) error {
 	if it.rlsEnabled {
-		if err := rls.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
+		if err := rlsutil.ValidateStaticCheckPredicate(it.rlsCheckPredicate, "upsert"); err != nil {
 			return err
 		}
 	}
@@ -509,7 +510,7 @@ func (it *UpsertTask) queryPreExecute(ctx context.Context) ([]int, error) {
 	}
 	existRowNum := typeutil.GetSizeOfIDs(existIDs)
 	if existRowNum > 0 && it.rlsEnabled {
-		if err := rls.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, usingExpr, "upsert", "using"); err != nil {
+		if err := rlsutil.ValidateRowsByPredicate(ctx, existFieldData, existRowNum, usingExpr, "upsert", "using"); err != nil {
 			log.Warn(ctx, "RLS using expression validation failed for upsert", mlog.Err(err))
 			return nil, err
 		}
@@ -1058,7 +1059,7 @@ func upsertRetrieveOutputFields(schemaHelper *typeutil.SchemaHelper, primaryFiel
 	}
 	outputFields := []string{primaryField.GetName()}
 	seen := map[int64]struct{}{primaryField.GetFieldID(): {}}
-	for _, fieldID := range rls.ReferencedFieldIDs(usingExpr) {
+	for _, fieldID := range rlsutil.ReferencedFieldIDs(usingExpr) {
 		if _, ok := seen[fieldID]; ok {
 			continue
 		}
@@ -1926,7 +1927,7 @@ func (it *UpsertTask) insertPreExecute(ctx context.Context) error {
 	}
 
 	if it.rlsEnabled {
-		if err := rls.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
+		if err := rlsutil.ValidateRowsByPredicate(ctx, it.upsertMsg.InsertMsg.GetFieldsData(), int(it.upsertMsg.InsertMsg.NRows()),
 			it.rlsCheckPredicate, "upsert", "check"); err != nil {
 			log.Warn(ctx, "RLS check expression validation failed for upsert", mlog.Err(err))
 			return err
@@ -2030,7 +2031,7 @@ func (it *UpsertTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 	}
-	if _, _, err := rls.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
+	if _, _, err := rlsutil.ResolveRuntimePrincipal(it.rlsEnabled, it.req.GetRlsPrincipal(), "upsert"); err != nil {
 		return err
 	}
 

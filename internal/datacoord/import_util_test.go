@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/metricsinfo"
@@ -234,7 +235,7 @@ func TestImportUtil_NewImportTasksWithDataTt(t *testing.T) {
 }
 
 func TestImportUtil_AssembleRequest(t *testing.T) {
-	rlsPredicate := []byte("rls-predicate")
+	rlsPredicate := &planpb.Expr{Expr: &planpb.Expr_AlwaysTrueExpr{AlwaysTrueExpr: &planpb.AlwaysTrueExpr{}}}
 	var job ImportJob = &importJob{
 		ImportJob: &datapb.ImportJob{
 			JobID:             0,

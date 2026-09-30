@@ -26,9 +26,10 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/msgpb"
-	"github.com/milvus-io/milvus/internal/rls"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
@@ -141,7 +142,7 @@ func (it *importTask) PreExecute(ctx context.Context) error {
 		}
 		it.skipRLS = !rlsEnabled
 	}
-	it.rlsPrincipal, _, err = rls.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
+	it.rlsPrincipal, _, err = rlsutil.ResolveRuntimePrincipal(rlsEnabled, rlsPrincipal, "import")
 	if err != nil {
 		return err
 	}

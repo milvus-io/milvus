@@ -30,10 +30,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	internalmocks "github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/rls"
+	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/common"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/merr"
 	"github.com/milvus-io/milvus/pkg/v3/util/paramtable"
@@ -85,12 +84,9 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			}},
 		}, nil).Once()
 
-		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		predicate, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
 		require.NoError(t, err)
-		require.NotEmpty(t, serialized)
-
-		predicate := &planpb.Expr{}
-		require.NoError(t, proto.Unmarshal(serialized, predicate))
+		require.NotNil(t, predicate)
 		field := func(value string) []*schemapb.FieldData {
 			return []*schemapb.FieldData{{
 				Type:    schemapb.DataType_VarChar,
@@ -100,8 +96,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 				}},
 			}}
 		}
-		require.NoError(t, rls.ValidateRowsByPredicate(context.Background(), field("acme"), 1, predicate, "import", "check"))
-		require.ErrorIs(t, rls.ValidateRowsByPredicate(context.Background(), field("other"), 1, predicate, "import", "check"), merr.ErrPrivilegeNotPermitted)
+		require.NoError(t, rlsutil.ValidateRowsByPredicate(context.Background(), field("acme"), 1, predicate, "import", "check"))
+		require.ErrorIs(t, rlsutil.ValidateRowsByPredicate(context.Background(), field("other"), 1, predicate, "import", "check"), merr.ErrPrivilegeNotPermitted)
 	})
 
 	t.Run("metadata failure is classified retryable", func(t *testing.T) {
@@ -111,8 +107,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			return ok
 		}), mock.Anything).Return(nil, status.Error(codes.Unavailable, "unavailable")).Once()
 
-		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
-		require.Empty(t, serialized)
+		predicate, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		require.Nil(t, predicate)
 		require.Error(t, err)
 		require.True(t, merr.IsRetryableErr(err))
 	})
@@ -123,8 +119,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			Status: merr.Status(merr.WrapErrIoFailedReason("etcd read failed")),
 		}, nil).Once()
 
-		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
-		require.Empty(t, serialized)
+		predicate, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		require.Nil(t, predicate)
 		require.ErrorIs(t, err, merr.ErrServiceUnavailable)
 		require.ErrorIs(t, err, merr.ErrIoFailed)
 		require.True(t, merr.IsRetryableErr(err))
@@ -136,8 +132,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			Status: merr.Status(merr.WrapErrDataIntegrityMsg("corrupt RLS metadata")),
 		}, nil).Once()
 
-		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
-		require.Empty(t, serialized)
+		predicate, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		require.Nil(t, predicate)
 		require.ErrorIs(t, err, merr.ErrDataIntegrity)
 		require.False(t, merr.IsRetryableErr(err))
 	})
@@ -146,8 +142,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		skipped := proto.Clone(request).(*internalpb.ImportRequestInternal)
 		skipped.SkipRls = true
 
-		serialized, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
-		require.Empty(t, serialized)
+		predicate, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
+		require.Nil(t, predicate)
 		require.NoError(t, err)
 	})
 
@@ -157,8 +153,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 		skipped.Schema.Properties = append(skipped.Schema.Properties,
 			&commonpb.KeyValuePair{Key: common.RLSForceKey, Value: "true"})
 
-		serialized, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
-		require.Empty(t, serialized)
+		predicate, err := (&Server{}).resolveImportRLSPredicate(context.Background(), skipped)
+		require.Nil(t, predicate)
 		require.ErrorIs(t, err, merr.ErrPrivilegeNotPermitted)
 	})
 
@@ -179,8 +175,8 @@ func TestResolveImportRLSPredicate(t *testing.T) {
 			}},
 		}, nil).Once()
 
-		serialized, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
-		require.NotEmpty(t, serialized)
+		predicate, err := (&Server{mixCoord: mixCoord}).resolveImportRLSPredicate(context.Background(), request)
+		require.NotNil(t, predicate)
 		require.NoError(t, err)
 	})
 }

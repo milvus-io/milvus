@@ -14,12 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package rls
+package rlsutil
 
 import (
 	"context"
 	"math"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -28,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v3/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2/rewriter"
-	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/funcutil"
@@ -37,12 +37,26 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
 )
 
-type compiledExpression struct {
+type CompiledExpression struct {
 	permissive        []*compiledPolicyExpression
 	restrictive       []*compiledPolicyExpression
 	needsTags         bool
 	staticOptimized   *planpb.Expr
 	staticUnoptimized *planpb.Expr
+}
+
+type expressionKind int
+
+const (
+	usingExpression expressionKind = iota
+	checkExpression
+)
+
+func (kind expressionKind) expression(policy *RowPolicy) string {
+	if kind == checkExpression {
+		return policy.GetCheckExpr()
+	}
+	return policy.GetUsingExpr()
 }
 
 type compiledPolicyExpression struct {
@@ -52,7 +66,7 @@ type compiledPolicyExpression struct {
 	tagVariableDataTypes map[string][]schemapb.DataType
 }
 
-func compiledExpressionNeedsTags(e *compiledExpression) bool {
+func compiledExpressionNeedsTags(e *CompiledExpression) bool {
 	if e == nil || len(e.permissive) == 0 {
 		// Without a permissive policy, RLS denies unconditionally, so tags in
 		// restrictive policies cannot affect the result.
@@ -68,11 +82,15 @@ func compiledExpressionNeedsTags(e *compiledExpression) bool {
 	return false
 }
 
+func (e *CompiledExpression) NeedsTags() bool {
+	return e != nil && e.needsTags
+}
+
 func (e *compiledPolicyExpression) isStatic() bool {
 	return e != nil && !e.needsPrincipal && len(e.tagVariables) == 0
 }
 
-func (e *compiledExpression) isStatic() bool {
+func (e *CompiledExpression) isStatic() bool {
 	if e == nil {
 		return false
 	}
@@ -87,13 +105,13 @@ func (e *compiledExpression) isStatic() bool {
 }
 
 type policyExprTemplate struct {
-	policyType     rlsutil.PolicyType
+	policyType     PolicyType
 	expr           string
 	needsPrincipal bool
 	tagVariables   map[string]string
 }
 
-func preparePolicyExprTemplates(policies []*rlsutil.RowPolicy, action rlsutil.PolicyAction, kind exprKind) ([]policyExprTemplate, int) {
+func preparePolicyExprTemplates(policies []*RowPolicy, action PolicyAction, kind expressionKind) ([]policyExprTemplate, int) {
 	templates := make([]policyExprTemplate, 0)
 	var permissiveCount, restrictiveCount int
 	var permissiveLength, restrictiveLength int
@@ -116,13 +134,13 @@ func preparePolicyExprTemplates(policies []*rlsutil.RowPolicy, action rlsutil.Po
 			tagVariables:   tagVariables,
 		})
 		switch policy.GetPolicyType() {
-		case rlsutil.PolicyTypePermissive:
+		case PolicyTypePermissive:
 			if permissiveCount > 0 {
 				permissiveLength += len(" or ")
 			}
 			permissiveCount++
 			permissiveLength += len(strings.TrimSpace(policyExpr)) + 2
-		case rlsutil.PolicyTypeRestrictive:
+		case PolicyTypeRestrictive:
 			if restrictiveCount > 0 {
 				restrictiveLength += len(" and ")
 			}
@@ -145,12 +163,36 @@ func preparePolicyExprTemplates(policies []*rlsutil.RowPolicy, action rlsutil.Po
 	return templates, combinedLength
 }
 
-func compileExprTemplates(schemaHelper *typeutil.SchemaHelper, templates []policyExprTemplate, timezone string, kind exprKind) (*compiledExpression, error) {
+func CompileUsingExpression(policies []*RowPolicy, action PolicyAction, schema *typeutil.SchemaHelper, maxLength int) (*CompiledExpression, error) {
+	return compileExpression(policies, action, schema, maxLength, usingExpression)
+}
+
+func CompileCheckExpression(policies []*RowPolicy, action PolicyAction, schema *typeutil.SchemaHelper, maxLength int) (*CompiledExpression, error) {
+	return compileExpression(policies, action, schema, maxLength, checkExpression)
+}
+
+func compileExpression(policies []*RowPolicy, action PolicyAction, schema *typeutil.SchemaHelper, maxLength int, kind expressionKind) (*CompiledExpression, error) {
+	policies = append([]*RowPolicy(nil), policies...)
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].GetPolicyName() < policies[j].GetPolicyName()
+	})
+	templates, combinedLength := preparePolicyExprTemplates(policies, action, kind)
+	if combinedLength > maxLength {
+		return nil, merr.WrapErrServiceQuotaExceededMsg("RLS combined expression exceeds max length %d", maxLength)
+	}
+	var timezone string
+	if schema != nil {
+		timezone = schema.GetTimezone()
+	}
+	return compileExprTemplates(schema, templates, timezone, kind)
+}
+
+func compileExprTemplates(schemaHelper *typeutil.SchemaHelper, templates []policyExprTemplate, timezone string, kind expressionKind) (*CompiledExpression, error) {
 	if len(templates) == 0 {
 		return nil, nil
 	}
 	visitorArgs := &planparserv2.ParserVisitorArgs{Timezone: timezone}
-	compiled := &compiledExpression{}
+	compiled := &CompiledExpression{}
 	for _, template := range templates {
 		policyExpr, err := compilePolicyExprTemplate(schemaHelper, template, visitorArgs, kind)
 		if err != nil {
@@ -160,9 +202,9 @@ func compileExprTemplates(schemaHelper *typeutil.SchemaHelper, templates []polic
 			continue
 		}
 		switch template.policyType {
-		case rlsutil.PolicyTypePermissive:
+		case PolicyTypePermissive:
 			compiled.permissive = append(compiled.permissive, policyExpr)
-		case rlsutil.PolicyTypeRestrictive:
+		case PolicyTypeRestrictive:
 			compiled.restrictive = append(compiled.restrictive, policyExpr)
 		}
 	}
@@ -233,7 +275,7 @@ func simplifyPolicyGroup(policies []*compiledPolicyExpression, op planpb.BinaryE
 	return append(dynamic, static)
 }
 
-func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template policyExprTemplate, visitorArgs *planparserv2.ParserVisitorArgs, kind exprKind) (*compiledPolicyExpression, error) {
+func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template policyExprTemplate, visitorArgs *planparserv2.ParserVisitorArgs, kind expressionKind) (*compiledPolicyExpression, error) {
 	expr := strings.TrimSpace(template.expr)
 	if expr == "" {
 		return nil, nil
@@ -252,11 +294,11 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 	for _, variable := range template.tagVariables {
 		allowedTemplateVariables[variable] = struct{}{}
 	}
-	if err := rlsutil.ValidateParsedExpression(parsedExpr, allowedTemplateVariables); err != nil {
+	if err := ValidateParsedExpression(parsedExpr, allowedTemplateVariables); err != nil {
 		return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS policy expression")
 	}
-	if kind == usingExprKind {
-		if err := rlsutil.ValidateUsingExpressionSchema(schemaHelper, parsedExpr); err != nil {
+	if kind == usingExpression {
+		if err := ValidateUsingExpressionSchema(schemaHelper, parsedExpr); err != nil {
 			return nil, merr.WrapErrDataIntegrity(err, "invalid persisted RLS using expression")
 		}
 	}
@@ -277,7 +319,7 @@ func compilePolicyExprTemplate(schemaHelper *typeutil.SchemaHelper, template pol
 	}, nil
 }
 
-func (e *compiledExpression) Instantiate(principalName string, principalTags map[string]rlsutil.TagValue) (*planpb.Expr, error) {
+func (e *CompiledExpression) Instantiate(principalName string, principalTags map[string]TagValue) (*planpb.Expr, error) {
 	if e == nil {
 		return nil, nil
 	}
@@ -291,7 +333,55 @@ func (e *compiledExpression) Instantiate(principalName string, principalTags map
 	return e.instantiate(principalName, principalTags, optimizeEnabled)
 }
 
-func (e *compiledExpression) instantiate(principalName string, principalTags map[string]rlsutil.TagValue, optimizeEnabled bool) (*planpb.Expr, error) {
+// BuildCheckPredicate compiles and instantiates a write CHECK predicate from
+// one authoritative metadata snapshot. It loads principal tags only when the
+// compiled predicate references them.
+func BuildCheckPredicate(
+	policies []*RowPolicy,
+	principalName string,
+	loadPrincipalTags func() (map[string]TagValue, error),
+	action PolicyAction,
+	schema *typeutil.SchemaHelper,
+	maxLength int,
+) (*planpb.Expr, error) {
+	compiled, err := CompileCheckExpression(policies, action, schema, maxLength)
+	if err != nil {
+		return nil, err
+	}
+	if compiled == nil {
+		return nil, denyNoApplicableCheckPolicy(action)
+	}
+	var principalTags map[string]TagValue
+	if compiled.NeedsTags() {
+		if loadPrincipalTags == nil {
+			return nil, merr.WrapErrServiceInternalMsg("RLS check predicate requires principal tags without a tag loader")
+		}
+		principalTags, err = loadPrincipalTags()
+		if err != nil {
+			return nil, err
+		}
+	}
+	expr, err := compiled.Instantiate(principalName, principalTags)
+	if err != nil {
+		return nil, err
+	}
+	if expr == nil {
+		return nil, denyNoApplicableCheckPolicy(action)
+	}
+	if err := ValidateStaticCheckPredicate(expr, PolicyActionOperation(action)); err != nil {
+		return nil, err
+	}
+	if rewriter.IsAlwaysTrueExpr(expr) {
+		return nil, nil
+	}
+	return expr, nil
+}
+
+func denyNoApplicableCheckPolicy(action PolicyAction) error {
+	return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS: no applicable check policies", PolicyActionOperation(action))
+}
+
+func (e *CompiledExpression) instantiate(principalName string, principalTags map[string]TagValue, optimizeEnabled bool) (*planpb.Expr, error) {
 	if len(e.permissive) == 0 {
 		if len(e.restrictive) > 0 {
 			return alwaysFalsePredicate(), nil
@@ -325,7 +415,7 @@ func (e *compiledExpression) instantiate(principalName string, principalTags map
 func instantiatePolicyExprs(
 	policies []*compiledPolicyExpression,
 	principalName string,
-	principalTags map[string]rlsutil.TagValue,
+	principalTags map[string]TagValue,
 	op planpb.BinaryExpr_BinaryOp,
 ) ([]*planpb.Expr, bool, error) {
 	exprs := make([]*planpb.Expr, 0, len(policies))
@@ -345,7 +435,7 @@ func instantiatePolicyExprs(
 	return exprs, len(policies) > 0 && len(exprs) == 0, nil
 }
 
-func (e *compiledPolicyExpression) Instantiate(principalName string, principalTags map[string]rlsutil.TagValue) (*planpb.Expr, error) {
+func (e *compiledPolicyExpression) Instantiate(principalName string, principalTags map[string]TagValue) (*planpb.Expr, error) {
 	if e == nil || e.expr == nil {
 		return nil, nil
 	}
@@ -359,7 +449,7 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 	// A policy is a single predicate, so validation guarantees at most one tag
 	// variable. Normalize it before allocating or cloning an expression.
 	var normalizedVariable string
-	var normalizedTagValue rlsutil.TagValue
+	var normalizedTagValue TagValue
 	for tagKey, variable := range e.tagVariables {
 		tagValue, ok := principalTags[tagKey]
 		if !ok {
@@ -387,13 +477,13 @@ func (e *compiledPolicyExpression) Instantiate(principalName string, principalTa
 	return expr, nil
 }
 
-func rlsTagValueToGenericValue(value rlsutil.TagValue) *planpb.GenericValue {
+func rlsTagValueToGenericValue(value TagValue) *planpb.GenericValue {
 	switch value.Kind {
-	case rlsutil.TagValueKindString:
+	case TagValueKindString:
 		return planparserv2.NewString(value.StringValue)
-	case rlsutil.TagValueKindInt64:
+	case TagValueKindInt64:
 		return planparserv2.NewInt(value.Int64Value)
-	case rlsutil.TagValueKindDouble:
+	case TagValueKindDouble:
 		return planparserv2.NewFloat(value.DoubleValue)
 	default:
 		return nil
@@ -416,49 +506,49 @@ func rlsTemplateColumnDataType(columnInfo *planpb.ColumnInfo) schemapb.DataType 
 // every occurrence of a tag variable in an expression. Numeric conversions are
 // allowed only when they preserve the value exactly; otherwise the policy is
 // treated as not matching instead of risking an over-permissive comparison.
-func normalizeRLSTagValue(dataTypes []schemapb.DataType, value rlsutil.TagValue) (rlsutil.TagValue, bool) {
+func normalizeRLSTagValue(dataTypes []schemapb.DataType, value TagValue) (TagValue, bool) {
 	if len(dataTypes) == 0 {
-		return rlsutil.TagValue{}, false
+		return TagValue{}, false
 	}
 	for _, dataType := range dataTypes {
 		switch {
 		case typeutil.IsStringType(dataType):
-			if value.Kind != rlsutil.TagValueKindString {
-				return rlsutil.TagValue{}, false
+			if value.Kind != TagValueKindString {
+				return TagValue{}, false
 			}
 		case typeutil.IsIntegerType(dataType):
 			switch value.Kind {
-			case rlsutil.TagValueKindInt64:
-			case rlsutil.TagValueKindDouble:
+			case TagValueKindInt64:
+			case TagValueKindDouble:
 				if !isExactInt64(value.DoubleValue) {
-					return rlsutil.TagValue{}, false
+					return TagValue{}, false
 				}
-				value = rlsutil.NewInt64TagValue(int64(value.DoubleValue))
+				value = NewInt64TagValue(int64(value.DoubleValue))
 			default:
-				return rlsutil.TagValue{}, false
+				return TagValue{}, false
 			}
 			if !integerTagFitsDataType(value.Int64Value, dataType) {
-				return rlsutil.TagValue{}, false
+				return TagValue{}, false
 			}
 		case typeutil.IsFloatingType(dataType):
 			switch value.Kind {
-			case rlsutil.TagValueKindInt64:
+			case TagValueKindInt64:
 				if dataType == schemapb.DataType_Float {
 					if int64(float64(float32(value.Int64Value))) != value.Int64Value {
-						return rlsutil.TagValue{}, false
+						return TagValue{}, false
 					}
 				} else if int64(float64(value.Int64Value)) != value.Int64Value {
-					return rlsutil.TagValue{}, false
+					return TagValue{}, false
 				}
-			case rlsutil.TagValueKindDouble:
+			case TagValueKindDouble:
 				if dataType == schemapb.DataType_Float && float64(float32(value.DoubleValue)) != value.DoubleValue {
-					return rlsutil.TagValue{}, false
+					return TagValue{}, false
 				}
 			default:
-				return rlsutil.TagValue{}, false
+				return TagValue{}, false
 			}
 		default:
-			return rlsutil.TagValue{}, false
+			return TagValue{}, false
 		}
 	}
 	return value, true
@@ -552,25 +642,8 @@ func combinePredicate(left *planpb.Expr, right *planpb.Expr, op planpb.BinaryExp
 	}
 }
 
-func policyMatchesAction(policy *rlsutil.RowPolicy, action rlsutil.PolicyAction) bool {
+func policyMatchesAction(policy *RowPolicy, action PolicyAction) bool {
 	return policy != nil && slices.Contains(policy.GetActions(), action)
-}
-
-func QueryAction(isIterator bool) rlsutil.PolicyAction {
-	if isIterator {
-		return rlsutil.PolicyActionQueryIterator
-	}
-	return rlsutil.PolicyActionQuery
-}
-
-func SearchAction(isAdvanced bool, isIterator bool) rlsutil.PolicyAction {
-	if isAdvanced {
-		return rlsutil.PolicyActionHybridSearch
-	}
-	if isIterator {
-		return rlsutil.PolicyActionSearchIterator
-	}
-	return rlsutil.PolicyActionSearch
 }
 
 func ResolveRuntimePrincipal(rlsEnabled bool, principalName string, operation string) (string, bool, error) {
@@ -583,52 +656,10 @@ func ResolveRuntimePrincipal(rlsEnabled bool, principalName string, operation st
 	// The refreshable principal-name limit is a creation quota. Runtime
 	// requests must keep existing principals addressable after that quota is
 	// lowered, while still enforcing the fixed transport safety bound.
-	if err := rlsutil.ValidatePrincipalName(principalName); err != nil {
+	if err := ValidatePrincipalName(principalName); err != nil {
 		return "", false, err
 	}
 	return principalName, true, nil
-}
-
-func MergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
-	if rlsPredicate != nil {
-		rlsPredicate = proto.Clone(rlsPredicate).(*planpb.Expr)
-	}
-	return mergePredicateToPlan(plan, rlsPredicate, mergePredicate)
-}
-
-// MergeNormalizedPredicateToPlan merges parser- and RLS-rewritten predicates
-// without walking either tree again. The caller must keep both inputs immutable
-// until the plan has been serialized.
-func MergeNormalizedPredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
-	return mergePredicateToPlan(plan, rlsPredicate, mergeNormalizedPredicate)
-}
-
-// AttachPredicateToRequeryPlan combines independently executable predicates
-// without rewriting either tree. Requery primary-key terms may be large.
-func AttachPredicateToRequeryPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr) error {
-	return mergePredicateToPlan(plan, rlsPredicate, func(userPredicate, rlsPredicate *planpb.Expr) *planpb.Expr {
-		return combinePredicate(userPredicate, rlsPredicate, planpb.BinaryExpr_LogicalAnd)
-	})
-}
-
-func mergePredicateToPlan(plan *planpb.PlanNode, rlsPredicate *planpb.Expr, merge func(*planpb.Expr, *planpb.Expr) *planpb.Expr) error {
-	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
-		return nil
-	}
-	if plan == nil {
-		return merr.WrapErrServiceInternalMsg("failed to merge RLS predicate into nil plan")
-	}
-	switch node := plan.GetNode().(type) {
-	case *planpb.PlanNode_Query:
-		node.Query.Predicates = merge(node.Query.GetPredicates(), rlsPredicate)
-	case *planpb.PlanNode_VectorAnns:
-		node.VectorAnns.Predicates = merge(node.VectorAnns.GetPredicates(), rlsPredicate)
-	case *planpb.PlanNode_Predicates:
-		node.Predicates = merge(node.Predicates, rlsPredicate)
-	default:
-		return merr.WrapErrServiceInternalMsg("failed to merge RLS predicate into unsupported plan node %T", node)
-	}
-	return nil
 }
 
 // ReferencedFieldIDs returns the field IDs read by an instantiated RLS
@@ -671,63 +702,6 @@ func addReferencedFieldID(column *planpb.ColumnInfo, fieldIDs map[int64]struct{}
 	}
 }
 
-func mergePredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *planpb.Expr {
-	if userPredicate == nil || rewriter.IsAlwaysTrueExpr(userPredicate) {
-		return rlsPredicate
-	}
-	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
-		return userPredicate
-	}
-	switch wrapper := userPredicate.GetExpr().(type) {
-	case *planpb.Expr_RandomSampleExpr:
-		wrapper.RandomSampleExpr.Predicate = mergePredicate(wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate)
-		return userPredicate
-	case *planpb.Expr_ElementFilterExpr:
-		wrapper.ElementFilterExpr.Predicate = mergePredicate(wrapper.ElementFilterExpr.GetPredicate(), rlsPredicate)
-		return userPredicate
-	}
-	return rewriter.RewriteExpr(&planpb.Expr{
-		Expr: &planpb.Expr_BinaryExpr{
-			BinaryExpr: &planpb.BinaryExpr{
-				Op:    planpb.BinaryExpr_LogicalAnd,
-				Left:  userPredicate,
-				Right: rlsPredicate,
-			},
-		},
-	})
-}
-
-func mergeNormalizedPredicate(userPredicate *planpb.Expr, rlsPredicate *planpb.Expr) *planpb.Expr {
-	if userPredicate == nil || rewriter.IsAlwaysTrueExpr(userPredicate) {
-		return rlsPredicate
-	}
-	if rlsPredicate == nil || rewriter.IsAlwaysTrueExpr(rlsPredicate) {
-		return userPredicate
-	}
-	switch wrapper := userPredicate.GetExpr().(type) {
-	case *planpb.Expr_RandomSampleExpr:
-		return &planpb.Expr{
-			Expr: &planpb.Expr_RandomSampleExpr{RandomSampleExpr: &planpb.RandomSampleExpr{
-				SampleFactor: wrapper.RandomSampleExpr.GetSampleFactor(),
-				Predicate: mergeNormalizedPredicate(
-					wrapper.RandomSampleExpr.GetPredicate(), rlsPredicate),
-			}},
-			IsTemplate: userPredicate.GetIsTemplate(),
-		}
-	case *planpb.Expr_ElementFilterExpr:
-		return &planpb.Expr{
-			Expr: &planpb.Expr_ElementFilterExpr{ElementFilterExpr: &planpb.ElementFilterExpr{
-				ElementExpr: wrapper.ElementFilterExpr.GetElementExpr(),
-				StructName:  wrapper.ElementFilterExpr.GetStructName(),
-				Predicate: mergeNormalizedPredicate(
-					wrapper.ElementFilterExpr.GetPredicate(), rlsPredicate),
-			}},
-			IsTemplate: userPredicate.GetIsTemplate(),
-		}
-	}
-	return rewriter.MergeNormalizedAnd(userPredicate, rlsPredicate)
-}
-
 func alwaysTruePredicate() *planpb.Expr {
 	return &planpb.Expr{
 		Expr: &planpb.Expr_AlwaysTrueExpr{
@@ -751,40 +725,11 @@ func alwaysFalsePredicate() *planpb.Expr {
 	}
 }
 
-func ValidateCheckForWrite(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, operation string) error {
-	return validateCheckForWrite(ctx, defaultManager, collectionID, principalName, action, fieldsData, schemaHelper, rowNum, operation)
-}
-
-func ResolveCheckForWrite(ctx context.Context, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, schemaHelper *typeutil.SchemaHelper, operation string) (*planpb.Expr, error) {
-	checkExpr, err := defaultManager.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
-	if err != nil {
-		return nil, err
-	}
-	if err := ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
-		return nil, err
-	}
-	return checkExpr, nil
-}
-
 func ValidateStaticCheckPredicate(checkExpr *planpb.Expr, operation string) error {
 	if checkExpr != nil && rewriter.IsAlwaysFalseExpr(checkExpr) {
 		return merr.WrapErrPrivilegeNotPermitted("%s operation denied by RLS check expression", operation)
 	}
 	return nil
-}
-
-func validateCheckForWrite(ctx context.Context, m *manager, collectionID UniqueID, principalName string, action rlsutil.PolicyAction, fieldsData []*schemapb.FieldData, schemaHelper *typeutil.SchemaHelper, rowNum int, operation string) error {
-	checkExpr, err := m.resolveCheckPredicate(ctx, collectionID, principalName, action, schemaHelper)
-	if err != nil {
-		return err
-	}
-	if err := ValidateStaticCheckPredicate(checkExpr, operation); err != nil {
-		return err
-	}
-	if checkExpr == nil {
-		return nil
-	}
-	return ValidateRowsByPredicate(ctx, fieldsData, rowNum, checkExpr, operation, "check")
 }
 
 func ValidateRowsByPredicate(ctx context.Context, fieldsData []*schemapb.FieldData, rowNum int, parsedExpr *planpb.Expr, operation string, exprKind string) error {
@@ -811,7 +756,7 @@ func ValidateRowsByPredicate(ctx context.Context, fieldsData []*schemapb.FieldDa
 
 // ValidateInsertDataByPredicate evaluates an RLS predicate directly against
 // import storage columns, avoiding a full protobuf copy of narrow integers.
-func ValidateInsertDataByPredicate(ctx context.Context, fieldsData map[int64]StorageFieldData, rowNum int, parsedExpr *planpb.Expr, operation string, exprKind string) error {
+func ValidateInsertDataByPredicate[T StorageFieldData](ctx context.Context, fieldsData map[int64]T, rowNum int, parsedExpr *planpb.Expr, operation string, exprKind string) error {
 	if parsedExpr == nil {
 		return nil
 	}
@@ -993,14 +938,14 @@ func newRowData(fieldsData []*schemapb.FieldData, referencedFieldIDs []int64) *r
 	return data
 }
 
-func newInsertRowData(fieldsData map[int64]StorageFieldData, referencedFieldIDs []int64) *rowData {
+func newInsertRowData[T StorageFieldData](fieldsData map[int64]T, referencedFieldIDs []int64) *rowData {
 	referencedFields := make(map[int64]struct{}, len(referencedFieldIDs))
 	for _, fieldID := range referencedFieldIDs {
 		referencedFields[fieldID] = struct{}{}
 	}
 	data := &rowData{fields: make(map[int64]*fieldReader, len(referencedFields))}
 	for fieldID, fieldData := range fieldsData {
-		if fieldData == nil {
+		if any(fieldData) == nil {
 			continue
 		}
 		if _, ok := referencedFields[fieldID]; !ok {

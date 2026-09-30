@@ -18,10 +18,10 @@ import (
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/internal/proxy/channelmgr"
 	"github.com/milvus-io/milvus/internal/proxy/dql"
+	"github.com/milvus-io/milvus/internal/proxy/rls"
 	"github.com/milvus-io/milvus/internal/proxy/scheduler"
 	"github.com/milvus-io/milvus/internal/proxy/shardclient"
 	"github.com/milvus-io/milvus/internal/proxy/taskmodel"
-	"github.com/milvus-io/milvus/internal/rls"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
@@ -407,7 +407,7 @@ func (dr *DeleteRunner) Init(ctx context.Context) error {
 			return err
 		}
 	}
-	principalName, enforceRLS, err := rls.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
+	principalName, enforceRLS, err := rlsutil.ResolveRuntimePrincipal(rlsEnabled, dr.req.GetRlsPrincipal(), "delete")
 	if err != nil {
 		return err
 	}

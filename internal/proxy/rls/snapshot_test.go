@@ -293,13 +293,13 @@ func TestMetadataRefreshErrorClassification(t *testing.T) {
 		status.Error(codes.DeadlineExceeded, "deadline exceeded"),
 		status.Error(codes.Unavailable, "unavailable"),
 	} {
-		wrapped := WrapMetadataRefreshError(err, "refresh failed")
+		wrapped := rlsutil.WrapMetadataRefreshError(err, "refresh failed")
 		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
 		require.True(t, merr.IsRetryableErr(wrapped))
 	}
 
 	typed := merr.WrapErrDataIntegrity(context.DeadlineExceeded, "corrupted metadata")
-	wrapped := WrapMetadataRefreshError(typed, "refresh failed")
+	wrapped := rlsutil.WrapMetadataRefreshError(typed, "refresh failed")
 	require.ErrorIs(t, wrapped, merr.ErrDataIntegrity)
 	require.False(t, merr.IsRetryableErr(wrapped))
 
@@ -308,14 +308,14 @@ func TestMetadataRefreshErrorClassification(t *testing.T) {
 		merr.WrapErrNodeNotFound(0, "mixcoord is unavailable"),
 		merr.WrapErrNodeNotMatch(1, 2, "mixcoord leader changed"),
 	} {
-		wrapped = WrapMetadataRefreshError(transient, "refresh failed")
+		wrapped = rlsutil.WrapMetadataRefreshError(transient, "refresh failed")
 		require.ErrorIs(t, wrapped, merr.ErrServiceUnavailable)
 		require.ErrorIs(t, wrapped, transient)
 		require.True(t, merr.IsRetryableErr(wrapped))
 	}
 
 	raw := errors.New("raw dependency failure")
-	wrapped = WrapMetadataRefreshError(raw, "refresh failed")
+	wrapped = rlsutil.WrapMetadataRefreshError(raw, "refresh failed")
 	require.ErrorIs(t, wrapped, merr.ErrServiceInternal)
 	require.ErrorIs(t, wrapped, raw)
 	require.False(t, merr.IsRetryableErr(wrapped))
@@ -1536,7 +1536,7 @@ func TestManagerPrincipalRefreshDoesNotRecreateRemovedCollection(t *testing.T) {
 func TestManagerSnapshotsOwnImmutableData(t *testing.T) {
 	m := newManager()
 	policy := validPolicyInfo("tenant")
-	policies, err := RowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
+	policies, err := rlsutil.RowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
 	require.NoError(t, err)
 	state := getOrCreateCollectionStateForTest(m, 100)
 	state.mu.Lock()

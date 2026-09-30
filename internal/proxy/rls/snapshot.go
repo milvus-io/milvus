@@ -20,10 +20,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus/internal/util/rlsutil"
 	"github.com/milvus-io/milvus/pkg/v3/proto/rootcoordpb"
@@ -34,23 +31,6 @@ import (
 
 type CoordClient interface {
 	GetRLSMetadata(ctx context.Context, in *rootcoordpb.GetRLSMetadataRequest, opts ...grpc.CallOption) (*rootcoordpb.GetRLSMetadataResponse, error)
-}
-
-// WrapMetadataRefreshError gives metadata RPC failures the same retry
-// classification for every RLS consumer.
-func WrapMetadataRefreshError(err error, format string, args ...any) error {
-	if errors.IsAny(err, merr.ErrIoFailed, merr.ErrNodeNotFound, merr.ErrNodeNotMatch) {
-		return merr.WrapErrServiceUnavailableErr(err, format, args...)
-	}
-	if merr.IsMilvusError(err) {
-		return merr.Wrapf(err, format, args...)
-	}
-	code := status.Code(err)
-	if errors.IsAny(err, context.Canceled, context.DeadlineExceeded) ||
-		code == codes.Canceled || code == codes.DeadlineExceeded || code == codes.Unavailable {
-		return merr.WrapErrServiceUnavailableErr(err, format, args...)
-	}
-	return merr.WrapErrServiceInternalErr(err, format, args...)
 }
 
 func (m *manager) ensurePoliciesFresh(ctx context.Context, collectionID UniqueID) error {
@@ -163,12 +143,12 @@ func (m *manager) refreshPoliciesAtGeneration(collectionID UniqueID, state *coll
 		Kind:         rootcoordpb.RLSMetadataKind_RLS_METADATA_KIND_POLICIES,
 	})
 	if err := merr.CheckRPCCall(resp, err); err != nil {
-		return WrapMetadataRefreshError(err, "failed to get RLS metadata")
+		return rlsutil.WrapMetadataRefreshError(err, "failed to get RLS metadata")
 	}
 	if resp.GetCollectionId() != collectionID {
 		return merr.WrapErrServiceInternalMsg("RLS metadata collection id mismatch: requested %d, received %d", collectionID, resp.GetCollectionId())
 	}
-	policies, err := RowPoliciesFromInfo(collectionID, resp.GetPolicies())
+	policies, err := rlsutil.RowPoliciesFromInfo(collectionID, resp.GetPolicies())
 	if err != nil {
 		return err
 	}
@@ -229,7 +209,7 @@ func (m *manager) ensurePrincipalTags(ctx context.Context, collectionID UniqueID
 			PrincipalName: principalName,
 		})
 		if err := merr.CheckRPCCall(resp, err); err != nil {
-			return nil, WrapMetadataRefreshError(err, "failed to get RLS principal %q tags", principalName)
+			return nil, rlsutil.WrapMetadataRefreshError(err, "failed to get RLS principal %q tags", principalName)
 		}
 		if resp.GetCollectionId() != collectionID {
 			return nil, merr.WrapErrServiceInternalMsg("RLS metadata collection id mismatch: requested %d, received %d", collectionID, resp.GetCollectionId())
@@ -288,46 +268,4 @@ func (m *manager) ensurePrincipalTags(ctx context.Context, collectionID UniqueID
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-}
-
-// RowPoliciesFromInfo validates and converts coordinator policy metadata.
-func RowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolicyInfo) (map[string]*rlsutil.RowPolicy, error) {
-	converted := make(map[string]*rlsutil.RowPolicy, len(policies))
-	for i, policy := range policies {
-		if policy == nil {
-			return nil, merr.WrapErrDataIntegrityMsg("RLS policy metadata at index %d is nil", i)
-		}
-		actions := make([]rlsutil.PolicyAction, len(policy.GetActions()))
-		for i, action := range policy.GetActions() {
-			actions[i] = rlsutil.PolicyAction(action)
-		}
-		convertedPolicy := &rlsutil.RowPolicy{
-			PolicyName:  policy.GetPolicyName(),
-			PolicyType:  rlsutil.PolicyType(policy.GetPolicyType()),
-			Actions:     actions,
-			UsingExpr:   policy.GetUsingExpr(),
-			CheckExpr:   policy.GetCheckExpr(),
-			Description: policy.GetDescription(),
-			PolicyId:    policy.GetPolicyId(),
-		}
-		if policy.GetCollectionId() != collectionID {
-			return nil, merr.WrapErrDataIntegrityMsg(
-				"RLS policy %q collection id mismatch: expected %d, received %d",
-				convertedPolicy.GetPolicyName(), collectionID, policy.GetCollectionId())
-		}
-		if convertedPolicy.PolicyId <= 0 {
-			return nil, merr.WrapErrDataIntegrityMsg("RLS policy %q has invalid id %d", convertedPolicy.GetPolicyName(), convertedPolicy.PolicyId)
-		}
-		if err := rlsutil.ValidateStoredPolicy(
-			convertedPolicy.GetPolicyName(), convertedPolicy.GetPolicyType(), convertedPolicy.GetActions(),
-			convertedPolicy.GetUsingExpr(), convertedPolicy.GetCheckExpr(),
-		); err != nil {
-			return nil, merr.WrapErrDataIntegrity(err, "invalid RLS policy %q metadata", convertedPolicy.GetPolicyName())
-		}
-		if _, ok := converted[convertedPolicy.GetPolicyName()]; ok {
-			return nil, merr.WrapErrDataIntegrityMsg("duplicated RLS policy name %q", convertedPolicy.GetPolicyName())
-		}
-		converted[convertedPolicy.GetPolicyName()] = convertedPolicy
-	}
-	return converted, nil
 }

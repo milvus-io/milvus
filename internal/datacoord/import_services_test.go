@@ -872,7 +872,7 @@ func (s *ImportServicesSuite) TestCreateImportJobFromAck_PersistsRLSPredicate() 
 	}, nil)
 	importMeta := NewMockImportMeta(s.T())
 	importMeta.EXPECT().AddJob(mock.Anything, mock.MatchedBy(func(job ImportJob) bool {
-		return job.GetState() == internalpb.ImportJobState_Pending && len(job.GetRlsCheckPredicate()) > 0
+		return job.GetState() == internalpb.ImportJobState_Pending && job.GetRlsCheckPredicate() != nil
 	})).Return(nil).Once()
 	allocator := allocator.NewMockAllocator(s.T())
 	allocator.EXPECT().AllocN(mock.Anything).Return(int64(1000), int64(1002), nil)

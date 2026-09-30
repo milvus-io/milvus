@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/v3/mlog"
 	"github.com/milvus-io/milvus/pkg/v3/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/v3/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/v3/proto/planpb"
 	"github.com/milvus-io/milvus/pkg/v3/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/v3/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/v3/util/typeutil"
@@ -155,7 +156,7 @@ type ImportJob interface {
 	GetOptions() []*commonpb.KeyValuePair
 	GetAutoCommit() bool
 	GetCommitByCoordinator() bool
-	GetRlsCheckPredicate() []byte
+	GetRlsCheckPredicate() *planpb.Expr
 	GetTR() *timerecord.TimeRecorder
 	GetDataTs() uint64
 	Clone() ImportJob

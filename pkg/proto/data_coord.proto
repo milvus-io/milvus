@@ -10,6 +10,7 @@ import "milvus.proto";
 import "schema.proto";
 import "msg.proto";
 import "index_coord.proto";
+import "plan.proto";
 import "view.proto";
 
 // TODO: import google/protobuf/empty.proto
@@ -1145,7 +1146,7 @@ message ImportRequest {
   int64 storage_version = 15;
   repeated common.KeyValuePair plugin_context = 16;
   bool use_loon_ffi = 17;
-  bytes rls_check_predicate = 18;
+  plan.Expr rls_check_predicate = 18;
 }
 
 message QueryPreImportRequest {
@@ -1499,7 +1500,7 @@ message ImportJob {
   repeated string committed_vchannels = 19;
   bool            auto_commit         = 20;
   bool commit_by_coordinator = 21; // Commit protocol selected by the original Import WAL message.
-  bytes rls_check_predicate = 22;
+  plan.Expr rls_check_predicate = 22;
 }
 
 enum ImportTaskStateV2 {
