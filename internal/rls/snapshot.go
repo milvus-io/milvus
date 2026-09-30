@@ -168,7 +168,7 @@ func (m *manager) refreshPoliciesAtGeneration(collectionID UniqueID, state *coll
 	if resp.GetCollectionId() != collectionID {
 		return merr.WrapErrServiceInternalMsg("RLS metadata collection id mismatch: requested %d, received %d", collectionID, resp.GetCollectionId())
 	}
-	policies, err := rowPoliciesFromInfo(collectionID, resp.GetPolicies())
+	policies, err := RowPoliciesFromInfo(collectionID, resp.GetPolicies())
 	if err != nil {
 		return err
 	}
@@ -290,7 +290,8 @@ func (m *manager) ensurePrincipalTags(ctx context.Context, collectionID UniqueID
 	}
 }
 
-func rowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolicyInfo) (map[string]*rlsutil.RowPolicy, error) {
+// RowPoliciesFromInfo validates and converts coordinator policy metadata.
+func RowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolicyInfo) (map[string]*rlsutil.RowPolicy, error) {
 	converted := make(map[string]*rlsutil.RowPolicy, len(policies))
 	for i, policy := range policies {
 		if policy == nil {
@@ -329,10 +330,4 @@ func rowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolic
 		converted[convertedPolicy.GetPolicyName()] = convertedPolicy
 	}
 	return converted, nil
-}
-
-// RowPoliciesFromInfo validates and converts coordinator policy metadata for
-// consumers that compile an immutable RLS snapshot outside the Proxy cache.
-func RowPoliciesFromInfo(collectionID UniqueID, policies []*rootcoordpb.RLSPolicyInfo) (map[string]*rlsutil.RowPolicy, error) {
-	return rowPoliciesFromInfo(collectionID, policies)
 }

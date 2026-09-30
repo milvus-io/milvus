@@ -1536,7 +1536,7 @@ func TestManagerPrincipalRefreshDoesNotRecreateRemovedCollection(t *testing.T) {
 func TestManagerSnapshotsOwnImmutableData(t *testing.T) {
 	m := newManager()
 	policy := validPolicyInfo("tenant")
-	policies, err := rowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
+	policies, err := RowPoliciesFromInfo(100, []*rootcoordpb.RLSPolicyInfo{policy})
 	require.NoError(t, err)
 	state := getOrCreateCollectionStateForTest(m, 100)
 	state.mu.Lock()
