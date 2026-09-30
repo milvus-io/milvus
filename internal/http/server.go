@@ -259,7 +259,7 @@ func RegisterCheckComponentReady(checkActive func(role string) error) {
 			if err := checkActive(role); err != nil {
 				mlog.RatedWarn(ctx, 1.0, "failed to check component ready", mlog.Err(err))
 				writeJSONWithMsg(w, http.StatusInternalServerError,
-					fmt.Sprintf("failed to to check component ready, %s", err.Error()))
+					fmt.Sprintf("failed to check component ready, %s", err.Error()))
 				return
 			}
 			mlog.RatedDebug(ctx, 1.0, "finish to check component ready",

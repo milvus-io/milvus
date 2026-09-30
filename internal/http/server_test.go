@@ -290,7 +290,7 @@ func TestCheckComponentReadyHandler(t *testing.T) {
 		expectedMsg  string
 	}{
 		{role: "proxy", expectedCode: http.StatusOK, expectedMsg: "OK"},
-		{role: `query"node`, expectedCode: http.StatusInternalServerError, expectedMsg: `failed to to check component ready, role "query\"node" is not ready`},
+		{role: `query"node`, expectedCode: http.StatusInternalServerError, expectedMsg: `failed to check component ready, role "query\"node" is not ready`},
 	}
 
 	for _, test := range tests {
